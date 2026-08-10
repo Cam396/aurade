@@ -81,3 +81,10 @@ The AuraDE Community server has been provisioned with the four categories in
 this blueprint, the support/development channels, the `Lounge` and
 `Pairing / Debug` voice rooms, and the six non-admin community roles. The
 existing default conversation and voice rooms were reused instead of deleted.
+
+
+The six project roles use scoped permissions rather than Administrator. A
+private `STAFF` category contains `staff-chat` and `mod-log`; server defaults
+use low member verification, explicit-content filtering, and mentions-only
+notifications. The setup bot's existing Administrator grant still needs an
+owner-side downgrade after bootstrap.
