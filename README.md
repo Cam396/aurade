@@ -1,6 +1,8 @@
 # AuraDE
 
-![AuraDE mark](assets/aurade-mark.png)
+<p align="center">
+  <img src="assets/aurade-logo.png" alt="AuraDE logo" width="450">
+</p>
 
 AuraDE is a ChromiumOS Ash-based desktop environment for Arch Linux. It brings
 a configurable, local-first ChromeOS-style desktop to ordinary laptops while
