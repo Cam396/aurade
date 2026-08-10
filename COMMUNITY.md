@@ -41,14 +41,45 @@ formal project organization and maintainer group exist.
 - `#chromium-patches` — patch-series and upstream-rebase work.
 - `#packaging-aur` — Arch packaging and future AUR work.
 - `#ci-builds` — CI results, hashes, and release evidence.
+- `#release-planning` — release checklists, launch coordination, and milestones.
 - `Pairing / Debug` — temporary voice room for live debugging.
+
+### CONTRIBUTORS
+
+- `#introductions` — say hello and share your setup or interests.
+- `#good-first-issues` — small, well-scoped tasks for first-time contributors.
+- `#help-wanted` — open tasks that need a second pair of hands.
+- `#docs-and-design` — documentation, UX, themes, and visual design.
+- `Contributor Hangout` — voice room for pairing and contributor calls.
+
+### STAFF
+
+- `#staff-chat` — private maintainer coordination.
+- `#mod-log` — private moderation and audit notes.
 
 ## Roles
 
-Start with the smallest useful set: `Maintainer`, `Developer`, `Package
-Builder`, `Hardware Tester`, `Contributor`, and `Community`. Keep
-`Administrator` limited to the account owner; bots should receive only the
-channel permissions they need.
+The live hierarchy is ordered below the setup bot and is intentionally scoped:
+
+- `Cam396 • Project Owner` — owner-only identity role for the project owner.
+- `Maintainer` — project administration, moderation, and release control.
+- `Founder` — project-leadership marker with maintainer-scoped capabilities.
+- `Community Moderator` — day-to-day moderation without server administration.
+- `Developer` — implementation and development-room access.
+- `Package Builder` — packaging and release-build work.
+- `Hardware Tester` — laptop and hardware qualification.
+- `Documentation` — docs and changelog collaboration.
+- `Theme Designer` — visual/theme collaboration.
+- `Contributor` — general contribution path.
+- `Early Adopter` — pre-alpha feedback and testing.
+- `Community` — general community identity.
+
+`#welcome`, `#rules`, and `#changelog` are read-only for ordinary members.
+`#announcements` is writable only by the project owner, `Founder`, and
+`Maintainer`. Discord join/leave system notices are routed to `#welcome`.
+The `STAFF` category is private. Keep `Administrator` limited to the owner;
+the setup bot's temporary Administrator grant should be downgraded after
+bootstrap.
 
 ## Bot checklist
 
@@ -77,14 +108,14 @@ Discord. Use the private GitHub security-advisory flow for security reports.
 
 ## Initial bootstrap checkpoint (2026-08-09)
 
-The AuraDE Community server has been provisioned with the four categories in
-this blueprint, the support/development channels, the `Lounge` and
-`Pairing / Debug` voice rooms, and the six non-admin community roles. The
-existing default conversation and voice rooms were reused instead of deleted.
+The AuraDE Community server has been provisioned with the categories and
+channels in this blueprint, the `Lounge`, `Pairing / Debug`, and `Contributor
+Hangout` voice rooms, and the scoped project roles above. The existing default
+conversation and voice rooms were reused instead of deleted. The owner has
+been assigned `Cam396 • Project Owner` and `Founder`.
 
-
-The six project roles use scoped permissions rather than Administrator. A
-private `STAFF` category contains `staff-chat` and `mod-log`; server defaults
-use low member verification, explicit-content filtering, and mentions-only
-notifications. The setup bot's existing Administrator grant still needs an
-owner-side downgrade after bootstrap.
+Project roles use scoped permissions rather than Administrator. A private
+`STAFF` category contains `staff-chat` and `mod-log`; server defaults use low
+member verification, explicit-content filtering, and mentions-only
+notifications. Join/leave notices target `#welcome`. The setup bot's existing
+Administrator grant still needs an owner-side downgrade after bootstrap.
