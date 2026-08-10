@@ -1,0 +1,1116 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index c9080f3c22..fd30805309 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -4,17 +4,35 @@
+ 
+ #include "chrome/browser/apps/app_service/publishers/crostini_apps.h"
+ 
++#include <map>
++#include <memory>
++#include <optional>
++#include <set>
+ #include <utility>
+ #include <vector>
+ 
+ #include "ash/public/cpp/app_menu_constants.h"
+ #include "ash/strings/grit/ash_strings.h"
++#include "base/command_line.h"
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/process/launch.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
++#include "base/task/thread_pool.h"
++#include "base/time/time.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/menu_util.h"
+ #include "chrome/browser/ash/crostini/crostini_features.h"
+ #include "chrome/browser/ash/crostini/crostini_util.h"
++#include "chrome/browser/ash/guest_os/guest_os_registry_service_factory.h"
+ #include "chrome/grit/chrome_unscaled_resources.h"
+ #include "chrome/grit/generated_resources.h"
++#include "chromeos/ash/components/dbus/vm_applications/apps.pb.h"
+ #include "components/services/app_service/public/cpp/app_types.h"
+ #include "components/services/app_service/public/cpp/intent.h"
+ #include "ui/display/display.h"
+@@ -39,6 +57,543 @@ bool ShouldShowDisplayDensityMenuItem(const std::string& app_id,
+   return d.device_scale_factor() != 1.0;
+ }
+ 
++constexpr char kAuraDeHostVmName[] = "aurade-host";
++constexpr char kAuraDeHostContainerName[] = "host";
++constexpr char kAuraDeHostWaylandSocket[] = "wayland-0";
++constexpr char kAuraDeNestedWestonPath[] = "/usr/bin/weston";
++
++using apps::AuraDeHostDesktopApp;
++
++struct AuraDeHostPackageMetadata {
++  std::string name;
++  std::string version;
++};
++
++std::string TrimASCII(std::string value) {
++  return std::string(base::TrimWhitespaceASCII(value, base::TRIM_ALL));
++}
++
++bool IsTruthyDesktopValue(const std::string& value) {
++  return base::EqualsCaseInsensitiveASCII(TrimASCII(value), "true");
++}
++
++bool IsTruthyEnvValue(const std::string& value) {
++  const std::string trimmed = TrimASCII(value);
++  return trimmed == "1" || base::EqualsCaseInsensitiveASCII(trimmed, "true") ||
++         base::EqualsCaseInsensitiveASCII(trimmed, "yes");
++}
++
++std::string ChooseAuraDeHostWaylandDisplay(base::Environment& environment) {
++  if (std::optional<std::string> display =
++          environment.GetVar("AURADE_HOST_APP_WAYLAND_DISPLAY");
++      display && !display->empty()) {
++    return *display;
++  }
++
++  return kAuraDeHostWaylandSocket;
++}
++
++bool ShouldUseNestedAuraDeHostCompositor(base::Environment& environment) {
++  std::optional<std::string> enable_nesting =
++      environment.GetVar("AURADE_ENABLE_HOST_APP_NESTING");
++  if (!enable_nesting || !IsTruthyEnvValue(*enable_nesting)) {
++    return false;
++  }
++
++  std::optional<std::string> disable_nesting =
++      environment.GetVar("AURADE_DISABLE_HOST_APP_NESTING");
++  if (disable_nesting && IsTruthyEnvValue(*disable_nesting)) {
++    return false;
++  }
++
++  std::string runtime_dir;
++  if (std::optional<std::string> env_runtime_dir =
++          environment.GetVar("XDG_RUNTIME_DIR")) {
++    runtime_dir = *env_runtime_dir;
++  }
++
++  return base::PathExists(base::FilePath(kAuraDeNestedWestonPath)) &&
++         !runtime_dir.empty() &&
++         base::PathExists(
++             base::FilePath(runtime_dir).Append(kAuraDeHostWaylandSocket));
++}
++
++std::string MakeAuraDeHostSocketName() {
++  return "aurade-host-" +
++         base::NumberToString(
++             base::TimeTicks::Now().since_origin().InMicroseconds());
++}
++
++std::string StripDesktopExecFieldCodes(const std::string& exec,
++                                       const std::string& name,
++                                       const base::FilePath& desktop_path) {
++  std::string result;
++  result.reserve(exec.size());
++  for (size_t i = 0; i < exec.size(); ++i) {
++    if (exec[i] != '%' || i + 1 >= exec.size()) {
++      result.push_back(exec[i]);
++      continue;
++    }
++
++    const char code = exec[++i];
++    switch (code) {
++      case '%':
++        result.push_back('%');
++        break;
++      case 'c':
++        result.append("\"");
++        result.append(name);
++        result.append("\"");
++        break;
++      case 'k':
++        result.append("\"");
++        result.append(desktop_path.value());
++        result.append("\"");
++        break;
++      case 'f':
++      case 'F':
++      case 'u':
++      case 'U':
++      case 'i':
++      case 'd':
++      case 'D':
++      case 'n':
++      case 'N':
++      case 'v':
++      case 'm':
++        break;
++      default:
++        break;
++    }
++  }
++  return TrimASCII(result);
++}
++
++std::string FirstExecToken(std::string_view exec) {
++  exec = base::TrimWhitespaceASCII(exec, base::TRIM_ALL);
++  if (exec.empty()) {
++    return std::string();
++  }
++
++  std::string token;
++  bool quoted = false;
++  char quote = '\0';
++  for (char c : exec) {
++    if (!quoted && (c == '\'' || c == '"')) {
++      quoted = true;
++      quote = c;
++      continue;
++    }
++    if (quoted && c == quote) {
++      quoted = false;
++      continue;
++    }
++    if (!quoted && base::IsAsciiWhitespace(c)) {
++      break;
++    }
++    token.push_back(c);
++  }
++  return token;
++}
++
++std::vector<std::string> SplitDesktopList(const std::string& value) {
++  return base::SplitString(value, ";", base::TRIM_WHITESPACE,
++                           base::SPLIT_WANT_NONEMPTY);
++}
++
++std::optional<std::string> ReadPacmanDescField(const std::string& contents,
++                                               std::string_view field_name) {
++  const std::string marker = "%" + std::string(field_name) + "%";
++  bool read_next_line = false;
++  for (std::string_view raw_line : base::SplitStringPiece(
++           contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    const std::string line = TrimASCII(std::string(raw_line));
++    if (read_next_line) {
++      return line.empty() ? std::nullopt : std::make_optional(line);
++    }
++    read_next_line = line == marker;
++  }
++  return std::nullopt;
++}
++
++std::map<std::string, AuraDeHostPackageMetadata>
++BuildAuraDeHostPackageMetadataMap() {
++  std::map<std::string, AuraDeHostPackageMetadata> packages_by_file;
++  const base::FilePath pacman_db("/var/lib/pacman/local");
++  if (!base::DirectoryExists(pacman_db)) {
++    return packages_by_file;
++  }
++
++  base::FileEnumerator package_dirs(pacman_db, /*recursive=*/false,
++                                    base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath package_dir = package_dirs.Next(); !package_dir.empty();
++       package_dir = package_dirs.Next()) {
++    std::string desc_contents;
++    std::string files_contents;
++    if (!base::ReadFileToString(package_dir.AppendASCII("desc"),
++                                &desc_contents) ||
++        !base::ReadFileToString(package_dir.AppendASCII("files"),
++                                &files_contents)) {
++      continue;
++    }
++
++    std::optional<std::string> name =
++        ReadPacmanDescField(desc_contents, "NAME");
++    std::optional<std::string> version =
++        ReadPacmanDescField(desc_contents, "VERSION");
++    if (!name || name->empty()) {
++      continue;
++    }
++
++    AuraDeHostPackageMetadata metadata;
++    metadata.name = *name;
++    metadata.version = version.value_or(std::string());
++
++    bool in_files = false;
++    for (std::string_view raw_line :
++         base::SplitStringPiece(files_contents, "\n", base::KEEP_WHITESPACE,
++                                base::SPLIT_WANT_ALL)) {
++      const std::string line = TrimASCII(std::string(raw_line));
++      if (line.empty()) {
++        continue;
++      }
++      if (line.front() == '%' && line.back() == '%') {
++        in_files = line == "%FILES%";
++        continue;
++      }
++      if (!in_files || !base::EndsWith(line, ".desktop")) {
++        continue;
++      }
++
++      packages_by_file.emplace("/" + line, metadata);
++    }
++  }
++
++  return packages_by_file;
++}
++
++bool CanFindExecutable(const std::string& executable,
++                       base::Environment& environment) {
++  if (executable.empty()) {
++    return false;
++  }
++
++  base::FilePath path(executable);
++  if (path.IsAbsolute()) {
++    return base::PathExists(path);
++  }
++
++  std::string path_env;
++  if (std::optional<std::string> env_path = environment.GetVar("PATH")) {
++    path_env = *env_path;
++  } else {
++    path_env = "/usr/local/bin:/usr/bin:/bin";
++  }
++
++  for (const std::string& dir : base::SplitString(
++           path_env, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (base::PathExists(base::FilePath(dir).Append(executable))) {
++      return true;
++    }
++  }
++  return false;
++}
++
++std::vector<std::string> IconFileNames(const std::string& icon) {
++  const base::FilePath icon_path(icon);
++  const std::string extension = base::ToLowerASCII(icon_path.Extension());
++  if (extension == ".svg" || extension == ".png") {
++    return {icon_path.BaseName().value()};
++  }
++  return {icon + ".svg", icon + ".png", icon};
++}
++
++std::vector<base::FilePath> AuraDeIconThemeDirs(const base::FilePath& root) {
++  static constexpr const char* kThemes[] = {"hicolor", "Adwaita", "gnome"};
++  static constexpr const char* kSubdirs[] = {
++      "scalable/apps", "symbolic/apps", "512x512/apps", "256x256/apps",
++      "128x128/apps",  "96x96/apps",    "64x64/apps",   "48x48/apps",
++      "32x32/apps",    "24x24/apps",    "16x16/apps"};
++
++  std::vector<base::FilePath> dirs;
++  for (const char* theme : kThemes) {
++    for (const char* subdir : kSubdirs) {
++      dirs.push_back(root.AppendASCII(theme).AppendASCII(subdir));
++    }
++  }
++  return dirs;
++}
++
++base::FilePath ResolveAuraDeHostIconPath(const std::string& icon,
++                                         base::Environment& environment) {
++  if (icon.empty()) {
++    return base::FilePath();
++  }
++
++  const base::FilePath raw_icon_path(icon);
++  if (raw_icon_path.IsAbsolute() && base::PathExists(raw_icon_path)) {
++    return raw_icon_path;
++  }
++
++  std::vector<base::FilePath> icon_roots;
++  if (std::optional<std::string> home = environment.GetVar("HOME");
++      home && !home->empty()) {
++    icon_roots.push_back(
++        base::FilePath(*home).AppendASCII(".local/share/icons"));
++    icon_roots.push_back(base::FilePath(*home).AppendASCII(".icons"));
++  }
++  icon_roots.emplace_back("/usr/local/share/icons");
++  icon_roots.emplace_back("/usr/share/icons");
++
++  std::vector<base::FilePath> candidate_dirs;
++  candidate_dirs.emplace_back("/usr/local/share/pixmaps");
++  candidate_dirs.emplace_back("/usr/share/pixmaps");
++  for (const base::FilePath& root : icon_roots) {
++    std::vector<base::FilePath> theme_dirs = AuraDeIconThemeDirs(root);
++    candidate_dirs.insert(candidate_dirs.end(), theme_dirs.begin(),
++                          theme_dirs.end());
++  }
++
++  const std::vector<std::string> names = IconFileNames(icon);
++  for (const base::FilePath& dir : candidate_dirs) {
++    for (const std::string& name : names) {
++      const base::FilePath path = dir.Append(name);
++      if (base::PathExists(path)) {
++        return path;
++      }
++    }
++  }
++
++  for (const base::FilePath& root : icon_roots) {
++    base::FileEnumerator enumerator(root, /*recursive=*/true,
++                                    base::FileEnumerator::FILES);
++    for (base::FilePath path = enumerator.Next(); !path.empty();
++         path = enumerator.Next()) {
++      for (const std::string& name : names) {
++        if (path.BaseName().value() == name) {
++          return path;
++        }
++      }
++    }
++  }
++
++  return base::FilePath();
++}
++
++bool InstallAuraDeHostIconOnThread(const base::FilePath& source_icon,
++                                   const base::FilePath& svg_path,
++                                   const base::FilePath& png_100p_path,
++                                   const base::FilePath& png_200p_path,
++                                   const base::FilePath& png_300p_path) {
++  if (source_icon.empty() || !base::PathExists(source_icon)) {
++    return false;
++  }
++
++  const base::FilePath icon_dir = svg_path.DirName();
++  base::DeletePathRecursively(icon_dir);
++  if (!base::CreateDirectory(icon_dir)) {
++    return false;
++  }
++
++  const std::string extension = base::ToLowerASCII(source_icon.Extension());
++  if (extension == ".svg") {
++    return base::CopyFile(source_icon, svg_path);
++  }
++  if (extension == ".png") {
++    bool ok = base::CopyFile(source_icon, png_100p_path);
++    ok &= base::CopyFile(source_icon, png_200p_path);
++    ok &= base::CopyFile(source_icon, png_300p_path);
++    return ok;
++  }
++
++  return false;
++}
++
++bool ParseDesktopFile(const base::FilePath& path,
++                      base::Environment& environment,
++                      AuraDeHostDesktopApp* app) {
++  std::string contents;
++  if (!base::ReadFileToString(path, &contents)) {
++    return false;
++  }
++
++  std::map<std::string, std::string> fields;
++  bool in_desktop_entry = false;
++  for (std::string_view raw_line : base::SplitStringPiece(
++           contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string line = TrimASCII(std::string(raw_line));
++    if (line.empty() || line[0] == '#') {
++      continue;
++    }
++    if (line.front() == '[' && line.back() == ']') {
++      in_desktop_entry = line == "[Desktop Entry]";
++      continue;
++    }
++    if (!in_desktop_entry) {
++      continue;
++    }
++
++    const size_t equals = line.find('=');
++    if (equals == std::string::npos) {
++      continue;
++    }
++    const std::string key = line.substr(0, equals);
++    if (!fields.contains(key)) {
++      fields.emplace(key, line.substr(equals + 1));
++    }
++  }
++
++  if (fields["Type"] != "Application" || fields["Name"].empty() ||
++      fields["Exec"].empty() || IsTruthyDesktopValue(fields["NoDisplay"]) ||
++      IsTruthyDesktopValue(fields["Hidden"]) ||
++      IsTruthyDesktopValue(fields["Terminal"])) {
++    return false;
++  }
++
++  if (!fields["TryExec"].empty() &&
++      !CanFindExecutable(fields["TryExec"], environment)) {
++    return false;
++  }
++
++  app->desktop_file_id = path.BaseName().value();
++  app->name = fields["Name"];
++  app->generic_name = fields["GenericName"];
++  app->comment = fields["Comment"];
++  app->exec = StripDesktopExecFieldCodes(fields["Exec"], app->name, path);
++  app->icon = fields["Icon"];
++  app->icon_path = ResolveAuraDeHostIconPath(app->icon, environment);
++  app->desktop_path = path;
++  app->categories = SplitDesktopList(fields["Categories"]);
++  app->keywords = SplitDesktopList(fields["Keywords"]);
++  app->mime_types = SplitDesktopList(fields["MimeType"]);
++  app->startup_wm_class = fields["StartupWMClass"];
++  app->startup_notify = IsTruthyDesktopValue(fields["StartupNotify"]);
++  return !app->exec.empty();
++}
++
++bool IsAuraDeHostDesktopAppAllowed(const AuraDeHostDesktopApp& app) {
++  const std::string desktop_file_id = base::ToLowerASCII(app.desktop_file_id);
++  const std::string name = base::ToLowerASCII(app.name);
++
++  static constexpr std::string_view kBlockedDesktopIds[] = {
++      "avahi-discover.desktop",  "bssh.desktop",        "bvnc.desktop",
++      "foot-server.desktop",     "footclient.desktop",  "lstopo.desktop",
++      "thunar-settings.desktop", "xfce4-about.desktop",
++  };
++  for (std::string_view blocked_id : kBlockedDesktopIds) {
++    if (desktop_file_id == blocked_id) {
++      return false;
++    }
++  }
++
++  static constexpr std::string_view kBlockedNameFragments[] = {
++      "about xfce",  "foot client",    "foot server", "hardware locality",
++      "preferences", "server browser", "settings",
++  };
++  for (std::string_view fragment : kBlockedNameFragments) {
++    if (name.find(fragment) != std::string::npos) {
++      return false;
++    }
++  }
++
++  return true;
++}
++
++bool IsAuraDeHostRegistration(
++    const guest_os::GuestOsRegistryService::Registration& registration) {
++  return registration.VmName() == kAuraDeHostVmName &&
++         registration.ContainerName() == kAuraDeHostContainerName;
++}
++
++std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
++  std::vector<base::FilePath> dirs;
++  auto environment = base::Environment::Create();
++  if (std::optional<std::string> home = environment->GetVar("HOME");
++      home && !home->empty()) {
++    dirs.push_back(
++        base::FilePath(*home).AppendASCII(".local/share/applications"));
++  }
++  dirs.emplace_back("/usr/local/share/applications");
++  dirs.emplace_back("/usr/share/applications");
++
++  std::vector<AuraDeHostDesktopApp> apps;
++  std::set<std::string> seen_desktop_ids;
++  // AuraDE compatibility: surface Arch package metadata in App Info for host
++  // Linux apps without invoking pacman once per desktop file.
++  const std::map<std::string, AuraDeHostPackageMetadata> packages_by_file =
++      BuildAuraDeHostPackageMetadataMap();
++  for (const base::FilePath& dir : dirs) {
++    base::FileEnumerator enumerator(dir, /*recursive=*/false,
++                                    base::FileEnumerator::FILES,
++                                    FILE_PATH_LITERAL("*.desktop"));
++    for (base::FilePath path = enumerator.Next(); !path.empty();
++         path = enumerator.Next()) {
++      AuraDeHostDesktopApp app;
++      if (!ParseDesktopFile(path, *environment, &app) ||
++          !IsAuraDeHostDesktopAppAllowed(app) ||
++          !seen_desktop_ids.insert(app.desktop_file_id).second) {
++        continue;
++      }
++      const auto package = packages_by_file.find(app.desktop_path.value());
++      if (package != packages_by_file.end()) {
++        app.package_name = package->second.name;
++        app.package_version = package->second.version;
++      }
++      apps.push_back(std::move(app));
++    }
++  }
++  return apps;
++}
++
++void LaunchAuraDeHostAppOnThread(std::string command) {
++  auto environment = base::Environment::Create();
++
++  base::CommandLine command_line(base::FilePath("/bin/sh"));
++  std::string wayland_display = ChooseAuraDeHostWaylandDisplay(*environment);
++  if (ShouldUseNestedAuraDeHostCompositor(*environment)) {
++    const std::string socket_name = MakeAuraDeHostSocketName();
++    wayland_display = kAuraDeHostWaylandSocket;
++
++    command_line = base::CommandLine(base::FilePath(kAuraDeNestedWestonPath));
++    command_line.AppendArg("--backend=wayland");
++    command_line.AppendArg("--shell=kiosk-shell.so");
++    command_line.AppendArg("--renderer=pixman");
++    command_line.AppendArg("--socket=" + socket_name);
++    command_line.AppendArg("--width=1280");
++    command_line.AppendArg("--height=800");
++    command_line.AppendArg("--idle-time=0");
++    command_line.AppendArg("--");
++    command_line.AppendArg("/usr/bin/env");
++    command_line.AppendArg("WAYLAND_DISPLAY=" + socket_name);
++    command_line.AppendArg("/bin/sh");
++    command_line.AppendArg("-lc");
++    command_line.AppendArg(command);
++  } else {
++    command_line.AppendArg("-lc");
++    command_line.AppendArg(command);
++  }
++
++  base::LaunchOptions options;
++  if (std::optional<std::string> home = environment->GetVar("HOME");
++      home && !home->empty()) {
++    options.current_directory = base::FilePath(*home);
++  }
++  options.environment["WAYLAND_DISPLAY"] = wayland_display;
++  options.environment["GDK_BACKEND"] = "wayland";
++  options.environment["GSK_RENDERER"] = "cairo";
++  options.environment["LIBGL_ALWAYS_SOFTWARE"] = "1";
++  options.environment["QT_QPA_PLATFORM"] = "wayland";
++  options.environment["SDL_VIDEODRIVER"] = "wayland";
++  options.environment["MOZ_ENABLE_WAYLAND"] = "1";
++  options.environment["NO_AT_BRIDGE"] = "1";
++  options.environment["XDG_CURRENT_DESKTOP"] = "AuraDE";
++  options.environment["XDG_SESSION_DESKTOP"] = "aurade";
++  options.environment["DESKTOP_SESSION"] = "aurade";
++  options.environment["LANG"] = "C.UTF-8";
++  options.environment["LC_ALL"] = "C.UTF-8";
++  base::LaunchProcess(command_line, options);
++}
++
+ }  // namespace
+ 
+ namespace apps {
+@@ -47,7 +602,17 @@ CrostiniApps::CrostiniApps(AppServiceProxy* proxy) : GuestOSApps(proxy) {}
+ 
+ CrostiniApps::~CrostiniApps() = default;
+ 
++void CrostiniApps::Initialize() {
++  GuestOSApps::Initialize();
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    RefreshAuraDeHostApps();
++  }
++}
++
+ bool CrostiniApps::CouldBeAllowed() const {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return true;
++  }
+   return crostini::CrostiniFeatures::Get()->CouldBeAllowed(profile());
+ }
+ 
+@@ -67,6 +632,10 @@ void CrostiniApps::Launch(const std::string& app_id,
+                           int32_t event_flags,
+                           LaunchSource launch_source,
+                           WindowInfoPtr window_info) {
++  if (LaunchAuraDeHostApp(app_id)) {
++    return;
++  }
++
+   crostini::LaunchCrostiniApp(
+       profile(), app_id,
+       window_info ? window_info->display_id : display::kInvalidDisplayId);
+@@ -78,6 +647,11 @@ void CrostiniApps::LaunchAppWithIntent(const std::string& app_id,
+                                        LaunchSource launch_source,
+                                        WindowInfoPtr window_info,
+                                        LaunchCallback callback) {
++  if (LaunchAuraDeHostApp(app_id)) {
++    std::move(callback).Run(LaunchResult::kSuccess);
++    return;
++  }
++
+   // Retrieve URLs from the files in the intent.
+   auto args = ArgsFromIntent(intent.get());
+   crostini::LaunchCrostiniAppWithIntent(
+@@ -95,6 +669,7 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+                                 int64_t display_id,
+                                 base::OnceCallback<void(MenuItems)> callback) {
+   MenuItems menu_items;
++  const bool is_aurade_host_app = aurade_host_execs_.contains(app_id);
+ 
+   if (menu_type == MenuType::kShelf) {
+     AddCommandItem(ash::APP_CONTEXT_MENU_NEW_WINDOW, IDS_APP_LIST_NEW_WINDOW,
+@@ -128,15 +703,161 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+     }
+   }
+ 
++  if (is_aurade_host_app) {
++    AddCommandItem(ash::SHOW_APP_INFO, IDS_APP_CONTEXT_MENU_SHOW_INFO,
++                   menu_items);
++  }
++
+   std::move(callback).Run(std::move(menu_items));
+ }
+ 
+ void CrostiniApps::CreateAppOverrides(
+     const guest_os::GuestOsRegistryService::Registration& registration,
+     App* app) {
++  const bool is_aurade_host_app = IsAuraDeHostRegistration(registration);
+   // Per crbug.com/40624403, Crostini apps aren't going to be added in App
+-  // Management.
+-  app->show_in_management = false;
++  // Management. AuraDE host apps are local Linux desktop apps and should have
++  // a useful App info surface.
++  app->show_in_management = is_aurade_host_app;
++  if (!is_aurade_host_app) {
++    return;
++  }
++
++  const auto host_app = aurade_host_apps_.find(registration.app_id());
++  app->publisher_id = "aurade-host:" + registration.DesktopFileId();
++  app->window_mode = WindowMode::kWindow;
++  app->allow_window_mode_selection = false;
++  app->resize_locked = false;
++  app->allow_uninstall = false;
++  app->SetExtraField("aurade_host_app", true);
++
++  if (host_app == aurade_host_apps_.end()) {
++    app->description = "Linux desktop application";
++    return;
++  }
++
++  const AuraDeHostDesktopApp& metadata = host_app->second;
++  if (!metadata.comment.empty()) {
++    app->description = metadata.comment;
++  } else if (!metadata.generic_name.empty()) {
++    app->description = metadata.generic_name;
++  } else {
++    app->description = "Linux desktop application";
++  }
++
++  app->SetExtraField("source", "AuraDE Linux apps");
++  if (!metadata.package_name.empty()) {
++    app->version = metadata.package_name;
++    if (!metadata.package_version.empty()) {
++      app->version->append(" ");
++      app->version->append(metadata.package_version);
++    }
++  }
++  app->SetExtraField("desktop_file_id", metadata.desktop_file_id);
++  app->SetExtraField("desktop_file_path", metadata.desktop_path.value());
++  app->SetExtraField("icon_name", metadata.icon);
++  app->SetExtraField("icon_path", metadata.icon_path.value());
++  app->SetExtraField("package_name", metadata.package_name);
++  app->SetExtraField("package_version", metadata.package_version);
++  app->SetExtraField("comment", metadata.comment);
++  app->SetExtraField("generic_name", metadata.generic_name);
++  app->SetExtraField("categories", base::JoinString(metadata.categories, ", "));
++  app->SetExtraField("keywords", base::JoinString(metadata.keywords, ", "));
++  app->SetExtraField("mime_types", base::JoinString(metadata.mime_types, ", "));
++
++  if (!metadata.generic_name.empty()) {
++    app->additional_search_terms.push_back(metadata.generic_name);
++  }
++  for (const std::string& category : metadata.categories) {
++    app->additional_search_terms.push_back(category);
++  }
++  for (const std::string& keyword : metadata.keywords) {
++    app->additional_search_terms.push_back(keyword);
++  }
++}
++
++void CrostiniApps::RefreshAuraDeHostApps() {
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ScanAuraDeHostDesktopApps),
++      base::BindOnce(&CrostiniApps::OnAuraDeHostAppsScanned,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void CrostiniApps::OnAuraDeHostAppsScanned(
++    std::vector<AuraDeHostDesktopApp> host_apps) {
++  auto* registry =
++      guest_os::GuestOsRegistryServiceFactory::GetForProfile(profile());
++  if (!registry) {
++    return;
++  }
++
++  vm_tools::apps::ApplicationList app_list;
++  app_list.set_vm_type(vm_tools::apps::VmType::TERMINA);
++  app_list.set_vm_name(kAuraDeHostVmName);
++  app_list.set_container_name(kAuraDeHostContainerName);
++
++  aurade_host_execs_.clear();
++  aurade_host_apps_.clear();
++  std::vector<std::pair<std::string, base::FilePath>> icon_install_requests;
++  for (const AuraDeHostDesktopApp& host_app : host_apps) {
++    vm_tools::apps::App* app = app_list.add_apps();
++    app->set_desktop_file_id(host_app.desktop_file_id);
++    app->mutable_name()->add_values()->set_value(host_app.name);
++    app->set_exec(host_app.exec);
++    app->set_executable_file_name(
++        base::FilePath(FirstExecToken(host_app.exec)).BaseName().value());
++    app->set_no_display(false);
++    app->set_terminal(false);
++    app->set_startup_wm_class(host_app.startup_wm_class);
++    app->set_startup_notify(host_app.startup_notify);
++
++    const std::string app_id = guest_os::GuestOsRegistryService::GenerateAppId(
++        host_app.desktop_file_id, kAuraDeHostVmName, kAuraDeHostContainerName);
++    aurade_host_execs_.emplace(app_id, host_app.exec);
++    aurade_host_apps_.emplace(app_id, host_app);
++    if (!host_app.icon_path.empty()) {
++      icon_install_requests.emplace_back(app_id, host_app.icon_path);
++    }
++  }
++
++  registry->UpdateApplicationList(app_list);
++
++  for (const auto& [app_id, icon_path] : icon_install_requests) {
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++        base::BindOnce(&InstallAuraDeHostIconOnThread, icon_path,
++                       registry->GetIconPath(app_id, ui::kScaleFactorNone),
++                       registry->GetIconPath(app_id, ui::k100Percent),
++                       registry->GetIconPath(app_id, ui::k200Percent),
++                       registry->GetIconPath(app_id, ui::k300Percent)),
++        base::BindOnce(&CrostiniApps::OnAuraDeHostIconInstalled,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++}
++
++void CrostiniApps::OnAuraDeHostIconInstalled(bool success) {
++  if (!success || !registry()) {
++    return;
++  }
++  registry()->ContainerBadgeColorChanged(guest_os::GuestId(
++      guest_os::VmType::TERMINA, kAuraDeHostVmName, kAuraDeHostContainerName));
++}
++
++bool CrostiniApps::LaunchAuraDeHostApp(const std::string& app_id) {
++  const auto exec = aurade_host_execs_.find(app_id);
++  if (exec == aurade_host_execs_.end()) {
++    return false;
++  }
++
++  if (registry()) {
++    registry()->AppLaunched(app_id);
++  }
++
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&LaunchAuraDeHostAppOnThread, exec->second));
++  return true;
+ }
+ 
+ }  // namespace apps
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+index df9db4317d..75182df1d2 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+@@ -5,10 +5,12 @@
+ #ifndef CHROME_BROWSER_APPS_APP_SERVICE_PUBLISHERS_CROSTINI_APPS_H_
+ #define CHROME_BROWSER_APPS_APP_SERVICE_PUBLISHERS_CROSTINI_APPS_H_
+ 
++#include <map>
+ #include <memory>
+ #include <string>
+ #include <vector>
+ 
++#include "base/files/file_path.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/publishers/guest_os_apps.h"
+@@ -20,6 +22,24 @@
+ 
+ namespace apps {
+ 
++struct AuraDeHostDesktopApp {
++  std::string desktop_file_id;
++  std::string name;
++  std::string generic_name;
++  std::string comment;
++  std::string exec;
++  std::string icon;
++  std::string package_name;
++  std::string package_version;
++  base::FilePath icon_path;
++  base::FilePath desktop_path;
++  std::vector<std::string> categories;
++  std::vector<std::string> keywords;
++  std::vector<std::string> mime_types;
++  std::string startup_wm_class;
++  bool startup_notify = false;
++};
++
+ // An app publisher (in the App Service sense) of Crostini apps,
+ // See components/services/app_service/README.md.
+ class CrostiniApps : public GuestOSApps {
+@@ -29,6 +49,8 @@ class CrostiniApps : public GuestOSApps {
+   CrostiniApps& operator=(const CrostiniApps&) = delete;
+   ~CrostiniApps() override;
+ 
++  void Initialize() override;
++
+  private:
+   bool CouldBeAllowed() const override;
+   apps::AppType AppType() const override;
+@@ -55,6 +77,14 @@ class CrostiniApps : public GuestOSApps {
+       const guest_os::GuestOsRegistryService::Registration& registration,
+       App* app) override;
+ 
++  void RefreshAuraDeHostApps();
++  void OnAuraDeHostAppsScanned(std::vector<AuraDeHostDesktopApp> apps);
++  void OnAuraDeHostIconInstalled(bool success);
++  bool LaunchAuraDeHostApp(const std::string& app_id);
++
++  std::map<std::string, std::string> aurade_host_execs_;
++  std::map<std::string, AuraDeHostDesktopApp> aurade_host_apps_;
++
+   base::WeakPtrFactory<CrostiniApps> weak_ptr_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc b/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
+index b3859bc3c5..cb6978370b 100644
+--- a/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
++++ b/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
+@@ -9,6 +9,7 @@
+ #include "base/logging.h"
+ #include "base/no_destructor.h"
+ #include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/ash/borealis/borealis_window_manager.h"
+ #include "chrome/browser/ash/guest_os/guest_id.h"
+ #include "chrome/browser/ash/guest_os/guest_os_pref_names.h"
+@@ -222,6 +223,35 @@ std::string GetGuestOsShelfAppId(Profile* profile,
+   // If the window_id does not follow the expected format, return a generic id.
+   if (!base::StartsWith(*window_app_id, kGuestOsWindowAppIdPrefix,
+                         base::CompareCase::SENSITIVE)) {
++    if (!base::SysInfo::IsRunningOnChromeOS()) {
++      std::vector<std::string> desktop_file_ids{*window_app_id};
++      if (!base::EndsWith(*window_app_id, ".desktop",
++                          base::CompareCase::SENSITIVE)) {
++        desktop_file_ids.push_back(*window_app_id + ".desktop");
++      }
++      for (const std::string& desktop_file_id : desktop_file_ids) {
++        if (FindAppId(apps, guest_os::prefs::kAppDesktopFileIdKey,
++                      desktop_file_id, guest_id, &app_id) ==
++            FindAppIdResult::UniqueMatch) {
++          return app_id;
++        }
++      }
++      if (FindAppId(apps, guest_os::prefs::kAppStartupWMClassKey,
++                    *window_app_id, guest_id, &app_id,
++                    false /* require_startup_notification */,
++                    true /* need_display */) ==
++          FindAppIdResult::UniqueMatch) {
++        return app_id;
++      }
++      if (FindAppId(apps, guest_os::prefs::kAppNameKey, *window_app_id,
++                    guest_id, &app_id,
++                    false /* require_startup_notification */,
++                    true /* need_display */,
++                    true /* ignore_space */) ==
++          FindAppIdResult::UniqueMatch) {
++        return app_id;
++      }
++    }
+     LOG(ERROR) << "window_app_id:" << *window_app_id
+                << " provided is not prefixed with "
+                << kGuestOsWindowAppIdPrefix;
+diff --git a/chrome/browser/resources/app_settings/app.html.ts b/chrome/browser/resources/app_settings/app.html.ts
+index 626c1e04dd..198cda44fb 100644
+--- a/chrome/browser/resources/app_settings/app.html.ts
++++ b/chrome/browser/resources/app_settings/app.html.ts
+@@ -23,7 +23,29 @@ export function getHtml(this: AppElement) {
+     </app-management-uninstall-button>
+   </div>
+   <div class="permission-list">
+-    ${this.isIsolatedWebApp_() ? html`
++    ${this.shouldShowAppDescription_() ? html`
++      <div class="permission-card-row" id="appDescription">
++        <div class="app-detail">
++          <div>Description</div>
++          <div class="secondary-text">${this.app_.description}</div>
++        </div>
++      </div>
++    ` : ''}
++    ${this.isAuraDeLinuxApp_() ? html`
++      <div class="permission-card-row" id="linuxAppSource">
++        <div class="app-detail">
++          <div>Source</div>
++          <div class="secondary-text">AuraDE Linux apps</div>
++        </div>
++      </div>
++      <div class="permission-card-row" id="linuxDesktopEntry">
++        <div class="app-detail">
++          <div>Desktop entry</div>
++          <div class="secondary-text">${this.getAuraDeDesktopEntry_()}</div>
++        </div>
++      </div>
++    ` : ''}
++    ${this.shouldShowStandaloneVersionDetails_() ? html`
+       <div class="permission-card-row" id="appVersion">
+         <div class="app-detail">
+           <div>$i18n{appManagementAppVersionTitle}</div>
+diff --git a/chrome/browser/resources/app_settings/app.ts b/chrome/browser/resources/app_settings/app.ts
+index c4f756afbb..2b454d4e97 100644
+--- a/chrome/browser/resources/app_settings/app.ts
++++ b/chrome/browser/resources/app_settings/app.ts
+@@ -139,10 +139,26 @@ export class AppElement extends AppElementBase {
+     return this.app_.showSystemNotificationsSettingsLink;
+   }
+ 
++  protected shouldShowAppDescription_(): boolean {
++    return Boolean(this.app_.description);
++  }
++
+   protected isIsolatedWebApp_(): boolean {
+     return this.app_.publisherId.startsWith('isolated-app://');
+   }
+ 
++  protected isAuraDeLinuxApp_(): boolean {
++    return this.app_.publisherId.startsWith('aurade-host:');
++  }
++
++  protected shouldShowStandaloneVersionDetails_(): boolean {
++    return this.isIsolatedWebApp_();
++  }
++
++  protected getAuraDeDesktopEntry_(): string {
++    return this.app_.publisherId.replace(/^aurade-host:/, '');
++  }
++
+   protected onNotificationsSystemSettingsLinkClicked_(
+       e: CustomEvent<{event: Event}>): void {
+     // A place holder href with the value "#" is used to have a compliant link.
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
+index 980b6c748d..53213ac5c9 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
+@@ -117,6 +117,7 @@ export class AppManagementAppDetailViewElement extends
+       case (AppType.kWeb):
+         return 'pwa-detail-view';
+       case (AppType.kChromeApp):
++      case (AppType.kCrostini):
+         return 'chrome-app-detail-view';
+       case (AppType.kArc):
+         return 'arc-detail-view';
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
+index 8fc889f333..9245af6951 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
+@@ -61,6 +61,24 @@
+     [[getSubappDataSharingExplanationString_(app, apps_, subAppToParentAppId_)]]
+   </div>
+ </template>
++<template is="dom-if" if="[[shouldShowDescription_(app)]]" restamp>
++  <div class="indented-app-details" id="description">
++    [[app.description]]
++  </div>
++</template>
++<template is="dom-if" if="[[isAuraDeLinuxApp_(app)]]" restamp>
++  <div class="indented-app-details" id="auradeLinuxSource">
++    Source: AuraDE Linux apps
++  </div>
++  <div class="indented-app-details" id="auradeLinuxDesktopEntry">
++    Desktop entry: [[getAuraDeDesktopEntry_(app)]]
++  </div>
++  <template is="dom-if" if="[[shouldShowAuraDeLinuxPackage_(app)]]" restamp>
++    <div class="indented-app-details" id="auradeLinuxPackage">
++      Package: [[getAuraDeLinuxPackage_(app)]]
++    </div>
++  </template>
++</template>
+ <template is="dom-if" if="[[shouldShowVersion_(app)]]" restamp>
+   <div class="indented-app-details" id="version">
+     [[i18n('appManagementAppDetailsVersion', app.version)]]
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
+index a02f8a74dd..6b667e70e3 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
+@@ -78,9 +78,16 @@ export class AppManagementAppDetailsItem extends
+     if (app.installReason === InstallReason.kSystem) {
+       return false;
+     }
++    if (this.isAuraDeLinuxApp_(app)) {
++      return false;
++    }
+     return Boolean(app.version);
+   }
+ 
++  private shouldShowAuraDeLinuxPackage_(app: App): boolean {
++    return this.isAuraDeLinuxApp_(app) && Boolean(app.version);
++  }
++
+   /**
+    * Storage information is shown for every app apart from System apps.
+    */
+@@ -99,6 +106,22 @@ export class AppManagementAppDetailsItem extends
+     return Boolean(app.dataSize);
+   }
+ 
++  private shouldShowDescription_(app: App): boolean {
++    return Boolean(app.description);
++  }
++
++  private isAuraDeLinuxApp_(app: App): boolean {
++    return app.publisherId.startsWith('aurade-host:');
++  }
++
++  private getAuraDeDesktopEntry_(app: App): string {
++    return app.publisherId.replace(/^aurade-host:/, '');
++  }
++
++  private getAuraDeLinuxPackage_(app: App): string {
++    return app.version || '';
++  }
++
+   private shouldShowInfoIcon_(app: App): boolean {
+     return app.type === AppType.kWeb &&
+         (app.installSource === InstallSource.kBrowser ||
+@@ -129,6 +152,8 @@ export class AppManagementAppDetailsItem extends
+       case AppType.kWeb:
+       case AppType.kExtension:
+         return this.i18n('appManagementAppDetailsTypeWeb' + suffix);
++      case AppType.kCrostini:
++        return 'Linux app';
+       default:
+         console.error('App type not handled by app management.');
+         return '';
+@@ -148,6 +173,9 @@ export class AppManagementAppDetailsItem extends
+   }
+ 
+   private getTypeAndSourceString_(app: App): string {
++    if (this.isAuraDeLinuxApp_(app)) {
++      return 'Linux app from AuraDE host';
++    }
+     if (app.installReason === InstallReason.kPolicy) {
+       return this.getTypeString_(app, 'InstallReasonPolicy');
+     }
+diff --git a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
+index 4da9e1d976..c9d09e9ade 100644
+--- a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
++++ b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
+@@ -15,6 +15,7 @@
+ #include "ash/public/cpp/window_properties.h"
+ #include "ash/shell.h"
+ #include "base/feature_list.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+ #include "chrome/browser/ash/app_list/arc/arc_app_utils.h"
+@@ -85,7 +86,8 @@ AppServiceAppWindowShelfController::AppServiceAppWindowShelfController(
+     arc_tracker_ = std::make_unique<AppServiceAppWindowArcTracker>(this);
+   }
+ 
+-  if (crostini::CrostiniFeatures::Get()->CouldBeAllowed(owner->profile())) {
++  if (crostini::CrostiniFeatures::Get()->CouldBeAllowed(owner->profile()) ||
++      !base::SysInfo::IsRunningOnChromeOS()) {
+     crostini_tracker_ =
+         std::make_unique<AppServiceAppWindowCrostiniTracker>(this);
+   }
+diff --git a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+index 6cbe7f0436..b26a6a0ee9 100644
+--- a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
++++ b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+@@ -249,6 +249,8 @@ AppManagementPageHandlerBase::CreateAppFromAppUpdate(
+   app->hide_pin_to_shelf =
+       !update.ShowInShelf().value_or(true) || ShouldHidePinToShelf(app->id);
+   app->window_mode = update.WindowMode();
++  app->hide_window_mode = !update.AllowWindowModeSelection() ||
++                          update.WindowMode() == apps::WindowMode::kUnknown;
+ 
+   auto run_on_os_login = update.RunOnOsLogin();
+   if (run_on_os_login.has_value()) {

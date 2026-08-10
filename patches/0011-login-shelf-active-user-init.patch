@@ -1,0 +1,142 @@
+diff --git a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
+index 2552cbdc17..7a0c9f4e0d 100644
+--- a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
++++ b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
+@@ -15,8 +15,11 @@
+ #include "ash/public/cpp/new_window_delegate.h"
+ #include "ash/public/cpp/projector/projector_controller.h"
+ #include "ash/public/cpp/shelf_model.h"
++#include "ash/shelf/shelf.h"
++#include "ash/shelf/shelf_layout_manager.h"
+ #include "ash/public/cpp/window_properties.h"
+ #include "ash/quick_pair/keyed_service/quick_pair_mediator.h"
++#include "ash/session/session_controller_impl.h"
+ #include "ash/shell.h"
+ #include "ash/system/input_device_settings/input_device_settings_controller_impl.h"
+ #include "ash/system/mahi/fake_mahi_manager.h"
+@@ -166,15 +169,42 @@ class ChromeShelfControllerInitializer
+   void OnSessionStateChanged() override {
+     TRACE_EVENT0("ui",
+                  "ChromeShelfControllerInitializer::OnSessionStateChanged");
+-    DCHECK(!chrome_shelf_controller_);
+-    DCHECK(!ChromeShelfController::instance());
++    if (chrome_shelf_controller_ || ChromeShelfController::instance()) {
++      // HACK(AuraDE): If we created the shelf early at LOGIN_PRIMARY with the
++      // sign-in profile, switch to the user's profile when the session becomes
++      // active. The observer was intentionally kept alive for this transition.
++      if (ChromeShelfController::instance() &&
++          session_manager::SessionManager::Get()->session_state() ==
++              session_manager::SessionState::ACTIVE) {
++        ChromeShelfController::instance()->OnUserProfileReadyToSwitch(
++            ProfileManager::GetActiveUserProfile());
++        session_manager::SessionManager::Get()->RemoveObserver(this);
++      }
++      return;
++    }
+ 
++    // Create the shelf when the session reaches ACTIVE and a user profile
++    // is available. On linux-chromeos, LOGIN_PRIMARY uses the sign-in profile
++    // which lacks proper services (e.g. AppServiceProxy), so we avoid creating
++    // the shelf at that state — it would crash on Init().
++    // The shelf is instead created here at ACTIVE, then the OnUserProfileLoaded
++    // handler below calls OnUserProfileReadyToSwitch to bind it.
+     if (session_manager::SessionManager::Get()->session_state() ==
+-        session_manager::SessionState::ACTIVE) {
++            session_manager::SessionState::ACTIVE) {
+       chrome_shelf_controller_ = std::make_unique<ChromeShelfController>(
+           nullptr, ash::ShelfModel::Get());
+       chrome_shelf_controller_->Init();
+ 
++      // Shelf layout manager needs to recalculate visibility now that the
++      // ChromeShelfController exists. Without this the shelf stays hidden
++      // because UpdateVisibilityState was called during session activation
++      // before the controller was ready.
++      if (auto* shelf = ash::Shelf::ForWindow(
++              ash::Shell::GetPrimaryRootWindow())) {
++        shelf->shelf_layout_manager()->UpdateVisibilityState(
++            /*force_layout=*/true);
++      }
++
+       session_manager::SessionManager::Get()->RemoveObserver(this);
+     }
+   }
+@@ -216,6 +246,50 @@ class ChromeBrowserMainExtraPartsAsh::UserProfileLoadedObserver
+     if (multi_user_window_manager_browser_adaptor_) {
+       multi_user_window_manager_browser_adaptor_->AddUser(account_id);
+     }
++
++    // HACK(AuraDE): Notify subsystems of the active user so their internal
++    // state is initialized. On real ChromeOS this happens via
++    // SessionControllerImpl::SetUserSessionOrder (triggered by the
++    // session_manager daemon over Mojo), but on linux-chromeos with stubs
++    // that call never arrives. Without this:
++    //   - MultiUserWindowManager: current_account_id_ stays empty, any
++    //     transient window creation (right-click menu) SIGABRTs.
++    //   - DesksClient: active_profile_ stays null, desks storage manager
++    //     never created, any saved-desk/recap access DCHECKs on null.
++    //   - ShelfController: auto_hide_behavior stays kAlwaysHidden (default),
++    //     so the shelf never allocates space or becomes visible.
++    //   - GeolocationPrivacySwitchController: cached_access_level_ stays
++    //     empty, crashes when Settings opens.
++    // Only fan out manually when ash already has a user session. In the
++    // shim-driven local-account flow the profile loads before the first
++    // session reaches ash; MultiUserWindowManager and DesksClient are
++    // ash::SessionObservers, so they get this notification naturally once
++    // chrome pushes the session moments later.
++    const bool ash_has_user_session =
++        ash::Shell::Get()->session_controller()->GetUserSession(0) != nullptr;
++    if (ash_has_user_session) {
++      if (auto* muwm = ash::MultiUserWindowManager::Get()) {
++        muwm->OnActiveUserSessionChanged(account_id);
++      }
++      if (auto* desks_client = DesksClient::Get()) {
++        desks_client->OnActiveUserSessionChanged(account_id);
++      }
++    }
++    if (profile) {
++      // The ShelfController's OnActiveUserPrefServiceChanged (which reads
++      // auto_hide from user prefs) is private and never called on
++      // linux-chromeos (no session_manager daemon). Without it the shelf
++      // stays in its default kAlwaysHidden state. Override it directly.
++      for (aura::Window* root : ash::Shell::Get()->GetAllRootWindows()) {
++        if (auto* shelf = ash::Shelf::ForWindow(root)) {
++          shelf->SetAutoHideBehavior(
++              ash::ShelfAutoHideBehavior::kNever);
++          shelf->shelf_layout_manager()->UpdateVisibilityState(
++              /*force_layout=*/true);
++        }
++      }
++    }
++
+     if (ChromeShelfController::instance()) {
+       ChromeShelfController::instance()->OnUserProfileReadyToSwitch(profile);
+     }
+diff --git a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
+index 62a89cfaa6..01f29c2e03 100644
+--- a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
++++ b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
+@@ -305,7 +305,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,
+       profile = profile->GetOriginalProfile();
+     }
+   }
+-
+   // All profile relevant settings get bound to the current profile.
+   AttachProfile(profile);
+   DCHECK_EQ(profile, profile_);
+@@ -807,6 +806,16 @@ void ChromeShelfController::SetShelfIDForBrowserWindowContents(
+ void ChromeShelfController::OnUserProfileReadyToSwitch(Profile* profile) {
+   if (user_switch_observer_.get()) {
+     user_switch_observer_->OnUserProfileReadyToSwitch(profile);
++    return;
++  }
++  // HACK(AuraDE): When ChromeShelfController is created early (at
++  // LOGIN_PRIMARY) on Linux desktop, the profile might be the sign-in profile
++  // rather than the logged-in user's profile.  Switch to the real profile once
++  // the user session is established.
++  if (profile_ != profile) {
++    ReleaseProfile();
++    AttachProfile(profile);
++    UpdatePinnedAppsFromSync();
+   }
+ }
+ 

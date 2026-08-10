@@ -1,0 +1,339 @@
+# Maintainer: AuraDE Contributors
+#
+# ChromiumOS Ash — ChromeOS desktop environment for Linux, built with
+# ChromeOS features (OOBE, login manager, Ash shell) but runs on a
+# standard Linux system via Ozone/X11, Ozone/Wayland, or direct DRM.
+#
+# This package requires shill-nm-adapter for network management via
+# NetworkManager and dbus-glib for session management.
+
+pkgname=chromiumos-ash
+# Version mirrors the upstream ChromeOS milestone + build revision.
+# Run the update-patches script to refresh before bumping.
+pkgver=152.1660893
+pkgrel=4
+pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
+arch=('x86_64')
+url="https://www.chromium.org/chromium-os/"
+license=('BSD-3-Clause')
+depends=(
+    'shill-nm-adapter'
+    'bash'
+    'dbus'
+    'dbus-glib'
+    'util-linux'
+    'python'
+    'python-dbus'
+    'python-gobject'
+    'libgl'
+    'wayland'
+    'weston'
+    'seatd'
+    'xorg-xwayland'
+    'libxkbcommon'
+    'libx11'
+    'libxcb'
+    'libxcomposite'
+    'libxdamage'
+    'libxext'
+    'libxfixes'
+    'libxi'
+    'libxrandr'
+    'libxrender'
+    'libxss'
+    'libxtst'
+    'pango'
+    'cairo'
+    'nss'
+    'nspr'
+    'alsa-lib'
+    'pipewire'
+    'minizip'
+    'libevent'
+    'libdrm'
+    'mesa'
+    'hwdata'
+    'harfbuzz'
+    'freetype2'
+    'ttf-roboto'
+    'libpng'
+    'libjpeg-turbo'
+    'tar'
+    'gzip'
+    'bzip2'
+    'xz'
+    'zstd'
+    'lzip'
+    '7zip'
+    'unrar'
+    'aurade-system-helper'
+    'aurade-account-helper'
+    'polkit'
+    'pam'
+    'shadow'
+    'accountsservice'
+)
+optdepends=(
+    'lm_sensors: userspace sensor discovery and setup tools for host hwmon devices'
+    'vulkan-driver: hardware Vulkan acceleration when supported by the GPU'
+    'mesa-utils: GPU smoke-test tools such as glxinfo and eglinfo'
+    'aurade-ai: Advanced Plus AI local Gemma model bootstrap'
+    'aurade-login: PAM greeter, lock screen, and logind session controls'
+    'aurade-power: event-driven Linux laptop suspend and power lifecycle bridge'
+    'aurade-host-bridge: BlueZ, udisks2, MIME, and pacman host integration'
+    'udiskie: opt-in recovery automounter when AURADE_REMOVABLE_AUTOMOUNT=1'
+)
+makedepends=(
+    'git'
+    'python'
+    'ninja'
+    'pkgconf'
+    'bison'
+    'flex'
+    'gperf'
+    'nodejs'
+    'patch'
+    'clang'
+    'lld'
+    'gn'
+    'python-pip'
+)
+# The source is Chromium's monolithic depot_tools+gclient checkout.
+# This is NOT a tarball — see the CI/CD build script for how to
+# prepare the source tree before invoking makepkg.
+#
+# The PKGBUILD expects ${srcdir}/chromiumos-src/ to contain a fully
+# synced ChromiumOS checkout with patches already applied.
+#
+# For a fresh pinned build, first run ci/bootstrap-chromium-src.sh. For a
+# warm checkout, ci/build-current-chromiumos-ash-package.sh refreshes the
+# current series and drives this PKGBUILD in an isolated work directory.
+source=(
+    'chromiumos-ash.sh'
+    'chromiumos-ash-session.sh'
+    'chromiumos-ash-session-child.sh'
+    'chromiumos-ash.desktop'
+    'chromiumos-ash-wayland.desktop'
+    'aurade.features.conf'
+    'google-api.conf.example'
+    'aurade-session-manager-shim.py'
+    'aurade-session-manager.service'
+    'org.chromium.SessionManager.conf'
+    'org.chromium.SessionManager.service'
+    'chromiumos-ash.sysusers.conf'
+    'chromiumos-ash.tmpfiles.conf'
+    'LICENSE'
+)
+noextract=()
+sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
+            '6008d05c99cc53cccc669edf7aee725c0ab7689518a6bf94fdda1f99727ade06'
+            '4bc9eacc89c24a020ba2dc6af48fe569e51a54bb9567d1a1482eb7b8df215110'
+            'f8c199d491d42a562e573592dd4f3fc66306f27e95c901e85fdd7360842fe821'
+            '7c149f0add02dbed69c642bb8a057d9d921e8b4fc4effd85123ffb30f43a7d23'
+            '84ea9c1d5108606f8db4ff4664847628bb9510a3e1b0d54adf49aad0143bd017'
+            '2f2adfd446b67048ec9f753bd4257fc01a604159f9ef4c74d1ff7c91b51940b5'
+            '8506d6044acd85b1ba6e72a6aff3452ea2955b1c14feb000718e02a2ecc641fc'
+            'fa70439a19399b9fd27ae402f62a8259c10132b5a259750d6849bd7b30f01480'
+            'c0f2402c7ee102fb1b127a17dd16755b2b0c90bb5a7b7c95f66812f8d6bdc53b'
+            '0ffe43ad4f1528c0f6470a2af610c101a170172afcf14223ea05c800604da955'
+            '15499a4411d0d86862989f909c1cbb0546353c029943052bc68350ce146a172b'
+            'faf6afb84f522cedf3ea7e707e14177470001cc87be757466af172a79635d0d2'
+            'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
+backup=('etc/aurade/features.conf')
+
+build() {
+    # CHROME_SRC must point to a synced+patched ChromiumOS src dir
+    local chrome_src="${CHROME_SRC:-${srcdir}/chromiumos-src}"
+    local out_dir="${chrome_src}/out/Ash"
+
+    if [ ! -d "${chrome_src}" ]; then
+        echo "ERROR: CHROME_SRC not found at ${chrome_src}"
+        echo "Run 'build-chromeos-ash.sh prepare' first."
+        exit 1
+    fi
+
+    cd "${chrome_src}"
+
+    if [ "${AURADE_SKIP_CHROMIUM_BUILD:-0}" = "1" ]; then
+        if [ ! -x "${out_dir}/chrome" ] || [ ! -x "${out_dir}/chrome_sandbox" ]; then
+            echo "ERROR: AURADE_SKIP_CHROMIUM_BUILD=1 but chrome artifacts are missing."
+            echo "Expected ${out_dir}/chrome and ${out_dir}/chrome_sandbox."
+            exit 1
+        fi
+        echo "Using existing ChromiumOS Ash build artifacts from ${out_dir}."
+        return
+    fi
+
+    # Generate GN args
+    gn gen "${out_dir}" --args="
+        target_os = \"chromeos\"
+        is_debug = false
+        is_component_build = false
+        is_official_build = false
+        symbol_level = 0
+        use_ozone = true
+        ozone_platform_wayland = true
+        use_system_minigbm = true
+        enable_rust = true
+    "
+
+    # Build the chrome target and its setuid sandbox helper.
+    ninja -C "${out_dir}" -j"$(nproc)" chrome chrome_sandbox
+}
+
+package() {
+    local chrome_src="${CHROME_SRC:-${srcdir}/chromiumos-src}"
+    local out_dir="${chrome_src}/out/Ash"
+    local gn_bin="gn"
+    local runtime_deps="${srcdir}/chromiumos-ash.runtime_deps"
+
+    if [ -x "${chrome_src}/buildtools/linux64/gn" ]; then
+        gn_bin="${chrome_src}/buildtools/linux64/gn"
+    fi
+
+    copy_runtime_dep() {
+        local rel="${1#./}"
+        local src
+        local dest
+
+        if [ -z "${rel}" ]; then
+            return
+        fi
+
+        case "${rel}" in
+            *.TOC|*.rsp|*.runtime_deps)
+                return
+                ;;
+        esac
+
+        src="${out_dir}/${rel}"
+        dest="${pkgdir}/usr/lib/chromiumos-ash/${rel}"
+
+        if [ ! -e "${src}" ]; then
+            printf 'warning: runtime dependency not found: %s\n' "${rel}" >&2
+            return
+        fi
+
+        if [ -d "${src}" ]; then
+            mkdir -p "${dest}"
+            cp -a "${src}/." "${dest}/"
+        else
+            install -Dm644 "${src}" "${dest}"
+            if [ -x "${src}" ]; then
+                chmod 755 "${dest}"
+            fi
+        fi
+    }
+
+    (
+        cd "${chrome_src}"
+        if ! "${gn_bin}" desc "${out_dir}" //chrome:chrome runtime_deps >"${runtime_deps}"; then
+            cat >"${runtime_deps}" <<'EOF'
+./chrome
+./chrome_crashpad_handler
+./chrome_sandbox
+chrome_100_percent.pak
+chrome_200_percent.pak
+icudtl.dat
+keyboard_resources.pak
+resources.pak
+snapshot_blob.bin
+libEGL.so
+libGLESv2.so
+libvk_swiftshader.so
+libvulkan.so.1
+vk_swiftshader_icd.json
+IwaKeyDistribution
+MEIPreload
+PrivacySandboxAttestationsPreloaded
+dbus
+locales
+mojo_service_manager
+resources
+EOF
+        fi
+    )
+
+    while IFS= read -r runtime_dep; do
+        copy_runtime_dep "${runtime_dep}"
+    done < <(sort -u "${runtime_deps}")
+
+    if [ -e "${pkgdir}/usr/lib/chromiumos-ash/chrome_sandbox" ]; then
+        mv "${pkgdir}/usr/lib/chromiumos-ash/chrome_sandbox" \
+            "${pkgdir}/usr/lib/chromiumos-ash/chrome-sandbox"
+    fi
+
+    chmod -R u+rwX,go+rX "${pkgdir}/usr/lib/chromiumos-ash"
+
+    if [ -e "${pkgdir}/usr/lib/chromiumos-ash/chrome-sandbox" ]; then
+        chown root:root "${pkgdir}/usr/lib/chromiumos-ash/chrome-sandbox"
+        chmod 4755 "${pkgdir}/usr/lib/chromiumos-ash/chrome-sandbox"
+    fi
+
+    # AuraDE compatibility: a few ChromiumOS/Chrome paths still probe the
+    # historical Google Chrome install prefix. Keep the real payload in
+    # /usr/lib/chromiumos-ash and expose stable symlinks for those probes.
+    install -dm755 "${pkgdir}/opt/google/chrome"
+    for rel in \
+        chrome \
+        chrome_100_percent.pak \
+        chrome_200_percent.pak \
+        icudtl.dat \
+        resources.pak; do
+        if [ -e "${pkgdir}/usr/lib/chromiumos-ash/${rel}" ]; then
+            ln -s "/usr/lib/chromiumos-ash/${rel}" \
+                "${pkgdir}/opt/google/chrome/${rel}"
+        fi
+    done
+
+    # AuraDE compatibility: Arch's ttf-roboto package installs under
+    # /usr/share/fonts/TTF, while some ChromeOS readahead paths still probe the
+    # ChromeOS-style /usr/share/fonts/roboto directory.
+    install -dm755 "${pkgdir}/usr/share/fonts/roboto"
+    ln -s /usr/share/fonts/TTF/Roboto-Regular.ttf \
+        "${pkgdir}/usr/share/fonts/roboto/Roboto-Regular.ttf"
+    ln -s /usr/share/fonts/TTF/Roboto-Medium.ttf \
+        "${pkgdir}/usr/share/fonts/roboto/Roboto-Medium.ttf"
+
+    # Install launcher script
+    install -Dm755 "${srcdir}/chromiumos-ash.sh" \
+        "${pkgdir}/usr/bin/chromiumos-ash"
+    install -Dm755 "${srcdir}/chromiumos-ash-session.sh" \
+        "${pkgdir}/usr/bin/chromiumos-ash-session"
+    install -Dm755 "${srcdir}/chromiumos-ash-session-child.sh" \
+        "${pkgdir}/usr/bin/chromiumos-ash-session-child"
+
+    # Install X11 session entry for display managers.
+    install -Dm644 "${srcdir}/chromiumos-ash.desktop" \
+        "${pkgdir}/usr/share/xsessions/chromiumos-ash.desktop"
+    install -Dm644 "${srcdir}/chromiumos-ash-wayland.desktop" \
+        "${pkgdir}/usr/share/wayland-sessions/chromiumos-ash.desktop"
+
+    # Install feature defaults.
+    install -Dm644 "${srcdir}/aurade.features.conf" \
+        "${pkgdir}/etc/aurade/features.conf"
+    install -Dm644 "${srcdir}/google-api.conf.example" \
+        "${pkgdir}/usr/share/doc/${pkgname}/google-api.conf.example"
+
+    # Install optional SessionManager shim components. D-Bus activation can
+    # start this on demand once the AuraDE session lifecycle switches from the
+    # in-process fake client to a host service.
+    install -Dm755 "${srcdir}/aurade-session-manager-shim.py" \
+        "${pkgdir}/usr/lib/chromiumos-ash/aurade-session-manager-shim.py"
+    install -Dm644 "${srcdir}/aurade-session-manager.service" \
+        "${pkgdir}/usr/lib/systemd/system/aurade-session-manager.service"
+    install -Dm644 "${srcdir}/org.chromium.SessionManager.conf" \
+        "${pkgdir}/usr/share/dbus-1/system.d/org.chromium.SessionManager.conf"
+    install -Dm644 "${srcdir}/org.chromium.SessionManager.service" \
+        "${pkgdir}/usr/share/dbus-1/system-services/org.chromium.SessionManager.service"
+
+    # AuraDE compatibility: generic Linux installs need the Wayland group for
+    # exo's Wayland server and writable ChromeOS metrics state directories.
+    install -Dm644 "${srcdir}/chromiumos-ash.sysusers.conf" \
+        "${pkgdir}/usr/lib/sysusers.d/chromiumos-ash.conf"
+    install -Dm644 "${srcdir}/chromiumos-ash.tmpfiles.conf" \
+        "${pkgdir}/usr/lib/tmpfiles.d/chromiumos-ash.conf"
+
+    install -Dm644 "${srcdir}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

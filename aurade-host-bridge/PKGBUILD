@@ -1,0 +1,116 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-host-bridge
+pkgver=0.1.0
+pkgrel=2
+pkgdesc="BlueZ, udisks2, pacman, and MIME integration bridge for AuraDE"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=(
+  'bluez'
+  'dbus'
+  'glib2'
+  'pacman'
+  'pacman-contrib'
+  'polkit'
+  'python'
+  'python-dbus'
+  'python-gobject'
+  'systemd'
+  'udisks2'
+)
+optdepends=('xdg-utils: fallback MIME launcher when gio is unavailable')
+source=(
+  'aurade_host_bridge_core.py'
+  'aurade_host_bridge.py'
+  'aurade_desktop_bridge.py'
+  'aurade_hostctl.py'
+  'aurade-host-bridge.service'
+  'org.aurade.HostBridge.service'
+  'org.aurade.DesktopBridge.service'
+  'org.aurade.HostBridge.conf'
+  'org.aurade.host-bridge.policy'
+  'README.md'
+  'LICENSE'
+  'test_core.py'
+)
+sha256sums=('de381099a90c117b3cca638f08ddd4ae2928aa1358c9e23320830a212caa9f40'
+            '560f43f999f9ae38cd6c673083934b731e1dd412f403fcd8cfd1f10ce7d9d1c3'
+            '669caf29a108aa53cf4876ce6696c22ae820600522d5b19a038633df9feac1c4'
+            '61b83ef7e1f1e6518d203cebd18c2b748c3dba8939679a398e3c0f0d69146b3a'
+            'dfaec2f6befc25702227fa3a685c4ded57c738db60051c90b32a4800e4a070b0'
+            '79034ab9e452ae0cecd7a34e6eaa2dbbb8f71b7e36aad7adb491faef9f5ab0c2'
+            '80aaa97e064346953c364bc67af4d522eb85439e34728c9c855df24e58e543c8'
+            '1af3968226e00bf5e77160fc2451c568f9be0da89d739d661957c204a297da09'
+            'e1c632926d1f77ec2626107c0d45a5bf9706c25a9ae6232f7bd3ade92b229f89'
+            'b8c8d4ce62bd4e66e5ed4d7791f4a2430fcc8fce2090e2ba496c28df95beb0ac'
+            '762a71fc35ca50b2c16f8f2dfc9f793d171e885f2a05c30d95507cdecb1d408c'
+            '21528258fd55a7200aaf4ed4aad0b26eb5b667e8dad8159a9042db5c7c802381')
+
+check() {
+  local module_dir="${srcdir}"
+  PYTHONPATH="${module_dir}" python -m py_compile \
+    aurade_host_bridge_core.py aurade_host_bridge.py \
+    aurade_desktop_bridge.py aurade_hostctl.py
+  PYTHONPATH="${module_dir}" python -c \
+    'import aurade_host_bridge; assert aurade_host_bridge.OBJECT_MANAGER_INTERFACE == "org.freedesktop.DBus.ObjectManager"'
+  PYTHONPATH="${module_dir}" python test_core.py
+  PYTHONPATH="${module_dir}" python aurade_hostctl.py \
+    --dry-run bluetooth pair AA:BB:CC:DD:EE:FF >/dev/null
+  PYTHONPATH="${module_dir}" python aurade_hostctl.py \
+    --dry-run pacman uninstall test-package >/dev/null
+  env -u XDG_RUNTIME_DIR dbus-run-session -- bash -c '
+    ./aurade_desktop_bridge.py >/tmp/aurade-desktop-bridge-check.log 2>&1 &
+    service_pid=$!
+    trap "kill ${service_pid} 2>/dev/null || true" EXIT
+    sleep 0.5
+    gdbus call --session --dest org.aurade.DesktopBridge \
+      --object-path /org/aurade/DesktopBridge \
+      --method org.aurade.DesktopBridge1.MimeOpen relative.txt
+  ' | grep -q 'invalid_argument'
+  env -u XDG_RUNTIME_DIR dbus-run-session -- bash -c '
+    python -c "import dbus, aurade_host_bridge as bridge; bridge.dbus.SystemBus = dbus.SessionBus; raise SystemExit(bridge.main())" >/tmp/aurade-host-bridge-check.log 2>&1 &
+    service_pid=$!
+    trap "kill ${service_pid} 2>/dev/null || true" EXIT
+    sleep 0.5
+    gdbus call --session --dest org.aurade.HostBridge \
+      --object-path /org/aurade/HostBridge \
+      --method org.aurade.HostBridge1.GetCapabilities
+  ' | grep -q '"operation":"capabilities"'
+}
+
+package() {
+  local bridge_dir="${pkgdir}/usr/lib/aurade-host-bridge"
+  install -Dm644 aurade_host_bridge_core.py \
+    "${bridge_dir}/aurade_host_bridge_core.py"
+  install -Dm755 aurade_host_bridge.py \
+    "${bridge_dir}/aurade_host_bridge.py"
+  install -Dm755 aurade_desktop_bridge.py \
+    "${bridge_dir}/aurade_desktop_bridge.py"
+  install -Dm755 aurade_hostctl.py \
+    "${bridge_dir}/aurade_hostctl.py"
+
+  install -d "${pkgdir}/usr/bin"
+  ln -s ../lib/aurade-host-bridge/aurade_host_bridge.py \
+    "${pkgdir}/usr/bin/aurade-host-bridge"
+  ln -s ../lib/aurade-host-bridge/aurade_desktop_bridge.py \
+    "${pkgdir}/usr/bin/aurade-desktop-bridge"
+  ln -s ../lib/aurade-host-bridge/aurade_hostctl.py \
+    "${pkgdir}/usr/bin/aurade-hostctl"
+
+  install -Dm644 aurade-host-bridge.service \
+    "${pkgdir}/usr/lib/systemd/system/aurade-host-bridge.service"
+  install -Dm644 org.aurade.HostBridge.service \
+    "${pkgdir}/usr/share/dbus-1/system-services/org.aurade.HostBridge.service"
+  install -Dm644 org.aurade.DesktopBridge.service \
+    "${pkgdir}/usr/share/dbus-1/services/org.aurade.DesktopBridge.service"
+  install -Dm644 org.aurade.HostBridge.conf \
+    "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.HostBridge.conf"
+  install -Dm644 org.aurade.host-bridge.policy \
+    "${pkgdir}/usr/share/polkit-1/actions/org.aurade.host-bridge.policy"
+  install -Dm644 README.md \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

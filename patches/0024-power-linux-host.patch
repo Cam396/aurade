@@ -1,0 +1,894 @@
+diff --git a/ash/public/cpp/ash_view_ids.h b/ash/public/cpp/ash_view_ids.h
+index 3e4c704124..83b4865d37 100644
+--- a/ash/public/cpp/ash_view_ids.h
++++ b/ash/public/cpp/ash_view_ids.h
+@@ -93,6 +93,7 @@ enum ViewID {
+   VIEW_ID_QS_POWER_EMAIL_MENU_BUTTON,
+   VIEW_ID_QS_POWER_LOCK_MENU_BUTTON,
+   VIEW_ID_QS_POWER_OFF_MENU_BUTTON,
++  VIEW_ID_QS_POWER_RESTART_AURADE_MENU_BUTTON,
+   VIEW_ID_QS_POWER_RESTART_MENU_BUTTON,
+   VIEW_ID_QS_POWER_SIGNOUT_MENU_BUTTON,
+   VIEW_ID_QS_SETTINGS_BUTTON,
+diff --git a/ash/shutdown_controller_impl.cc b/ash/shutdown_controller_impl.cc
+index 6ad26996dd..e4ba6ad800 100644
+--- a/ash/shutdown_controller_impl.cc
++++ b/ash/shutdown_controller_impl.cc
+@@ -9,7 +9,12 @@
+ #include "ash/session/session_controller_impl.h"
+ #include "ash/shell.h"
+ #include "ash/shutdown_reason.h"
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/logging.h"
+ #include "base/metrics/user_metrics.h"
++#include "base/process/launch.h"
++#include "base/process/process.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/system/sys_info.h"
+ #include "chromeos/dbus/power/power_manager_client.h"
+@@ -17,6 +22,36 @@
+ 
+ namespace ash {
+ 
++namespace {
++
++bool LaunchHostPowerCommandWith(const base::FilePath& executable,
++                                const char* command) {
++  base::CommandLine command_line(executable);
++  command_line.AppendArg(command);
++  base::Process process =
++      base::LaunchProcess(command_line, base::LaunchOptions());
++  if (!process.IsValid()) {
++    LOG(ERROR) << "Failed to launch " << executable.value() << " " << command;
++    return false;
++  }
++  return true;
++}
++
++bool LaunchHostPowerCommand(const char* command) {
++  // AuraDE compatibility: generic Linux power actions are routed through the
++  // package-owned helper so policy/session behavior can evolve outside Ash.
++  if (LaunchHostPowerCommandWith(
++          base::FilePath(FILE_PATH_LITERAL("/usr/bin/aurade-system-helper")),
++          command)) {
++    return true;
++  }
++
++  return LaunchHostPowerCommandWith(
++      base::FilePath(FILE_PATH_LITERAL("/usr/bin/systemctl")), command);
++}
++
++}  // namespace
++
+ ShutdownControllerImpl::ShutdownControllerImpl() = default;
+ 
+ ShutdownControllerImpl::~ShutdownControllerImpl() = default;
+@@ -38,9 +73,8 @@ void ShutdownControllerImpl::SetRebootOnShutdown(bool reboot_on_shutdown) {
+ }
+ 
+ void ShutdownControllerImpl::ShutDownOrReboot(ShutdownReason reason) {
+-  // For developers on Linux desktop just exit the app.
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
+-    Shell::Get()->session_controller()->RequestSignOut();
++    LaunchHostPowerCommand(reboot_on_shutdown_ ? "reboot" : "poweroff");
+     return;
+   }
+ 
+diff --git a/ash/system/unified/power_button.cc b/ash/system/unified/power_button.cc
+index 5a6c9e40f0..04ec2f0330 100644
+--- a/ash/system/unified/power_button.cc
++++ b/ash/system/unified/power_button.cc
+@@ -216,6 +216,11 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+         Shell::Get()->lock_state_controller()->RequestRestart(
+             power_manager::REQUEST_RESTART_FOR_USER, "Reboot by user");
+         break;
++      case VIEW_ID_QS_POWER_RESTART_AURADE_MENU_BUTTON:
++        quick_settings_metrics_util::RecordQsButtonActivated(
++            QsButtonCatalogName::kPowerRestartMenuButton);
++        Shell::Get()->session_controller()->AttemptRestartChrome();
++        break;
+       case VIEW_ID_QS_POWER_LOCK_MENU_BUTTON:
+         quick_settings_metrics_util::RecordQsButtonActivated(
+             QsButtonCatalogName::kPowerLockMenuButton);
+@@ -300,6 +305,12 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+                                        cros_tokens::kCrosSysOnSurface,
+                                        kTrayTopShortcutButtonIconSize));
+     if (!is_on_login_screen) {
++      context_menu_model_->AddItemWithIcon(
++          VIEW_ID_QS_POWER_RESTART_AURADE_MENU_BUTTON,
++          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_RESTART_AURADE),
++          ui::ImageModel::FromVectorIcon(kSystemPowerButtonMenuRestartIcon,
++                                         cros_tokens::kCrosSysOnSurface,
++                                         kTrayTopShortcutButtonIconSize));
+       context_menu_model_->AddItemWithIcon(
+           VIEW_ID_QS_POWER_SIGNOUT_MENU_BUTTON,
+           l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SIGN_OUT),
+diff --git a/ash/wm/lock_state_controller.cc b/ash/wm/lock_state_controller.cc
+index 91d3a7254f..5a435537a0 100644
+--- a/ash/wm/lock_state_controller.cc
++++ b/ash/wm/lock_state_controller.cc
+@@ -37,6 +37,7 @@
+ #include "ash/wm/workspace/workspace_layout_manager.h"
+ #include "ash/wm/workspace_controller.h"
+ #include "base/containers/span.h"
++#include "base/command_line.h"
+ #include "base/debug/crash_logging.h"
+ #include "base/debug/dump_without_crashing.h"
+ #include "base/files/file_path.h"
+@@ -50,6 +51,8 @@
+ #include "base/metrics/histogram_macros.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/notreached.h"
++#include "base/process/launch.h"
++#include "base/process/process.h"
+ #include "base/strings/string_util.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/bind_post_task.h"
+@@ -112,6 +115,32 @@ constexpr base::TimeDelta kShutdownRequestDelay = base::Milliseconds(50);
+ // duration.
+ constexpr base::TimeDelta kTakeScreenshotFailTimeout = base::Milliseconds(800);
+ 
++bool LaunchHostPowerCommandWith(const base::FilePath& executable,
++                                const char* command) {
++  base::CommandLine command_line(executable);
++  command_line.AppendArg(command);
++  base::Process process =
++      base::LaunchProcess(command_line, base::LaunchOptions());
++  if (!process.IsValid()) {
++    LOG(ERROR) << "Failed to launch " << executable.value() << " " << command;
++    return false;
++  }
++  return true;
++}
++
++bool LaunchHostPowerCommand(const char* command) {
++  // AuraDE compatibility: generic Linux power actions are routed through the
++  // package-owned helper so policy/session behavior can evolve outside Ash.
++  if (LaunchHostPowerCommandWith(
++          base::FilePath(FILE_PATH_LITERAL("/usr/bin/aurade-system-helper")),
++          command)) {
++    return true;
++  }
++
++  return LaunchHostPowerCommandWith(
++      base::FilePath(FILE_PATH_LITERAL("/usr/bin/systemctl")), command);
++}
++
+ // Records the given `duration` to the given `pref_name` so it can be recorded
+ // as an UMA metric on the next startup.
+ void SaveInformedRestoreScreenshotDuration(PrefService* local_state,
+@@ -1086,6 +1115,11 @@ void LockStateController::OnInformedRestoreImageSaved(
+ 
+ void LockStateController::DoRestart(power_manager::RequestRestartReason reason,
+                                     const std::string& description) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    LaunchHostPowerCommand("reboot");
++    return;
++  }
++
+   chromeos::PowerManagerClient::Get()->RequestRestart(reason, description);
+ }
+ 
+diff --git a/chromeos/dbus/power/fake_power_manager_client.cc b/chromeos/dbus/power/fake_power_manager_client.cc
+index 0b7693dcf5..fc28f28c25 100644
+--- a/chromeos/dbus/power/fake_power_manager_client.cc
++++ b/chromeos/dbus/power/fake_power_manager_client.cc
+@@ -4,18 +4,31 @@
+ 
+ #include "chromeos/dbus/power/fake_power_manager_client.h"
+ 
++#include <algorithm>
++#include <cstdint>
+ #include <set>
+ #include <utility>
+ #include <vector>
+ 
++#include "base/command_line.h"
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/json/json_reader.h"
+ #include "base/location.h"
+ #include "base/logging.h"
+ #include "base/posix/unix_domain_socket.h"
++#include "base/process/launch.h"
++#include "base/process/process.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/task/single_thread_task_runner.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+@@ -33,6 +46,426 @@ constexpr double kUsbMinAcWatts = 24;
+ // The time power manager will wait before resuspending from a dark resume.
+ constexpr base::TimeDelta kDarkSuspendDelayTimeout = base::Seconds(20);
+ 
++constexpr char kAuraDeUseHostPowerStatus[] = "AURADE_USE_HOST_POWER_STATUS";
++constexpr char kBacklightPath[] = "/sys/class/backlight";
++constexpr char kPowerSupplyPath[] = "/sys/class/power_supply";
++constexpr char kAuraDePowerStatePath[] = "/run/aurade/power-state.json";
++constexpr double kBacklightStepPercent = 10.0;
++constexpr double kMinimumVisibleBacklightPercent = 1.0;
++
++struct HostBacklightState {
++  base::FilePath path;
++  int64_t brightness = 0;
++  int64_t max_brightness = 0;
++};
++
++bool IsAuraDeUseHostPowerStatusEnabled() {
++  auto environment = base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar(kAuraDeUseHostPowerStatus);
++  return value.has_value() && value.value() != "0";
++}
++
++bool LaunchHostPowerCommandWith(const base::FilePath& executable,
++                                const char* command) {
++  base::CommandLine command_line(executable);
++  command_line.AppendArg(command);
++  base::Process process =
++      base::LaunchProcess(command_line, base::LaunchOptions());
++  if (!process.IsValid()) {
++    LOG(ERROR) << "Failed to launch " << executable.value() << " " << command;
++    return false;
++  }
++  return true;
++}
++
++bool LaunchHostPowerCommand(const char* command) {
++  // AuraDE compatibility: generic Linux fake-power production mode uses the
++  // package-owned helper instead of treating suspend as a no-op test counter.
++  if (LaunchHostPowerCommandWith(
++          base::FilePath(FILE_PATH_LITERAL("/usr/bin/aurade-system-helper")),
++          command)) {
++    return true;
++  }
++
++  return LaunchHostPowerCommandWith(
++      base::FilePath(FILE_PATH_LITERAL("/usr/bin/systemctl")), command);
++}
++
++std::optional<std::string> ReadTrimmedString(const base::FilePath& path) {
++  std::string value;
++  if (!base::ReadFileToString(path, &value)) {
++    return std::nullopt;
++  }
++  base::TrimWhitespaceASCII(value, base::TRIM_ALL, &value);
++  return value;
++}
++
++std::optional<std::string> ReadHostLifecycleState() {
++  return ReadTrimmedString(base::FilePath(kAuraDePowerStatePath));
++}
++
++std::optional<double> ReadDouble(const base::FilePath& path) {
++  const std::optional<std::string> value = ReadTrimmedString(path);
++  if (!value.has_value()) {
++    return std::nullopt;
++  }
++  double result = 0.0;
++  if (!base::StringToDouble(value.value(), &result)) {
++    return std::nullopt;
++  }
++  return result;
++}
++
++std::optional<int64_t> ReadInt64(const base::FilePath& path) {
++  const std::optional<std::string> value = ReadTrimmedString(path);
++  if (!value.has_value()) {
++    return std::nullopt;
++  }
++  int64_t result = 0;
++  if (!base::StringToInt64(value.value(), &result)) {
++    return std::nullopt;
++  }
++  return result;
++}
++
++std::optional<HostBacklightState> ReadHostBacklightState() {
++  base::FileEnumerator enumerator(base::FilePath(kBacklightPath),
++                                  /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath path = enumerator.Next(); !path.empty();
++       path = enumerator.Next()) {
++    const std::optional<int64_t> max_brightness =
++        ReadInt64(path.Append("max_brightness"));
++    const std::optional<int64_t> brightness =
++        ReadInt64(path.Append("brightness"));
++    if (!max_brightness.has_value() || !brightness.has_value() ||
++        max_brightness.value() <= 0 || brightness.value() < 0) {
++      continue;
++    }
++    return HostBacklightState{
++        .path = path,
++        .brightness = brightness.value(),
++        .max_brightness = max_brightness.value(),
++    };
++  }
++  return std::nullopt;
++}
++
++std::optional<double> ReadHostScreenBrightnessPercent() {
++  const std::optional<HostBacklightState> state = ReadHostBacklightState();
++  if (!state.has_value()) {
++    return std::nullopt;
++  }
++  return std::clamp(
++      static_cast<double>(state->brightness) * 100.0 /
++          static_cast<double>(state->max_brightness),
++      0.0, 100.0);
++}
++
++std::optional<double> WriteHostScreenBrightnessPercent(double percent,
++                                                       bool allow_zero) {
++  const std::optional<HostBacklightState> state = ReadHostBacklightState();
++  if (!state.has_value()) {
++    return std::nullopt;
++  }
++
++  double clamped_percent = std::clamp(percent, 0.0, 100.0);
++  if (!allow_zero && clamped_percent <= 0.0) {
++    clamped_percent = kMinimumVisibleBacklightPercent;
++  }
++
++  int64_t target = static_cast<int64_t>(
++      (clamped_percent * static_cast<double>(state->max_brightness) / 100.0) +
++      0.5);
++  target = std::clamp<int64_t>(target, allow_zero ? 0 : 1,
++                               state->max_brightness);
++
++  if (!base::WriteFile(state->path.Append("brightness"),
++                       base::NumberToString(target))) {
++    return std::nullopt;
++  }
++  return ReadHostScreenBrightnessPercent().value_or(clamped_percent);
++}
++
++std::optional<double> AdjustHostScreenBrightnessPercent(bool increase,
++                                                        bool allow_off) {
++  const std::optional<double> current = ReadHostScreenBrightnessPercent();
++  if (!current.has_value()) {
++    return std::nullopt;
++  }
++  const double target =
++      current.value() + (increase ? kBacklightStepPercent
++                                  : -kBacklightStepPercent);
++  return WriteHostScreenBrightnessPercent(target, allow_off);
++}
++
++bool IsOnlinePowerSupply(const base::FilePath& path) {
++  const std::optional<std::string> online =
++      ReadTrimmedString(path.Append("online"));
++  return online.has_value() && online.value() == "1";
++}
++
++std::optional<double> ReadMicroUnitAsBaseUnit(const base::FilePath& path) {
++  const std::optional<double> value = ReadDouble(path);
++  if (!value.has_value()) {
++    return std::nullopt;
++  }
++  return value.value() / 1000000.0;
++}
++
++std::optional<double> ReadBatteryVoltage(const base::FilePath& path) {
++  return ReadMicroUnitAsBaseUnit(path.Append("voltage_now"));
++}
++
++std::optional<double> ReadBatteryCharge(const base::FilePath& path,
++                                        const char* charge_file,
++                                        const char* energy_file,
++                                        std::optional<double> voltage) {
++  const std::optional<double> charge =
++      ReadMicroUnitAsBaseUnit(path.Append(charge_file));
++  if (charge.has_value()) {
++    return charge;
++  }
++
++  const std::optional<double> energy_wh =
++      ReadMicroUnitAsBaseUnit(path.Append(energy_file));
++  if (!energy_wh.has_value() || !voltage.has_value() || voltage.value() <= 0) {
++    return std::nullopt;
++  }
++  return energy_wh.value() / voltage.value();
++}
++
++std::optional<int64_t> EstimateBatterySeconds(
++    double numerator,
++    std::optional<double> denominator) {
++  if (!denominator.has_value() || denominator.value() <= 0 || numerator <= 0) {
++    return std::nullopt;
++  }
++  return static_cast<int64_t>((numerator / denominator.value()) * 3600.0);
++}
++
++power_manager::PowerSupplyProperties::PowerSource::Type
++PowerSourceTypeFromSysfs(const std::string& type) {
++  if (type == "Mains") {
++    return power_manager::PowerSupplyProperties::PowerSource::MAINS;
++  }
++  if (type == "USB_C" || type == "USB_PD" || type == "USB_PD_DRP" ||
++      type == "BrickID") {
++    return power_manager::PowerSupplyProperties::PowerSource::USB_C;
++  }
++  if (type == "USB" || type == "USB_ACA" || type == "USB_CDP" ||
++      type == "USB_DCP") {
++    return power_manager::PowerSupplyProperties::PowerSource::USB_BC_1_2;
++  }
++  return power_manager::PowerSupplyProperties::PowerSource::OTHER;
++}
++
++bool IsExternalPowerSupplyType(const std::string& type) {
++  return type == "Mains" || type == "USB" || type == "USB_ACA" ||
++         type == "USB_CDP" || type == "USB_DCP" || type == "USB_C" ||
++         type == "USB_PD" || type == "USB_PD_DRP" || type == "BrickID";
++}
++
++bool IsLowPowerUsbType(const std::string& type) {
++  return type == "USB" || type == "USB_ACA" || type == "USB_CDP" ||
++         type == "USB_DCP";
++}
++
++void PopulatePowerSource(const base::FilePath& path,
++                         const std::string& type,
++                         power_manager::PowerSupplyProperties* props) {
++  auto* source = props->add_available_external_power_source();
++  source->set_id(path.BaseName().MaybeAsASCII());
++  source->set_type(PowerSourceTypeFromSysfs(type));
++  source->set_port(power_manager::PowerSupplyProperties::PowerSource::UNKNOWN);
++  source->set_active_by_default(IsOnlinePowerSupply(path));
++
++  if (const std::optional<std::string> manufacturer =
++          ReadTrimmedString(path.Append("manufacturer"));
++      manufacturer.has_value()) {
++    source->set_manufacturer_id(manufacturer.value());
++  }
++  if (const std::optional<std::string> model =
++          ReadTrimmedString(path.Append("model_name"));
++      model.has_value()) {
++    source->set_model_id(model.value());
++  }
++
++  const std::optional<double> current =
++      ReadMicroUnitAsBaseUnit(path.Append("current_max"));
++  const std::optional<double> voltage =
++      ReadMicroUnitAsBaseUnit(path.Append("voltage_max_design"));
++  if (current.has_value() && voltage.has_value()) {
++    source->set_max_power(current.value() * voltage.value());
++  }
++
++  if (IsOnlinePowerSupply(path)) {
++    props->set_external_power_source_id(source->id());
++  }
++}
++
++power_manager::PowerSupplyProperties CreateNoBatteryPowerProperties() {
++  power_manager::PowerSupplyProperties props;
++  props.set_battery_percent(0);
++  props.set_is_calculating_battery_time(false);
++  props.set_battery_state(
++      power_manager::PowerSupplyProperties_BatteryState_NOT_PRESENT);
++  props.set_external_power(
++      power_manager::PowerSupplyProperties_ExternalPower_DISCONNECTED);
++  props.set_battery_time_to_full_sec(0);
++  props.set_battery_time_to_empty_sec(0);
++  return props;
++}
++
++std::optional<power_manager::PowerSupplyProperties>
++ReadHostPowerSupplyProperties() {
++  power_manager::PowerSupplyProperties props = CreateNoBatteryPowerProperties();
++  base::FileEnumerator supplies(base::FilePath(kPowerSupplyPath),
++                                /*recursive=*/false,
++                                base::FileEnumerator::DIRECTORIES);
++  std::optional<base::FilePath> battery_path;
++  bool line_power_online = false;
++  bool usb_power_online = false;
++
++  for (base::FilePath path = supplies.Next(); !path.empty();
++       path = supplies.Next()) {
++    const std::optional<std::string> type =
++        ReadTrimmedString(path.Append("type"));
++    if (!type.has_value()) {
++      continue;
++    }
++
++    if (type.value() == "Battery") {
++      battery_path = path;
++      continue;
++    }
++
++    if (!IsExternalPowerSupplyType(type.value())) {
++      continue;
++    }
++
++    PopulatePowerSource(path, type.value(), &props);
++    if (IsOnlinePowerSupply(path)) {
++      if (IsLowPowerUsbType(type.value())) {
++        usb_power_online = true;
++      } else {
++        line_power_online = true;
++      }
++    }
++  }
++
++  if (line_power_online) {
++    props.set_external_power(
++        power_manager::PowerSupplyProperties_ExternalPower_AC);
++  } else if (usb_power_online) {
++    props.set_external_power(
++        power_manager::PowerSupplyProperties_ExternalPower_USB);
++  }
++
++  if (!battery_path.has_value()) {
++    return props;
++  }
++
++  const base::FilePath path = battery_path.value();
++  const std::optional<double> capacity = ReadDouble(path.Append("capacity"));
++  const std::optional<std::string> status =
++      ReadTrimmedString(path.Append("status"));
++  const std::optional<double> voltage = ReadBatteryVoltage(path);
++  const std::optional<double> current =
++      ReadMicroUnitAsBaseUnit(path.Append("current_now"));
++  const std::optional<double> power =
++      ReadMicroUnitAsBaseUnit(path.Append("power_now"));
++  const std::optional<double> charge_now =
++      ReadBatteryCharge(path, "charge_now", "energy_now", voltage);
++  const std::optional<double> charge_full =
++      ReadBatteryCharge(path, "charge_full", "energy_full", voltage);
++  const std::optional<double> charge_full_design =
++      ReadBatteryCharge(path, "charge_full_design", "energy_full_design",
++                        voltage);
++
++  props.set_battery_percent(capacity.value_or(0.0));
++  props.set_battery_time_to_empty_sec(0);
++  props.set_battery_time_to_full_sec(0);
++  props.set_is_calculating_battery_time(false);
++  if (voltage.has_value()) {
++    props.set_battery_voltage(voltage.value());
++  }
++  if (current.has_value()) {
++    props.set_battery_current(current.value());
++  }
++  if (charge_now.has_value()) {
++    props.set_battery_charge(charge_now.value());
++  }
++  if (charge_full.has_value()) {
++    props.set_battery_charge_full(charge_full.value());
++  }
++  if (charge_full_design.has_value()) {
++    props.set_battery_charge_full_design(charge_full_design.value());
++  }
++  if (const std::optional<std::string> vendor =
++          ReadTrimmedString(path.Append("manufacturer"));
++      vendor.has_value()) {
++    props.set_battery_vendor(vendor.value());
++  }
++  if (const std::optional<std::string> model =
++          ReadTrimmedString(path.Append("model_name"));
++      model.has_value()) {
++    props.set_battery_model_name(model.value());
++  }
++  if (const std::optional<std::string> serial =
++          ReadTrimmedString(path.Append("serial_number"));
++      serial.has_value()) {
++    props.set_battery_serial_number(serial.value());
++  }
++  if (const std::optional<std::string> technology =
++          ReadTrimmedString(path.Append("technology"));
++      technology.has_value()) {
++    props.set_battery_technology(technology.value());
++  }
++  if (status.has_value()) {
++    props.set_battery_status(status.value());
++  }
++  if (const std::optional<double> cycle_count =
++          ReadDouble(path.Append("cycle_count"));
++      cycle_count.has_value()) {
++    props.set_battery_cycle_count(static_cast<int64_t>(cycle_count.value()));
++  }
++
++  if (status == "Charging") {
++    props.set_battery_state(
++        power_manager::PowerSupplyProperties_BatteryState_CHARGING);
++    if (charge_full.has_value() && charge_now.has_value()) {
++      if (const std::optional<int64_t> seconds = EstimateBatterySeconds(
++              charge_full.value() - charge_now.value(), current);
++          seconds.has_value()) {
++        props.set_battery_time_to_full_sec(seconds.value());
++      }
++    }
++    if (power.has_value()) {
++      props.set_battery_discharge_rate(-power.value());
++    }
++  } else if (status == "Full") {
++    props.set_battery_state(
++        power_manager::PowerSupplyProperties_BatteryState_FULL);
++  } else {
++    props.set_battery_state(
++        power_manager::PowerSupplyProperties_BatteryState_DISCHARGING);
++    if (charge_now.has_value()) {
++      if (const std::optional<int64_t> seconds =
++              EstimateBatterySeconds(charge_now.value(), current);
++          seconds.has_value()) {
++        props.set_battery_time_to_empty_sec(seconds.value());
++      }
++    }
++    if (power.has_value()) {
++      props.set_battery_discharge_rate(power.value());
++    }
++  }
++
++  return props;
++}
++
+ // Callback fired when timer started through |StartArcTimer| expires. In
+ // non-test environments this does a potentially blocking call on the UI
+ // thread. However, the clients that exercise this code path don't run in
+@@ -112,6 +545,24 @@ FakePowerManagerClient::FakePowerManagerClient()
+   CHECK(!g_instance);
+   g_instance = this;
+ 
++  use_host_power_status_ = IsAuraDeUseHostPowerStatusEnabled();
++  if (use_host_power_status_) {
++    props_ = ReadHostPowerSupplyProperties();
++    host_power_poll_timer_ = std::make_unique<base::RepeatingTimer>();
++    host_power_poll_timer_->Start(
++        FROM_HERE, base::Seconds(5),
++        base::BindRepeating(&FakePowerManagerClient::RequestStatusUpdate,
++                            base::Unretained(this)));
++    host_lifecycle_poll_timer_ = std::make_unique<base::RepeatingTimer>();
++    host_lifecycle_poll_timer_->Start(
++        FROM_HERE, base::Milliseconds(250),
++        base::BindRepeating(
++            &FakePowerManagerClient::RequestHostLifecycleUpdate,
++            base::Unretained(this)));
++    RequestHostLifecycleUpdate();
++    return;
++  }
++
+   props_->set_battery_percent(50);
+   props_->set_is_calculating_battery_time(false);
+   props_->set_battery_state(
+@@ -149,6 +600,19 @@ void FakePowerManagerClient::SetRenderProcessManagerDelegate(
+ }
+ 
+ void FakePowerManagerClient::DecreaseScreenBrightness(bool allow_off) {
++  if (use_host_power_status_) {
++    // AuraDE compatibility: on Linux laptops, brightness keys should control
++    // the host backlight instead of only changing fake test state.
++    const auto cause =
++        power_manager::BacklightBrightnessChange_Cause_USER_REQUEST;
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&AdjustHostScreenBrightnessPercent,
++                       /*increase=*/false, allow_off),
++        base::BindOnce(&FakePowerManagerClient::OnHostScreenBrightnessChanged,
++                       weak_ptr_factory_.GetWeakPtr(), cause));
++  }
++
+   // Simulate the real behavior of the platform by disabling the ambient light
+   // sensor when the brightness is manually changed.
+   power_manager::SetAmbientLightSensorEnabledRequest set_als_request;
+@@ -157,6 +621,19 @@ void FakePowerManagerClient::DecreaseScreenBrightness(bool allow_off) {
+ }
+ 
+ void FakePowerManagerClient::IncreaseScreenBrightness() {
++  if (use_host_power_status_) {
++    // AuraDE compatibility: on Linux laptops, brightness keys should control
++    // the host backlight instead of only changing fake test state.
++    const auto cause =
++        power_manager::BacklightBrightnessChange_Cause_USER_REQUEST;
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&AdjustHostScreenBrightnessPercent,
++                       /*increase=*/true, /*allow_off=*/false),
++        base::BindOnce(&FakePowerManagerClient::OnHostScreenBrightnessChanged,
++                       weak_ptr_factory_.GetWeakPtr(), cause));
++  }
++
+   // Simulate the real behavior of the platform by disabling the ambient light
+   // sensor when the brightness is manually changed.
+   power_manager::SetAmbientLightSensorEnabledRequest set_als_request;
+@@ -166,6 +643,23 @@ void FakePowerManagerClient::IncreaseScreenBrightness() {
+ 
+ void FakePowerManagerClient::SetScreenBrightness(
+     const power_manager::SetBacklightBrightnessRequest& request) {
++  if (use_host_power_status_) {
++    requested_screen_brightness_percent_ = request.percent();
++    requested_screen_brightness_cause_ = request.cause();
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&WriteHostScreenBrightnessPercent, request.percent(),
++                       /*allow_zero=*/true),
++        base::BindOnce(&FakePowerManagerClient::OnHostScreenBrightnessChanged,
++                       weak_ptr_factory_.GetWeakPtr(),
++                       RequestCauseToChangeCause(request.cause())));
++
++    power_manager::SetAmbientLightSensorEnabledRequest set_als_request;
++    set_als_request.set_sensor_enabled(false);
++    SetAmbientLightSensorEnabled(set_als_request);
++    return;
++  }
++
+   screen_brightness_percent_ = request.percent();
+   requested_screen_brightness_percent_ = request.percent();
+   requested_screen_brightness_cause_ = request.cause();
+@@ -187,6 +681,13 @@ void FakePowerManagerClient::SetScreenBrightness(
+ 
+ void FakePowerManagerClient::GetScreenBrightnessPercent(
+     DBusMethodCallback<double> callback) {
++  if (use_host_power_status_) {
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&ReadHostScreenBrightnessPercent), std::move(callback));
++    return;
++  }
++
+   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+       base::BindOnce(std::move(callback), screen_brightness_percent_));
+@@ -314,6 +815,15 @@ FakePowerManagerClient::GetLastStatus() {
+ }
+ 
+ void FakePowerManagerClient::RequestStatusUpdate() {
++  if (use_host_power_status_) {
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&ReadHostPowerSupplyProperties),
++        base::BindOnce(&FakePowerManagerClient::UpdatePowerProperties,
++                       weak_ptr_factory_.GetWeakPtr()));
++    return;
++  }
++
+   // RequestStatusUpdate() calls and notifies the observers
+   // asynchronously on a real device. On the fake implementation, we call
+   // observers in a posted task to emulate the same behavior.
+@@ -331,6 +841,17 @@ void FakePowerManagerClient::RequestSuspend(
+     int32_t duration_secs,
+     power_manager::RequestSuspendFlavor flavor) {
+   ++num_request_suspend_calls_;
++  if (use_host_power_status_) {
++    if (host_preparing_for_sleep_ != true) {
++      host_preparing_for_sleep_ = true;
++      host_suspend_started_at_ = base::TimeTicks::Now();
++      SendSuspendImminent(power_manager::SuspendImminent_Reason_OTHER);
++    }
++    if (!LaunchHostPowerCommand("suspend")) {
++      host_preparing_for_sleep_ = false;
++      SendSuspendDone(base::TimeDelta());
++    }
++  }
+ }
+ 
+ void FakePowerManagerClient::RequestRestart(
+@@ -349,6 +870,79 @@ void FakePowerManagerClient::RequestShutdown(
+   ++num_request_shutdown_calls_;
+ }
+ 
++void FakePowerManagerClient::OnHostScreenBrightnessChanged(
++    power_manager::BacklightBrightnessChange_Cause cause,
++    std::optional<double> percent) {
++  if (!percent.has_value()) {
++    return;
++  }
++  screen_brightness_percent_ = percent;
++
++  power_manager::BacklightBrightnessChange change;
++  change.set_percent(percent.value());
++  change.set_cause(cause);
++  SendScreenBrightnessChanged(change);
++}
++
++void FakePowerManagerClient::RequestHostLifecycleUpdate() {
++  if (host_lifecycle_request_in_flight_) {
++    return;
++  }
++  host_lifecycle_request_in_flight_ = true;
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadHostLifecycleState),
++      base::BindOnce(&FakePowerManagerClient::OnHostLifecycleState,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void FakePowerManagerClient::OnHostLifecycleState(
++    std::optional<std::string> state_json) {
++  host_lifecycle_request_in_flight_ = false;
++  if (!state_json.has_value()) {
++    return;
++  }
++  std::optional<base::Value> value =
++      base::JSONReader::Read(*state_json, base::JSON_PARSE_RFC);
++  if (!value || !value->is_dict()) {
++    return;
++  }
++  const base::DictValue& state = value->GetDict();
++  const std::optional<bool> lid_closed = state.FindBool("lid_closed");
++  if (lid_closed.has_value() && host_lid_closed_ != lid_closed) {
++    host_lid_closed_ = lid_closed;
++    SetLidState(*lid_closed ? LidState::CLOSED : LidState::OPEN,
++                base::TimeTicks::Now());
++  }
++
++  const std::optional<bool> preparing =
++      state.FindBool("preparing_for_sleep");
++  if (!preparing.has_value() || host_preparing_for_sleep_ == preparing) {
++    return;
++  }
++
++  const bool was_preparing = host_preparing_for_sleep_.value_or(false);
++  host_preparing_for_sleep_ = preparing;
++  if (*preparing) {
++    host_suspend_started_at_ = base::TimeTicks::Now();
++    SendSuspendImminent(power_manager::SuspendImminent_Reason_OTHER);
++    return;
++  }
++  if (was_preparing) {
++    const base::TimeDelta sleep_duration =
++        host_suspend_started_at_.is_null()
++            ? base::TimeDelta()
++            : base::TimeTicks::Now() - host_suspend_started_at_;
++    host_suspend_started_at_ = base::TimeTicks();
++    SendSuspendDone(sleep_duration);
++    RequestStatusUpdate();
++    GetScreenBrightnessPercent(base::BindOnce(
++        &FakePowerManagerClient::OnHostScreenBrightnessChanged,
++        weak_ptr_factory_.GetWeakPtr(),
++        power_manager::BacklightBrightnessChange_Cause_OTHER));
++  }
++}
++
+ void FakePowerManagerClient::NotifyUserActivity(
+     power_manager::UserActivityType type) {
+   if (user_activity_callback_)
+diff --git a/chromeos/dbus/power/fake_power_manager_client.h b/chromeos/dbus/power/fake_power_manager_client.h
+index 69eb73ec26..8193b8bc20 100644
+--- a/chromeos/dbus/power/fake_power_manager_client.h
++++ b/chromeos/dbus/power/fake_power_manager_client.h
+@@ -29,6 +29,7 @@
+ 
+ namespace base {
+ class OneShotTimer;
++class RepeatingTimer;
+ }
+ 
+ namespace chromeos {
+@@ -293,6 +294,12 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
+   // Notifies |observers_| that |props_| has been updated.
+   void NotifyObservers();
+ 
++  void OnHostScreenBrightnessChanged(
++      power_manager::BacklightBrightnessChange_Cause cause,
++      std::optional<double> percent);
++  void RequestHostLifecycleUpdate();
++  void OnHostLifecycleState(std::optional<std::string> state_json);
++
+   // Deletes all timers, if any, associated with |tag|.
+   void DeleteArcTimersInternal(const std::string& tag);
+ 
+@@ -311,6 +318,16 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
+   // Power status received from the power manager.
+   std::optional<power_manager::PowerSupplyProperties> props_;
+ 
++  // AuraDE compatibility: on generic Linux, the fake power client is the
++  // production bridge from Ash's power UI to host `/sys/class/power_supply`.
++  bool use_host_power_status_ = false;
++  std::unique_ptr<base::RepeatingTimer> host_power_poll_timer_;
++  std::unique_ptr<base::RepeatingTimer> host_lifecycle_poll_timer_;
++  std::optional<bool> host_preparing_for_sleep_;
++  std::optional<bool> host_lid_closed_;
++  bool host_lifecycle_request_in_flight_ = false;
++  base::TimeTicks host_suspend_started_at_;
++
+   // Number of times that various methods have been called.
+   int num_request_restart_calls_ = 0;
+   int num_request_shutdown_calls_ = 0;

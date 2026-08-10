@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">AuraDE mark</title>
+  <desc id="desc">A stylized A inside an aurora ring.</desc>
+  <defs>
+    <linearGradient id="aurora" x1="44" y1="468" x2="468" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#35d5ff"/>
+      <stop offset=".52" stop-color="#7d6bff"/>
+      <stop offset="1" stop-color="#d96cff"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="160" y1="382" x2="352" y2="130" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e7fbff"/>
+      <stop offset="1" stop-color="#fff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#10172b"/>
+  <circle cx="256" cy="256" r="188" fill="none" stroke="#35d5ff" stroke-opacity=".12" stroke-width="34"/>
+  <path d="M256 68c104 0 188 84 188 188 0 33-9 64-24 91" fill="none" stroke="url(#aurora)" stroke-linecap="round" stroke-width="28" filter="url(#glow)"/>
+  <path d="M232 68c-93 12-164 91-164 188 0 104 84 188 188 188 38 0 73-11 103-30" fill="none" stroke="url(#aurora)" stroke-linecap="round" stroke-width="28"/>
+  <path d="M151 371 239 145c6-16 28-16 34 0l88 226h-57l-18-54h-88l-18 54zm62-101h57l-28-86z" fill="url(#glyph)"/>
+  <path d="M207 303h98" stroke="#7d6bff" stroke-linecap="round" stroke-width="18"/>
+</svg>

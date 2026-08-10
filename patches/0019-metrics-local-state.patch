@@ -1,0 +1,420 @@
+diff --git a/chrome/browser/ash/external_metrics/external_metrics.cc b/chrome/browser/ash/external_metrics/external_metrics.cc
+index 3661765def..2021e36f3e 100644
+--- a/chrome/browser/ash/external_metrics/external_metrics.cc
++++ b/chrome/browser/ash/external_metrics/external_metrics.cc
+@@ -8,11 +8,13 @@
+ 
+ #include <map>
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <vector>
+ 
+ #include "ash/constants/ash_switches.h"
+ #include "base/command_line.h"
++#include "base/environment.h"
+ #include "base/files/dir_reader_posix.h"
+ #include "base/functional/bind.h"
+ #include "base/metrics/histogram.h"
+@@ -61,6 +63,14 @@ constexpr base::TimeDelta kDefaultCollectionInterval = base::Seconds(30);
+ 
+ ExternalMetrics* g_instance = nullptr;
+ 
++bool ShouldDisableExternalMetricsForAuraDe() {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar("AURADE_DISABLE_EXTERNAL_METRICS");
++  return value.has_value() && value.value() != "0";
++}
++
+ }  // namespace
+ 
+ ExternalMetrics::ExternalMetrics()
+@@ -96,6 +106,10 @@ ExternalMetrics* ExternalMetrics::Get() {
+ }
+ 
+ void ExternalMetrics::Start() {
++  if (ShouldDisableExternalMetricsForAuraDe()) {
++    VLOG(1) << "Skipping ChromeOS external metrics collection for AuraDE.";
++    return;
++  }
+   ScheduleCollector();
+ }
+ 
+diff --git a/chrome/browser/metrics/chromeos_system_profile_provider.cc b/chrome/browser/metrics/chromeos_system_profile_provider.cc
+index e182942bbc..84f2c40865 100644
+--- a/chrome/browser/metrics/chromeos_system_profile_provider.cc
++++ b/chrome/browser/metrics/chromeos_system_profile_provider.cc
+@@ -8,6 +8,7 @@
+ 
+ #include "base/barrier_closure.h"
+ #include "base/check_deref.h"
++#include "base/command_line.h"
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -32,6 +33,9 @@
+ 
+ namespace {
+ 
++constexpr char kAuraDeDisableArcFeaturesSwitch[] =
++    "aurade-disable-arc-features";
++
+ // Called on a background thread to load cellular device variant
+ // using ConfigFS.
+ std::string GetCellularDeviceVariantOnBackgroundThread() {
+@@ -99,10 +103,11 @@ void ChromeOSSystemProfileProvider::ProvideSystemProfileMetrics(
+ 
+   display::Display::TouchSupport has_touch =
+       ui::GetInternalDisplayTouchSupport();
+-  if (has_touch == display::Display::TouchSupport::AVAILABLE)
++  if (has_touch == display::Display::TouchSupport::AVAILABLE) {
+     hardware->set_internal_display_supports_touch(true);
+-  else if (has_touch == display::Display::TouchSupport::UNAVAILABLE)
++  } else if (has_touch == display::Display::TouchSupport::UNAVAILABLE) {
+     hardware->set_internal_display_supports_touch(false);
++  }
+ 
+   if (tpm_rw_firmware_version_.has_value()) {
+     hardware->set_tpm_rw_firmware_version(*tpm_rw_firmware_version_);
+@@ -123,8 +128,9 @@ void ChromeOSSystemProfileProvider::WriteLinkedAndroidPhoneProto(
+       ash::multidevice_setup::MultiDeviceSetupClientFactory::GetForProfile(
+           cached_profile_->GetMetricsProfile());
+ 
+-  if (!client)
++  if (!client) {
+     return;
++  }
+ 
+   const ash::multidevice_setup::MultiDeviceSetupClient::HostStatusWithDevice&
+       host_status_with_device = client->GetHostStatus();
+@@ -209,6 +215,12 @@ void ChromeOSSystemProfileProvider::InitTaskWaitForMachineStatisticsLoaded(
+ 
+ void ChromeOSSystemProfileProvider::InitTaskGetArcFeatures(
+     base::OnceClosure callback) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          kAuraDeDisableArcFeaturesSwitch)) {
++    std::move(callback).Run();
++    return;
++  }
++
+   arc::ArcFeaturesParser::GetArcFeatures(
+       base::BindOnce(&ChromeOSSystemProfileProvider::OnArcFeaturesParsed,
+                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+diff --git a/chrome/browser/metrics/per_user_state_manager_chromeos.cc b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
+index b8b94a9c24..f06ede1167 100644
+--- a/chrome/browser/metrics/per_user_state_manager_chromeos.cc
++++ b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
+@@ -6,8 +6,10 @@
+ 
+ #include "ash/constants/ash_login_pref_names.h"
+ #include "base/callback_list.h"
++#include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/system/sys_info.h"
+ #include "base/uuid.h"
+ #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+@@ -49,6 +51,45 @@ std::string GenerateUserId() {
+   return base::Uuid::GenerateRandomV4().AsLowercaseString();
+ }
+ 
++base::FilePath GetAuraDEMetricsStateDir() {
++  return base::GetHomeDir()
++      .AppendASCII(".local")
++      .AppendASCII("state")
++      .AppendASCII("aurade")
++      .AppendASCII("metrics");
++}
++
++base::FilePath GetDaemonStoreConsentPath(const std::string& hash) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: generic Linux does not have ChromeOS daemon-store
++    // or cryptohome. Keep the per-user UMA consent marker in normal XDG-style
++    // user state instead of writing to /run/daemon-store.
++    return GetAuraDEMetricsStateDir()
++        .AppendASCII("uma-consent")
++        .Append(hash)
++        .Append(kDaemonStoreFileName);
++  }
++
++  return base::FilePath(kDaemonStorePath)
++      .Append(hash)
++      .Append(kDaemonStoreFileName);
++}
++
++base::FilePath GetOutOfCryptohomeConsentPath() {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: preserve the boot-collector consent signal without
++    // relying on ChromeOS' /home/chronos layout.
++    return GetAuraDEMetricsStateDir().AppendASCII("boot-collect-consent");
++  }
++
++  return base::FilePath(kOutOfCryptohomeConsent);
++}
++
++bool EnsureAuraDEParentDirectory(const base::FilePath& path) {
++  return base::SysInfo::IsRunningOnChromeOS() ||
++         base::CreateDirectory(path.DirName());
++}
++
+ // Keep in sync with PerUserDaemonStoreFail enum.
+ // These values are persisted to logs. Entries should not be renumbered and
+ // numeric values should never be reused
+@@ -74,9 +115,12 @@ void RecordIdReset(IdResetType id_type) {
+   base::UmaHistogramEnumeration("UMA.CrosPerUser.IdReset", id_type);
+ }
+ 
+-void WriteDaemonStore(base::FilePath path, bool user_choice) {
++void WriteDaemonStore(base::FilePath path,
++                      base::FilePath out_of_cryptohome_path,
++                      bool user_choice) {
+   const std::string file_contents = user_choice ? "1" : "0";
+-  if (!base::WriteFile(path, file_contents)) {
++  if (!EnsureAuraDEParentDirectory(path) ||
++      !base::WriteFile(path, file_contents)) {
+     LOG(ERROR) << "Failed to persist consent change " << file_contents
+                << " to daemon-store. State on disk will be inaccurate!";
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+@@ -84,8 +128,8 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+                                       ? DaemonStoreFailType::kFailedEnabling
+                                       : DaemonStoreFailType::kFailedDisabling);
+   }
+-  if (!base::WriteFile(base::FilePath(kOutOfCryptohomeConsent),
+-                       file_contents)) {
++  if (!EnsureAuraDEParentDirectory(out_of_cryptohome_path) ||
++      !base::WriteFile(out_of_cryptohome_path, file_contents)) {
+     LOG(ERROR) << "Failed to write out-of-cryptohome consent change: "
+                << file_contents;
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+@@ -96,7 +140,7 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+ }
+ 
+ void RemoveGlobalMetricsConsent() {
+-  if (!base::DeleteFile(base::FilePath(kOutOfCryptohomeConsent))) {
++  if (!base::DeleteFile(GetOutOfCryptohomeConsentPath())) {
+     LOG(ERROR) << "failed to remove out-of-cryptohome consent file";
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+                                   DaemonStoreFailType::kFailedDeletingBoot);
+@@ -296,14 +340,13 @@ void PerUserStateManagerChromeOS::SetReportingState(bool user_choice) {
+   GetCurrentUserPrefs()->SetBoolean(prefs::kMetricsUserConsent, user_choice);
+ 
+   std::string hash = user_manager_->GetActiveUser()->username_hash();
+-  base::FilePath daemon_store_consent = base::FilePath(kDaemonStorePath)
+-                                            .Append(hash)
+-                                            .Append(kDaemonStoreFileName);
++  base::FilePath daemon_store_consent = GetDaemonStoreConsentPath(hash);
+   // Do this asynchronously so we don't block in a potentially non-blocking
+   // context.
+-  task_runner_->PostTask(
+-      FROM_HERE,
+-      base::BindOnce(WriteDaemonStore, daemon_store_consent, user_choice));
++  task_runner_->PostTask(FROM_HERE,
++                         base::BindOnce(WriteDaemonStore, daemon_store_consent,
++                                        GetOutOfCryptohomeConsentPath(),
++                                        user_choice));
+   NotifyObservers(user_choice);
+ }
+ 
+diff --git a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
+index a77e46fcf8..37a9925e42 100644
+--- a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
++++ b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
+@@ -5,7 +5,10 @@
+ #include "chrome/browser/metrics/structured/ash_structured_metrics_recorder.h"
+ 
+ #include <memory>
++#include <optional>
++#include <string>
+ 
++#include "base/environment.h"
+ #include "base/files/file_path.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/metrics/metrics_hashes.h"
+@@ -25,6 +28,14 @@ namespace {
+ // Directory containing serialized event protos to read.
+ constexpr char kExternalMetricsDir[] = "/var/lib/metrics/structured/events";
+ 
++bool ShouldDisableExternalMetricsForAuraDe() {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar("AURADE_DISABLE_EXTERNAL_METRICS");
++  return value.has_value() && value.value() != "0";
++}
++
+ std::unique_ptr<EventStorage<StructuredEventProto>> CreateEventStorage() {
+   StorageManagerConfig config = StorageManagerImpl::GetStorageManagerConfig();
+   return std::make_unique<StorageManagerImpl>(config);
+@@ -146,6 +157,10 @@ void AshStructuredMetricsRecorder::SetExternalMetricsDirForTest(
+ }
+ 
+ void AshStructuredMetricsRecorder::ProfileAdded(const Profile& profile) {
++  if (ShouldDisableExternalMetricsForAuraDe()) {
++    return;
++  }
++
+   external_metrics_ = std::make_unique<ExternalMetrics>(
+       base::FilePath(kExternalMetricsDir),
+       GetExternalMetricsCollectionInterval(),
+diff --git a/chrome/browser/metrics/structured/cros_events_processor.cc b/chrome/browser/metrics/structured/cros_events_processor.cc
+index aee8ad3f8b..a9b1c8d82a 100644
+--- a/chrome/browser/metrics/structured/cros_events_processor.cc
++++ b/chrome/browser/metrics/structured/cros_events_processor.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/metrics/structured/cros_events_processor.h"
+ 
++#include <memory>
++#include <optional>
++#include <string>
++
++#include "base/environment.h"
+ #include "base/files/file_util.h"
+ #include "base/logging.h"
+ 
+@@ -14,13 +19,34 @@ namespace metrics::structured::cros_event {
+ // platform2/metrics/structured/reset_counter_updater.cc
+ const char* kResetCounterPath = "/var/lib/metrics/structured/reset-counter";
+ 
++base::FilePath GetResetCounterPath(const char* reset_counter_path,
++                                   bool* log_missing_path) {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    *log_missing_path = true;
++    return base::FilePath(reset_counter_path);
++  }
++
++  *log_missing_path = false;
++  base::FilePath path =
++      base::FilePath(metrics_dir.value()).Append("reset-counter");
++  base::CreateDirectory(path.DirName());
++  return path;
++}
++
+ CrOSEventsProcessor::CrOSEventsProcessor(const char* reset_counter_path) {
++  bool log_missing_path = true;
++  const base::FilePath path =
++      GetResetCounterPath(reset_counter_path, &log_missing_path);
+   std::string content;
+-  if (base::ReadFileToString(base::FilePath(reset_counter_path), &content)) {
++  if (base::ReadFileToString(path, &content)) {
+     std::stringstream ss(content);
+     ss >> current_reset_counter_;
+-  } else {
+-    LOG(ERROR) << "Failed to read reset_counter file: " << reset_counter_path;
++  } else if (log_missing_path) {
++    LOG(ERROR) << "Failed to read reset_counter file: " << path;
+   }
+ }
+ CrOSEventsProcessor::~CrOSEventsProcessor() = default;
+diff --git a/chrome/browser/metrics/structured/key_data_provider_ash.cc b/chrome/browser/metrics/structured/key_data_provider_ash.cc
+index d7b3c43cc5..a14696cc9d 100644
+--- a/chrome/browser/metrics/structured/key_data_provider_ash.cc
++++ b/chrome/browser/metrics/structured/key_data_provider_ash.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/metrics/structured/key_data_provider_ash.h"
+ 
++#include <optional>
++#include <string>
++
++#include "base/environment.h"
++#include "base/files/file_util.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+ #include "components/metrics/structured/key_data_provider_file.h"
+ #include "components/metrics/structured/structured_metrics_validator.h"
+@@ -24,10 +29,25 @@ constexpr char kProfileKeyPath[] = "structured_metrics/keys";
+ // by chronos.
+ constexpr char kDeviceKeyPath[] = "/var/lib/metrics/structured/chromium/keys";
+ 
++base::FilePath GetDeviceKeyPath() {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    return base::FilePath(kDeviceKeyPath);
++  }
++
++  base::FilePath path(metrics_dir.value());
++  path = path.Append("chromium").Append("keys");
++  base::CreateDirectory(path.DirName());
++  return path;
++}
++
+ }  // namespace
+ 
+ KeyDataProviderAsh::KeyDataProviderAsh()
+-    : KeyDataProviderAsh(base::FilePath(kDeviceKeyPath), kSaveDelay) {}
++    : KeyDataProviderAsh(GetDeviceKeyPath(), kSaveDelay) {}
+ 
+ KeyDataProviderAsh::KeyDataProviderAsh(const base::FilePath& device_key_path,
+                                        base::TimeDelta write_delay)
+diff --git a/chrome/browser/metrics/structured/storage_manager_impl.cc b/chrome/browser/metrics/structured/storage_manager_impl.cc
+index b803332908..666bd5599e 100644
+--- a/chrome/browser/metrics/structured/storage_manager_impl.cc
++++ b/chrome/browser/metrics/structured/storage_manager_impl.cc
+@@ -4,9 +4,14 @@
+ 
+ #include "chrome/browser/metrics/structured/storage_manager_impl.h"
+ 
++#include <memory>
++#include <optional>
++#include <string>
+ #include <vector>
+ 
+ #include "base/byte_size.h"
++#include "base/environment.h"
++#include "base/files/file_util.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/task_traits.h"
+@@ -49,12 +54,40 @@ constexpr char kRootPartitionPath[] = "/var/lib/metrics/structured/";
+ constexpr int64_t kMinBufferSize = 10 * 1024;  // 10 kb
+ constexpr int64_t kMinDiskSize = 50 * 1024;    // 50 kb
+ 
++base::FilePath GetStructuredMetricsPath(const char* first_component,
++                                        const char* second_component,
++                                        const char* third_component,
++                                        const char* fallback_path) {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    return base::FilePath(fallback_path);
++  }
++
++  base::FilePath path(metrics_dir.value());
++  path = path.Append(first_component)
++             .Append(second_component)
++             .Append(third_component);
++  base::CreateDirectory(path.DirName());
++  return path;
++}
++
+ }  // namespace
+ 
+ StorageManagerImpl::StorageManagerImpl(const StorageManagerConfig& config)
+     : StorageManagerImpl(config,
+-                         base::FilePath(kArenaProtoDefaultPath),
+-                         base::FilePath(kFlushedEventsDefaultDir)) {}
++                         GetStructuredMetricsPath(
++                             "chromium",
++                             "storage",
++                             "initial-events",
++                             kArenaProtoDefaultPath),
++                         GetStructuredMetricsPath(
++                             "chromium",
++                             "storage",
++                             "flushed",
++                             kFlushedEventsDefaultDir)) {}
+ 
+ StorageManagerImpl::StorageManagerImpl(const StorageManagerConfig& config,
+                                        const base::FilePath& events_path,

@@ -1,0 +1,21 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-full
+pkgver=152.1660893
+pkgrel=2
+pkgdesc="Complete AuraDE desktop environment meta package with local AI"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=(
+    "aurade>=${pkgver}"
+    "aurade-ai>=${pkgver}"
+    'bluez'
+)
+source=('LICENSE')
+sha256sums=('b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
+
+package() {
+    install -Dm644 "${srcdir}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

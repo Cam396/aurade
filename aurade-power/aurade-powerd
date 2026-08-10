@@ -1,0 +1,303 @@
+#!/usr/bin/python
+"""Event-driven Linux power state bridge for AuraDE."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import time
+from typing import Any
+
+
+INTERFACE_XML = """
+<node>
+  <interface name='org.aurade.Power'>
+    <method name='GetState'>
+      <arg type='s' name='json' direction='out'/>
+    </method>
+    <method name='Refresh'>
+      <arg type='s' name='json' direction='out'/>
+    </method>
+    <signal name='StateChanged'>
+      <arg type='s' name='json'/>
+    </signal>
+    <signal name='PreparingForSleep'>
+      <arg type='b' name='sleeping'/>
+      <arg type='t' name='generation'/>
+    </signal>
+  </interface>
+</node>
+"""
+
+
+def read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+
+
+def read_number(path: Path) -> float | None:
+    value = read_text(path)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(value, output, sort_keys=True, separators=(",", ":"))
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+class StateReader:
+    def __init__(self, sys_root: Path = Path("/sys"), proc_root: Path = Path("/proc")):
+        self.sys_root = sys_root
+        self.proc_root = proc_root
+
+    def _lid_closed(self) -> bool | None:
+        lid_root = self.proc_root / "acpi/button/lid"
+        for state_file in sorted(lid_root.glob("*/state")):
+            state = (read_text(state_file) or "").lower()
+            if "closed" in state:
+                return True
+            if "open" in state:
+                return False
+        return None
+
+    def _backlight(self) -> dict[str, Any] | None:
+        root = self.sys_root / "class/backlight"
+        for device in sorted(root.iterdir()) if root.is_dir() else []:
+            current = read_number(device / "brightness")
+            maximum = read_number(device / "max_brightness")
+            if current is None or maximum is None or maximum <= 0:
+                continue
+            return {
+                "device": device.name,
+                "brightness": current,
+                "maximum": maximum,
+                "percent": round(current * 100.0 / maximum, 2),
+            }
+        return None
+
+    def _supplies(self) -> list[dict[str, Any]]:
+        root = self.sys_root / "class/power_supply"
+        supplies: list[dict[str, Any]] = []
+        for device in sorted(root.iterdir()) if root.is_dir() else []:
+            supply_type = read_text(device / "type") or "Unknown"
+            entry: dict[str, Any] = {
+                "name": device.name,
+                "type": supply_type,
+            }
+            for field in ("status", "online", "capacity", "manufacturer", "model_name"):
+                value = read_text(device / field)
+                if value is not None:
+                    entry[field] = value
+            supplies.append(entry)
+        return supplies
+
+    def read(self) -> dict[str, Any]:
+        supplies = self._supplies()
+        batteries = [item for item in supplies if item["type"].lower() == "battery"]
+        line_power = [
+            item
+            for item in supplies
+            if item["type"].lower() in {"mains", "usb", "usb_c", "wireless"}
+        ]
+        online = any(item.get("online") == "1" for item in line_power)
+        capacities = [
+            float(item["capacity"])
+            for item in batteries
+            if str(item.get("capacity", "")).replace(".", "", 1).isdigit()
+        ]
+        return {
+            "timestamp_unix_ms": int(time.time() * 1000),
+            "lid_closed": self._lid_closed(),
+            "on_battery": bool(batteries) and not online,
+            "battery_percent": round(sum(capacities) / len(capacities), 2) if capacities else None,
+            "backlight": self._backlight(),
+            "power_supplies": supplies,
+        }
+
+
+class PowerDaemon:
+    def __init__(self, runtime_path: Path, persistent_path: Path, reader: StateReader):
+        from gi.repository import Gio, GLib
+
+        self.Gio = Gio
+        self.GLib = GLib
+        self.runtime_path = runtime_path
+        self.persistent_path = persistent_path
+        self.reader = reader
+        self.generation = 0
+        self.preparing_for_sleep = False
+        self.state: dict[str, Any] = {}
+        self.comparable = ""
+        self.inhibitor: subprocess.Popen[bytes] | None = None
+        self.connection = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        node = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
+        self.interface_info = node.interfaces[0]
+        self.connection.register_object(
+            "/org/aurade/Power", self.interface_info, self._method_call, None, None
+        )
+        Gio.bus_own_name_on_connection(
+            self.connection, "org.aurade.Power", Gio.BusNameOwnerFlags.NONE, None, None
+        )
+        self.connection.signal_subscribe(
+            "org.freedesktop.login1",
+            "org.freedesktop.login1.Manager",
+            "PrepareForSleep",
+            "/org/freedesktop/login1",
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self._prepare_for_sleep,
+        )
+        self.connection.signal_subscribe(
+            "org.freedesktop.UPower",
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+            None,
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self._host_state_changed,
+        )
+        self._acquire_sleep_inhibitor()
+
+    def _acquire_sleep_inhibitor(self) -> bool:
+        if self.inhibitor and self.inhibitor.poll() is None:
+            return False
+        try:
+            self.inhibitor = subprocess.Popen(
+                [
+                    "/usr/bin/systemd-inhibit",
+                    "--what=sleep",
+                    "--who=AuraDE",
+                    "--why=Flush desktop power state",
+                    "--mode=delay",
+                    "/usr/bin/sleep",
+                    "infinity",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            self.inhibitor = None
+        return False
+
+    def _release_sleep_inhibitor(self) -> bool:
+        if self.inhibitor and self.inhibitor.poll() is None:
+            self.inhibitor.terminate()
+            try:
+                self.inhibitor.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.inhibitor.kill()
+                self.inhibitor.wait()
+        self.inhibitor = None
+        return False
+
+    def _json(self) -> str:
+        return json.dumps(self.state, sort_keys=True, separators=(",", ":"))
+
+    def refresh(self, emit: bool = True) -> bool:
+        new_state = self.reader.read()
+        new_state["preparing_for_sleep"] = self.preparing_for_sleep
+        comparable = json.dumps(
+            {key: value for key, value in new_state.items() if key != "timestamp_unix_ms"},
+            sort_keys=True,
+        )
+        changed = comparable != self.comparable
+        if changed:
+            self.generation += 1
+            self.comparable = comparable
+        new_state["generation"] = self.generation
+        self.state = new_state
+        atomic_json(self.runtime_path, self.state)
+        if changed and emit:
+            self.connection.emit_signal(
+                None,
+                "/org/aurade/Power",
+                "org.aurade.Power",
+                "StateChanged",
+                self.GLib.Variant("(s)", (self._json(),)),
+            )
+        return True
+
+    def _method_call(self, _connection, sender, _path, _interface, method, _params, invocation):
+        if method not in {"GetState", "Refresh"}:
+            invocation.return_dbus_error("org.aurade.Power.Error.UnknownMethod", method)
+            return
+        if method == "Refresh":
+            self.refresh()
+        invocation.return_value(self.GLib.Variant("(s)", (self._json(),)))
+
+    def _prepare_for_sleep(self, _connection, _sender, _path, _interface, _signal, params):
+        sleeping = bool(params.unpack()[0])
+        self.preparing_for_sleep = sleeping
+        self.refresh()
+        if sleeping:
+            atomic_json(self.persistent_path, self.state)
+            # Hold logind's delay inhibitor briefly so Ash can observe the
+            # atomically written state and quiesce renderers before sleep.
+            self.GLib.timeout_add(1000, self._release_sleep_inhibitor)
+        self.connection.emit_signal(
+            None,
+            "/org/aurade/Power",
+            "org.aurade.Power",
+            "PreparingForSleep",
+            self.GLib.Variant("(bt)", (sleeping, self.generation)),
+        )
+        if not sleeping:
+            self._acquire_sleep_inhibitor()
+            self.GLib.timeout_add(1000, self.refresh)
+
+    def _host_state_changed(self, *_args):
+        self.refresh()
+
+    def run(self) -> None:
+        self.refresh(emit=False)
+        self.GLib.timeout_add_seconds(5, self.refresh)
+        self.GLib.MainLoop().run()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--once", action="store_true", help="print one state sample and exit")
+    parser.add_argument("--sys-root", type=Path, default=Path("/sys"))
+    parser.add_argument("--proc-root", type=Path, default=Path("/proc"))
+    parser.add_argument("--runtime-state", type=Path, default=Path("/run/aurade/power-state.json"))
+    parser.add_argument("--persistent-state", type=Path, default=Path("/var/lib/aurade/power-state.json"))
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    reader = StateReader(args.sys_root, args.proc_root)
+    if args.once:
+        print(json.dumps(reader.read(), sort_keys=True, separators=(",", ":")))
+        return 0
+    PowerDaemon(args.runtime_state, args.persistent_state, reader).run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# Collect a single hardware-qualification evidence bundle without changing state.
+# shellcheck disable=SC2016 # capture_shell commands intentionally expand in their child shell.
+set -u
+
+OUTPUT_DIR=${HOME:-/tmp}
+SINCE=boot
+FULL=0
+CAPTURE_TIMEOUT=${AURADE_CAPTURE_TIMEOUT:-30}
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-hardware-qualify [--output-dir DIR] [--since BOOT|TIME] [--full]
+
+Collects the existing aurade-hardware-report plus journals, coredumps, DRM,
+input, audio, network, display, and power state in one mode-0600 archive.
+The collector is read-only. Run as root for debugfs, kernel logs, and complete
+coredump metadata. Review the archive before sharing it.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --output-dir) OUTPUT_DIR=${2:?}; shift 2 ;;
+    --since) SINCE=${2:?}; shift 2 ;;
+    --full) FULL=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "aurade-hardware-qualify: unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+[[ $CAPTURE_TIMEOUT =~ ^[1-9][0-9]{0,3}$ ]] || {
+  echo 'aurade-hardware-qualify: AURADE_CAPTURE_TIMEOUT must be 1-9999 seconds' >&2
+  exit 2
+}
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+work=$OUTPUT_DIR/aurade-qualification-$timestamp
+archive=${work}.tar.zst
+umask 077
+[[ ! -e $work && ! -e $archive && ! -e ${work}.tar.gz ]] || {
+  echo "aurade-hardware-qualify: output already exists for timestamp: $timestamp" >&2
+  exit 1
+}
+mkdir -p "$work"/{commands,drm,input,audio,power,logs,metadata}
+
+redact() {
+  sed -E \
+    -e 's/(GOOGLE_[A-Z0-9_]*(KEY|SECRET|TOKEN|CLIENT_ID)[A-Z0-9_]*=)[^[:space:]]+/\1[redacted]/g' \
+    -e 's/((api|oauth|client|refresh|access)[-_]?(key|secret|token)[=:])[A-Za-z0-9._~+\/-]+/\1[redacted]/Ig' \
+    -e 's/(psk=|password=|Identity=)[^[:space:]]+/\1[redacted]/Ig'
+}
+
+capture() {
+  local destination=$1
+  shift
+  {
+    printf '$'
+    printf ' %q' "$@"
+    printf '\n\n'
+    if command -v "$1" >/dev/null 2>&1; then
+      timeout --signal=TERM "$CAPTURE_TIMEOUT" "$@" 2>&1 || true
+    else
+      printf 'command not installed: %s\n' "$1"
+    fi
+  } | redact >"$work/$destination"
+}
+
+capture_shell() {
+  local destination=$1 command=$2
+  {
+    printf '$ %s\n\n' "$command"
+    timeout --signal=TERM "$CAPTURE_TIMEOUT" bash -o pipefail -c "$command" 2>&1 || true
+  } | redact >"$work/$destination"
+}
+
+cat >"$work/README.txt" <<EOF
+AuraDE hardware qualification evidence
+Generated UTC: $timestamp
+Since selector: $SINCE
+Collector UID: $(id -u)
+
+This bundle can contain usernames, device serials, IP addresses, application
+names, and crash stacks. Common secret patterns are redacted, but a human must
+review the archive before public upload.
+EOF
+
+if command -v aurade-hardware-report >/dev/null 2>&1; then
+  report_args=(--output-dir "$work")
+  (( FULL )) && report_args+=(--full)
+  base_report=$(timeout --signal=TERM "$((CAPTURE_TIMEOUT * 8))" \
+    aurade-hardware-report "${report_args[@]}" 2>"$work/logs/aurade-hardware-report.stderr" || true)
+  [[ -z $base_report || ! -f $base_report ]] || mv "$base_report" "$work/metadata/"
+else
+  printf '%s\n' 'aurade-hardware-report is not installed' >"$work/logs/aurade-hardware-report.stderr"
+fi
+
+capture metadata/os-release.txt cat /etc/os-release
+capture metadata/uname.txt uname -a
+capture metadata/lsblk.txt lsblk -e7 -o NAME,PATH,TYPE,SIZE,FSTYPE,FSVER,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,SERIAL
+capture metadata/findmnt.txt findmnt --all
+capture metadata/packages.txt pacman -Q
+capture metadata/bootctl.txt bootctl status --no-pager
+capture metadata/loginctl.txt loginctl list-sessions --no-legend
+capture metadata/seat0.txt loginctl seat-status seat0
+capture metadata/inhibitors.txt systemd-inhibit --list --no-pager
+capture metadata/system-failed.txt systemctl --failed --no-pager
+capture metadata/user-failed.txt systemctl --user --failed --no-pager
+capture metadata/install-manifest.txt cat /etc/aurade-install/manifest
+capture metadata/package-lock.txt cat /etc/aurade-install/packages.lock
+
+if [[ $SINCE == boot ]]; then
+  journal_args=(-b)
+else
+  journal_args=(--since "$SINCE")
+fi
+capture logs/journal.txt journalctl "${journal_args[@]}" --no-pager
+capture logs/user-journal.txt journalctl --user "${journal_args[@]}" --no-pager
+capture logs/kernel-journal.txt journalctl -k "${journal_args[@]}" --no-pager
+capture logs/coredump-list.txt coredumpctl list --no-pager
+capture logs/coredump-info.txt coredumpctl info --no-pager
+capture logs/dmesg.txt dmesg --ctime
+
+capture drm/devices.txt ls -la /dev/dri
+capture drm/wayland-info.txt wayland-info
+capture drm/weston-info.txt weston-info
+capture drm/xrandr.txt xrandr --verbose
+capture drm/modetest.txt modetest -c -p -e
+capture_shell drm/sysfs.txt 'for d in /sys/class/drm/*; do echo "## $d"; find "$d" -maxdepth 2 -type f -print -exec sh -c '\''printf "  "; head -c 4096 "$1" 2>/dev/null; printf "\n"'\'' sh {} \;; done'
+capture_shell drm/debugfs.txt 'if [ -d /sys/kernel/debug/dri ]; then find /sys/kernel/debug/dri -maxdepth 3 -type f -print -exec sh -c '\''echo "## $1"; head -c 1048576 "$1" 2>/dev/null'\'' sh {} \;; else echo "DRM debugfs unavailable"; fi'
+
+capture input/libinput.txt libinput list-devices
+capture input/proc-devices.txt cat /proc/bus/input/devices
+capture input/localectl.txt localectl status
+capture input/udev.txt udevadm info --export-db
+capture_shell input/event-nodes.txt 'for d in /dev/input/event*; do [ -e "$d" ] || continue; echo "## $d"; udevadm info --query=property --name="$d"; done'
+
+capture audio/wpctl.txt wpctl status --name
+capture audio/pactl-info.txt pactl info
+capture audio/pactl-sinks.txt pactl list sinks
+capture audio/pactl-sources.txt pactl list sources
+capture audio/aplay.txt aplay -l
+capture audio/arecord.txt arecord -l
+capture audio/alsa.txt alsactl info
+capture audio/wireplumber.txt systemctl --user status wireplumber pipewire pipewire-pulse --no-pager
+
+capture power/upower.txt upower -d
+capture power/brightnessctl.txt brightnessctl --list
+capture power/logind.conf.txt systemd-analyze cat-config systemd/logind.conf
+capture power/sleep.conf.txt systemd-analyze cat-config systemd/sleep.conf
+capture power/systemd-sleep-status.txt systemctl status systemd-suspend.service systemd-hibernate.service --no-pager
+capture_shell power/power-supply-sysfs.txt 'for d in /sys/class/power_supply/*; do [ -e "$d" ] || continue; echo "## $d"; find "$d" -maxdepth 1 -type f -print -exec sh -c '\''printf "  "; head -c 4096 "$1" 2>/dev/null; printf "\n"'\'' sh {} \;; done'
+capture_shell power/backlight-sysfs.txt 'for d in /sys/class/backlight/*; do [ -e "$d" ] || continue; echo "## $d"; find "$d" -maxdepth 1 -type f -print -exec sh -c '\''printf "  "; head -c 4096 "$1" 2>/dev/null; printf "\n"'\'' sh {} \;; done'
+capture_shell power/lid.txt 'for d in /proc/acpi/button/lid/*; do [ -e "$d/state" ] && { echo "## $d"; cat "$d/state"; }; done'
+
+capture commands/processes.txt ps -efww
+capture commands/networkmanager.txt systemctl status NetworkManager shill-nm-adapter --no-pager
+capture commands/ip-address.txt ip address show
+capture commands/ip-route.txt ip route show
+capture commands/rfkill.txt rfkill list
+capture commands/bluetooth.txt bluetoothctl show
+
+(cd "$work" && find . -type f ! -name manifest.sha256 -print0 | sort -z | xargs -0 sha256sum >metadata/manifest.sha256)
+if command -v zstd >/dev/null 2>&1; then
+  if ! (set -o pipefail; tar --sort=name --owner=0 --group=0 --numeric-owner \
+      -C "$(dirname "$work")" -cf - "$(basename "$work")" | \
+      zstd -T0 -19 -q -o "$archive"); then
+    rm -f -- "$archive"
+    echo 'aurade-hardware-qualify: could not create evidence archive' >&2
+    exit 1
+  fi
+else
+  archive=${work}.tar.gz
+  if ! tar --sort=name --owner=0 --group=0 --numeric-owner \
+      -C "$(dirname "$work")" -czf "$archive" "$(basename "$work")"; then
+    rm -f -- "$archive"
+    echo 'aurade-hardware-qualify: could not create evidence archive' >&2
+    exit 1
+  fi
+fi
+chmod 600 "$archive" || exit 1
+printf '%s\n' "$archive"

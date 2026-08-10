@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=org.chromium.SessionManager
+Exec=/usr/bin/python /usr/lib/chromiumos-ash/aurade-session-manager-shim.py
+User=root
+SystemdService=aurade-session-manager.service

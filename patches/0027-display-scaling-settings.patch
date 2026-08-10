@@ -1,0 +1,2091 @@
+diff --git a/ash/display/cros_display_config.cc b/ash/display/cros_display_config.cc
+index 3030aeb672..49efc4ee00 100644
+--- a/ash/display/cros_display_config.cc
++++ b/ash/display/cros_display_config.cc
+@@ -24,6 +24,7 @@
+ #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+ #include "base/functional/bind.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
+ #include "components/device_event_log/device_event_log.h"
+ #include "ui/display/display.h"
+ #include "ui/display/display_layout.h"
+@@ -291,13 +292,21 @@ DisplayUnitInfo GetDisplayUnitInfo(const display::Display& display,
+     ++display_mode_index;
+   }
+ 
+-  info.display_zoom_factor = display_info.zoom_factor();
+-  if (has_active_mode) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: ChromeOS display zoom changes the logical root
++    // display size, which shrinks the visible desktop under a generic
++    // Linux/Wayland host. Keep display zoom pinned to 100% until AuraDE has a
++    // real compositor-backed UI scale path.
++    info.display_zoom_factor = 1.f;
++    info.available_display_zoom_factors.push_back(1.f);
++  } else if (has_active_mode) {
++    info.display_zoom_factor = display_info.zoom_factor();
+     auto zoom_levels = display::GetDisplayZoomFactors(active_mode);
+     info.available_display_zoom_factors.reserve(zoom_levels.size());
+     info.available_display_zoom_factors.assign(zoom_levels.begin(),
+                                                zoom_levels.end());
+   } else {
++    info.display_zoom_factor = display_info.zoom_factor();
+     info.available_display_zoom_factors.push_back(display_info.zoom_factor());
+   }
+ 
+@@ -381,8 +390,8 @@ DisplayConfigResult ValidateDisplayProperties(
+   }
+ 
+   // In Unified mode, the actual zoom factor will be picked by the system.
+-  if (properties.display_zoom_factor >
+-      0) {  // && !display_manager->IsInUnifiedMode()) {
++  if (properties.display_zoom_factor > 0 &&
++      base::SysInfo::IsRunningOnChromeOS()) {
+     display::ManagedDisplayMode current_mode;
+     if (!display_manager->GetActiveModeForDisplayId(id, &current_mode)) {
+       DISPLAY_LOG(ERROR) << "No active mode for display:" << dump_state();
+@@ -769,8 +778,12 @@ DisplayConfigResult CrosDisplayConfigImpl::SetDisplayProperties(
+   }
+ 
+   if (properties.display_zoom_factor > 0) {
++    // AuraDE compatibility: clamp ChromeOS logical display zoom on generic
++    // Linux/Wayland hosts; see GetDisplayUnitInfo() above.
+     display_manager->UpdateZoomFactor(display.id(),
+-                                      properties.display_zoom_factor);
++                                      base::SysInfo::IsRunningOnChromeOS()
++                                          ? properties.display_zoom_factor
++                                          : 1.f);
+   }
+ 
+   // Set the display mode. Note: if this returns an error, other properties
+diff --git a/ash/display/cursor_window_controller.cc b/ash/display/cursor_window_controller.cc
+index c0f8a80560..7e8833e7fe 100644
+--- a/ash/display/cursor_window_controller.cc
++++ b/ash/display/cursor_window_controller.cc
+@@ -23,6 +23,7 @@
+ #include "ash/session/session_controller_impl.h"
+ #include "ash/shell.h"
+ #include "base/command_line.h"
++#include "base/system/sys_info.h"
+ #include "components/prefs/pref_service.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/accessibility/accessibility_features.h"
+@@ -417,26 +418,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
+   large_cursor_size_in_dip =
+       std::max(large_cursor_size_in_dip, kMinLargeCursorSize);
+ 
+-  if (large_cursor_size_in_dip_ == large_cursor_size_in_dip)
++  if (large_cursor_size_in_dip_ == large_cursor_size_in_dip) {
+     return;
++  }
+ 
+   large_cursor_size_in_dip_ = large_cursor_size_in_dip;
+ 
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ }
+ 
+ void CursorWindowController::SetCursorColor(SkColor cursor_color) {
+-  if (cursor_color_ == cursor_color)
++  if (cursor_color_ == cursor_color) {
+     return;
++  }
+ 
+   cursor_color_ = cursor_color;
+ 
+   // Reset cursor lottie animation cache when new color needs to be applied.
+   wm::ClearCursorAnimationCache();
+ 
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ }
+ 
+ void CursorWindowController::SetCursorInverted(bool inverted) {
+@@ -489,8 +494,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+     return true;
+   }
+ 
+-  if (shell->fullscreen_magnifier_controller()->IsEnabled())
++  if (shell->fullscreen_magnifier_controller()->IsEnabled()) {
+     return true;
++  }
+ 
+   PrefService* prefs = shell->session_controller()->GetActivePrefService();
+   if (!prefs) {
+@@ -525,16 +531,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+ }
+ 
+ void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
+-  if (is_cursor_compositing_enabled_ == enabled)
++  if (is_cursor_compositing_enabled_ == enabled) {
+     return;
++  }
+ 
+   is_cursor_compositing_enabled_ = enabled;
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ 
+   UpdateContainer();
+-  for (auto& obs : observers_)
++  for (auto& obs : observers_) {
+     obs.OnCursorCompositingStateChanged(is_cursor_compositing_enabled_);
++  }
+ }
+ 
+ void CursorWindowController::UpdateContainer() {
+@@ -543,8 +552,9 @@ void CursorWindowController::UpdateContainer() {
+     display::Display display =
+         screen->GetDisplayNearestPoint(screen->GetCursorScreenPoint());
+     DCHECK(display.is_valid());
+-    if (display.is_valid())
++    if (display.is_valid()) {
+       SetDisplay(display);
++    }
+   } else {
+     SetContainer(nullptr);
+   }
+@@ -572,8 +582,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
+   last_updated_.reset();
+ 
+   aura::Window* root_window = Shell::GetRootWindowForDisplayId(display.id());
+-  if (!root_window)
++  if (!root_window) {
+     return;
++  }
+ 
+   if (!is_cursor_compositing_enabled_) {
+     return;
+@@ -638,8 +649,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
+ }
+ 
+ void CursorWindowController::SetCursor(gfx::NativeCursor cursor) {
+-  if (cursor_ == cursor)
++  if (cursor_ == cursor) {
+     return;
++  }
+   cursor_ = cursor;
+   UpdateCursorImage();
+   UpdateCursorVisibility();
+@@ -838,15 +850,19 @@ void CursorWindowController::UpdateCursorImage() {
+ void CursorWindowController::UpdateCursorVisibility() {
+   bool visible = (visible_ && cursor_.type() != ui::mojom::CursorType::kNone);
+   if (visible) {
+-    if (cursor_view_widget_)
++    if (cursor_view_widget_) {
+       cursor_view_widget_->Show();
+-    if (cursor_window_)
++    }
++    if (cursor_window_) {
+       cursor_window_->Show();
++    }
+   } else {
+-    if (cursor_view_widget_)
++    if (cursor_view_widget_) {
+       cursor_view_widget_->Hide();
+-    if (cursor_window_)
++    }
++    if (cursor_window_) {
+       cursor_window_->Hide();
++    }
+   }
+ }
+ 
+@@ -883,6 +899,13 @@ const gfx::ImageSkia& CursorWindowController::GetCursorImageForTest() const {
+ }
+ 
+ bool CursorWindowController::ShouldUseFastInk() const {
++  // AuraDE compatibility: generic Linux/Wayland sessions do not provide the
++  // ChromeOS scanout path FastInk expects. Use the standard textured cursor
++  // while composited cursors are active, such as when Night Light is enabled.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
+   // If inverted cursor is enabled, we want to use the aura::Window path to
+   // support the inverted cursor feature.
+   if (::features::IsAccessibilityInvertedMouseCursorEnabled() && is_inverted_) {
+diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
+index f010b52a70..d6f0fa28c9 100644
+--- a/ash/display/display_configuration_controller.cc
++++ b/ash/display/display_configuration_controller.cc
+@@ -52,6 +52,9 @@ display::DisplayPositionInUnifiedMatrix GetUnifiedModeShelfCellPosition() {
+ 
+     case ShelfAlignment::kRight:
+       return display::DisplayPositionInUnifiedMatrix::kTopRight;
++
++    case ShelfAlignment::kTop:
++      return display::DisplayPositionInUnifiedMatrix::kTopLeft;
+   }
+ 
+   NOTREACHED();
+diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
+index 050fea7d42..ddf94619fc 100644
+--- a/ash/display/root_window_transformers.cc
++++ b/ash/display/root_window_transformers.cc
+@@ -106,6 +106,18 @@ class AshRootWindowTransformer : public RootWindowTransformer {
+     transform_ = insets_and_rotation_transform;
+     insets_and_scale_transform_ = CreateReverseRotatedInsetsTransform(
+         display.panel_rotation(), host_insets_, display.device_scale_factor());
++    if (!base::SysInfo::IsRunningOnChromeOS()) {
++      // AuraDE compatibility: the ChromeOS display stack applies the device
++      // scale factor below Ash. On a generic Linux/Wayland host, Ash still
++      // shrinks the root window bounds to DIP size, but nothing scales that
++      // root layer back up to the native host surface. Apply the same scale to
++      // the visual layer transform and root event transform so shelf,
++      // wallpaper, windows, and hit testing all share one coordinate map.
++      transform_.Scale(display.device_scale_factor(),
++                       display.device_scale_factor());
++      insets_and_scale_transform_.Scale(display.device_scale_factor(),
++                                        display.device_scale_factor());
++    }
+     FullscreenMagnifierController* magnifier =
+         Shell::Get()->fullscreen_magnifier_controller();
+     if (magnifier) {
+@@ -133,14 +145,16 @@ class AshRootWindowTransformer : public RootWindowTransformer {
+     return invert_transform_;
+   }
+   gfx::Rect GetRootWindowBounds(const gfx::Size& host_size) const override {
+-    if (base::SysInfo::IsRunningOnChromeOS())
++    if (base::SysInfo::IsRunningOnChromeOS()) {
+       return initial_root_bounds_;
++    }
+ 
+     // If we're running on linux desktop for dev purpose, the host window
+     // may be updated to new size. Recompute the root window bounds based
+     // on the host size if the host size changed.
+-    if (initial_host_size_ == host_size)
++    if (initial_host_size_ == host_size) {
+       return initial_root_bounds_;
++    }
+ 
+     gfx::RectF new_bounds = gfx::RectF(gfx::SizeF(host_size));
+     new_bounds.Inset(gfx::InsetsF(host_insets_));
+@@ -317,8 +331,9 @@ class PartialBoundsRootWindowTransformer : public RootWindowTransformer {
+     const bool need_transpose =
+         active_root_rotation == display::Display::ROTATE_90 ||
+         active_root_rotation == display::Display::ROTATE_270;
+-    if (need_transpose)
++    if (need_transpose) {
+       root_bounds_.Transpose();
++    }
+ 
+     // |screen_bounds| is the unified desktop logical bounds.
+     // Calculate the unified height scale value, and apply the same scale on the
+diff --git a/ash/display/window_tree_host_manager.cc b/ash/display/window_tree_host_manager.cc
+index 72e5b3599f..2bd3ee56ed 100644
+--- a/ash/display/window_tree_host_manager.cc
++++ b/ash/display/window_tree_host_manager.cc
+@@ -30,12 +30,16 @@
+ #include "ash/wm/window_util.h"
+ #include "base/byte_size.h"
+ #include "base/check.h"
++#include "base/environment.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/metrics/histogram.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/notimplemented.h"
+ #include "base/notreached.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/system/sys_info.h"
+@@ -58,6 +62,8 @@
+ #include "ui/display/manager/display_configurator.h"
+ #include "ui/display/manager/display_layout_store.h"
+ #include "ui/display/manager/display_manager.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/manager/util/display_manager_util.h"
+ #include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
+ #include "ui/display/util/display_util.h"
+@@ -93,6 +99,85 @@ constexpr int kUICompositorMemoryLimitDisplaySizeThreshold = 3500;
+ // configure the compositor to use a higher memory limit.
+ constexpr base::ByteSize kUICompositorMemoryLimitRamCapacityThreshold =
+     base::GiBU(16);
++constexpr char kAuraDisplayScaleEnv[] = "AURADE_DISPLAY_SCALE";
++constexpr float kAuraDisplayScaleDefault = 1.f;
++constexpr float kAuraDisplayScaleMin = 1.f;
++constexpr float kAuraDisplayScaleMax = 3.f;
++constexpr float kAuraDisplayScaleEpsilon = 0.001f;
++
++float NormalizeAuraDisplayScale(float scale) {
++  if (!std::isfinite(scale)) {
++    return kAuraDisplayScaleDefault;
++  }
++  return std::clamp(scale, kAuraDisplayScaleMin, kAuraDisplayScaleMax);
++}
++
++float GetConfiguredAuraDisplayScale(float fallback_scale) {
++  auto env = base::Environment::Create();
++  std::optional<std::string> configured_scale =
++      env->GetVar(kAuraDisplayScaleEnv);
++  if (!configured_scale || configured_scale->empty()) {
++    return NormalizeAuraDisplayScale(fallback_scale);
++  }
++
++  double parsed_scale = fallback_scale;
++  if (!base::StringToDouble(*configured_scale, &parsed_scale)) {
++    return NormalizeAuraDisplayScale(fallback_scale);
++  }
++  return NormalizeAuraDisplayScale(static_cast<float>(parsed_scale));
++}
++
++bool UpdateLinuxDesktopDisplayModeForHostResize(
++    display::DisplayManager* display_manager,
++    int64_t display_id,
++    const gfx::Rect& host_bounds_in_pixels) {
++  if (base::SysInfo::IsRunningOnChromeOS() || host_bounds_in_pixels.IsEmpty()) {
++    return false;
++  }
++
++  display::ManagedDisplayInfo display_info =
++      display_manager->GetDisplayInfo(display_id);
++  const gfx::Size host_size_in_pixels = host_bounds_in_pixels.size();
++  const float aura_display_scale =
++      GetConfiguredAuraDisplayScale(display_info.device_scale_factor());
++  const display::ManagedDisplayMode current_host_mode(
++      host_size_in_pixels, display_info.refresh_rate(),
++      display_info.is_interlaced(), true, aura_display_scale);
++
++  const bool zoom_already_current =
++      std::abs(display_info.zoom_factor() - 1.f) < 0.001f;
++  const bool scale_already_current =
++      std::abs(display_info.device_scale_factor() - aura_display_scale) <
++      kAuraDisplayScaleEpsilon;
++  const bool already_current =
++      display_info.bounds_in_native() == host_bounds_in_pixels &&
++      display_info.display_modes().size() == 1 &&
++      display_info.display_modes()[0].IsEquivalent(current_host_mode) &&
++      zoom_already_current && scale_already_current;
++  if (already_current) {
++    return false;
++  }
++
++  // AuraDE compatibility: under a generic Linux/Wayland host there is no
++  // ChromeOS display configurator feeding Ash real mode updates. Keep Ash's
++  // synthetic mode list pinned to the host surface, while real output selection
++  // is handled by the AuraDE/Weston display-mode control.
++  display_info.set_device_scale_factor(aura_display_scale);
++  display_info.set_zoom_factor(1.f);
++  display_info.AddZoomFactorForSize(host_size_in_pixels.ToString(), 1.f);
++  display_info.SetBounds(host_bounds_in_pixels);
++  display_info.SetManagedDisplayModes({current_host_mode});
++
++  display::DisplayInfoList display_info_list;
++  for (const display::Display& active_display :
++       display_manager->active_display_list()) {
++    display_info_list.push_back(
++        active_display.id() == display_id
++            ? display_info
++            : display_manager->GetDisplayInfo(active_display.id()));
++  }
++  return display_manager->OnNativeDisplaysChanged(display_info_list);
++}
+ 
+ // An UMA signal for the current effective resolution/dpi is sent at this rate.
+ // This keeps track of the effective resolution/dpi most used on
+@@ -269,17 +354,20 @@ class FocusActivationStore {
+       focus_client_ = aura::client::GetFocusClient(root);
+     }
+     focused_ = focus_client_->GetFocusedWindow();
+-    if (focused_)
++    if (focused_) {
+       tracker_.Add(focused_);
++    }
+     active_ = activation_client_->GetActiveWindow();
+-    if (active_ && focused_ != active_)
++    if (active_ && focused_ != active_) {
+       tracker_.Add(active_);
++    }
+ 
+     // Deactivate the window to close menu / bubble windows. Deactivating by
+     // setting active window to nullptr to avoid side effects of activating an
+     // arbitrary window, such as covering |active_| before Restore().
+-    if (clear_focus && active_)
++    if (clear_focus && active_) {
+       activation_client_->ActivateWindow(nullptr);
++    }
+ 
+     // Release capture if any.
+     capture_client_->SetCapture(nullptr);
+@@ -288,8 +376,9 @@ class FocusActivationStore {
+     // window may be deleted when losing focus (fullscreen flash for
+     // example).  If the focused window is still alive after move, it'll
+     // be re-focused below.
+-    if (clear_focus)
++    if (clear_focus) {
+       focus_client_->FocusWindow(nullptr);
++    }
+   }
+ 
+   void Restore() {
+@@ -299,10 +388,12 @@ class FocusActivationStore {
+     } else if (active_ && tracker_.Contains(active_)) {
+       activation_client_->ActivateWindow(active_);
+     }
+-    if (focused_)
++    if (focused_) {
+       tracker_.Remove(focused_);
+-    if (active_)
++    }
++    if (active_) {
+       tracker_.Remove(active_);
++    }
+     focused_ = nullptr;
+     active_ = nullptr;
+   }
+@@ -382,16 +473,18 @@ void WindowTreeHostManager::Shutdown() {
+   for (aura::Window::Windows::iterator iter = root_windows.begin();
+        iter != root_windows.end(); ++iter) {
+     RootWindowController* rwc = RootWindowController::ForWindow(*iter);
+-    if (GetRootWindowSettings(*iter)->display_id == primary_id)
++    if (GetRootWindowSettings(*iter)->display_id == primary_id) {
+       primary_rwc = rwc;
+-    else
++    } else {
+       to_delete.push_back(rwc);
++    }
+   }
+   CHECK(primary_rwc);
+ 
+   Shell::SetRootWindowForNewWindows(nullptr);
+-  for (auto* rwc : to_delete)
++  for (auto* rwc : to_delete) {
+     delete rwc;
++  }
+   delete primary_rwc;
+ }
+ 
+@@ -439,8 +532,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
+ aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
+   // If |primary_tree_host_for_replace_| is set, it means |primary_display_id|
+   // is kInvalidDisplayId.
+-  if (primary_tree_host_for_replace_)
++  if (primary_tree_host_for_replace_) {
+     return GetWindow(primary_tree_host_for_replace_);
++  }
+   return GetRootWindowForDisplayId(primary_display_id);
+ }
+ 
+@@ -452,8 +546,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
+ AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
+     int64_t display_id) {
+   const auto host = window_tree_hosts_.find(display_id);
+-  if (host != window_tree_hosts_.end())
++  if (host != window_tree_hosts_.end()) {
+     return host->second;
++  }
+   return mirror_window_controller_->GetAshWindowTreeHostForDisplayId(
+       display_id);
+ }
+@@ -463,8 +558,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
+   for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
+        it != window_tree_hosts_.end(); ++it) {
+     DCHECK(it->second);
+-    if (RootWindowController::ForWindow(GetWindow(it->second)))
++    if (RootWindowController::ForWindow(GetWindow(it->second))) {
+       windows.push_back(GetWindow(it->second));
++    }
+   }
+   return windows;
+ }
+@@ -476,8 +572,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
+        it != window_tree_hosts_.end(); ++it) {
+     RootWindowController* controller =
+         RootWindowController::ForWindow(GetWindow(it->second));
+-    if (controller)
++    if (controller) {
+       controllers.push_back(controller);
++    }
+   }
+   return controllers;
+ }
+@@ -585,8 +682,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
+         display_info.bounds_in_native());
+     SetDisplayPropertiesOnHost(ash_host, display);
+   } else {
+-    if (primary_display_id == display::kInvalidDisplayId)
++    if (primary_display_id == display::kInvalidDisplayId) {
+       primary_display_id = display.id();
++    }
+     DCHECK(!window_tree_hosts_.empty());
+     AshWindowTreeHost* ash_host =
+         AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
+@@ -609,8 +707,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
+   // Delete most of root window related objects, but don't delete
+   // root window itself yet because the stack may be using it.
+   controller->Shutdown(primary_root_after_host_deletion);
+-  if (primary_tree_host_for_replace_ == host_to_delete)
++  if (primary_tree_host_for_replace_ == host_to_delete) {
+     primary_tree_host_for_replace_ = nullptr;
++  }
+   DCHECK_EQ(primary_root_after_host_deletion, Shell::GetPrimaryRootWindow());
+   if (Shell::GetRootWindowForNewWindows() == root_being_deleted) {
+     Shell::SetRootWindowForNewWindows(primary_root_after_host_deletion);
+@@ -773,8 +872,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
+       display::Screen::Get()->GetDisplayNearestWindow(host->window());
+ 
+   display::DisplayManager* display_manager = GetDisplayManager();
+-  if (display_manager->UpdateDisplayBounds(display.id(),
+-                                           host->GetBoundsInPixels())) {
++  const gfx::Rect host_bounds_in_pixels = host->GetBoundsInPixels();
++
++  if (UpdateLinuxDesktopDisplayModeForHostResize(display_manager, display.id(),
++                                                 host_bounds_in_pixels) ||
++      display_manager->UpdateDisplayBounds(display.id(),
++                                           host_bounds_in_pixels)) {
+     mirror_window_controller_->UpdateWindow();
+     cursor_window_controller_->UpdateContainer();
+   }
+@@ -790,8 +893,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
+                                                           bool secure) {
+   AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(display_id);
+   // No host for internal display in docked mode.
+-  if (!host)
++  if (!host) {
+     return;
++  }
+ 
+   ui::Compositor* compositor = host->AsWindowTreeHost()->compositor();
+   if (compositor->output_is_secure() == secure) {
+@@ -820,8 +924,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
+   // display is drawn through compositor mirroring). Therefore, it's
+   // unnecessary to handle the cursor_window at all. See:
+   // http://crbug.com/412910
+-  if (!cursor_window_controller_->is_cursor_compositing_enabled())
++  if (!cursor_window_controller_->is_cursor_compositing_enabled()) {
+     cursor_window_controller_->UpdateContainer();
++  }
+ }
+ 
+ void WindowTreeHostManager::PreDisplayConfigurationChange(bool clear_focus) {
+@@ -868,8 +973,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
+   LOG_IF(ERROR, !non_primary_host)
+       << "Unknown display is requested in SetPrimaryDisplay: id="
+       << new_primary_id;
+-  if (!non_primary_host)
++  if (!non_primary_host) {
+     return;
++  }
+ 
+   display::Display old_primary_display =
+       display::Screen::Get()->GetPrimaryDisplay();
+diff --git a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+index 1d523840e2..c30a3a2b39 100644
+--- a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
++++ b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+@@ -103,6 +103,32 @@ export interface ExternalStorage {
+   uuid: string;
+ }
+ 
++export interface AuraDisplayInfo {
++  available: boolean;
++  connector: string;
++  configuredMode: string;
++  currentMode: string;
++  configuredScale: number;
++  currentScale: number;
++  modes: string[];
++  scaleAvailable: boolean;
++  scaleOptions: number[];
++  requiresRestart: boolean;
++  status: string;
++}
++
++export interface AuraFeatureProfileInfo {
++  available: boolean;
++  configured: boolean;
++  configuredProfile: string;
++  currentProfile: string;
++  defaultProfile: string;
++  memoryGb: number;
++  profiles: string[];
++  requiresRestart: boolean;
++  status: string;
++}
++
+ export interface DevicePageBrowserProxy {
+   /** Initializes the mouse and touchpad handler. */
+   initializePointers(): void;
+@@ -206,6 +232,21 @@ export interface DevicePageBrowserProxy {
+    */
+   dragDisplayDelta(displayId: string, deltaX: number, deltaY: number): void;
+ 
++  /** Gets host DRM modes and current AuraDE compositor display config. */
++  getAuraDisplayInfo(): Promise<AuraDisplayInfo>;
++
++  /** Saves the compositor display mode used by the next AuraDE session. */
++  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo>;
++
++  /** Saves and applies the AuraDE UI scale factor. */
++  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo>;
++
++  /** Gets the AuraDE feature profile used for ChromeOS feature gates. */
++  getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo>;
++
++  /** Saves the AuraDE feature profile used by the next AuraDE session. */
++  setAuraFeatureProfile(profile: string): Promise<AuraFeatureProfileInfo>;
++
+   updateStorageInfo(): void;
+ 
+   getStorageEncryptionInfo(): Promise<string>;
+@@ -314,6 +355,26 @@ export class DevicePageBrowserProxyImpl implements DevicePageBrowserProxy {
+     chrome.send('dragDisplayDelta', [displayId, deltaX, deltaY]);
+   }
+ 
++  getAuraDisplayInfo(): Promise<AuraDisplayInfo> {
++    return sendWithPromise('getAuraDisplayInfo');
++  }
++
++  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayMode', mode);
++  }
++
++  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayScale', scale);
++  }
++
++  getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo> {
++    return sendWithPromise('getAuraFeatureProfileInfo');
++  }
++
++  setAuraFeatureProfile(profile: string): Promise<AuraFeatureProfileInfo> {
++    return sendWithPromise('setAuraFeatureProfile', profile);
++  }
++
+   updateStorageInfo(): void {
+     chrome.send('updateStorageInfo');
+   }
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.html b/chrome/browser/resources/ash/settings/device_page/display.html
+index a65b096ea3..43867417f6 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.html
++++ b/chrome/browser/resources/ash/settings/device_page/display.html
+@@ -57,6 +57,20 @@
+     display: flex;
+     flex-direction: column;
+   }
++
++  #auraDisplayActions,
++  #auraFeatureProfileActions {
++    align-items: center;
++    display: flex;
++    flex-wrap: wrap;
++    gap: 12px;
++    justify-content: flex-end;
++  }
++
++  #auraDisplayModeSelector,
++  #auraFeatureProfileSelector {
++    min-width: 180px;
++  }
+ </style>
+ 
+ <!-- Display Shiny Performance Mode Controller -->
+@@ -201,7 +215,9 @@
+   </template>
+ 
+   <!-- Display zoom selection slider -->
+-  <div class="settings-box indented two-line">
++  <div class="settings-box indented two-line"
++      hidden$="[[shouldHideChromeOsDisplayZoom_(
++          selectedDisplay, auraDisplayScaleAvailable_)]]">
+     <div class="start text-area layout vertical">
+       <div id="displayZoomLabel" aria-hidden="true">
+         $i18n{displayZoomLabel}
+@@ -236,6 +252,83 @@
+     </settings-slider>
+   </div>
+ 
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE UI scale</div>
++      <div class="secondary self-start" id="auraDisplayScaleSublabel">
++        [[auraDisplayScaleStatus_]]
++      </div>
++    </div>
++    <div id="auraDisplayScaleActions">
++      <settings-slider id="auraDisplayScaleSlider"
++          ticks="[[auraDisplayScaleOptions_]]"
++          pref="{{auraDisplayScalePref_}}"
++          label-aria="AuraDE UI scale"
++          label-min="Small"
++          label-max="Large"
++          disabled="[[!auraDisplayScaleAvailable_]]"
++          aria-describedby="auraDisplayScaleSublabel">
++      </settings-slider>
++      <cr-button on-click="onAuraDisplayScaleApplyClick_"
++          disabled$="[[isAuraDisplayScaleApplyDisabled_(
++              auraDisplayScaleAvailable_,
++              auraDisplayScaleApplyInProgress_,
++              auraDisplayScalePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE display mode</div>
++      <div class="secondary self-start" id="auraDisplaySublabel">
++        [[auraDisplayStatus_]]
++      </div>
++    </div>
++    <div id="auraDisplayActions">
++      <settings-dropdown-menu id="auraDisplayModeSelector"
++          pref="{{auraDisplayModePref_}}"
++          disabled="[[!auraDisplayAvailable_]]"
++          label="AuraDE display mode"
++          aria-describedby="auraDisplaySublabel"
++          menu-options="[[auraDisplayModeOptions_]]">
++      </settings-dropdown-menu>
++      <cr-button on-click="onAuraDisplayApplyClick_"
++          disabled$="[[isAuraDisplayApplyDisabled_(
++              auraDisplayAvailable_,
++              auraDisplayApplyInProgress_,
++              auraDisplayModePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE feature profile</div>
++      <div class="secondary self-start" id="auraFeatureProfileSublabel">
++        [[auraFeatureProfileStatus_]]
++      </div>
++    </div>
++    <div id="auraFeatureProfileActions">
++      <settings-dropdown-menu id="auraFeatureProfileSelector"
++          pref="{{auraFeatureProfilePref_}}"
++          disabled="[[!auraFeatureProfileAvailable_]]"
++          label="AuraDE feature profile"
++          aria-describedby="auraFeatureProfileSublabel"
++          menu-options="[[auraFeatureProfileOptions_]]">
++      </settings-dropdown-menu>
++      <cr-button on-click="onAuraFeatureProfileApplyClick_"
++          disabled$="[[isAuraFeatureProfileApplyDisabled_(
++              auraFeatureProfileAvailable_,
++              auraFeatureProfileApplyInProgress_,
++              auraFeatureProfilePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
+   <!-- Drop down select menu for resolution -->
+   <template is="dom-if"
+       if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
+index ef08f9927d..ad779e8e9e 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.ts
++++ b/chrome/browser/resources/ash/settings/device_page/display.ts
+@@ -8,6 +8,7 @@
+  */
+ 
+ import 'chrome://resources/ash/common/cr_elements/cr_checkbox/cr_checkbox.js';
++import 'chrome://resources/ash/common/cr_elements/cr_button/cr_button.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_link_row/cr_link_row.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_slider/cr_slider.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_tabs/cr_tabs.js';
+@@ -48,7 +49,11 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+ import type {Route} from '../router.js';
+ import {routes} from '../router.js';
+ 
+-import type {DevicePageBrowserProxy} from './device_page_browser_proxy.js';
++import type {
++  AuraDisplayInfo,
++  AuraFeatureProfileInfo,
++  DevicePageBrowserProxy,
++} from './device_page_browser_proxy.js';
+ import {DevicePageBrowserProxyImpl, getDisplayApi} from './device_page_browser_proxy.js';
+ import {getTemplate} from './display.html.js';
+ import type {SettingsDisplayOverscanDialogElement} from './display_overscan_dialog.js';
+@@ -135,6 +140,90 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         },
+       },
+ 
++      auraDisplayAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraDisplayScalePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraDisplayScalePref',
++            type: chrome.settingsPrivate.PrefType.NUMBER,
++            value: 1,
++          };
++        },
++      },
++
++      auraDisplayScaleStatus_: String,
++
++      auraDisplayModeOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraDisplayModePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraDisplayModePref',
++            type: chrome.settingsPrivate.PrefType.STRING,
++            value: '',
++          };
++        },
++      },
++
++      auraDisplayStatus_: String,
++
++      auraFeatureProfileAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraFeatureProfileApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraFeatureProfileOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraFeatureProfilePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraFeatureProfilePref',
++            type: chrome.settingsPrivate.PrefType.STRING,
++            value: '',
++          };
++        },
++      },
++
++      auraFeatureProfileStatus_: String,
++
+       displays: Array,
+ 
+       layouts: Array,
+@@ -306,6 +395,16 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+   ]);
+ 
+   private readonly ambientColorAvailable_: boolean;
++  private auraDisplayApplyInProgress_: boolean;
++  private auraDisplayAvailable_: boolean;
++  private auraDisplayModeOptions_: DropdownMenuOptionList;
++  private auraDisplayModePref_: chrome.settingsPrivate.PrefObject;
++  private auraDisplayStatus_: string;
++  private auraFeatureProfileApplyInProgress_: boolean;
++  private auraFeatureProfileAvailable_: boolean;
++  private auraFeatureProfileOptions_: DropdownMenuOptionList;
++  private auraFeatureProfilePref_: chrome.settingsPrivate.PrefObject;
++  private auraFeatureProfileStatus_: string;
+   private browserProxy_: DevicePageBrowserProxy;
+   private brightnessSliderMax_: number;
+   private brightnessSliderMin_: number;
+@@ -337,6 +436,11 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+   private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
+   private readonly unifiedDesktopAvailable_: boolean;
+   private unifiedDesktopMode_: boolean;
++  private auraDisplayScaleApplyInProgress_: boolean;
++  private auraDisplayScaleAvailable_: boolean;
++  private auraDisplayScaleOptions_: SliderTick[];
++  private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
++  private auraDisplayScaleStatus_: string;
+   private zoomValues_: SliderTick[];
+ 
+   constructor() {
+@@ -395,6 +499,8 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+     getDisplayApi().onDisplayChanged.addListener(this.displayChangedListener_);
+ 
+     this.getDisplayInfo_();
++    this.refreshAuraDisplayInfo_();
++    this.refreshAuraFeatureProfileInfo_();
+     this.$.displaySizeSlider.updateValueInstantly = false;
+ 
+     const {isTabletMode} = await this.displaySettingsProvider.observeTabletMode(
+@@ -539,6 +645,219 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         (displays: DisplayUnitInfo[]) => this.displayInfoFetched_(displays));
+   }
+ 
++  private refreshAuraDisplayInfo_(): void {
++    this.browserProxy_.getAuraDisplayInfo()
++        .then(info => {
++          this.auraDisplayAvailable_ = info.available;
++          this.auraDisplayModeOptions_ =
++              info.modes.map(mode => ({name: mode, value: mode}));
++          const selectedMode = info.currentMode || info.configuredMode ||
++              (info.modes.length ? info.modes[0] : '');
++          this.set('auraDisplayModePref_.value', selectedMode);
++          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
++          this.auraDisplayScaleOptions_ =
++              info.scaleOptions.map(scale => ({
++                value: scale,
++                ariaValue: Math.round(scale * 100),
++                label: `${Math.round(scale * 100)}%`,
++              }));
++          const selectedScale = info.configuredScale || info.currentScale || 1;
++          this.set('auraDisplayScalePref_.value', selectedScale);
++          this.auraDisplayStatus_ = this.getAuraDisplayStatus_(info);
++          this.auraDisplayScaleStatus_ =
++              this.getAuraDisplayScaleStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to load AuraDE display info', error);
++          this.auraDisplayAvailable_ = false;
++          this.auraDisplayScaleAvailable_ = false;
++          this.auraDisplayStatus_ = 'Display mode controls are unavailable';
++          this.auraDisplayScaleStatus_ =
++              'Display scale controls are unavailable';
++        });
++  }
++
++  private refreshAuraFeatureProfileInfo_(): void {
++    this.browserProxy_.getAuraFeatureProfileInfo()
++        .then(info => {
++          this.auraFeatureProfileAvailable_ = info.available;
++          this.auraFeatureProfileOptions_ = info.profiles.map(profile => ({
++            name: this.getAuraFeatureProfileLabel_(profile),
++            value: profile,
++          }));
++          this.set(
++              'auraFeatureProfilePref_.value',
++              info.configuredProfile || info.currentProfile ||
++                  info.defaultProfile || 'standard');
++          this.auraFeatureProfileStatus_ =
++              this.getAuraFeatureProfileStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to load AuraDE feature profile info', error);
++          this.auraFeatureProfileAvailable_ = false;
++          this.auraFeatureProfileStatus_ =
++              'Feature profile controls are unavailable';
++        });
++  }
++
++  private getAuraFeatureProfileLabel_(profile: string): string {
++    switch (profile) {
++      case 'advanced_plus_ai':
++        return 'Advanced Plus AI';
++      case 'advanced_plus':
++        return 'Advanced Plus';
++      case 'plus':
++        return 'Plus';
++      case 'standard':
++        return 'Standard';
++      default:
++        return profile || 'Standard';
++    }
++  }
++
++  private getAuraFeatureProfileStatus_(info: AuraFeatureProfileInfo): string {
++    if (!info.available) {
++      return info.status || 'Feature profiles are unavailable';
++    }
++
++    const configuredLabel =
++        this.getAuraFeatureProfileLabel_(info.configuredProfile);
++    if (info.requiresRestart) {
++      return `${configuredLabel} - restart AuraDE to apply`;
++    }
++
++    if (info.configuredProfile === 'advanced_plus_ai') {
++      return `${configuredLabel} - experimental local AI features enabled`;
++    }
++
++    if (info.configuredProfile === 'advanced_plus') {
++      return `${configuredLabel} - experimental features enabled`;
++    }
++
++    if (!info.configured) {
++      const memoryText = info.memoryGb > 0 ? ` (${info.memoryGb} GB RAM)` : '';
++      return `Auto: ${configuredLabel}${memoryText}`;
++    }
++
++    return configuredLabel;
++  }
++
++  private onAuraFeatureProfileApplyClick_(): void {
++    const profile = String(this.auraFeatureProfilePref_.value || '');
++    if (!profile || this.auraFeatureProfileApplyInProgress_) {
++      return;
++    }
++
++    this.auraFeatureProfileApplyInProgress_ = true;
++    this.browserProxy_.setAuraFeatureProfile(profile)
++        .then(info => {
++          this.auraFeatureProfileAvailable_ = info.available;
++          this.set(
++              'auraFeatureProfilePref_.value',
++              info.configuredProfile || profile);
++          this.auraFeatureProfileStatus_ =
++              this.getAuraFeatureProfileStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE feature profile', error);
++          this.auraFeatureProfileStatus_ = 'Could not save feature profile';
++        })
++        .finally(() => {
++          this.auraFeatureProfileApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraFeatureProfileApplyDisabled_(
++      available: boolean, applyInProgress: boolean, profile: string): boolean {
++    return !available || applyInProgress || !profile;
++  }
++
++  private getAuraDisplayStatus_(info: AuraDisplayInfo): string {
++    if (!info.available) {
++      return info.status || 'No DRM display modes found';
++    }
++
++    const connector = info.connector || 'display';
++    const currentMode = info.currentMode || info.configuredMode || 'not set';
++    return `Output ${connector}, configured for ${currentMode}`;
++  }
++
++  private getAuraDisplayScaleStatus_(info: AuraDisplayInfo): string {
++    const configuredScale = info.configuredScale || 1;
++    const currentScale = info.currentScale || configuredScale;
++    const configuredPercent = Math.round(configuredScale * 100);
++    const currentPercent = Math.round(currentScale * 100);
++    if (Math.abs(configuredScale - currentScale) < 0.001) {
++      return `Currently ${currentPercent}%`;
++    }
++    return `Configured ${configuredPercent}%, currently ${currentPercent}%`;
++  }
++
++  private onAuraDisplayApplyClick_(): void {
++    const mode = String(this.auraDisplayModePref_.value || '');
++    if (!mode || this.auraDisplayApplyInProgress_) {
++      return;
++    }
++
++    this.auraDisplayApplyInProgress_ = true;
++    this.browserProxy_.setAuraDisplayMode(mode)
++        .then(info => {
++          this.auraDisplayAvailable_ = info.available;
++          this.set('auraDisplayModePref_.value', info.configuredMode || mode);
++          this.auraDisplayStatus_ =
++              `${this.getAuraDisplayStatus_(info)}. Restart AuraDE to apply.`;
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE display mode', error);
++          this.auraDisplayStatus_ = 'Could not save display mode';
++        })
++        .finally(() => {
++          this.auraDisplayApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraDisplayApplyDisabled_(
++      available: boolean, applyInProgress: boolean, mode: string): boolean {
++    return !available || applyInProgress || !mode;
++  }
++
++  private onAuraDisplayScaleApplyClick_(): void {
++    const scale = Number(this.auraDisplayScalePref_.value || 1);
++    if (!scale || this.auraDisplayScaleApplyInProgress_) {
++      return;
++    }
++
++    this.auraDisplayScaleApplyInProgress_ = true;
++    this.browserProxy_.setAuraDisplayScale(scale)
++        .then(info => {
++          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
++          this.set(
++              'auraDisplayScalePref_.value',
++              info.configuredScale || info.currentScale || scale);
++          this.auraDisplayScaleStatus_ =
++              `${this.getAuraDisplayScaleStatus_(info)}. Applied.`;
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE display scale', error);
++          this.auraDisplayScaleStatus_ = 'Could not apply display scale';
++        })
++        .finally(() => {
++          this.auraDisplayScaleApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraDisplayScaleApplyDisabled_(
++      available: boolean, applyInProgress: boolean, scale: number): boolean {
++    return !available || applyInProgress || !scale;
++  }
++
++  private shouldHideChromeOsDisplayZoom_(
++      selectedDisplay: DisplayUnitInfo|undefined,
++      auraDisplayScaleAvailable: boolean): boolean {
++    return auraDisplayScaleAvailable && !!selectedDisplay &&
++        selectedDisplay.availableDisplayZoomFactors.length <= 1;
++  }
++
+   private displayInfoFetched_(displays: DisplayUnitInfo[]): void {
+     if (!displays.length) {
+       return;
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+index 1764a9516f..5fe3499233 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+@@ -4,16 +4,663 @@
+ 
+ #include "chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h"
+ 
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <optional>
++#include <vector>
++
+ #include "ash/display/cros_display_config.h"
+ #include "ash/shell.h"
+ #include "base/check_deref.h"
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
+ #include "base/values.h"
+ #include "content/public/browser/web_ui.h"
++#include "ui/display/display.h"
++#include "ui/display/manager/display_manager.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
+ 
+ namespace ash::settings {
++namespace {
++
++constexpr char kSysDrmPath[] = "/sys/class/drm";
++constexpr char kWestonConfigPath[] = ".config/weston.ini";
++constexpr char kAuraDisplayConfigPath[] = ".config/aurade/display.conf";
++constexpr char kAuraFeaturesConfigPath[] = ".config/aurade/features.conf";
++constexpr char kAuraDisplayScaleEnv[] = "AURADE_DISPLAY_SCALE";
++constexpr char kAuraFeatureProfileEnv[] = "AURADE_FEATURE_PROFILE";
++constexpr char kAuraFeatureProfileStandard[] = "standard";
++constexpr char kAuraFeatureProfilePlus[] = "plus";
++constexpr char kAuraFeatureProfileAdvancedPlus[] = "advanced_plus";
++constexpr char kAuraFeatureProfileAdvancedPlusAi[] = "advanced_plus_ai";
++constexpr uint64_t kBytesPerGiB = 1024ULL * 1024 * 1024;
++constexpr uint64_t kAuraPlusProfileMinRamBytes = 8ULL * kBytesPerGiB;
++constexpr double kAuraDisplayScaleDefault = 1.0;
++constexpr double kAuraDisplayScaleMin = 1.0;
++constexpr double kAuraDisplayScaleMax = 3.0;
++constexpr std::array<double, 7> kAuraDisplayScaleOptions = {
++    1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0};
++
++struct AuraDisplayState {
++  bool available = false;
++  std::string connector;
++  std::string configured_mode;
++  double configured_scale = kAuraDisplayScaleDefault;
++  double current_scale = kAuraDisplayScaleDefault;
++  std::vector<std::string> modes;
++};
++
++struct AuraFeatureProfileState {
++  bool available = true;
++  bool configured = false;
++  std::string configured_profile;
++  std::string current_profile;
++  std::string default_profile;
++  int memory_gb = 0;
++};
++
++std::string ConnectorNameFromPath(const base::FilePath& path) {
++  const std::string basename = path.BaseName().value();
++  const size_t separator = basename.find('-');
++  if (separator == std::string::npos) {
++    return basename;
++  }
++  return basename.substr(separator + 1);
++}
++
++bool IsValidMode(const std::string& mode) {
++  const std::vector<std::string> parts = base::SplitString(
++      mode, "x", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
++  if (parts.size() != 2) {
++    return false;
++  }
++
++  int width = 0;
++  int height = 0;
++  return base::StringToInt(parts[0], &width) &&
++         base::StringToInt(parts[1], &height) && width > 0 && height > 0 &&
++         width <= 10000 && height <= 10000;
++}
++
++bool IsValidAuraDisplayScale(double scale) {
++  return std::isfinite(scale) && scale >= kAuraDisplayScaleMin &&
++         scale <= kAuraDisplayScaleMax;
++}
++
++double NormalizeAuraDisplayScale(double scale) {
++  if (!std::isfinite(scale)) {
++    return kAuraDisplayScaleDefault;
++  }
++  return std::clamp(scale, kAuraDisplayScaleMin, kAuraDisplayScaleMax);
++}
++
++std::optional<base::FilePath> GetWestonConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kWestonConfigPath);
++}
++
++std::optional<base::FilePath> GetAuraDisplayConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kAuraDisplayConfigPath);
++}
++
++std::optional<base::FilePath> GetAuraFeaturesConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kAuraFeaturesConfigPath);
++}
++
++double GetConfiguredAuraDisplayScale() {
++  const std::optional<base::FilePath> config_path = GetAuraDisplayConfigFile();
++  if (!config_path) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (!line.starts_with("scale=")) {
++      continue;
++    }
++
++    double scale = kAuraDisplayScaleDefault;
++    if (base::StringToDouble(line.substr(6), &scale) &&
++        IsValidAuraDisplayScale(scale)) {
++      return scale;
++    }
++  }
++
++  return kAuraDisplayScaleDefault;
++}
++
++bool WriteAuraDisplayScale(double scale) {
++  const std::optional<base::FilePath> config_path = GetAuraDisplayConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  scale = NormalizeAuraDisplayScale(scale);
++  return base::WriteFile(*config_path, "# AuraDE display settings\nscale=" +
++                                           base::NumberToString(scale) + "\n");
++}
++
++std::string NormalizeAuraFeatureProfile(std::string profile) {
++  std::string trimmed_profile;
++  base::TrimWhitespaceASCII(profile, base::TRIM_ALL, &trimmed_profile);
++  profile = std::move(trimmed_profile);
++  if (profile.size() >= 2 &&
++      ((profile.front() == '"' && profile.back() == '"') ||
++       (profile.front() == '\'' && profile.back() == '\''))) {
++    profile = profile.substr(1, profile.size() - 2);
++  }
++
++  profile = base::ToLowerASCII(profile);
++  if (profile == kAuraFeatureProfileStandard ||
++      profile == kAuraFeatureProfilePlus ||
++      profile == kAuraFeatureProfileAdvancedPlus ||
++      profile == kAuraFeatureProfileAdvancedPlusAi) {
++    return profile;
++  }
++  return std::string();
++}
++
++int GetPhysicalMemoryGiB() {
++  const uint64_t memory =
++      base::SysInfo::AmountOfTotalPhysicalMemory().InBytes();
++  if (memory == 0) {
++    return 0;
++  }
++  return static_cast<int>((memory + kBytesPerGiB - 1) / kBytesPerGiB);
++}
++
++std::string GetDefaultAuraFeatureProfile() {
++  const uint64_t memory =
++      base::SysInfo::AmountOfTotalPhysicalMemory().InBytes();
++  return memory >= kAuraPlusProfileMinRamBytes ? kAuraFeatureProfilePlus
++                                               : kAuraFeatureProfileStandard;
++}
++
++std::string GetConfiguredAuraFeatureProfile(bool* configured) {
++  *configured = false;
++  const std::string default_profile = GetDefaultAuraFeatureProfile();
++  const std::optional<base::FilePath> config_path =
++      GetAuraFeaturesConfigFile();
++  if (!config_path) {
++    return default_profile;
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return default_profile;
++  }
++
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (line.starts_with("#")) {
++      continue;
++    }
++
++    const size_t separator = line.find('=');
++    if (separator == std::string::npos) {
++      continue;
++    }
++
++    const std::string key = line.substr(0, separator);
++    if (key != kAuraFeatureProfileEnv && key != "profile") {
++      continue;
++    }
++
++    const std::string profile =
++        NormalizeAuraFeatureProfile(line.substr(separator + 1));
++    if (!profile.empty()) {
++      *configured = true;
++      return profile;
++    }
++  }
++
++  return default_profile;
++}
++
++std::string GetCurrentAuraFeatureProfile(const std::string& fallback) {
++  auto env = base::Environment::Create();
++  std::optional<std::string> profile = env->GetVar(kAuraFeatureProfileEnv);
++  if (!profile || profile->empty()) {
++    return fallback;
++  }
++
++  const std::string normalized = NormalizeAuraFeatureProfile(*profile);
++  return normalized.empty() ? fallback : normalized;
++}
++
++AuraFeatureProfileState GetAuraFeatureProfileState() {
++  AuraFeatureProfileState state;
++  state.default_profile = GetDefaultAuraFeatureProfile();
++  state.memory_gb = GetPhysicalMemoryGiB();
++  state.configured_profile =
++      GetConfiguredAuraFeatureProfile(&state.configured);
++  state.current_profile = GetCurrentAuraFeatureProfile(state.configured_profile);
++  return state;
++}
++
++base::DictValue AuraFeatureProfileStateToValue(
++    const AuraFeatureProfileState& state) {
++  base::ListValue profiles;
++  profiles.Append(kAuraFeatureProfileStandard);
++  profiles.Append(kAuraFeatureProfilePlus);
++  profiles.Append(kAuraFeatureProfileAdvancedPlus);
++  profiles.Append(kAuraFeatureProfileAdvancedPlusAi);
++
++  base::DictValue value;
++  value.Set("available", state.available);
++  value.Set("configured", state.configured);
++  value.Set("configuredProfile", state.configured_profile);
++  value.Set("currentProfile", state.current_profile);
++  value.Set("defaultProfile", state.default_profile);
++  value.Set("memoryGb", state.memory_gb);
++  value.Set("profiles", std::move(profiles));
++  value.Set("requiresRestart",
++            state.configured_profile != state.current_profile);
++  value.Set("status", "Ready");
++  return value;
++}
++
++base::DictValue GetAuraFeatureProfileValueOnBlockingThread() {
++  return AuraFeatureProfileStateToValue(GetAuraFeatureProfileState());
++}
++
++std::string BuildUpdatedAuraFeaturesConfig(const std::string& original,
++                                           const std::string& profile) {
++  if (original.empty()) {
++    return "# AuraDE feature settings\n" +
++           std::string(kAuraFeatureProfileEnv) + "=" + profile + "\n";
++  }
++
++  std::vector<std::string> output;
++  bool wrote_profile = false;
++
++  for (const std::string& line : base::SplitString(
++           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    const size_t separator = trimmed.find('=');
++    const std::string key =
++        separator == std::string::npos ? std::string()
++                                       : trimmed.substr(0, separator);
++    if (key == kAuraFeatureProfileEnv || key == "profile") {
++      output.push_back(std::string(kAuraFeatureProfileEnv) + "=" + profile);
++      wrote_profile = true;
++      continue;
++    }
++    output.push_back(line);
++  }
++
++  if (!wrote_profile) {
++    if (!output.empty() && !output.back().empty()) {
++      output.push_back(std::string());
++    }
++    output.push_back(std::string(kAuraFeatureProfileEnv) + "=" + profile);
++  }
++
++  return base::JoinString(output, "\n") + "\n";
++}
++
++bool WriteAuraFeatureProfile(const std::string& profile) {
++  const std::optional<base::FilePath> config_path =
++      GetAuraFeaturesConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  std::string original;
++  base::ReadFileToString(*config_path, &original);
++  return base::WriteFile(*config_path,
++                         BuildUpdatedAuraFeaturesConfig(original, profile));
++}
++
++base::DictValue SetAuraFeatureProfileOnBlockingThread(
++    std::string requested_profile) {
++  requested_profile = NormalizeAuraFeatureProfile(requested_profile);
++
++  std::string status;
++  bool success = false;
++  if (requested_profile.empty()) {
++    status = "Unsupported feature profile";
++  } else if (!WriteAuraFeatureProfile(requested_profile)) {
++    status = "Unable to save feature profile";
++  } else {
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result =
++      AuraFeatureProfileStateToValue(GetAuraFeatureProfileState());
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++std::string GetConfiguredWestonMode() {
++  const std::optional<base::FilePath> config_path = GetWestonConfigFile();
++  if (!config_path) {
++    return std::string();
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return std::string();
++  }
++
++  bool in_output_section = false;
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      in_output_section = trimmed == "[output]";
++      continue;
++    }
++    if (!in_output_section || !trimmed.starts_with("mode=")) {
++      continue;
++    }
++
++    const std::string mode = trimmed.substr(5);
++    return IsValidMode(mode) ? mode : std::string();
++  }
++
++  return std::string();
++}
++
++AuraDisplayState GetAuraDisplayState() {
++  AuraDisplayState state;
++
++  base::FileEnumerator drm_outputs(base::FilePath(kSysDrmPath),
++                                   /*recursive=*/false,
++                                   base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath output = drm_outputs.Next(); !output.empty();
++       output = drm_outputs.Next()) {
++    const std::string basename = output.BaseName().value();
++    if (!basename.starts_with("card") ||
++        basename.find('-') == std::string::npos) {
++      continue;
++    }
++
++    std::string modes_text;
++    if (!base::ReadFileToString(output.Append("modes"), &modes_text) ||
++        modes_text.empty()) {
++      continue;
++    }
++
++    state.connector = ConnectorNameFromPath(output);
++    for (std::string mode :
++         base::SplitString(modes_text, "\n", base::TRIM_WHITESPACE,
++                           base::SPLIT_WANT_NONEMPTY)) {
++      if (IsValidMode(mode) && std::find(state.modes.begin(), state.modes.end(),
++                                         mode) == state.modes.end()) {
++        state.modes.push_back(std::move(mode));
++      }
++    }
++    break;
++  }
++
++  state.configured_mode = GetConfiguredWestonMode();
++  state.configured_scale = GetConfiguredAuraDisplayScale();
++  state.current_scale = state.configured_scale;
++  state.available = !state.connector.empty() && !state.modes.empty();
++  return state;
++}
++
++base::DictValue AuraDisplayStateToValue(const AuraDisplayState& state) {
++  base::ListValue modes;
++  for (const std::string& mode : state.modes) {
++    modes.Append(mode);
++  }
++
++  base::DictValue value;
++  value.Set("available", state.available);
++  value.Set("connector", state.connector);
++  value.Set("configuredMode", state.configured_mode);
++  value.Set("currentMode", state.configured_mode);
++  value.Set("configuredScale", state.configured_scale);
++  value.Set("currentScale", state.current_scale);
++  value.Set("scaleAvailable", true);
++  value.Set("requiresRestart", true);
++  value.Set("modes", std::move(modes));
++  base::ListValue scale_options;
++  for (double scale : kAuraDisplayScaleOptions) {
++    scale_options.Append(scale);
++  }
++  value.Set("scaleOptions", std::move(scale_options));
++  value.Set("status", state.available ? "Ready" : "No DRM display modes found");
++  return value;
++}
++
++base::DictValue GetAuraDisplayValueOnBlockingThread() {
++  return AuraDisplayStateToValue(GetAuraDisplayState());
++}
++
++std::string BuildUpdatedWestonConfig(const std::string& original,
++                                     const std::string& connector,
++                                     const std::string& mode) {
++  std::vector<std::string> output;
++  bool in_output_section = false;
++  bool saw_output_section = false;
++  bool wrote_name = false;
++  bool wrote_mode = false;
++
++  auto finish_output_section = [&]() {
++    if (!in_output_section) {
++      return;
++    }
++    if (!wrote_name) {
++      output.push_back("name=" + connector);
++    }
++    if (!wrote_mode) {
++      output.push_back("mode=" + mode);
++    }
++    wrote_name = false;
++    wrote_mode = false;
++  };
++
++  for (const std::string& line : base::SplitString(
++           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      finish_output_section();
++      in_output_section = trimmed == "[output]";
++      saw_output_section |= in_output_section;
++      output.push_back(line);
++      continue;
++    }
++
++    if (in_output_section && trimmed.starts_with("name=")) {
++      output.push_back("name=" + connector);
++      wrote_name = true;
++      continue;
++    }
++    if (in_output_section && trimmed.starts_with("mode=")) {
++      output.push_back("mode=" + mode);
++      wrote_mode = true;
++      continue;
++    }
++
++    output.push_back(line);
++  }
++
++  finish_output_section();
++
++  if (!saw_output_section) {
++    if (!output.empty() && !output.back().empty()) {
++      output.push_back(std::string());
++    }
++    output.push_back("[output]");
++    output.push_back("name=" + connector);
++    output.push_back("mode=" + mode);
++  }
++
++  return base::JoinString(output, "\n") + "\n";
++}
++
++bool WriteWestonDisplayMode(const std::string& connector,
++                            const std::string& mode) {
++  const std::optional<base::FilePath> config_path = GetWestonConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  std::string original;
++  base::ReadFileToString(*config_path, &original);
++  return base::WriteFile(*config_path,
++                         BuildUpdatedWestonConfig(original, connector, mode));
++}
++
++base::DictValue SetAuraDisplayModeOnBlockingThread(std::string requested_mode) {
++  AuraDisplayState state = GetAuraDisplayState();
++  const bool valid_mode = IsValidMode(requested_mode) &&
++                          std::find(state.modes.begin(), state.modes.end(),
++                                    requested_mode) != state.modes.end();
++
++  std::string status;
++  bool success = false;
++  if (!state.available) {
++    status = "No DRM display modes found";
++  } else if (!valid_mode) {
++    status = "Unsupported display mode";
++  } else if (!WriteWestonDisplayMode(state.connector, requested_mode)) {
++    status = "Unable to save display mode";
++  } else {
++    state.configured_mode = requested_mode;
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result = AuraDisplayStateToValue(state);
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++base::DictValue SetAuraDisplayScaleOnBlockingThread(double requested_scale) {
++  AuraDisplayState state = GetAuraDisplayState();
++
++  std::string status;
++  bool success = false;
++  if (!IsValidAuraDisplayScale(requested_scale)) {
++    status = "Unsupported display scale";
++  } else if (!WriteAuraDisplayScale(requested_scale)) {
++    status = "Unable to save display scale";
++  } else {
++    state.configured_scale = NormalizeAuraDisplayScale(requested_scale);
++    state.current_scale = state.configured_scale;
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result = AuraDisplayStateToValue(state);
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++double GetCurrentAuraDisplayScale() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  const display::Display& primary = display::Screen::Get()->GetPrimaryDisplay();
++  if (primary.id() == display::kInvalidDisplayId) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  return NormalizeAuraDisplayScale(primary.device_scale_factor());
++}
++
++bool ApplyAuraDisplayScale(double scale) {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  scale = NormalizeAuraDisplayScale(scale);
++  auto env = base::Environment::Create();
++  env->SetVar(kAuraDisplayScaleEnv, base::NumberToString(scale));
++
++  display::DisplayManager* display_manager = Shell::Get()->display_manager();
++  if (!display_manager || display_manager->active_display_list().empty()) {
++    return false;
++  }
++
++  const display::Display& primary = display::Screen::Get()->GetPrimaryDisplay();
++  if (primary.id() == display::kInvalidDisplayId) {
++    return false;
++  }
++
++  display::ManagedDisplayInfo display_info =
++      display_manager->GetDisplayInfo(primary.id());
++  gfx::Rect native_bounds = display_info.bounds_in_native();
++  if (native_bounds.IsEmpty()) {
++    native_bounds = gfx::Rect(display_info.size_in_pixel());
++  }
++  if (native_bounds.IsEmpty()) {
++    return false;
++  }
++
++  const display::ManagedDisplayMode scaled_host_mode(
++      native_bounds.size(), display_info.refresh_rate(),
++      display_info.is_interlaced(), true, scale);
++
++  // AuraDE compatibility: use Ash's device scale factor for Linux desktop UI
++  // scaling. Unlike ChromeOS display zoom, this keeps the native host surface
++  // fixed while changing the DIP coordinate space used by shelf, wallpaper,
++  // windows, and web UI.
++  display_info.set_device_scale_factor(scale);
++  display_info.set_zoom_factor(1.f);
++  display_info.SetBounds(native_bounds);
++  display_info.SetManagedDisplayModes({scaled_host_mode});
++  display_info.AddZoomFactorForSize(native_bounds.size().ToString(), 1.f);
++
++  display::DisplayInfoList display_info_list;
++  for (const display::Display& active_display :
++       display_manager->active_display_list()) {
++    display_info_list.push_back(
++        active_display.id() == primary.id()
++            ? display_info
++            : display_manager->GetDisplayInfo(active_display.id()));
++  }
++  display_manager->OnNativeDisplaysChanged(display_info_list);
++  return true;
++}
++
++}  // namespace
+ 
+ DisplayHandler::DisplayHandler()
+     : cros_display_config_(CHECK_DEREF(Shell::Get()->cros_display_config())) {}
+@@ -32,6 +679,31 @@ void DisplayHandler::RegisterMessages() {
+       "dragDisplayDelta",
+       base::BindRepeating(&DisplayHandler::HandleDragDisplayDelta,
+                           base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "getAuraDisplayInfo",
++      base::BindRepeating(&DisplayHandler::HandleGetAuraDisplayInfo,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraDisplayMode",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraDisplayMode,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraDisplayScale",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraDisplayScale,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "getAuraFeatureProfileInfo",
++      base::BindRepeating(&DisplayHandler::HandleGetAuraFeatureProfileInfo,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraFeatureProfile",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraFeatureProfile,
++                          base::Unretained(this)));
+ }
+ 
+ void DisplayHandler::HandleHighlightDisplay(const base::ListValue& args) {
+@@ -64,4 +736,154 @@ void DisplayHandler::HandleDragDisplayDelta(const base::ListValue& args) {
+   cros_display_config_->DragDisplayDelta(display_id, delta_x, delta_y);
+ }
+ 
++void DisplayHandler::HandleGetAuraDisplayInfo(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(1U, args.size());
++  std::string callback_id = args[0].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&GetAuraDisplayValueOnBlockingThread),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayInfo,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraDisplayMode(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  std::string requested_mode = args[1].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraDisplayModeOnBlockingThread,
++                     std::move(requested_mode)),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayMode,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraDisplayScale(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  double requested_scale = kAuraDisplayScaleDefault;
++  if (args[1].is_double()) {
++    requested_scale = args[1].GetDouble();
++  } else if (args[1].is_int()) {
++    requested_scale = args[1].GetInt();
++  }
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraDisplayScaleOnBlockingThread, requested_scale),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayScale,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleGetAuraFeatureProfileInfo(
++    const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(1U, args.size());
++  std::string callback_id = args[0].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&GetAuraFeatureProfileValueOnBlockingThread),
++      base::BindOnce(&DisplayHandler::ResolveAuraFeatureProfileInfo,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraFeatureProfile(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  std::string requested_profile = args[1].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraFeatureProfileOnBlockingThread,
++                     std::move(requested_profile)),
++      base::BindOnce(&DisplayHandler::ResolveAuraFeatureProfile,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::ResolveAuraDisplayInfo(std::string callback_id,
++                                            base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  info.Set("currentScale", GetCurrentAuraDisplayScale());
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
++}
++
++void DisplayHandler::ResolveAuraDisplayMode(std::string callback_id,
++                                            base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
++void DisplayHandler::ResolveAuraDisplayScale(std::string callback_id,
++                                             base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  const std::optional<double> scale = result.FindDouble("configuredScale");
++  if (!scale || !ApplyAuraDisplayScale(*scale)) {
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value("Unable to apply display scale"));
++    return;
++  }
++
++  result.Set("currentScale", GetCurrentAuraDisplayScale());
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
++void DisplayHandler::ResolveAuraFeatureProfileInfo(std::string callback_id,
++                                                   base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
++}
++
++void DisplayHandler::ResolveAuraFeatureProfile(std::string callback_id,
++                                               base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
+ }  // namespace ash::settings
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+index ed34140842..c35d9d8f9a 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+@@ -5,7 +5,10 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
+ #define CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
+ 
++#include <string>
++
+ #include "base/memory/raw_ref.h"
++#include "base/memory/weak_ptr.h"
+ #include "content/public/browser/web_ui_message_handler.h"
+ 
+ namespace ash {
+@@ -13,6 +16,7 @@ class CrosDisplayConfig;
+ }  // namespace ash
+ 
+ namespace base {
++class DictValue;
+ class ListValue;
+ }  // namespace base
+ 
+@@ -34,8 +38,21 @@ class DisplayHandler : public content::WebUIMessageHandler {
+  private:
+   void HandleHighlightDisplay(const base::ListValue& args);
+   void HandleDragDisplayDelta(const base::ListValue& args);
++  void HandleGetAuraDisplayInfo(const base::ListValue& args);
++  void HandleSetAuraDisplayMode(const base::ListValue& args);
++  void HandleSetAuraDisplayScale(const base::ListValue& args);
++  void HandleGetAuraFeatureProfileInfo(const base::ListValue& args);
++  void HandleSetAuraFeatureProfile(const base::ListValue& args);
++  void ResolveAuraDisplayInfo(std::string callback_id, base::DictValue info);
++  void ResolveAuraDisplayMode(std::string callback_id, base::DictValue result);
++  void ResolveAuraDisplayScale(std::string callback_id, base::DictValue result);
++  void ResolveAuraFeatureProfileInfo(std::string callback_id,
++                                     base::DictValue info);
++  void ResolveAuraFeatureProfile(std::string callback_id,
++                                 base::DictValue result);
+ 
+   const raw_ref<CrosDisplayConfig> cros_display_config_;
++  base::WeakPtrFactory<DisplayHandler> weak_ptr_factory_{this};
+ };
+ 
+ }  // namespace ash::settings
+diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
+index 71ada86bca..b5d2d23080 100644
+--- a/ui/display/manager/display_manager.cc
++++ b/ui/display/manager/display_manager.cc
+@@ -777,8 +777,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
+     display_info_list.emplace_back(info);
+   }
+ 
+-  if (display_property_changed)
++  if (display_property_changed) {
+     UpdateDisplaysWith(display_info_list);
++  }
+ }
+ 
+ bool DisplayManager::SetDisplayMode(int64_t display_id,
+@@ -1899,6 +1900,13 @@ void DisplayManager::ClearTouchCalibrationData(
+ void DisplayManager::UpdateZoomFactor(int64_t display_id, float zoom_factor) {
+   DCHECK(zoom_factor > 0);
+   DCHECK_NE(display_id, kInvalidDisplayId);
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: non-ChromeOS Linux hosts do not have the ChromeOS
++    // native display stack behind Ash. Applying display zoom here changes the
++    // logical root size without changing the host surface, so the shelf and
++    // wallpaper no longer cover the visible desktop.
++    zoom_factor = 1.f;
++  }
+   auto iter = display_info_.find(display_id);
+   if (iter == display_info_.end()) {
+     return;

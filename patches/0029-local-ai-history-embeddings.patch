@@ -1,0 +1,591 @@
+diff --git a/chrome/browser/history_embeddings/history_embeddings_utils.cc b/chrome/browser/history_embeddings/history_embeddings_utils.cc
+index 8198ba0c74..9d88721042 100644
+--- a/chrome/browser/history_embeddings/history_embeddings_utils.cc
++++ b/chrome/browser/history_embeddings/history_embeddings_utils.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/history_embeddings/history_embeddings_utils.h"
+ 
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/passage_embeddings/aurade_local_passage_embedder.h"
+ #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+ #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -28,6 +29,12 @@ namespace history_embeddings {
+ 
+ namespace {
+ 
++// AuraDE compatibility: true when the local Gemma-backed passage embedder is
++// active, which enables history embeddings without a Google account.
++bool AuraDeHistoryEmbeddingsEnabled() {
++  return passage_embeddings::AuraDeLocalPassageEmbedder::IsEnabled();
++}
++
+ // Returns the country code from the variations service.
+ std::string GetCountryCode(variations::VariationsService* variations_service) {
+   std::string country_code;
+@@ -64,6 +71,13 @@ bool IsHistoryEmbeddingsEnabledForProfile(Profile* profile) {
+     return false;
+   }
+ 
++  // AuraDE compatibility: local Gemma-backed embeddings do not depend on a
++  // signed-in Google account or optimization-guide model execution, so enable
++  // the feature for local profiles once the AuraDE local embedder is active.
++  if (AuraDeHistoryEmbeddingsEnabled()) {
++    return true;
++  }
++
+   OptimizationGuideKeyedService* optimization_guide_keyed_service =
+       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
+   return optimization_guide_keyed_service &&
+@@ -98,6 +112,11 @@ bool IsHistoryEmbeddingsSettingVisible(Profile* profile) {
+     return false;
+   }
+ 
++  // AuraDE compatibility: expose the setting for local Gemma-backed embeddings.
++  if (AuraDeHistoryEmbeddingsEnabled()) {
++    return true;
++  }
++
+   OptimizationGuideKeyedService* optimization_guide_keyed_service =
+       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
+   return optimization_guide_keyed_service &&
+diff --git a/chrome/browser/passage_embeddings/BUILD.gn b/chrome/browser/passage_embeddings/BUILD.gn
+index 621a9dcfa0..55e8bbd727 100644
+--- a/chrome/browser/passage_embeddings/BUILD.gn
++++ b/chrome/browser/passage_embeddings/BUILD.gn
+@@ -4,6 +4,8 @@
+ 
+ source_set("passage_embeddings") {
+   sources = [
++    "aurade_local_passage_embedder.cc",
++    "aurade_local_passage_embedder.h",
+     "chrome_passage_embeddings_service_controller.cc",
+     "chrome_passage_embeddings_service_controller.h",
+     "chrome_passage_embeddings_service_launcher.cc",
+@@ -25,6 +27,8 @@ source_set("passage_embeddings") {
+     "//components/performance_manager",
+     "//components/permissions:permissions_common",
+     "//content/public/browser",
++    "//net",
++    "//services/network/public/cpp",
+     "//services/passage_embeddings/public/mojom",
+   ]
+   if (is_chromeos) {
+diff --git a/chrome/browser/passage_embeddings/aurade_local_passage_embedder.cc b/chrome/browser/passage_embeddings/aurade_local_passage_embedder.cc
+new file mode 100644
+index 0000000000..c70d0d74a7
+--- /dev/null
++++ b/chrome/browser/passage_embeddings/aurade_local_passage_embedder.cc
+@@ -0,0 +1,238 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/passage_embeddings/aurade_local_passage_embedder.h"
++
++#include <cmath>
++#include <utility>
++
++#include "base/environment.h"
++#include "base/hash/hash.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/logging.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
++#include "base/values.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++
++namespace passage_embeddings {
++
++namespace {
++
++constexpr char kProfileEnvVar[] = "AURADE_FEATURE_PROFILE";
++constexpr char kAdvancedPlusAiProfile[] = "advanced_plus_ai";
++constexpr char kEndpointEnvVar[] = "AURADE_LOCAL_AI_ENDPOINT";
++constexpr char kEmbedModelEnvVar[] = "AURADE_LOCAL_AI_EMBED_MODEL";
++constexpr char kEmbedDimEnvVar[] = "AURADE_LOCAL_AI_EMBED_DIM";
++constexpr char kEmbedScoreThresholdEnvVar[] =
++    "AURADE_LOCAL_AI_EMBED_SCORE_THRESHOLD";
++constexpr char kDefaultEndpoint[] = "http://127.0.0.1:11434";
++constexpr size_t kDefaultEmbeddingDimensions = 768;
++// Must stay within SimpleURLLoader's bounded DownloadToString limit.
++constexpr size_t kMaxResponseBytes = 4 * 1024 * 1024;
++constexpr base::TimeDelta kRequestTimeout = base::Seconds(90);
++
++const net::NetworkTrafficAnnotationTag kAuraDeLocalEmbedTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("aurade_local_embeddings_request",
++                                        R"(
++        semantics {
++          sender: "AuraDE Local AI"
++          description:
++            "AuraDE sends history passage text to a local embedding model "
++            "runtime running on the same machine. The default endpoint is "
++            "Ollama on localhost."
++          trigger:
++            "Chrome computes embeddings for browsing history passages so "
++            "history search can work with a local model."
++          data: "Extracted page passage text."
++          destination: LOCAL
++        }
++        policy {
++          cookies_allowed: NO
++          setting:
++            "Only active when the AuraDE Advanced Plus AI feature profile "
++            "and a local embedding model are configured."
++          policy_exception_justification:
++            "Local-only request; no data leaves the machine."
++        })");
++
++std::string GetEnv(const char* name) {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  return env->GetVar(std::string(name)).value_or(std::string());
++}
++
++std::string GetEmbedModel() {
++  return GetEnv(kEmbedModelEnvVar);
++}
++
++std::string GetEndpoint() {
++  std::string endpoint = GetEnv(kEndpointEnvVar);
++  return endpoint.empty() ? kDefaultEndpoint : endpoint;
++}
++
++size_t GetEmbeddingDimensions() {
++  size_t dimensions = 0;
++  if (base::StringToSizeT(GetEnv(kEmbedDimEnvVar), &dimensions) &&
++      dimensions > 0) {
++    return dimensions;
++  }
++  return kDefaultEmbeddingDimensions;
++}
++
++double GetSearchScoreThreshold() {
++  double threshold = 0.0;
++  if (base::StringToDouble(GetEnv(kEmbedScoreThresholdEnvVar), &threshold) &&
++      threshold > 0.0 && threshold < 1.0) {
++    return threshold;
++  }
++  // Gemma-family embedding similarities for related text sit well below the
++  // 0.9 default tuned for the original Google embedder.
++  return 0.5;
++}
++
++}  // namespace
++
++// static
++bool AuraDeLocalPassageEmbedder::IsEnabled() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++  if (GetEnv(kProfileEnvVar) != kAdvancedPlusAiProfile) {
++    return false;
++  }
++  return !GetEmbedModel().empty();
++}
++
++// static
++EmbedderMetadata AuraDeLocalPassageEmbedder::GetMetadata() {
++  // Derive a stable nonzero version from the model name so switching the
++  // local model invalidates and re-embeds existing databases.
++  int64_t version =
++      static_cast<int64_t>(base::PersistentHash(GetEmbedModel())) + 1;
++  return EmbedderMetadata(version, GetEmbeddingDimensions(),
++                          GetSearchScoreThreshold());
++}
++
++AuraDeLocalPassageEmbedder::AuraDeLocalPassageEmbedder(
++    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
++    : url_loader_factory_(std::move(url_loader_factory)) {}
++
++AuraDeLocalPassageEmbedder::~AuraDeLocalPassageEmbedder() = default;
++
++void AuraDeLocalPassageEmbedder::ComputeEmbeddings(
++    std::vector<std::string> passages,
++    ResultCallback callback) {
++  base::ListValue input;
++  for (const std::string& passage : passages) {
++    input.Append(passage);
++  }
++  base::DictValue body;
++  body.Set("model", GetEmbedModel());
++  body.Set("input", std::move(input));
++  body.Set("truncate", true);
++  std::string post_body;
++  base::JSONWriter::Write(body, &post_body);
++
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GURL(GetEndpoint() + "/api/embed");
++  resource_request->method = "POST";
++  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++
++  std::unique_ptr<network::SimpleURLLoader> loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kAuraDeLocalEmbedTrafficAnnotation);
++  loader->AttachStringForUpload(post_body, "application/json");
++  loader->SetTimeoutDuration(kRequestTimeout);
++
++  loaders_.push_front(std::move(loader));
++  auto loader_it = loaders_.begin();
++  (*loader_it)
++      ->DownloadToString(
++          url_loader_factory_.get(),
++          base::BindOnce(&AuraDeLocalPassageEmbedder::OnResponse,
++                         base::Unretained(this), loader_it, passages.size(),
++                         std::move(callback)),
++          kMaxResponseBytes);
++}
++
++void AuraDeLocalPassageEmbedder::OnResponse(
++    LoaderList::iterator loader_it,
++    size_t expected_count,
++    ResultCallback callback,
++    std::optional<std::string> response_body) {
++  const int net_error = (*loader_it)->NetError();
++  loaders_.erase(loader_it);
++
++  if (net_error != net::OK || !response_body.has_value()) {
++    LOG(ERROR) << "AuraDE embeddings: local endpoint request failed, net "
++                  "error "
++               << net_error;
++    std::move(callback).Run({}, ComputeEmbeddingsStatus::kExecutionFailure);
++    return;
++  }
++
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(*response_body, /*options=*/0);
++  if (!parsed) {
++    LOG(ERROR) << "AuraDE embeddings: local endpoint returned invalid JSON";
++    std::move(callback).Run({}, ComputeEmbeddingsStatus::kExecutionFailure);
++    return;
++  }
++
++  if (const std::string* error = parsed->FindString("error")) {
++    LOG(ERROR) << "AuraDE embeddings: local endpoint error: " << *error;
++    std::move(callback).Run({}, ComputeEmbeddingsStatus::kModelUnavailable);
++    return;
++  }
++
++  const base::ListValue* embeddings = parsed->FindList("embeddings");
++  if (!embeddings || embeddings->size() != expected_count) {
++    LOG(ERROR) << "AuraDE embeddings: expected " << expected_count
++               << " embeddings, got "
++               << (embeddings ? embeddings->size() : 0u);
++    std::move(callback).Run({}, ComputeEmbeddingsStatus::kExecutionFailure);
++    return;
++  }
++
++  const size_t expected_dimensions = GetEmbeddingDimensions();
++  std::vector<mojom::PassageEmbeddingsResultPtr> results;
++  results.reserve(embeddings->size());
++  for (const base::Value& entry : *embeddings) {
++    const base::ListValue* vector = entry.GetIfList();
++    if (!vector || vector->size() != expected_dimensions) {
++      LOG(ERROR) << "AuraDE embeddings: embedding size "
++                 << (vector ? vector->size() : 0u) << " does not match "
++                 << "configured " << kEmbedDimEnvVar << "="
++                 << expected_dimensions;
++      std::move(callback).Run({}, ComputeEmbeddingsStatus::kExecutionFailure);
++      return;
++    }
++    auto result = mojom::PassageEmbeddingsResult::New();
++    result->embeddings.reserve(vector->size());
++    double magnitude_squared = 0.0;
++    for (const base::Value& component : *vector) {
++      const double value = component.GetIfDouble().value_or(0.0);
++      magnitude_squared += value * value;
++      result->embeddings.push_back(static_cast<float>(value));
++    }
++    // Normalize so downstream dot-product scoring behaves like the
++    // upstream embedder, which produces unit vectors.
++    const double magnitude = std::sqrt(magnitude_squared);
++    if (magnitude > 0.0) {
++      for (float& component : result->embeddings) {
++        component = static_cast<float>(component / magnitude);
++      }
++    }
++    results.push_back(std::move(result));
++  }
++
++  std::move(callback).Run(std::move(results),
++                          ComputeEmbeddingsStatus::kSuccess);
++}
++
++}  // namespace passage_embeddings
+diff --git a/chrome/browser/passage_embeddings/aurade_local_passage_embedder.h b/chrome/browser/passage_embeddings/aurade_local_passage_embedder.h
+new file mode 100644
+index 0000000000..b9c524f2da
+--- /dev/null
++++ b/chrome/browser/passage_embeddings/aurade_local_passage_embedder.h
+@@ -0,0 +1,70 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_PASSAGE_EMBEDDINGS_AURADE_LOCAL_PASSAGE_EMBEDDER_H_
++#define CHROME_BROWSER_PASSAGE_EMBEDDINGS_AURADE_LOCAL_PASSAGE_EMBEDDER_H_
++
++#include <list>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/scoped_refptr.h"
++#include "components/passage_embeddings/core/passage_embeddings_types.h"
++#include "services/passage_embeddings/public/mojom/passage_embeddings.mojom.h"
++
++namespace network {
++class SharedURLLoaderFactory;
++class SimpleURLLoader;
++}  // namespace network
++
++namespace passage_embeddings {
++
++// AuraDE compatibility: computes passage embeddings by calling a local model
++// runtime (Ollama by default) over HTTP instead of the downloaded
++// TFLite/Gemini Nano embedder, which is unavailable on generic Linux.
++class AuraDeLocalPassageEmbedder {
++ public:
++  using ResultCallback = base::OnceCallback<void(
++      std::vector<mojom::PassageEmbeddingsResultPtr> results,
++      ComputeEmbeddingsStatus status)>;
++
++  // True when running on generic Linux with the Advanced Plus AI profile and
++  // a configured local embedding model.
++  static bool IsEnabled();
++
++  // Metadata describing the configured local embedding model. Only meaningful
++  // when IsEnabled() returns true. The model version is derived from the
++  // model name so switching models re-embeds existing databases.
++  static EmbedderMetadata GetMetadata();
++
++  explicit AuraDeLocalPassageEmbedder(
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++  AuraDeLocalPassageEmbedder(const AuraDeLocalPassageEmbedder&) = delete;
++  AuraDeLocalPassageEmbedder& operator=(const AuraDeLocalPassageEmbedder&) =
++      delete;
++  ~AuraDeLocalPassageEmbedder();
++
++  // Requests embeddings for `passages` from the local runtime. Invokes
++  // `callback` with one result per passage on success, or with empty results
++  // and a failure status.
++  void ComputeEmbeddings(std::vector<std::string> passages,
++                         ResultCallback callback);
++
++ private:
++  using LoaderList = std::list<std::unique_ptr<network::SimpleURLLoader>>;
++
++  void OnResponse(LoaderList::iterator loader_it,
++                  size_t expected_count,
++                  ResultCallback callback,
++                  std::optional<std::string> response_body);
++
++  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
++  LoaderList loaders_;
++};
++
++}  // namespace passage_embeddings
++
++#endif  // CHROME_BROWSER_PASSAGE_EMBEDDINGS_AURADE_LOCAL_PASSAGE_EMBEDDER_H_
+diff --git a/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.cc b/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.cc
+index 0f8332a681..3f7c5c60f2 100644
+--- a/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.cc
++++ b/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.cc
+@@ -8,6 +8,9 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/process/process.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/net/system_network_context_manager.h"
++#include "chrome/browser/passage_embeddings/aurade_local_passage_embedder.h"
+ #include "content/public/browser/browser_child_process_host.h"
+ #include "content/public/browser/browser_child_process_host_iterator.h"
+ #include "content/public/browser/browser_thread.h"
+@@ -15,11 +18,22 @@
+ #include "content/public/browser/service_process_host.h"
+ #include "content/public/common/process_type.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
+ 
+ namespace passage_embeddings {
+ 
+ ChromePassageEmbeddingsServiceLauncher::
+-    ChromePassageEmbeddingsServiceLauncher() = default;
++    ChromePassageEmbeddingsServiceLauncher() {
++  if (AuraDeLocalPassageEmbedder::IsEnabled()) {
++    // AuraDE compatibility: retain Chromium's 152 launcher/controller split,
++    // but supply the generic-Linux embedder through the controller callback.
++    controller_.SetAuraDeLocalEmbedder(
++        base::BindRepeating(
++            &ChromePassageEmbeddingsServiceLauncher::GetAuraDeLocalEmbeddings,
++            base::Unretained(this)),
++        AuraDeLocalPassageEmbedder::GetMetadata());
++  }
++}
+ 
+ ChromePassageEmbeddingsServiceLauncher::
+     ~ChromePassageEmbeddingsServiceLauncher() = default;
+@@ -52,6 +66,19 @@ bool ChromePassageEmbeddingsServiceLauncher::AllowedToLaunch() const {
+   return true;
+ }
+ 
++void ChromePassageEmbeddingsServiceLauncher::GetAuraDeLocalEmbeddings(
++    std::vector<std::string> passages,
++    PassagePriority /*priority*/,
++    PassageEmbeddingsServiceController::GetEmbeddingsResultCallback callback) {
++  if (!aurade_local_embedder_) {
++    aurade_local_embedder_ = std::make_unique<AuraDeLocalPassageEmbedder>(
++        g_browser_process->system_network_context_manager()
++            ->GetSharedURLLoaderFactory());
++  }
++  aurade_local_embedder_->ComputeEmbeddings(std::move(passages),
++                                            std::move(callback));
++}
++
+ void ChromePassageEmbeddingsServiceLauncher::OnServiceLaunched(
+     const base::Process& process) {
+   // `OnServiceLaunched` is triggered by the same observable that
+diff --git a/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.h b/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.h
+index d92830989a..0499a3c972 100644
+--- a/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.h
++++ b/chrome/browser/passage_embeddings/chrome_passage_embeddings_service_launcher.h
+@@ -5,6 +5,9 @@
+ #ifndef CHROME_BROWSER_PASSAGE_EMBEDDINGS_CHROME_PASSAGE_EMBEDDINGS_SERVICE_LAUNCHER_H_
+ #define CHROME_BROWSER_PASSAGE_EMBEDDINGS_CHROME_PASSAGE_EMBEDDINGS_SERVICE_LAUNCHER_H_
+ 
++#include <memory>
++#include <vector>
++
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/passage_embeddings/cpu_histogram_logger.h"
+ #include "components/passage_embeddings/core/passage_embeddings_service_controller.h"
+@@ -17,6 +20,8 @@ class Process;
+ 
+ namespace passage_embeddings {
+ 
++class AuraDeLocalPassageEmbedder;
++
+ // Launches the passage embeddings service and manages its lifetime.
+ class ChromePassageEmbeddingsServiceLauncher
+     : public PassageEmbeddingsServiceLauncher {
+@@ -44,12 +49,19 @@ class ChromePassageEmbeddingsServiceLauncher
+   void InitializeCpuLogger();
+ 
+   void OnServiceLaunched(const base::Process& process);
++  void GetAuraDeLocalEmbeddings(
++      std::vector<std::string> passages,
++      PassagePriority /*priority*/,
++      PassageEmbeddingsServiceController::GetEmbeddingsResultCallback callback);
+ 
+   ServiceState service_state_ = ServiceState::kIdle;
+ 
+   // Periodically samples and logs the CPU time used by the service process.
+   CpuHistogramLogger cpu_logger_;
+ 
++  // AuraDE compatibility: created lazily for the local Ollama embedding path.
++  std::unique_ptr<AuraDeLocalPassageEmbedder> aurade_local_embedder_;
++
+   PassageEmbeddingsServiceController controller_{*this};
+ 
+   base::WeakPtrFactory<ChromePassageEmbeddingsServiceLauncher>
+diff --git a/components/passage_embeddings/core/passage_embeddings_service_controller.cc b/components/passage_embeddings/core/passage_embeddings_service_controller.cc
+index 5124c5a8c0..30b55715c7 100644
+--- a/components/passage_embeddings/core/passage_embeddings_service_controller.cc
++++ b/components/passage_embeddings/core/passage_embeddings_service_controller.cc
+@@ -207,12 +207,21 @@ Embedder* PassageEmbeddingsServiceController::GetEmbedder() {
+ 
+ void PassageEmbeddingsServiceController::AddObserver(
+     EmbedderMetadataObserver* observer) {
+-  if (IsModelAvailable()) {
++  if (aurade_local_metadata_.has_value() || IsModelAvailable()) {
+     observer->EmbedderMetadataUpdated(GetEmbedderMetadata());
+   }
+   observer_list_.AddObserver(observer);
+ }
+ 
++void PassageEmbeddingsServiceController::SetAuraDeLocalEmbedder(
++    GetEmbeddingsCallback callback,
++    EmbedderMetadata metadata) {
++  aurade_local_get_embeddings_ = std::move(callback);
++  aurade_local_metadata_ = metadata;
++  observer_list_.Notify(&EmbedderMetadataObserver::EmbedderMetadataUpdated,
++                        GetEmbedderMetadata());
++}
++
+ void PassageEmbeddingsServiceController::RemoveObserver(
+     EmbedderMetadataObserver* observer) {
+   observer_list_.RemoveObserver(observer);
+@@ -227,6 +236,12 @@ void PassageEmbeddingsServiceController::GetEmbeddings(
+     return;
+   }
+ 
++  if (aurade_local_get_embeddings_) {
++    aurade_local_get_embeddings_.Run(std::move(passages), priority,
++                                     std::move(callback));
++    return;
++  }
++
+   if (!IsModelAvailable()) {
+     VLOG(1) << "Missing model path: embeddings='" << embeddings_model_path_
+             << "'; sp='" << sp_model_path_ << "'";
+@@ -278,6 +293,10 @@ void PassageEmbeddingsServiceController::GetEmbeddings(
+ }
+ 
+ EmbedderMetadata PassageEmbeddingsServiceController::GetEmbedderMetadata() {
++  if (aurade_local_metadata_.has_value()) {
++    return *aurade_local_metadata_;
++  }
++
+   if (model_metadata_->score_threshold() > 0.0) {
+     return EmbedderMetadata(model_version_, model_metadata_->output_size(),
+                             model_metadata_->score_threshold());
+diff --git a/components/passage_embeddings/core/passage_embeddings_service_controller.h b/components/passage_embeddings/core/passage_embeddings_service_controller.h
+index 183cfd7425..7bb3c59580 100644
+--- a/components/passage_embeddings/core/passage_embeddings_service_controller.h
++++ b/components/passage_embeddings/core/passage_embeddings_service_controller.h
+@@ -59,11 +59,6 @@ class PassageEmbeddingsServiceController : public EmbedderMetadataProvider {
+   void AddObserver(EmbedderMetadataObserver* observer) override;
+   void RemoveObserver(EmbedderMetadataObserver* observer) override;
+ 
+- private:
+-  // Computes embeddings for each entry in `passages`. Will invoke `callback`
+-  // when done. If successful, it is guaranteed that `results` will have the
+-  // same number of passages and embeddings and in the same order as
+-  // `passages`. Otherwise `results` will have empty passages and embeddings.
+   using GetEmbeddingsResultCallback = base::OnceCallback<void(
+       std::vector<mojom::PassageEmbeddingsResultPtr> results,
+       ComputeEmbeddingsStatus status)>;
+@@ -71,6 +66,17 @@ class PassageEmbeddingsServiceController : public EmbedderMetadataProvider {
+       base::RepeatingCallback<void(std::vector<std::string> passages,
+                                    PassagePriority priority,
+                                    GetEmbeddingsResultCallback callback)>;
++
++  // AuraDE compatibility: routes generation and metadata to a local model
++  // runtime that does not use downloaded model files.
++  void SetAuraDeLocalEmbedder(GetEmbeddingsCallback callback,
++                              EmbedderMetadata metadata);
++
++ private:
++  // Computes embeddings for each entry in `passages`. Will invoke `callback`
++  // when done. If successful, it is guaranteed that `results` will have the
++  // same number of passages and embeddings and in the same order as
++  // `passages`. Otherwise `results` will have empty passages and embeddings.
+   void GetEmbeddings(std::vector<std::string> passages,
+                      PassagePriority priority,
+                      GetEmbeddingsResultCallback callback);
+@@ -130,6 +136,11 @@ class PassageEmbeddingsServiceController : public EmbedderMetadataProvider {
+   std::optional<optimization_guide::proto::PassageEmbeddingsModelMetadata>
+       model_metadata_;
+ 
++  // AuraDE compatibility: metadata for a local HTTP embedder, taking
++  // precedence over downloaded-model metadata when set.
++  std::optional<EmbedderMetadata> aurade_local_metadata_;
++  GetEmbeddingsCallback aurade_local_get_embeddings_;
++
+   base::FilePath embeddings_model_path_;
+   base::FilePath sp_model_path_;
+ 

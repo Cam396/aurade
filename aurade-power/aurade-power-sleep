@@ -1,0 +1,31 @@
+#!/bin/bash
+# systemd invokes this as root immediately before and after system sleep.
+set -u
+
+state_dir=/var/lib/aurade
+state_file="${state_dir}/backlight-before-sleep"
+
+case "${1:-}" in
+  pre)
+    install -d -m 755 "${state_dir}"
+    if command -v brightnessctl >/dev/null 2>&1; then
+      brightnessctl -m 2>/dev/null | head -1 >"${state_file}.tmp" || true
+      if [[ -s "${state_file}.tmp" ]]; then
+        mv -f "${state_file}.tmp" "${state_file}"
+      else
+        rm -f "${state_file}.tmp"
+      fi
+    fi
+    ;;
+  post)
+    if [[ -r "${state_file}" ]] && command -v brightnessctl >/dev/null 2>&1; then
+      percent="$(awk -F, 'NR == 1 { gsub(/%/, "", $4); print $4 }' "${state_file}")"
+      if [[ "${percent}" =~ ^[0-9]+$ ]] && (( percent >= 1 && percent <= 100 )); then
+        brightnessctl --quiet set "${percent}%" >/dev/null 2>&1 || true
+      fi
+    fi
+    systemctl try-restart aurade-powerd.service >/dev/null 2>&1 || true
+    ;;
+esac
+
+exit 0

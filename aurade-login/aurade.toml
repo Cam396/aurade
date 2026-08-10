@@ -1,0 +1,6 @@
+[terminal]
+vt = 1
+
+[default_session]
+command = "tuigreet --time --remember --remember-user-session --asterisks --sessions /usr/share/wayland-sessions --session-wrapper /usr/bin/aurade-session-supervisor --cmd /usr/bin/chromiumos-ash-session"
+user = "greeter"

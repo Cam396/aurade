@@ -1,0 +1,470 @@
+#!/usr/bin/env bash
+# Deterministic, noninteractive AuraDE installation engine.
+set -Eeuo pipefail
+
+PROGRAM=${0##*/}
+SELF_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
+MODE=dry-run
+TARGET=
+CONFIRM=
+MOUNTPOINT=/mnt/aurade-target
+HOSTNAME=aurade
+USERNAME=
+PASSWORD_HASH_FILE=
+LUKS=0
+LUKS_PASSPHRASE_FILE=
+ARCH_SNAPSHOT=
+BUNDLE_DIR=/opt/aurade/repo
+PACKAGE_LOCK=
+REPO_NAME=aurade
+REPO_URL=https://repo.aurade.invalid/stable/x86_64
+REPO_KEY=
+REPO_FINGERPRINT=
+ALLOW_UNSIGNED=0
+ALLOW_LOOP=0
+TIMEZONE=UTC
+LOCALE=en_US.UTF-8
+KEYMAP=us
+BASE_PACKAGES=(
+  base linux linux-firmware intel-ucode btrfs-progs dosfstools cryptsetup
+  gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
+  pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
+  xdg-utils polkit openssh bluez bluez-utils vim
+)
+
+ROOT_PART=
+ESP_PART=
+CRYPT_NAME=aurade-root
+CRYPT_OPENED=0
+TARGET_MOUNTED=0
+WORK_DIR=
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-install --target /dev/DEVICE --username NAME \
+  --password-hash-file FILE --arch-snapshot YYYY/MM/DD [options]
+
+The default is a dry run. Real installation additionally requires:
+  --execute --confirm ERASE:/dev/DEVICE
+
+Required:
+  --target DEVICE              Whole target disk, never a partition
+  --username NAME              Initial unprivileged account
+  --password-hash-file FILE    Root-readable file containing a crypt(3) hash
+  --arch-snapshot YYYY/MM/DD   Arch Linux Archive package snapshot
+
+Repository integrity:
+  --bundle-dir DIR             Offline AuraDE package repository
+  --package-lock FILE          SHA-256 lock (default: DIR/packages.lock)
+  --repo-key FILE              Pacman-compatible public signing key
+  --repo-fingerprint HEX       Full fingerprint expected in --repo-key
+  --repo-name NAME             Installed pacman repository name
+  --repo-url URL               Installed repository URL
+  --allow-unsigned             Development only; still verifies package hashes
+
+Storage and identity:
+  --encrypt                    Format the root partition as LUKS2
+  --luks-passphrase-file FILE  Root-readable LUKS passphrase file
+  --mountpoint DIR             Temporary target mountpoint
+  --hostname NAME
+  --timezone ZONE
+  --locale LOCALE
+  --keymap KEYMAP
+  --allow-loop                 Permit /dev/loop* as an execution target
+
+Safety:
+  --dry-run                    Print the complete plan (default)
+  --execute                    Permit execution after every safety check passes
+  --confirm TOKEN              Must exactly equal ERASE:<canonical target>
+EOF
+}
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit 1
+}
+
+log() {
+  printf '[aurade-install] %s\n' "$*" >&2
+}
+
+print_command() {
+  printf ' +'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run() {
+  if [[ $MODE == dry-run ]]; then
+    print_command "$@"
+  else
+    "$@"
+  fi
+}
+
+write_target_file() {
+  local relative=$1 mode=$2 content=$3
+  local destination="${MOUNTPOINT%/}${relative}"
+  if [[ $MODE == dry-run ]]; then
+    printf ' + write %q mode=%q\n' "$destination" "$mode"
+    return
+  fi
+  install -d -m 0755 "$(dirname "$destination")"
+  printf '%b' "$content" >"$destination"
+  chmod "$mode" "$destination"
+}
+
+canonical_device() {
+  local value=$1
+  if [[ -e $value ]]; then
+    readlink -f -- "$value"
+  else
+    printf '%s\n' "$value"
+  fi
+}
+
+partition_path() {
+  local disk=$1 number=$2
+  case "$disk" in
+    /dev/nvme*|/dev/mmcblk*|/dev/loop*) printf '%sp%s\n' "$disk" "$number" ;;
+    *) printf '%s%s\n' "$disk" "$number" ;;
+  esac
+}
+
+cleanup() {
+  local status=$?
+  set +e
+  if (( TARGET_MOUNTED )); then
+    umount -R "$MOUNTPOINT" >/dev/null 2>&1 || true
+  fi
+  if (( CRYPT_OPENED )); then
+    cryptsetup close "$CRYPT_NAME" >/dev/null 2>&1 || true
+  fi
+  [[ -z ${WORK_DIR:-} ]] || rm -rf -- "$WORK_DIR"
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+while (($#)); do
+  case "$1" in
+    --target) TARGET=${2:?}; shift 2 ;;
+    --username) USERNAME=${2:?}; shift 2 ;;
+    --password-hash-file) PASSWORD_HASH_FILE=${2:?}; shift 2 ;;
+    --arch-snapshot) ARCH_SNAPSHOT=${2:?}; shift 2 ;;
+    --bundle-dir) BUNDLE_DIR=${2:?}; shift 2 ;;
+    --package-lock) PACKAGE_LOCK=${2:?}; shift 2 ;;
+    --repo-key) REPO_KEY=${2:?}; shift 2 ;;
+    --repo-fingerprint) REPO_FINGERPRINT=${2:?}; shift 2 ;;
+    --repo-name) REPO_NAME=${2:?}; shift 2 ;;
+    --repo-url) REPO_URL=${2:?}; shift 2 ;;
+    --mountpoint) MOUNTPOINT=${2:?}; shift 2 ;;
+    --hostname) HOSTNAME=${2:?}; shift 2 ;;
+    --timezone) TIMEZONE=${2:?}; shift 2 ;;
+    --locale) LOCALE=${2:?}; shift 2 ;;
+    --keymap) KEYMAP=${2:?}; shift 2 ;;
+    --luks-passphrase-file) LUKS_PASSPHRASE_FILE=${2:?}; shift 2 ;;
+    --encrypt) LUKS=1; shift ;;
+    --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
+    --allow-loop) ALLOW_LOOP=1; shift ;;
+    --execute) MODE=execute; shift ;;
+    --dry-run) MODE=dry-run; shift ;;
+    --confirm) CONFIRM=${2:?}; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+[[ -n $TARGET ]] || die '--target is required'
+[[ $TARGET == /dev/* ]] || die '--target must be an absolute /dev path'
+TARGET=$(canonical_device "$TARGET")
+[[ $TARGET =~ ^/dev/[A-Za-z0-9._/+:-]+$ ]] || die 'target device path contains unsupported characters'
+[[ -n $USERNAME ]] || die '--username is required'
+[[ $USERNAME =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die 'invalid username'
+[[ $HOSTNAME =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || die 'invalid hostname'
+[[ $REPO_NAME =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid repository name'
+[[ $REPO_URL =~ ^(https|file)://[^[:space:]\\]+$ ]] || die '--repo-url must be an HTTPS or file URL without whitespace'
+[[ $MOUNTPOINT == /* && $MOUNTPOINT != / ]] || die '--mountpoint must be an absolute non-root path'
+[[ $TIMEZONE =~ ^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$ && $TIMEZONE != *..* ]] || die 'invalid timezone'
+[[ $LOCALE =~ ^[A-Za-z0-9_.@-]+$ ]] || die 'invalid locale'
+[[ $KEYMAP =~ ^[A-Za-z0-9_.@+-]+$ ]] || die 'invalid keymap'
+[[ $ARCH_SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || \
+  die '--arch-snapshot must be YYYY/MM/DD'
+normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
+[[ $normalized_snapshot == "$ARCH_SNAPSHOT" ]] || die '--arch-snapshot is not a real calendar date'
+[[ -n $PACKAGE_LOCK ]] || PACKAGE_LOCK="${BUNDLE_DIR%/}/packages.lock"
+
+[[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
+[[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'
+IFS= read -r PASSWORD_HASH <"$PASSWORD_HASH_FILE" || true
+[[ $PASSWORD_HASH == \$* ]] || die 'password hash must be a crypt(3) hash, not plaintext'
+unset PASSWORD_HASH
+
+if (( LUKS )); then
+  [[ -r $LUKS_PASSPHRASE_FILE ]] || die '--encrypt requires a readable --luks-passphrase-file'
+  [[ -s $LUKS_PASSPHRASE_FILE ]] || die 'LUKS passphrase file is empty'
+  [[ -z $(find "$LUKS_PASSPHRASE_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'LUKS passphrase file must not be group/world accessible'
+fi
+
+[[ -d $BUNDLE_DIR ]] || die "bundle directory does not exist: $BUNDLE_DIR"
+[[ -r $PACKAGE_LOCK ]] || die "package lock does not exist: $PACKAGE_LOCK"
+for helper in aurade-recovery aurade-hardware-qualify; do
+  [[ -r $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
+done
+
+mapfile -t LOCK_LINES < <(awk 'NF && $1 !~ /^#/ {print}' "$PACKAGE_LOCK")
+((${#LOCK_LINES[@]} > 0)) || die 'package lock is empty'
+PACKAGE_FILES=()
+LOCK_FILENAMES=()
+PACKAGE_DEPENDENCIES=()
+declare -A LOCKED_NAMES=()
+for line in "${LOCK_LINES[@]}"; do
+  read -r digest filename pkgname pkgver arch extra <<<"$line"
+  [[ $digest =~ ^[0-9a-f]{64}$ && $filename != */* && -n $pkgname && -n $pkgver && -n $arch && -z ${extra:-} ]] || \
+    die "invalid package lock line: $line"
+  [[ -f ${BUNDLE_DIR%/}/$filename ]] || die "locked package is missing: $filename"
+  actual=$(sha256sum "${BUNDLE_DIR%/}/$filename" | awk '{print $1}')
+  [[ $actual == "$digest" ]] || die "SHA-256 mismatch: $filename"
+  command -v bsdtar >/dev/null || die 'bsdtar is required to inspect locked packages'
+  pkginfo=$(bsdtar -xOf "${BUNDLE_DIR%/}/$filename" .PKGINFO 2>/dev/null) || die "cannot read .PKGINFO: $filename"
+  actual_pkgname=$(awk -F ' = ' '$1 == "pkgname" {print $2; exit}' <<<"$pkginfo")
+  actual_pkgver=$(awk -F ' = ' '$1 == "pkgver" {print $2; exit}' <<<"$pkginfo")
+  actual_arch=$(awk -F ' = ' '$1 == "arch" {print $2; exit}' <<<"$pkginfo")
+  [[ $actual_pkgname == "$pkgname" && $actual_pkgver == "$pkgver" && $actual_arch == "$arch" ]] || \
+    die "package metadata does not match lock: $filename"
+  PACKAGE_FILES+=("/var/cache/aurade/repo/$filename")
+  LOCK_FILENAMES+=("$filename")
+  while IFS= read -r dependency; do
+    [[ -z $dependency ]] || PACKAGE_DEPENDENCIES+=("${dependency%%[<>=]*}")
+  done < <(awk -F ' = ' '$1 == "depend" {print $2}' <<<"$pkginfo")
+  LOCKED_NAMES[$pkgname]=1
+done
+[[ -n ${LOCKED_NAMES[aurade]:-} ]] || die 'package lock must include aurade'
+[[ -n ${LOCKED_NAMES[chromiumos-ash]:-} ]] || die 'package lock must include chromiumos-ash'
+
+declare -A BASE_PACKAGE_SET=()
+for package in "${BASE_PACKAGES[@]}"; do BASE_PACKAGE_SET[$package]=1; done
+mapfile -t SORTED_DEPENDENCIES < <(printf '%s\n' "${PACKAGE_DEPENDENCIES[@]}" | LC_ALL=C sort -u)
+for dependency in "${SORTED_DEPENDENCIES[@]}"; do
+  [[ -z $dependency ]] && continue
+  [[ $dependency =~ ^[A-Za-z0-9@._+:-]+$ ]] || die "unsupported package dependency: $dependency"
+  [[ -n ${LOCKED_NAMES[$dependency]:-} || -n ${BASE_PACKAGE_SET[$dependency]:-} ]] && continue
+  BASE_PACKAGES+=("$dependency")
+  BASE_PACKAGE_SET[$dependency]=1
+done
+
+if (( ! ALLOW_UNSIGNED )); then
+  [[ -r $REPO_KEY ]] || die '--repo-key is required unless --allow-unsigned is explicit'
+  compact_fingerprint=${REPO_FINGERPRINT//[[:space:]]/}
+  [[ $compact_fingerprint =~ ^[0-9A-Fa-f]{40,64}$ ]] || die 'a full --repo-fingerprint is required'
+  command -v gpg >/dev/null || die 'gpg is required to validate the repository key'
+  command -v gpgv >/dev/null || die 'gpgv is required to validate package signatures'
+  KEY_LISTING=$(gpg --batch --show-keys --with-colons "$REPO_KEY" 2>/dev/null) || \
+    die 'repository public key could not be parsed'
+  if awk -F: '$1 == "sec" {found=1} END {exit !found}' <<<"$KEY_LISTING"; then
+    die 'refusing to install a repository secret key'
+  fi
+  mapfile -t KEY_FINGERPRINTS < <(
+    awk -F: '$1 == "fpr" {print toupper($10)}' <<<"$KEY_LISTING"
+  )
+  expected_fingerprint=${compact_fingerprint^^}
+  found=0
+  for fingerprint in "${KEY_FINGERPRINTS[@]}"; do
+    [[ $fingerprint == "$expected_fingerprint" ]] && found=1
+  done
+  (( found )) || die 'repository key fingerprint does not match --repo-fingerprint'
+  for filename in "${LOCK_FILENAMES[@]}"; do
+    package="${BUNDLE_DIR%/}/$filename"
+    [[ -f ${package}.sig ]] || die "signed installation requires ${filename}.sig"
+    gpgv --keyring "$REPO_KEY" "${package}.sig" "$package" >/dev/null 2>&1 || \
+      die "invalid package signature: $filename"
+  done
+fi
+
+ESP_PART=$(partition_path "$TARGET" 1)
+ROOT_PART=$(partition_path "$TARGET" 2)
+ERASE_TOKEN="ERASE:$TARGET"
+
+if [[ $MODE == execute ]]; then
+  (( EUID == 0 )) || die '--execute requires root'
+  [[ $CONFIRM == "$ERASE_TOKEN" ]] || die "refusing write: --confirm must exactly equal $ERASE_TOKEN"
+  [[ -b $TARGET ]] || die "target is not a block device: $TARGET"
+  target_type=$(lsblk -dnro TYPE "$TARGET")
+  case "$target_type" in
+    disk) ;;
+    loop) (( ALLOW_LOOP )) || die 'loop targets require --allow-loop' ;;
+    *) die "target must be a whole disk or explicitly allowed loop device (found $target_type)" ;;
+  esac
+  root_source=$(findmnt -nro SOURCE / | sed 's/\[.*//')
+  if lsblk -snpo NAME "$root_source" 2>/dev/null | grep -Fxq "$TARGET"; then
+    die 'target contains the running root filesystem'
+  fi
+  while read -r mounted_source; do
+    [[ -z $mounted_source ]] && continue
+    die "target or a child partition is mounted: $mounted_source"
+  done < <(lsblk -lnpo NAME,MOUNTPOINTS "$TARGET" | awk '$2 != "" {print $1 " -> " $2}')
+  for command in sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacstrap arch-chroot genfstab bootctl blkid; do
+    command -v "$command" >/dev/null || die "required command not found: $command"
+  done
+fi
+
+log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"
+log "safety token: $ERASE_TOKEN"
+
+WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
+ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
+cat >"$ARCH_PACMAN_CONF" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+ParallelDownloads = 5
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Optional
+
+[core]
+Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
+
+[extra]
+Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
+EOF
+
+run wipefs --all --force "$TARGET"
+run sgdisk --zap-all "$TARGET"
+ROOT_PARTITION_TYPE=8300
+(( LUKS )) && ROOT_PARTITION_TYPE=8309
+run sgdisk --clear --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:AURADE_ESP \
+  --new=2:0:0 --typecode="2:${ROOT_PARTITION_TYPE}" --change-name=2:AURADE_ROOT "$TARGET"
+run partprobe "$TARGET"
+run udevadm settle
+run mkfs.fat -F 32 -n AURADE_ESP "$ESP_PART"
+
+ROOT_DEVICE=$ROOT_PART
+if (( LUKS )); then
+  run cryptsetup luksFormat --type luks2 --batch-mode --key-file "$LUKS_PASSPHRASE_FILE" "$ROOT_PART"
+  run cryptsetup open --key-file "$LUKS_PASSPHRASE_FILE" "$ROOT_PART" "$CRYPT_NAME"
+  if [[ $MODE == execute ]]; then
+    CRYPT_OPENED=1
+  fi
+  ROOT_DEVICE=/dev/mapper/$CRYPT_NAME
+fi
+run mkfs.btrfs -f -L AURADE_ROOT "$ROOT_DEVICE"
+run install -d -m 0755 "$MOUNTPOINT"
+run mount "$ROOT_DEVICE" "$MOUNTPOINT"
+if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
+for subvolume in @ @home @var_log @snapshots; do
+  run btrfs subvolume create "$MOUNTPOINT/$subvolume"
+done
+run umount "$MOUNTPOINT"
+if [[ $MODE == execute ]]; then TARGET_MOUNTED=0; fi
+run mount -o noatime,compress=zstd:3,subvol=@ "$ROOT_DEVICE" "$MOUNTPOINT"
+if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
+run install -d -m 0755 "$MOUNTPOINT/boot" "$MOUNTPOINT/home" "$MOUNTPOINT/var/log" "$MOUNTPOINT/.snapshots" "$MOUNTPOINT/var/cache/aurade/repo"
+run mount "$ESP_PART" "$MOUNTPOINT/boot"
+run mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_DEVICE" "$MOUNTPOINT/home"
+run mount -o noatime,compress=zstd:3,subvol=@var_log "$ROOT_DEVICE" "$MOUNTPOINT/var/log"
+run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOINT/.snapshots"
+
+run pacstrap -K -C "$ARCH_PACMAN_CONF" "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
+run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
+
+if (( ! ALLOW_UNSIGNED )); then
+  run install -Dm0644 "$REPO_KEY" "$MOUNTPOINT/usr/share/pacman/keyrings/aurade-repository.gpg"
+  run arch-chroot "$MOUNTPOINT" pacman-key --add /usr/share/pacman/keyrings/aurade-repository.gpg
+  run arch-chroot "$MOUNTPOINT" pacman-key --lsign-key "$expected_fingerprint"
+  if [[ $MODE == execute ]]; then
+    sed -i -E 's/^LocalFileSigLevel.*/LocalFileSigLevel = Required/' "$MOUNTPOINT/etc/pacman.conf"
+  else
+    printf ' + require signatures for local package files in %q\n' "$MOUNTPOINT/etc/pacman.conf"
+  fi
+fi
+
+if (( ALLOW_UNSIGNED )); then
+  repo_siglevel='SigLevel = Never'
+else
+  repo_siglevel='SigLevel = Required DatabaseOptional'
+fi
+write_target_file /etc/pacman.d/aurade-mirrorlist 0644 "Server = ${REPO_URL%/}\n"
+write_target_file /etc/pacman.d/aurade.conf 0644 "[${REPO_NAME}]\n${repo_siglevel}\nInclude = /etc/pacman.d/aurade-mirrorlist\n"
+if [[ $MODE == execute ]]; then
+  printf '\nInclude = /etc/pacman.d/aurade.conf\n' >>"$MOUNTPOINT/etc/pacman.conf"
+else
+  printf ' + append %q to %q\n' 'Include = /etc/pacman.d/aurade.conf' "$MOUNTPOINT/etc/pacman.conf"
+fi
+
+run arch-chroot "$MOUNTPOINT" pacman -U --needed --noconfirm "${PACKAGE_FILES[@]}"
+
+if [[ $MODE == execute ]]; then
+  genfstab -U "$MOUNTPOINT" >"$MOUNTPOINT/etc/fstab"
+else
+  printf ' + genfstab -U %q > %q\n' "$MOUNTPOINT" "$MOUNTPOINT/etc/fstab"
+fi
+run arch-chroot "$MOUNTPOINT" ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+run arch-chroot "$MOUNTPOINT" hwclock --systohc
+write_target_file /etc/hostname 0644 "$HOSTNAME\n"
+write_target_file /etc/vconsole.conf 0644 "KEYMAP=$KEYMAP\n"
+write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
+if [[ $MODE == execute ]]; then
+  sed -i -E "s/^#(${LOCALE//./\\.}[[:space:]]+UTF-8)/\\1/" "$MOUNTPOINT/etc/locale.gen"
+else
+  printf ' + enable locale %q in %q\n' "$LOCALE" "$MOUNTPOINT/etc/locale.gen"
+fi
+run arch-chroot "$MOUNTPOINT" locale-gen
+run arch-chroot "$MOUNTPOINT" useradd -m -G wheel,audio,video,input,storage -s /bin/bash "$USERNAME"
+if [[ $MODE == execute ]]; then
+  arch-chroot "$MOUNTPOINT" usermod --password "$(<"$PASSWORD_HASH_FILE")" "$USERNAME"
+else
+  printf ' + arch-chroot %q usermod --password %q %q\n' "$MOUNTPOINT" '<redacted-crypt-hash>' "$USERNAME"
+fi
+write_target_file /etc/sudoers.d/10-aurade-wheel 0440 '%wheel ALL=(ALL:ALL) ALL\n'
+
+run arch-chroot "$MOUNTPOINT" systemctl enable \
+  NetworkManager.service bluetooth.service systemd-timesyncd.service \
+  aurade-powerd.service aurade-host-bridge.service aurade-greetd.service
+run arch-chroot "$MOUNTPOINT" systemctl set-default graphical.target
+
+if (( LUKS )); then
+  if [[ $MODE == execute ]]; then
+    sed -i -E 's|^HOOKS=.*|HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)|' "$MOUNTPOINT/etc/mkinitcpio.conf"
+  else
+    printf ' + configure mkinitcpio sd-encrypt hook\n'
+  fi
+fi
+run arch-chroot "$MOUNTPOINT" mkinitcpio -P
+run bootctl --root="$MOUNTPOINT" --esp-path=/boot --no-variables install
+
+if [[ $MODE == execute ]]; then
+  ROOT_UUID=$(blkid -s UUID -o value "$ROOT_DEVICE")
+  if (( LUKS )); then
+    LUKS_UUID=$(cryptsetup luksUUID "$ROOT_PART")
+    ROOT_OPTIONS="rd.luks.name=${LUKS_UUID}=${CRYPT_NAME} root=/dev/mapper/${CRYPT_NAME} rw"
+  else
+    ROOT_OPTIONS="root=UUID=${ROOT_UUID} rw"
+  fi
+else
+  ROOT_UUID='<root-filesystem-uuid>'
+  ROOT_OPTIONS='root=UUID=<root-filesystem-uuid> rw'
+  (( LUKS )) && ROOT_OPTIONS='rd.luks.name=<luks-uuid>=aurade-root root=/dev/mapper/aurade-root rw'
+fi
+
+write_target_file /boot/loader/loader.conf 0644 'default aurade.conf\ntimeout 4\nconsole-mode max\neditor no\n'
+write_target_file /boot/loader/entries/aurade.conf 0644 "title AuraDE\nlinux /vmlinuz-linux\ninitrd /intel-ucode.img\ninitrd /initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@ quiet\n"
+run install -d -m 0755 "$MOUNTPOINT/boot/aurade-rollback/factory"
+for artifact in vmlinuz-linux intel-ucode.img initramfs-linux.img; do
+  run install -m 0644 "$MOUNTPOINT/boot/$artifact" \
+    "$MOUNTPOINT/boot/aurade-rollback/factory/$artifact"
+done
+write_target_file /boot/loader/entries/aurade-rollback.conf 0644 "title AuraDE factory rollback\nlinux /aurade-rollback/factory/vmlinuz-linux\ninitrd /aurade-rollback/factory/intel-ucode.img\ninitrd /aurade-rollback/factory/initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@snapshots/0/snapshot systemd.unit=multi-user.target\n"
+
+run install -d -m 0750 "$MOUNTPOINT/etc/aurade-install" "$MOUNTPOINT/.snapshots/0"
+run cp "$PACKAGE_LOCK" "$MOUNTPOINT/etc/aurade-install/packages.lock"
+run install -Dm0755 "$SELF_DIR/aurade-recovery" "$MOUNTPOINT/usr/local/sbin/aurade-recovery"
+run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/sbin/aurade-hardware-qualify"
+write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
+run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
+run sync
+
+log 'installation plan completed'
+if [[ $MODE == dry-run ]]; then
+  log "dry run only; rerun with --execute --confirm '$ERASE_TOKEN' after review"
+else
+  log 'AuraDE installed; factory rollback entry is available from systemd-boot'
+fi

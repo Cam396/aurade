@@ -1,0 +1,16 @@
+# shellcheck shell=bash
+_aurade_remove_legacy_web_launchers() {
+  rm -f /usr/share/applications/aurade-web-*.desktop
+  rm -f /usr/share/applications/aurade-connect-google.desktop
+  rm -f /usr/share/applications/aurade-disconnect-google.desktop
+  rm -f /usr/share/icons/hicolor/scalable/apps/aurade-web-*.svg
+
+}
+
+post_install() {
+  _aurade_remove_legacy_web_launchers
+}
+
+post_upgrade() {
+  _aurade_remove_legacy_web_launchers
+}

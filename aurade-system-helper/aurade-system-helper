@@ -1,0 +1,73 @@
+#!/bin/bash
+# Privileged helper for AuraDE desktop integration.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  aurade-system-helper install-package /absolute/path/pkg.pkg.tar.{zst,xz}
+  aurade-system-helper poweroff
+  aurade-system-helper reboot
+  aurade-system-helper suspend
+EOF
+}
+
+die() {
+  echo "aurade-system-helper: $*" >&2
+  exit 1
+}
+
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    die "this command must be run through pkexec"
+  fi
+}
+
+install_package() {
+  local package_path="${1:-}"
+
+  require_root
+  [[ "$#" -eq 1 ]] || { usage; exit 2; }
+  [[ -n "${package_path}" ]] || { usage; exit 2; }
+  [[ "${package_path}" = /* ]] || die "package path must be absolute"
+  [[ -f "${package_path}" ]] || die "package does not exist: ${package_path}"
+
+  case "${package_path,,}" in
+    *.pkg.tar.zst|*.pkg.tar.xz) ;;
+    *) die "unsupported package extension" ;;
+  esac
+
+  pacman -Qip "${package_path}" >/dev/null
+  exec pacman -U --needed --noconfirm "${package_path}"
+}
+
+host_power_action() {
+  local action="${1:-}"
+
+  [[ "$#" -eq 1 ]] || { usage; exit 2; }
+  case "${action}" in
+    poweroff|reboot|suspend) ;;
+    *) usage; exit 2 ;;
+  esac
+
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl "${action}"
+    exit $?
+  fi
+
+  exec systemctl "${action}"
+}
+
+case "${1:-}" in
+  install-package)
+    shift
+    install_package "$@"
+    ;;
+  poweroff|reboot|suspend)
+    host_power_action "$@"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

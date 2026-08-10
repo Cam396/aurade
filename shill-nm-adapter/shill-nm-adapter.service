@@ -1,0 +1,21 @@
+[Unit]
+Description=Shill-to-NetworkManager bridge for ChromeOS Ash
+BindsTo=NetworkManager.service
+After=NetworkManager.service
+Wants=dbus.service
+After=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/shill-nm-adapter
+Restart=on-failure
+RestartSec=5
+User=root
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

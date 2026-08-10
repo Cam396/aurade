@@ -1,0 +1,200 @@
+#!/bin/bash
+# Optional AuraDE local AI bootstrapper.
+#
+# This is installed by the optional aurade-ai package. The main AuraDE launcher
+# calls it only when AURADE_FEATURE_PROFILE=advanced_plus_ai.
+set -u
+
+AURADE_FEATURE_PROFILE="${AURADE_FEATURE_PROFILE:-}"
+AURADE_LOCAL_AI_BACKEND="${AURADE_LOCAL_AI_BACKEND:-}"
+AURADE_LOCAL_AI_MODEL="${AURADE_LOCAL_AI_MODEL:-}"
+AURADE_LOCAL_AI_ENDPOINT="${AURADE_LOCAL_AI_ENDPOINT:-}"
+AURADE_LOCAL_AI_AUTO_DOWNLOAD="${AURADE_LOCAL_AI_AUTO_DOWNLOAD:-}"
+AURADE_LOCAL_AI_START_OLLAMA="${AURADE_LOCAL_AI_START_OLLAMA:-}"
+AURADE_AI_FORCE=0
+AURADE_AI_BACKGROUND=0
+AURADE_AI_STATUS=0
+
+aurade_source_config() {
+    local config="$1"
+    if [ -r "${config}" ]; then
+        # shellcheck source=/dev/null
+        . "${config}"
+    fi
+}
+
+aurade_source_config /etc/aurade/features.conf
+aurade_source_config "${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/features.conf"
+aurade_source_config /etc/aurade/ai.conf
+aurade_source_config "${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/ai.conf"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --background)
+            AURADE_AI_BACKGROUND=1
+            ;;
+        --foreground)
+            AURADE_AI_BACKGROUND=0
+            ;;
+        --force)
+            AURADE_AI_FORCE=1
+            ;;
+        --status)
+            AURADE_AI_STATUS=1
+            ;;
+        *)
+            echo "Usage: aurade-ai-bootstrap [--background] [--foreground] [--force] [--status]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+AURADE_LOCAL_AI_BACKEND="${AURADE_LOCAL_AI_BACKEND:-ollama}"
+AURADE_LOCAL_AI_MODEL="${AURADE_LOCAL_AI_MODEL:-gemma4:e2b-it-qat}"
+# AuraDE compatibility: embedding model for local history embeddings.
+AURADE_LOCAL_AI_EMBED_MODEL="${AURADE_LOCAL_AI_EMBED_MODEL:-embeddinggemma}"
+AURADE_LOCAL_AI_ENDPOINT="${AURADE_LOCAL_AI_ENDPOINT:-http://127.0.0.1:11434}"
+AURADE_LOCAL_AI_AUTO_DOWNLOAD="${AURADE_LOCAL_AI_AUTO_DOWNLOAD:-1}"
+AURADE_LOCAL_AI_START_OLLAMA="${AURADE_LOCAL_AI_START_OLLAMA:-1}"
+
+AURADE_AI_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/aurade"
+AURADE_AI_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/aurade"
+AURADE_AI_LOG="${AURADE_AI_STATE_DIR}/ai-bootstrap.log"
+AURADE_AI_LOCK="${AURADE_AI_CACHE_DIR}/ai-bootstrap.lock"
+
+mkdir -p "${AURADE_AI_STATE_DIR}" "${AURADE_AI_CACHE_DIR}"
+
+aurade_log() {
+    printf '%s %s\n' "$(date -Is)" "$*"
+}
+
+if [ "${AURADE_AI_BACKGROUND}" = "1" ]; then
+    nohup "$0" --foreground >>"${AURADE_AI_LOG}" 2>&1 &
+    exit 0
+fi
+
+exec 9>"${AURADE_AI_LOCK}"
+if ! flock -n 9; then
+    aurade_log "another local AI bootstrap is already running"
+    exit 0
+fi
+
+if [ "${AURADE_FEATURE_PROFILE}" != "advanced_plus_ai" ] && \
+    [ "${AURADE_AI_FORCE}" != "1" ]; then
+    aurade_log "local AI bootstrap skipped for profile=${AURADE_FEATURE_PROFILE:-unset}"
+    exit 0
+fi
+
+if [ "${AURADE_LOCAL_AI_BACKEND}" != "ollama" ]; then
+    aurade_log "local AI bootstrap skipped for backend=${AURADE_LOCAL_AI_BACKEND}"
+    exit 0
+fi
+
+if ! command -v ollama >/dev/null 2>&1; then
+    aurade_log "ollama is not installed; install the aurade-ai package to enable Advanced Plus AI model bootstrap"
+    exit 0
+fi
+
+aurade_ollama_host() {
+    local endpoint="$1"
+    endpoint="${endpoint#http://}"
+    endpoint="${endpoint#https://}"
+    endpoint="${endpoint%%/*}"
+    printf '%s\n' "${endpoint}"
+}
+
+export OLLAMA_HOST="${OLLAMA_HOST:-$(aurade_ollama_host "${AURADE_LOCAL_AI_ENDPOINT}")}"
+
+aurade_ollama_ready() {
+    ollama list >/dev/null 2>&1
+}
+
+aurade_start_ollama() {
+    local waited=0
+
+    if aurade_ollama_ready; then
+        return 0
+    fi
+
+    if [ "${AURADE_LOCAL_AI_START_OLLAMA}" != "1" ]; then
+        return 1
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start ollama.service >/dev/null 2>&1 || true
+    fi
+
+    if ! aurade_ollama_ready; then
+        aurade_log "starting user Ollama server on ${OLLAMA_HOST}"
+        nohup ollama serve >>"${AURADE_AI_LOG}" 2>&1 &
+    fi
+
+    while [ "${waited}" -lt 30 ]; do
+        if aurade_ollama_ready; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    return 1
+}
+
+aurade_model_present() {
+    ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | \
+        grep -Fx -- "${AURADE_LOCAL_AI_MODEL}" >/dev/null 2>&1
+}
+
+aurade_embed_model_present() {
+    [ -z "${AURADE_LOCAL_AI_EMBED_MODEL}" ] && return 0
+    ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | \
+        grep -F -- "${AURADE_LOCAL_AI_EMBED_MODEL}" >/dev/null 2>&1
+}
+
+if ! aurade_start_ollama; then
+    aurade_log "ollama is installed but not reachable at ${OLLAMA_HOST}"
+    exit 0
+fi
+
+if [ "${AURADE_AI_STATUS}" = "1" ]; then
+    if aurade_model_present; then
+        aurade_log "model present: ${AURADE_LOCAL_AI_MODEL}"
+    else
+        aurade_log "model missing: ${AURADE_LOCAL_AI_MODEL}"
+    fi
+    if aurade_embed_model_present; then
+        aurade_log "embed model present: ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    else
+        aurade_log "embed model missing: ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    fi
+    exit 0
+fi
+
+if aurade_model_present && aurade_embed_model_present; then
+    aurade_log "models already present: ${AURADE_LOCAL_AI_MODEL}, ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    exit 0
+fi
+
+if [ "${AURADE_LOCAL_AI_AUTO_DOWNLOAD}" != "1" ]; then
+    aurade_log "model missing and auto-download disabled: ${AURADE_LOCAL_AI_MODEL}"
+    exit 0
+fi
+
+if ! aurade_model_present; then
+    aurade_log "pulling local AI model: ${AURADE_LOCAL_AI_MODEL}"
+    if ollama pull "${AURADE_LOCAL_AI_MODEL}"; then
+        aurade_log "model pull complete: ${AURADE_LOCAL_AI_MODEL}"
+    else
+        aurade_log "model pull failed: ${AURADE_LOCAL_AI_MODEL}"
+    fi
+fi
+
+if [ -n "${AURADE_LOCAL_AI_EMBED_MODEL}" ] && ! aurade_embed_model_present; then
+    aurade_log "pulling local embedding model: ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    if ollama pull "${AURADE_LOCAL_AI_EMBED_MODEL}"; then
+        aurade_log "embed model pull complete: ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    else
+        aurade_log "embed model pull failed: ${AURADE_LOCAL_AI_EMBED_MODEL}"
+    fi
+fi

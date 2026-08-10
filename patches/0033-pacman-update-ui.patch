@@ -1,0 +1,762 @@
+diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
+index a05587a4fd..6c7740bcdd 100644
+--- a/ash/ash_strings.grd
++++ b/ash/ash_strings.grd
+@@ -1099,6 +1099,9 @@ Style notes:
+       <message name="IDS_UPDATE_NOTIFICATION_MESSAGE_LEARN_MORE" desc="The body of the notification to notify that the user should restart to get system updates. This notification body links to the info page on the update.">
+         Learn more about the latest <ph name="SYSTEM_APP_NAME">$1<ex>ChromiumOS</ex></ph> update
+       </message>
++      <message name="IDS_AURADE_UPDATE_NOTIFICATION_MESSAGE_ROLLBACK" desc="The body of the AuraDE update notification when a pre-update recovery snapshot and matching rollback boot entry are available.">
++        <ph name="UPDATE_TEXT">$1<ex>Learn more about the latest AuraDE update</ex></ph>. A pre-update snapshot is available from the AuraDE rollback entry in the boot menu.
++      </message>
+       <message name="IDS_UPDATE_NOTIFICATION_RESTART_BUTTON" meaning="button label" desc="The label used as the button to restart system and update. Displayed as the action button of the notification for system update.">
+         Restart
+       </message>
+diff --git a/ash/system/update/update_notification_controller.cc b/ash/system/update/update_notification_controller.cc
+index c96270e59b..a4c8eafb57 100644
+--- a/ash/system/update/update_notification_controller.cc
++++ b/ash/system/update/update_notification_controller.cc
+@@ -23,6 +23,7 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "base/task/thread_pool.h"
+ #include "chromeos/ash/components/dbus/update_engine/update_engine_client.h"
+ #include "components/vector_icons/vector_icons.h"
+@@ -240,6 +241,13 @@ std::u16string UpdateNotificationController::GetMessage() const {
+         IDS_UPDATE_NOTIFICATION_MESSAGE_LEARN_MORE, system_app_name);
+   }
+ 
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      base::PathExists(
++          base::FilePath("/boot/loader/entries/aurade-rollback.conf"))) {
++    update_text = l10n_util::GetStringFUTF16(
++        IDS_AURADE_UPDATE_NOTIFICATION_MESSAGE_ROLLBACK, update_text);
++  }
++
+   if (slow_boot_file_path_exists_) {
+     return l10n_util::GetStringFUTF16(IDS_UPDATE_NOTIFICATION_MESSAGE_SLOW_BOOT,
+                                       update_text);
+diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+index a37bde4ecd..0a4019b31e 100644
+--- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
++++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+@@ -13,6 +13,7 @@
+ #include "base/check.h"
+ #include "base/files/file_path.h"
+ #include "base/memory/scoped_refptr.h"
++#include "base/no_destructor.h"
+ #include "base/path_service.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/system/sys_info.h"
+@@ -129,41 +130,48 @@ void OverrideStubPathsIfNeeded() {
+ 
+ DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
+ 
+-std::unique_ptr<base::Thread> g_aurade_bluez_dbus_thread;
+-scoped_refptr<dbus::Bus> g_aurade_bluez_system_bus;
+ bool g_aurade_uses_linux_bluez = false;
+ 
++std::unique_ptr<base::Thread>& AuraDeBluezDbusThread() {
++  static base::NoDestructor<std::unique_ptr<base::Thread>> thread;
++  return *thread;
++}
++
++scoped_refptr<dbus::Bus>& AuraDeBluezSystemBusStorage() {
++  static base::NoDestructor<scoped_refptr<dbus::Bus>> bus;
++  return *bus;
++}
++
+ dbus::Bus* GetAuraDeBluezSystemBus() {
+-  if (g_aurade_bluez_system_bus) {
+-    return g_aurade_bluez_system_bus.get();
++  if (AuraDeBluezSystemBusStorage()) {
++    return AuraDeBluezSystemBusStorage().get();
+   }
+ 
+   // AuraDE compatibility: target_os=chromeos normally shares the ChromeOS
+-  // system bus with every daemon client. Generic Linux keeps those clients
+-  // fake, so BlueZ gets a narrowly scoped real bus and D-Bus thread of its own.
+-  g_aurade_bluez_dbus_thread =
++  // system bus with every daemon client. Generic Linux keeps most of those
++  // clients fake, so Linux host adapters share this narrowly scoped real bus.
++  AuraDeBluezDbusThread() =
+       std::make_unique<base::Thread>("AuraDE BlueZ D-Bus thread");
+   base::Thread::Options thread_options;
+   thread_options.message_pump_type = base::MessagePumpType::IO;
+-  CHECK(g_aurade_bluez_dbus_thread->StartWithOptions(
+-      std::move(thread_options)));
++  CHECK(AuraDeBluezDbusThread()->StartWithOptions(std::move(thread_options)));
+ 
+   dbus::Bus::Options bus_options;
+   bus_options.bus_type = dbus::Bus::SYSTEM;
+   bus_options.connection_type = dbus::Bus::PRIVATE;
+-  bus_options.dbus_task_runner = g_aurade_bluez_dbus_thread->task_runner();
+-  g_aurade_bluez_system_bus = new dbus::Bus(std::move(bus_options));
+-  return g_aurade_bluez_system_bus.get();
++  bus_options.dbus_task_runner = AuraDeBluezDbusThread()->task_runner();
++  AuraDeBluezSystemBusStorage() = new dbus::Bus(std::move(bus_options));
++  return AuraDeBluezSystemBusStorage().get();
+ }
+ 
+ void ShutdownAuraDeBluezSystemBus() {
+-  if (g_aurade_bluez_system_bus) {
+-    g_aurade_bluez_system_bus->ShutdownOnDBusThreadAndBlock();
+-    g_aurade_bluez_system_bus.reset();
++  if (AuraDeBluezSystemBusStorage()) {
++    AuraDeBluezSystemBusStorage()->ShutdownOnDBusThreadAndBlock();
++    AuraDeBluezSystemBusStorage().reset();
+   }
+-  if (g_aurade_bluez_dbus_thread) {
+-    g_aurade_bluez_dbus_thread->Stop();
+-    g_aurade_bluez_dbus_thread.reset();
++  if (AuraDeBluezDbusThread()) {
++    AuraDeBluezDbusThread()->Stop();
++    AuraDeBluezDbusThread().reset();
+   }
+   g_aurade_uses_linux_bluez = false;
+ }
+@@ -259,7 +267,11 @@ void InitializeDBus() {
+   InitializeDBusClient<chromeos::TpmManagerClient>(bus);
+   InitializeDBusClient<TypecdClient>(bus);
+   InitializeDBusClient<chromeos::U2FClient>(bus);
+-  InitializeDBusClient<UpdateEngineClient>(bus);
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    InitializeDBusClient<UpdateEngineClient>(bus);
++  } else {
++    UpdateEngineClient::InitializeAura(GetAuraDeBluezSystemBus());
++  }
+   InitializeDBusClient<UserDataAuthClient>(bus);
+   InitializeDBusClient<UpstartClient>(bus);
+   InitializeDBusClient<VirtualFileProviderClient>(bus);
+@@ -367,8 +379,6 @@ void ShutdownDBus() {
+   } else {
+     bluez::BluezDBusManager::Shutdown();
+   }
+-  ShutdownAuraDeBluezSystemBus();
+-
+   // Depends on `DlcserviceClient`.
+   language_packs::LanguagePackManager::Shutdown();
+ 
+@@ -379,6 +389,7 @@ void ShutdownDBus() {
+   UpstartClient::Shutdown();
+   UserDataAuthClient::Shutdown();
+   UpdateEngineClient::Shutdown();
++  ShutdownAuraDeBluezSystemBus();
+   chromeos::U2FClient::Shutdown();
+   TypecdClient::Shutdown();
+   chromeos::TpmManagerClient::Shutdown();
+diff --git a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
+index c18bae1d14..4d9c487b80 100644
+--- a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
++++ b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
+@@ -12,6 +12,7 @@
+ #include "base/location.h"
+ #include "base/logging.h"
+ #include "base/no_destructor.h"
++#include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/time/clock.h"
+ #include "base/time/default_clock.h"
+@@ -221,7 +222,14 @@ void UpgradeDetectorChromeos::UpdateStatusChanged(
+              update_engine::Operation::UPDATED_BUT_DEFERRED) {
+     // Update engine broadcasts this state when update is downloaded but
+     // deferred.
+-    NotifyUpdateDeferred(/*use_notification=*/false);
++    // AuraDE compatibility: a generic-Linux pacman transaction is deliberately
++    // user-initiated, so expose its deferred state as an actionable
++    // notification immediately instead of waiting for ChromeOS policy timing.
++    const bool use_notification = !base::SysInfo::IsRunningOnChromeOS();
++    NotifyUpdateDeferred(use_notification);
++    if (use_notification) {
++      return;
++    }
+     // Start timer for notification.
+     upgrade_notification_timer_.Start(
+         FROM_HERE, kDefaultHighThreshold, this,
+@@ -230,8 +238,9 @@ void UpgradeDetectorChromeos::UpdateStatusChanged(
+              status.current_operation() ==
+                  update_engine::Operation::DOWNLOADING) {
+     update_in_progress_ = true;
+-    if (!upgrade_detected_time().is_null())
++    if (!upgrade_detected_time().is_null()) {
+       NotifyOnUpgrade();
++    }
+   }
+ }
+ 
+diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
+index 3552ef1d29..e221755af1 100644
+--- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
++++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
+@@ -7,18 +7,28 @@
+ #include <stdint.h>
+ 
+ #include <algorithm>
++#include <cctype>
++#include <optional>
+ #include <string>
++#include <string_view>
+ #include <vector>
+ 
+ #include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
++#include "base/json/json_reader.h"
+ #include "base/location.h"
+ #include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/observer_list.h"
+ #include "base/strings/string_util.h"
+ #include "base/task/single_thread_task_runner.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "base/values.h"
++#include "base/version.h"
+ #include "chromeos/ash/components/dbus/update_engine/fake_update_engine_client.h"
+ #include "chromeos/dbus/constants/dbus_switches.h"
+ #include "chromeos/version/version_loader.h"
+@@ -776,6 +786,503 @@ class UpdateEngineClientDesktopFake : public UpdateEngineClient {
+   base::WeakPtrFactory<UpdateEngineClientDesktopFake> weak_factory_{this};
+ };
+ 
++constexpr char kAuraHostBridgeService[] = "org.aurade.HostBridge";
++constexpr char kAuraHostBridgePath[] = "/org/aurade/HostBridge";
++constexpr char kAuraHostBridgeInterface[] = "org.aurade.HostBridge1";
++constexpr char kAuraPacmanListUpdates[] = "PacmanListUpdates";
++constexpr char kAuraPacmanUpgrade[] = "PacmanUpgrade";
++constexpr char kAuraJobGet[] = "JobGet";
++constexpr char kLoginManagerService[] = "org.freedesktop.login1";
++constexpr char kLoginManagerPath[] = "/org/freedesktop/login1";
++constexpr char kLoginManagerInterface[] = "org.freedesktop.login1.Manager";
++constexpr char kAuraRollbackEntry[] = "aurade-rollback.conf";
++constexpr base::TimeDelta kAuraInitialUpdateDelay = base::Minutes(1);
++constexpr base::TimeDelta kAuraUpdateCheckInterval = base::Hours(6);
++constexpr base::TimeDelta kAuraJobPollInterval = base::Seconds(2);
++constexpr int kAuraHostBridgeTimeoutMs = 310000;
++
++// AuraDE compatibility: translate the Arch host bridge's package operations
++// into update_engine states so the existing settings, progress, and restart
++// notification surfaces remain the single system-update UI on generic Linux.
++class UpdateEngineClientAura : public UpdateEngineClient {
++ public:
++  UpdateEngineClientAura() {
++    last_status_.set_current_operation(update_engine::Operation::IDLE);
++    last_status_.set_progress(0.0);
++    rollback_available_ = base::PathExists(
++        base::FilePath("/boot/loader/entries/aurade-rollback.conf"));
++  }
++
++  UpdateEngineClientAura(const UpdateEngineClientAura&) = delete;
++  UpdateEngineClientAura& operator=(const UpdateEngineClientAura&) = delete;
++  ~UpdateEngineClientAura() override = default;
++
++  void Init(dbus::Bus* bus) override {
++    CHECK(bus);
++    host_bridge_proxy_ = bus->GetObjectProxy(
++        kAuraHostBridgeService, dbus::ObjectPath(kAuraHostBridgePath));
++    login_manager_proxy_ = bus->GetObjectProxy(
++        kLoginManagerService, dbus::ObjectPath(kLoginManagerPath));
++
++    initial_update_timer_.Start(
++        FROM_HERE, kAuraInitialUpdateDelay, this,
++        &UpdateEngineClientAura::CheckForDeferredUpdates);
++    periodic_update_timer_.Start(
++        FROM_HERE, kAuraUpdateCheckInterval, this,
++        &UpdateEngineClientAura::CheckForDeferredUpdates);
++  }
++
++  void AddObserver(Observer* observer) override {
++    observers_.AddObserver(observer);
++  }
++
++  void RemoveObserver(Observer* observer) override {
++    observers_.RemoveObserver(observer);
++  }
++
++  bool HasObserver(const Observer* observer) const override {
++    return observers_.HasObserver(observer);
++  }
++
++  void RequestUpdateCheck(UpdateCheckCallback callback) override {
++    RequestUpdateCheckInternal(std::move(callback), /*apply_update=*/true,
++                               /*mark_deferred=*/false);
++  }
++
++  void RequestUpdateCheckWithoutApplying(
++      UpdateCheckCallback callback) override {
++    RequestUpdateCheckInternal(std::move(callback), /*apply_update=*/false,
++                               /*mark_deferred=*/false);
++  }
++
++  void RebootAfterUpdate() override {
++    dbus::MethodCall method_call(kLoginManagerInterface, "Reboot");
++    dbus::MessageWriter writer(&method_call);
++    writer.AppendBool(true);
++    login_manager_proxy_->CallMethod(
++        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce([](dbus::Response* response) {
++          if (!response) {
++            LOG(ERROR) << "AuraDE update: logind rejected restart";
++          }
++        }));
++  }
++
++  void Rollback() override {
++    if (!rollback_available_) {
++      LOG(ERROR) << "AuraDE update: no rollback boot entry is available";
++      return;
++    }
++
++    dbus::MethodCall method_call(kLoginManagerInterface,
++                                 "SetRebootToBootLoaderEntry");
++    dbus::MessageWriter writer(&method_call);
++    writer.AppendString(kAuraRollbackEntry);
++    login_manager_proxy_->CallMethod(
++        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(&UpdateEngineClientAura::OnRollbackEntrySelected,
++                       weak_factory_.GetWeakPtr()));
++  }
++
++  void CanRollbackCheck(RollbackCheckCallback callback) override {
++    rollback_available_ = rollback_available_ ||
++                          base::PathExists(base::FilePath(
++                              "/boot/loader/entries/aurade-rollback.conf"));
++    std::move(callback).Run(rollback_available_);
++  }
++
++  update_engine::StatusResult GetLastStatus() override { return last_status_; }
++
++  void SetChannel(const std::string& target_channel,
++                  bool is_powerwash_allowed) override {
++    target_channel_ = target_channel;
++  }
++
++  void GetChannel(bool get_current_channel,
++                  GetChannelCallback callback) override {
++    std::move(callback).Run(get_current_channel ? current_channel_
++                                                : target_channel_);
++  }
++
++  void GetEolInfo(GetEolInfoCallback callback) override {
++    std::move(callback).Run(EolInfo());
++  }
++
++  void SetUpdateOverCellularPermission(bool allowed,
++                                       base::OnceClosure callback) override {
++    std::move(callback).Run();
++  }
++
++  void SetUpdateOverCellularOneTimePermission(
++      const std::string& update_version,
++      int64_t update_size,
++      UpdateOverCellularOneTimePermissionCallback callback) override {
++    std::move(callback).Run(true);
++  }
++
++  void ToggleFeature(const std::string& feature, bool enable) override {
++    VLOG(1) << "AuraDE update: ignoring update_engine feature " << feature;
++  }
++
++  void IsFeatureEnabled(const std::string& feature,
++                        IsFeatureEnabledCallback callback) override {
++    std::move(callback).Run(std::nullopt);
++  }
++
++  void ApplyDeferredUpdateAdvanced(
++      bool shutdown_after_update,
++      base::OnceClosure failure_callback) override {
++    if (!updates_available_ || update_job_running_) {
++      if (failure_callback) {
++        base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++            FROM_HERE, std::move(failure_callback));
++      }
++      return;
++    }
++    StartUpgrade(std::move(failure_callback));
++  }
++
++ private:
++  using HostResponseCallback =
++      base::OnceCallback<void(std::optional<base::DictValue>)>;
++
++  static std::optional<base::DictValue> ReadHostResponse(
++      dbus::Response* response) {
++    if (!response) {
++      LOG(ERROR) << "AuraDE update: host bridge did not respond";
++      return std::nullopt;
++    }
++
++    dbus::MessageReader reader(response);
++    std::string json;
++    if (!reader.PopString(&json)) {
++      LOG(ERROR) << "AuraDE update: host bridge returned a non-string reply";
++      return std::nullopt;
++    }
++
++    std::optional<base::Value> envelope =
++        base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++    if (!envelope || !envelope->is_dict()) {
++      LOG(ERROR) << "AuraDE update: host bridge returned invalid JSON";
++      return std::nullopt;
++    }
++
++    const base::DictValue& root = envelope->GetDict();
++    if (!root.FindBool("ok").value_or(false)) {
++      const base::DictValue* error = root.FindDict("error");
++      const std::string* message =
++          error ? error->FindString("message") : nullptr;
++      LOG(ERROR) << "AuraDE update: "
++                 << (message ? *message : "host bridge operation failed");
++      return std::nullopt;
++    }
++
++    const base::DictValue* data = root.FindDict("data");
++    if (!data) {
++      LOG(ERROR) << "AuraDE update: host bridge response has no data";
++      return std::nullopt;
++    }
++    return data->Clone();
++  }
++
++  void CallHostBridge(std::string_view method, HostResponseCallback callback) {
++    dbus::MethodCall method_call(kAuraHostBridgeInterface, std::string(method));
++    host_bridge_proxy_->CallMethod(
++        &method_call, kAuraHostBridgeTimeoutMs,
++        base::BindOnce(
++            [](HostResponseCallback callback, dbus::Response* response) {
++              std::move(callback).Run(
++                  UpdateEngineClientAura::ReadHostResponse(response));
++            },
++            std::move(callback)));
++  }
++
++  void CallHostBridge(std::string_view method,
++                      std::string_view argument,
++                      HostResponseCallback callback) {
++    dbus::MethodCall method_call(kAuraHostBridgeInterface, std::string(method));
++    dbus::MessageWriter writer(&method_call);
++    writer.AppendString(std::string(argument));
++    host_bridge_proxy_->CallMethod(
++        &method_call, kAuraHostBridgeTimeoutMs,
++        base::BindOnce(
++            [](HostResponseCallback callback, dbus::Response* response) {
++              std::move(callback).Run(
++                  UpdateEngineClientAura::ReadHostResponse(response));
++            },
++            std::move(callback)));
++  }
++
++  static std::string ToUpdateVersion(const base::ListValue& packages) {
++    const std::string* arch_version = nullptr;
++    for (const base::Value& package : packages) {
++      const base::DictValue* dict = package.GetIfDict();
++      if (!dict) {
++        continue;
++      }
++      const std::string* candidate = dict->FindString("available_version");
++      if (!candidate) {
++        continue;
++      }
++      if (!arch_version) {
++        arch_version = candidate;
++      }
++      const std::string* name = dict->FindString("name");
++      if (name && (*name == "chromiumos-ash" || *name == "aurade")) {
++        arch_version = candidate;
++        break;
++      }
++    }
++
++    std::string normalized;
++    bool needs_separator = false;
++    for (char c : arch_version ? *arch_version : std::string()) {
++      if (std::isdigit(static_cast<unsigned char>(c))) {
++        if (needs_separator && !normalized.empty()) {
++          normalized.push_back('.');
++        }
++        normalized.push_back(c);
++        needs_separator = false;
++      } else if (!normalized.empty()) {
++        needs_separator = true;
++      }
++    }
++    if (base::Version(normalized).IsValid()) {
++      return normalized;
++    }
++    return "0.0.0.1";
++  }
++
++  void PublishStatus(update_engine::Operation operation, double progress) {
++    last_status_.set_current_operation(operation);
++    last_status_.set_progress(progress);
++    last_status_.set_last_checked_time(base::Time::Now().ToTimeT());
++    last_status_.set_new_version(update_version_);
++    last_status_.set_new_size(0);
++    last_status_.set_is_enterprise_rollback(false);
++    last_status_.set_will_powerwash_after_reboot(false);
++    last_status_.set_is_interactive(true);
++    last_status_.set_will_defer_update(
++        operation == update_engine::Operation::UPDATED_BUT_DEFERRED);
++    for (auto& observer : observers_) {
++      observer.UpdateStatusChanged(last_status_);
++    }
++  }
++
++  void CheckForDeferredUpdates() {
++    if (check_in_flight_ || update_job_running_ || updates_available_ ||
++        last_status_.current_operation() ==
++            update_engine::Operation::UPDATED_NEED_REBOOT) {
++      return;
++    }
++    RequestUpdateCheckInternal(UpdateCheckCallback(), /*apply_update=*/false,
++                               /*mark_deferred=*/true);
++  }
++
++  void RequestUpdateCheckInternal(UpdateCheckCallback callback,
++                                  bool apply_update,
++                                  bool mark_deferred) {
++    if (update_job_running_ || check_in_flight_) {
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_FAILED);
++      }
++      return;
++    }
++
++    if (updates_available_) {
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_SUCCESS);
++      }
++      if (apply_update) {
++        StartUpgrade(base::OnceClosure());
++      }
++      return;
++    }
++
++    if (last_status_.current_operation() ==
++        update_engine::Operation::UPDATED_NEED_REBOOT) {
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_SUCCESS);
++      }
++      return;
++    }
++
++    check_in_flight_ = true;
++    update_version_.clear();
++    PublishStatus(update_engine::Operation::CHECKING_FOR_UPDATE, 0.0);
++    CallHostBridge(
++        kAuraPacmanListUpdates,
++        base::BindOnce(&UpdateEngineClientAura::OnUpdatesListed,
++                       weak_factory_.GetWeakPtr(), std::move(callback),
++                       apply_update, mark_deferred));
++  }
++
++  void OnUpdatesListed(UpdateCheckCallback callback,
++                       bool apply_update,
++                       bool mark_deferred,
++                       std::optional<base::DictValue> data) {
++    check_in_flight_ = false;
++    if (!data) {
++      PublishStatus(update_engine::Operation::ERROR, 0.0);
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_FAILED);
++      }
++      return;
++    }
++
++    const base::ListValue* packages = data->FindList("packages");
++    if (!packages) {
++      PublishStatus(update_engine::Operation::ERROR, 0.0);
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_FAILED);
++      }
++      return;
++    }
++
++    updates_available_ = !packages->empty();
++    if (!updates_available_) {
++      update_version_.clear();
++      PublishStatus(update_engine::Operation::IDLE, 0.0);
++      if (callback) {
++        std::move(callback).Run(UPDATE_RESULT_SUCCESS);
++      }
++      return;
++    }
++
++    update_version_ = ToUpdateVersion(*packages);
++    PublishStatus(mark_deferred ? update_engine::Operation::UPDATED_BUT_DEFERRED
++                                : update_engine::Operation::UPDATE_AVAILABLE,
++                  0.0);
++    if (callback) {
++      std::move(callback).Run(UPDATE_RESULT_SUCCESS);
++    }
++    if (apply_update) {
++      StartUpgrade(base::OnceClosure());
++    }
++  }
++
++  void StartUpgrade(base::OnceClosure failure_callback) {
++    if (!updates_available_ || update_job_running_) {
++      if (failure_callback) {
++        std::move(failure_callback).Run();
++      }
++      return;
++    }
++
++    update_job_running_ = true;
++    update_progress_ = 0.01;
++    PublishStatus(update_engine::Operation::DOWNLOADING, update_progress_);
++    CallHostBridge(kAuraPacmanUpgrade,
++                   base::BindOnce(&UpdateEngineClientAura::OnUpgradeStarted,
++                                  weak_factory_.GetWeakPtr(),
++                                  std::move(failure_callback)));
++  }
++
++  void OnUpgradeStarted(base::OnceClosure failure_callback,
++                        std::optional<base::DictValue> data) {
++    const std::string* job_id = data ? data->FindString("job_id") : nullptr;
++    if (!job_id || job_id->empty()) {
++      update_job_running_ = false;
++      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      if (failure_callback) {
++        std::move(failure_callback).Run();
++      }
++      return;
++    }
++
++    update_job_id_ = *job_id;
++    ScheduleJobPoll(base::Milliseconds(250));
++  }
++
++  void ScheduleJobPoll(base::TimeDelta delay) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++        FROM_HERE,
++        base::BindOnce(&UpdateEngineClientAura::PollUpdateJob,
++                       weak_factory_.GetWeakPtr()),
++        delay);
++  }
++
++  void PollUpdateJob() {
++    if (!update_job_running_ || update_job_id_.empty()) {
++      return;
++    }
++    CallHostBridge(kAuraJobGet, update_job_id_,
++                   base::BindOnce(&UpdateEngineClientAura::OnJobPolled,
++                                  weak_factory_.GetWeakPtr()));
++  }
++
++  void OnJobPolled(std::optional<base::DictValue> data) {
++    const std::string* state = data ? data->FindString("state") : nullptr;
++    if (!state) {
++      update_job_running_ = false;
++      update_job_id_.clear();
++      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      return;
++    }
++
++    if (*state == "running") {
++      update_progress_ = std::min(0.9, update_progress_ + 0.02);
++      PublishStatus(update_engine::Operation::DOWNLOADING, update_progress_);
++      ScheduleJobPoll(kAuraJobPollInterval);
++      return;
++    }
++
++    update_job_running_ = false;
++    update_job_id_.clear();
++    if (*state != "succeeded") {
++      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      return;
++    }
++
++    rollback_available_ =
++        data->FindBool("rollback_available").value_or(rollback_available_);
++    if (const std::string* snapshot = data->FindString("rollback_snapshot")) {
++      rollback_snapshot_ = *snapshot;
++    }
++    updates_available_ = false;
++    PublishStatus(update_engine::Operation::FINALIZING, 1.0);
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++        FROM_HERE,
++        base::BindOnce(&UpdateEngineClientAura::FinishSuccessfulUpgrade,
++                       weak_factory_.GetWeakPtr()),
++        base::Milliseconds(500));
++  }
++
++  void FinishSuccessfulUpgrade() {
++    PublishStatus(update_engine::Operation::UPDATED_NEED_REBOOT, 1.0);
++    if (rollback_available_) {
++      LOG(INFO) << "AuraDE update: rollback snapshot available at "
++                << rollback_snapshot_;
++    }
++  }
++
++  void OnRollbackEntrySelected(dbus::Response* response) {
++    if (!response) {
++      LOG(ERROR) << "AuraDE update: could not select rollback boot entry";
++      return;
++    }
++    RebootAfterUpdate();
++  }
++
++  base::ObserverList<Observer> observers_;
++  raw_ptr<dbus::ObjectProxy> host_bridge_proxy_ = nullptr;
++  raw_ptr<dbus::ObjectProxy> login_manager_proxy_ = nullptr;
++  update_engine::StatusResult last_status_;
++  std::string current_channel_ = "stable-channel";
++  std::string target_channel_ = "stable-channel";
++  std::string update_version_;
++  std::string update_job_id_;
++  std::string rollback_snapshot_;
++  bool check_in_flight_ = false;
++  bool update_job_running_ = false;
++  bool updates_available_ = false;
++  bool rollback_available_ = false;
++  double update_progress_ = 0.0;
++  base::OneShotTimer initial_update_timer_;
++  base::RepeatingTimer periodic_update_timer_;
++  base::WeakPtrFactory<UpdateEngineClientAura> weak_factory_{this};
++};
++
+ }  // namespace
+ 
+ // static
+@@ -793,12 +1300,19 @@ void UpdateEngineClient::Initialize(dbus::Bus* bus) {
+ void UpdateEngineClient::InitializeFake() {
+   // Do not create a new fake if it was initialized early in a browser test to
+   // allow the test to set its own client.
+-  if (g_instance)
++  if (g_instance) {
+     return;
++  }
+ 
+   (new UpdateEngineClientDesktopFake())->Init(nullptr);
+ }
+ 
++// static
++void UpdateEngineClient::InitializeAura(dbus::Bus* bus) {
++  CHECK(bus);
++  (new UpdateEngineClientAura())->Init(bus);
++}
++
+ // static
+ FakeUpdateEngineClient* UpdateEngineClient::InitializeFakeForTest() {
+   auto* client = new FakeUpdateEngineClient();
+diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.h b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
+index d84d7036be..39ec4ab79d 100644
+--- a/chromeos/ash/components/dbus/update_engine/update_engine_client.h
++++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
+@@ -77,6 +77,11 @@ class COMPONENT_EXPORT(ASH_DBUS_UPDATE_ENGINE) UpdateEngineClient
+   // no instance already exists.
+   static void InitializeFake();
+ 
++  // Creates the generic-Linux implementation backed by AuraDE's system host
++  // bridge. This is separate from InitializeFake() so browser tests keep the
++  // deterministic desktop fake.
++  static void InitializeAura(dbus::Bus* bus);
++
+   // Creates and initializes a fake global instance for unit tests.
+   static FakeUpdateEngineClient* InitializeFakeForTest();
+ 

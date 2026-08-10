@@ -1,0 +1,2475 @@
+diff --git a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
+index 2bbd60b291..21845fb98a 100644
+--- a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
++++ b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
+@@ -46,8 +46,9 @@ bool GetEventNodeId(base::FilePath path, int* id) {
+   const std::string base_name_prefix = "event";
+ 
+   std::string base_name = path.BaseName().value();
+-  if (!base::StartsWith(base_name, base_name_prefix))
++  if (!base::StartsWith(base_name, base_name_prefix)) {
+     return false;
++  }
+   base_name.erase(0, base_name_prefix.length());
+   return base::StringToInt(base_name, id);
+ }
+@@ -100,11 +101,26 @@ InputDataProvider::~InputDataProvider() {
+   }
+ 
+   BlockShortcuts(/*should_block=*/false);
+-  device_manager_->RemoveObserver(this);
+-  widget_->RemoveObserver(this);
+-  TabletMode::Get()->RemoveObserver(this);
+-  chromeos::PowerManagerClient::Get()->RemoveObserver(this);
+-  ash::Shell::Get()->display_configurator()->RemoveObserver(this);
++  if (observing_device_manager_) {
++    device_manager_->RemoveObserver(this);
++  }
++  if (observing_widget_ && widget_) {
++    widget_->RemoveObserver(this);
++  }
++  if (observing_tablet_mode_ && TabletMode::Get()) {
++    TabletMode::Get()->RemoveObserver(this);
++  }
++  if (observing_power_manager_) {
++    chromeos::PowerManagerClient* power_manager_client =
++        chromeos::PowerManagerClient::Get();
++    if (power_manager_client) {
++      power_manager_client->RemoveObserver(this);
++    }
++  }
++  if (observing_display_configurator_ &&
++      ash::Shell::Get()->display_configurator()) {
++    ash::Shell::Get()->display_configurator()->RemoveObserver(this);
++  }
+ }
+ 
+ // static
+@@ -127,21 +143,40 @@ void InputDataProvider::Initialize(aura::Window* window) {
+   DCHECK(event_rewriter_delegate_);
+ 
+   // Window and widget are needed for security enforcement.
+-  CHECK(window);
+-  widget_ = views::Widget::GetWidgetForNativeWindow(window);
+-  CHECK(widget_);
++  if (!window) {
++    LOG(WARNING) << "Input diagnostics started without a native window; "
++                    "keyboard event testing will be disabled.";
++  } else {
++    widget_ = views::Widget::GetWidgetForNativeWindow(window);
++    if (!widget_) {
++      LOG(WARNING) << "Input diagnostics started without a native widget; "
++                      "keyboard event testing will be disabled.";
++    }
++  }
+   device_manager_->AddObserver(this);
++  observing_device_manager_ = true;
+   device_manager_->ScanDevices(this);
+-  widget_->AddObserver(this);
+-  TabletMode::Get()->AddObserver(this);
+-  ash::Shell::Get()->display_configurator()->AddObserver(this);
++  if (widget_) {
++    widget_->AddObserver(this);
++    observing_widget_ = true;
++  }
++  if (TabletMode::Get()) {
++    TabletMode::Get()->AddObserver(this);
++    observing_tablet_mode_ = true;
++  }
++  if (ash::Shell::Get()->display_configurator()) {
++    ash::Shell::Get()->display_configurator()->AddObserver(this);
++    observing_display_configurator_ = true;
++  }
+ 
+   chromeos::PowerManagerClient* power_manager_client =
+       chromeos::PowerManagerClient::Get();
+-  DCHECK(power_manager_client);
+-  power_manager_client->AddObserver(this);
+-  power_manager_client->GetSwitchStates(base::BindOnce(
+-      &InputDataProvider::OnReceiveSwitchStates, weak_factory_.GetWeakPtr()));
++  if (power_manager_client) {
++    power_manager_client->AddObserver(this);
++    observing_power_manager_ = true;
++    power_manager_client->GetSwitchStates(base::BindOnce(
++        &InputDataProvider::OnReceiveSwitchStates, weak_factory_.GetWeakPtr()));
++  }
+ 
+   UpdateMaySendEvents();
+ }
+@@ -282,14 +317,21 @@ void InputDataProvider::OnPowerStateChanged(
+ }
+ 
+ void InputDataProvider::MoveAppToTestingScreen(uint32_t evdev_id) {
++  if (!widget_) {
++    LOG(WARNING) << "Cannot move Diagnostics to a testing screen without a "
++                    "native widget.";
++    return;
++  }
++
+   aura::Window* window = widget_->GetNativeWindow();
+   const int64_t current_display_id =
+       display::Screen::Get()->GetDisplayNearestWindow(window).id();
+ 
+   // Find the testing touchscreen device.
+   auto it = touch_devices_.find((int)evdev_id);
+-  if (it == touch_devices_.end())
++  if (it == touch_devices_.end()) {
+     return;
++  }
+ 
+   // Use device name to find the targeting display id.
+   // Since we use evdev_id as the device id in our implementation, which
+@@ -318,7 +360,7 @@ void InputDataProvider::MoveAppToTestingScreen(uint32_t evdev_id) {
+ }
+ 
+ void InputDataProvider::MoveAppBackToPreviousScreen() {
+-  if (previous_display_id_ != display::kInvalidDisplayId) {
++  if (widget_ && previous_display_id_ != display::kInvalidDisplayId) {
+     window_util::MoveWindowToDisplay(widget_->GetNativeWindow(),
+                                      previous_display_id_);
+   }
+@@ -329,11 +371,19 @@ void InputDataProvider::MoveAppBackToPreviousScreen() {
+ }
+ 
+ void InputDataProvider::SetA11yTouchPassthrough(bool enabled) {
++  if (!widget_) {
++    return;
++  }
+   widget_->GetNativeWindow()->SetProperty(
+       aura::client::kAccessibilityTouchExplorationPassThrough, enabled);
+ }
+ 
+ void InputDataProvider::UpdateMaySendEvents() {
++  if (!widget_) {
++    may_send_events_ = false;
++    return;
++  }
++
+   const bool widget_open = !widget_->IsClosed();
+   const bool widget_active = widget_->IsActive();
+   const bool widget_visible = widget_->IsVisible();
+@@ -353,10 +403,11 @@ void InputDataProvider::UpdateEventObservers() {
+       BlockShortcuts(may_send_events_);
+     }
+ 
+-    if (!may_send_events_)
++    if (!may_send_events_) {
+       SendPauseEvents();
+-    else
++    } else {
+       SendResumeEvents();
++    }
+   }
+ }
+ 
+@@ -440,8 +491,11 @@ void InputDataProvider::OnObservedKeyboardInputDisconnect(
+ void InputDataProvider::ObserveKeyEvents(
+     uint32_t id,
+     mojo::PendingRemote<mojom::KeyboardObserver> observer) {
+-  CHECK(widget_) << "Observing Key Events for input diagnostics not allowed "
+-                    "without widget to track focus.";
++  if (!widget_) {
++    LOG(WARNING) << "Observing key events for input diagnostics is disabled "
++                    "without a widget to track focus.";
++    return;
++  }
+ 
+   if (!keyboards_.contains(id)) {
+     LOG(ERROR) << "Couldn't find keyboard with ID " << id
+@@ -469,12 +523,14 @@ void InputDataProvider::ObserveKeyEvents(
+   const auto observer_id = observers.Add(std::move(observer));
+ 
+   // Ensure first callback is 'Paused' if we do not currently have focus
+-  if (!may_send_events_)
++  if (!may_send_events_) {
+     observers.Get(observer_id)->OnKeyEventsPaused();
++  }
+ 
+   // When we are adding the first observer, start forwarding events.
+-  if (observers.size() == 1)
++  if (observers.size() == 1) {
+     ForwardKeyboardInput(id);
++  }
+ }
+ 
+ void InputDataProvider::SendPauseEvents() {
+@@ -589,9 +645,9 @@ void InputDataProvider::AddKeyboard(const InputDeviceInformation* device_info) {
+   if (is_internal_keyboard &&
+       IsSplitModifierKeyboard(device_info->input_device.id) &&
+       (keyboard->bottom_left_layout == mojom::BottomLeftLayout::kUnknown ||
+-        keyboard->bottom_right_layout == mojom::BottomRightLayout::kUnknown)) {
+-      return;
+-    }
++       keyboard->bottom_right_layout == mojom::BottomRightLayout::kUnknown)) {
++    return;
++  }
+   if (!features::IsExternalKeyboardInDiagnosticsAppEnabled() &&
+       !is_internal_keyboard) {
+     return;
+@@ -623,8 +679,11 @@ void InputDataProvider::SendInputKeyEvent(uint32_t id,
+                                           uint32_t key_code,
+                                           uint32_t scan_code,
+                                           bool down) {
+-  CHECK(widget_) << "Sending Key Events for input diagnostics not allowed "
+-                    "without widget to track focus.";
++  if (!widget_) {
++    LOG(WARNING) << "Dropping input diagnostics key event without a widget to "
++                    "track focus.";
++    return;
++  }
+ 
+   if (!keyboard_observers_.contains(id)) {
+     LOG(ERROR) << "Couldn't find keyboard observer with ID " << id
+diff --git a/ash/webui/diagnostics_ui/backend/input/input_data_provider.h b/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
+index bf64c5212e..c36d9f23d5 100644
+--- a/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
++++ b/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
+@@ -204,6 +204,11 @@ class InputDataProvider : public mojom::InputDataProvider,
+ 
+   bool logged_not_dispatching_key_events_ = false;
+   raw_ptr<views::Widget> widget_ = nullptr;
++  bool observing_device_manager_ = false;
++  bool observing_widget_ = false;
++  bool observing_tablet_mode_ = false;
++  bool observing_power_manager_ = false;
++  bool observing_display_configurator_ = false;
+ 
+   mojo::RemoteSet<mojom::ConnectedDevicesObserver> connected_devices_observers_;
+ 
+diff --git a/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc b/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
+index 53a448c9a6..b77268ba8c 100644
+--- a/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
++++ b/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
+@@ -4,8 +4,20 @@
+ 
+ #include "ash/webui/diagnostics_ui/backend/system/system_data_provider.h"
+ 
++#include <dirent.h>
++#include <fcntl.h>
++#include <sys/utsname.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <cctype>
++#include <cstdint>
++#include <limits>
++#include <map>
+ #include <optional>
+ #include <string>
++#include <string_view>
++#include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+@@ -17,6 +29,11 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/i18n/time_formatting.h"
++#include "base/no_destructor.h"
++#include "base/numerics/safe_conversions.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+ #include "chromeos/ash/services/cros_healthd/public/cpp/service_connection.h"
+@@ -36,7 +53,1000 @@ constexpr int kBatteryHealthRefreshIntervalInSeconds = 60;
+ constexpr int kChargeStatusRefreshIntervalInSeconds = 15;
+ constexpr int kCpuUsageRefreshIntervalInSeconds = 1;
+ constexpr int kMemoryUsageRefreshIntervalInSeconds = 10;
++constexpr int kGpuUsageRefreshIntervalInSeconds = 5;
++constexpr int kSensorInfoRefreshIntervalInSeconds = 5;
+ constexpr int kMilliampsInAnAmp = 1000;
++constexpr size_t kProcFileMaxSizeBytes = 512 * 1024;
++constexpr size_t kPciIdsMaxSizeBytes = 2 * 1024 * 1024;
++
++struct LinuxMemorySnapshot {
++  uint32_t total_memory_kib = 0;
++  uint32_t free_memory_kib = 0;
++  uint32_t available_memory_kib = 0;
++};
++
++struct PciIdNames {
++  std::string vendor_name;
++  std::string device_name;
++};
++
++struct PciIdsCache {
++  bool loaded = false;
++  std::map<std::string, std::string> vendor_names;
++  std::map<std::string, std::string> device_names;
++};
++
++struct SensorKind {
++  std::string_view prefix;
++  std::string_view suffix;
++  mojom::SensorType type;
++  std::string_view label;
++  std::string_view unit;
++  double scale;
++};
++
++void PopulateCpuUsagePercentages(const CpuUsageData& new_usage,
++                                 const CpuUsageData& old_usage,
++                                 mojom::CpuUsage& out_cpu_usage);
++
++const healthd::SystemInfo* GetSystemInfoIfPresent(
++    const healthd::TelemetryInfo& info) {
++  if (info.system_result.is_null() ||
++      info.system_result->which() != healthd::SystemResult::Tag::kSystemInfo) {
++    return nullptr;
++  }
++  return info.system_result->get_system_info().get();
++}
++
++const healthd::CpuInfo* GetCpuInfoIfPresent(
++    const healthd::TelemetryInfo& info) {
++  if (info.cpu_result.is_null() ||
++      info.cpu_result->which() != healthd::CpuResult::Tag::kCpuInfo) {
++    return nullptr;
++  }
++  return info.cpu_result->get_cpu_info().get();
++}
++
++const healthd::MemoryInfo* GetMemoryInfoIfPresent(
++    const healthd::TelemetryInfo& info) {
++  if (info.memory_result.is_null() ||
++      info.memory_result->which() != healthd::MemoryResult::Tag::kMemoryInfo) {
++    return nullptr;
++  }
++  return info.memory_result->get_memory_info().get();
++}
++
++uint32_t KiBToUint32(uint64_t kib) {
++  return base::saturated_cast<uint32_t>(kib);
++}
++
++uint32_t BytesToKiB(uint64_t bytes) {
++  return KiBToUint32(bytes / 1024);
++}
++
++uint32_t GetPhysicalMemoryKiB() {
++  const long pages = sysconf(_SC_PHYS_PAGES);
++  const long page_size = sysconf(_SC_PAGESIZE);
++  if (pages <= 0 || page_size <= 0) {
++    return 0;
++  }
++  return BytesToKiB(static_cast<uint64_t>(pages) *
++                    static_cast<uint64_t>(page_size));
++}
++
++uint16_t GetOnlineProcessorCount() {
++  const long processors = sysconf(_SC_NPROCESSORS_ONLN);
++  return base::saturated_cast<uint16_t>(std::max<long>(processors, 1));
++}
++
++std::string GetKernelVersion() {
++  struct utsname info;
++  if (uname(&info) != 0) {
++    return "";
++  }
++  return info.release;
++}
++
++std::string GetArchitecture() {
++  struct utsname info;
++  if (uname(&info) != 0) {
++    return "";
++  }
++  return info.machine;
++}
++
++std::string TrimmedString(std::string_view value) {
++  std::string trimmed;
++  base::TrimWhitespaceASCII(value, base::TRIM_ALL, &trimmed);
++  return trimmed;
++}
++
++std::string LowerAscii(std::string value) {
++  for (char& c : value) {
++    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++  }
++  return value;
++}
++
++std::optional<std::string> ReadFileContents(const char* path,
++                                            size_t max_size = 4096) {
++  const int fd = open(path, O_RDONLY | O_CLOEXEC);
++  if (fd < 0) {
++    return std::nullopt;
++  }
++
++  std::string contents;
++  contents.reserve(std::min(max_size, static_cast<size_t>(4096)));
++  char buffer[4096];
++  while (contents.size() < max_size) {
++    const size_t bytes_to_read =
++        std::min(sizeof(buffer), max_size - contents.size());
++    const ssize_t bytes_read = read(fd, buffer, bytes_to_read);
++    if (bytes_read < 0) {
++      close(fd);
++      return std::nullopt;
++    }
++    if (bytes_read == 0) {
++      break;
++    }
++    contents.append(buffer, static_cast<size_t>(bytes_read));
++  }
++  close(fd);
++  return contents;
++}
++
++std::optional<std::string> ReadTrimmedFile(const char* path,
++                                           size_t max_size = 4096) {
++  std::optional<std::string> contents = ReadFileContents(path, max_size);
++  if (!contents.has_value()) {
++    return std::nullopt;
++  }
++
++  std::string trimmed = TrimmedString(contents.value());
++  if (trimmed.empty()) {
++    return std::nullopt;
++  }
++  return trimmed;
++}
++
++std::optional<int64_t> ReadIntegerFile(const std::string& path) {
++  std::optional<std::string> value = ReadTrimmedFile(path.c_str());
++  if (!value.has_value()) {
++    return std::nullopt;
++  }
++
++  int64_t parsed = 0;
++  if (!base::StringToInt64(value.value(), &parsed)) {
++    return std::nullopt;
++  }
++  return parsed;
++}
++
++std::optional<std::string> ReadOsReleaseValue(std::string_view key) {
++  std::optional<std::string> contents =
++      ReadTrimmedFile("/etc/os-release", kProcFileMaxSizeBytes);
++  if (!contents.has_value()) {
++    return std::nullopt;
++  }
++
++  const std::string prefix = std::string(key) + "=";
++  for (std::string_view line :
++       base::SplitStringPiece(contents.value(), "\n", base::TRIM_WHITESPACE,
++                              base::SPLIT_WANT_NONEMPTY)) {
++    if (!base::StartsWith(line, prefix, base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    std::string value = TrimmedString(line.substr(prefix.size()));
++    if (value.size() >= 2 &&
++        ((value.front() == '"' && value.back() == '"') ||
++         (value.front() == '\'' && value.back() == '\''))) {
++      value = value.substr(1, value.size() - 2);
++    }
++    if (!value.empty()) {
++      return value;
++    }
++  }
++
++  return std::nullopt;
++}
++
++std::optional<uint64_t> ParseMeminfoKiB(std::string_view contents,
++                                        std::string_view key) {
++  const std::string prefix = std::string(key) + ":";
++  for (std::string_view line : base::SplitStringPiece(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (!base::StartsWith(line, prefix, base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    std::vector<std::string_view> fields = base::SplitStringPiece(
++        line.substr(prefix.size()), " ", base::TRIM_WHITESPACE,
++        base::SPLIT_WANT_NONEMPTY);
++    if (fields.empty()) {
++      return std::nullopt;
++    }
++
++    uint64_t value = 0;
++    if (base::StringToUint64(fields[0], &value)) {
++      return value;
++    }
++    return std::nullopt;
++  }
++
++  return std::nullopt;
++}
++
++std::optional<LinuxMemorySnapshot> ReadLinuxMemorySnapshot() {
++  std::optional<std::string> contents =
++      ReadFileContents("/proc/meminfo", kProcFileMaxSizeBytes);
++  if (!contents.has_value()) {
++    return std::nullopt;
++  }
++
++  std::optional<uint64_t> total = ParseMeminfoKiB(contents.value(), "MemTotal");
++  if (!total.has_value() || total.value() == 0) {
++    return std::nullopt;
++  }
++
++  LinuxMemorySnapshot snapshot;
++  snapshot.total_memory_kib = KiBToUint32(total.value());
++  snapshot.free_memory_kib =
++      KiBToUint32(ParseMeminfoKiB(contents.value(), "MemFree").value_or(0));
++  snapshot.available_memory_kib =
++      KiBToUint32(ParseMeminfoKiB(contents.value(), "MemAvailable")
++                      .value_or(snapshot.free_memory_kib));
++  return snapshot;
++}
++
++std::optional<uint64_t> ParseProcStatCpuTime(std::string_view value) {
++  uint64_t time = 0;
++  if (base::StringToUint64(value, &time)) {
++    return time;
++  }
++  return std::nullopt;
++}
++
++std::optional<CpuUsageData> ReadLinuxCpuUsageData() {
++  std::optional<std::string> contents =
++      ReadFileContents("/proc/stat", kProcFileMaxSizeBytes);
++  if (!contents.has_value()) {
++    return std::nullopt;
++  }
++
++  for (std::string_view line :
++       base::SplitStringPiece(contents.value(), "\n", base::TRIM_WHITESPACE,
++                              base::SPLIT_WANT_NONEMPTY)) {
++    if (!base::StartsWith(line, "cpu ", base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    std::vector<std::string_view> fields = base::SplitStringPiece(
++        line, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
++    if (fields.size() < 5) {
++      return std::nullopt;
++    }
++
++    const uint64_t user = ParseProcStatCpuTime(fields[1]).value_or(0);
++    const uint64_t nice = ParseProcStatCpuTime(fields[2]).value_or(0);
++    const uint64_t system = ParseProcStatCpuTime(fields[3]).value_or(0);
++    const uint64_t idle = ParseProcStatCpuTime(fields[4]).value_or(0);
++    const uint64_t iowait =
++        fields.size() > 5 ? ParseProcStatCpuTime(fields[5]).value_or(0) : 0;
++    const uint64_t irq =
++        fields.size() > 6 ? ParseProcStatCpuTime(fields[6]).value_or(0) : 0;
++    const uint64_t softirq =
++        fields.size() > 7 ? ParseProcStatCpuTime(fields[7]).value_or(0) : 0;
++    const uint64_t steal =
++        fields.size() > 8 ? ParseProcStatCpuTime(fields[8]).value_or(0) : 0;
++
++    return CpuUsageData(user + nice, system + irq + softirq + steal,
++                        idle + iowait);
++  }
++
++  return std::nullopt;
++}
++
++std::optional<uint32_t> ReadLinuxCpuClockKHz() {
++  std::optional<std::string> contents =
++      ReadFileContents("/proc/cpuinfo", kProcFileMaxSizeBytes);
++  if (!contents.has_value()) {
++    return std::nullopt;
++  }
++
++  double max_cpu_mhz = 0;
++  for (std::string_view line :
++       base::SplitStringPiece(contents.value(), "\n", base::TRIM_WHITESPACE,
++                              base::SPLIT_WANT_NONEMPTY)) {
++    if (!base::StartsWith(line, "cpu MHz", base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    const size_t separator = line.find(':');
++    if (separator == std::string_view::npos) {
++      continue;
++    }
++
++    double cpu_mhz = 0;
++    if (base::StringToDouble(TrimmedString(line.substr(separator + 1)),
++                             &cpu_mhz)) {
++      max_cpu_mhz = std::max(max_cpu_mhz, cpu_mhz);
++    }
++  }
++
++  if (max_cpu_mhz <= 0) {
++    return std::nullopt;
++  }
++
++  return base::saturated_cast<uint32_t>(max_cpu_mhz * 1000);
++}
++
++uint32_t GetLinuxCpuMaxClockSpeedKHz() {
++  uint32_t max_frequency_khz = 0;
++  if (DIR* dir = opendir("/sys/devices/system/cpu")) {
++    while (dirent* entry = readdir(dir)) {
++      std::string name = entry->d_name;
++      if (!base::StartsWith(name, "cpu", base::CompareCase::SENSITIVE) ||
++          name.size() == 3 ||
++          !std::all_of(name.begin() + 3, name.end(),
++                       [](unsigned char c) { return std::isdigit(c); })) {
++        continue;
++      }
++
++      const std::string base_path =
++          "/sys/devices/system/cpu/" + name + "/cpufreq/";
++      for (const char* file_name :
++           {"cpuinfo_max_freq", "scaling_max_freq", "scaling_cur_freq"}) {
++        std::optional<std::string> value =
++            ReadTrimmedFile((base_path + file_name).c_str());
++        uint32_t frequency_khz = 0;
++        if (value.has_value() &&
++            base::StringToUint(value.value(), &frequency_khz)) {
++          max_frequency_khz = std::max(max_frequency_khz, frequency_khz);
++        }
++      }
++    }
++    closedir(dir);
++  }
++  if (max_frequency_khz > 0) {
++    return max_frequency_khz;
++  }
++  return ReadLinuxCpuClockKHz().value_or(0);
++}
++
++uint16_t GetLinuxCpuThreadCount() {
++  return GetOnlineProcessorCount();
++}
++
++std::string GetLinuxCpuModelName() {
++  std::optional<std::string> contents =
++      ReadFileContents("/proc/cpuinfo", kProcFileMaxSizeBytes);
++  if (contents.has_value()) {
++    for (std::string_view line :
++         base::SplitStringPiece(contents.value(), "\n", base::TRIM_WHITESPACE,
++                                base::SPLIT_WANT_NONEMPTY)) {
++      if (!base::StartsWith(line, "model name", base::CompareCase::SENSITIVE) &&
++          !base::StartsWith(line, "Hardware", base::CompareCase::SENSITIVE)) {
++        continue;
++      }
++
++      const size_t separator = line.find(':');
++      if (separator == std::string_view::npos) {
++        continue;
++      }
++
++      std::string model_name = TrimmedString(line.substr(separator + 1));
++      if (!model_name.empty()) {
++        return model_name;
++      }
++    }
++  }
++
++  std::string architecture = GetArchitecture();
++  return architecture.empty() ? "Unknown CPU" : architecture;
++}
++
++std::string GetLinuxBoardName() {
++  for (const char* path : {"/sys/class/dmi/id/product_name",
++                           "/sys/devices/virtual/dmi/id/product_name",
++                           "/sys/class/dmi/id/board_name"}) {
++    std::optional<std::string> value = ReadTrimmedFile(path);
++    if (value.has_value() && value.value() != "None" &&
++        value.value() != "System Product Name") {
++      return value.value();
++    }
++  }
++
++  return "Linux host";
++}
++
++std::string NormalizePciId(std::string value) {
++  value = TrimmedString(value);
++  if (base::StartsWith(value, "0x", base::CompareCase::INSENSITIVE_ASCII)) {
++    value = value.substr(2);
++  }
++  return LowerAscii(value);
++}
++
++bool IsPciIdToken(std::string_view value) {
++  return value.size() == 4 &&
++         std::all_of(value.begin(), value.end(),
++                     [](unsigned char c) { return std::isxdigit(c); });
++}
++
++std::string PciDeviceKey(std::string_view vendor_id,
++                         std::string_view device_id) {
++  return std::string(vendor_id) + ":" + std::string(device_id);
++}
++
++PciIdsCache& GetPciIdsCache() {
++  static base::NoDestructor<PciIdsCache> cache;
++  return *cache;
++}
++
++void PopulatePciIdsCache(PciIdsCache& cache) {
++  if (cache.loaded) {
++    return;
++  }
++  cache.loaded = true;
++
++  for (const char* path : {"/usr/share/hwdata/pci.ids",
++                           "/usr/share/misc/pci.ids", "/usr/share/pci.ids"}) {
++    std::optional<std::string> contents =
++        ReadFileContents(path, kPciIdsMaxSizeBytes);
++    if (!contents.has_value()) {
++      continue;
++    }
++
++    std::string current_vendor_id;
++    for (std::string_view line :
++         base::SplitStringPiece(contents.value(), "\n", base::KEEP_WHITESPACE,
++                                base::SPLIT_WANT_NONEMPTY)) {
++      if (line.empty() || line[0] == '#') {
++        continue;
++      }
++
++      if (line[0] != '\t') {
++        if (line.size() >= 5 && IsPciIdToken(line.substr(0, 4)) &&
++            std::isspace(static_cast<unsigned char>(line[4]))) {
++          current_vendor_id = LowerAscii(std::string(line.substr(0, 4)));
++          cache.vendor_names[current_vendor_id] = TrimmedString(line.substr(4));
++        }
++        continue;
++      }
++
++      if (current_vendor_id.empty() || line.size() < 6 || line[1] == '\t' ||
++          !IsPciIdToken(line.substr(1, 4)) ||
++          !std::isspace(static_cast<unsigned char>(line[5]))) {
++        continue;
++      }
++
++      const std::string current_device_id =
++          LowerAscii(std::string(line.substr(1, 4)));
++      cache.device_names[PciDeviceKey(current_vendor_id, current_device_id)] =
++          TrimmedString(line.substr(5));
++    }
++    return;
++  }
++}
++
++std::optional<PciIdNames> ReadPciIdNames(std::string_view vendor_id,
++                                         std::string_view device_id) {
++  const std::string normalized_vendor_id =
++      NormalizePciId(std::string(vendor_id));
++  const std::string normalized_device_id =
++      NormalizePciId(std::string(device_id));
++  if (normalized_vendor_id.empty()) {
++    return std::nullopt;
++  }
++
++  PciIdsCache& cache = GetPciIdsCache();
++  PopulatePciIdsCache(cache);
++
++  PciIdNames names;
++  if (auto it = cache.vendor_names.find(normalized_vendor_id);
++      it != cache.vendor_names.end()) {
++    names.vendor_name = it->second;
++  }
++  if (!normalized_device_id.empty()) {
++    if (auto it = cache.device_names.find(
++            PciDeviceKey(normalized_vendor_id, normalized_device_id));
++        it != cache.device_names.end()) {
++      names.device_name = it->second;
++    }
++  }
++  if (!names.vendor_name.empty() || !names.device_name.empty()) {
++    return names;
++  }
++
++  return std::nullopt;
++}
++
++bool IsPrimaryDrmCardNode(std::string_view name) {
++  return base::StartsWith(name, "card", base::CompareCase::SENSITIVE) &&
++         name.size() > 4 &&
++         std::all_of(name.begin() + 4, name.end(),
++                     [](unsigned char c) { return std::isdigit(c); });
++}
++
++std::string BasenameFromPath(std::string_view path) {
++  const size_t slash = path.rfind('/');
++  if (slash == std::string_view::npos) {
++    return std::string(path);
++  }
++  return std::string(path.substr(slash + 1));
++}
++
++std::vector<std::string> ReadDirectoryNames(const std::string& path) {
++  std::vector<std::string> names;
++  DIR* dir = opendir(path.c_str());
++  if (!dir) {
++    return names;
++  }
++
++  while (dirent* entry = readdir(dir)) {
++    if (entry->d_name[0] == '.') {
++      continue;
++    }
++    names.emplace_back(entry->d_name);
++  }
++  closedir(dir);
++  std::sort(names.begin(), names.end());
++  return names;
++}
++
++bool IsIndexedSensorInputFile(std::string_view name, std::string_view prefix) {
++  constexpr std::string_view kInputSuffix = "_input";
++  if (!base::StartsWith(name, prefix, base::CompareCase::SENSITIVE) ||
++      !base::EndsWith(name, kInputSuffix, base::CompareCase::SENSITIVE) ||
++      name.size() <= prefix.size() + kInputSuffix.size()) {
++    return false;
++  }
++
++  const std::string_view index = name.substr(
++      prefix.size(), name.size() - prefix.size() - kInputSuffix.size());
++  return std::all_of(index.begin(), index.end(),
++                     [](unsigned char c) { return std::isdigit(c); });
++}
++
++std::string SensorIndex(std::string_view name, std::string_view prefix) {
++  constexpr std::string_view kInputSuffix = "_input";
++  return std::string(name.substr(
++      prefix.size(), name.size() - prefix.size() - kInputSuffix.size()));
++}
++
++std::vector<mojom::GpuSensorReadingPtr> ReadGpuSensorReadings(
++    const std::string& dev_dir,
++    std::string_view prefix,
++    bool millivalue_to_unit,
++    std::string_view fallback_label) {
++  std::vector<mojom::GpuSensorReadingPtr> readings;
++  const std::string hwmon_root = dev_dir + "hwmon";
++  for (const std::string& hwmon_name : ReadDirectoryNames(hwmon_root)) {
++    if (!base::StartsWith(hwmon_name, "hwmon", base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    const std::string hwmon_dir = hwmon_root + "/" + hwmon_name + "/";
++    std::optional<std::string> chip_name =
++        ReadTrimmedFile((hwmon_dir + "name").c_str());
++    for (const std::string& file_name : ReadDirectoryNames(hwmon_dir)) {
++      if (!IsIndexedSensorInputFile(file_name, prefix)) {
++        continue;
++      }
++
++      std::optional<int64_t> raw_value = ReadIntegerFile(hwmon_dir + file_name);
++      if (!raw_value.has_value()) {
++        continue;
++      }
++
++      const std::string index = SensorIndex(file_name, prefix);
++      std::string label =
++          ReadTrimmedFile(
++              (hwmon_dir + std::string(prefix) + index + "_label").c_str())
++              .value_or("");
++      if (label.empty()) {
++        label = std::string(fallback_label) + " " + index;
++      }
++      if (chip_name.has_value() && !chip_name->empty() &&
++          label.find(chip_name.value()) == std::string::npos) {
++        label += " (" + chip_name.value() + ")";
++      }
++
++      auto reading = mojom::GpuSensorReading::New();
++      reading->label = label;
++      reading->value = base::saturated_cast<int32_t>(
++          millivalue_to_unit ? (raw_value.value() + 500) / 1000
++                             : raw_value.value());
++      readings.push_back(std::move(reading));
++    }
++  }
++  return readings;
++}
++
++bool IsIndexedSensorFile(std::string_view name, const SensorKind& kind) {
++  if (!base::StartsWith(name, kind.prefix, base::CompareCase::SENSITIVE)) {
++    return false;
++  }
++  if (!kind.suffix.empty() &&
++      !base::EndsWith(name, kind.suffix, base::CompareCase::SENSITIVE)) {
++    return false;
++  }
++
++  const size_t suffix_size = kind.suffix.size();
++  if (name.size() <= kind.prefix.size() + suffix_size) {
++    return false;
++  }
++
++  const std::string_view index = name.substr(
++      kind.prefix.size(), name.size() - kind.prefix.size() - suffix_size);
++  return std::all_of(index.begin(), index.end(),
++                     [](unsigned char c) { return std::isdigit(c); });
++}
++
++std::string SensorIndex(std::string_view name, const SensorKind& kind) {
++  return std::string(
++      name.substr(kind.prefix.size(),
++                  name.size() - kind.prefix.size() - kind.suffix.size()));
++}
++
++std::vector<mojom::SensorInfoPtr> ReadLinuxSensorInfos() {
++  static constexpr SensorKind kSensorKinds[] = {
++      {"temp", "_input", mojom::SensorType::kTemperature, "Temperature", "C",
++       0.001},
++      {"fan", "_input", mojom::SensorType::kFan, "Fan", "RPM", 1.0},
++      {"in", "_input", mojom::SensorType::kVoltage, "Voltage", "V", 0.001},
++      {"curr", "_input", mojom::SensorType::kCurrent, "Current", "A", 0.001},
++      {"power", "_input", mojom::SensorType::kPower, "Power", "W", 0.000001},
++      {"energy", "_input", mojom::SensorType::kEnergy, "Energy", "J", 0.000001},
++      {"humidity", "_input", mojom::SensorType::kHumidity, "Humidity", "%",
++       0.001},
++      {"freq", "_input", mojom::SensorType::kFrequency, "Frequency", "MHz",
++       0.000001},
++      {"pwm", "", mojom::SensorType::kPwm, "PWM", "PWM", 1.0},
++  };
++
++  std::vector<mojom::SensorInfoPtr> sensors;
++  const std::string hwmon_root = "/sys/class/hwmon";
++  for (const std::string& hwmon_name : ReadDirectoryNames(hwmon_root)) {
++    if (!base::StartsWith(hwmon_name, "hwmon", base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    const std::string hwmon_dir = hwmon_root + "/" + hwmon_name + "/";
++    const std::string device_name =
++        ReadTrimmedFile((hwmon_dir + "name").c_str()).value_or(hwmon_name);
++
++    for (const std::string& file_name : ReadDirectoryNames(hwmon_dir)) {
++      for (const SensorKind& kind : kSensorKinds) {
++        if (!IsIndexedSensorFile(file_name, kind)) {
++          continue;
++        }
++
++        std::optional<int64_t> raw_value =
++            ReadIntegerFile(hwmon_dir + file_name);
++        if (!raw_value.has_value()) {
++          continue;
++        }
++
++        const std::string index = SensorIndex(file_name, kind);
++        std::string label =
++            ReadTrimmedFile(
++                (hwmon_dir + std::string(kind.prefix) + index + "_label")
++                    .c_str())
++                .value_or("");
++        if (label.empty()) {
++          label = std::string(kind.label) + " " + index;
++        }
++
++        auto sensor = mojom::SensorInfo::New();
++        sensor->label = label;
++        sensor->device_name = device_name;
++        sensor->path = hwmon_dir + file_name;
++        sensor->type = kind.type;
++        sensor->value = static_cast<double>(raw_value.value()) * kind.scale;
++        sensor->unit = std::string(kind.unit);
++        sensors.push_back(std::move(sensor));
++        break;
++      }
++    }
++  }
++
++  std::sort(sensors.begin(), sensors.end(),
++            [](const mojom::SensorInfoPtr& a, const mojom::SensorInfoPtr& b) {
++              return std::tie(a->device_name, a->type, a->label, a->path) <
++                     std::tie(b->device_name, b->type, b->label, b->path);
++            });
++  return sensors;
++}
++
++std::string BuildGpuDisplayName(const mojom::GpuInfo& gpu) {
++  if (!gpu.device_name.empty()) {
++    if (!gpu.vendor_name.empty() &&
++        !base::StartsWith(gpu.device_name, gpu.vendor_name,
++                          base::CompareCase::INSENSITIVE_ASCII)) {
++      return gpu.vendor_name + " " + gpu.device_name;
++    }
++    return gpu.device_name;
++  }
++  if (!gpu.vendor_name.empty()) {
++    return gpu.vendor_name + " GPU";
++  }
++  if (!gpu.driver.empty()) {
++    return gpu.driver + " GPU";
++  }
++  return gpu.drm_card.empty() ? "GPU" : "GPU " + gpu.drm_card;
++}
++
++std::vector<mojom::GpuInfoPtr> ReadLinuxGpuInfos() {
++  std::vector<mojom::GpuInfoPtr> gpus;
++  DIR* dir = opendir("/sys/class/drm");
++  if (!dir) {
++    return gpus;
++  }
++
++  while (dirent* entry = readdir(dir)) {
++    std::string name = entry->d_name;
++    // Match primary card nodes only: card0, card1, etc. Skip connectors like
++    // card0-HDMI-A-1 and render/control nodes.
++    if (!IsPrimaryDrmCardNode(name)) {
++      continue;
++    }
++
++    const std::string device_path =
++        std::string("/sys/class/drm/") + name + "/device";
++    if (access(device_path.c_str(), F_OK) != 0) {
++      continue;
++    }
++
++    auto gpu = mojom::GpuInfo::New();
++    gpu->drm_card = name;
++
++    const std::string dev_dir = device_path + "/";
++    std::optional<std::string> vendor =
++        ReadTrimmedFile((dev_dir + "vendor").c_str());
++    std::optional<std::string> device =
++        ReadTrimmedFile((dev_dir + "device").c_str());
++    if (vendor.has_value()) {
++      gpu->vendor_id = NormalizePciId(vendor.value());
++    }
++    if (device.has_value()) {
++      gpu->device_id = NormalizePciId(device.value());
++    }
++
++    std::optional<PciIdNames> names =
++        ReadPciIdNames(gpu->vendor_id, gpu->device_id);
++    if (names.has_value()) {
++      gpu->vendor_name = names->vendor_name;
++      gpu->device_name = names->device_name;
++    }
++
++    std::string driver_path = dev_dir + "driver";
++    if (access(driver_path.c_str(), F_OK) == 0) {
++      std::string link_buf(256, '\0');
++      const ssize_t link_len =
++          readlink(driver_path.c_str(), link_buf.data(), link_buf.size() - 1);
++      if (link_len > 0) {
++        link_buf.resize(static_cast<size_t>(link_len));
++        size_t slash = link_buf.rfind('/');
++        if (slash != std::string::npos) {
++          gpu->driver = link_buf.substr(slash + 1);
++        } else {
++          gpu->driver = link_buf;
++        }
++      }
++    }
++
++    std::string pci_buf(512, '\0');
++    const ssize_t pci_len =
++        readlink(device_path.c_str(), pci_buf.data(), pci_buf.size() - 1);
++    if (pci_len > 0) {
++      pci_buf.resize(static_cast<size_t>(pci_len));
++      gpu->pci_path = BasenameFromPath(pci_buf);
++    }
++
++    gpu->temperatures =
++        ReadGpuSensorReadings(dev_dir, "temp", true, "Temperature");
++    gpu->fans = ReadGpuSensorReadings(dev_dir, "fan", false, "Fan");
++
++    // Attempt to read AMD-specific utilization metrics.
++    auto usage = mojom::GpuUsage::New();
++    bool has_usage = false;
++
++    std::optional<std::string> busy =
++        ReadTrimmedFile((dev_dir + "gpu_busy_percent").c_str());
++    if (busy.has_value()) {
++      unsigned int busy_val = 0;
++      if (base::StringToUint(TrimmedString(busy.value()), &busy_val) &&
++          busy_val <= 100) {
++        usage->gpu_busy_percent = static_cast<uint8_t>(busy_val);
++        has_usage = true;
++      }
++    }
++
++    std::optional<std::string> vram_total =
++        ReadTrimmedFile((dev_dir + "mem_info_vram_total").c_str());
++    if (vram_total.has_value()) {
++      uint64_t vram_val = 0;
++      if (base::StringToUint64(TrimmedString(vram_total.value()), &vram_val)) {
++        usage->vram_total = vram_val;
++        has_usage = true;
++      }
++    }
++
++    std::optional<std::string> vram_used =
++        ReadTrimmedFile((dev_dir + "mem_info_vram_used").c_str());
++    if (vram_used.has_value()) {
++      uint64_t vram_val = 0;
++      if (base::StringToUint64(TrimmedString(vram_used.value()), &vram_val)) {
++        usage->vram_used = vram_val;
++        has_usage = true;
++      }
++    }
++
++    if (has_usage) {
++      gpu->usage = std::move(usage);
++    }
++
++    gpu->display_name = BuildGpuDisplayName(*gpu);
++    gpus.push_back(std::move(gpu));
++  }
++
++  closedir(dir);
++  return gpus;
++}
++
++bool LinuxHostHasBattery() {
++  DIR* dir = opendir("/sys/class/power_supply");
++  if (!dir) {
++    return false;
++  }
++
++  bool has_battery = false;
++  while (dirent* entry = readdir(dir)) {
++    if (entry->d_name[0] == '.') {
++      continue;
++    }
++    std::string type_path =
++        std::string("/sys/class/power_supply/") + entry->d_name + "/type";
++    std::optional<std::string> type = ReadTrimmedFile(type_path.c_str());
++    if (type.has_value() && type.value() == "Battery") {
++      has_battery = true;
++      break;
++    }
++  }
++  closedir(dir);
++  return has_battery;
++}
++
++std::optional<uint16_t> ReadLinuxAverageCpuTemperatureCelsius() {
++  DIR* dir = opendir("/sys/class/thermal");
++  if (!dir) {
++    return std::nullopt;
++  }
++
++  uint64_t total_celsius = 0;
++  uint32_t count = 0;
++  while (dirent* entry = readdir(dir)) {
++    std::string name = entry->d_name;
++    if (!base::StartsWith(name, "thermal_zone", base::CompareCase::SENSITIVE)) {
++      continue;
++    }
++
++    std::string temp_path = std::string("/sys/class/thermal/") + name + "/temp";
++    std::optional<std::string> temp_string = ReadTrimmedFile(temp_path.c_str());
++    if (!temp_string.has_value()) {
++      continue;
++    }
++
++    int temp = 0;
++    if (!base::StringToInt(temp_string.value(), &temp) || temp <= 0) {
++      continue;
++    }
++
++    total_celsius += temp > 1000 ? temp / 1000 : temp;
++    ++count;
++  }
++  closedir(dir);
++
++  if (count == 0) {
++    return std::nullopt;
++  }
++  return base::saturated_cast<uint16_t>(total_celsius / count);
++}
++
++void PopulateLinuxSystemInfo(mojom::SystemInfo& out_system_info) {
++  out_system_info.board_name = GetLinuxBoardName();
++  out_system_info.marketing_name = out_system_info.board_name;
++  out_system_info.cpu_model_name = GetLinuxCpuModelName();
++  out_system_info.cpu_threads_count = GetLinuxCpuThreadCount();
++  out_system_info.cpu_max_clock_speed_khz = GetLinuxCpuMaxClockSpeedKHz();
++
++  if (std::optional<LinuxMemorySnapshot> memory = ReadLinuxMemorySnapshot()) {
++    out_system_info.total_memory_kib = memory->total_memory_kib;
++  } else {
++    out_system_info.total_memory_kib = GetPhysicalMemoryKiB();
++  }
++
++  const std::string os_name =
++      ReadOsReleaseValue("PRETTY_NAME").value_or("Linux");
++  const std::string kernel_version = GetKernelVersion();
++  out_system_info.version_info = mojom::VersionInfo::New(
++      "Linux",
++      kernel_version.empty() ? os_name : os_name + " / " + kernel_version);
++
++  mojom::DeviceCapabilitiesPtr capabilities = mojom::DeviceCapabilities::New();
++  capabilities->has_battery = LinuxHostHasBattery();
++  out_system_info.device_capabilities = std::move(capabilities);
++}
++
++void FillMissingSystemInfoFromLinux(mojom::SystemInfo& out_system_info) {
++  mojom::SystemInfoPtr linux_system_info = mojom::SystemInfo::New();
++  linux_system_info->version_info = mojom::VersionInfo::New();
++  linux_system_info->device_capabilities = mojom::DeviceCapabilities::New();
++  PopulateLinuxSystemInfo(*linux_system_info);
++
++  if (out_system_info.board_name.empty()) {
++    out_system_info.board_name = linux_system_info->board_name;
++  }
++  if (out_system_info.marketing_name.empty() ||
++      out_system_info.marketing_name == "TBD") {
++    out_system_info.marketing_name = linux_system_info->marketing_name;
++  }
++  if (out_system_info.cpu_model_name.empty()) {
++    out_system_info.cpu_model_name = linux_system_info->cpu_model_name;
++  }
++  if (out_system_info.cpu_threads_count == 0) {
++    out_system_info.cpu_threads_count = linux_system_info->cpu_threads_count;
++  }
++  if (out_system_info.cpu_max_clock_speed_khz == 0) {
++    out_system_info.cpu_max_clock_speed_khz =
++        linux_system_info->cpu_max_clock_speed_khz;
++  }
++  if (out_system_info.total_memory_kib == 0) {
++    out_system_info.total_memory_kib = linux_system_info->total_memory_kib;
++  }
++  if (!out_system_info.version_info ||
++      out_system_info.version_info->full_version_string.empty()) {
++    out_system_info.version_info = linux_system_info->version_info.Clone();
++  }
++  if (!out_system_info.device_capabilities) {
++    out_system_info.device_capabilities =
++        linux_system_info->device_capabilities.Clone();
++  }
++}
++
++mojom::MemoryUsagePtr CreateLinuxMemoryUsage() {
++  mojom::MemoryUsagePtr memory_usage = mojom::MemoryUsage::New();
++  if (std::optional<LinuxMemorySnapshot> memory = ReadLinuxMemorySnapshot()) {
++    memory_usage->total_memory_kib = memory->total_memory_kib;
++    memory_usage->free_memory_kib = memory->free_memory_kib;
++    memory_usage->available_memory_kib = memory->available_memory_kib;
++    return memory_usage;
++  }
++
++  memory_usage->total_memory_kib = GetPhysicalMemoryKiB();
++  memory_usage->available_memory_kib = memory_usage->total_memory_kib;
++  memory_usage->free_memory_kib = memory_usage->available_memory_kib;
++  return memory_usage;
++}
++
++void PopulateLinuxCpuUsage(CpuUsageData& previous_cpu_usage_data,
++                           mojom::CpuUsage& out_cpu_usage) {
++  std::optional<CpuUsageData> new_usage_data = ReadLinuxCpuUsageData();
++  if (new_usage_data.has_value()) {
++    if (previous_cpu_usage_data.IsInitialized()) {
++      PopulateCpuUsagePercentages(new_usage_data.value(),
++                                  previous_cpu_usage_data, out_cpu_usage);
++    }
++    previous_cpu_usage_data = new_usage_data.value();
++  }
++
++  out_cpu_usage.average_cpu_temp_celsius =
++      ReadLinuxAverageCpuTemperatureCelsius().value_or(0);
++  out_cpu_usage.scaling_current_frequency_khz =
++      ReadLinuxCpuClockKHz().value_or(GetLinuxCpuMaxClockSpeedKHz());
++}
+ 
+ void PopulateBoardName(const healthd::SystemInfo& system_info,
+                        mojom::SystemInfo& out_system_info) {
+@@ -74,7 +1084,8 @@ void PopulateCpuInfo(const healthd::CpuInfo& cpu_info,
+   for (const auto& physical_cpu_ptr : physical_cpus) {
+     if (physical_cpu_ptr->logical_cpus.empty()) {
+       EmitSystemDataError(metrics::DataError::kExpectationNotMet);
+-      LOG(ERROR) << "Device reported having a physical CPU with 0 logical CPUs.";
++      LOG(ERROR)
++          << "Device reported having a physical CPU with 0 logical CPUs.";
+       return;
+     }
+   }
+@@ -249,7 +1260,8 @@ void PopulateAverageScaledClockSpeed(const healthd::CpuInfo& cpu_info,
+                                      mojom::CpuUsage& out_cpu_usage) {
+   for (const auto& physical_cpu_ptr : cpu_info.physical_cpus) {
+     if (physical_cpu_ptr->logical_cpus.empty()) {
+-      LOG(ERROR) << "Device reported having a physical CPU with 0 logical CPUs.";
++      LOG(ERROR)
++          << "Device reported having a physical CPU with 0 logical CPUs.";
+       return;
+     }
+   }
+@@ -280,6 +1292,8 @@ SystemDataProvider::SystemDataProvider() {
+   battery_health_timer_ = std::make_unique<base::RepeatingTimer>();
+   cpu_usage_timer_ = std::make_unique<base::RepeatingTimer>();
+   memory_usage_timer_ = std::make_unique<base::RepeatingTimer>();
++  gpu_usage_timer_ = std::make_unique<base::RepeatingTimer>();
++  sensor_info_timer_ = std::make_unique<base::RepeatingTimer>();
+   chromeos::PowerManagerClient::Get()->AddObserver(this);
+ }
+ 
+@@ -306,6 +1320,14 @@ void SystemDataProvider::GetBatteryInfo(GetBatteryInfoCallback callback) {
+                      weak_factory_.GetWeakPtr(), std::move(callback)));
+ }
+ 
++void SystemDataProvider::GetGpuInfo(GetGpuInfoCallback callback) {
++  std::move(callback).Run(ReadLinuxGpuInfos());
++}
++
++void SystemDataProvider::GetSensorInfo(GetSensorInfoCallback callback) {
++  std::move(callback).Run(ReadLinuxSensorInfos());
++}
++
+ void SystemDataProvider::ObserveBatteryChargeStatus(
+     mojo::PendingRemote<mojom::BatteryChargeStatusObserver> observer) {
+   battery_charge_status_observers_.Add(std::move(observer));
+@@ -359,6 +1381,32 @@ void SystemDataProvider::ObserveCpuUsage(
+   UpdateCpuUsage();
+ }
+ 
++void SystemDataProvider::ObserveGpuUsage(
++    mojo::PendingRemote<mojom::GpuUsageObserver> observer) {
++  gpu_usage_observers_.Add(std::move(observer));
++  if (!gpu_usage_timer_->IsRunning()) {
++    gpu_usage_timer_->Start(
++        FROM_HERE, base::Seconds(kGpuUsageRefreshIntervalInSeconds),
++        base::BindRepeating(&SystemDataProvider::UpdateGpuUsage,
++                            base::Unretained(this)));
++  }
++
++  UpdateGpuUsage();
++}
++
++void SystemDataProvider::ObserveSensorInfo(
++    mojo::PendingRemote<mojom::SensorInfoObserver> observer) {
++  sensor_info_observers_.Add(std::move(observer));
++  if (!sensor_info_timer_->IsRunning()) {
++    sensor_info_timer_->Start(
++        FROM_HERE, base::Seconds(kSensorInfoRefreshIntervalInSeconds),
++        base::BindRepeating(&SystemDataProvider::UpdateSensorInfo,
++                            base::Unretained(this)));
++  }
++
++  UpdateSensorInfo();
++}
++
+ void SystemDataProvider::PowerChanged(
+     const power_manager::PowerSupplyProperties& proto) {
+   if (battery_charge_status_observers_.empty()) {
+@@ -408,40 +1456,41 @@ void SystemDataProvider::OnSystemInfoProbeResponse(
+ 
+   if (info_ptr.is_null()) {
+     LOG(ERROR) << "Null response from croshealthd::ProbeTelemetryInfo.";
++    PopulateLinuxSystemInfo(*system_info);
+     std::move(callback).Run(std::move(system_info));
+     return;
+   }
+ 
+   const healthd::SystemInfo* system_info_ptr =
+-      diagnostics::GetSystemInfo(*info_ptr);
++      GetSystemInfoIfPresent(*info_ptr);
+   if (system_info_ptr) {
+     PopulateBoardName(*system_info_ptr, *system_info.get());
+     PopulateMarketingName(*system_info_ptr, *system_info.get());
+     PopulateVersionInfo(*system_info_ptr, *system_info.get());
+   } else {
+-    LOG(ERROR)
+-        << "Expected SystemInfo in croshealthd::ProbeTelemetryInfo response";
++    VLOG(1) << "Using Linux system info fallback.";
++    PopulateLinuxSystemInfo(*system_info);
+     std::move(callback).Run(std::move(system_info));
+     return;
+   }
+ 
+-  const healthd::CpuInfo* cpu_info_ptr = GetCpuInfo(*info_ptr);
++  const healthd::CpuInfo* cpu_info_ptr = GetCpuInfoIfPresent(*info_ptr);
+   if (cpu_info_ptr) {
+     PopulateCpuInfo(*cpu_info_ptr, *system_info.get());
+   } else {
+-    LOG(ERROR)
+-        << "Expected CpuInfo in croshealthd::ProbeTelemetryInfo response";
++    VLOG(1) << "Using Linux CPU info fallback.";
+   }
+ 
+-  const healthd::MemoryInfo* memory_info_ptr = GetMemoryInfo(*info_ptr);
++  const healthd::MemoryInfo* memory_info_ptr =
++      GetMemoryInfoIfPresent(*info_ptr);
+   if (memory_info_ptr) {
+     PopulateMemorySize(*memory_info_ptr, *system_info.get());
+   } else {
+-    LOG(ERROR)
+-        << "Expected MemoryInfo in croshealthd::ProbeTelemetryInfo response";
++    VLOG(1) << "Using Linux memory info fallback.";
+   }
+ 
+   PopulateDeviceCapabilities(*info_ptr, *system_info.get());
++  FillMissingSystemInfoFromLinux(*system_info);
+ 
+   if (IsLoggingEnabled()) {
+     DiagnosticsLogController::Get()->GetTelemetryLog().UpdateSystemInfo(
+@@ -579,18 +1628,22 @@ void SystemDataProvider::OnMemoryUsageUpdated(
+ 
+   if (info_ptr.is_null()) {
+     LOG(ERROR) << "Null response from croshealthd::ProbeTelemetryInfo.";
+-    NotifyMemoryUsageObservers(memory_usage);
++    NotifyMemoryUsageObservers(CreateLinuxMemoryUsage());
+     return;
+   }
+ 
+-  const healthd::MemoryInfo* memory_info = GetMemoryInfo(*info_ptr);
++  const healthd::MemoryInfo* memory_info = GetMemoryInfoIfPresent(*info_ptr);
+   if (memory_info == nullptr) {
+-    LOG(ERROR) << "No MemoryInfo in response from cros_healthd.";
+-    NotifyMemoryUsageObservers(memory_usage);
++    VLOG(1) << "Using Linux memory usage fallback.";
++    NotifyMemoryUsageObservers(CreateLinuxMemoryUsage());
+     return;
+   }
+ 
+   PopulateMemoryUsage(*memory_info, *memory_usage.get());
++  if (memory_usage->total_memory_kib == 0 ||
++      memory_usage->available_memory_kib == 0) {
++    memory_usage = CreateLinuxMemoryUsage();
++  }
+   NotifyMemoryUsageObservers(memory_usage);
+ }
+ 
+@@ -599,15 +1652,17 @@ void SystemDataProvider::OnCpuUsageUpdated(healthd::TelemetryInfoPtr info_ptr) {
+ 
+   if (info_ptr.is_null()) {
+     LOG(ERROR) << "Null response from croshealthd::ProbeTelemetryInfo.";
++    PopulateLinuxCpuUsage(previous_cpu_usage_data_, *cpu_usage);
+     NotifyCpuUsageObservers(cpu_usage);
+     return;
+   }
+ 
+   // TODO(ashleydp): Add metrics to track the occurrence of invalid cros_healthd
+   // CpuInfo responses.
+-  const healthd::CpuInfo* cpu_info = GetCpuInfo(*info_ptr);
++  const healthd::CpuInfo* cpu_info = GetCpuInfoIfPresent(*info_ptr);
+   if (cpu_info == nullptr) {
+-    LOG(ERROR) << "No CpuInfo in response from cros_healthd.";
++    VLOG(1) << "Using Linux CPU usage fallback.";
++    PopulateLinuxCpuUsage(previous_cpu_usage_data_, *cpu_usage);
+     NotifyCpuUsageObservers(cpu_usage);
+     return;
+   }
+@@ -615,6 +1670,14 @@ void SystemDataProvider::OnCpuUsageUpdated(healthd::TelemetryInfoPtr info_ptr) {
+   ComputeAndPopulateCpuUsage(*cpu_info, *cpu_usage.get());
+   PopulateAverageCpuTemperature(*cpu_info, *cpu_usage.get());
+   PopulateAverageScaledClockSpeed(*cpu_info, *cpu_usage.get());
++  if (cpu_usage->scaling_current_frequency_khz == 0) {
++    cpu_usage->scaling_current_frequency_khz =
++        ReadLinuxCpuClockKHz().value_or(GetLinuxCpuMaxClockSpeedKHz());
++  }
++  if (cpu_usage->average_cpu_temp_celsius == 0) {
++    cpu_usage->average_cpu_temp_celsius =
++        ReadLinuxAverageCpuTemperatureCelsius().value_or(0);
++  }
+ 
+   NotifyCpuUsageObservers(cpu_usage);
+ }
+@@ -701,6 +1764,48 @@ void SystemDataProvider::NotifyCpuUsageObservers(
+   }
+ }
+ 
++void SystemDataProvider::NotifyGpuUsageObservers(
++    const std::vector<mojom::GpuInfoPtr>& gpu_info) {
++  for (auto& observer : gpu_usage_observers_) {
++    std::vector<mojom::GpuInfoPtr> cloned;
++    cloned.reserve(gpu_info.size());
++    for (const auto& gpu : gpu_info) {
++      cloned.push_back(gpu.Clone());
++    }
++    observer->OnGpuUsageUpdated(std::move(cloned));
++  }
++}
++
++void SystemDataProvider::NotifySensorInfoObservers(
++    const std::vector<mojom::SensorInfoPtr>& sensors) {
++  for (auto& observer : sensor_info_observers_) {
++    std::vector<mojom::SensorInfoPtr> cloned;
++    cloned.reserve(sensors.size());
++    for (const auto& sensor : sensors) {
++      cloned.push_back(sensor.Clone());
++    }
++    observer->OnSensorInfoUpdated(std::move(cloned));
++  }
++}
++
++void SystemDataProvider::UpdateGpuUsage() {
++  OnGpuUsageUpdated();
++}
++
++void SystemDataProvider::OnGpuUsageUpdated() {
++  std::vector<mojom::GpuInfoPtr> gpu_info = ReadLinuxGpuInfos();
++  NotifyGpuUsageObservers(gpu_info);
++}
++
++void SystemDataProvider::UpdateSensorInfo() {
++  OnSensorInfoUpdated();
++}
++
++void SystemDataProvider::OnSensorInfoUpdated() {
++  std::vector<mojom::SensorInfoPtr> sensors = ReadLinuxSensorInfos();
++  NotifySensorInfoObservers(sensors);
++}
++
+ void SystemDataProvider::BindCrosHealthdProbeServiceIfNeccessary() {
+   if (!probe_service_ || !probe_service_.is_connected()) {
+     cros_healthd::ServiceConnection::GetInstance()->BindProbeService(
+diff --git a/ash/webui/diagnostics_ui/backend/system/system_data_provider.h b/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
+index 92f78cac67..f32c8aa560 100644
+--- a/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
++++ b/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ #include <optional>
++#include <vector>
+ 
+ #include "ash/webui/diagnostics_ui/backend/system/cpu_usage_data.h"
+ #include "ash/webui/diagnostics_ui/mojom/system_data_provider.mojom.h"
+@@ -39,6 +40,8 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   // mojom::SystemDataProvider:
+   void GetSystemInfo(GetSystemInfoCallback callback) override;
+   void GetBatteryInfo(GetBatteryInfoCallback callback) override;
++  void GetGpuInfo(GetGpuInfoCallback callback) override;
++  void GetSensorInfo(GetSensorInfoCallback callback) override;
+   void ObserveBatteryChargeStatus(
+       mojo::PendingRemote<mojom::BatteryChargeStatusObserver> observer)
+       override;
+@@ -48,6 +51,10 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+       mojo::PendingRemote<mojom::MemoryUsageObserver> observer) override;
+   void ObserveCpuUsage(
+       mojo::PendingRemote<mojom::CpuUsageObserver> observer) override;
++  void ObserveGpuUsage(
++      mojo::PendingRemote<mojom::GpuUsageObserver> observer) override;
++  void ObserveSensorInfo(
++      mojo::PendingRemote<mojom::SensorInfoObserver> observer) override;
+ 
+   // PowerManagerClient::Observer:
+   void PowerChanged(const power_manager::PowerSupplyProperties& proto) override;
+@@ -86,6 +93,8 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   void UpdateMemoryUsage();
+ 
+   void UpdateCpuUsage();
++  void UpdateGpuUsage();
++  void UpdateSensorInfo();
+ 
+   void NotifyBatteryChargeStatusObservers(
+       const mojom::BatteryChargeStatusPtr& battery_charge_status);
+@@ -96,6 +105,9 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   void NotifyMemoryUsageObservers(const mojom::MemoryUsagePtr& memory_usage);
+ 
+   void NotifyCpuUsageObservers(const mojom::CpuUsagePtr& cpu_usage);
++  void NotifyGpuUsageObservers(const std::vector<mojom::GpuInfoPtr>& gpu_info);
++  void NotifySensorInfoObservers(
++      const std::vector<mojom::SensorInfoPtr>& sensors);
+ 
+   void OnBatteryChargeStatusUpdated(
+       const std::optional<power_manager::PowerSupplyProperties>&
+@@ -107,6 +119,8 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   void OnMemoryUsageUpdated(cros_healthd::mojom::TelemetryInfoPtr info_ptr);
+ 
+   void OnCpuUsageUpdated(cros_healthd::mojom::TelemetryInfoPtr info_ptr);
++  void OnGpuUsageUpdated();
++  void OnSensorInfoUpdated();
+ 
+   void ComputeAndPopulateCpuUsage(const cros_healthd::mojom::CpuInfo& cpu_info,
+                                   mojom::CpuUsage& out_cpu_usage);
+@@ -119,6 +133,8 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   mojo::RemoteSet<mojom::BatteryHealthObserver> battery_health_observers_;
+   mojo::RemoteSet<mojom::MemoryUsageObserver> memory_usage_observers_;
+   mojo::RemoteSet<mojom::CpuUsageObserver> cpu_usage_observers_;
++  mojo::RemoteSet<mojom::GpuUsageObserver> gpu_usage_observers_;
++  mojo::RemoteSet<mojom::SensorInfoObserver> sensor_info_observers_;
+ 
+   mojo::Receiver<mojom::SystemDataProvider> receiver_{this};
+ 
+@@ -126,6 +142,8 @@ class SystemDataProvider : public mojom::SystemDataProvider,
+   std::unique_ptr<base::RepeatingTimer> battery_health_timer_;
+   std::unique_ptr<base::RepeatingTimer> memory_usage_timer_;
+   std::unique_ptr<base::RepeatingTimer> cpu_usage_timer_;
++  std::unique_ptr<base::RepeatingTimer> gpu_usage_timer_;
++  std::unique_ptr<base::RepeatingTimer> sensor_info_timer_;
+ 
+   base::WeakPtrFactory<SystemDataProvider> weak_factory_{this};
+ };
+diff --git a/ash/webui/diagnostics_ui/diagnostics_ui.cc b/ash/webui/diagnostics_ui/diagnostics_ui.cc
+index 4b37888313..5616053049 100644
+--- a/ash/webui/diagnostics_ui/diagnostics_ui.cc
++++ b/ash/webui/diagnostics_ui/diagnostics_ui.cc
+@@ -361,6 +361,7 @@ void AddDiagnosticsStrings(content::WebUIDataSource* html_source) {
+       {"wifiLabel", IDS_NETWORK_TYPE_WIFI},
+   };
+   html_source->AddLocalizedStrings(kLocalizedStrings);
++  html_source->AddString("sensorsText", "Sensors");
+   html_source->AddLocalizedStrings(GetDataSourceUpdate());
+   html_source->UseStringsJs();
+ }
+diff --git a/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom b/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
+index cc0471d2b9..028483fa99 100644
+--- a/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
++++ b/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
+@@ -66,6 +66,59 @@ struct BatteryHealth {
+   int8 battery_wear_percentage;
+ };
+ 
++// Contains live GPU utilization metrics (only populated when the kernel
++// exposes them — currently AMD GPUs only via sysfs).
++struct GpuUsage {
++  uint8 gpu_busy_percent;
++  uint64 vram_total;
++  uint64 vram_used;
++};
++
++// Contains a numeric GPU sensor reading. Temperature values are Celsius and fan
++// values are RPM.
++struct GpuSensorReading {
++  string label;
++  int32 value;
++};
++
++enum SensorType {
++  kTemperature,
++  kFan,
++  kVoltage,
++  kCurrent,
++  kPower,
++  kEnergy,
++  kHumidity,
++  kFrequency,
++  kPwm,
++  kOther,
++};
++
++// Contains a single generic Linux hwmon sensor reading.
++struct SensorInfo {
++  string label;
++  string device_name;
++  string path;
++  SensorType type;
++  double value;
++  string unit;
++};
++
++// Contains information about a single GPU on the device.
++struct GpuInfo {
++  string display_name;
++  string vendor_id;
++  string vendor_name;
++  string device_id;
++  string device_name;
++  string driver;
++  string drm_card;
++  string pci_path;
++  array<GpuSensorReading> temperatures;
++  array<GpuSensorReading> fans;
++  GpuUsage? usage;
++};
++
+ // Contains information about the usage of memory on the device.
+ struct MemoryUsage {
+   uint32 total_memory_kib;
+@@ -118,6 +171,18 @@ interface CpuUsageObserver {
+   OnCpuUsageUpdated(CpuUsage cpu_usage);
+ };
+ 
++// Implemented by clients that wish to be updated periodically about the
++// GPU usage of the device.
++interface GpuUsageObserver {
++  OnGpuUsageUpdated(array<GpuInfo> gpu_info);
++};
++
++// Implemented by clients that wish to be updated periodically about generic
++// sensor readings.
++interface SensorInfoObserver {
++  OnSensorInfoUpdated(array<SensorInfo> sensors);
++};
++
+ // Provides telemetric information about the system. This API is exposed to the
+ // Diagnostics SWA.
+ interface SystemDataProvider {
+@@ -142,4 +207,17 @@ interface SystemDataProvider {
+ 
+   // Registers an observer of CpuUsage information.
+   ObserveCpuUsage(pending_remote<CpuUsageObserver> observer);
++
++  // Returns a snapshot of GPU information. |gpu_info| is static
++  // information that does not change during the lifetime of the service.
++  GetGpuInfo() => (array<GpuInfo> gpu_info);
++
++  // Registers an observer of GpuUsage information.
++  ObserveGpuUsage(pending_remote<GpuUsageObserver> observer);
++
++  // Returns a snapshot of generic Linux hwmon sensor readings.
++  GetSensorInfo() => (array<SensorInfo> sensors);
++
++  // Registers an observer of generic Linux hwmon sensor readings.
++  ObserveSensorInfo(pending_remote<SensorInfoObserver> observer);
+ };
+diff --git a/ash/webui/diagnostics_ui/resources/BUILD.gn b/ash/webui/diagnostics_ui/resources/BUILD.gn
+index 1ff9d17772..626f874281 100644
+--- a/ash/webui/diagnostics_ui/resources/BUILD.gn
++++ b/ash/webui/diagnostics_ui/resources/BUILD.gn
+@@ -26,6 +26,7 @@ build_webui("build") {
+     "diagnostics_card.ts",
+     "diagnostics_card_frame.ts",
+     "diagnostics_network_icon.ts",
++    "gpu_card.ts",
+     "diagnostics_sticky_banner.ts",
+     "ethernet_info.ts",
+     "input_card.ts",
+@@ -43,6 +44,7 @@ build_webui("build") {
+     "routine_result_entry.ts",
+     "routine_result_list.ts",
+     "routine_section.ts",
++    "sensors_page.ts",
+     "system_page.ts",
+     "text_badge.ts",
+     "touchpad_tester.ts",
+diff --git a/ash/webui/diagnostics_ui/resources/diagnostics_app.ts b/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
+index 0c1ecf1873..fe46d5dd34 100644
+--- a/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
++++ b/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
+@@ -10,6 +10,7 @@ import './diagnostics_sticky_banner.js';
+ import './diagnostics_shared.css.js';
+ import './input_list.js';
+ import './network_list.js';
++import './sensors_page.js';
+ import '/strings.m.js';
+ import './system_page.js';
+ 
+@@ -168,6 +169,9 @@ export class DiagnosticsAppElement extends DiagnosticsAppElementBase {
+       this.$.navigationPanel.createSelectorItem(
+           loadTimeData.getString('connectivityText'), 'network-list',
+           getNavigationIcon('ethernet'), 'connectivity'),
++      this.$.navigationPanel.createSelectorItem(
++          loadTimeData.getString('sensorsText'), 'sensors-page',
++          getDiagnosticsIcon('sensor'), 'sensors'),
+     ];
+ 
+     pages.push(this.createInputSelector());
+diff --git a/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts b/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
+index bad97b10af..247a46393b 100644
+--- a/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
++++ b/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
+@@ -49,6 +49,8 @@ export function getNavigationViewForPageId(id: string): NavigationView {
+       return NavigationView.CONNECTIVITY;
+     case 'input':
+       return NavigationView.INPUT;
++    case 'sensors':
++      return NavigationView.SYSTEM;
+     default:
+       assertNotReached();
+   }
+diff --git a/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts b/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
+index 3bbb2986f7..20decfd84d 100644
+--- a/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
++++ b/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
+@@ -6,7 +6,7 @@ import {FakeMethodResolver} from 'chrome://resources/ash/common/fake_method_reso
+ import {FakeObservables} from 'chrome://resources/ash/common/fake_observables.js';
+ import {assert} from 'chrome://resources/js/assert.js';
+ 
+-import type {BatteryChargeStatus, BatteryChargeStatusObserverRemote, BatteryHealth, BatteryHealthObserverRemote, BatteryInfo, CpuUsage, CpuUsageObserverRemote, MemoryUsage, MemoryUsageObserverRemote, SystemDataProviderInterface, SystemInfo} from './system_data_provider.mojom-webui.js';
++import type {BatteryChargeStatus, BatteryChargeStatusObserverRemote, BatteryHealth, BatteryHealthObserverRemote, BatteryInfo, CpuUsage, CpuUsageObserverRemote, GpuInfo, GpuUsageObserverRemote, MemoryUsage, MemoryUsageObserverRemote, SensorInfo, SensorInfoObserverRemote, SystemDataProviderInterface, SystemInfo} from './system_data_provider.mojom-webui.js';
+ 
+ /**
+  * @fileoverview
+@@ -24,6 +24,8 @@ export type FakeSystemDataProviderInterface = SystemDataProviderInterface&{
+   setFakeCpuUsage(cpuUsageList: CpuUsage[]): void,
+   setFakeMemoryUsage(memoryUsageList: MemoryUsage[]): void,
+   setFakeSystemInfo(systemInfo: SystemInfo): void,
++  setFakeGpuInfo(gpuInfo: GpuInfo[]): void,
++  setFakeSensorInfo(sensors: SensorInfo[]): void,
+ };
+ 
+ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+@@ -33,6 +35,8 @@ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+   private observeBatteryHealthPromise: Promise<void>|null = null;
+   private observeCpuUsagePromise: Promise<void>|null = null;
+   private observeMemoryUsagePromise: Promise<void>|null = null;
++  private observeGpuUsagePromise: Promise<void>|null = null;
++  private observeSensorInfoPromise: Promise<void>|null = null;
+ 
+   constructor() {
+     this.registerMethods();
+@@ -58,6 +62,26 @@ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+     this.methods.setResult('getBatteryInfo', {batteryInfo});
+   }
+ 
++  // Implements SystemDataProviderInterface.GetGpuInfo.
++  getGpuInfo(): Promise<{gpuInfo: GpuInfo[]}> {
++    return this.methods.resolveMethod('getGpuInfo');
++  }
++
++  // Sets the value that will be returned when calling getGpuInfo().
++  setFakeGpuInfo(gpuInfo: GpuInfo[]): void {
++    this.methods.setResult('getGpuInfo', {gpuInfo});
++  }
++
++  // Implements SystemDataProviderInterface.GetSensorInfo.
++  getSensorInfo(): Promise<{sensors: SensorInfo[]}> {
++    return this.methods.resolveMethod('getSensorInfo');
++  }
++
++  // Sets the value that will be returned when calling getSensorInfo().
++  setFakeSensorInfo(sensors: SensorInfo[]): void {
++    this.methods.setResult('getSensorInfo', {sensors});
++  }
++
+   // Implements SystemDataProviderInterface.ObserveBatteryChargeStatus.
+   observeBatteryChargeStatus(remote: BatteryChargeStatusObserverRemote): void {
+     this.observeBatteryChargeStatusPromise = this.observe(
+@@ -168,6 +192,58 @@ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+     this.observables.trigger('MemoryUsageObserver_onMemoryUsageUpdated');
+   }
+ 
++  // Implements SystemDataProviderInterface.ObserveGpuUsage.
++  observeGpuUsage(remote: GpuUsageObserverRemote): void {
++    this.observeGpuUsagePromise = this.observe(
++        'GpuUsageObserver_onGpuUsageUpdated', (gpuInfo) => {
++          remote.onGpuUsageUpdated(
++              /** @type {!Array<!GpuInfo>} */ (gpuInfo));
++        });
++  }
++
++  // Returns the promise for the most recent GPU usage observation.
++  getObserveGpuUsagePromiseForTesting(): Promise<void> {
++    assert(this.observeGpuUsagePromise);
++    return this.observeGpuUsagePromise;
++  }
++
++  // Sets the values that will observed from observeGpuUsage.
++  setFakeGpuUsage(gpuInfoList: GpuInfo[]): void {
++    this.observables.setObservableData(
++        'GpuUsageObserver_onGpuUsageUpdated', gpuInfoList);
++  }
++
++  // Causes the GPU usage observer to fire.
++  triggerGpuUsageObserver(): void {
++    this.observables.trigger('GpuUsageObserver_onGpuUsageUpdated');
++  }
++
++  // Implements SystemDataProviderInterface.ObserveSensorInfo.
++  observeSensorInfo(remote: SensorInfoObserverRemote): void {
++    this.observeSensorInfoPromise = this.observe(
++        'SensorInfoObserver_onSensorInfoUpdated', (sensors) => {
++          remote.onSensorInfoUpdated(
++              /** @type {!Array<!SensorInfo>} */ (sensors));
++        });
++  }
++
++  // Returns the promise for the most recent sensor info observation.
++  getObserveSensorInfoPromiseForTesting(): Promise<void> {
++    assert(this.observeSensorInfoPromise);
++    return this.observeSensorInfoPromise;
++  }
++
++  // Sets the values that will observed from observeSensorInfo.
++  setFakeObservedSensorInfo(sensors: SensorInfo[]): void {
++    this.observables.setObservableData(
++        'SensorInfoObserver_onSensorInfoUpdated', sensors);
++  }
++
++  // Causes the sensor info observer to fire.
++  triggerSensorInfoObserver(): void {
++    this.observables.trigger('SensorInfoObserver_onSensorInfoUpdated');
++  }
++
+   // Make the observables fire automatically on various intervals.
+   startTriggerIntervals(): void {
+     this.observables.startTriggerOnInterval(
+@@ -189,6 +265,8 @@ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+   registerMethods(): void {
+     this.methods.register('getSystemInfo');
+     this.methods.register('getBatteryInfo');
++    this.methods.register('getGpuInfo');
++    this.methods.register('getSensorInfo');
+   }
+ 
+   // Setup observables.
+@@ -198,6 +276,8 @@ export class FakeSystemDataProvider implements FakeSystemDataProviderInterface {
+     this.observables.register('BatteryHealthObserver_onBatteryHealthUpdated');
+     this.observables.register('CpuUsageObserver_onCpuUsageUpdated');
+     this.observables.register('MemoryUsageObserver_onMemoryUsageUpdated');
++    this.observables.register('GpuUsageObserver_onGpuUsageUpdated');
++    this.observables.register('SensorInfoObserver_onSensorInfoUpdated');
+   }
+ 
+   // Disables all observers and resets provider to its initial state.
+diff --git a/ash/webui/diagnostics_ui/resources/gpu_card.html b/ash/webui/diagnostics_ui/resources/gpu_card.html
+new file mode 100644
+index 0000000000..f2320277c9
+--- /dev/null
++++ b/ash/webui/diagnostics_ui/resources/gpu_card.html
+@@ -0,0 +1,86 @@
++<style include="diagnostics-shared">
++  .gpu-section {
++    grid-column: 1 / -1;
++    padding: 10px 24px 16px;
++  }
++  .gpu-section:not(:first-of-type) {
++    border-top: 1px solid var(--cros-separator-color);
++  }
++  .gpu-name {
++    color: var(--cros-text-color-primary);
++    font-family: var(--diagnostics-roboto-font-family);
++    font-size: 14px;
++    font-weight: var(--diagnostics-medium-font-weight);
++    padding-bottom: 2px;
++  }
++  .gpu-meta,
++  .metrics-heading {
++    color: var(--cros-text-color-secondary);
++    font-family: var(--diagnostics-roboto-font-family);
++    font-size: 12px;
++  }
++  .gpu-meta {
++    padding-bottom: 12px;
++  }
++  .metrics-heading {
++    border-top: 1px solid var(--cros-separator-color);
++    margin-top: 12px;
++    padding-top: 12px;
++  }
++  .gpu-grid {
++    display: grid;
++    gap: 2px 24px;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++  .unavailable {
++    color: var(--cros-text-color-secondary);
++  }
++  @media (max-width: 600px) {
++    .gpu-grid {
++      grid-template-columns: 1fr;
++    }
++  }
++</style>
++<diagnostics-card>
++  <div slot="title">GPU</div>
++  <iron-icon slot="icon" icon="diagnostics:gpu"></iron-icon>
++  <percent-bar-chart slot="left-panel"
++      header="[[getPrimaryUsageHeader(gpuInfo)]]"
++      value="[[getPrimaryUsageBusyPercent(gpuInfo)]]">
++  </percent-bar-chart>
++  <template is="dom-repeat" items="[[gpuInfo]]" id="gpuList">
++    <div slot="body" class="gpu-section">
++      <div class="gpu-name">[[formatDeviceTitle(item, index)]]</div>
++      <div class="gpu-meta">[[formatGpuMeta(item)]]</div>
++      <div class="gpu-grid">
++        <data-point orientation="horizontal" header="Vendor" value="[[formatNamedId(item.vendorName, item.vendorId)]]"></data-point>
++        <data-point orientation="horizontal" header="Device" value="[[formatNamedId(item.deviceName, item.deviceId)]]"></data-point>
++        <data-point orientation="horizontal" header="Driver" value="[[formatText(item.driver)]]"></data-point>
++        <data-point orientation="horizontal" header="DRM Card" value="[[formatText(item.drmCard)]]"></data-point>
++        <data-point orientation="horizontal" header="PCI Path" value="[[formatText(item.pciPath)]]"></data-point>
++      </div>
++      <div class="metrics-heading">Live metrics</div>
++      <div class="gpu-grid">
++        <data-point orientation="horizontal" header="Utilization" value="[[formatUsage(item.usage)]]"></data-point>
++        <data-point orientation="horizontal" header="VRAM" value="[[formatVramPair(item.usage)]]"></data-point>
++        <template is="dom-repeat" items="[[item.temperatures]]" as="temperature">
++          <data-point orientation="horizontal" header="[[formatSensorLabel(temperature)]]" value="[[formatTemperature(temperature)]]"></data-point>
++        </template>
++        <template is="dom-if" if="[[!hasTemperatures(item)]]">
++          <data-point orientation="horizontal" header="Temperature" class="unavailable" value="Unavailable"></data-point>
++        </template>
++        <template is="dom-repeat" items="[[item.fans]]" as="fan">
++          <data-point orientation="horizontal" header="[[formatSensorLabel(fan)]]" value="[[formatFan(fan)]]"></data-point>
++        </template>
++        <template is="dom-if" if="[[!hasFans(item)]]">
++          <data-point orientation="horizontal" header="Fan" class="unavailable" value="Unavailable"></data-point>
++        </template>
++      </div>
++    </div>
++  </template>
++  <template is="dom-if" if="[[showNoGpuMessage]]">
++    <div slot="body" class="gpu-section">
++      <data-point orientation="horizontal" header="GPU" class="unavailable" value="No GPU detected"></data-point>
++    </div>
++  </template>
++</diagnostics-card>
+diff --git a/ash/webui/diagnostics_ui/resources/gpu_card.ts b/ash/webui/diagnostics_ui/resources/gpu_card.ts
+new file mode 100644
+index 0000000000..e2aaf52df5
+--- /dev/null
++++ b/ash/webui/diagnostics_ui/resources/gpu_card.ts
+@@ -0,0 +1,186 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import 'chrome://resources/ash/common/cr_elements/icons.html.js';
++import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
++import './data_point.js';
++import './diagnostics_card.js';
++import './diagnostics_shared.css.js';
++import './icons.html.js';
++import './percent_bar_chart.js';
++
++import type {PolymerElementProperties} from 'chrome://resources/polymer/v3_0/polymer/interfaces.js';
++import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
++
++import {getTemplate} from './gpu_card.html.js';
++import {getSystemDataProvider} from './mojo_interface_provider.js';
++import type {GpuInfo, GpuSensorReading, GpuUsage, SystemDataProviderInterface} from './system_data_provider.mojom-webui.js';
++import {GpuUsageObserverReceiver} from './system_data_provider.mojom-webui.js';
++
++/**
++ * @fileoverview
++ * 'gpu-card' shows information about the device's GPU(s).
++ */
++
++export class GpuCardElement extends PolymerElement {
++  static get is(): string {
++    return 'gpu-card';
++  }
++
++  static get template(): HTMLTemplateElement {
++    return getTemplate();
++  }
++
++  static get properties(): PolymerElementProperties {
++    return {
++      gpuInfo: {
++        type: Array,
++        value: () => [],
++      },
++
++      showNoGpuMessage: {
++        type: Boolean,
++        value: false,
++      },
++
++    };
++  }
++
++  private gpuInfo: GpuInfo[];
++  private showNoGpuMessage: boolean;
++  private systemDataProvider: SystemDataProviderInterface =
++      getSystemDataProvider();
++  private gpuUsageObserverReceiver: GpuUsageObserverReceiver|null = null;
++
++  constructor() {
++    super();
++    this.fetchGpuInfo();
++    this.observeGpuUsage();
++  }
++
++  override disconnectedCallback(): void {
++    super.disconnectedCallback();
++
++    if (this.gpuUsageObserverReceiver) {
++      this.gpuUsageObserverReceiver.$.close();
++    }
++  }
++
++  private observeGpuUsage(): void {
++    this.gpuUsageObserverReceiver = new GpuUsageObserverReceiver(this);
++    this.systemDataProvider.observeGpuUsage(
++        this.gpuUsageObserverReceiver.$.bindNewPipeAndPassRemote());
++  }
++
++  /**
++   * Implements GpuUsageObserver.onGpuUsageUpdated().
++   */
++  onGpuUsageUpdated(gpuInfo: GpuInfo[]): void {
++    this.gpuInfo = gpuInfo;
++    this.showNoGpuMessage = gpuInfo.length === 0;
++  }
++
++  private fetchGpuInfo(): void {
++    this.systemDataProvider.getGpuInfo().then(
++        (result: {gpuInfo: GpuInfo[]}) => {
++          this.onGpuUsageUpdated(result.gpuInfo);
++        });
++  }
++
++  protected formatVram(bytes: bigint|number): string {
++    if (bytes === 0 || bytes === undefined || bytes === null) {
++      return 'Unavailable';
++    }
++    const gb = Number(bytes) / (1024 * 1024 * 1024);
++    if (gb >= 1) {
++      return gb.toFixed(1) + ' GB';
++    }
++    const mb = Number(bytes) / (1024 * 1024);
++    return mb.toFixed(0) + ' MB';
++  }
++
++  protected formatGpuName(index: number): string {
++    return `GPU ${index + 1}`;
++  }
++
++  protected formatText(value: string): string {
++    return value || 'Unavailable';
++  }
++
++  protected formatDeviceTitle(gpu: GpuInfo, index: number): string {
++    return gpu.displayName || this.formatGpuName(index);
++  }
++
++  protected formatGpuMeta(gpu: GpuInfo): string {
++    return [gpu.driver, gpu.drmCard, gpu.pciPath].filter(Boolean).join(' / ');
++  }
++
++  protected formatNamedId(name: string, id: string): string {
++    if (name && id) {
++      return `${name} (${id})`;
++    }
++    return name || id || 'Unavailable';
++  }
++
++  protected formatPercent(value: number): string {
++    return `${value}%`;
++  }
++
++  protected formatUsage(usage: GpuUsage|null): string {
++    return usage ? this.formatPercent(usage.gpuBusyPercent) : 'Unavailable';
++  }
++
++  protected formatVramPair(usage: GpuUsage|null): string {
++    if (!usage) {
++      return 'Unavailable';
++    }
++    const used = this.formatVram(usage.vramUsed);
++    const total = this.formatVram(usage.vramTotal);
++    if (used === 'Unavailable' && total === 'Unavailable') {
++      return 'Unavailable';
++    }
++    return `${used} / ${total}`;
++  }
++
++  protected getPrimaryUsageHeader(gpuInfo: GpuInfo[]): string {
++    const gpu = gpuInfo.find((entry) => !!entry.usage);
++    if (!gpu) {
++      return gpuInfo.length === 0 ? 'No GPU detected' : 'Live usage unavailable';
++    }
++    return `${gpu.displayName || gpu.drmCard || 'GPU'} busy`;
++  }
++
++  protected getPrimaryUsageBusyPercent(gpuInfo: GpuInfo[]): number {
++    const gpu = gpuInfo.find((entry) => !!entry.usage);
++    return gpu?.usage?.gpuBusyPercent || 0;
++  }
++
++  protected hasTemperatures(gpu: GpuInfo): boolean {
++    return gpu.temperatures.length > 0;
++  }
++
++  protected hasFans(gpu: GpuInfo): boolean {
++    return gpu.fans.length > 0;
++  }
++
++  protected formatSensorLabel(sensor: GpuSensorReading): string {
++    return sensor.label || 'Sensor';
++  }
++
++  protected formatTemperature(sensor: GpuSensorReading): string {
++    return `${sensor.value} C`;
++  }
++
++  protected formatFan(sensor: GpuSensorReading): string {
++    return `${sensor.value} RPM`;
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'gpu-card': GpuCardElement;
++  }
++}
++
++customElements.define(GpuCardElement.is, GpuCardElement);
+diff --git a/ash/webui/diagnostics_ui/resources/icons.html b/ash/webui/diagnostics_ui/resources/icons.html
+index fc4702f942..df8102aec9 100644
+--- a/ash/webui/diagnostics_ui/resources/icons.html
++++ b/ash/webui/diagnostics_ui/resources/icons.html
+@@ -69,6 +69,14 @@
+     <g id="memory">
+       <path fill-rule="evenodd" clip-rule="evenodd" d="M2 4H16C17.1046 4 18 4.89543 18 6V9C17.4477 9 17 9.44772 17 10C17 10.5523 17.4477 11 18 11V13V15C18 15.5523 17.5523 16 17 16H9C8.44772 16 8 15.5523 8 15V14H7V15C7 15.5523 6.55228 16 6 16H3C2.44772 16 2 15.5523 2 15V13V11C2.55228 11 3 10.5523 3 10C3 9.44772 2.55228 9 2 9V4ZM5 6H7V11H5V6ZM9 6H11V11H9V6ZM15 6H13V11H15V6ZM4 13H3V15H4V13ZM5 13H6V15H5V13ZM10 13H9V15H10V13ZM12 13H11V15H12V13ZM13 13H14V15H13V13ZM16 13H15V15H16V13Z" />
+     </g>
++    <g id="gpu">
++      <path d="M3 5C2.44772 5 2 5.44772 2 6V14C2 14.5523 2.44772 15 3 15H17C17.5523 15 18 14.5523 18 14V6C18 5.44772 17.5523 5 17 5H3ZM4 7H16V13H4V7Z" />
++      <path d="M2 15H18V17H2V15Z" />
++    </g>
++    <g id="sensor">
++      <path d="M8 3C8 1.89543 8.89543 1 10 1C11.1046 1 12 1.89543 12 3V10.5351C13.1956 11.2267 14 12.5194 14 14C14 16.2091 12.2091 18 10 18C7.79086 18 6 16.2091 6 14C6 12.5194 6.8044 11.2267 8 10.5351V3ZM10 3V11.792L9.5 12.0806C8.6022 12.5989 8 13.5663 8 14C8 15.1046 8.89543 16 10 16C11.1046 16 12 15.1046 12 14C12 13.5663 11.3978 12.5989 10.5 12.0806L10 11.792V3Z" />
++      <path d="M15 4H19V6H15V4ZM15 8H19V10H15V8ZM15 12H19V14H15V12Z" />
++    </g>
+     <g id="download">
+       <path d="M11 9.2L13.5 6.5L15 8L10 13L5 8L6.5 6.5L9 9.2V3H11V9.2Z" />
+       <path d="M6 15V13H4V15.375C4 16.2688 4.73125 17 5.625 17H14.375C15.2688 17 16 16.2688 16 15.375V13H14V15H6Z" />
+diff --git a/ash/webui/diagnostics_ui/resources/sensors_page.html b/ash/webui/diagnostics_ui/resources/sensors_page.html
+new file mode 100644
+index 0000000000..406162a7bf
+--- /dev/null
++++ b/ash/webui/diagnostics_ui/resources/sensors_page.html
+@@ -0,0 +1,70 @@
++<style include="cr-shared-style diagnostics-shared">
++  #sensorsContainer {
++    align-items: center;
++    box-sizing: border-box;
++    display: flex;
++    flex-direction: column;
++    height: inherit;
++    position: relative;
++  }
++
++  .sensor-row {
++    border-top: 1px solid var(--cros-separator-color);
++    padding: 12px 24px;
++  }
++
++  .sensor-row:first-of-type {
++    border-top: 0;
++  }
++
++  .sensor-name {
++    color: var(--cros-text-color-primary);
++    font-family: var(--diagnostics-roboto-font-family);
++    font-size: 13px;
++    font-weight: var(--diagnostics-medium-font-weight);
++    padding-bottom: 8px;
++  }
++
++  .sensor-grid {
++    display: grid;
++    gap: 2px 24px;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  @media (max-width: 600px) {
++    .sensor-grid {
++      grid-template-columns: 1fr;
++    }
++  }
++</style>
++<div id="sensorsContainer" tabindex="0">
++  <div class="diagnostics-cards-container-nav">
++    <template is="dom-repeat" items="[[sensorGroups]]" as="group">
++      <div class="card-width">
++        <diagnostics-card is-networking-card="true">
++          <div slot="title">[[group.deviceName]]</div>
++          <iron-icon slot="icon" icon="diagnostics:sensor"></iron-icon>
++          <template is="dom-repeat" items="[[group.sensors]]" as="sensor">
++            <div slot="body" class="sensor-row">
++              <div class="sensor-name">[[sensor.label]]</div>
++              <div class="sensor-grid">
++                <data-point orientation="horizontal" header="Value" value="[[formatSensorValue(sensor)]]"></data-point>
++                <data-point orientation="horizontal" header="Type" value="[[formatSensorType(sensor.type)]]"></data-point>
++                <data-point orientation="horizontal" header="Source" value="[[sensor.path]]"></data-point>
++              </div>
++            </div>
++          </template>
++        </diagnostics-card>
++      </div>
++    </template>
++    <template is="dom-if" if="[[showNoSensorsMessage]]">
++      <div class="card-width">
++        <diagnostics-card is-networking-card="true">
++          <div slot="title">Sensors</div>
++          <iron-icon slot="icon" icon="diagnostics:sensor"></iron-icon>
++          <data-point slot="body" orientation="horizontal" header="Sensors" value="Unavailable"></data-point>
++        </diagnostics-card>
++      </div>
++    </template>
++  </div>
++</div>
+diff --git a/ash/webui/diagnostics_ui/resources/sensors_page.ts b/ash/webui/diagnostics_ui/resources/sensors_page.ts
+new file mode 100644
+index 0000000000..1e4f969ff4
+--- /dev/null
++++ b/ash/webui/diagnostics_ui/resources/sensors_page.ts
+@@ -0,0 +1,168 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import 'chrome://resources/ash/common/cr_elements/icons.html.js';
++import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
++import './data_point.js';
++import './diagnostics_card.js';
++import './diagnostics_shared.css.js';
++import './icons.html.js';
++
++import {assert} from 'chrome://resources/js/assert.js';
++import type {PolymerElementProperties} from 'chrome://resources/polymer/v3_0/polymer/interfaces.js';
++import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
++
++import {DiagnosticsBrowserProxyImpl} from './diagnostics_browser_proxy.js';
++import {getTemplate} from './sensors_page.html.js';
++import {getSystemDataProvider} from './mojo_interface_provider.js';
++import type {SensorInfo, SystemDataProviderInterface} from './system_data_provider.mojom-webui.js';
++import {SensorInfoObserverReceiver, SensorType} from './system_data_provider.mojom-webui.js';
++
++interface SensorGroup {
++  deviceName: string;
++  sensors: SensorInfo[];
++}
++
++export class SensorsPageElement extends PolymerElement {
++  static get is(): 'sensors-page' {
++    return 'sensors-page' as const;
++  }
++
++  static get template(): HTMLTemplateElement {
++    return getTemplate();
++  }
++
++  static get properties(): PolymerElementProperties {
++    return {
++      sensorGroups: {
++        type: Array,
++        value: () => [],
++      },
++
++      showNoSensorsMessage: {
++        type: Boolean,
++        value: false,
++      },
++    };
++  }
++
++  private sensorGroups: SensorGroup[];
++  private showNoSensorsMessage: boolean;
++  private systemDataProvider: SystemDataProviderInterface =
++      getSystemDataProvider();
++  private browserProxy: DiagnosticsBrowserProxyImpl =
++      DiagnosticsBrowserProxyImpl.getInstance();
++  private sensorInfoObserverReceiver: SensorInfoObserverReceiver|null = null;
++
++  constructor() {
++    super();
++    this.fetchSensorInfo();
++    this.observeSensorInfo();
++  }
++
++  override disconnectedCallback(): void {
++    super.disconnectedCallback();
++
++    if (this.sensorInfoObserverReceiver) {
++      this.sensorInfoObserverReceiver.$.close();
++    }
++  }
++
++  private fetchSensorInfo(): void {
++    this.systemDataProvider.getSensorInfo().then(
++        (result: {sensors: SensorInfo[]}) => {
++          this.onSensorInfoUpdated(result.sensors);
++        });
++  }
++
++  private observeSensorInfo(): void {
++    this.sensorInfoObserverReceiver = new SensorInfoObserverReceiver(this);
++    this.systemDataProvider.observeSensorInfo(
++        this.sensorInfoObserverReceiver.$.bindNewPipeAndPassRemote());
++  }
++
++  /**
++   * Implements SensorInfoObserver.onSensorInfoUpdated().
++   */
++  onSensorInfoUpdated(sensors: SensorInfo[]): void {
++    const groups = new Map<string, SensorInfo[]>();
++    for (const sensor of sensors) {
++      const key = sensor.deviceName || 'System sensors';
++      const group = groups.get(key) || [];
++      group.push(sensor);
++      groups.set(key, group);
++    }
++
++    this.sensorGroups = Array.from(groups.entries()).map(
++        ([deviceName, groupSensors]) => ({deviceName, sensors: groupSensors}));
++    this.showNoSensorsMessage = sensors.length === 0;
++  }
++
++  /**
++   * Called by navigation-view-panel when the active page changes.
++   */
++  onNavigationPageChanged({isActive}: {isActive: boolean}): void {
++    if (!isActive) {
++      return;
++    }
++
++    const container: HTMLDivElement|null =
++        this.shadowRoot!.querySelector('#sensorsContainer');
++    assert(container);
++    container.focus();
++    this.browserProxy.recordNavigation('sensors');
++  }
++
++  protected formatSensorValue(sensor: SensorInfo): string {
++    switch (sensor.type) {
++      case SensorType.kFan:
++      case SensorType.kPwm:
++        return `${sensor.value.toFixed(0)} ${sensor.unit}`;
++      case SensorType.kTemperature:
++      case SensorType.kHumidity:
++        return `${sensor.value.toFixed(1)} ${sensor.unit}`;
++      case SensorType.kVoltage:
++      case SensorType.kCurrent:
++      case SensorType.kPower:
++      case SensorType.kEnergy:
++      case SensorType.kFrequency:
++        return `${sensor.value.toFixed(2)} ${sensor.unit}`;
++      case SensorType.kOther:
++        return `${sensor.value} ${sensor.unit}`;
++    }
++  }
++
++  protected formatSensorType(type: SensorType): string {
++    switch (type) {
++      case SensorType.kTemperature:
++        return 'Temperature';
++      case SensorType.kFan:
++        return 'Fan';
++      case SensorType.kVoltage:
++        return 'Voltage';
++      case SensorType.kCurrent:
++        return 'Current';
++      case SensorType.kPower:
++        return 'Power';
++      case SensorType.kEnergy:
++        return 'Energy';
++      case SensorType.kHumidity:
++        return 'Humidity';
++      case SensorType.kFrequency:
++        return 'Frequency';
++      case SensorType.kPwm:
++        return 'PWM';
++      case SensorType.kOther:
++        return 'Other';
++    }
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    [SensorsPageElement.is]: SensorsPageElement;
++  }
++}
++
++customElements.define(SensorsPageElement.is, SensorsPageElement);
+diff --git a/ash/webui/diagnostics_ui/resources/system_page.html b/ash/webui/diagnostics_ui/resources/system_page.html
+index 9bf06ba6de..8afe37f560 100644
+--- a/ash/webui/diagnostics_ui/resources/system_page.html
++++ b/ash/webui/diagnostics_ui/resources/system_page.html
+@@ -69,6 +69,9 @@
+           is-active="[[isActive]]">
+       </memory-card>
+     </div>
++    <div class="card-width">
++      <gpu-card id="gpuCard"></gpu-card>
++    </div>
+   </div>
+   <cr-toast id="toast" duration="2500">
+     <span>[[toastText]]</span>
+diff --git a/ash/webui/diagnostics_ui/resources/system_page.ts b/ash/webui/diagnostics_ui/resources/system_page.ts
+index b58efa01b9..4b71f1e6f8 100644
+--- a/ash/webui/diagnostics_ui/resources/system_page.ts
++++ b/ash/webui/diagnostics_ui/resources/system_page.ts
+@@ -9,6 +9,7 @@ import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
+ import './battery_status_card.js';
+ import './cpu_card.js';
+ import './diagnostics_shared.css.js';
++import './gpu_card.js';
+ import './icons.html.js';
+ import './memory_card.js';
+ import './overview_card.js';

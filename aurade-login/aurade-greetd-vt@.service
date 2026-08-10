@@ -1,0 +1,11 @@
+[Unit]
+Description=AuraDE secondary PAM greeter on VT %i
+After=systemd-user-sessions.service
+Conflicts=getty@tty%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/aurade-login/aurade-greetd-vt %i
+Restart=on-failure
+RestartSec=1s
+

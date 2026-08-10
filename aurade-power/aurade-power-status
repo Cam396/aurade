@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ -r /run/aurade/power-state.json ]]; then
+  cat /run/aurade/power-state.json
+  exit 0
+fi
+
+if command -v gdbus >/dev/null 2>&1 && \
+   gdbus call --system --dest org.aurade.Power \
+     --object-path /org/aurade/Power --method org.aurade.Power.GetState \
+     2>/dev/null | sed -E "s/^\('//; s/',\)$//; s/\\\\'/\x27/g"; then
+  exit 0
+else
+  echo "aurade-power-status: power service state is unavailable" >&2
+  exit 1
+fi

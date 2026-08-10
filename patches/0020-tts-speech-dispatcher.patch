@@ -1,0 +1,227 @@
+diff --git a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
+index bca5565e08c62ee383a2a8bb3482cb88bba02ae1..06029558e437bb0164c4202b11380f7b78c830c5 100644
+--- a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
++++ b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
+@@ -125,6 +125,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+   if (!browser_context || disable_built_in_tts_engine_for_testing_)
+     return true;
+ 
++  // AuraDE compatibility: on generic Linux, TTS is served by the native
++  // speech-dispatcher platform (TtsPlatformImplLinux), not by the ChromeOS
++  // Google/espeak component extensions. Those extensions never load here, so
++  // the component-extension readiness check would park every utterance
++  // forever. The platform's own readiness is gated separately by
++  // TtsControllerImpl::TtsPlatformLoading(), so report the built-in engine as
++  // ready and let utterances flow to the native platform.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return true;
++  }
++
+   std::vector<content::VoiceData> voices;
+   GetVoices(browser_context, GURL(), &voices);
+   bool saw_google_tts = false;
+@@ -136,11 +147,8 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+         voice.engine_id == extension_misc::kEspeakSpeechSynthesisExtensionId;
+   }
+ 
+-  // When running on a real Chrome OS environment, require both Google tts and
+-  // Espeak to be initialized; otherwise, only check for Espeak (i.e. on a
+-  // non-Chrome OS linux system running the Chrome OS variant of Chrome).
+-  return base::SysInfo::IsRunningOnChromeOS() ? (saw_google_tts && saw_espeak)
+-                                              : saw_espeak;
++  // On a real Chrome OS environment, require both Google tts and Espeak.
++  return saw_google_tts && saw_espeak;
+ }
+ 
+ void TtsExtensionEngineChromeOS::OnStart() {
+diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
+index 907db663cb75e0737497f58bfa049a35bc6bc1ac..871fbbed69164bdc6c629a0660ba51172c66004e 100644
+--- a/content/browser/BUILD.gn
++++ b/content/browser/BUILD.gn
+@@ -2792,7 +2792,10 @@ source_set("browser") {
+     ]
+   }
+ 
+-  if (is_linux) {
++  # AuraDE compatibility: AuraDE runs the ChromeOS target on generic Linux, so
++  # wire the Linux speech-dispatcher backend into that target as the local TTS
++  # fallback. ChromeOS code still uses the embedder-provided platform first.
++  if (is_linux || is_chromeos) {
+     sources += [ "speech/tts_linux.cc" ]
+     deps += [
+       "//third_party/speech-dispatcher",
+diff --git a/content/browser/speech/tts_linux.cc b/content/browser/speech/tts_linux.cc
+index dcfb2d419ccbaca3387672247643952c1a1708ef..c8b91ef3a4166e68634052b48a476dead871aa30 100644
+--- a/content/browser/speech/tts_linux.cc
++++ b/content/browser/speech/tts_linux.cc
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <map>
+ #include <memory>
++#include <set>
+ 
+ #include "base/command_line.h"
+ #include "base/compiler_specific.h"
+@@ -25,7 +26,6 @@
+ #include "content/public/browser/browser_task_traits.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/tts_controller.h"
+-#include "content/public/common/content_switches.h"
+ #include "library_loaders/libspeechd.h"
+ 
+ namespace content {
+@@ -43,6 +43,11 @@ using PlatformVoices = std::map<std::string, SPDChromeVoice>;
+ constexpr int kInvalidUtteranceId = -1;
+ constexpr int kInvalidMessageUid = -1;
+ 
++// AuraDE compatibility: ChromeOS target builds do not expose the Linux-only
++// content switch declaration, but AuraDE still launches with this switch to
++// opt into the speech-dispatcher backend on generic Linux.
++constexpr char kEnableSpeechDispatcherSwitch[] = "enable-speech-dispatcher";
++
+ }  // namespace
+ 
+ class TtsPlatformImplBackgroundWorker {
+@@ -169,9 +174,20 @@ class TtsPlatformImplLinux : public TtsPlatformImpl {
+ 
+ void TtsPlatformImplBackgroundWorker::Initialize() {
+   PlatformVoices voices;
++  // AuraDE compatibility: log each stage so generic-Linux speech-dispatcher
++  // bring-up failures are diagnosable from the session log.
+   if (InitializeSpeechd()) {
+     OpenConnection();
++    if (!conn_) {
++      LOG(ERROR) << "AuraDE TTS: spd_open failed (no speech-dispatcher "
++                    "connection)";
++    }
+     InitializeVoices(&voices);
++    LOG(INFO) << "AuraDE TTS: speech-dispatcher initialized with "
++              << voices.size() << " voices";
++  } else {
++    LOG(ERROR) << "AuraDE TTS: failed to load libspeechd.so.2 (missing "
++                  "library or unresolved symbols)";
+   }
+ 
+   bool success = (conn_ != nullptr);
+@@ -212,6 +228,9 @@ void TtsPlatformImplBackgroundWorker::ProcessSpeech(
+   utterance_id_ = utterance_id;
+   utterance_char_position_ = 0;
+   utterance_length_ = parsed_utterance.size();
++  // AuraDE compatibility: diagnostic for the generic-Linux TTS bring-up.
++  LOG(INFO) << "AuraDE TTS: speaking utterance " << utterance_id << " via "
++            << voice.module << "/" << voice.name;
+ 
+   // spd_say(...) returns msg_uid on success, -1 otherwise. Each call to spd_say
+   // returns a different msg_uid.
+@@ -257,6 +276,12 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
+   if (!conn_)
+     return;
+ 
++  // AuraDE compatibility: speech-dispatcher commonly reports the same
++  // synthesis voice through every output module. Chrome exposed each
++  // module/voice pair separately, producing thousands of duplicate entries in
++  // accessibility settings. Keep the first working module for each semantic
++  // (name, language) voice while retaining distinct language variants.
++  std::set<std::string> semantic_voice_ids;
+   char** modules = libspeechd_loader_.spd_list_modules(conn_);
+   if (!modules)
+     return;
+@@ -274,11 +299,18 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
+       spd_data.name = spd_voice->name;
+       spd_data.module = module;
+       spd_data.language = spd_voice->language;
+-      std::string key;
+-      key.append(spd_data.name);
+-      key.append(" ");
+-      key.append(spd_data.module);
+-      voices->insert(std::pair<std::string, SPDChromeVoice>(key, spd_data));
++      std::string semantic_id = spd_data.name;
++      semantic_id.push_back('\0');
++      semantic_id.append(spd_data.language);
++      if (semantic_voice_ids.insert(std::move(semantic_id)).second) {
++        std::string display_name = spd_data.name;
++        if (voices->contains(display_name)) {
++          display_name.append(" (");
++          display_name.append(spd_data.language);
++          display_name.push_back(')');
++        }
++        voices->insert_or_assign(std::move(display_name), std::move(spd_data));
++      }
+       free(UNSAFE_TODO(spd_voices[j]));
+     }
+     free(UNSAFE_TODO(modules[i]));
+@@ -312,8 +344,12 @@ void TtsPlatformImplBackgroundWorker::OpenConnection() {
+ 
+ void TtsPlatformImplBackgroundWorker::CloseConnection() {
+   if (conn_) {
+-    libspeechd_loader_.spd_close(conn_);
++    // AuraDE compatibility: spd_close() frees the connection. Clear the
++    // protected pointer first so BackupRefPtr does not report a dangling
++    // pointer during orderly browser shutdown.
++    SPDConnection* connection = conn_;
+     conn_ = nullptr;
++    libspeechd_loader_.spd_close(connection);
+   }
+ }
+ 
+@@ -405,7 +441,7 @@ TtsPlatformImplLinux::TtsPlatformImplLinux()
+   DCHECK(BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+   const base::CommandLine& command_line =
+       *base::CommandLine::ForCurrentProcess();
+-  if (!command_line.HasSwitch(switches::kEnableSpeechDispatcher))
++  if (!command_line.HasSwitch(kEnableSpeechDispatcherSwitch))
+     return;
+ 
+   // The TTS platform is supported. The Tts platform initialisation will happen
+@@ -496,6 +532,9 @@ void TtsPlatformImplLinux::GetVoices(std::vector<VoiceData>* out_voices) {
+   DCHECK(BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+   DCHECK(PlatformImplInitialized());
+ 
++  // AuraDE compatibility: diagnostic for the generic-Linux TTS bring-up.
++  VLOG(0) << "AuraDE TTS: GetVoices returning " << voices_.size()
++          << " platform voices";
+   for (auto it = voices_.begin(); it != voices_.end(); ++it) {
+     out_voices->push_back(VoiceData());
+     VoiceData& voice = out_voices->back();
+diff --git a/content/browser/speech/tts_platform_impl.cc b/content/browser/speech/tts_platform_impl.cc
+index 2a2c89228d7a5e8c10474ffb4d7ae68f9e85b0ce..c80057adc0bb0010d982207ee8f8ee3e1dd70510 100644
+--- a/content/browser/speech/tts_platform_impl.cc
++++ b/content/browser/speech/tts_platform_impl.cc
+@@ -4,24 +4,33 @@
+ 
+ #include "content/browser/speech/tts_platform_impl.h"
+ 
++#include <string>
++
++#include "base/system/sys_info.h"
+ #include "build/build_config.h"
+ #include "content/public/browser/content_browser_client.h"
+ #include "content/public/common/content_client.h"
+ 
+-#include <string>
+-
+-
+ namespace content {
+ 
+ // static
+ TtsPlatform* TtsPlatform::GetInstance() {
+ #if !defined(NO_CONTENT_CLIENT)
+   TtsPlatform* result = GetContentClient()->browser()->GetTtsPlatform();
+-  if (result)
++  if (result) {
+     return result;
++  }
+ #endif
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: ChromiumOS builds running on generic Linux do not
++  // have ChromeOS ARC/component TTS. Fall back to Chromium's Linux
++  // speech-dispatcher implementation when the embedder did not provide a
++  // ChromeOS platform.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return TtsPlatformImpl::GetInstance();
++  }
++
+   // On Chrome OS, the platform TTS definition is provided by the content
+   // client.
+   //

@@ -1,0 +1,22 @@
+pkgbase = aurade-ai
+	pkgdesc = Optional AuraDE Advanced Plus AI local model bootstrap
+	pkgver = 152.1660893
+	pkgrel = 1
+	url = https://github.com/aurade/aurade
+	arch = any
+	license = BSD-3-Clause
+	depends = bash
+	depends = ollama
+	depends = util-linux
+	optdepends = ollama-cuda: NVIDIA CUDA acceleration for Ollama
+	optdepends = ollama-rocm: AMD ROCm acceleration for Ollama
+	optdepends = ollama-vulkan: Vulkan acceleration for Ollama
+	backup = etc/aurade/ai.conf
+	source = aurade-ai-bootstrap
+	source = aurade-ai.conf
+	source = LICENSE
+	sha256sums = 994672edd78fbed5d665b55cd75ae9cc595bc4f29a3d650dbe4183f43251b3aa
+	sha256sums = f3b4c75a76be179485ffd10893aa08192749675314bc3e4f8d162a3a7965fc07
+	sha256sums = b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d
+
+pkgname = aurade-ai

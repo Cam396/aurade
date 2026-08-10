@@ -1,0 +1,12 @@
+[Unit]
+Description=Build and validate an AuraDE release candidate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/aurade/release-build.conf
+ExecStart=/usr/bin/bash /usr/local/src/aurade/ci/build-release-candidate.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

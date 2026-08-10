@@ -1,0 +1,395 @@
+diff --git a/components/exo/wayland/wl_compositor.cc b/components/exo/wayland/wl_compositor.cc
+index 2fa9819b6c..d32c90c2a8 100644
+--- a/components/exo/wayland/wl_compositor.cc
++++ b/components/exo/wayland/wl_compositor.cc
+@@ -182,6 +182,15 @@ void surface_set_buffer_scale(wl_client* client,
+   GetUserDataAs<Surface>(resource)->SetBufferScale(scale);
+ }
+ 
++void surface_damage_buffer(wl_client* client,
++                           wl_resource* resource,
++                           int32_t x,
++                           int32_t y,
++                           int32_t width,
++                           int32_t height) {
++  GetUserDataAs<Surface>(resource)->Damage(gfx::Rect(x, y, width, height));
++}
++
+ const struct wl_surface_interface surface_implementation = {
+     surface_destroy,
+     surface_attach,
+@@ -191,7 +200,8 @@ const struct wl_surface_interface surface_implementation = {
+     surface_set_input_region,
+     surface_commit,
+     surface_set_buffer_transform,
+-    surface_set_buffer_scale};
++    surface_set_buffer_scale,
++    surface_damage_buffer};
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // wl_compositor_interface:
+diff --git a/components/exo/wayland/wl_compositor.h b/components/exo/wayland/wl_compositor.h
+index cc553e800c..832faebf68 100644
+--- a/components/exo/wayland/wl_compositor.h
++++ b/components/exo/wayland/wl_compositor.h
+@@ -12,7 +12,7 @@
+ namespace exo::wayland {
+ 
+ constexpr uint32_t kWlCompositorVersion =
+-    WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION;
++    WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION;
+ 
+ void bind_compositor(wl_client* client,
+                      void* data,
+diff --git a/components/viz/service/display_embedder/output_surface_provider_impl.cc b/components/viz/service/display_embedder/output_surface_provider_impl.cc
+index 0a1c0ebd23..3fd14a02c2 100644
+--- a/components/viz/service/display_embedder/output_surface_provider_impl.cc
++++ b/components/viz/service/display_embedder/output_surface_provider_impl.cc
+@@ -4,11 +4,14 @@
+ 
+ #include "components/viz/service/display_embedder/output_surface_provider_impl.h"
+ 
++#include <atomic>
+ #include <memory>
++#include <optional>
+ #include <utility>
+ 
+ #include "base/command_line.h"
+ #include "base/compiler_specific.h"
++#include "base/environment.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -128,7 +131,19 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
+       // GPU compositing is expected to always work on Chrome OS and Cast
+       // devices, so we should never encounter fatal context error. This could
+       // be an unrecoverable hardware error or a bug.
+-      LOG(FATAL) << "Unexpected fatal context error";
++      std::optional<std::string> aura_de_fallback =
++          base::Environment::Create()->GetVar(
++              "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
++      if (aura_de_fallback.has_value() && aura_de_fallback.value() != "0") {
++        static std::atomic_bool logged_aura_de_fallback{false};
++        if (!logged_aura_de_fallback.exchange(true)) {
++          LOG(ERROR) << "Unexpected fatal context error; disabling GPU "
++                        "compositing for AuraDE host session";
++        }
++        gpu_service_impl_->DisableGpuCompositing();
++      } else {
++        LOG(FATAL) << "Unexpected fatal context error";
++      }
+ #elif !BUILDFLAG(IS_ANDROID)
+       gpu_service_impl_->DisableGpuCompositing();
+ #endif
+diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper.cc b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
+index abe91d0a04..0b4aba839e 100644
+--- a/gpu/command_buffer/service/shared_memory_region_wrapper.cc
++++ b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+ 
++#include <algorithm>
++
+ #include "base/compiler_specific.h"
+ #include "base/logging.h"
+ #include "base/numerics/checked_math.h"
+@@ -52,6 +54,30 @@ bool ValidateStride(const gfx::Size size,
+   return true;
+ }
+ 
++std::optional<size_t> SharedMemorySizeForStride(viz::SharedImageFormat format,
++                                                const gfx::Size& size,
++                                                uint32_t stride) {
++  if (!format.is_single_plane()) {
++    return viz::SharedMemorySizeForSharedImageFormat(format, size);
++  }
++
++  std::optional<size_t> row_size =
++      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
++                                                   size.width());
++  if (!row_size) {
++    return std::nullopt;
++  }
++
++  base::CheckedNumeric<size_t> checked_size = stride;
++  checked_size *= std::max(0, size.height() - 1);
++  checked_size += row_size.value();
++  if (!checked_size.IsValid()) {
++    return std::nullopt;
++  }
++
++  return checked_size.ValueOrDie();
++}
++
+ }  // namespace
+ 
+ SharedMemoryRegionWrapper::SharedMemoryRegionWrapper() = default;
+@@ -78,7 +104,7 @@ bool SharedMemoryRegionWrapper::Initialize(
+   }
+ 
+   std::optional<size_t> buffer_size =
+-      viz::SharedMemorySizeForSharedImageFormat(format, size);
++      SharedMemorySizeForStride(format, size, handle.stride);
+   if (!buffer_size) {
+     DLOG(ERROR) << "Invalid GMB size.";
+     return false;
+@@ -110,23 +136,31 @@ bool SharedMemoryRegionWrapper::Initialize(
+   int num_planes = format.NumberOfPlanes();
+   planes_.resize(num_planes);
+ 
+-  // The offset/stride only make sense when GpuMemoryBufferHandle is for a
+-  // single plane. Stride should be set as the expected stride for first plane
+-  // and offset should always be zero.
+-  DCHECK_EQ(static_cast<size_t>(handle.stride),
+-            viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
+-                                                         size.width())
+-                .value());
+-  DCHECK_EQ(handle.offset, 0u);
++  std::optional<size_t> first_plane_row_size =
++      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
++                                                   size.width());
++  if (!first_plane_row_size) {
++    return false;
++  }
++  if (!format.is_single_plane() &&
++      static_cast<size_t>(handle.stride) != first_plane_row_size.value()) {
++    DLOG(ERROR) << "Invalid multi-plane GMB stride.";
++    return false;
++  }
+ 
+   for (int plane_index = 0; plane_index < num_planes; ++plane_index) {
+     const size_t plane_offset =
+         viz::SharedMemoryOffsetForSharedImageFormat(format, plane_index, size);
+ 
+     planes_[plane_index].offset = memory_offset + plane_offset;
+-    planes_[plane_index].stride = viz::SharedMemoryRowSizeForSharedImageFormat(
+-                                      format, plane_index, size.width())
+-                                      .value();
++    if (format.is_single_plane()) {
++      planes_[plane_index].stride = handle.stride;
++    } else {
++      planes_[plane_index].stride =
++          viz::SharedMemoryRowSizeForSharedImageFormat(format, plane_index,
++                                                       size.width())
++              .value();
++    }
+   }
+ 
+   return true;
+diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
+index fee2b968f2..98a0ed9738 100644
+--- a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
++++ b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+ 
++#include "base/memory/unsafe_shared_memory_region.h"
+ #include "components/viz/common/resources/shared_image_format_utils.h"
+ #include "gpu/command_buffer/service/shared_image/shared_memory_image_backing_factory.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+@@ -28,6 +29,25 @@ TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888) {
+   EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
+ }
+ 
++TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888PaddedStride) {
++  constexpr gfx::Size size(696, 100);
++  constexpr viz::SharedImageFormat format = viz::SinglePlaneFormat::kRGBA_8888;
++  constexpr uint32_t stride = 2816;
++
++  auto shared_memory_region =
++      base::UnsafeSharedMemoryRegion::Create(stride * size.height());
++  ASSERT_TRUE(shared_memory_region.IsValid());
++
++  gfx::GpuMemoryBufferHandle handle(std::move(shared_memory_region));
++  handle.type = gfx::SHARED_MEMORY_BUFFER;
++  handle.offset = 0;
++  handle.stride = stride;
++
++  SharedMemoryRegionWrapper wrapper;
++  EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
++  EXPECT_EQ(stride, wrapper.GetStride(0));
++}
++
+ TEST(SharedMemoryRegionWrapperTest, MultiPlaneY_UV_420) {
+   constexpr gfx::Size size(100, 100);
+   constexpr viz::SharedImageFormat format = viz::MultiPlaneFormat::kNV12;
+diff --git a/ui/base/clipboard/BUILD.gn b/ui/base/clipboard/BUILD.gn
+index 3c7a17dbee..5f3212fa83 100644
+--- a/ui/base/clipboard/BUILD.gn
++++ b/ui/base/clipboard/BUILD.gn
+@@ -65,7 +65,7 @@ component("clipboard_types") {
+   }
+ }
+ 
+-if (is_linux && use_dbus) {
++if ((is_linux || is_chromeos) && use_dbus) {
+   source_set("clipboard_util_linux") {
+     sources = [
+       "clipboard_util_linux.cc",
+diff --git a/ui/base/ime/linux/BUILD.gn b/ui/base/ime/linux/BUILD.gn
+index aa6e9f2437..919d01bbbf 100644
+--- a/ui/base/ime/linux/BUILD.gn
++++ b/ui/base/ime/linux/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/linux/pangocairo/pangocairo.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ component("linux") {
+   output_name = "ui_base_ime_linux"
+diff --git a/ui/linux/BUILD.gn b/ui/linux/BUILD.gn
+index 267de0acba..0e0a8534c4 100644
+--- a/ui/linux/BUILD.gn
++++ b/ui/linux/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//build/config/linux/gtk/gtk.gni")
+ import("//ui/qt/qt.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ component("linux_ui") {
+   defines = [ "IS_LINUX_UI_IMPL" ]
+diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+index e523e4e393..18abdf7416 100644
+--- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
++++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+@@ -350,7 +350,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
+ }
+ 
+ void DrmDisplayHostManager::RemoveDelegate(DrmNativeDisplayDelegate* delegate) {
+-  DCHECK_EQ(delegate_, delegate);
++  if (delegate_ != delegate) {
++    LOG(WARNING) << "Ignoring stale DRM display delegate removal";
++    return;
++  }
+   delegate_ = nullptr;
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
+index 8e2d305163..4f5b35db59 100644
+--- a/ui/ozone/platform/wayland/BUILD.gn
++++ b/ui/ozone/platform/wayland/BUILD.gn
+@@ -9,7 +9,7 @@ import("//gpu/vulkan/features.gni")
+ import("//testing/libfuzzer/fuzzer_test.gni")
+ import("//ui/ozone/platform/wayland/wayland.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ source_set("common") {
+   sources = [
+@@ -320,7 +320,7 @@ source_set("wayland") {
+     "//ui/platform_window/wm",
+   ]
+ 
+-  if (use_dbus) {
++  if (use_dbus && !is_chromeos) {
+     sources += [
+       "host/org_gnome_mutter_idle_monitor.cc",
+       "host/org_gnome_mutter_idle_monitor.h",
+diff --git a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
+index c553d6503a..744ce36a04 100644
+--- a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
++++ b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
+@@ -5,6 +5,7 @@
+ #include "ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.h"
+ 
+ #include <drm_fourcc.h>
++#include <fcntl.h>
+ 
+ #include <algorithm>
+ #include <utility>
+@@ -472,11 +473,17 @@ void WaylandBufferManagerGpu::MaybeCreateGbmDevice() {
+     supports_dmabuf_ = false;
+     return;
+   }
++  if (fcntl(drm_render_node_fd_.get(), F_GETFD) < 0) {
++    supports_dmabuf_ = false;
++    PLOG(WARNING) << "DRM render node fd is invalid";
++    return;
++  }
+   TRACE_EVENT("gpu,startup", "ui::CreateGbmDevice");
+   gbm_device* device = gbm_create_device(drm_render_node_fd_.get());
+   if (!device) {
+     supports_dmabuf_ = false;
+-    LOG(WARNING) << "Failed to initialize gbm device.";
++    PLOG(WARNING) << "Failed to initialize gbm device for DRM fd "
++                  << drm_render_node_fd_.get();
+     return;
+   }
+   native_display_ = gl::EGLDisplayPlatform(
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.cc b/ui/ozone/platform/wayland/host/wayland_screen.cc
+index b0bb41f423..8521b1cdd2 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.cc
++++ b/ui/ozone/platform/wayland/host/wayland_screen.cc
+@@ -42,7 +42,7 @@
+ #include "ui/ozone/platform/wayland/host/wayland_wp_color_management_output.h"
+ #include "ui/ozone/platform/wayland/host/zwp_idle_inhibit_manager.h"
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+ #include "ui/ozone/platform/wayland/host/org_gnome_mutter_idle_monitor.h"
+ #endif
+ 
+@@ -482,7 +482,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+       return *idle_time;
+   }
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+   // Try the org.gnome.Mutter.IdleMonitor D-Bus service (Mutter).
+   if (!org_gnome_mutter_idle_monitor_)
+     org_gnome_mutter_idle_monitor_ =
+@@ -490,7 +490,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+   const auto idle_time = org_gnome_mutter_idle_monitor_->GetIdleTime();
+   if (idle_time)
+     return *idle_time;
+-#endif  // BUILDFLAG(USE_DBUS)
++#endif  // BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+ 
+   NOTIMPLEMENTED_LOG_ONCE();
+ 
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.h b/ui/ozone/platform/wayland/host/wayland_screen.h
+index 9850170783..d122eea255 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.h
++++ b/ui/ozone/platform/wayland/host/wayland_screen.h
+@@ -132,7 +132,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
+   std::optional<viz::SharedImageFormat> image_format_no_alpha_;
+   std::optional<viz::SharedImageFormat> image_format_hdr_;
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+   mutable std::unique_ptr<OrgGnomeMutterIdleMonitor>
+       org_gnome_mutter_idle_monitor_;
+ #endif
+diff --git a/ui/platform_window/platform_window_delegate.cc b/ui/platform_window/platform_window_delegate.cc
+index 52d4ae6242..60f71edc1e 100644
+--- a/ui/platform_window/platform_window_delegate.cc
++++ b/ui/platform_window/platform_window_delegate.cc
+@@ -58,7 +58,7 @@ gfx::Insets PlatformWindowDelegate::CalculateInsetsInDIP(
+   return gfx::Insets();
+ }
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+ void PlatformWindowDelegate::OnWindowTiledStateChanged(
+     WindowTiledEdges new_tiled_edges) {}
+ #endif
+diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
+index 2ba67bf9f9..9c873c48f6 100644
+--- a/ui/platform_window/platform_window_delegate.h
++++ b/ui/platform_window/platform_window_delegate.h
+@@ -146,7 +146,7 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
+   virtual void OnWindowStateChanged(PlatformWindowState old_state,
+                                     PlatformWindowState new_state) = 0;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   // Notifies the delegate that the tiled state of the window edges has changed.
+   virtual void OnWindowTiledStateChanged(WindowTiledEdges new_tiled_edges);
+ #endif

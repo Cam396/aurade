@@ -1,0 +1,229 @@
+diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
+index ee23cdd290..5a5bc28124 100644
+--- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
++++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
+@@ -12,6 +12,7 @@
+ #include "chrome/browser/ash/file_manager/file_tasks.h"
+ #include "chrome/browser/ash/file_manager/virtual_tasks/drive_upload_virtual_task.h"
+ #include "chrome/browser/ash/file_manager/virtual_tasks/install_isolated_web_app_virtual_task.h"
++#include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
+ #include "chrome/browser/ash/file_manager/virtual_tasks/ms365_virtual_task.h"
+ #include "chromeos/ash/components/file_manager/app_id.h"
+ #include "components/services/app_service/public/cpp/intent_util.h"
+@@ -26,6 +27,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
+   static const base::NoDestructor<std::vector<VirtualTask*>> virtual_tasks(
+       std::initializer_list<VirtualTask*>({
+           new InstallIsolatedWebAppVirtualTask(),
++          new InstallPackageVirtualTask(),
+           new Ms365VirtualTask(),
+           new DocsUploadVirtualTask(),
+           new SheetsUploadVirtualTask(),
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
+index 9197de05b4..fd7bf21307 100644
+--- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
++++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
+@@ -11,6 +11,8 @@ static_library("virtual_tasks") {
+     "id_constants.h",
+     "install_isolated_web_app_virtual_task.cc",
+     "install_isolated_web_app_virtual_task.h",
++    "install_package_virtual_task.cc",
++    "install_package_virtual_task.h",
+     "ms365_virtual_task.cc",
+     "ms365_virtual_task.h",
+   ]
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
+index d6a8b7a844..e4020a50c6 100644
+--- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
++++ b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
+@@ -10,6 +10,8 @@ namespace file_manager::file_tasks {
+ inline constexpr char kActionIdInstallIsolatedWebApp[] =
+     "install-isolated-web-app";
+ 
++inline constexpr char kActionIdInstallPackage[] = "install-package";
++
+ }  // namespace file_manager::file_tasks
+ 
+ #endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_ID_CONSTANTS_H_
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
+new file mode 100644
+index 0000000000..88dbf01c0d
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
+@@ -0,0 +1,119 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
++
++#include <string>
++#include <vector>
++
++#include "ash/webui/file_manager/url_constants.h"
++#include "base/process/launch.h"
++#include "base/strings/strcat.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
++#include "base/task/thread_pool.h"
++#include "chrome/browser/ash/file_manager/file_tasks.h"
++#include "chrome/browser/ash/file_manager/virtual_tasks/id_constants.h"
++#include "chrome/browser/profiles/profile.h"
++#include "storage/browser/file_system/file_system_url.h"
++#include "url/gurl.h"
++
++namespace file_manager::file_tasks {
++
++namespace {
++
++constexpr char kAuraDeSystemHelperPath[] = "/usr/bin/aurade-system-helper";
++
++// Returns the extension string for the given file path, including compound
++// extensions like ".pkg.tar.zst".
++std::string GetPackageExtension(const base::FilePath& path) {
++  const std::string name = path.value();
++  // Check compound Arch extensions first.
++  if (base::EndsWith(name, ".pkg.tar.zst",
++                     base::CompareCase::INSENSITIVE_ASCII)) {
++    return ".pkg.tar.zst";
++  }
++  if (base::EndsWith(name, ".pkg.tar.xz",
++                     base::CompareCase::INSENSITIVE_ASCII)) {
++    return ".pkg.tar.xz";
++  }
++  return "";
++}
++
++bool IsSupportedPackage(const base::FilePath& path) {
++  const std::string extension = GetPackageExtension(path);
++  return extension == ".pkg.tar.zst" || extension == ".pkg.tar.xz";
++}
++
++// Runs the package install helper on the thread pool (fire-and-forget).
++void RunPackageInstall(const base::FilePath& path) {
++  base::LaunchOptions options;
++  base::LaunchProcess(
++      {"pkexec", kAuraDeSystemHelperPath, "install-package", path.value()},
++      options);
++}
++
++}  // namespace
++
++InstallPackageVirtualTask::InstallPackageVirtualTask() {
++  // No extensions registered via matcher_file_extensions_; Matches() is
++  // overridden to handle compound extensions like .pkg.tar.zst.
++}
++
++bool InstallPackageVirtualTask::IsEnabled(Profile* profile) const {
++  return !base::SysInfo::IsRunningOnChromeOS();
++}
++
++std::string InstallPackageVirtualTask::id() const {
++  return base::StrCat({ash::file_manager::kChromeUIFileManagerURL, "?",
++                       kActionIdInstallPackage});
++}
++
++std::string InstallPackageVirtualTask::title() const {
++  return "Install Arch package";
++}
++
++GURL InstallPackageVirtualTask::icon_url() const {
++  return GURL();
++}
++
++bool InstallPackageVirtualTask::IsDlpBlocked(
++    const std::vector<std::string>& dlp_source_urls) const {
++  return false;
++}
++
++bool InstallPackageVirtualTask::Matches(
++    const std::vector<extensions::EntryInfo>& entries,
++    const std::vector<GURL>& file_urls) const {
++  if (entries.empty()) {
++    return false;
++  }
++  for (const auto& entry : entries) {
++    if (!IsSupportedPackage(entry.path)) {
++      return false;
++    }
++  }
++  return true;
++}
++
++bool InstallPackageVirtualTask::Execute(
++    Profile* profile,
++    const TaskDescriptor& task,
++    const std::vector<storage::FileSystemURL>& file_urls) const {
++  if (file_urls.empty()) {
++    return false;
++  }
++  for (const auto& file_url : file_urls) {
++    const base::FilePath path = file_url.path();
++    if (!IsSupportedPackage(path)) {
++      continue;
++    }
++    base::ThreadPool::PostTask(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&RunPackageInstall, path));
++  }
++  return true;
++}
++
++}  // namespace file_manager::file_tasks
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
+new file mode 100644
+index 0000000000..c06ab759cc
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
+@@ -0,0 +1,52 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_
++#define CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_
++
++#include <string>
++#include <vector>
++
++#include "chrome/browser/ash/file_manager/virtual_file_tasks.h"
++
++class GURL;
++class Profile;
++
++namespace storage {
++class FileSystemURL;
++}  // namespace storage
++
++namespace file_manager::file_tasks {
++
++struct TaskDescriptor;
++
++// A task to install native Arch package files through aurade-system-helper.
++// Enabled only on linux-chromeos builds (non-ChromeOS hardware).
++class InstallPackageVirtualTask : public VirtualTask {
++ public:
++  InstallPackageVirtualTask();
++
++  bool IsEnabled(Profile* profile) const override;
++
++  std::string id() const override;
++
++  std::string title() const override;
++
++  GURL icon_url() const override;
++
++  bool IsDlpBlocked(
++      const std::vector<std::string>& dlp_source_urls) const override;
++
++  bool Execute(
++      Profile* profile,
++      const TaskDescriptor& task,
++      const std::vector<storage::FileSystemURL>& file_urls) const override;
++
++  bool Matches(const std::vector<extensions::EntryInfo>& entries,
++               const std::vector<GURL>& file_urls) const override;
++};
++
++}  // namespace file_manager::file_tasks
++
++#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_

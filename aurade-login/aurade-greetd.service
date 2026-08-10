@@ -1,0 +1,18 @@
+[Unit]
+Description=AuraDE PAM greeter
+Documentation=man:greetd(1)
+After=systemd-user-sessions.service plymouth-quit-wait.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/greetd --config /etc/greetd/aurade.toml
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+TimeoutStopSec=30s
+KeyringMode=shared
+Restart=always
+RestartSec=1s
+
+[Install]
+Alias=display-manager.service

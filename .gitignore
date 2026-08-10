@@ -1,0 +1,64 @@
+# Curated source repository: never commit upstream checkouts or build state.
+chromium_dev/
+src/
+chroot/
+out/
+depot_tools/
+depot_tools_fresh/
+chromite/
+infra/
+infra_virtualenv/
+bazel_deps/
+manifest/
+.repo/
+
+# Local build, package, cache, and deployment state.
+package-staging/
+private-repo/
+private-repo.*
+build-artifact-backups/
+tmp-build-backups/
+.ninja-tmpfs-backups/
+.makepkg-*/
+**/pkg/
+**/src/
+deploy/
+artifacts/
+output/
+
+# Logs, crash dumps, screenshots, and generated archives.
+*.log
+*.strace
+*.core
+core
+*.dump
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.iso
+*.iso.*
+*.pkg.tar.*
+*.sig
+*.sha256
+*.sha512
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+
+# Editor and host state.
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.env
+.gclient
+
+# Local credentials and machine-specific configuration.
+*.pem
+*.key
+*.token
+google-api.conf
+**/google-api.conf

@@ -1,0 +1,122 @@
+diff --git a/ash/public/cpp/accelerators.h b/ash/public/cpp/accelerators.h
+index 4555a096ff..7dd3d42805 100644
+--- a/ash/public/cpp/accelerators.h
++++ b/ash/public/cpp/accelerators.h
+@@ -51,8 +51,11 @@ ASH_PUBLIC_EXPORT inline constexpr auto kAcceleratorData = std::to_array<
+     {true, ui::VKEY_TAB, ui::EF_ALT_DOWN, AcceleratorAction::kCycleForwardMru},
+     {true, ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+      AcceleratorAction::kCycleBackwardMru},
+-    {true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_NONE,
+-     AcceleratorAction::kToggleOverview},
++    // HACK(AuraDE): Super key opens app list; Super+Shift toggles overview.
++    // ChromeOS normally uses the Search key (VKEY_BROWSER_SEARCH) for this.
++    {true, ui::VKEY_LWIN, ui::EF_NONE, AcceleratorAction::kToggleAppList},
++    {true, ui::VKEY_LWIN, ui::EF_SHIFT_DOWN, AcceleratorAction::kToggleOverview},
++    {true, ui::VKEY_TAB, ui::EF_COMMAND_DOWN, AcceleratorAction::kToggleOverview},
+     // Historically, the browser search key with and without the shift key can
+     // toggle the app list into different open states. Now the two combinations
+     // are used to toggle the app list in the same way to keep the behavior
+@@ -207,8 +210,10 @@ ASH_PUBLIC_EXPORT inline constexpr auto kAcceleratorData = std::to_array<
+     {true, ui::VKEY_ZOOM, ui::EF_NONE, AcceleratorAction::kToggleFullscreen},
+     {true, ui::VKEY_ZOOM, ui::EF_SHIFT_DOWN,
+      AcceleratorAction::kToggleFullscreen},
+-    {true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN | ui::EF_COMMAND_DOWN,
+-     AcceleratorAction::kUnpin},
++    {true, ui::VKEY_ESCAPE, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
++     AcceleratorAction::kShowTaskManager},
++    {true, ui::VKEY_N, ui::EF_COMMAND_DOWN,
++     AcceleratorAction::kToggleMessageCenterBubble},
+     {true, ui::VKEY_S, ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN,
+      AcceleratorAction::kFocusCameraPreview},
+     {true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+diff --git a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
+index f9f730b72f..59b6bdd08e 100644
+--- a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
++++ b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
+@@ -223,6 +223,14 @@ std::vector<mojom::TextAcceleratorPartPtr> GenerateTextAcceleratorParts(
+   return result;
+ }
+ 
++mojom::TextAcceleratorPropertiesPtr CreateFallbackTextAcceleratorProperties(
++    const std::u16string& text) {
++  std::vector<mojom::TextAcceleratorPartPtr> parts;
++  parts.push_back(mojom::TextAcceleratorPart::New(
++      text, mojom::TextAcceleratorPartType::kPlainText));
++  return mojom::TextAcceleratorProperties::New(std::move(parts));
++}
++
+ // Hide accelerators if they are either:
+ // 1. In the `kHiddenAccelerators` map.
+ // 2. Not positionally remapped in the current keyboard layout, but are
+@@ -1489,15 +1497,15 @@ AcceleratorConfigurationProvider::GetDefaultAcceleratorsForId(
+ mojom::TextAcceleratorPropertiesPtr
+ AcceleratorConfigurationProvider::CreateTextAcceleratorProperties(
+     const NonConfigurableAcceleratorDetails& details) const {
+-  DCHECK(details.message_id.has_value());
++  if (!details.message_id.has_value()) {
++    return CreateFallbackTextAcceleratorProperties(std::u16string());
++  }
++
+   // Ambient accelerators that only contain plain text e.g., Drag the
+   // link to the tab's address bar.
+   if (!details.replacements.has_value() || details.replacements->empty()) {
+-    std::vector<mojom::TextAcceleratorPartPtr> parts;
+-    parts.push_back(mojom::TextAcceleratorPart::New(
+-        l10n_util::GetStringUTF16(details.message_id.value()),
+-        mojom::TextAcceleratorPartType::kPlainText));
+-    return mojom::TextAcceleratorProperties::New(std::move(parts));
++    return CreateFallbackTextAcceleratorProperties(
++        l10n_util::GetStringUTF16(details.message_id.value()));
+   }
+ 
+   // Contains the start points of the replaced strings.
+@@ -1509,13 +1517,27 @@ AcceleratorConfigurationProvider::CreateTextAcceleratorProperties(
+   const auto replaced_string = l10n_util::GetStringFUTF16(
+       details.message_id.value(), empty_string_replacements, &offsets);
+ 
++  const auto& replacement_parts = details.replacements.value();
++  // AuraDE compatibility: Advanced feature profiles can expose ChromeOS
++  // ambient shortcut rows on generic Linux before every localized replacement
++  // placeholder lines up with the upstream table. Keep the shortcut surface
++  // best-effort instead of crashing the whole shell in DCHECK builds.
++  if (offsets.size() != replacement_parts.size() ||
++      !std::is_sorted(offsets.begin(), offsets.end()) ||
++      std::ranges::any_of(offsets, [&](size_t offset) {
++        return offset > replaced_string.size();
++      })) {
++    LOG(ERROR) << "Invalid ambient shortcut text accelerator data for message "
++               << details.message_id.value();
++    return CreateFallbackTextAcceleratorProperties(replaced_string);
++  }
++
+   // Sort the offsets and split the string on the offsets.
+-  sort(offsets.begin(), offsets.end());
++  std::ranges::sort(offsets);
+   const auto plain_text_parts = SplitStringOnOffsets(replaced_string, offsets);
+ 
+   auto text_accelerator_parts = GenerateTextAcceleratorParts(
+-      plain_text_parts, details.replacements.value(), offsets,
+-      replaced_string.size());
++      plain_text_parts, replacement_parts, offsets, replaced_string.size());
+   return mojom::TextAcceleratorProperties::New(
+       std::move(text_accelerator_parts));
+ }
+diff --git a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
+index c037c63ab8..f377d62610 100644
+--- a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
++++ b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
+@@ -9,13 +9,5 @@
+ #include "components/user_manager/user_manager.h"
+ 
+ bool ChromeAcceleratorPrefsDelegate::IsUserEnterpriseManaged() const {
+-  // Ensure the user is logged in.
+-  if (!user_manager::UserManager::IsInitialized() ||
+-      !user_manager::UserManager::Get()->IsUserLoggedIn()) {
+-    return false;
+-  }
+-  // Check if the user is managed.
+-  return ProfileManager::GetPrimaryUserProfile()
+-      ->GetProfilePolicyConnector()
+-      ->IsManaged();
++  return false;
+ }

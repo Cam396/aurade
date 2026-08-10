@@ -1,0 +1,37 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-ai
+pkgver=152.1660893
+pkgrel=1
+pkgdesc="Optional AuraDE Advanced Plus AI local model bootstrap"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=(
+    'bash'
+    'ollama'
+    'util-linux'
+)
+optdepends=(
+    'ollama-cuda: NVIDIA CUDA acceleration for Ollama'
+    'ollama-rocm: AMD ROCm acceleration for Ollama'
+    'ollama-vulkan: Vulkan acceleration for Ollama'
+)
+source=(
+    'aurade-ai-bootstrap'
+    'aurade-ai.conf'
+    'LICENSE'
+)
+sha256sums=('994672edd78fbed5d665b55cd75ae9cc595bc4f29a3d650dbe4183f43251b3aa'
+            'f3b4c75a76be179485ffd10893aa08192749675314bc3e4f8d162a3a7965fc07'
+            'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
+backup=('etc/aurade/ai.conf')
+
+package() {
+    install -Dm755 "${srcdir}/aurade-ai-bootstrap" \
+        "${pkgdir}/usr/bin/aurade-ai-bootstrap"
+    install -Dm644 "${srcdir}/aurade-ai.conf" \
+        "${pkgdir}/etc/aurade/ai.conf"
+    install -Dm644 "${srcdir}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

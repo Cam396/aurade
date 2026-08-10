@@ -1,0 +1,19 @@
+pkgbase = aurade-account-helper
+	pkgdesc = PAM-backed local account helper for AuraDE
+	pkgver = 0.1.0
+	pkgrel = 2
+	url = https://github.com/aurade/aurade
+	arch = x86_64
+	license = BSD-3-Clause
+	makedepends = gcc
+	depends = gcc-libs
+	depends = glibc
+	depends = pam
+	source = aurade-account-helper.cc
+	source = aurade.pam
+	source = LICENSE
+	sha256sums = 3e26ad59d70cb1f6e4edd68c9d31f3b46ee268e68d66bb07e9d74255789099ce
+	sha256sums = 005736b9bd650ff5e5d82a7e288853776d5bb8c90185d5774c07231c1e1c64a9
+	sha256sums = 65b98d3d5435f0e7f1857890e246f773e8b759fac8f117853318c232a9f15168
+
+pkgname = aurade-account-helper

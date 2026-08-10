@@ -1,0 +1,241 @@
+diff --git a/ash/wallpaper/views/wallpaper_view.cc b/ash/wallpaper/views/wallpaper_view.cc
+index fe58433703..d5eb78810f 100644
+--- a/ash/wallpaper/views/wallpaper_view.cc
++++ b/ash/wallpaper/views/wallpaper_view.cc
+@@ -86,8 +86,14 @@ class WallpaperWidgetDelegate : public views::WidgetDelegateView {
+     display::Display display =
+         display::Screen::Get()->GetDisplayNearestWindow(window);
+ 
++    const gfx::Size target_size = window->bounds().size();
++    const gfx::Size fallback_size = display.size();
+     for (views::View* child : children()) {
+-      child->SetBounds(0, 0, display.size().width(), display.size().height());
++      child->SetBounds(
++          0, 0,
++          target_size.IsEmpty() ? fallback_size.width() : target_size.width(),
++          target_size.IsEmpty() ? fallback_size.height()
++                                : target_size.height());
+       gfx::Transform transform;
+       // Apply RTL transform explicitly becacuse Views layer code
+       // doesn't handle RTL. crbug.com/458753.
+@@ -117,8 +123,9 @@ void WallpaperView::SetLockShieldEnabled(bool enabled) {
+ 
+   if (enabled) {
+     DCHECK(!shield_view_);
+-    // TODO(crbug.com/374034250): Remove the shield layer once the bug is fixed and
+-    // the compositor can fallback to solid color background for missing tiles.
++    // TODO(crbug.com/374034250): Remove the shield layer once the bug is fixed
++    // and the compositor can fallback to solid color background for missing
++    // tiles.
+     shield_view_ = new views::View();
+     parent()->AddChildViewAt(shield_view_.get(), 0);
+     shield_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
+diff --git a/ash/wallpaper/views/wallpaper_widget_controller.cc b/ash/wallpaper/views/wallpaper_widget_controller.cc
+index 56be1cc47e..8c5d0c9016 100644
+--- a/ash/wallpaper/views/wallpaper_widget_controller.cc
++++ b/ash/wallpaper/views/wallpaper_widget_controller.cc
+@@ -17,6 +17,7 @@
+ #include "ui/compositor/scoped_layer_animation_settings.h"
+ #include "ui/display/screen.h"
+ #include "ui/gfx/animation/tween.h"
++#include "ui/gfx/geometry/rect.h"
+ #include "ui/views/widget/widget.h"
+ #include "ui/views/widget/widget_observer.h"
+ #include "ui/wm/core/window_util.h"
+@@ -35,6 +36,7 @@ WallpaperWidgetController::~WallpaperWidgetController() {
+ void WallpaperWidgetController::Init(bool locked) {
+   widget_ = CreateWallpaperWidget(root_window_, wallpaper_constants::kClear,
+                                   locked, &wallpaper_view_);
++  UpdateWallpaperBounds();
+   CreateWallpaperUnderlayLayer();
+ }
+ 
+@@ -125,9 +127,7 @@ void WallpaperWidgetController::OnDisplayMetricsChanged(
+     return;
+   }
+ 
+-  // Bounds have to be in parent. Since these are set on the layer directly, and
+-  // layer bounds are relative to the layer's parent.
+-  wallpaper_underlay_layer_->SetBounds(root_window_->bounds());
++  UpdateWallpaperBounds();
+ }
+ 
+ void WallpaperWidgetController::OnColorProviderChanged() {
+@@ -158,6 +158,22 @@ void WallpaperWidgetController::CreateWallpaperUnderlayLayer() {
+   wallpaper_underlay_layer_->SetVisible(false);
+ }
+ 
++void WallpaperWidgetController::UpdateWallpaperBounds() {
++  if (!widget_ || !widget_->GetNativeWindow()) {
++    return;
++  }
++
++  const gfx::Rect bounds(root_window_->bounds().size());
++  widget_->SetBounds(bounds);
++  if (wallpaper_underlay_layer_) {
++    wallpaper_underlay_layer_->SetBounds(bounds);
++  }
++  if (wallpaper_view_) {
++    wallpaper_view_->ClearCachedImage();
++    wallpaper_view_->SchedulePaint();
++  }
++}
++
+ void WallpaperWidgetController::RunAnimationEndCallbacks() {
+   std::list<base::OnceClosure> callbacks;
+   animation_end_callbacks_.swap(callbacks);
+diff --git a/ash/wallpaper/views/wallpaper_widget_controller.h b/ash/wallpaper/views/wallpaper_widget_controller.h
+index 08a3142c3a..5a9d057abb 100644
+--- a/ash/wallpaper/views/wallpaper_widget_controller.h
++++ b/ash/wallpaper/views/wallpaper_widget_controller.h
+@@ -101,6 +101,8 @@ class ASH_EXPORT WallpaperWidgetController
+   }
+ 
+  private:
++  void UpdateWallpaperBounds();
++
+   void CreateWallpaperUnderlayLayer();
+ 
+   // Runs callbacks in |animation_end_callbacks_|.
+diff --git a/ash/wallpaper/wallpaper_controller_impl.cc b/ash/wallpaper/wallpaper_controller_impl.cc
+index a068a6d94a..4a4d080c6d 100644
+--- a/ash/wallpaper/wallpaper_controller_impl.cc
++++ b/ash/wallpaper/wallpaper_controller_impl.cc
+@@ -137,6 +137,36 @@ gfx::ImageSkia CreateSolidColorWallpaper(SkColor color) {
+   return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
+ }
+ 
++// HACK(AuraDE): Creates a vertical gradient wallpaper as fallback for
++// standalone Ash mode where no ChromeOS wallpaper assets are available.
++// TODO: Replace with proper wallpaper asset loading or user-configurable
++// background once local account support is implemented.
++// FIXME: This should be configurable via right-click context menu.
++gfx::ImageSkia CreateAuraDeGradientWallpaper() {
++  constexpr int kWidth = 1920;
++  constexpr int kHeight = 1080;
++  // Dark teal -> deep navy gradient (similar to ChromeOS default style).
++  constexpr SkColor kTopColor = SkColorSetRGB(0x1a, 0x2a, 0x3a);
++  constexpr SkColor kBottomColor = SkColorSetRGB(0x0d, 0x12, 0x1e);
++  SkBitmap bitmap;
++  bitmap.allocN32Pixels(kWidth, kHeight);
++  for (int y = 0; y < kHeight; ++y) {
++    float t = static_cast<float>(y) / kHeight;
++    SkColor color = SkColorSetARGB(
++        255,
++        static_cast<uint8_t>(SkColorGetR(kTopColor) * (1.0f - t) +
++                              SkColorGetR(kBottomColor) * t),
++        static_cast<uint8_t>(SkColorGetG(kTopColor) * (1.0f - t) +
++                              SkColorGetG(kBottomColor) * t),
++        static_cast<uint8_t>(SkColorGetB(kTopColor) * (1.0f - t) +
++                              SkColorGetB(kBottomColor) * t));
++    for (int x = 0; x < kWidth; ++x) {
++      *bitmap.getAddr32(x, y) = color;
++    }
++  }
++  return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
++}
++
+ // Deletes a list of wallpaper files in |file_list|.
+ void DeleteWallpaperInList(std::vector<base::FilePath> file_list) {
+   for (const base::FilePath& path : file_list) {
+@@ -2266,9 +2296,10 @@ void WallpaperControllerImpl::OnDefaultWallpaperDecoded(
+   if (image.isNull()) {
+     wallpaper_metrics_manager_->LogWallpaperResult(
+         WallpaperType::kDefault, SetWallpaperResult::kDecodingError);
+-    // Create a solid color wallpaper if the default wallpaper decoding fails.
+-    cached_default_wallpaper_.image =
+-        CreateSolidColorWallpaper(kDefaultWallpaperColor);
++    // HACK(AuraDE): Use gradient instead of solid gray for standalone Ash.
++    // Decoding fails because ChromeOS wallpaper assets aren't available on
++    // standard Linux. TODO: Load user-set wallpaper from local config.
++    cached_default_wallpaper_.image = CreateAuraDeGradientWallpaper();
+     cached_default_wallpaper_.file_path.clear();
+   } else {
+     wallpaper_metrics_manager_->LogWallpaperResult(
+diff --git a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
+index a4ca49aa88..1ac7ca3131 100644
+--- a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
++++ b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
+@@ -376,28 +376,43 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
+ 
+ void WallpaperControllerClientImpl::MakeTransparent(
+     content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++
++  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
++  if (!top_level_window) {
++    return;
++  }
++
+   // Disable the window backdrop that creates an opaque layer in tablet mode.
+   ash::WindowBackdrop* window_backdrop =
+-      ash::WindowBackdrop::Get(web_contents->GetTopLevelNativeWindow());
++      ash::WindowBackdrop::Get(top_level_window);
+   window_backdrop->SetBackdropMode(
+       ash::WindowBackdrop::BackdropMode::kDisabled);
+ 
+   // Set transparency on the top level native window and tell the WM not to
+   // change it when window state changes.
+-  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
+   top_level_window->SetProperty(::chromeos::kWindowManagerManagesOpacityKey,
+                                 false);
+   top_level_window->SetTransparent(true);
+ 
+   // Set the background color to transparent.
+-  web_contents->GetRenderWidgetHostView()->SetBackgroundColor(
+-      SK_ColorTRANSPARENT);
++  if (content::RenderWidgetHostView* render_widget_host_view =
++          web_contents->GetRenderWidgetHostView()) {
++    render_widget_host_view->SetBackgroundColor(SK_ColorTRANSPARENT);
++  }
+ 
+   // Turn off the web contents background.
++  BrowserView* browser_view =
++      BrowserView::GetBrowserViewForNativeWindow(top_level_window);
++  if (!browser_view) {
++    VLOG(1) << "Skipping wallpaper transparency for non-BrowserView window.";
++    return;
++  }
++
+   std::vector<ContentsWebView*> contents_views =
+-      BrowserView::GetBrowserViewForNativeWindow(
+-          web_contents->GetTopLevelNativeWindow())
+-          ->GetAllVisibleContentsWebViews();
++      browser_view->GetAllVisibleContentsWebViews();
+   for (ContentsWebView* contents_view : contents_views) {
+     contents_view->SetBackgroundVisible(false);
+   }
+@@ -405,13 +420,28 @@ void WallpaperControllerClientImpl::MakeTransparent(
+ 
+ void WallpaperControllerClientImpl::MakeOpaque(
+     content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++
++  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
++  if (!top_level_window) {
++    return;
++  }
++
+   // Reversing `contents_web_view` is sufficient to make the view opaque,
+   // as `window_backdrop`, `top_level_window` and `web_contents` are not
+   // highly impactful to the animated theme change effect.
++  BrowserView* browser_view =
++      BrowserView::GetBrowserViewForNativeWindow(top_level_window);
++  if (!browser_view) {
++    top_level_window->SetTransparent(false);
++    VLOG(1) << "Skipping wallpaper opacity restore for non-BrowserView window.";
++    return;
++  }
++
+   std::vector<ContentsWebView*> contents_views =
+-      BrowserView::GetBrowserViewForNativeWindow(
+-          web_contents->GetTopLevelNativeWindow())
+-          ->GetAllVisibleContentsWebViews();
++      browser_view->GetAllVisibleContentsWebViews();
+   for (ContentsWebView* contents_view : contents_views) {
+     contents_view->SetBackgroundVisible(true);
+   }

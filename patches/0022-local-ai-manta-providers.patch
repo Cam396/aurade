@@ -1,0 +1,795 @@
+diff --git a/components/manta/BUILD.gn b/components/manta/BUILD.gn
+index 02bdc3c66f..5de0b041df 100644
+--- a/components/manta/BUILD.gn
++++ b/components/manta/BUILD.gn
+@@ -36,6 +36,10 @@ component("manta") {
+ 
+   if (is_chromeos) {
+     sources += [
++      "aurade_local_mahi_provider.cc",
++      "aurade_local_mahi_provider.h",
++      "aurade_local_orca_provider.cc",
++      "aurade_local_orca_provider.h",
+       "mahi_provider.cc",
+       "mahi_provider.h",
+       "orca_provider.cc",
+@@ -50,6 +54,7 @@ component("manta") {
+     deps += [
+       "//chromeos/components/magic_boost/public/cpp",
+       "//chromeos/constants",
++      "//services/network/public/cpp",
+     ]
+   }
+ }
+diff --git a/components/manta/aurade_local_mahi_provider.cc b/components/manta/aurade_local_mahi_provider.cc
+new file mode 100644
+index 0000000000..323dee028b
+--- /dev/null
++++ b/components/manta/aurade_local_mahi_provider.cc
+@@ -0,0 +1,266 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/manta/aurade_local_mahi_provider.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "base/environment.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/strings/string_util.h"
++#include "base/values.h"
++#include "components/manta/manta_status.h"
++#include "net/base/load_flags.h"
++#include "net/base/net_errors.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++
++namespace manta {
++
++namespace {
++
++constexpr char kDefaultEndpoint[] = "http://127.0.0.1:11434";
++constexpr char kDefaultModel[] = "gemma4:e2b-it-q4_K_M";
++constexpr size_t kMaxOllamaResponseBytes = 4 * 1024 * 1024;
++
++const net::NetworkTrafficAnnotationTag kAuraDELocalMahiTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("aurade_local_mahi_request",
++                                        R"(
++        semantics {
++          sender: "AuraDE Local AI"
++          description:
++            "AuraDE sends Help Me Read text to a local model runtime running "
++            "on the same machine. The default endpoint is Ollama on localhost."
++          trigger:
++            "The user asks AuraDE to summarize, simplify, or answer a "
++            "question about local page or document text."
++          user_data {
++            type: USER_CONTENT
++            type: WEB_CONTENT
++          }
++          data:
++            "The selected text, page content, page title, page URL, and user "
++            "question when provided."
++          destination: LOCAL
++          last_reviewed: "2026-06-29"
++        }
++        policy {
++          cookies_allowed: NO
++          setting:
++            "Only enabled by AuraDE Advanced Plus AI with a local AI backend."
++        })");
++
++std::string GetEnvOrDefault(const char* name, const char* fallback) {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> value = env->GetVar(std::string(name));
++  if (value.has_value() && !value->empty()) {
++    return *value;
++  }
++  return fallback;
++}
++
++GURL GetOllamaGenerateUrl() {
++  std::string endpoint =
++      GetEnvOrDefault("AURADE_LOCAL_AI_ENDPOINT", kDefaultEndpoint);
++  base::TrimString(endpoint, "/", &endpoint);
++  return GURL(endpoint + "/api/generate");
++}
++
++std::string GetOllamaModel() {
++  return GetEnvOrDefault("AURADE_LOCAL_AI_MODEL", kDefaultModel);
++}
++
++std::string BuildHeader(const char* task,
++                        const std::string& title,
++                        const std::optional<std::string>& url) {
++  std::string prompt =
++      "You are AuraDE Local AI, running fully locally. " + std::string(task) +
++      "\nReturn only the useful answer. Do not mention policies, prompts, or "
++      "that you are a model.\n\n";
++  if (!title.empty()) {
++    prompt += "Title: " + title + "\n";
++  }
++  if (url.has_value() && !url->empty()) {
++    prompt += "URL: " + *url + "\n";
++  }
++  return prompt;
++}
++
++std::string BuildSummaryPrompt(const std::string& input,
++                               const std::string& title,
++                               const std::optional<std::string>& context,
++                               const std::optional<std::string>& url) {
++  std::string prompt =
++      BuildHeader("Summarize this content clearly and concisely.", title, url);
++  if (context.has_value() && !context->empty()) {
++    prompt += "Context:\n" + *context + "\n\n";
++  }
++  prompt += "Content:\n" + input;
++  return prompt;
++}
++
++std::string BuildElucidationPrompt(const std::string& input,
++                                   const std::string& context,
++                                   const std::string& title,
++                                   const std::optional<std::string>& url) {
++  std::string prompt =
++      BuildHeader("Explain the selected text in simpler language.", title, url);
++  prompt += "Full context:\n" + context + "\n\nSelected text:\n" + input;
++  return prompt;
++}
++
++std::string BuildQAPrompt(const std::string& content,
++                          const std::string& title,
++                          const std::optional<std::string>& url,
++                          const std::vector<MahiProvider::MahiQAPair>& history,
++                          const std::string& question) {
++  std::string prompt =
++      BuildHeader("Answer the user's question using the provided content.",
++                  title, url);
++  if (!history.empty()) {
++    prompt += "Previous Q&A:\n";
++    for (const auto& [previous_question, previous_answer] : history) {
++      prompt += "Q: " + previous_question + "\nA: " + previous_answer + "\n";
++    }
++    prompt += "\n";
++  }
++  prompt += "Content:\n" + content + "\n\nQuestion:\n" + question;
++  return prompt;
++}
++
++}  // namespace
++
++AuraDELocalMahiProvider::AuraDELocalMahiProvider(
++    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
++    : MahiProvider(url_loader_factory, /*identity_manager=*/nullptr),
++      url_loader_factory_(url_loader_factory) {}
++
++AuraDELocalMahiProvider::~AuraDELocalMahiProvider() = default;
++
++void AuraDELocalMahiProvider::Summarize(
++    const std::string& input,
++    const std::string& title,
++    const std::optional<std::string>& context,
++    const std::optional<std::string>& url,
++    MantaGenericCallback done_callback) {
++  CallOllama(BuildSummaryPrompt(input, title, context, url),
++             std::move(done_callback));
++}
++
++void AuraDELocalMahiProvider::Elucidate(
++    const std::string& input,
++    const std::string& context,
++    const std::string& title,
++    const std::optional<std::string>& url,
++    MantaGenericCallback done_callback) {
++  CallOllama(BuildElucidationPrompt(input, context, title, url),
++             std::move(done_callback));
++}
++
++void AuraDELocalMahiProvider::QuestionAndAnswer(
++    const std::string& content,
++    const std::string& title,
++    const std::optional<std::string>& url,
++    const std::vector<MahiQAPair> QAHistory,
++    const std::string& question,
++    MantaGenericCallback done_callback) {
++  CallOllama(BuildQAPrompt(content, title, url, QAHistory, question),
++             std::move(done_callback));
++}
++
++void AuraDELocalMahiProvider::CallOllama(const std::string& prompt,
++                                         MantaGenericCallback callback) {
++  if (!url_loader_factory_) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kBackendFailure, "AuraDE local AI has no loader"});
++    return;
++  }
++
++  base::DictValue request_body;
++  request_body.Set("model", GetOllamaModel());
++  request_body.Set("prompt", prompt);
++  request_body.Set("stream", false);
++
++  std::string post_body;
++  if (!base::JSONWriter::Write(request_body, &post_body)) {
++    std::move(callback).Run(base::DictValue(),
++                            {MantaStatusCode::kInvalidInput,
++                             "AuraDE local AI request serialization failed"});
++    return;
++  }
++
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GetOllamaGenerateUrl();
++  resource_request->method = "POST";
++  resource_request->load_flags =
++      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
++  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++
++  std::unique_ptr<network::SimpleURLLoader> loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kAuraDELocalMahiTrafficAnnotation);
++  loader->AttachStringForUpload(post_body, "application/json");
++  network::SimpleURLLoader* loader_ptr = loader.get();
++  pending_loaders_.push_back(std::move(loader));
++  loader_ptr->DownloadToString(
++      url_loader_factory_.get(),
++      base::BindOnce(&AuraDELocalMahiProvider::OnOllamaResponse,
++                     weak_ptr_factory_.GetWeakPtr(), loader_ptr,
++                     std::move(callback)),
++      kMaxOllamaResponseBytes);
++}
++
++void AuraDELocalMahiProvider::OnOllamaResponse(
++    network::SimpleURLLoader* loader,
++    MantaGenericCallback callback,
++    std::optional<std::string> response_body) {
++  int net_error = loader ? loader->NetError() : net::ERR_FAILED;
++  auto it = std::ranges::find_if(
++      pending_loaders_, [loader](const auto& pending_loader) {
++        return pending_loader.get() == loader;
++      });
++  if (it != pending_loaders_.end()) {
++    pending_loaders_.erase(it);
++  }
++
++  if (net_error != net::OK || !response_body) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kNoInternetConnection,
++         "AuraDE local AI backend is unavailable"});
++    return;
++  }
++
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(*response_body, /*options=*/0);
++  if (!parsed.has_value()) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kMalformedResponse,
++         "AuraDE local AI returned malformed JSON"});
++    return;
++  }
++
++  const std::string* output = parsed->FindString("response");
++  if (!output || output->empty()) {
++    const std::string* error = parsed->FindString("error");
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kBackendFailure,
++         error ? *error : "AuraDE local AI returned no output"});
++    return;
++  }
++
++  std::move(callback).Run(base::DictValue().Set("outputData", *output),
++                          {MantaStatusCode::kOk});
++}
++
++}  // namespace manta
+diff --git a/components/manta/aurade_local_mahi_provider.h b/components/manta/aurade_local_mahi_provider.h
+new file mode 100644
+index 0000000000..27c7d91f04
+--- /dev/null
++++ b/components/manta/aurade_local_mahi_provider.h
+@@ -0,0 +1,62 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_MANTA_AURADE_LOCAL_MAHI_PROVIDER_H_
++#define COMPONENTS_MANTA_AURADE_LOCAL_MAHI_PROVIDER_H_
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/memory/weak_ptr.h"
++#include "components/manta/mahi_provider.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++
++namespace manta {
++
++// AuraDE compatibility: local Mahi implementation backed by the AuraDE Local AI
++// endpoint instead of Google Manta/Gemini services.
++class COMPONENT_EXPORT(MANTA) AuraDELocalMahiProvider : public MahiProvider {
++ public:
++  explicit AuraDELocalMahiProvider(
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  AuraDELocalMahiProvider(const AuraDELocalMahiProvider&) = delete;
++  AuraDELocalMahiProvider& operator=(const AuraDELocalMahiProvider&) = delete;
++
++  ~AuraDELocalMahiProvider() override;
++
++  void Summarize(const std::string& input,
++                 const std::string& title,
++                 const std::optional<std::string>& context,
++                 const std::optional<std::string>& url,
++                 MantaGenericCallback done_callback) override;
++
++  void Elucidate(const std::string& input,
++                 const std::string& context,
++                 const std::string& title,
++                 const std::optional<std::string>& url,
++                 MantaGenericCallback done_callback) override;
++
++  void QuestionAndAnswer(const std::string& content,
++                         const std::string& title,
++                         const std::optional<std::string>& url,
++                         const std::vector<MahiQAPair> QAHistory,
++                         const std::string& question,
++                         MantaGenericCallback done_callback) override;
++
++ private:
++  void CallOllama(const std::string& prompt, MantaGenericCallback callback);
++  void OnOllamaResponse(network::SimpleURLLoader* loader,
++                        MantaGenericCallback callback,
++                        std::optional<std::string> response_body);
++
++  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
++  std::vector<std::unique_ptr<network::SimpleURLLoader>> pending_loaders_;
++  base::WeakPtrFactory<AuraDELocalMahiProvider> weak_ptr_factory_{this};
++};
++
++}  // namespace manta
++
++#endif  // COMPONENTS_MANTA_AURADE_LOCAL_MAHI_PROVIDER_H_
+diff --git a/components/manta/aurade_local_orca_provider.cc b/components/manta/aurade_local_orca_provider.cc
+new file mode 100644
+index 0000000000..77f7428bf3
+--- /dev/null
++++ b/components/manta/aurade_local_orca_provider.cc
+@@ -0,0 +1,263 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/manta/aurade_local_orca_provider.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "base/environment.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/strings/string_util.h"
++#include "base/values.h"
++#include "components/manta/manta_status.h"
++#include "components/manta/provider_params.h"
++#include "net/base/load_flags.h"
++#include "net/base/net_errors.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++
++namespace manta {
++
++namespace {
++
++constexpr char kDefaultEndpoint[] = "http://127.0.0.1:11434";
++constexpr char kDefaultModel[] = "gemma4:e2b-it-q4_K_M";
++constexpr size_t kMaxOllamaResponseBytes = 4 * 1024 * 1024;
++
++const net::NetworkTrafficAnnotationTag kAuraDELocalOrcaTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("aurade_local_orca_request",
++                                        R"(
++        semantics {
++          sender: "AuraDE Local AI"
++          description:
++            "AuraDE sends Help Me Write text to a local model runtime running "
++            "on the same machine. The default endpoint is Ollama on localhost."
++          trigger:
++            "The user asks AuraDE to write or rewrite text in an editable "
++            "field."
++          user_data {
++            type: USER_CONTENT
++          }
++          data:
++            "The selected text, prompt, tone, locale, and other writing "
++            "metadata supplied by the Help Me Write UI."
++          destination: LOCAL
++          last_reviewed: "2026-06-29"
++        }
++        policy {
++          cookies_allowed: NO
++          setting:
++            "Only enabled by AuraDE Advanced Plus AI with a local AI backend."
++        })");
++
++std::string GetEnvOrDefault(const char* name, const char* fallback) {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> value = env->GetVar(std::string(name));
++  if (value.has_value() && !value->empty()) {
++    return *value;
++  }
++  return fallback;
++}
++
++GURL GetOllamaGenerateUrl() {
++  std::string endpoint =
++      GetEnvOrDefault("AURADE_LOCAL_AI_ENDPOINT", kDefaultEndpoint);
++  base::TrimString(endpoint, "/", &endpoint);
++  return GURL(endpoint + "/api/generate");
++}
++
++std::string GetOllamaModel() {
++  return GetEnvOrDefault("AURADE_LOCAL_AI_MODEL", kDefaultModel);
++}
++
++std::string DescribeTone(const std::string& tone) {
++  if (tone == "SHORTEN") {
++    return "Shorten the selected text.";
++  }
++  if (tone == "ELABORATE") {
++    return "Elaborate on the selected text.";
++  }
++  if (tone == "REPHRASE") {
++    return "Rephrase the selected text.";
++  }
++  if (tone == "FORMALIZE") {
++    return "Make the selected text more formal.";
++  }
++  if (tone == "EMOJIFY") {
++    return "Rewrite the selected text with appropriate emoji.";
++  }
++  if (tone == "PROOFREAD") {
++    return "Proofread and correct the selected text.";
++  }
++  if (tone == "FREEFORM_WRITE") {
++    return "Write new text for the user request.";
++  }
++  if (tone == "FREEFORM_REWRITE") {
++    return "Rewrite the selected text according to the user request.";
++  }
++  return "Help write or rewrite the text.";
++}
++
++std::string FindInput(const std::map<std::string, std::string>& input,
++                      const char* key) {
++  auto it = input.find(key);
++  return it == input.end() ? std::string() : it->second;
++}
++
++std::string BuildPrompt(const std::map<std::string, std::string>& input) {
++  const std::string tone = FindInput(input, "tone");
++  std::string prompt =
++      "You are AuraDE Local AI, running fully locally. " +
++      DescribeTone(tone) +
++      "\nReturn exactly one useful text suggestion. Do not mention policies, "
++      "prompts, or that you are a model.\n\n";
++
++  const std::string freeform = FindInput(input, "freeform_text");
++  const std::string selected = FindInput(input, "selected_text");
++  const std::string context = FindInput(input, "surrounding_text");
++  const std::string locale = FindInput(input, "locale");
++
++  if (!locale.empty()) {
++    prompt += "Locale: " + locale + "\n";
++  }
++  if (!freeform.empty()) {
++    prompt += "User request:\n" + freeform + "\n\n";
++  }
++  if (!selected.empty()) {
++    prompt += "Selected text:\n" + selected + "\n\n";
++  }
++  if (!context.empty()) {
++    prompt += "Surrounding context:\n" + context + "\n\n";
++  }
++
++  if (freeform.empty() && selected.empty() && context.empty()) {
++    for (const auto& [key, value] : input) {
++      prompt += key + ": " + value + "\n";
++    }
++  }
++
++  return prompt;
++}
++
++}  // namespace
++
++AuraDELocalOrcaProvider::AuraDELocalOrcaProvider(
++    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
++    : OrcaProvider(url_loader_factory, /*identity_manager=*/nullptr,
++                   ProviderParams()),
++      url_loader_factory_(url_loader_factory) {}
++
++AuraDELocalOrcaProvider::~AuraDELocalOrcaProvider() = default;
++
++void AuraDELocalOrcaProvider::Call(
++    const std::map<std::string, std::string>& input,
++    MantaGenericCallback done_callback) {
++  if (!input.contains("tone")) {
++    std::move(done_callback)
++        .Run(base::DictValue(),
++             {MantaStatusCode::kInvalidInput, /*message=*/std::string()});
++    return;
++  }
++
++  CallOllama(BuildPrompt(input), std::move(done_callback));
++}
++
++void AuraDELocalOrcaProvider::CallOllama(const std::string& prompt,
++                                         MantaGenericCallback callback) {
++  if (!url_loader_factory_) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kBackendFailure, "AuraDE local AI has no loader"});
++    return;
++  }
++
++  base::DictValue request_body;
++  request_body.Set("model", GetOllamaModel());
++  request_body.Set("prompt", prompt);
++  request_body.Set("stream", false);
++
++  std::string post_body;
++  if (!base::JSONWriter::Write(request_body, &post_body)) {
++    std::move(callback).Run(base::DictValue(),
++                            {MantaStatusCode::kInvalidInput,
++                             "AuraDE local AI request serialization failed"});
++    return;
++  }
++
++  auto resource_request = std::make_unique<network::ResourceRequest>();
++  resource_request->url = GetOllamaGenerateUrl();
++  resource_request->method = "POST";
++  resource_request->load_flags =
++      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
++  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++
++  std::unique_ptr<network::SimpleURLLoader> loader =
++      network::SimpleURLLoader::Create(std::move(resource_request),
++                                       kAuraDELocalOrcaTrafficAnnotation);
++  loader->AttachStringForUpload(post_body, "application/json");
++  network::SimpleURLLoader* loader_ptr = loader.get();
++  pending_loaders_.push_back(std::move(loader));
++  loader_ptr->DownloadToString(
++      url_loader_factory_.get(),
++      base::BindOnce(&AuraDELocalOrcaProvider::OnOllamaResponse,
++                     weak_ptr_factory_.GetWeakPtr(), loader_ptr,
++                     std::move(callback)),
++      kMaxOllamaResponseBytes);
++}
++
++void AuraDELocalOrcaProvider::OnOllamaResponse(
++    network::SimpleURLLoader* loader,
++    MantaGenericCallback callback,
++    std::optional<std::string> response_body) {
++  int net_error = loader ? loader->NetError() : net::ERR_FAILED;
++  auto it = std::find_if(pending_loaders_.begin(), pending_loaders_.end(),
++                         [loader](const auto& pending_loader) {
++                           return pending_loader.get() == loader;
++                         });
++  if (it != pending_loaders_.end()) {
++    pending_loaders_.erase(it);
++  }
++
++  if (net_error != net::OK || !response_body) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kNoInternetConnection,
++         "AuraDE local AI backend is unavailable"});
++    return;
++  }
++
++  std::optional<base::DictValue> parsed =
++      base::JSONReader::ReadDict(*response_body, /*options=*/0);
++  if (!parsed.has_value()) {
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kMalformedResponse,
++         "AuraDE local AI returned malformed JSON"});
++    return;
++  }
++
++  const std::string* output = parsed->FindString("response");
++  if (!output || output->empty()) {
++    const std::string* error = parsed->FindString("error");
++    std::move(callback).Run(
++        base::DictValue(),
++        {MantaStatusCode::kBackendFailure,
++         error ? *error : "AuraDE local AI returned no output"});
++    return;
++  }
++
++  std::move(callback).Run(
++      base::DictValue().Set(
++          "outputData",
++          base::ListValue().Append(base::DictValue().Set("text", *output))),
++      {MantaStatusCode::kOk});
++}
++
++}  // namespace manta
+diff --git a/components/manta/aurade_local_orca_provider.h b/components/manta/aurade_local_orca_provider.h
+new file mode 100644
+index 0000000000..4f1cbfed32
+--- /dev/null
++++ b/components/manta/aurade_local_orca_provider.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_MANTA_AURADE_LOCAL_ORCA_PROVIDER_H_
++#define COMPONENTS_MANTA_AURADE_LOCAL_ORCA_PROVIDER_H_
++
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/memory/weak_ptr.h"
++#include "components/manta/orca_provider.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++
++namespace manta {
++
++// AuraDE compatibility: local Help Me Write implementation backed by the
++// AuraDE Local AI endpoint instead of Google Manta/Gemini services.
++class COMPONENT_EXPORT(MANTA) AuraDELocalOrcaProvider : public OrcaProvider {
++ public:
++  explicit AuraDELocalOrcaProvider(
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  AuraDELocalOrcaProvider(const AuraDELocalOrcaProvider&) = delete;
++  AuraDELocalOrcaProvider& operator=(const AuraDELocalOrcaProvider&) = delete;
++
++  ~AuraDELocalOrcaProvider() override;
++
++  void Call(const std::map<std::string, std::string>& input,
++            MantaGenericCallback done_callback) override;
++
++ private:
++  void CallOllama(const std::string& prompt, MantaGenericCallback callback);
++  void OnOllamaResponse(network::SimpleURLLoader* loader,
++                        MantaGenericCallback callback,
++                        std::optional<std::string> response_body);
++
++  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
++  std::vector<std::unique_ptr<network::SimpleURLLoader>> pending_loaders_;
++  base::WeakPtrFactory<AuraDELocalOrcaProvider> weak_ptr_factory_{this};
++};
++
++}  // namespace manta
++
++#endif  // COMPONENTS_MANTA_AURADE_LOCAL_ORCA_PROVIDER_H_
+diff --git a/components/manta/manta_service.cc b/components/manta/manta_service.cc
+index 1b84c89093..7708d842dc 100644
+--- a/components/manta/manta_service.cc
++++ b/components/manta/manta_service.cc
+@@ -7,7 +7,9 @@
+ #include <memory>
+ 
+ #include "base/containers/fixed_flat_set.h"
++#include "base/environment.h"
+ #include "base/memory/scoped_refptr.h"
++#include "base/system/sys_info.h"
+ #include "components/account_id/account_id.h"
+ #include "components/manta/anchovy/anchovy_provider.h"
+ #include "components/manta/provider_params.h"
+@@ -18,6 +20,8 @@
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "chromeos/constants/chromeos_features.h"  // nogncheck
++#include "components/manta/aurade_local_mahi_provider.h"
++#include "components/manta/aurade_local_orca_provider.h"
+ #include "components/manta/mahi_provider.h"
+ #include "components/manta/orca_provider.h"
+ #include "components/manta/scanner_provider.h"
+@@ -40,6 +44,21 @@ FeatureSupportStatus ConvertToMantaFeatureSupportStatus(signin::Tribool value) {
+   }
+ }
+ 
++bool ShouldUseAuraDELocalAI() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> profile = env->GetVar("AURADE_FEATURE_PROFILE");
++  if (!profile.has_value() || *profile != "advanced_plus_ai") {
++    return false;
++  }
++
++  std::optional<std::string> backend = env->GetVar("AURADE_LOCAL_AI_BACKEND");
++  return !backend.has_value() || backend->empty() || *backend == "ollama";
++}
++
+ }  // namespace
+ 
+ MantaService::MantaService(
+@@ -61,6 +80,12 @@ MantaService::MantaService(
+ MantaService::~MantaService() = default;
+ 
+ FeatureSupportStatus MantaService::SupportsOrca() {
++  // AuraDE compatibility: local AI profiles should be treated as provider
++  // capable even without Google account capability bits.
++  if (ShouldUseAuraDELocalAI()) {
++    return FeatureSupportStatus::kSupported;
++  }
++
+   if (is_demo_mode_) {
+     return FeatureSupportStatus::kSupported;
+   }
+@@ -69,6 +94,12 @@ FeatureSupportStatus MantaService::SupportsOrca() {
+ 
+ FeatureSupportStatus
+ MantaService::CanAccessMantaFeaturesWithoutMinorRestrictions() {
++  // AuraDE compatibility: local AI is gated by the AuraDE profile and package
++  // state, not by Google account capability bits.
++  if (ShouldUseAuraDELocalAI()) {
++    return FeatureSupportStatus::kSupported;
++  }
++
+   if (identity_manager_ == nullptr) {
+     return FeatureSupportStatus::kUnknown;
+   }
+@@ -102,6 +133,11 @@ std::unique_ptr<AnchovyProvider> MantaService::CreateAnchovyProvider() {
+ #if BUILDFLAG(IS_CHROMEOS)
+ 
+ std::unique_ptr<OrcaProvider> MantaService::CreateOrcaProvider() {
++  if (ShouldUseAuraDELocalAI()) {
++    return std::make_unique<AuraDELocalOrcaProvider>(
++        shared_url_loader_factory_);
++  }
++
+   if (!identity_manager_) {
+     return nullptr;
+   }
+@@ -132,6 +168,11 @@ std::unique_ptr<SnapperProvider> MantaService::CreateSnapperProvider() {
+ }
+ 
+ std::unique_ptr<MahiProvider> MantaService::CreateMahiProvider() {
++  if (ShouldUseAuraDELocalAI()) {
++    return std::make_unique<AuraDELocalMahiProvider>(
++        shared_url_loader_factory_);
++  }
++
+   if (!identity_manager_) {
+     return nullptr;
+   }
+diff --git a/components/manta/orca_provider.h b/components/manta/orca_provider.h
+index 26afb1ccc7..2e2b06e314 100644
+--- a/components/manta/orca_provider.h
++++ b/components/manta/orca_provider.h
+@@ -49,8 +49,8 @@ class COMPONENT_EXPORT(MANTA) OrcaProvider : virtual public BaseProvider {
+   // In demo mode, it uses the Google API key for authentication, otherwise uses
+   // `IdentityManager`, in this case it will give an empty response if
+   // `IdentityManager` is no longer valid.
+-  void Call(const std::map<std::string, std::string>& input,
+-            MantaGenericCallback done_callback);
++  virtual void Call(const std::map<std::string, std::string>& input,
++                    MantaGenericCallback done_callback);
+ 
+  private:
+   friend class FakeOrcaProvider;

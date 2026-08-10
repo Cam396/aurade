@@ -1,0 +1,43 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do bash -n "$file"; done < <(find . -type f -name '*.sh' -not -path './.git/*' -print)
+
+      - name: Check Python syntax without bytecode output
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do python3 -B -m py_compile "$file"; done < <(find . -type f -name '*.py' -not -path './.git/*' -print)
+
+      - name: Check patch series manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t patches < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' patches/SERIES)
+          test "${#patches[@]}" -eq 33
+          for patch in "${patches[@]}"; do test -f "patches/${patch}"; done
+          test "$(printf '%s\n' "${patches[@]}" | sort -u | wc -l)" -eq 33
+
+      - name: Check generated package metadata is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r package; do test -f "${package}/PKGBUILD"; test -f "${package}/.SRCINFO"; done < installer/expected-packages.txt
+
+      - name: Check whitespace
+        run: git diff --check
