@@ -57,6 +57,9 @@ The current source snapshot carries 33 ordered Chromium patches and an
 
 Use an Arch Linux host, container, or validation root with `base-devel`,
 `pacman`, `namcap`, `repo-add`, and the package dependencies installed.
+For the complete pinned build, release-repository, and ISO workflow, see
+[BUILDING.md](BUILDING.md). Maintainer-level CI details are in
+[`ci/README.md`](ci/README.md).
 
 ```bash
 git clone https://github.com/Cam396/aurade.git
@@ -66,12 +69,15 @@ cd aurade
 AURADE_VERIFY_CHROMIUMOS_ASH=0 ci/arch-package-smoke.sh
 ```
 
-For a complete private repository, use the documented root workflow after
-bootstrapping an Arch validation root:
+For a complete private repository, follow [BUILDING.md](BUILDING.md). After
+the validation root and pinned Chromium checkout are ready, the final
+orchestration command is:
 
 ```bash
-ci/bootstrap-arch-root.sh
-ci/build-release-candidate.sh --reuse-chromium
+sudo env \
+  CHROME_SRC=/mnt/build/aurade-work/chromium-bootstrap/src \
+  AURADE_WORKDIR=/mnt/build/aurade-work \
+  ./ci/build-release-candidate.sh
 ```
 
 The `--reuse-chromium` option is safe only when the exact current
@@ -86,19 +92,21 @@ downloads tens of gigabytes and can take hours:
 
 ```bash
 ci/bootstrap-chromium-src.sh \
-  --revision <chromium-src-commit> \
+  --revision "$(cat pins/chromium.sha)" \
   --target /mnt/build/aurade-work/chromium-bootstrap \
   --run --verify-series
-
-CHROME_SRC=/mnt/build/aurade-work/chromium-bootstrap/src \
-  ./build-chromeos-ash.sh build
 ```
+
+After the source gate passes, run the pinned release entry point described in
+[BUILDING.md](BUILDING.md). Do not use `build-chromeos-ash.sh` with a
+`CHROME_SRC` variable; that legacy helper reads `CHROMIUMOS_DIR` instead.
 
 The patch series is always applied in the order listed by `patches/SERIES`.
 Before spending build time, run the no-build integrity gate:
 
 ```bash
-ci/verify-patch-series.sh --expect-tree-match
+CHROME_SRC=/path/to/chromium-bootstrap/src \
+  ci/verify-patch-series.sh --expect-tree-match
 ```
 
 Do not put a Chromium checkout, `chroot/`, `out/`, package cache, VM image, or
@@ -134,6 +142,9 @@ target. Start the VM through the host's `vmrun` operations, then use
 `ci/vm-smoke.sh` for package/session/Files/audio/accessibility checks. Physical
 qualification procedures for the Dell Latitude 3180 and HP G3/G4 EE are in
 [AURADE_HARDWARE_TEST_PACKET.md](AURADE_HARDWARE_TEST_PACKET.md).
+The copy-paste VM test matrix and failure-report format are in
+[TESTING.md](TESTING.md). Common build and VM failures are collected in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 Please include the exact package versions, SHA-256 values, hardware model,
 and relevant `journalctl`/`coredumpctl` evidence in an issue. Never paste

@@ -1,5 +1,10 @@
 # AuraDE CI Notes
 
+Start with [BUILDING.md](../BUILDING.md) for the public copy-paste workflow,
+[TESTING.md](../TESTING.md) for the VM matrix, and
+[TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common failures. This file
+covers maintainer-level CI, candidate promotion, and optional scheduled gates.
+
 `build-private-repo.sh` builds the local Arch packages into `private-repo/` and
 creates a pacman database with `repo-add`.
 
