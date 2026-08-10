@@ -56,6 +56,7 @@ formal project organization and maintainer group exist.
 
 - `#staff-chat` — private maintainer coordination.
 - `#mod-log` — private moderation and audit notes.
+- `#staff-announcements` — private notices for moderators and staff.
 
 ## Roles
 
