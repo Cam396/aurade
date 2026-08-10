@@ -14,6 +14,8 @@ and systemd.
 > development artifacts, not a supported or stable release. Read
 > [RELEASE_STATUS.md](RELEASE_STATUS.md) before installing anything.
 
+Join the project Discord: <https://discord.gg/vkZ7CSMG5>
+
 ## What is here
 
 - Ash window management and ChromeOS system UI on generic Linux.

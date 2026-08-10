@@ -8,6 +8,8 @@ Recommended description:
 > Arch Linux. Builds, hardware testing, development, support, and release
 > updates.
 
+Current Discord invite: <https://discord.gg/vkZ7CSMG5>
+
 Keep the server community-focused rather than calling it “official” while the
 project is hosted under a personal GitHub account. Change the wording after a
 formal project organization and maintainer group exist.
