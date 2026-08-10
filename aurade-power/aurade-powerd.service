@@ -1,0 +1,22 @@
+[Unit]
+Description=AuraDE Linux power lifecycle bridge
+After=dbus.service systemd-tmpfiles-setup.service upower.service
+Wants=upower.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/aurade/aurade-powerd
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/aurade /var/lib/aurade
+
+[Install]
+WantedBy=multi-user.target

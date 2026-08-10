@@ -1,0 +1,41 @@
+# shellcheck shell=bash
+
+_aurade_migrate_legacy_config() {
+  local config="${1:-/etc/greetd/aurade.toml}"
+  local legacy replacement line tmp replaced=0
+  legacy='command = "tuigreet --time --remember --remember-user-session --asterisks --sessions /usr/share/wayland-sessions --cmd /usr/bin/aurade-session-supervisor"'
+  replacement='command = "tuigreet --time --remember --remember-user-session --asterisks --sessions /usr/share/wayland-sessions --session-wrapper /usr/bin/aurade-session-supervisor --cmd /usr/bin/chromiumos-ash-session"'
+
+  [[ -f "${config}" && ! -L "${config}" ]] || return 0
+  grep -Fqx -- "${legacy}" "${config}" || return 0
+
+  tmp="${config}.aurade-migrate.$$"
+  umask 077
+  : >"${tmp}" || return 1
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == "${legacy}" ]]; then
+      printf '%s\n' "${replacement}" >>"${tmp}" || return 1
+      replaced=1
+    else
+      printf '%s\n' "${line}" >>"${tmp}" || return 1
+    fi
+  done <"${config}"
+
+  if [[ "${replaced}" == 1 ]]; then
+    chown --reference="${config}" "${tmp}" || return 1
+    chmod --reference="${config}" "${tmp}" || return 1
+    mv -fT -- "${tmp}" "${config}" || return 1
+    printf '%s\n' \
+      'aurade-login: migrated the legacy nested-supervisor greetd command' >&2
+  else
+    rm -f -- "${tmp}"
+  fi
+}
+
+post_install() {
+  _aurade_migrate_legacy_config
+}
+
+post_upgrade() {
+  _aurade_migrate_legacy_config
+}

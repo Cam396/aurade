@@ -1,0 +1,23 @@
+pkgbase = shill-nm-adapter
+	pkgdesc = Shill-to-NetworkManager DBus bridge for ChromeOS Ash
+	pkgver = 0.1.0
+	pkgrel = 2
+	url = https://github.com/aurade/aurade
+	arch = any
+	license = BSD-3-Clause
+	depends = dbus
+	depends = python
+	depends = python-dbus
+	depends = python-gobject
+	depends = glib2
+	depends = networkmanager
+	source = shill_nm_adapter.py
+	source = shill-nm-adapter.service
+	source = org.chromium.flimflam.conf
+	source = LICENSE
+	sha256sums = e2eac683e5e8f6ec57f07851614b37901d32831f685fd2a8f69e94c085f71886
+	sha256sums = 7d4df043634a73de04e2b05264e5258d5a404eefb53dda8e2924320299c7558a
+	sha256sums = 102f2ceaa1ace82f86644e226937fdd072e330268de8d27220b9719f4dd181ca
+	sha256sums = 95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10
+
+pkgname = shill-nm-adapter

@@ -1,0 +1,46 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-power
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Linux laptop power lifecycle service for AuraDE"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=('python' 'python-gobject' 'systemd' 'upower' 'brightnessctl')
+backup=('etc/systemd/logind.conf.d/60-aurade-laptop.conf')
+source=(
+  'aurade-powerd'
+  'aurade-power-status'
+  'aurade-powerd.service'
+  'aurade-power-sleep'
+  '60-aurade-laptop.conf'
+  'org.aurade.Power.conf'
+  'aurade-power.tmpfiles'
+  'LICENSE'
+)
+sha256sums=('699720c5f7afd4c6587e21bdd79cc9764d2ee2e6ba0eb7c7267deec6c485b104'
+            '03934a0631c4d4ea05f7714999070b3f0f5c91df79f2040cb2d88b4476e23ef1'
+            '52cc1c7b7fe25858168de81e56d2379572b3d647ef75bc0da28c0df26b609c91'
+            'e9d3ff50d982979134c6a1b6b27c255edaf7562bdf0b7562a5078d57bfd871a2'
+            'edd89db5a3ec9a3165f6eaa227f944581e55bc6c27c2ec52dd2f4bca261feeb8'
+            'b6247dfb5822b2fe2b7329d8a92b4e36db63897215281320f39df4be6e74239e'
+            'd4e22f4c2aa8f1af92c017ac49013b62017756f07c7cf340e33f315e706644b0'
+            '64c4f7794ec1c87def4b345fc105a8940a4742f423eeb8d8b54e535db38903b5')
+
+package() {
+  install -Dm755 aurade-powerd "${pkgdir}/usr/lib/aurade/aurade-powerd"
+  install -Dm755 aurade-power-status "${pkgdir}/usr/bin/aurade-power-status"
+  install -Dm755 aurade-power-sleep \
+    "${pkgdir}/usr/lib/systemd/system-sleep/aurade-power"
+  install -Dm644 aurade-powerd.service \
+    "${pkgdir}/usr/lib/systemd/system/aurade-powerd.service"
+  install -Dm644 60-aurade-laptop.conf \
+    "${pkgdir}/etc/systemd/logind.conf.d/60-aurade-laptop.conf"
+  install -Dm644 org.aurade.Power.conf \
+    "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Power.conf"
+  install -Dm644 aurade-power.tmpfiles \
+    "${pkgdir}/usr/lib/tmpfiles.d/aurade-power.conf"
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

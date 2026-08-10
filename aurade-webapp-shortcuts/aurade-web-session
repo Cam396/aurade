@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Opens selected web apps in the user's persistent AuraDE Chromium profile.
+set -euo pipefail
+
+CHROME="${AURADE_CHROME:-/usr/lib/chromiumos-ash/chrome}"
+AURADE_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/aurade"
+USER_DATA_DIR="${AURADE_CHROME_USER_DATA_DIR:-${AURADE_DATA_HOME}/chromiumos-ash}"
+AURADE_OZONE_PLATFORM="${AURADE_OZONE_PLATFORM:-}"
+AURADE_WEB_SESSION_CDP_URL="${AURADE_WEB_SESSION_CDP_URL:-http://127.0.0.1:${AURADE_WEB_SESSION_REMOTE_DEBUGGING_PORT:-9222}}"
+AURADE_WEB_SESSION_ALLOW_CHROME="${AURADE_WEB_SESSION_ALLOW_CHROME:-0}"
+AURADE_WEB_SESSION_OPEN_TIMEOUT="${AURADE_WEB_SESSION_OPEN_TIMEOUT:-4}"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage:
+  aurade-web-session connect google
+  aurade-web-session disconnect google
+  aurade-web-session open <web-target-or-url>
+
+Known web targets:
+  gmail drive calendar docs sheets slides photos youtube gemini keep meet
+
+Installed Google PWAs should be launched from the AuraDE launcher. This helper
+only opens browser-session targets through the running AuraDE browser process.
+EOF
+}
+
+known_url() {
+    case "$1" in
+        google|account|accounts|connect)
+            printf '%s\n' 'https://accounts.google.com/'
+            ;;
+        logout|disconnect)
+            printf '%s\n' 'https://accounts.google.com/Logout?continue=https%3A%2F%2Faccounts.google.com%2F'
+            ;;
+        gmail)
+            printf '%s\n' 'https://mail.google.com/mail/u/0/'
+            ;;
+        drive)
+            printf '%s\n' 'https://drive.google.com/drive/u/0/my-drive'
+            ;;
+        calendar)
+            printf '%s\n' 'https://calendar.google.com/calendar/u/0/r'
+            ;;
+        docs)
+            printf '%s\n' 'https://docs.google.com/document/u/0/'
+            ;;
+        sheets)
+            printf '%s\n' 'https://docs.google.com/spreadsheets/u/0/'
+            ;;
+        slides)
+            printf '%s\n' 'https://docs.google.com/presentation/u/0/'
+            ;;
+        photos)
+            printf '%s\n' 'https://photos.google.com/u/0/'
+            ;;
+        youtube)
+            printf '%s\n' 'https://www.youtube.com/'
+            ;;
+        gemini)
+            printf '%s\n' 'https://gemini.google.com/'
+            ;;
+        keep)
+            printf '%s\n' 'https://keep.google.com/u/0/'
+            ;;
+        meet)
+            printf '%s\n' 'https://meet.google.com/'
+            ;;
+        http://*|https://*)
+            printf '%s\n' "$1"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+chrome_flags() {
+    printf '%s\0' "--user-data-dir=${USER_DATA_DIR}"
+    if [ -n "${AURADE_OZONE_PLATFORM}" ]; then
+        printf '%s\0' "--ozone-platform=${AURADE_OZONE_PLATFORM}"
+    elif [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        printf '%s\0' '--ozone-platform=wayland'
+    fi
+}
+
+cdp_open_url() {
+    local url="$1"
+    local endpoint="${AURADE_WEB_SESSION_CDP_URL%/}/json/new?${url}"
+
+    command -v curl >/dev/null 2>&1 || return 1
+    curl --fail --silent --show-error \
+        --connect-timeout "${AURADE_WEB_SESSION_OPEN_TIMEOUT}" \
+        --max-time "${AURADE_WEB_SESSION_OPEN_TIMEOUT}" \
+        --request PUT "${endpoint}" >/dev/null
+}
+
+chrome_open_url() {
+    local url="$1"
+    local mode="$2"
+    local flags=()
+
+    if [ "${AURADE_WEB_SESSION_ALLOW_CHROME}" != "1" ]; then
+        cat >&2 <<EOF
+aurade-web-session: AuraDE web session bridge is unavailable.
+Restart AuraDE with AURADE_ENABLE_WEB_SESSION_BRIDGE=1, or set
+AURADE_WEB_SESSION_ALLOW_CHROME=1 for unsafe direct Chrome launching.
+EOF
+        return 69
+    fi
+
+    mkdir -p "${USER_DATA_DIR}"
+    while IFS= read -r -d '' flag; do
+        flags+=("${flag}")
+    done < <(chrome_flags)
+
+    case "${mode}" in
+        browser)
+            exec "${CHROME}" "${flags[@]}" --new-window "${url}"
+            ;;
+        app)
+            exec "${CHROME}" "${flags[@]}" "--app=${url}"
+            ;;
+        *)
+            echo "aurade-web-session: invalid mode: ${mode}" >&2
+            return 2
+            ;;
+    esac
+}
+
+open_url() {
+    local target="$1"
+    local mode="${2:-app}"
+    local url
+
+    if ! url="$(known_url "${target}")"; then
+        echo "aurade-web-session: unknown web app: ${target}" >&2
+        return 2
+    fi
+
+    cdp_open_url "${url}" || chrome_open_url "${url}" "${mode}"
+}
+
+if [ "$#" -lt 2 ]; then
+    usage
+    exit 2
+fi
+
+case "$1" in
+    connect)
+        [ "$2" = "google" ] || { usage; exit 2; }
+        open_url accounts browser
+        ;;
+    disconnect)
+        [ "$2" = "google" ] || { usage; exit 2; }
+        open_url logout browser
+        ;;
+    open)
+        open_url "$2" app
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

@@ -1,0 +1,604 @@
+diff --git a/ash/login/ui/login_expanded_public_account_view.cc b/ash/login/ui/login_expanded_public_account_view.cc
+index 048498be212ea6d59670622ddd67c1a12a7eb1a2..7fe95dccceae37119019c59a1d77279a317583da 100644
+--- a/ash/login/ui/login_expanded_public_account_view.cc
++++ b/ash/login/ui/login_expanded_public_account_view.cc
+@@ -436,14 +436,19 @@ class RightPaneView : public NonAccessibleView {
+         0, gfx::Font::FontStyle::NORMAL, gfx::Font::Weight::NORMAL);
+     style.override_color_id =
+         static_cast<ui::ColorId>(cros_tokens::kCrosSysOnSurface);
+-    learn_more_label_->AddStyleRange(gfx::Range(0, offset), style);
++    if (offset > 0 && offset <= text.length()) {
++      learn_more_label_->AddStyleRange(gfx::Range(0, offset), style);
++    }
+ 
+     views::StyledLabel::RangeStyleInfo link_style =
+         views::StyledLabel::RangeStyleInfo::CreateForLink(on_learn_more_tapped);
+     link_style.override_color_id =
+         static_cast<ui::ColorId>(cros_tokens::kCrosSysPrimary);
+-    learn_more_label_->AddStyleRange(gfx::Range(offset, offset + link.length()),
+-                                     link_style);
++    if (!link.empty() && offset < text.length() &&
++        offset + link.length() <= text.length()) {
++      learn_more_label_->AddStyleRange(
++          gfx::Range(offset, offset + link.length()), link_style);
++    }
+     learn_more_label_->SetAutoColorReadabilityEnabled(false);
+ 
+     learn_more_label_->SetProperty(
+diff --git a/chrome/browser/ash/login/auth/chrome_login_performer.cc b/chrome/browser/ash/login/auth/chrome_login_performer.cc
+index 9ff57a12de7bc74e9d47e907334b7da26d948850..5bc62d509da9bd6d4417db3c3032cbda51000a39 100644
+--- a/chrome/browser/ash/login/auth/chrome_login_performer.cc
++++ b/chrome/browser/ash/login/auth/chrome_login_performer.cc
+@@ -7,8 +7,11 @@
+ #include <memory>
+ 
+ #include "ash/constants/ash_paths.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/path_service.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+ #include "chrome/browser/ash/login/helper.h"
+@@ -136,6 +139,11 @@ void ChromeLoginPerformer::LoadAndApplyEarlyPrefs(
+       base::PathService::Get(ash::DIR_HOMEDIR_MOUNT, &early_prefs_dir);
+   CHECK(success);
+   early_prefs_dir = early_prefs_dir.Append(context->GetUserIDHash());
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      base::StartsWith(context->GetUserIDHash(), "local-",
++                       base::CompareCase::SENSITIVE)) {
++    base::CreateDirectory(early_prefs_dir);
++  }
+ 
+   // Use TaskPriority::HIGHEST as this operation blocks
+   // user login flow.
+diff --git a/chrome/browser/ash/login/existing_user_controller.cc b/chrome/browser/ash/login/existing_user_controller.cc
+index b5285a37b1d5247ef8c450ae5048305baace1a80..5f5f135a5f62fd3f8ef0ba287d6ea11d9baba498 100644
+--- a/chrome/browser/ash/login/existing_user_controller.cc
++++ b/chrome/browser/ash/login/existing_user_controller.cc
+@@ -26,16 +26,19 @@
+ #include "base/check_is_test.h"
+ #include "base/command_line.h"
+ #include "base/compiler_specific.h"
++#include "base/environment.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/logging.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/scoped_observation.h"
++#include "base/strings/strcat.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/syslog_logging.h"
+ #include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
+ #include "base/timer/elapsed_timer.h"
+ #include "base/values.h"
+ #include "base/version.h"
+@@ -89,6 +92,7 @@
+ #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
+ #include "chromeos/ash/components/demo_mode/utils/demo_session_utils.h"
+ #include "chromeos/ash/components/install_attributes/install_attributes.h"
++#include "chromeos/ash/components/login/auth/public/auth_factors_configuration.h"
+ #include "chromeos/ash/components/login/auth/public/auth_failure.h"
+ #include "chromeos/ash/components/login/auth/public/key.h"
+ #include "chromeos/ash/components/login/session/session_termination_manager.h"
+@@ -122,6 +126,7 @@
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/storage_partition.h"
+ #include "google_apis/gaia/gaia_auth_util.h"
++#include "google_apis/gaia/gaia_id.h"
+ #include "google_apis/gaia/google_service_auth_error.h"
+ #include "services/network/public/mojom/network_context.mojom.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -150,6 +155,73 @@ const char kAutoLaunchNotifierId[] = "ash.managed_guest_session-auto_launch";
+ // Delay for restarting the ui if safe-mode login has failed.
+ const long int kSafeModeRestartUiDelayMs = 30000;
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++constexpr char kAuraTokenHandleStatusPref[] = "TokenHandleStatus";
++constexpr char kAuraTokenHandleStatusValid[] = "valid";
++constexpr base::TimeDelta kAuraLocalAuthSessionLifetime = base::Minutes(10);
++
++std::string GetAuraLocalLinuxUsername() {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> username = env->GetVar("USER");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  username = env->GetVar("LOGNAME");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  return "local";
++}
++
++AccountId GetAuraLocalAccountId() {
++  const std::string linux_username = GetAuraLocalLinuxUsername();
++  return AccountId::FromUserEmailGaiaId(
++      base::StrCat({linux_username, kAuraLocalAccountDomain}),
++      GaiaId(base::StrCat({kAuraLocalGaiaIdPrefix, linux_username})));
++}
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
++std::optional<AccountId> GetAuraLocalAccountForAutoStart(
++    const user_manager::UserList& users,
++    const PrefService& local_state) {
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    return std::nullopt;
++  }
++  if (!StartupUtils::IsOobeCompleted(local_state)) {
++    return std::nullopt;
++  }
++
++  const AccountId local_account_id = GetAuraLocalAccountId();
++  for (const user_manager::User* user : users) {
++    if (user && user->GetAccountId() == local_account_id &&
++        IsAuraLocalAccount(user->GetAccountId())) {
++      return local_account_id;
++    }
++  }
++  return std::nullopt;
++}
++
++void MarkAuraLocalAccountOfflineReady(const AccountId& account_id,
++                                      PrefService* local_state) {
++  user_manager::UserManager::Get()->SaveForceOnlineSignin(
++      account_id, /*force_online_signin=*/false);
++  user_manager::UserManager::Get()->SaveUserOAuthStatus(
++      account_id, user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
++
++  user_manager::KnownUser known_user(local_state);
++  known_user.SetStringPref(account_id, kAuraTokenHandleStatusPref,
++                           kAuraTokenHandleStatusValid);
++  known_user.UpdateReauthReason(account_id, 0);
++}
++
+ // Makes a call to the policy subsystem to reload the policy when we detect
+ // authentication change.
+ void RefreshPoliciesOnUIThread(policy::PolicyService& policy_service) {
+@@ -452,6 +524,33 @@ ExistingUserController::ExistingUserController(
+ void ExistingUserController::Init(const user_manager::UserList& users) {
+   timer_init_ = std::make_unique<base::ElapsedTimer>();
+   UpdateLoginDisplay(users);
++  std::optional<AccountId> aura_local_account =
++      GetAuraLocalAccountForAutoStart(users, local_state_.get());
++  if (aura_local_account.has_value()) {
++    VLOG(1) << "Auto-starting AuraDE local session for "
++            << aura_local_account->GetUserEmail();
++    MarkAuraLocalAccountOfflineReady(*aura_local_account, &local_state_.get());
++    UserContext user_context(user_manager::UserType::kRegular,
++                             *aura_local_account);
++    user_context.SetAuthFlow(UserContext::AUTH_FLOW_OFFLINE);
++    user_context.SetIsUsingOAuth(false);
++    user_context.SetSessionLifetime(base::Time::Now() +
++                                    kAuraLocalAuthSessionLifetime);
++    user_context.SetAuthSessionIds(
++        base::StrCat(
++            {kAuraLocalGaiaIdPrefix, GetAuraLocalLinuxUsername(), "-session"}),
++        base::StrCat({kAuraLocalGaiaIdPrefix, GetAuraLocalLinuxUsername(),
++                      "-broadcast"}));
++    user_context.SetUserIDHash(
++        base::StrCat({"local-", GetAuraLocalLinuxUsername()}));
++    user_context.SetAuthFactorsConfiguration(AuthFactorsConfiguration());
++    UserSessionManager::GetInstance()->StartSession(
++        user_context, UserSessionManager::StartSessionType::kPrimary,
++        false,  // has_auth_cookies
++        false,  // has_active_session
++        AsWeakPtr());
++    return;
++  }
+   ConfigureAutoLogin();
+ }
+ 
+diff --git a/chrome/browser/ash/login/reauth_stats.cc b/chrome/browser/ash/login/reauth_stats.cc
+index 3519a3c37d05564fff61eb6b807fae507dfcb8a8..ef765e1bc69d977357575a6976d822b8c713cea0 100644
+--- a/chrome/browser/ash/login/reauth_stats.cc
++++ b/chrome/browser/ash/login/reauth_stats.cc
+@@ -6,13 +6,25 @@
+ 
+ #include "base/logging.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/strings/string_util.h"
+ #include "base/syslog_logging.h"
++#include "components/account_id/account_id.h"
+ #include "components/user_manager/known_user.h"
+ 
+ namespace ash {
+ 
+ namespace {
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
+ ReauthReason GetReauthReason(const user_manager::KnownUser& known_user,
+                              const AccountId& account_id) {
+   return static_cast<ReauthReason>(
+@@ -25,11 +37,13 @@ ReauthReason GetReauthReason(const user_manager::KnownUser& known_user,
+ void RecordReauthReason(PrefService& local_state,
+                         const AccountId& account_id,
+                         ReauthReason reason) {
+-  if (reason == ReauthReason::kNone)
++  if (reason == ReauthReason::kNone || IsAuraLocalAccount(account_id)) {
+     return;
++  }
+   user_manager::KnownUser known_user(&local_state);
+-  if (GetReauthReason(known_user, account_id) == reason)
++  if (GetReauthReason(known_user, account_id) == reason) {
+     return;
++  }
+ 
+   SYSLOG(WARNING) << "Reauth reason updated: " << static_cast<int>(reason);
+   known_user.UpdateReauthReason(account_id, static_cast<int>(reason));
+@@ -40,8 +54,9 @@ void SendReauthReason(PrefService& local_state,
+                       bool password_changed) {
+   user_manager::KnownUser known_user(&local_state);
+   ReauthReason reauth_reason = GetReauthReason(known_user, account_id);
+-  if (reauth_reason == ReauthReason::kNone)
++  if (reauth_reason == ReauthReason::kNone) {
+     return;
++  }
+   if (password_changed) {
+     base::UmaHistogramEnumeration("Login.PasswordChanged.ReauthReason",
+                                   reauth_reason,
+diff --git a/chrome/browser/ash/login/screens/sync_consent_screen.cc b/chrome/browser/ash/login/screens/sync_consent_screen.cc
+index 0b432f298d20de0c989359dee422f474012995f8..54853345d8b3d826a0f4676fa046b488ecde6f24 100644
+--- a/chrome/browser/ash/login/screens/sync_consent_screen.cc
++++ b/chrome/browser/ash/login/screens/sync_consent_screen.cc
+@@ -426,6 +426,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
+ 
+ void SyncConsentScreen::SetSyncEverythingEnabled(bool enabled) {
+   syncer::SyncService* sync_service = GetSyncService(profile_);
++  if (!sync_service) {
++    return;
++  }
+   syncer::SyncUserSettings* sync_settings = sync_service->GetUserSettings();
+   if (enabled != sync_settings->IsSyncEverythingEnabled()) {
+     syncer::UserSelectableTypeSet empty_set;
+diff --git a/chrome/browser/ash/login/screens/user_selection_screen.cc b/chrome/browser/ash/login/screens/user_selection_screen.cc
+index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a2012198eca4 100644
+--- a/chrome/browser/ash/login/screens/user_selection_screen.cc
++++ b/chrome/browser/ash/login/screens/user_selection_screen.cc
+@@ -26,6 +26,7 @@
+ #include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/metrics/histogram_macros.h"
++#include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/time/time.h"
+ #include "base/trace_event/trace_event.h"
+@@ -87,6 +88,15 @@ namespace {
+ 
+ const char kWakeLockReason[] = "TPMLockedIssue";
+ const int kWaitingOvertimeInSeconds = 1;
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
+ 
+ // Max number of users to show.
+ // Please keep synced with one in signin_userlist_unittest.cc.
+@@ -224,6 +234,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+   const bool is_public_session =
+       user->GetType() == user_manager::UserType::kPublicAccount;
+   const bool has_gaia_account = user->HasGaiaAccount();
++  const bool is_aura_local_account = IsAuraLocalAccount(user->GetAccountId());
+ 
+   if (is_public_session) {
+     return proximity_auth::mojom::AuthType::OFFLINE_PASSWORD;
+@@ -231,7 +242,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+ 
+   // At this point the reason for invalid token should be already set. If not,
+   // this might be a leftover from an old version.
+-  if (has_gaia_account &&
++  if (!is_aura_local_account && has_gaia_account &&
+       token_status == user_manager::User::OAUTH2_TOKEN_STATUS_INVALID) {
+     RecordReauthReason(local_state, user->GetAccountId(), ReauthReason::kOther);
+   }
+@@ -239,16 +250,30 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+   // We need to force an online signin if the user is marked as requiring it or
+   // if there's an invalid OAUTH token that needs to be refreshed.
+   if (user->force_online_signin()) {
+-    VLOG(1) << "Online login forced by user flag";
+-    return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
++    if (is_aura_local_account) {
++      VLOG(1) << "Clearing online login requirement for AuraDE local user";
++      user_manager::UserManager::Get()->SaveForceOnlineSignin(
++          user->GetAccountId(), /*force_online_signin=*/false);
++    } else {
++      VLOG(1) << "Online login forced by user flag";
++      return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
++    }
+   }
+ 
+-  if (has_gaia_account &&
++  if (!is_aura_local_account && has_gaia_account &&
+       (token_status == user_manager::User::OAUTH2_TOKEN_STATUS_INVALID ||
+        token_status == user_manager::User::OAUTH_TOKEN_STATUS_UNKNOWN)) {
+     VLOG(1) << "Online login forced due to invalid OAuth2 token status: "
+             << token_status;
+-    return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
++
++    // HACK(AuraDE): Skip online sign-in validation when --stub-auth is
++    // active, since the stored OAuth2 token from a previous fake-token session
++    // will always appear invalid. Instead fall through to offline password.
++    if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {
++      VLOG(1) << "  --> overridden by --stub-auth, allowing offline password";
++    } else {
++      return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
++    }
+   }
+ 
+   user_manager::KnownUser known_user(&local_state);
+diff --git a/chrome/browser/ash/login/signin/auth_error_observer.cc b/chrome/browser/ash/login/signin/auth_error_observer.cc
+index 3df5f56d1696674f60819502d15f8fe386b9e743..453bfdfc1fb464b822f2037c9ae68ec21cf48e1d 100644
+--- a/chrome/browser/ash/login/signin/auth_error_observer.cc
++++ b/chrome/browser/ash/login/signin/auth_error_observer.cc
+@@ -8,6 +8,7 @@
+ #include "base/functional/bind.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/metrics/user_metrics_action.h"
++#include "base/strings/string_util.h"
+ #include "chrome/browser/ash/login/reauth_stats.h"
+ #include "chrome/browser/ash/login/signin/signin_error_notifier.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+@@ -20,12 +21,23 @@
+ #include "components/user_manager/user_manager.h"
+ 
+ namespace ash {
++namespace {
++
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++
++bool IsAuraLocalAccount(const user_manager::User* user) {
++  return user && base::EndsWith(user->GetAccountId().GetUserEmail(),
++                               kAuraLocalAccountDomain,
++                               base::CompareCase::SENSITIVE);
++}
++
++}  // namespace
+ 
+ // static
+ bool AuthErrorObserver::ShouldObserve(Profile* profile) {
+   const user_manager::User* const user =
+       ProfileHelper::Get()->GetUserByProfile(profile);
+-  return user && user->HasGaiaAccount();
++  return user && user->HasGaiaAccount() && !IsAuraLocalAccount(user);
+ }
+ 
+ AuthErrorObserver::AuthErrorObserver(PrefService* local_state, Profile* profile)
+@@ -83,6 +95,9 @@ void AuthErrorObserver::HandleAuthError(
+     const GoogleServiceAuthError& auth_error) {
+   const user_manager::User* const user =
+       ProfileHelper::Get()->GetUserByProfile(profile_);
++  if (IsAuraLocalAccount(user)) {
++    return;
++  }
+   DCHECK(user->HasGaiaAccount());
+ 
+   if (auth_error.IsPersistentError() && !auth_error.IsScopePersistentError()) {
+diff --git a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
+index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e21748556 100644
+--- a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
++++ b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/ash/login/signin/oauth2_token_fetcher.h"
+ 
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/strings/string_util.h"
+@@ -43,6 +44,24 @@ void OAuth2TokenFetcher::StartExchangeFromAuthCode(
+     const std::string& auth_code,
+     const std::string& signin_scoped_device_id) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
++
++  // HACK(AuraDE): --stub-auth bypass — return fake OAuth2 tokens so the login
++  // flow completes without contacting Google's servers. Needed because we
++  // distribute this build without Chrome API keys.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {
++    LOG(INFO) << "HACK(AuraDE): --stub-auth detected, returning fake OAuth2 tokens";
++    delegate_->OnOAuth2TokensAvailable(
++        GaiaAuthConsumer::ClientOAuthResult(
++            "fake_refresh_token",       // refresh_token
++            "fake_access_token",        // access_token
++            3600,                       // expires_in_secs
++            false,                      // is_under_advanced_protection
++            false                       // is_bound_to_key
++        ));
++    return;
++  }
++  // END HACK(AuraDE)
++
+   auth_code_ = auth_code;
+   signin_scoped_device_id_ = signin_scoped_device_id;
+   auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
+diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
+index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a4430e056 100644
+--- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
++++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
+@@ -14,8 +14,10 @@
+ #include "ash/public/cpp/notification_utils.h"
+ #include "ash/webui/settings/public/constants/routes.mojom.h"
+ #include "base/check_deref.h"
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
++#include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ash/account_manager/account_manager_util.h"
+@@ -63,6 +65,9 @@ namespace {
+ 
+ constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
+ constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
++// AuraDE compatibility: local Linux users are represented as synthetic
++// ChromeOS account ids so the shell can run without GAIA as the OS account.
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
+ 
+ bool g_ignore_sync_errors_for_test_ = false;
+ 
+@@ -83,6 +88,12 @@ bool AreAllAccountsMigrated(
+   return true;
+ }
+ 
++bool IsAuraLocalProfile(Profile* profile) {
++  return base::EndsWith(
++      multi_user_util::GetAccountIdFromProfile(profile).GetUserEmail(),
++      kAuraLocalAccountDomain, base::CompareCase::SENSITIVE);
++}
++
+ // Returns true if the child user has migrated at least one of their
+ // secondary edu accounts to ARC++.
+ bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
+@@ -214,7 +225,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+   error_controller_->AddObserver(this);
+   const AccountId account_id =
+       multi_user_util::GetAccountIdFromProfile(profile_);
+-  if (token_handle_store_->HasToken(account_id) &&
++  if (!IsAuraLocalProfile(profile_) &&
++      token_handle_store_->HasToken(account_id) &&
+       !token_handle_store_->IsRecentlyChecked(account_id)) {
+     token_handle_store_->IsReauthRequired(
+         account_id, profile->GetURLLoaderFactory(),
+@@ -227,6 +239,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+ void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
+                                              const std::string& token,
+                                              bool reauth_required) {
++  if (IsAuraLocalProfile(profile_)) {
++    return;
++  }
++
+   if (ash::features::IsUseTokenHandleStoreEnabled()) {
+     account_manager::AccountManager* account_manager =
+         AccountManagerFactory::Get()->GetAccountManager(
+@@ -281,8 +297,28 @@ void SigninErrorNotifier::Shutdown() {
+ }
+ 
+ void SigninErrorNotifier::OnErrorChanged() {
+-  if (g_ignore_sync_errors_for_test_)
++  if (g_ignore_sync_errors_for_test_) {
++    return;
++  }
++
++  // AuraDE compatibility: local Linux accounts intentionally do not have
++  // ChromeOS GAIA refresh tokens. Keep Google web sign-in separate from the OS
++  // account and do not show persistent ChromeOS account-manager warnings.
++  if (IsAuraLocalProfile(profile_)) {
++    NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
++        NotificationHandler::Type::TRANSIENT, device_account_notification_id_);
++    NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
++        NotificationHandler::Type::TRANSIENT,
++        secondary_account_notification_id_);
+     return;
++  }
++
++  // HACK(AuraDE): legacy developer stub sessions bypass ChromeOS login and
++  // therefore cannot satisfy GAIA reauth. Packaged local sessions should be
++  // handled by the local-account check above.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-config")) {
++    return;
++  }
+ 
+   if (!error_controller_->HasError()) {
+     NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
+@@ -328,8 +364,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
+   // to a Family Link Supervised account, then suppress the notification.
+   supervised_user::SupervisedUserService* service =
+       supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);
+-  if (service->signout_required_after_supervision_enabled())
++  if (service->signout_required_after_supervision_enabled()) {
+     return;
++  }
+ 
+   // We need to save the flag in the local state because
+   // TokenHandleUtil::IsReauthRequired might fail on the login screen due to
+diff --git a/chrome/browser/ash/login/signin/token_handle_service.cc b/chrome/browser/ash/login/signin/token_handle_service.cc
+index 4bd8e9d1e7986baf2903195d32c9ff4917dcc30f..3d8b893b3fe5ab9ce5b119d4f4027525c0e62e10 100644
+--- a/chrome/browser/ash/login/signin/token_handle_service.cc
++++ b/chrome/browser/ash/login/signin/token_handle_service.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <string>
+ 
++#include "base/strings/string_util.h"
+ #include "chrome/browser/ash/login/signin/token_handle_store_factory.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -28,6 +29,13 @@
+ namespace ash {
+ namespace {
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE);
++}
++
+ account_manager::AccountManager* GetAccountManager(Profile* profile) {
+   return AccountManagerFactory::Get()->GetAccountManager(
+       profile->GetPath().value());
+@@ -62,6 +70,9 @@ void TokenHandleService::StartObserving() {
+ void TokenHandleService::MaybeFetchForExistingUser(
+     const AccountId& account_id) {
+   VLOG(1) << "TokenHandleService::MaybeFetchForExistingUser";
++  if (IsAuraLocalAccount(account_id)) {
++    return;
++  }
+   if (account_id.GetAccountType() != AccountType::GOOGLE) {
+     return;
+   }
+@@ -73,6 +84,9 @@ void TokenHandleService::MaybeFetchForNewUser(
+     const std::string& access_token,
+     const std::string& refresh_token_hash) {
+   VLOG(1) << "TokenHandleService::MaybeFetchForNewUser";
++  if (IsAuraLocalAccount(account_id)) {
++    return;
++  }
+   MaybeFetchTokenHandle(account_id, access_token, refresh_token_hash);
+ }
+ 
+@@ -81,6 +95,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
+   const AccountId& account_id =
+       ProfileHelper::Get()->GetUserByProfile(profile_)->GetAccountId();
+ 
++  if (IsAuraLocalAccount(account_id)) {
++    return;
++  }
+   if (account_info.email == account_id.GetUserEmail()) {
+     token_handle_store_->SetTokenHandleStale(account_id);
+   }
+@@ -88,6 +105,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
+ 
+ void TokenHandleService::FetchAccessToken(const AccountId& account_id) {
+   VLOG(1) << "TokenHandleService::FetchAccessToken";
++  if (IsAuraLocalAccount(account_id)) {
++    return;
++  }
+   if (signin::IdentityManager* const identity_manager =
+           IdentityManagerFactory::GetForProfile(profile_);
+       identity_manager) {

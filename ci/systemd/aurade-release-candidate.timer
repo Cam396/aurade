@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly AuraDE release-candidate build
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=aurade-release-candidate.service
+
+[Install]
+WantedBy=timers.target

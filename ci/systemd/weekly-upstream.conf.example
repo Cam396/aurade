@@ -1,0 +1,20 @@
+# Copy to /etc/aurade/weekly-upstream.conf and adjust for the builder.
+AURADE_UPDATE_STATE_ROOT=/var/lib/aurade/chromium-update
+AURADE_CHROMIUM_REMOTE=https://chromium.googlesource.com/chromium/src.git
+AURADE_CHROMIUM_BRANCH=refs/heads/main
+AURADE_CHROMIUM_REFERENCE=/var/lib/aurade/chromium-reference/src
+AURADE_CANDIDATE_CHECKOUT_ROOT=/var/lib/aurade/chromium-candidate
+# AURADE_CANDIDATE_USER=aurabuild
+# AURADE_DEPOT_TOOLS=/var/lib/aurade/depot_tools
+AURADE_UPDATE_KEEP=8
+
+# The build commands use the one materialized warm checkout and re-exec as its
+# owner. The final VM command must deploy this candidate before running smoke.
+AURADE_UPDATE_GATES=replay,materialize,gn,targeted,full-build,package,repo,vm
+# AURADE_MATERIALIZE_COMMAND=/usr/local/src/aurade/ci/materialize-chromium-candidate.sh
+AURADE_GN_COMMAND=/usr/local/src/aurade/ci/chromium-candidate-gate.sh gn
+AURADE_TARGETED_COMMAND=/usr/local/src/aurade/ci/chromium-candidate-gate.sh targeted
+AURADE_FULL_BUILD_COMMAND=/usr/local/src/aurade/ci/chromium-candidate-gate.sh full-build
+# AURADE_PACKAGE_COMMAND=/usr/local/src/aurade/ci/build-release-candidate.sh
+# AURADE_REPO_COMMAND="REPO_DIR=/var/lib/aurade/private-repo /usr/local/src/aurade/ci/verify-release-repo.sh"
+# AURADE_VM_COMMAND=/usr/local/lib/aurade/gates/vm-release-smoke

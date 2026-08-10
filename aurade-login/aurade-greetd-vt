@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+vt="${1:-}"
+[[ "${vt}" =~ ^(8|9|10|11|12)$ ]] || {
+  echo "aurade-greetd-vt: only VTs 8 through 12 are supported" >&2
+  exit 2
+}
+
+runtime_dir=/run/aurade-login
+config="${runtime_dir}/greetd-vt${vt}.toml"
+install -d -m 0755 "${runtime_dir}"
+cat >"${config}.tmp" <<EOF
+[terminal]
+vt = ${vt}
+
+[default_session]
+command = "tuigreet --time --remember --remember-user-session --asterisks --sessions /usr/share/wayland-sessions --session-wrapper /usr/bin/aurade-session-supervisor --cmd /usr/bin/chromiumos-ash-session"
+user = "greeter"
+EOF
+chmod 0644 "${config}.tmp"
+mv -f "${config}.tmp" "${config}"
+exec /usr/bin/greetd --config "${config}"

@@ -1,0 +1,1188 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index fd30805309..962f3eee2a 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/apps/app_service/publishers/crostini_apps.h"
+ 
++#include <algorithm>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -18,12 +19,14 @@
+ #include "base/files/file_enumerator.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
++#include "base/json/json_reader.h"
+ #include "base/process/launch.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/thread_pool.h"
++#include "base/threading/platform_thread.h"
+ #include "base/time/time.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/menu_util.h"
+@@ -505,6 +508,67 @@ bool IsAuraDeHostRegistration(
+          registration.ContainerName() == kAuraDeHostContainerName;
+ }
+ 
++bool IsAuraDeProtectedPackage(std::string_view package_name) {
++  static constexpr std::string_view kProtectedPackages[] = {
++      "aurade", "aurade-full",    "aurade-host-bridge",
++      "base",   "bash",           "chromiumos-ash",
++      "dbus",   "filesystem",     "glibc",
++      "linux",  "networkmanager", "pacman",
++      "polkit", "systemd",        "weston",
++  };
++  return std::ranges::contains(kProtectedPackages, package_name);
++}
++
++bool RunAuraDePacmanUninstall(const std::string& package_name) {
++  base::CommandLine uninstall(base::FilePath("/usr/bin/aurade-hostctl"));
++  uninstall.AppendArg("pacman");
++  uninstall.AppendArg("uninstall");
++  uninstall.AppendArg(package_name);
++
++  std::string output;
++  int exit_code = 1;
++  if (!base::GetAppOutputWithExitCode(uninstall, &output, &exit_code) ||
++      exit_code != 0) {
++    return false;
++  }
++  std::optional<base::Value> response =
++      base::JSONReader::Read(output, base::JSON_PARSE_RFC);
++  const base::DictValue* data = response && response->is_dict()
++                                    ? response->GetDict().FindDict("data")
++                                    : nullptr;
++  const std::string* job_id = data ? data->FindString("job_id") : nullptr;
++  if (!job_id) {
++    return false;
++  }
++
++  // AuraDE compatibility: package jobs are asynchronous and serialized by the
++  // host bridge. Wait off the UI thread so the app registry is refreshed only
++  // after pacman has committed its transaction.
++  for (int attempt = 0; attempt < 900; ++attempt) {
++    base::PlatformThread::Sleep(base::Seconds(1));
++    base::CommandLine query(base::FilePath("/usr/bin/aurade-hostctl"));
++    query.AppendArg("pacman");
++    query.AppendArg("job");
++    query.AppendArg(*job_id);
++    output.clear();
++    exit_code = 1;
++    if (!base::GetAppOutputWithExitCode(query, &output, &exit_code) ||
++        exit_code != 0) {
++      continue;
++    }
++    response = base::JSONReader::Read(output, base::JSON_PARSE_RFC);
++    data = response && response->is_dict()
++               ? response->GetDict().FindDict("data")
++               : nullptr;
++    const std::string* state = data ? data->FindString("state") : nullptr;
++    if (!state || *state == "running") {
++      continue;
++    }
++    return *state == "succeeded";
++  }
++  return false;
++}
++
+ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
+   std::vector<base::FilePath> dirs;
+   auto environment = base::Environment::Create();
+@@ -704,6 +768,11 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+   }
+ 
+   if (is_aurade_host_app) {
++    const auto app = aurade_host_apps_.find(app_id);
++    if (app != aurade_host_apps_.end() && !app->second.package_name.empty() &&
++        !IsAuraDeProtectedPackage(app->second.package_name)) {
++      AddCommandItem(ash::UNINSTALL, IDS_APP_LIST_UNINSTALL_ITEM, menu_items);
++    }
+     AddCommandItem(ash::SHOW_APP_INFO, IDS_APP_CONTEXT_MENU_SHOW_INFO,
+                    menu_items);
+   }
+@@ -728,7 +797,10 @@ void CrostiniApps::CreateAppOverrides(
+   app->window_mode = WindowMode::kWindow;
+   app->allow_window_mode_selection = false;
+   app->resize_locked = false;
+-  app->allow_uninstall = false;
++  app->allow_uninstall =
++      host_app != aurade_host_apps_.end() &&
++      !host_app->second.package_name.empty() &&
++      !IsAuraDeProtectedPackage(host_app->second.package_name);
+   app->SetExtraField("aurade_host_app", true);
+ 
+   if (host_app == aurade_host_apps_.end()) {
+@@ -860,4 +932,31 @@ bool CrostiniApps::LaunchAuraDeHostApp(const std::string& app_id) {
+   return true;
+ }
+ 
++void CrostiniApps::Uninstall(const std::string& app_id,
++                             UninstallSource uninstall_source,
++                             bool clear_site_data,
++                             bool report_abuse) {
++  const auto app = aurade_host_apps_.find(app_id);
++  if (app == aurade_host_apps_.end() || app->second.package_name.empty() ||
++      IsAuraDeProtectedPackage(app->second.package_name)) {
++    AppPublisher::Uninstall(app_id, uninstall_source, clear_site_data,
++                            report_abuse);
++    return;
++  }
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&RunAuraDePacmanUninstall, app->second.package_name),
++      base::BindOnce(&CrostiniApps::OnAuraDePackageUninstalled,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void CrostiniApps::OnAuraDePackageUninstalled(bool success) {
++  if (!success) {
++    LOG(ERROR) << "AuraDE host package uninstall failed";
++    return;
++  }
++  RefreshAuraDeHostApps();
++}
++
+ }  // namespace apps
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+index 75182df1d2..a544a090f3 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+@@ -72,6 +72,10 @@ class CrostiniApps : public GuestOSApps {
+                     MenuType menu_type,
+                     int64_t display_id,
+                     base::OnceCallback<void(MenuItems)> callback) override;
++  void Uninstall(const std::string& app_id,
++                 UninstallSource uninstall_source,
++                 bool clear_site_data,
++                 bool report_abuse) override;
+ 
+   void CreateAppOverrides(
+       const guest_os::GuestOsRegistryService::Registration& registration,
+@@ -81,6 +85,7 @@ class CrostiniApps : public GuestOSApps {
+   void OnAuraDeHostAppsScanned(std::vector<AuraDeHostDesktopApp> apps);
+   void OnAuraDeHostIconInstalled(bool success);
+   bool LaunchAuraDeHostApp(const std::string& app_id);
++  void OnAuraDePackageUninstalled(bool success);
+ 
+   std::map<std::string, std::string> aurade_host_execs_;
+   std::map<std::string, AuraDeHostDesktopApp> aurade_host_apps_;
+diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+index e84b5741a0..a37bde4ecd 100644
+--- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
++++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+@@ -170,6 +170,10 @@ void ShutdownAuraDeBluezSystemBus() {
+ 
+ }  // namespace
+ 
++dbus::Bus* GetAuraDeSharedSystemBus() {
++  return GetAuraDeBluezSystemBus();
++}
++
+ DBusHelperObserverForTest::~DBusHelperObserverForTest() = default;  // IN-TEST
+ 
+ // static
+diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.h b/chrome/browser/ash/dbus/ash_dbus_helper.h
+index 1c328904f6..51e8e0ba57 100644
+--- a/chrome/browser/ash/dbus/ash_dbus_helper.h
++++ b/chrome/browser/ash/dbus/ash_dbus_helper.h
+@@ -5,6 +5,10 @@
+ #ifndef CHROME_BROWSER_ASH_DBUS_ASH_DBUS_HELPER_H_
+ #define CHROME_BROWSER_ASH_DBUS_ASH_DBUS_HELPER_H_
+ 
++namespace dbus {
++class Bus;
++}
++
+ namespace ash {
+ 
+ // An observer for DBus initialization and shutdown for test.
+@@ -32,6 +36,11 @@ void InitializeFeatureListDependentDBus();
+ // Shuts down the D-Bus thread manager and Chrome D-Bus services for Ash.
+ void ShutdownDBus();
+ 
++// AuraDE compatibility: the narrowly scoped real system bus shared by Linux
++// host adapters (BlueZ, update engine, udisks2 bridge) while the ChromeOS
++// daemon clients remain fake. Created on first use; only valid off ChromeOS.
++dbus::Bus* GetAuraDeSharedSystemBus();
++
+ }  // namespace ash
+ 
+ #endif  // CHROME_BROWSER_ASH_DBUS_ASH_DBUS_HELPER_H_
+diff --git a/chrome/browser/ash/extensions/file_manager/private_api_mount.cc b/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
+index 72bfd1b92f..5ff99577dc 100644
+--- a/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
++++ b/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
+@@ -224,6 +224,12 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
+ 
+   switch (volume->type()) {
+     case file_manager::VOLUME_TYPE_REMOVABLE_DISK_PARTITION:
++      DiskMountManager::GetInstance()->EjectDevice(
++          volume->mount_path().value(),
++          base::BindOnce(
++              &FileManagerPrivateRemoveMountFunction::OnDiskUnmounted, this));
++      return RespondLater();
++
+     case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
+       DiskMountManager::GetInstance()->UnmountPath(
+           volume->mount_path().value(),
+diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
+index 5a5bc28124..7723e422af 100644
+--- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
++++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
+@@ -14,6 +14,7 @@
+ #include "chrome/browser/ash/file_manager/virtual_tasks/install_isolated_web_app_virtual_task.h"
+ #include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
+ #include "chrome/browser/ash/file_manager/virtual_tasks/ms365_virtual_task.h"
++#include "chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h"
+ #include "chromeos/ash/components/file_manager/app_id.h"
+ #include "components/services/app_service/public/cpp/intent_util.h"
+ 
+@@ -28,6 +29,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
+       std::initializer_list<VirtualTask*>({
+           new InstallIsolatedWebAppVirtualTask(),
+           new InstallPackageVirtualTask(),
++          new OpenLinuxVirtualTask(),
+           new Ms365VirtualTask(),
+           new DocsUploadVirtualTask(),
+           new SheetsUploadVirtualTask(),
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
+index fd7bf21307..3e385fce06 100644
+--- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
++++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
+@@ -15,6 +15,8 @@ static_library("virtual_tasks") {
+     "install_package_virtual_task.h",
+     "ms365_virtual_task.cc",
+     "ms365_virtual_task.h",
++    "open_linux_virtual_task.cc",
++    "open_linux_virtual_task.h",
+   ]
+ 
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
+index e4020a50c6..c651152c60 100644
+--- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
++++ b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
+@@ -12,6 +12,8 @@ inline constexpr char kActionIdInstallIsolatedWebApp[] =
+ 
+ inline constexpr char kActionIdInstallPackage[] = "install-package";
+ 
++inline constexpr char kActionIdOpenWithLinux[] = "open-with-linux";
++
+ }  // namespace file_manager::file_tasks
+ 
+ #endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_ID_CONSTANTS_H_
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
+new file mode 100644
+index 0000000000..a6d6dfe2ec
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
+@@ -0,0 +1,97 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h"
++
++#include <string>
++#include <vector>
++
++#include "ash/webui/file_manager/url_constants.h"
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/process/launch.h"
++#include "base/strings/strcat.h"
++#include "base/system/sys_info.h"
++#include "base/task/thread_pool.h"
++#include "chrome/browser/ash/file_manager/virtual_tasks/id_constants.h"
++#include "storage/browser/file_system/file_system_url.h"
++
++namespace file_manager::file_tasks {
++namespace {
++
++constexpr char kAuraDeHostControlPath[] = "/usr/bin/aurade-hostctl";
++
++void OpenWithLinuxMimeHandler(base::FilePath path) {
++  base::CommandLine command(base::FilePath{kAuraDeHostControlPath});
++  command.AppendArg("mime");
++  command.AppendArg("open");
++  command.AppendArgPath(path);
++  base::LaunchProcess(command, base::LaunchOptions());
++}
++
++}  // namespace
++
++OpenLinuxVirtualTask::OpenLinuxVirtualTask() = default;
++OpenLinuxVirtualTask::~OpenLinuxVirtualTask() = default;
++
++bool OpenLinuxVirtualTask::IsEnabled(Profile* profile) const {
++  // AuraDE compatibility: use the freedesktop MIME database on generic Linux
++  // while retaining ChromeOS task behavior on ChromeOS images.
++  return !base::SysInfo::IsRunningOnChromeOS() &&
++         base::PathExists(base::FilePath(kAuraDeHostControlPath));
++}
++
++std::string OpenLinuxVirtualTask::id() const {
++  return base::StrCat({ash::file_manager::kChromeUIFileManagerURL, "?",
++                       kActionIdOpenWithLinux});
++}
++
++GURL OpenLinuxVirtualTask::icon_url() const {
++  return GURL();
++}
++
++std::string OpenLinuxVirtualTask::title() const {
++  return "Open with Linux application";
++}
++
++bool OpenLinuxVirtualTask::IsDlpBlocked(
++    const std::vector<std::string>& dlp_source_urls) const {
++  return false;
++}
++
++bool OpenLinuxVirtualTask::Matches(
++    const std::vector<extensions::EntryInfo>& entries,
++    const std::vector<GURL>& file_urls) const {
++  if (entries.empty() || entries.size() != file_urls.size()) {
++    return false;
++  }
++  for (const extensions::EntryInfo& entry : entries) {
++    if (entry.is_directory || !entry.path.IsAbsolute()) {
++      return false;
++    }
++  }
++  return true;
++}
++
++bool OpenLinuxVirtualTask::Execute(
++    Profile* profile,
++    const TaskDescriptor& task,
++    const std::vector<storage::FileSystemURL>& file_urls) const {
++  if (file_urls.empty()) {
++    return false;
++  }
++  for (const storage::FileSystemURL& file_url : file_urls) {
++    if (!file_url.path().IsAbsolute()) {
++      return false;
++    }
++    base::ThreadPool::PostTask(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&OpenWithLinuxMimeHandler, file_url.path()));
++  }
++  return true;
++}
++
++}  // namespace file_manager::file_tasks
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
+new file mode 100644
+index 0000000000..dab99b9f04
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
+@@ -0,0 +1,33 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
++#define CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
++
++#include "chrome/browser/ash/file_manager/virtual_file_tasks.h"
++
++namespace file_manager::file_tasks {
++
++// Opens local files through the user's freedesktop MIME association database.
++class OpenLinuxVirtualTask : public VirtualTask {
++ public:
++  OpenLinuxVirtualTask();
++  ~OpenLinuxVirtualTask() override;
++
++  bool Execute(Profile* profile,
++               const TaskDescriptor& task,
++               const std::vector<FileSystemURL>& file_urls) const override;
++  bool IsEnabled(Profile* profile) const override;
++  bool Matches(const std::vector<extensions::EntryInfo>& entries,
++               const std::vector<GURL>& file_urls) const override;
++  std::string id() const override;
++  GURL icon_url() const override;
++  std::string title() const override;
++  bool IsDlpBlocked(
++      const std::vector<std::string>& dlp_source_urls) const override;
++};
++
++}  // namespace file_manager::file_tasks
++
++#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 2a82e76753..b202576dea 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -561,7 +561,14 @@ class DBusServices {
+     TPMTokenLoader::Initialize();
+     NetworkCertLoader::Initialize();
+ 
+-    disks::DiskMountManager::Initialize();
++    if (base::SysInfo::IsRunningOnChromeOS()) {
++      disks::DiskMountManager::Initialize();
++    } else {
++      // AuraDE compatibility: source removable block devices from the udisks2
++      // host bridge over the shared AuraDE system bus; the fake
++      // DBusThreadManager has no system bus on a conventional Linux host.
++      disks::DiskMountManager::InitializeAura(GetAuraDeSharedSystemBus());
++    }
+ 
+     WifiP2PController::Initialize();
+     NetworkHandler::Initialize();
+diff --git a/chromeos/ash/components/disks/disk.cc b/chromeos/ash/components/disks/disk.cc
+index e00dc5d335..1d6c3efb14 100644
+--- a/chromeos/ash/components/disks/disk.cc
++++ b/chromeos/ash/components/disks/disk.cc
+@@ -56,8 +56,9 @@ Disk::~Disk() = default;
+ void Disk::SetMountPath(const std::string& mount_path) {
+   mount_path_ = mount_path;
+ 
+-  if (base_mount_path_.empty())
++  if (base_mount_path_.empty()) {
+     base_mount_path_ = mount_path;
++  }
+ }
+ 
+ bool Disk::IsStatefulPartition() const {
+@@ -178,6 +179,11 @@ Disk::Builder& Disk::Builder::SetIsHidden(bool is_hidden) {
+   return *this;
+ }
+ 
++Disk::Builder& Disk::Builder::SetIsAutoMountable(bool is_auto_mountable) {
++  disk_->is_auto_mountable_ = is_auto_mountable;
++  return *this;
++}
++
+ Disk::Builder& Disk::Builder::SetFileSystemType(
+     const std::string& file_system_type) {
+   disk_->file_system_type_ = file_system_type;
+diff --git a/chromeos/ash/components/disks/disk.h b/chromeos/ash/components/disks/disk.h
+index 0e3d710719..dce4f52e26 100644
+--- a/chromeos/ash/components/disks/disk.h
++++ b/chromeos/ash/components/disks/disk.h
+@@ -207,6 +207,7 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) Disk::Builder {
+   Builder& SetOnBootDevice(bool on_boot_device);
+   Builder& SetOnRemovableDevice(bool on_removable_device);
+   Builder& SetIsHidden(bool is_hidden);
++  Builder& SetIsAutoMountable(bool is_auto_mountable);
+   Builder& SetFileSystemType(const std::string& file_system_type);
+   Builder& SetBaseMountPath(const std::string& base_mount_path);
+   Builder& SetIsMounted(bool is_mounted);
+diff --git a/chromeos/ash/components/disks/disk_mount_manager.cc b/chromeos/ash/components/disks/disk_mount_manager.cc
+index 855a26fd00..a39c1d3717 100644
+--- a/chromeos/ash/components/disks/disk_mount_manager.cc
++++ b/chromeos/ash/components/disks/disk_mount_manager.cc
+@@ -9,8 +9,10 @@
+ #include <stdint.h>
+ #include <sys/stat.h>
+ 
++#include <algorithm>
+ #include <map>
+ #include <memory>
++#include <optional>
+ #include <set>
+ #include <string>
+ #include <string_view>
+@@ -23,6 +25,7 @@
+ #include "base/files/scoped_file.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/json/json_reader.h"
+ #include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -35,9 +38,16 @@
+ #include "base/system/sys_info.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/scoped_blocking_call.h"
++#include "base/timer/timer.h"
++#include "base/values.h"
+ #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
++#include "chromeos/ash/components/dbus/dbus_thread_manager.h"
+ #include "chromeos/ash/components/disks/disk.h"
++#include "dbus/bus.h"
+ #include "chromeos/ash/components/disks/suspend_unmount_manager.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "dbus/object_proxy.h"
+ 
+ namespace ash::disks {
+ namespace {
+@@ -50,6 +60,75 @@ std::string Redact(std::string_view s) {
+ 
+ DiskMountManager* g_disk_mount_manager = nullptr;
+ 
++constexpr char kAuraDeHostBridgeService[] = "org.aurade.HostBridge";
++constexpr char kAuraDeHostBridgePath[] = "/org/aurade/HostBridge";
++constexpr char kAuraDeHostBridgeInterface[] = "org.aurade.HostBridge1";
++
++bool IsAuraDeHostBridgeEnabled() {
++  return !base::SysInfo::IsRunningOnChromeOS();
++}
++
++const base::DictValue* ReadAuraDeHostBridgeResponse(
++    dbus::Response* response,
++    base::Value* parsed_response) {
++  if (!response) {
++    return nullptr;
++  }
++
++  std::string json;
++  dbus::MessageReader reader(response);
++  if (!reader.PopString(&json)) {
++    return nullptr;
++  }
++
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (!parsed || !parsed->is_dict() ||
++      parsed->GetDict().FindBool("ok") != true) {
++    return nullptr;
++  }
++
++  *parsed_response = std::move(*parsed);
++  return parsed_response->GetDict().FindDict("data");
++}
++
++uint64_t ReadAuraDeSize(const base::DictValue& value) {
++  if (std::optional<int> size = value.FindInt("size")) {
++    return *size < 0 ? 0 : static_cast<uint64_t>(*size);
++  }
++  if (std::optional<double> size = value.FindDouble("size")) {
++    return *size < 0 ? 0 : static_cast<uint64_t>(*size);
++  }
++  return 0;
++}
++
++std::string ReadAuraDeString(const base::DictValue& value,
++                             std::string_view key) {
++  const std::string* result = value.FindString(key);
++  return result ? *result : std::string();
++}
++
++bool AuraDeDiskStateChanged(const Disk& old_disk, const Disk& new_disk) {
++  return old_disk.mount_path() != new_disk.mount_path() ||
++         old_disk.file_path() != new_disk.file_path() ||
++         old_disk.device_label() != new_disk.device_label() ||
++         old_disk.drive_label() != new_disk.drive_label() ||
++         old_disk.vendor_name() != new_disk.vendor_name() ||
++         old_disk.product_name() != new_disk.product_name() ||
++         old_disk.fs_uuid() != new_disk.fs_uuid() ||
++         old_disk.storage_device_path() != new_disk.storage_device_path() ||
++         old_disk.device_type() != new_disk.device_type() ||
++         old_disk.total_size_in_bytes() != new_disk.total_size_in_bytes() ||
++         old_disk.is_read_only_hardware() != new_disk.is_read_only_hardware() ||
++         old_disk.has_media() != new_disk.has_media() ||
++         old_disk.on_boot_device() != new_disk.on_boot_device() ||
++         old_disk.on_removable_device() != new_disk.on_removable_device() ||
++         old_disk.is_hidden() != new_disk.is_hidden() ||
++         old_disk.is_auto_mountable() != new_disk.is_auto_mountable() ||
++         old_disk.is_mounted() != new_disk.is_mounted() ||
++         old_disk.file_system_type() != new_disk.file_system_type();
++}
++
+ struct UnmountDeviceRecursivelyCallbackData {
+   explicit UnmountDeviceRecursivelyCallbackData(
+       DiskMountManager::UnmountDeviceRecursivelyCallbackType in_callback)
+@@ -240,8 +319,29 @@ void FixPermissions(const std::string_view path) {
+ class DiskMountManagerImpl : public DiskMountManager,
+                              public CrosDisksClient::Observer {
+  public:
+-  DiskMountManagerImpl() {
++  explicit DiskMountManagerImpl(dbus::Bus* aurade_system_bus = nullptr) {
++    // cros-disks (the fake client on generic Linux) still serves archive
++    // mounts, so always observe it.
+     cros_disks_client_observation_.Observe(cros_disks_client_);
++    if (IsAuraDeHostBridgeEnabled()) {
++      // AuraDE compatibility: cros-disks is not available on a conventional
++      // Linux host. Keep it for archives, but source block devices from the
++      // polkit-protected udisks2 bridge over the injected real system bus;
++      // the fake DBusThreadManager has no system bus here.
++      if (!aurade_system_bus) {
++        LOG(ERROR) << "AuraDE host bridge requires a real system bus; "
++                      "removable device integration is disabled.";
++        return;
++      }
++      aurade_host_bridge_proxy_ = aurade_system_bus->GetObjectProxy(
++          kAuraDeHostBridgeService, dbus::ObjectPath(kAuraDeHostBridgePath));
++      aurade_host_bridge_proxy_->ConnectToSignal(
++          kAuraDeHostBridgeInterface, "Event",
++          base::BindRepeating(&DiskMountManagerImpl::OnAuraDeHostBridgeEvent,
++                              weak_ptr_factory_.GetWeakPtr()),
++          base::BindOnce(&DiskMountManagerImpl::OnAuraDeSignalConnected,
++                         weak_ptr_factory_.GetWeakPtr()));
++    }
+   }
+ 
+   DiskMountManagerImpl(const DiskMountManagerImpl&) = delete;
+@@ -313,6 +413,17 @@ class DiskMountManagerImpl : public DiskMountManager,
+       const MountType type,
+       const MountAccessMode access_mode) {
+     VLOG(1) << "Mounting '" << source_path << "'...";
++    if (aurade_host_bridge_proxy_ && type == MountType::kDevice) {
++      dbus::MethodCall method_call(kAuraDeHostBridgeInterface, "StorageMount");
++      dbus::MessageWriter writer(&method_call);
++      writer.AppendObjectPath(dbus::ObjectPath(source_path));
++      writer.AppendBool(access_mode == MountAccessMode::kReadOnly);
++      aurade_host_bridge_proxy_->CallMethod(
++          &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++          base::BindOnce(&DiskMountManagerImpl::OnAuraDeMount,
++                         weak_ptr_factory_.GetWeakPtr(), source_path, type));
++      return;
++    }
+     cros_disks_client_->Mount(
+         source_path, source_format, mount_label, mount_options, access_mode,
+         RemountOption::kMountNewDevice,
+@@ -341,12 +452,56 @@ class DiskMountManagerImpl : public DiskMountManager,
+     UnmountPathContinue(mount_path, std::move(callback), true /* success */);
+   }
+ 
++  void EjectDevice(const std::string& mount_path,
++                   UnmountPathCallback callback) override {
++    if (!IsAuraDeHostBridgeEnabled()) {
++      UnmountPath(mount_path, std::move(callback));
++      return;
++    }
++
++    const MountPoints::const_iterator mount_point =
++        mount_points_.find(mount_path);
++    const Disks::const_iterator disk =
++        mount_point == mount_points_.end()
++            ? disks_.end()
++            : disks_.find(mount_point->source_path);
++    if (disk == disks_.end() || (*disk)->storage_device_path().empty()) {
++      UnmountPath(mount_path, std::move(callback));
++      return;
++    }
++
++    const std::string drive_path = (*disk)->storage_device_path();
++    const bool ejectable = aurade_ejectable_drives_.contains(drive_path);
++    UnmountPath(mount_path,
++                base::BindOnce(&DiskMountManagerImpl::OnAuraDeUnmountForEject,
++                               weak_ptr_factory_.GetWeakPtr(), drive_path,
++                               ejectable, std::move(callback)));
++  }
++
+   void UnmountPathContinue(const std::string& mount_path,
+                            UnmountPathCallback callback,
+                            bool success) {
+     if (!success) {
+       LOG(ERROR) << "Cannot drop ARC caches for " << Redact(mount_path);
+     }
++    if (aurade_host_bridge_proxy_) {
++      const MountPoints::const_iterator mount_point =
++          mount_points_.find(mount_path);
++      if (mount_point != mount_points_.end() &&
++          mount_point->mount_type == MountType::kDevice) {
++        dbus::MethodCall method_call(kAuraDeHostBridgeInterface,
++                                     "StorageUnmount");
++        dbus::MessageWriter writer(&method_call);
++        writer.AppendObjectPath(dbus::ObjectPath(mount_point->source_path));
++        writer.AppendBool(false);
++        aurade_host_bridge_proxy_->CallMethod(
++            &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++            base::BindOnce(&DiskMountManagerImpl::OnAuraDeUnmount,
++                           weak_ptr_factory_.GetWeakPtr(), std::move(callback),
++                           mount_path));
++        return;
++      }
++    }
+     cros_disks_client_->Unmount(mount_path,
+                                 BindOnce(&DiskMountManagerImpl::OnUnmountPath,
+                                          weak_ptr_factory_.GetWeakPtr(),
+@@ -389,6 +544,11 @@ class DiskMountManagerImpl : public DiskMountManager,
+       return;
+     }
+ 
++    if (IsAuraDeHostBridgeEnabled() && !disk->get()->is_mounted()) {
++      FormatUnmountedDevice(device_path, filesystem, label);
++      return;
++    }
++
+     UnmountPath(disk->get()->mount_path(),
+                 BindOnce(&DiskMountManagerImpl::OnUnmountPathForFormat,
+                          weak_ptr_factory_.GetWeakPtr(), device_path,
+@@ -492,6 +652,20 @@ class DiskMountManagerImpl : public DiskMountManager,
+ 
+     for (const std::string& device : devices_to_unmount) {
+       VLOG(1) << "Unmounting '" << device << "'...";
++      if (IsAuraDeHostBridgeEnabled()) {
++        UnmountPath(
++            device,
++            base::BindOnce(
++                [](UnmountDeviceRecursivelyCallbackData* cb_data,
++                   base::RepeatingClosure done_callback, MountError error) {
++                  if (error != MountError::kSuccess) {
++                    cb_data->error_code = error;
++                  }
++                  done_callback.Run();
++                },
++                raw_cb_data, done_callback));
++        continue;
++      }
+       cros_disks_client_->Unmount(
+           device, BindOnce(&DiskMountManagerImpl::OnUnmountDeviceRecursively,
+                            weak_ptr_factory_.GetWeakPtr(), raw_cb_data, device,
+@@ -509,6 +683,10 @@ class DiskMountManagerImpl : public DiskMountManager,
+ 
+     refresh_callbacks_.push_back(std::move(callback));
+     if (refresh_callbacks_.size() == 1) {
++      if (IsAuraDeHostBridgeEnabled()) {
++        RefreshAuraDeStorage();
++        return;
++      }
+       // If there's no in-flight refreshing task, start it.
+       cros_disks_client_->EnumerateDevices(
+           BindOnce(&DiskMountManagerImpl::RefreshAfterEnumerateDevices,
+@@ -590,6 +768,307 @@ class DiskMountManagerImpl : public DiskMountManager,
+     OnMountCompleted({source_path, {}, type, MountError::kInternalError});
+   }
+ 
++  void OnAuraDeMount(const std::string& source_path,
++                     MountType type,
++                     dbus::Response* response) {
++    base::Value parsed;
++    const base::DictValue* data =
++        ReadAuraDeHostBridgeResponse(response, &parsed);
++    const std::string* mount_path =
++        data ? data->FindString("mount_point") : nullptr;
++    std::string resolved_mount_path = mount_path ? *mount_path : std::string();
++    const bool read_only = data && data->FindBool("read_only").value_or(false);
++    MountError error = MountError::kInternalError;
++    if (mount_path) {
++      error = MountError::kSuccess;
++    } else if (const Disks::const_iterator disk = disks_.find(source_path);
++               disk != disks_.end() && (*disk)->file_system_type().empty()) {
++      error = MountError::kUnknownFilesystem;
++      resolved_mount_path =
++          base::FilePath("/media/removable")
++              .Append(base::FilePath((*disk)->file_path()).BaseName())
++              .value();
++    }
++    OnMountCompleted(
++        {source_path, resolved_mount_path, type, error, 100, read_only});
++    RefreshAuraDeStorage();
++  }
++
++  void OnAuraDeUnmount(UnmountPathCallback callback,
++                       const std::string& mount_path,
++                       dbus::Response* response) {
++    base::Value parsed;
++    const bool success =
++        ReadAuraDeHostBridgeResponse(response, &parsed) != nullptr;
++    OnUnmountPath(std::move(callback), mount_path,
++                  success ? MountError::kSuccess : MountError::kInternalError);
++    RefreshAuraDeStorage();
++  }
++
++  void OnAuraDeUnmountForEject(const std::string& drive_path,
++                               bool ejectable,
++                               UnmountPathCallback callback,
++                               MountError error) {
++    if (error != MountError::kSuccess) {
++      if (callback) {
++        std::move(callback).Run(error);
++      }
++      return;
++    }
++    dbus::MethodCall method_call(
++        kAuraDeHostBridgeInterface,
++        ejectable ? "StorageEject" : "StoragePowerOff");
++    dbus::MessageWriter writer(&method_call);
++    writer.AppendObjectPath(dbus::ObjectPath(drive_path));
++    aurade_host_bridge_proxy_->CallMethod(
++        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(&DiskMountManagerImpl::OnAuraDeEject,
++                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
++  }
++
++  void OnAuraDeEject(UnmountPathCallback callback, dbus::Response* response) {
++    base::Value parsed;
++    const bool success =
++        ReadAuraDeHostBridgeResponse(response, &parsed) != nullptr;
++    if (callback) {
++      std::move(callback).Run(success ? MountError::kSuccess
++                                      : MountError::kInternalError);
++    }
++    RefreshAuraDeStorage();
++  }
++
++  void OnAuraDeFormat(const std::string& device_path,
++                      dbus::Response* response) {
++    base::Value parsed;
++    const bool success =
++        ReadAuraDeHostBridgeResponse(response, &parsed) != nullptr;
++    OnFormatCompleted(
++        success ? FormatError::kSuccess : FormatError::kUnknownError,
++        device_path);
++  }
++
++  void OnAuraDeSignalConnected(const std::string& interface_name,
++                               const std::string& signal_name,
++                               bool success) {
++    LOG_IF(ERROR, !success)
++        << "Failed to connect to AuraDE host storage events";
++    if (success) {
++      RefreshAuraDeStorage();
++    }
++  }
++
++  void OnAuraDeHostBridgeEvent(dbus::Signal* signal) {
++    std::string json;
++    dbus::MessageReader reader(signal);
++    if (!reader.PopString(&json)) {
++      return;
++    }
++    std::optional<base::Value> event =
++        base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++    if (!event || !event->is_dict() ||
++        ReadAuraDeString(event->GetDict(), "domain") != "storage") {
++      return;
++    }
++    aurade_refresh_timer_.Start(
++        FROM_HERE, base::Milliseconds(150),
++        base::BindOnce(&DiskMountManagerImpl::RefreshAuraDeStorage,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++
++  void RefreshAuraDeStorage() {
++    if (!aurade_host_bridge_proxy_ || aurade_refresh_in_flight_) {
++      aurade_refresh_pending_ = true;
++      return;
++    }
++    aurade_refresh_in_flight_ = true;
++    dbus::MethodCall method_call(kAuraDeHostBridgeInterface, "StorageList");
++    aurade_host_bridge_proxy_->CallMethod(
++        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(&DiskMountManagerImpl::OnAuraDeStorageRefreshed,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++
++  void OnAuraDeStorageRefreshed(dbus::Response* response) {
++    aurade_refresh_in_flight_ = false;
++    base::Value parsed;
++    const base::DictValue* data =
++        ReadAuraDeHostBridgeResponse(response, &parsed);
++    const bool success = data && ApplyAuraDeStorageState(*data);
++    RefreshCompleted(success);
++    if (std::exchange(aurade_refresh_pending_, false)) {
++      RefreshAuraDeStorage();
++    }
++  }
++
++  bool ApplyAuraDeStorageState(const base::DictValue& data) {
++    const base::ListValue* blocks = data.FindList("blocks");
++    const base::ListValue* drives = data.FindList("drives");
++    if (!blocks || !drives) {
++      return false;
++    }
++
++    struct DriveState {
++      std::string vendor;
++      std::string model;
++      std::string connection_bus;
++      bool removable = false;
++      bool ejectable = false;
++      bool media_available = false;
++    };
++    std::map<std::string, DriveState> drives_by_path;
++    std::set<std::string> ejectable_drives;
++    for (const base::Value& value : *drives) {
++      const base::DictValue* drive = value.GetIfDict();
++      if (!drive) {
++        continue;
++      }
++      const std::string* path = drive->FindString("path");
++      if (!path) {
++        continue;
++      }
++      DriveState state;
++      state.vendor = ReadAuraDeString(*drive, "vendor");
++      state.model = ReadAuraDeString(*drive, "model");
++      state.connection_bus = ReadAuraDeString(*drive, "connection_bus");
++      state.removable = drive->FindBool("removable").value_or(false);
++      state.ejectable = drive->FindBool("ejectable").value_or(false);
++      state.media_available =
++          drive->FindBool("media_available").value_or(false);
++      if (state.ejectable) {
++        ejectable_drives.insert(*path);
++      }
++      drives_by_path.emplace(*path, std::move(state));
++    }
++
++    std::map<std::string, const Disk*> previous_disks;
++    for (const auto& disk : disks_) {
++      previous_disks.emplace(disk->device_path(), disk.get());
++    }
++
++    Disks updated_disks;
++    MountPoints updated_mount_points;
++    std::set<std::string> updated_paths;
++    std::set<std::string> changed_paths;
++    for (const base::Value& value : *blocks) {
++      const base::DictValue* block = value.GetIfDict();
++      if (!block || block->FindBool("hint_ignore").value_or(false)) {
++        continue;
++      }
++
++      const std::string* path = block->FindString("path");
++      const std::string* device = block->FindString("device");
++      if (!path || !device || !dbus::ObjectPath(*path).IsValid()) {
++        continue;
++      }
++      updated_paths.insert(*path);
++
++      const std::string drive_path = ReadAuraDeString(*block, "drive");
++      const auto drive_it = drives_by_path.find(drive_path);
++      const DriveState* drive =
++          drive_it == drives_by_path.end() ? nullptr : &drive_it->second;
++      const bool external = drive && (drive->removable || drive->ejectable ||
++                                      drive->connection_bus == "usb" ||
++                                      drive->connection_bus == "sdio" ||
++                                      drive->connection_bus == "firewire" ||
++                                      drive->connection_bus == "thunderbolt");
++      const bool system = block->FindBool("hint_system").value_or(false);
++      const bool read_only = block->FindBool("read_only").value_or(false);
++      const base::ListValue* mount_paths = block->FindList("mount_points");
++      const std::string mount_path =
++          mount_paths && !mount_paths->empty() && (*mount_paths)[0].is_string()
++              ? (*mount_paths)[0].GetString()
++              : std::string();
++      const std::string label = ReadAuraDeString(*block, "id_label");
++      const std::string filesystem = ReadAuraDeString(*block, "id_type");
++      const std::string uuid = ReadAuraDeString(*block, "id_uuid");
++
++      Disk::Builder builder;
++      builder.SetDevicePath(*path)
++          .SetFilePath(*device)
++          .SetMountPath(mount_path)
++          .SetBaseMountPath(mount_path)
++          .SetStorageDevicePath(drive_path)
++          .SetDeviceLabel(label)
++          .SetDriveLabel(drive ? drive->model : std::string())
++          .SetVendorName(drive ? drive->vendor : std::string())
++          .SetProductName(drive ? drive->model : std::string())
++          .SetFileSystemUUID(uuid)
++          .SetFileSystemType(filesystem)
++          .SetSizeInBytes(ReadAuraDeSize(*block))
++          .SetDeviceType(external ? DeviceType::kUSB : DeviceType::kUnknown)
++          .SetIsReadOnlyHardware(read_only)
++          .SetHasMedia(!drive || drive->media_available)
++          .SetOnBootDevice(system)
++          .SetOnRemovableDevice(external)
++          .SetIsHidden(system)
++          .SetIsAutoMountable(external && !system)
++          .SetIsMounted(!mount_path.empty());
++      std::unique_ptr<Disk> disk = builder.Build();
++      if (const auto previous = previous_disks.find(*path);
++          previous != previous_disks.end()) {
++        disk->set_is_first_mount(previous->second->is_first_mount());
++        if (AuraDeDiskStateChanged(*previous->second, *disk)) {
++          changed_paths.insert(*path);
++        }
++      }
++      updated_disks.insert(std::move(disk));
++      if (!mount_path.empty()) {
++        updated_mount_points.insert({*path, mount_path, MountType::kDevice,
++                                     MountError::kSuccess, 100, read_only});
++      }
++    }
++
++    for (const auto& disk : disks_) {
++      if (!updated_paths.contains(disk->device_path())) {
++        NotifyDiskStatusUpdate(DISK_REMOVED, *disk);
++        NotifyDeviceStatusUpdate(DEVICE_REMOVED, disk->device_path());
++      }
++    }
++
++    std::map<std::string, std::string> previous_mounts;
++    for (const MountPoint& mount : mount_points_) {
++      if (mount.mount_type == MountType::kDevice) {
++        previous_mounts.emplace(mount.source_path, mount.mount_path);
++      }
++    }
++    std::erase_if(mount_points_, [](const MountPoint& mount) {
++      return mount.mount_type == MountType::kDevice;
++    });
++    mount_points_.insert(updated_mount_points.begin(),
++                         updated_mount_points.end());
++    disks_ = std::move(updated_disks);
++    aurade_ejectable_drives_ = std::move(ejectable_drives);
++
++    for (const auto& disk : disks_) {
++      const auto previous = previous_disks.find(disk->device_path());
++      if (previous == previous_disks.end()) {
++        NotifyDeviceStatusUpdate(DEVICE_ADDED, disk->device_path());
++        NotifyDiskStatusUpdate(DISK_ADDED, *disk);
++      } else if (changed_paths.contains(disk->device_path())) {
++        NotifyDiskStatusUpdate(DISK_CHANGED, *disk);
++      }
++
++      const std::string old_mount =
++          previous_mounts.contains(disk->device_path())
++              ? previous_mounts[disk->device_path()]
++              : std::string();
++      if (old_mount == disk->mount_path()) {
++        continue;
++      }
++      if (!old_mount.empty()) {
++        NotifyMountStatusUpdate(
++            UNMOUNTING, MountError::kSuccess,
++            {disk->device_path(), old_mount, MountType::kDevice});
++      }
++      if (!disk->mount_path().empty()) {
++        NotifyMountStatusUpdate(
++            MOUNTING, MountError::kSuccess,
++            {disk->device_path(), disk->mount_path(), MountType::kDevice});
++      }
++    }
++    return true;
++  }
++
+   void RemountRemovableDrive(const Disk& disk,
+                              MountAccessMode access_mode) override {
+     // TODO(yamaguchi): Retry for tentative remount failures. crbug.com/661455
+@@ -612,6 +1091,28 @@ class DiskMountManagerImpl : public DiskMountManager,
+       return;
+     }
+ 
++    if (IsAuraDeHostBridgeEnabled()) {
++      const std::string source_path = mount_point->source_path;
++      const std::string source_format = disk.file_system_type();
++      const std::string mount_label = disk.device_label();
++      UnmountPath(mount_path,
++                  base::BindOnce(
++                      [](base::WeakPtr<DiskMountManagerImpl> manager,
++                         std::string source_path, std::string source_format,
++                         std::string mount_label, MountAccessMode access_mode,
++                         MountError error) {
++                        if (!manager || error != MountError::kSuccess) {
++                          return;
++                        }
++                        manager->MountPath(source_path, source_format,
++                                           mount_label, {}, MountType::kDevice,
++                                           access_mode, base::DoNothing());
++                      },
++                      weak_ptr_factory_.GetWeakPtr(), source_path,
++                      source_format, mount_label, access_mode));
++      return;
++    }
++
+     cros_disks_client_->Mount(
+         mount_point->source_path, std::string(), std::string(), {}, access_mode,
+         RemountOption::kRemountExistingDevice,
+@@ -869,6 +1370,22 @@ class DiskMountManagerImpl : public DiskMountManager,
+     base::UmaHistogramEnumeration("FileBrowser.FormatFileSystemType",
+                                   filesystem);
+ 
++    if (IsAuraDeHostBridgeEnabled()) {
++      dbus::MethodCall method_call(kAuraDeHostBridgeInterface, "StorageFormat");
++      dbus::MessageWriter writer(&method_call);
++      writer.AppendObjectPath(dbus::ObjectPath(device_path));
++      writer.AppendString(FormatFileSystemTypeToString(filesystem));
++      writer.AppendString(label);
++      writer.AppendString("FORMAT " + (*disk)->file_path());
++      NotifyFormatStatusUpdate(FORMAT_STARTED, FormatError::kSuccess,
++                               device_path, label);
++      aurade_host_bridge_proxy_->CallMethod(
++          &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++          base::BindOnce(&DiskMountManagerImpl::OnAuraDeFormat,
++                         weak_ptr_factory_.GetWeakPtr(), device_path));
++      return;
++    }
++
+     cros_disks_client_->Format(
+         device_path, FormatFileSystemTypeToString(filesystem), label,
+         BindOnce(&DiskMountManagerImpl::OnFormatStarted,
+@@ -1348,6 +1865,12 @@ class DiskMountManagerImpl : public DiskMountManager,
+   base::ScopedObservation<CrosDisksClient, CrosDisksClient::Observer>
+       cros_disks_client_observation_{this};
+ 
++  raw_ptr<dbus::ObjectProxy> aurade_host_bridge_proxy_ = nullptr;
++  bool aurade_refresh_in_flight_ = false;
++  bool aurade_refresh_pending_ = false;
++  std::set<std::string> aurade_ejectable_drives_;
++  base::OneShotTimer aurade_refresh_timer_;
++
+   base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_{this};
+ };
+ 
+@@ -1364,6 +1887,12 @@ bool DiskMountManager::AddDiskForTest(std::unique_ptr<Disk> disk) {
+ bool DiskMountManager::AddMountPointForTest(const MountPoint& mount_point) {
+   return false;
+ }
++
++void DiskMountManager::EjectDevice(const std::string& mount_path,
++                                   UnmountPathCallback callback) {
++  UnmountPath(mount_path, std::move(callback));
++}
++
+ // static
+ void DiskMountManager::Initialize() {
+   if (g_disk_mount_manager) {
+@@ -1374,6 +1903,16 @@ void DiskMountManager::Initialize() {
+   VLOG(1) << "DiskMountManager initialized";
+ }
+ 
++// static
++void DiskMountManager::InitializeAura(dbus::Bus* system_bus) {
++  if (g_disk_mount_manager) {
++    LOG(WARNING) << "DiskMountManager was already initialized";
++    return;
++  }
++  g_disk_mount_manager = new DiskMountManagerImpl(system_bus);
++  VLOG(1) << "DiskMountManager initialized with the AuraDE host bridge";
++}
++
+ // static
+ void DiskMountManager::InitializeForTesting(
+     DiskMountManager* disk_mount_manager) {
+diff --git a/chromeos/ash/components/disks/disk_mount_manager.h b/chromeos/ash/components/disks/disk_mount_manager.h
+index e939b0e8a9..02b3313d5c 100644
+--- a/chromeos/ash/components/disks/disk_mount_manager.h
++++ b/chromeos/ash/components/disks/disk_mount_manager.h
+@@ -18,6 +18,10 @@
+ #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
+ #include "chromeos/ash/components/disks/disk.h"
+ 
++namespace dbus {
++class Bus;
++}
++
+ namespace ash::disks {
+ 
+ // Possible filesystem types that can be passed to FormatMountedDevice.
+@@ -212,6 +216,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
+   virtual void UnmountPath(const std::string& mount_path,
+                            UnmountPathCallback callback) = 0;
+ 
++  // Unmounts and, when supported, ejects or powers off the backing device.
++  // The default implementation is equivalent to UnmountPath().
++  virtual void EjectDevice(const std::string& mount_path,
++                           UnmountPathCallback callback);
++
+   // Remounts mounted removable device to change the read-only mount option.
+   // Device that can be mounted only in its read-only mode will be ignored.
+   virtual void RemountRemovableDrive(const Disk& disk,
+@@ -260,6 +269,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
+   // Creates the global DiskMountManager instance.
+   static void Initialize();
+ 
++  // AuraDE compatibility: like Initialize(), but sources removable block
++  // devices from the udisks2 host bridge over the injected real system bus.
++  // The bus must outlive the manager (it is owned by the DBus helper layer).
++  static void InitializeAura(dbus::Bus* system_bus);
++
+   // Similar to Initialize(), but can inject an alternative
+   // DiskMountManager such as MockDiskMountManager for testing.
+   // The injected object will be owned by the internal pointer and deleted

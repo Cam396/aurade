@@ -1,0 +1,963 @@
+diff --git a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
+index e2fb247193..fd55ce0d80 100644
+--- a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
++++ b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
+@@ -13,7 +13,9 @@
+ #include "ash/public/mojom/input_device_settings.mojom.h"
+ #include "ash/system/input_device_settings/input_device_settings_notification_controller.h"
+ #include "base/containers/fixed_flat_map.h"
++#include "base/environment.h"
+ #include "base/notreached.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/ash/notifications/deprecation_notification_controller.h"
+ #include "chrome/browser/extensions/extension_commands_global_registry.h"
+ #include "chrome/browser/ui/ash/login/login_display_host.h"
+@@ -30,6 +32,22 @@
+ 
+ namespace ash {
+ 
++namespace {
++
++constexpr char kAuraTopRowLayoutEnv[] = "AURADE_CHROMEOS_TOP_ROW_LAYOUT";
++
++bool HasAuraTopRowLayoutOverride() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++  auto env = base::Environment::Create();
++  const std::optional<std::string> layout = env->GetVar(kAuraTopRowLayoutEnv);
++  return layout &&
++         (*layout == "1" || *layout == "2" || *layout == "3" || *layout == "4");
++}
++
++}  // namespace
++
+ EventRewriterDelegateImpl::EventRewriterDelegateImpl(
+     wm::ActivationClient* activation_client)
+     : EventRewriterDelegateImpl(
+@@ -65,8 +83,9 @@ bool EventRewriterDelegateImpl::RewriteModifierKeys() {
+   // when user logs in as guest.
+   // TODO(kpschoedel): check whether this is still necessary.
+   if (user_manager::UserManager::Get()->IsLoggedInAsGuest() &&
+-      LoginDisplayHost::default_host())
++      LoginDisplayHost::default_host()) {
+     return false;
++  }
+   return !suppress_modifier_key_rewrites_;
+ }
+ 
+@@ -106,6 +125,13 @@ bool EventRewriterDelegateImpl::TopRowKeysAreFunctionKeys(int device_id) const {
+     }
+   }
+ 
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: Wayland may not preserve the source device id.
++    // Keep normal Linux F-keys intact unless the hardware profile explicitly
++    // opts into a Chromebook action-key layout.
++    return !HasAuraTopRowLayoutOverride();
++  }
++
+   // If we really don't know what device this is, fall back to respecting the
+   // global preference.
+   const PrefService* pref_service = GetPrefService();
+@@ -158,8 +184,9 @@ bool EventRewriterDelegateImpl::IsExtensionCommandRegistered(
+ 
+ bool EventRewriterDelegateImpl::IsSearchKeyAcceleratorReserved() const {
+   // |activation_client_| can be null in test.
+-  if (!activation_client_)
++  if (!activation_client_) {
+     return false;
++  }
+ 
+   aura::Window* active_window = activation_client_->GetActiveWindow();
+   return active_window &&
+@@ -281,8 +308,9 @@ bool EventRewriterDelegateImpl::NotifyDeprecatedSixPackKeyRewrite(
+ }
+ 
+ PrefService* EventRewriterDelegateImpl::GetPrefService() const {
+-  if (pref_service_for_testing_)
++  if (pref_service_for_testing_) {
+     return pref_service_for_testing_;
++  }
+   auto* active_session =
+       session_manager::SessionManager::Get()->GetActiveSession();
+   if (!active_session) {
+diff --git a/chrome/browser/ash/system/fake_input_device_settings.cc b/chrome/browser/ash/system/fake_input_device_settings.cc
+index 36d87c724b..5aea06041f 100644
+--- a/chrome/browser/ash/system/fake_input_device_settings.cc
++++ b/chrome/browser/ash/system/fake_input_device_settings.cc
+@@ -4,13 +4,173 @@
+ 
+ #include "chrome/browser/ash/system/fake_input_device_settings.h"
+ 
++#include <algorithm>
++#include <map>
++#include <string>
+ #include <utility>
++#include <vector>
+ 
++#include "base/environment.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
+ #include "base/functional/callback.h"
++#include "base/location.h"
++#include "base/no_destructor.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
+ 
+ namespace ash {
+ namespace system {
+ 
++namespace {
++
++constexpr char kAuraManagedInputEnv[] = "AURADE_ENABLE_WESTON_INPUT_SETTINGS";
++constexpr char kWestonConfigPath[] = ".config/weston.ini";
++
++bool IsAuraManagedInputEnabled() {
++  auto env = base::Environment::Create();
++  const std::optional<std::string> enabled = env->GetVar(kAuraManagedInputEnv);
++  return enabled && *enabled == "1";
++}
++
++std::string BoolValue(bool value) {
++  return value ? "true" : "false";
++}
++
++std::string BuildUpdatedWestonInputConfig(
++    const std::string& original,
++    const std::map<std::string, std::string>& settings) {
++  const std::vector<std::string> lines = base::SplitString(
++      original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
++  std::vector<std::string> output;
++  bool in_libinput_section = false;
++  bool saw_libinput_section = false;
++  std::map<std::string, bool> wrote_setting;
++  for (const auto& [key, value] : settings) {
++    wrote_setting[key] = false;
++  }
++
++  auto finish_section = [&]() {
++    if (!in_libinput_section) {
++      return;
++    }
++    for (const auto& [key, value] : settings) {
++      if (!wrote_setting[key]) {
++        output.push_back(key + "=" + value);
++        wrote_setting[key] = true;
++      }
++    }
++  };
++
++  for (const std::string& line : lines) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      finish_section();
++      in_libinput_section = trimmed == "[libinput]";
++      saw_libinput_section |= in_libinput_section;
++      output.push_back(line);
++      continue;
++    }
++
++    if (in_libinput_section) {
++      const size_t separator = trimmed.find('=');
++      const std::string key = separator == std::string::npos
++                                  ? std::string()
++                                  : trimmed.substr(0, separator);
++      const auto replacement = settings.find(key);
++      if (replacement != settings.end()) {
++        output.push_back(key + "=" + replacement->second);
++        wrote_setting[key] = true;
++        continue;
++      }
++    }
++    output.push_back(line);
++  }
++  finish_section();
++
++  if (!saw_libinput_section) {
++    if (!output.empty() && !output.back().empty()) {
++      output.push_back(std::string());
++    }
++    output.push_back("[libinput]");
++    for (const auto& [key, value] : settings) {
++      output.push_back(key + "=" + value);
++    }
++  }
++  return base::JoinString(output, "\n") + "\n";
++}
++
++void PersistAuraTouchpadSettingsOnBlockingThread(
++    std::map<std::string, std::string> weston_settings) {
++  auto env = base::Environment::Create();
++  const std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return;
++  }
++  const base::FilePath config_path =
++      base::FilePath(*home).Append(kWestonConfigPath);
++  if (!base::CreateDirectory(config_path.DirName())) {
++    return;
++  }
++
++  std::string original;
++  base::ReadFileToString(config_path, &original);
++  // AuraDE compatibility: Weston owns libinput in a nested Wayland session.
++  // Persist Ash touchpad preferences into the compositor configuration that
++  // the session wrapper consumes on the next compositor start.
++  base::ImportantFileWriter::WriteFileAtomically(
++      config_path, BuildUpdatedWestonInputConfig(original, weston_settings));
++}
++
++scoped_refptr<base::SequencedTaskRunner> GetAuraInputWriter() {
++  static const base::NoDestructor<scoped_refptr<base::SequencedTaskRunner>>
++      writer(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::BLOCK_SHUTDOWN}));
++  return *writer;
++}
++
++void PersistAuraTouchpadSettings(const TouchpadSettings& settings) {
++  if (!IsAuraManagedInputEnabled()) {
++    return;
++  }
++
++  std::map<std::string, std::string> weston_settings;
++  if (settings.IsTapToClickSet()) {
++    weston_settings["enable-tap"] = BoolValue(settings.GetTapToClick());
++  }
++  if (settings.IsTapDraggingSet()) {
++    weston_settings["tap-and-drag"] = BoolValue(settings.GetTapDragging());
++  }
++  if (settings.IsNaturalScrollSet()) {
++    weston_settings["natural-scroll"] = BoolValue(settings.GetNaturalScroll());
++  }
++  if (settings.IsAccelerationSet()) {
++    weston_settings["accel-profile"] =
++        settings.GetAcceleration() ? "adaptive" : "flat";
++  }
++  if (settings.IsSensitivitySet()) {
++    const double normalized =
++        std::clamp((settings.GetSensitivity() - 3) / 2.0, -1.0, 1.0);
++    weston_settings["accel-speed"] = base::NumberToString(normalized);
++  }
++  if (weston_settings.empty()) {
++    return;
++  }
++
++  GetAuraInputWriter()->PostTask(
++      FROM_HERE, base::BindOnce(&PersistAuraTouchpadSettingsOnBlockingThread,
++                                std::move(weston_settings)));
++}
++
++}  // namespace
++
+ FakeInputDeviceSettings::FakeInputDeviceSettings() = default;
+ 
+ FakeInputDeviceSettings::~FakeInputDeviceSettings() = default;
+@@ -23,6 +183,7 @@ void FakeInputDeviceSettings::TouchpadExists(DeviceExistsCallback callback) {
+ void FakeInputDeviceSettings::UpdateTouchpadSettings(
+     const TouchpadSettings& settings) {
+   current_touchpad_settings_.Update(settings);
++  PersistAuraTouchpadSettings(current_touchpad_settings_);
+ }
+ 
+ void FakeInputDeviceSettings::SetTouchpadSensitivity(int value) {
+@@ -163,11 +324,9 @@ void FakeInputDeviceSettings::SetTouchpadScrollAcceleration(bool enabled) {
+   UpdateTouchpadSettings(settings);
+ }
+ 
+-void FakeInputDeviceSettings::ReapplyTouchpadSettings() {
+-}
++void FakeInputDeviceSettings::ReapplyTouchpadSettings() {}
+ 
+-void FakeInputDeviceSettings::ReapplyMouseSettings() {
+-}
++void FakeInputDeviceSettings::ReapplyMouseSettings() {}
+ 
+ void FakeInputDeviceSettings::ReapplyPointingStickSettings() {}
+ 
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+index 5fe3499233..a304ddd8bc 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+@@ -213,8 +213,7 @@ std::string GetDefaultAuraFeatureProfile() {
+ std::string GetConfiguredAuraFeatureProfile(bool* configured) {
+   *configured = false;
+   const std::string default_profile = GetDefaultAuraFeatureProfile();
+-  const std::optional<base::FilePath> config_path =
+-      GetAuraFeaturesConfigFile();
++  const std::optional<base::FilePath> config_path = GetAuraFeaturesConfigFile();
+   if (!config_path) {
+     return default_profile;
+   }
+@@ -266,9 +265,9 @@ AuraFeatureProfileState GetAuraFeatureProfileState() {
+   AuraFeatureProfileState state;
+   state.default_profile = GetDefaultAuraFeatureProfile();
+   state.memory_gb = GetPhysicalMemoryGiB();
+-  state.configured_profile =
+-      GetConfiguredAuraFeatureProfile(&state.configured);
+-  state.current_profile = GetCurrentAuraFeatureProfile(state.configured_profile);
++  state.configured_profile = GetConfiguredAuraFeatureProfile(&state.configured);
++  state.current_profile =
++      GetCurrentAuraFeatureProfile(state.configured_profile);
+   return state;
+ }
+ 
+@@ -301,8 +300,8 @@ base::DictValue GetAuraFeatureProfileValueOnBlockingThread() {
+ std::string BuildUpdatedAuraFeaturesConfig(const std::string& original,
+                                            const std::string& profile) {
+   if (original.empty()) {
+-    return "# AuraDE feature settings\n" +
+-           std::string(kAuraFeatureProfileEnv) + "=" + profile + "\n";
++    return "# AuraDE feature settings\n" + std::string(kAuraFeatureProfileEnv) +
++           "=" + profile + "\n";
+   }
+ 
+   std::vector<std::string> output;
+@@ -313,9 +312,9 @@ std::string BuildUpdatedAuraFeaturesConfig(const std::string& original,
+     std::string trimmed;
+     base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
+     const size_t separator = trimmed.find('=');
+-    const std::string key =
+-        separator == std::string::npos ? std::string()
+-                                       : trimmed.substr(0, separator);
++    const std::string key = separator == std::string::npos
++                                ? std::string()
++                                : trimmed.substr(0, separator);
+     if (key == kAuraFeatureProfileEnv || key == "profile") {
+       output.push_back(std::string(kAuraFeatureProfileEnv) + "=" + profile);
+       wrote_profile = true;
+@@ -335,8 +334,7 @@ std::string BuildUpdatedAuraFeaturesConfig(const std::string& original,
+ }
+ 
+ bool WriteAuraFeatureProfile(const std::string& profile) {
+-  const std::optional<base::FilePath> config_path =
+-      GetAuraFeaturesConfigFile();
++  const std::optional<base::FilePath> config_path = GetAuraFeaturesConfigFile();
+   if (!config_path || !base::CreateDirectory(config_path->DirName())) {
+     return false;
+   }
+@@ -369,7 +367,7 @@ base::DictValue SetAuraFeatureProfileOnBlockingThread(
+   return result;
+ }
+ 
+-std::string GetConfiguredWestonMode() {
++std::string GetConfiguredWestonMode(const std::string& connector) {
+   const std::optional<base::FilePath> config_path = GetWestonConfigFile();
+   if (!config_path) {
+     return std::string();
+@@ -381,23 +379,33 @@ std::string GetConfiguredWestonMode() {
+   }
+ 
+   bool in_output_section = false;
++  bool matching_output = false;
++  std::string section_mode;
+   for (const std::string& line : base::SplitString(
+            contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
+     std::string trimmed;
+     base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
+     if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      if (in_output_section && matching_output) {
++        return section_mode;
++      }
+       in_output_section = trimmed == "[output]";
++      matching_output = false;
++      section_mode.clear();
+       continue;
+     }
+-    if (!in_output_section || !trimmed.starts_with("mode=")) {
++    if (!in_output_section) {
+       continue;
+     }
+-
+-    const std::string mode = trimmed.substr(5);
+-    return IsValidMode(mode) ? mode : std::string();
++    if (trimmed.starts_with("name=")) {
++      matching_output = trimmed.substr(5) == connector;
++    } else if (trimmed.starts_with("mode=")) {
++      const std::string mode = trimmed.substr(5);
++      section_mode = IsValidMode(mode) ? mode : std::string();
++    }
+   }
+ 
+-  return std::string();
++  return in_output_section && matching_output ? section_mode : std::string();
+ }
+ 
+ AuraDisplayState GetAuraDisplayState() {
+@@ -432,7 +440,7 @@ AuraDisplayState GetAuraDisplayState() {
+     break;
+   }
+ 
+-  state.configured_mode = GetConfiguredWestonMode();
++  state.configured_mode = GetConfiguredWestonMode(state.connector);
+   state.configured_scale = GetConfiguredAuraDisplayScale();
+   state.current_scale = state.configured_scale;
+   state.available = !state.connector.empty() && !state.modes.empty();
+@@ -471,55 +479,65 @@ base::DictValue GetAuraDisplayValueOnBlockingThread() {
+ std::string BuildUpdatedWestonConfig(const std::string& original,
+                                      const std::string& connector,
+                                      const std::string& mode) {
++  // AuraDE compatibility: preserve independent Weston output sections; mode
++  // changes for one connector must not collapse a multi-monitor policy.
++  const std::vector<std::string> lines = base::SplitString(
++      original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+   std::vector<std::string> output;
+-  bool in_output_section = false;
+-  bool saw_output_section = false;
+-  bool wrote_name = false;
+-  bool wrote_mode = false;
+-
+-  auto finish_output_section = [&]() {
+-    if (!in_output_section) {
+-      return;
+-    }
+-    if (!wrote_name) {
+-      output.push_back("name=" + connector);
+-    }
+-    if (!wrote_mode) {
+-      output.push_back("mode=" + mode);
+-    }
+-    wrote_name = false;
+-    wrote_mode = false;
+-  };
++  bool updated_connector = false;
+ 
+-  for (const std::string& line : base::SplitString(
+-           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++  for (size_t index = 0; index < lines.size();) {
++    const std::string& line = lines[index];
+     std::string trimmed;
+     base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
+-    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
+-      finish_output_section();
+-      in_output_section = trimmed == "[output]";
+-      saw_output_section |= in_output_section;
++    if (trimmed != "[output]") {
+       output.push_back(line);
++      ++index;
+       continue;
+     }
+ 
+-    if (in_output_section && trimmed.starts_with("name=")) {
+-      output.push_back("name=" + connector);
+-      wrote_name = true;
+-      continue;
++    size_t section_end = index + 1;
++    for (; section_end < lines.size(); ++section_end) {
++      std::string candidate;
++      base::TrimWhitespaceASCII(lines[section_end], base::TRIM_ALL, &candidate);
++      if (candidate.starts_with("[") && candidate.ends_with("]")) {
++        break;
++      }
+     }
+-    if (in_output_section && trimmed.starts_with("mode=")) {
+-      output.push_back("mode=" + mode);
+-      wrote_mode = true;
+-      continue;
++
++    bool matching_output = false;
++    bool has_mode = false;
++    for (size_t section_index = index + 1; section_index < section_end;
++         ++section_index) {
++      std::string candidate;
++      base::TrimWhitespaceASCII(lines[section_index], base::TRIM_ALL,
++                                &candidate);
++      if (candidate.starts_with("name=") && candidate.substr(5) == connector) {
++        matching_output = true;
++      }
++      has_mode |= candidate.starts_with("mode=");
+     }
+ 
+     output.push_back(line);
++    for (size_t section_index = index + 1; section_index < section_end;
++         ++section_index) {
++      std::string candidate;
++      base::TrimWhitespaceASCII(lines[section_index], base::TRIM_ALL,
++                                &candidate);
++      if (matching_output && candidate.starts_with("mode=")) {
++        output.push_back("mode=" + mode);
++      } else {
++        output.push_back(lines[section_index]);
++      }
++    }
++    if (matching_output && !has_mode) {
++      output.push_back("mode=" + mode);
++    }
++    updated_connector |= matching_output;
++    index = section_end;
+   }
+ 
+-  finish_output_section();
+-
+-  if (!saw_output_section) {
++  if (!updated_connector) {
+     if (!output.empty() && !output.back().empty()) {
+       output.push_back(std::string());
+     }
+diff --git a/ui/events/ash/keyboard_capability.cc b/ui/events/ash/keyboard_capability.cc
+index 1d062c6e57..75997f2cb0 100644
+--- a/ui/events/ash/keyboard_capability.cc
++++ b/ui/events/ash/keyboard_capability.cc
+@@ -22,6 +22,7 @@
+ #include "base/containers/fixed_flat_map.h"
+ #include "base/containers/fixed_flat_set.h"
+ #include "base/containers/flat_set.h"
++#include "base/environment.h"
+ #include "base/files/scoped_file.h"
+ #include "base/functional/bind.h"
+ #include "base/no_destructor.h"
+@@ -86,6 +87,7 @@ constexpr std::string_view kRevenBoardName = "reven";
+ constexpr char kLayoutProperty[] = "CROS_KEYBOARD_TOP_ROW_LAYOUT";
+ constexpr char kCustomTopRowLayoutAttribute[] = "function_row_physmap";
+ constexpr char kCustomTopRowLayoutProperty[] = "FUNCTION_ROW_PHYSMAP";
++constexpr char kAuraTopRowLayoutEnv[] = "AURADE_CHROMEOS_TOP_ROW_LAYOUT";
+ 
+ constexpr KeyboardCode kFunctionKeys[] = {
+     VKEY_F1,  VKEY_F2,  VKEY_F3,  VKEY_F4,  VKEY_F5,
+@@ -230,9 +232,8 @@ std::optional<uint32_t> ConvertScanCodeToEvdevKey(const base::ScopedFD& fd,
+     return std::nullopt;
+   }
+ 
+-  struct input_keymap_entry keymap_entry {
+-    .flags = 0, .len = sizeof(scancode), .keycode = 0
+-  };
++  struct input_keymap_entry keymap_entry{
++      .flags = 0, .len = sizeof(scancode), .keycode = 0};
+   UNSAFE_TODO(memcpy(keymap_entry.scancode, &scancode, sizeof(scancode)));
+ 
+   int ret = ioctl(fd.get(), EVIOCGKEYCODE_V2, &keymap_entry);
+@@ -307,6 +308,27 @@ bool ParseKeyboardTopRowLayout(const std::string& layout_string,
+   return true;
+ }
+ 
++std::optional<KeyboardTopRowLayout> GetAuraTopRowLayoutOverride() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return std::nullopt;
++  }
++
++  auto env = base::Environment::Create();
++  const std::optional<std::string> configured_layout =
++      env->GetVar(kAuraTopRowLayoutEnv);
++  KeyboardTopRowLayout layout;
++  if (!configured_layout || configured_layout->empty() ||
++      !ParseKeyboardTopRowLayout(*configured_layout, layout) ||
++      layout == KeyboardTopRowLayout::kKbdTopRowLayoutCustom) {
++    return std::nullopt;
++  }
++
++  // AuraDE compatibility: Wayland gives Ash key events but does not expose the
++  // compositor's physical keyboard udev properties. Allow Chromebook hardware
++  // profiles to select a known top-row layout without affecting PC keyboards.
++  return layout;
++}
++
+ // Determines the type of |keyboard_device| we are dealing with.
+ // |has_chromeos_top_row| argument indicates that the keyboard's top
+ // row has "action" keys (such as back, refresh, etc.) instead of the
+@@ -337,20 +359,20 @@ KeyboardCapability::DeviceType IdentifyKeyboardType(
+                : KeyboardCapability::DeviceType::kDeviceInternalKeyboard;
+   }
+ 
+-    if (has_null_top_row) {
+-      VLOG(1) << "External Null Top Row keyboard '" << keyboard_device.name
+-              << "' connected: id=" << keyboard_device.id;
+-      return KeyboardCapability::DeviceType::
+-          kDeviceExternalNullTopRowChromeOsKeyboard;
+-    }
++  if (has_null_top_row) {
++    VLOG(1) << "External Null Top Row keyboard '" << keyboard_device.name
++            << "' connected: id=" << keyboard_device.id;
++    return KeyboardCapability::DeviceType::
++        kDeviceExternalNullTopRowChromeOsKeyboard;
++  }
+ 
+-    if (has_chromeos_top_row) {
+-      // If the device was tagged as having Chrome OS top row layout it must be
+-      // a Chrome OS keyboard.
+-      VLOG(1) << "External Chrome OS keyboard '" << keyboard_device.name
+-              << "' connected: id=" << keyboard_device.id;
+-      return KeyboardCapability::DeviceType::kDeviceExternalChromeOsKeyboard;
+-    }
++  if (has_chromeos_top_row) {
++    // If the device was tagged as having Chrome OS top row layout it must be
++    // a Chrome OS keyboard.
++    VLOG(1) << "External Chrome OS keyboard '" << keyboard_device.name
++            << "' connected: id=" << keyboard_device.id;
++    return KeyboardCapability::DeviceType::kDeviceExternalChromeOsKeyboard;
++  }
+ 
+   const std::vector<std::string> tokens =
+       base::SplitString(keyboard_device.name, " .", base::KEEP_WHITESPACE,
+@@ -791,6 +813,11 @@ DeviceType KeyboardCapability::GetDeviceType(int device_id) const {
+ 
+ KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(
+     const KeyboardDevice& keyboard) const {
++  if (const std::optional<KeyboardTopRowLayout> override =
++          GetAuraTopRowLayoutOverride()) {
++    return *override;
++  }
++
+   const auto* keyboard_info = GetKeyboardInfo(keyboard);
+   if (!keyboard_info) {
+     return KeyboardTopRowLayout::kKbdTopRowLayoutDefault;
+@@ -802,6 +829,10 @@ KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(
+ KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(int device_id) const {
+   auto keyboard = FindKeyboardWithId(device_id);
+   if (!keyboard) {
++    if (const std::optional<KeyboardTopRowLayout> override =
++            GetAuraTopRowLayoutOverride()) {
++      return *override;
++    }
+     return KeyboardTopRowLayout::kKbdTopRowLayoutDefault;
+   }
+ 
+diff --git a/ui/ozone/platform/wayland/common/wayland_object.cc b/ui/ozone/platform/wayland/common/wayland_object.cc
+index e29910a05b..66cd81f57c 100644
+--- a/ui/ozone/platform/wayland/common/wayland_object.cc
++++ b/ui/ozone/platform/wayland/common/wayland_object.cc
+@@ -228,6 +228,7 @@ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_locked_pointer_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_pointer_constraints_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_hold_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_pinch_v1)
++IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_swipe_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_pointer_gestures_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_manager_v1)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_v1)
+diff --git a/ui/ozone/platform/wayland/common/wayland_object.h b/ui/ozone/platform/wayland/common/wayland_object.h
+index dd46b63c0e..3c6e5ac036 100644
+--- a/ui/ozone/platform/wayland/common/wayland_object.h
++++ b/ui/ozone/platform/wayland/common/wayland_object.h
+@@ -193,6 +193,7 @@ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_locked_pointer_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_pointer_constraints_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_hold_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_pinch_v1)
++DECLARE_WAYLAND_OBJECT_TRAITS(zwp_pointer_gesture_swipe_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_pointer_gestures_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_manager_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_v1)
+diff --git a/ui/ozone/platform/wayland/host/wayland_event_source.cc b/ui/ozone/platform/wayland/host/wayland_event_source.cc
+index c96f1e87fb..cb718d8e4d 100644
+--- a/ui/ozone/platform/wayland/host/wayland_event_source.cc
++++ b/ui/ozone/platform/wayland/host/wayland_event_source.cc
+@@ -871,6 +871,26 @@ const WaylandWindow* WaylandEventSource::GetTouchTarget(PointerId id) const {
+   return it == touch_points_.end() ? nullptr : it->second->window.get();
+ }
+ 
++void WaylandEventSource::OnSwipeEvent(EventType event_type,
++                                      const gfx::Vector2dF& delta,
++                                      uint32_t finger_count,
++                                      base::TimeTicks timestamp,
++                                      int device_id) {
++  // AuraDE compatibility: Weston owns libinput, so Ash cannot consume its
++  // native gesture stream. Preserve compositor three and four-finger swipes as
++  // the same finger-counted scroll events emitted by ChromeOS evdev.
++  ScrollEvent event(event_type, pointer_location_, pointer_location_, timestamp,
++                    pointer_flags_, delta.x(), delta.y(), delta.x(), delta.y(),
++                    finger_count);
++  event.set_source_device_id(device_id);
++
++  auto* target = window_manager_->GetCurrentPointerFocusedWindow();
++  if (!target) {
++    return;
++  }
++  SetTargetAndDispatchEvent(&event, target);
++}
++
+ void WaylandEventSource::OnPinchEvent(EventType event_type,
+                                       const gfx::Vector2dF& delta,
+                                       base::TimeTicks timestamp,
+diff --git a/ui/ozone/platform/wayland/host/wayland_event_source.h b/ui/ozone/platform/wayland/host/wayland_event_source.h
+index 610771d044..045abd8dd7 100644
+--- a/ui/ozone/platform/wayland/host/wayland_event_source.h
++++ b/ui/ozone/platform/wayland/host/wayland_event_source.h
+@@ -172,6 +172,11 @@ class WaylandEventSource : public PlatformEventSource,
+   const WaylandWindow* GetTouchTarget(PointerId id) const override;
+ 
+   // WaylandZwpPointerGesture::Delegate:
++  void OnSwipeEvent(EventType event_type,
++                    const gfx::Vector2dF& delta,
++                    uint32_t finger_count,
++                    base::TimeTicks timestamp,
++                    int device_id) override;
+   void OnPinchEvent(EventType event_type,
+                     const gfx::Vector2dF& delta,
+                     base::TimeTicks timestamp,
+diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
+index c41e15d5c1..f14809cd12 100644
+--- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
++++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
+@@ -69,6 +69,15 @@ void WaylandZwpPointerGestures::Init() {
+   DCHECK(connection_->seat()->pointer());
+   wl_pointer* pointer = connection_->seat()->pointer()->wl_object();
+ 
++  swipe_.reset(zwp_pointer_gestures_v1_get_swipe_gesture(obj_.get(), pointer));
++  static constexpr zwp_pointer_gesture_swipe_v1_listener kSwipeListener = {
++      .begin = &OnSwipeBegin,
++      .update = &OnSwipeUpdate,
++      .end = &OnSwipeEnd,
++  };
++  zwp_pointer_gesture_swipe_v1_add_listener(swipe_.get(), &kSwipeListener,
++                                            this);
++
+   pinch_.reset(zwp_pointer_gestures_v1_get_pinch_gesture(obj_.get(), pointer));
+   static constexpr zwp_pointer_gesture_pinch_v1_listener kPinchListener = {
+       .begin = &OnPinchBegin,
+@@ -91,6 +100,48 @@ void WaylandZwpPointerGestures::Init() {
+ #endif
+ }
+ 
++// static
++void WaylandZwpPointerGestures::OnSwipeBegin(
++    void* data,
++    struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++    uint32_t serial,
++    uint32_t time,
++    struct wl_surface* surface,
++    uint32_t fingers) {
++  auto* self = static_cast<WaylandZwpPointerGestures*>(data);
++  self->swipe_finger_count_ = fingers;
++}
++
++// static
++void WaylandZwpPointerGestures::OnSwipeUpdate(
++    void* data,
++    struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++    uint32_t time,
++    wl_fixed_t dx,
++    wl_fixed_t dy) {
++  auto* self = static_cast<WaylandZwpPointerGestures*>(data);
++  const gfx::Vector2dF delta(static_cast<float>(wl_fixed_to_double(dx)),
++                             static_cast<float>(wl_fixed_to_double(dy)));
++  self->delegate_->OnSwipeEvent(
++      EventType::kScroll, delta, self->swipe_finger_count_,
++      wl::EventMillisecondsToTimeTicks(time), self->obj_.id());
++}
++
++// static
++void WaylandZwpPointerGestures::OnSwipeEnd(
++    void* data,
++    struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++    uint32_t serial,
++    uint32_t time,
++    int32_t cancelled) {
++  auto* self = static_cast<WaylandZwpPointerGestures*>(data);
++  self->delegate_->OnSwipeEvent(
++      cancelled ? EventType::kScrollFlingCancel : EventType::kScrollFlingStart,
++      gfx::Vector2dF(), self->swipe_finger_count_,
++      wl::EventMillisecondsToTimeTicks(time), self->obj_.id());
++  self->swipe_finger_count_ = 0;
++}
++
+ // static
+ void WaylandZwpPointerGestures::OnPinchBegin(
+     void* data,
+diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
+index 294f40e247..8491fe92e2 100644
+--- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
++++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
+@@ -50,6 +50,27 @@ class WaylandZwpPointerGestures
+   void Init();
+ 
+  private:
++  // zwp_pointer_gesture_swipe_v1_listener callbacks:
++  static void OnSwipeBegin(
++      void* data,
++      struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++      uint32_t serial,
++      uint32_t time,
++      struct wl_surface* surface,
++      uint32_t fingers);
++  static void OnSwipeUpdate(
++      void* data,
++      struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++      uint32_t time,
++      wl_fixed_t dx,
++      wl_fixed_t dy);
++  static void OnSwipeEnd(
++      void* data,
++      struct zwp_pointer_gesture_swipe_v1* zwp_pointer_gesture_swipe_v1,
++      uint32_t serial,
++      uint32_t time,
++      int32_t cancelled);
++
+   // zwp_pointer_gesture_pinch_v1_listener callbacks:
+   static void OnPinchBegin(
+       void* data,
+@@ -93,17 +114,27 @@ class WaylandZwpPointerGestures
+ #endif
+ 
+   wl::Object<zwp_pointer_gestures_v1> obj_;
++  wl::Object<zwp_pointer_gesture_swipe_v1> swipe_;
+   wl::Object<zwp_pointer_gesture_pinch_v1> pinch_;
+ #if defined(ZWP_POINTER_GESTURES_V1_GET_HOLD_GESTURE_SINCE_VERSION)
+   wl::Object<zwp_pointer_gesture_hold_v1> hold_;
+ #endif
+   double current_scale_ = 1;
++  uint32_t swipe_finger_count_ = 0;
+   const raw_ptr<WaylandConnection> connection_;
+   const raw_ptr<Delegate> delegate_;
+ };
+ 
+ class WaylandZwpPointerGestures::Delegate {
+  public:
++  // Handles three and four-finger compositor swipes as finger-counted scroll
++  // events, matching the ChromeOS evdev gesture pipeline.
++  virtual void OnSwipeEvent(EventType event_type,
++                            const gfx::Vector2dF& delta,
++                            uint32_t finger_count,
++                            base::TimeTicks timestamp,
++                            int device_id) = 0;
++
+   // Handles the events coming during the pinch zoom session.
+   // |event_type| is one of EventType::kGesturePinch### members.
+   // |delta| is empty on the BEGIN and END, and shows the movement of the centre
+diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
+index 8cf409ac4f..066cae2e02 100644
+--- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
++++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
+@@ -41,8 +41,9 @@ class PinchEventScaleRecorder : public PlatformEventObserver {
+  protected:
+   // PlatformEventObserver:
+   void WillProcessEvent(const PlatformEvent& event) override {
+-    if (!event->IsGestureEvent())
++    if (!event->IsGestureEvent()) {
+       return;
++    }
+ 
+     const GestureEvent* const gesture = event->AsGestureEvent();
+     if (!gesture->IsPinchEvent() ||
+@@ -145,6 +146,45 @@ TEST_F(WaylandPointerGesturesTest, PinchZoomScale) {
+   }
+ }
+ 
++TEST_F(WaylandPointerGesturesTest, SwipePreservesFingerCount) {
++  EnterPoint();
++
++  std::unique_ptr<Event> update_event;
++  std::unique_ptr<Event> end_event;
++  EXPECT_CALL(delegate_, DispatchEvent(testing::_))
++      .Times(2)
++      .WillOnce(CloneEvent(&update_event))
++      .WillOnce(CloneEvent(&end_event));
++
++  PostToServerAndWait([surface_id = window_->root_surface()->get_surface_id()](
++                          wl::TestWaylandServerThread* server) {
++    auto* const swipe = server->wp_pointer_gestures().swipe()->resource();
++    auto* const surface =
++        server->GetObject<wl::MockSurface>(surface_id)->resource();
++    zwp_pointer_gesture_swipe_v1_send_begin(swipe, server->GetNextSerial(),
++                                            server->GetNextTime(), surface,
++                                            /*fingers=*/3);
++    zwp_pointer_gesture_swipe_v1_send_update(swipe, server->GetNextTime(),
++                                             wl_fixed_from_int(12),
++                                             wl_fixed_from_int(-7));
++    zwp_pointer_gesture_swipe_v1_send_end(swipe, server->GetNextSerial(),
++                                          server->GetNextTime(),
++                                          /*cancelled=*/0);
++  });
++
++  ASSERT_TRUE(update_event);
++  ASSERT_TRUE(update_event->IsScrollEvent());
++  EXPECT_EQ(EventType::kScroll, update_event->type());
++  EXPECT_EQ(3, update_event->AsScrollEvent()->finger_count());
++  EXPECT_EQ(12.0f, update_event->AsScrollEvent()->x_offset());
++  EXPECT_EQ(-7.0f, update_event->AsScrollEvent()->y_offset());
++
++  ASSERT_TRUE(end_event);
++  ASSERT_TRUE(end_event->IsScrollEvent());
++  EXPECT_EQ(EventType::kScrollFlingStart, end_event->type());
++  EXPECT_EQ(3, end_event->AsScrollEvent()->finger_count());
++}
++
+ // Test ensures Hold Event ends a fling.
+ TEST_F(WaylandPointerGesturesTest, HoldEventCancelsFling) {
+   // Enter cursor to surface.
+diff --git a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
+index b521b68a81..efde02f0b8 100644
+--- a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
++++ b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
+@@ -14,6 +14,8 @@ namespace wl {
+ 
+ namespace {
+ 
++const struct zwp_pointer_gesture_swipe_v1_interface kTestSwipeImpl = {
++    DestroyResource};
+ const struct zwp_pointer_gesture_pinch_v1_interface kTestPinchImpl = {
+     DestroyResource};
+ const struct zwp_pointer_gesture_hold_v1_interface kTestHoldImpl = {
+@@ -42,7 +44,17 @@ void TestWpPointerGestures::GetSwipeGesture(struct wl_client* client,
+                                             struct wl_resource* resource,
+                                             uint32_t id,
+                                             struct wl_resource* pointer) {
+-  NOTIMPLEMENTED_LOG_ONCE();
++  wl_resource* swipe_gesture_resource =
++      CreateResourceWithImpl<TestSwipeGesture>(
++          client, &zwp_pointer_gesture_swipe_v1_interface, 1, &kTestSwipeImpl,
++          id,
++          base::BindOnce(
++              &TestWpPointerGestures::set_swipe,
++              GetUserDataAs<TestWpPointerGestures>(resource)->GetWeakPtr(),
++              nullptr));
++
++  GetUserDataAs<TestWpPointerGestures>(resource)->swipe_ =
++      GetUserDataAs<TestSwipeGesture>(swipe_gesture_resource);
+ }
+ 
+ // static
+@@ -93,4 +105,9 @@ TestHoldGesture::TestHoldGesture(wl_resource* resource)
+ 
+ TestHoldGesture::~TestHoldGesture() = default;
+ 
++TestSwipeGesture::TestSwipeGesture(wl_resource* resource)
++    : ServerObject(resource) {}
++
++TestSwipeGesture::~TestSwipeGesture() = default;
++
+ }  // namespace wl
+diff --git a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
+index 1c24f761b2..c641376e2f 100644
+--- a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
++++ b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
+@@ -14,6 +14,14 @@ struct wl_resource;
+ 
+ namespace wl {
+ 
++class TestSwipeGesture : public ServerObject {
++ public:
++  explicit TestSwipeGesture(wl_resource* resource);
++  TestSwipeGesture(const TestSwipeGesture&) = delete;
++  TestSwipeGesture& operator=(const TestSwipeGesture&) = delete;
++  ~TestSwipeGesture() override;
++};
++
+ class TestPinchGesture : public ServerObject {
+  public:
+   explicit TestPinchGesture(wl_resource* resource);
+@@ -38,10 +46,12 @@ class TestWpPointerGestures : public GlobalObject {
+   TestWpPointerGestures& operator=(const TestWpPointerGestures&) = delete;
+   ~TestWpPointerGestures() override;
+ 
++  TestSwipeGesture* swipe() const { return swipe_; }
+   TestPinchGesture* pinch() const { return pinch_; }
+ 
+   TestHoldGesture* hold() const { return hold_; }
+ 
++  void set_swipe(TestSwipeGesture* swipe) { swipe_ = swipe; }
+   void set_pinch(TestPinchGesture* pinch) { pinch_ = pinch; }
+   void set_hold(TestHoldGesture* hold) { hold_ = hold; }
+ 
+@@ -65,6 +75,7 @@ class TestWpPointerGestures : public GlobalObject {
+                              struct wl_resource* pointer);
+ 
+  private:
++  raw_ptr<TestSwipeGesture> swipe_;
+   raw_ptr<TestPinchGesture> pinch_;
+   raw_ptr<TestHoldGesture> hold_;
+   base::WeakPtrFactory<TestWpPointerGestures> weak_ptr_factory_{this};

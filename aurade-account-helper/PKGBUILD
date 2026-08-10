@@ -1,0 +1,34 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-account-helper
+pkgver=0.1.0
+pkgrel=2
+pkgdesc="PAM-backed local account helper for AuraDE"
+arch=('x86_64')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=('gcc-libs' 'glibc' 'pam')
+makedepends=('gcc')
+source=(
+  'aurade-account-helper.cc'
+  'aurade.pam'
+  'LICENSE'
+)
+sha256sums=('3e26ad59d70cb1f6e4edd68c9d31f3b46ee268e68d66bb07e9d74255789099ce'
+            '005736b9bd650ff5e5d82a7e288853776d5bb8c90185d5774c07231c1e1c64a9'
+            '65b98d3d5435f0e7f1857890e246f773e8b759fac8f117853318c232a9f15168')
+
+build() {
+  g++ ${CXXFLAGS} -std=c++17 -Wall -Wextra \
+    aurade-account-helper.cc -o aurade-account-helper \
+    ${LDFLAGS} -Wl,-z,now -lpam
+}
+
+package() {
+  install -Dm755 aurade-account-helper \
+    "${pkgdir}/usr/bin/aurade-account-helper"
+  install -Dm644 aurade.pam \
+    "${pkgdir}/etc/pam.d/aurade"
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -1,0 +1,1169 @@
+diff --git a/chrome/browser/ash/login/screens/BUILD.gn b/chrome/browser/ash/login/screens/BUILD.gn
+index e0865673fc..51405d5a5d 100644
+--- a/chrome/browser/ash/login/screens/BUILD.gn
++++ b/chrome/browser/ash/login/screens/BUILD.gn
+@@ -21,6 +21,8 @@ static_library("screens") {
+     "app_launch_splash_screen.h",
+     "arc_vm_data_migration_screen.cc",
+     "arc_vm_data_migration_screen.h",
++    "aura_local_account_screen.cc",
++    "aura_local_account_screen.h",
+     "base_screen.cc",
+     "base_screen.h",
+     "categories_selection_screen.cc",
+diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.cc b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+new file mode 100644
+index 0000000000..a80a923a01
+--- /dev/null
++++ b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+@@ -0,0 +1,154 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/login/screens/aura_local_account_screen.h"
++
++#include "base/command_line.h"
++#include "base/environment.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_writer.h"
++#include "base/logging.h"
++#include "base/strings/strcat.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "base/values.h"
++#include "chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h"
++
++namespace ash {
++namespace {
++
++constexpr char kUserActionBack[] = "back";
++constexpr char kUserActionStartSession[] = "start-session";
++
++base::FilePath GetAuraProfileConfigPath() {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> xdg_config_home = env->GetVar("XDG_CONFIG_HOME");
++  if (xdg_config_home.has_value() && !xdg_config_home->empty()) {
++    return base::FilePath(*xdg_config_home)
++        .AppendASCII("aurade")
++        .AppendASCII("profile.json");
++  }
++  return base::GetHomeDir()
++      .AppendASCII(".config")
++      .AppendASCII("aurade")
++      .AppendASCII("profile.json");
++}
++
++std::string GetLinuxUsername() {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> username = env->GetVar("USER");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  username = env->GetVar("LOGNAME");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  return "local";
++}
++
++void PersistLocalProfileMetadataBlocking(std::string display_name,
++                                         std::string password_hint) {
++  const std::string linux_username = GetLinuxUsername();
++
++  base::DictValue profile;
++  profile.Set("version", 1);
++  profile.Set("linux_username", linux_username);
++  profile.Set("account_id", base::StrCat({linux_username, "@local.aurade"}));
++  profile.Set("display_name", display_name);
++  profile.Set("password_hint", password_hint);
++  profile.Set("identity_source", "aurade-local");
++
++  std::string json;
++  if (!base::JSONWriter::WriteWithOptions(
++          profile, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json)) {
++    LOG(ERROR) << "AuraDE local profile metadata serialization failed";
++    return;
++  }
++
++  const base::FilePath path = GetAuraProfileConfigPath();
++  if (!base::CreateDirectory(path.DirName())) {
++    PLOG(ERROR) << "AuraDE local profile config directory creation failed: "
++                << path.DirName();
++    return;
++  }
++  if (!base::WriteFile(path, json)) {
++    PLOG(ERROR) << "AuraDE local profile metadata write failed: " << path;
++  }
++}
++
++}  // namespace
++
++// static
++std::string AuraLocalAccountScreen::GetResultString(Result result) {
++  switch (result) {
++    case Result::BACK:
++      return "Back";
++    case Result::START_SESSION:
++      return "StartSession";
++    case Result::NOT_APPLICABLE:
++      return BaseScreen::kNotApplicable;
++  }
++}
++
++AuraLocalAccountScreen::AuraLocalAccountScreen(
++    base::WeakPtr<AuraLocalAccountView> view,
++    const ScreenExitCallback& exit_callback)
++    : BaseScreen(AuraLocalAccountView::kScreenId,
++                 OobeScreenPriority::DEFAULT),
++      view_(std::move(view)),
++      exit_callback_(exit_callback) {}
++
++AuraLocalAccountScreen::~AuraLocalAccountScreen() = default;
++
++bool AuraLocalAccountScreen::MaybeSkip(WizardContext& context) {
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::NOT_APPLICABLE);
++    return true;
++  }
++  return false;
++}
++
++void AuraLocalAccountScreen::ShowImpl() {
++  if (view_) {
++    view_->Show();
++  }
++}
++
++void AuraLocalAccountScreen::HideImpl() {}
++
++void AuraLocalAccountScreen::OnUserAction(const base::ListValue& args) {
++  const std::string& action_id = args[0].GetString();
++  if (action_id == kUserActionBack) {
++    exit_callback_.Run(Result::BACK);
++  } else if (action_id == kUserActionStartSession) {
++    ScheduleLocalProfileMetadataPersistence(args);
++    exit_callback_.Run(Result::START_SESSION);
++  } else {
++    BaseScreen::OnUserAction(args);
++  }
++}
++
++void AuraLocalAccountScreen::ScheduleLocalProfileMetadataPersistence(
++    const base::ListValue& args) {
++  std::string display_name;
++  std::string password_hint;
++  if (args.size() > 1 && args[1].is_string()) {
++    display_name = args[1].GetString();
++  }
++  if (args.size() > 2 && args[2].is_string()) {
++    password_hint = args[2].GetString();
++  }
++
++  base::ThreadPool::PostTask(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++      base::BindOnce(&PersistLocalProfileMetadataBlocking,
++                     std::move(display_name), std::move(password_hint)));
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.h b/chrome/browser/ash/login/screens/aura_local_account_screen.h
+new file mode 100644
+index 0000000000..1db2554348
+--- /dev/null
++++ b/chrome/browser/ash/login/screens/aura_local_account_screen.h
+@@ -0,0 +1,54 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_LOGIN_SCREENS_AURA_LOCAL_ACCOUNT_SCREEN_H_
++#define CHROME_BROWSER_ASH_LOGIN_SCREENS_AURA_LOCAL_ACCOUNT_SCREEN_H_
++
++#include <string>
++
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/ash/login/screens/base_screen.h"
++
++namespace ash {
++
++class AuraLocalAccountView;
++
++// AuraDE local account setup screen. This is Linux-host only and is gated by
++// the AuraDE launcher flag.
++class AuraLocalAccountScreen : public BaseScreen {
++ public:
++  enum class Result {
++    BACK,
++    START_SESSION,
++    NOT_APPLICABLE,
++  };
++
++  using TView = AuraLocalAccountView;
++  using ScreenExitCallback = base::RepeatingCallback<void(Result result)>;
++
++  static std::string GetResultString(Result result);
++
++  explicit AuraLocalAccountScreen(base::WeakPtr<AuraLocalAccountView> view,
++                                  const ScreenExitCallback& exit_callback);
++  ~AuraLocalAccountScreen() override;
++
++  AuraLocalAccountScreen(const AuraLocalAccountScreen&) = delete;
++  AuraLocalAccountScreen& operator=(const AuraLocalAccountScreen&) = delete;
++
++ private:
++  bool MaybeSkip(WizardContext& context) override;
++  void ShowImpl() override;
++  void HideImpl() override;
++  void OnUserAction(const base::ListValue& args) override;
++
++  void ScheduleLocalProfileMetadataPersistence(const base::ListValue& args);
++
++  base::WeakPtr<AuraLocalAccountView> view_;
++  ScreenExitCallback exit_callback_;
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_LOGIN_SCREENS_AURA_LOCAL_ACCOUNT_SCREEN_H_
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
+index e49b9449d3..417c796338 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.cc
++++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/ash/login/screens/user_creation_screen.h"
+ 
++// HACK(AuraDE): Needed by the --stub-config bypass below. Normally provided
++// through C++ modules in the modular build.
++#include "base/command_line.h"
++// END HACK(AuraDE)
++
+ #include "ash/public/cpp/login_screen.h"
+ #include "chrome/browser/ash/login/error_screens_histogram_helper.h"
+ #include "chrome/browser/ash/login/wizard_context.h"
+@@ -19,6 +24,7 @@ namespace ash {
+ 
+ namespace {
+ 
++constexpr char kUserActionLocalAccount[] = "local-account";
+ constexpr char kUserActionSignIn[] = "signin";
+ constexpr char kUserActionAddChild[] = "add-child";
+ constexpr char kUserActionCancel[] = "cancel";
+@@ -40,6 +46,8 @@ UserCreationScreen::UserCreationScreenExitTestDelegate* test_exit_delegate =
+ std::string UserCreationScreen::GetResultString(Result result) {
+   // LINT.IfChange(UsageMetrics)
+   switch (result) {
++    case Result::LOCAL_ACCOUNT:
++      return "LocalAccount";
+     case Result::SIGNIN:
+       return "SignIn";
+     case Result::SIGNIN_TRIAGE:
+@@ -84,6 +92,19 @@ void UserCreationScreen::SetUserCreationScreenExitTestDelegate(
+ }
+ 
+ bool UserCreationScreen::MaybeSkip(WizardContext& context) {
++  const bool aurade_local_accounts_enabled =
++      base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts");
++
++  // HACK(AuraDE): Skip user creation screen in standalone Ash desktop mode
++  // only when the AuraDE local-account path is not available.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-config") &&
++      !aurade_local_accounts_enabled) {
++    LOG(INFO) << "HACK(AuraDE): --stub-config detected, skipping user creation "
++                 "screen";
++    RunExitCallback(Result::SKIPPED);
++    return true;
++  }
+   const bool is_managed = ash::InstallAttributes::Get()->IsEnterpriseManaged();
+   context.is_user_creation_enabled = !is_managed;
+   if (context.skip_to_login_for_tests || is_managed) {
+@@ -94,8 +115,9 @@ bool UserCreationScreen::MaybeSkip(WizardContext& context) {
+ }
+ 
+ void UserCreationScreen::ShowImpl() {
+-  if (!view_)
++  if (!view_) {
+     return;
++  }
+ 
+   scoped_observation_.Observe(network_state_informer_.get());
+ 
+@@ -109,8 +131,9 @@ void UserCreationScreen::ShowImpl() {
+ 
+   UpdateState(NetworkError::ERROR_REASON_UPDATE);
+ 
+-  if (!error_screen_visible_)
++  if (!error_screen_visible_) {
+     view_->Show();
++  }
+ 
+   histogram_helper_->OnScreenShow();
+ }
+@@ -131,7 +154,10 @@ void UserCreationScreen::SetChildSetupStep() {
+ 
+ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
+   const std::string& action_id = args[0].GetString();
+-  if (action_id == kUserActionSignIn) {
++  if (action_id == kUserActionLocalAccount) {
++    context()->sign_in_as_child = false;
++    RunExitCallback(Result::LOCAL_ACCOUNT);
++  } else if (action_id == kUserActionSignIn) {
+     context()->sign_in_as_child = false;
+     RunExitCallback(Result::SIGNIN);
+   } else if (action_id == kUserActionAddChild) {
+@@ -180,6 +206,19 @@ void UserCreationScreen::SetDefaultStep() {
+ }
+ 
+ void UserCreationScreen::UpdateState(NetworkError::ErrorReason reason) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    if (error_screen_visible_ &&
++        error_screen_->GetParentScreen() == UserCreationView::kScreenId) {
++      error_screen_visible_ = false;
++      error_screen_->SetParentScreen(OOBE_SCREEN_UNKNOWN);
++      error_screen_->Hide();
++      view_->Show();
++      histogram_helper_->OnErrorHide();
++    }
++    return;
++  }
++
+   NetworkStateInformer::State state = network_state_informer_->state();
+   if (state != NetworkStateInformer::ONLINE ||
+       reason == NetworkError::ERROR_REASON_LOADING_TIMEOUT) {
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.h b/chrome/browser/ash/login/screens/user_creation_screen.h
+index 6677e6b851..ca40b8ff82 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.h
++++ b/chrome/browser/ash/login/screens/user_creation_screen.h
+@@ -24,6 +24,7 @@ class UserCreationScreen
+       public NetworkStateInformer::NetworkStateInformerObserver {
+  public:
+   enum class Result {
++    LOCAL_ACCOUNT,
+     SIGNIN,
+     SIGNIN_TRIAGE,
+     ADD_CHILD,
+diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
+index 383f507506..9270c13d26 100644
+--- a/chrome/browser/ash/login/wizard_controller.cc
++++ b/chrome/browser/ash/login/wizard_controller.cc
+@@ -25,6 +25,7 @@
+ #include "base/check_is_test.h"
+ #include "base/command_line.h"
+ #include "base/debug/dump_without_crashing.h"
++#include "base/environment.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/json/json_string_value_serializer.h"
+@@ -33,11 +34,13 @@
+ #include "base/no_destructor.h"
+ #include "base/notimplemented.h"
+ #include "base/notreached.h"
++#include "base/strings/strcat.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/syslog_logging.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/task/thread_pool.h"
++#include "base/time/time.h"
+ #include "chrome/browser/ash/accessibility/accessibility_manager.h"
+ #include "chrome/browser/ash/app_mode/kiosk_app_types.h"
+ #include "chrome/browser/ash/app_mode/kiosk_controller.h"
+@@ -68,6 +71,7 @@
+ #include "chrome/browser/ash/login/screens/app_downloading_screen.h"
+ #include "chrome/browser/ash/login/screens/app_launch_splash_screen.h"
+ #include "chrome/browser/ash/login/screens/arc_vm_data_migration_screen.h"
++#include "chrome/browser/ash/login/screens/aura_local_account_screen.h"
+ #include "chrome/browser/ash/login/screens/base_screen.h"
+ #include "chrome/browser/ash/login/screens/categories_selection_screen.h"
+ #include "chrome/browser/ash/login/screens/choobe_screen.h"
+@@ -172,6 +176,7 @@
+ #include "chrome/browser/ui/webui/ash/login/app_downloading_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/arc_vm_data_migration_screen_handler.h"
++#include "chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/auto_enrollment_check_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/categories_selection_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/choobe_screen_handler.h"
+@@ -256,6 +261,8 @@
+ #include "chromeos/ash/components/geolocation/system_location_provider.h"
+ #include "chromeos/ash/components/install_attributes/install_attributes.h"
+ #include "chromeos/ash/components/language_packs/language_pack_manager.h"
++#include "chromeos/ash/components/login/auth/public/auth_factors_configuration.h"
++#include "chromeos/ash/components/login/auth/public/user_context.h"
+ #include "chromeos/ash/components/network/network_state.h"
+ #include "chromeos/ash/components/network/network_state_handler.h"
+ #include "chromeos/ash/components/osauth/public/auth_session_storage.h"
+@@ -282,6 +289,7 @@
+ #include "components/version_info/version_info.h"
+ #include "content/public/browser/browser_task_traits.h"
+ #include "content/public/browser/browser_thread.h"
++#include "google_apis/gaia/gaia_id.h"
+ #include "remoting/host/chromeos/features.h"
+ #include "services/network/public/cpp/shared_url_loader_factory.h"
+ #include "services/service_manager/public/cpp/connector.h"
+@@ -305,6 +313,11 @@ const unsigned int kResolveTimeZoneTimeoutSeconds = 60;
+ 
+ constexpr const char kDefaultExitReason[] = "Next";
+ constexpr const char kResetScreenExitReason[] = "Cancel";
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++constexpr char kAuraTokenHandleStatusPref[] = "TokenHandleStatus";
++constexpr char kAuraTokenHandleStatusValid[] = "valid";
++constexpr base::TimeDelta kAuraLocalAuthSessionLifetime = base::Minutes(10);
+ 
+ // TODO(crbug.com/40738890) Remove after stepping stone is set after M87.
+ constexpr char kLegacyUpdateScreenName[] = "update";
+@@ -350,6 +363,32 @@ const StaticOobeScreenId kScreensWithHiddenStatusArea[] = {
+     LocalStateErrorScreenView::kScreenId,
+ };
+ 
++std::string GetAuraLocalLinuxUsername() {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  std::optional<std::string> username = env->GetVar("USER");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  username = env->GetVar("LOGNAME");
++  if (username.has_value() && !username->empty()) {
++    return *username;
++  }
++  return "local";
++}
++
++void MarkAuraLocalAccountOfflineReady(const AccountId& account_id,
++                                      PrefService* local_state) {
++  user_manager::UserManager::Get()->SaveForceOnlineSignin(
++      account_id, /*force_online_signin=*/false);
++  user_manager::UserManager::Get()->SaveUserOAuthStatus(
++      account_id, user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
++
++  user_manager::KnownUser known_user(local_state);
++  known_user.SetStringPref(account_id, kAuraTokenHandleStatusPref,
++                           kAuraTokenHandleStatusValid);
++  known_user.UpdateReauthReason(account_id, 0);
++}
++
+ bool IsResumableOobeScreen(OobeScreenId screen_id) {
+   for (const auto& resumable_screen : kResumableOobeScreens) {
+     if (screen_id == resumable_screen) {
+@@ -913,6 +952,11 @@ WizardController::CreateScreens() {
+       base::BindRepeating(&WizardController::OnUserCreationScreenExit,
+                           weak_factory_.GetWeakPtr())));
+ 
++  append(std::make_unique<AuraLocalAccountScreen>(
++      oobe_ui->GetView<AuraLocalAccountScreenHandler>()->AsWeakPtr(),
++      base::BindRepeating(&WizardController::OnAuraLocalAccountScreenExit,
++                          weak_factory_.GetWeakPtr())));
++
+   append(std::make_unique<AddChildScreen>(
+       oobe_ui->GetView<AddChildScreenHandler>()->AsWeakPtr(),
+       oobe_ui->GetErrorScreen(),
+@@ -1532,6 +1576,9 @@ void WizardController::OnUserCreationScreenExit(
+   OnScreenExit(UserCreationView::kScreenId,
+                UserCreationScreen::GetResultString(result));
+   switch (result) {
++    case UserCreationScreen::Result::LOCAL_ACCOUNT:
++      AdvanceToScreen(AuraLocalAccountView::kScreenId);
++      break;
+     case UserCreationScreen::Result::SIGNIN_SCHOOL:
+       MaybeAbortQuickStartFlow(
+           quick_start::QuickStartController::AbortFlowReason::SIGNIN_SCHOOL);
+@@ -1588,6 +1635,49 @@ void WizardController::OnUserCreationScreenExit(
+   }
+ }
+ 
++void WizardController::OnAuraLocalAccountScreenExit(
++    AuraLocalAccountScreen::Result result) {
++  OnScreenExit(AuraLocalAccountView::kScreenId,
++               AuraLocalAccountScreen::GetResultString(result));
++  switch (result) {
++    case AuraLocalAccountScreen::Result::BACK:
++      AdvanceToScreen(UserCreationView::kScreenId);
++      break;
++    case AuraLocalAccountScreen::Result::START_SESSION: {
++      const std::string linux_username = GetAuraLocalLinuxUsername();
++      const AccountId account_id = AccountId::FromUserEmailGaiaId(
++          base::StrCat({linux_username, kAuraLocalAccountDomain}),
++          GaiaId(base::StrCat({kAuraLocalGaiaIdPrefix, linux_username})));
++      MarkAuraLocalAccountOfflineReady(account_id, &local_state_.get());
++      PerformOOBECompletedActions(
++          OobeMetricsHelper::CompletedPreLoginOobeFlowType::kRegular);
++      if (!StartupUtils::IsOobeCompleted(local_state_.get())) {
++        break;
++      }
++      UserContext user_context(user_manager::UserType::kRegular, account_id);
++      user_context.SetAuthFlow(UserContext::AUTH_FLOW_OFFLINE);
++      user_context.SetIsUsingOAuth(false);
++      user_context.SetSessionLifetime(base::Time::Now() +
++                                      kAuraLocalAuthSessionLifetime);
++      user_context.SetAuthSessionIds(
++          base::StrCat({kAuraLocalGaiaIdPrefix, linux_username, "-session"}),
++          base::StrCat({kAuraLocalGaiaIdPrefix, linux_username, "-broadcast"}));
++      user_context.SetUserIDHash(base::StrCat({"local-", linux_username}));
++      user_context.SetAuthFactorsConfiguration(AuthFactorsConfiguration());
++
++      UserSessionManager::GetInstance()->StartSession(
++          user_context, UserSessionManager::StartSessionType::kPrimary,
++          false,  // has_auth_cookies
++          false,  // has_active_session
++          base::WeakPtr<UserSessionManagerDelegate>());
++      break;
++    }
++    case AuraLocalAccountScreen::Result::NOT_APPLICABLE:
++      AdvanceToScreen(GaiaView::kScreenId);
++      break;
++  }
++}
++
+ void WizardController::OnConsumerUpdateScreenExit(
+     ConsumerUpdateScreen::Result result) {
+   OnScreenExit(ConsumerUpdateScreenView::kScreenId,
+@@ -3716,6 +3806,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
+              screen_id == FamilyLinkNoticeView::kScreenId ||
+              screen_id == GaiaView::kScreenId ||
+              screen_id == UserCreationView::kScreenId ||
++             screen_id == AuraLocalAccountView::kScreenId ||
+              screen_id == SignInFatalErrorView::kScreenId ||
+              screen_id == UserAllowlistCheckScreenView::kScreenId ||
+              screen_id == LocaleSwitchView::kScreenId ||
+diff --git a/chrome/browser/ash/login/wizard_controller.h b/chrome/browser/ash/login/wizard_controller.h
+index e65365c347..450eb895f8 100644
+--- a/chrome/browser/ash/login/wizard_controller.h
++++ b/chrome/browser/ash/login/wizard_controller.h
+@@ -68,6 +68,7 @@
+ #include "chrome/browser/ash/login/screens/osauth/password_selection_screen.h"
+ #include "chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.h"
+ #include "chrome/browser/ash/login/screens/osauth/remove_local_auth_factors_screen.h"
++#include "chrome/browser/ash/login/screens/aura_local_account_screen.h"
+ #include "chrome/browser/ash/login/screens/packaged_license_screen.h"
+ #include "chrome/browser/ash/login/screens/parental_handoff_screen.h"
+ #include "chrome/browser/ash/login/screens/perks_discovery_screen.h"
+@@ -449,6 +450,7 @@ class WizardController : public OobeUI::Observer {
+   void OnEnableDebuggingScreenExit();
+   void OnDemoPreferencesScreenExit(DemoPreferencesScreen::Result result);
+   void OnDemoSetupScreenExit(DemoSetupScreen::Result result);
++  void OnAuraLocalAccountScreenExit(AuraLocalAccountScreen::Result result);
+   void OnUserCreationScreenExit(UserCreationScreen::Result result);
+   // Start of online authentication sub-group
+   void OnGaiaScreenExit(GaiaScreen::Result result);
+diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/resources/chromeos/login/BUILD.gn
+index 0bd336866f..3d0b03a1c8 100644
+--- a/chrome/browser/resources/chromeos/login/BUILD.gn
++++ b/chrome/browser/resources/chromeos/login/BUILD.gn
+@@ -93,6 +93,7 @@ build_webui("build") {
+     "screens/common/ai_intro.ts",
+     "screens/common/app_downloading.ts",
+     "screens/common/app_launch_splash.ts",
++    "screens/common/aura_local_account.ts",
+     "screens/common/categories_selection.ts",
+     "screens/common/choobe.ts",
+     "screens/common/consolidated_consent.ts",
+diff --git a/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts b/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
+index de6f87a416..33b63278b0 100644
+--- a/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
++++ b/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
+@@ -119,6 +119,9 @@ export class OobeModalDialog extends OobeModalDialogBase {
+   }
+ 
+   hideDialog(): void {
++    if (!this.open) {
++      return;
++    }
+     this.getModalDialog().close();
+   }
+ 
+diff --git a/chrome/browser/resources/chromeos/login/components/oobe_icons.html b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
+index 22917bdf4a..e2e3a21adc 100644
+--- a/chrome/browser/resources/chromeos/login/components/oobe_icons.html
++++ b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
+@@ -418,6 +418,9 @@ found in the LICENSE file.
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M24 13.2C20.508 13.2 17.7 16.008 17.7 19.5C17.7 22.992 20.508 25.8 24 25.8C27.492 25.8 30.3 22.992 30.3 19.5C30.3 16.008 27.492 13.2 24 13.2ZM21.3 19.5C21.3 20.994 22.506 22.2 24 22.2C25.494 22.2 26.7 20.994 26.7 19.5C26.7 18.006 25.494 16.8 24 16.8C22.506 16.8 21.3 18.006 21.3 19.5Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M24 4.8C13.4016 4.8 4.8 13.4016 4.8 24C4.8 34.5984 13.4016 43.2 24 43.2C34.5984 43.2 43.2 34.5984 43.2 24C43.2 13.4016 34.5984 4.8 24 4.8ZM15.126 35.304C15.9 33.684 20.616 32.1 24 32.1C27.384 32.1 32.118 33.684 32.874 35.304C30.426 37.248 27.348 38.4 24 38.4C20.652 38.4 17.574 37.248 15.126 35.304ZM24 28.5C26.628 28.5 32.874 29.562 35.448 32.694C37.284 30.282 38.4 27.276 38.4 24C38.4 16.062 31.938 9.6 24 9.6C16.062 9.6 9.6 16.062 9.6 24C9.6 27.276 10.716 30.282 12.552 32.694C15.126 29.562 21.372 28.5 24 28.5Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+       </g>
++      <g id="local-account" fill-rule="evenodd">
++        <path fill-rule="evenodd" clip-rule="evenodd" d="M9.6 10.8C7.6118 10.8 6 12.4118 6 14.4V32.4C6 34.3882 7.6118 36 9.6 36H38.4C40.3882 36 42 34.3882 42 32.4V14.4C42 12.4118 40.3882 10.8 38.4 10.8H9.6ZM10.8 15.6H37.2V31.2H10.8V15.6ZM17.4 39.6H30.6L33 43.2H15L17.4 39.6ZM23.9999 17.4C21.6803 17.4 19.8 19.2804 19.8 21.6C19.8 23.9196 21.6803 25.8 23.9999 25.8C26.3195 25.8 28.1999 23.9196 28.1999 21.6C28.1999 19.2804 26.3195 17.4 23.9999 17.4ZM17.4 30C18.1679 27.84 21.3839 26.7 23.9999 26.7C26.6159 26.7 29.8319 27.84 30.5999 30H17.4Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
++      </g>
+       <g id="child-user" fill-rule="evenodd">
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M24 3.55566C27.3 3.55566 30 6.25566 30 9.55566C30 12.8557 27.3 15.5557 24 15.5557C20.7 15.5557 18 12.8557 18 9.55566C18 6.25566 20.7 3.55566 24 3.55566ZM11 24.7757C11 20.6757 17.84 17.5557 24 17.5557C30.16 17.5557 37 20.6757 37 24.7757V36.3157C37 38.6357 34.82 40.6557 31.8 41.9557V37.4957C31.8 35.6157 29.38 34.0757 26.6 33.4557C25.74 33.2557 24.86 33.1557 24 33.1557C20.66 33.1557 16.98 34.6957 16.32 36.8157C18.62 37.7757 21.36 38.3557 24 38.3557C24.66 38.3557 25.34 38.2957 26 38.2157V43.4157C25.34 43.4957 24.66 43.5557 24 43.5557C21.32 43.5557 18.52 42.9557 16.2 41.9557C13.18 40.6357 11 38.6357 11 36.3157V24.7757ZM28 25.5557C28 27.7648 26.2091 29.5557 24 29.5557C21.7909 29.5557 20 27.7648 20 25.5557C20 23.3465 21.7909 21.5557 24 21.5557C26.2091 21.5557 28 23.3465 28 25.5557Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+       </g>
+@@ -502,6 +505,9 @@ found in the LICENSE file.
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M48 26.4C41.016 26.4 35.4 32.016 35.4 39C35.4 45.984 41.016 51.6 48 51.6C54.984 51.6 60.6 45.984 60.6 39C60.6 32.016 54.984 26.4 48 26.4ZM42.6 39C42.6 41.988 45.012 44.4 48 44.4C50.988 44.4 53.4 41.988 53.4 39C53.4 36.012 50.988 33.6 48 33.6C45.012 33.6 42.6 36.012 42.6 39Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M48 9.6C26.8032 9.6 9.59998 26.8032 9.59998 48C9.59998 69.1968 26.8032 86.4 48 86.4C69.1968 86.4 86.4 69.1968 86.4 48C86.4 26.8032 69.1968 9.6 48 9.6ZM30.2519 70.608C31.7999 67.368 41.2319 64.2 47.9999 64.2C54.7679 64.2 64.2359 67.368 65.7479 70.608C60.8519 74.496 54.6959 76.8 47.9999 76.8C41.3039 76.8 35.1479 74.496 30.2519 70.608ZM48 57C53.256 57 65.748 59.124 70.896 65.388C74.568 60.564 76.8 54.552 76.8 48C76.8 32.124 63.876 19.2 48 19.2C32.124 19.2 19.2 32.124 19.2 48C19.2 54.552 21.432 60.564 25.104 65.388C30.252 59.124 42.744 57 48 57Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+       </g>
++      <g id="local-account" fill-rule="evenodd">
++        <path fill-rule="evenodd" clip-rule="evenodd" d="M19.2 21.6C15.2236 21.6 12 24.8236 12 28.8V64.8C12 68.7765 15.2236 72 19.2 72H76.8C80.7765 72 84 68.7765 84 64.8V28.8C84 24.8236 80.7765 21.6 76.8 21.6H19.2ZM21.6 31.2H74.4V62.4H21.6V31.2ZM34.8 79.2H61.2L66 86.4H30L34.8 79.2ZM47.9998 34.8C43.3606 34.8 39.6 38.5607 39.6 43.2C39.6 47.8392 43.3606 51.6 47.9998 51.6C52.639 51.6 56.3998 47.8392 56.3998 43.2C56.3998 38.5607 52.639 34.8 47.9998 34.8ZM34.8 60C36.3358 55.68 42.7678 53.4 47.9998 53.4C53.2318 53.4 59.6638 55.68 61.1998 60H34.8Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
++      </g>
+       <g id="child-user" fill-rule="evenodd">
+         <path fill-rule="evenodd" clip-rule="evenodd" d="M48 7.55566C54.6 7.55566 60 12.9557 60 19.5557C60 26.1557 54.6 31.5557 48 31.5557C41.4 31.5557 36 26.1557 36 19.5557C36 12.9557 41.4 7.55566 48 7.55566ZM22 49.9957C22 41.7957 35.68 35.5557 48 35.5557C60.32 35.5557 74 41.7957 74 49.9957V73.0757C74 77.7157 69.64 81.7557 63.6 84.3557V75.4357C63.6 71.6757 58.76 68.5957 53.2 67.3557C51.48 66.9557 49.72 66.7557 48 66.7557C41.32 66.7557 33.96 69.8357 32.64 74.0757C37.24 75.9957 42.72 77.1557 48 77.1557C49.32 77.1557 50.68 77.0357 52 76.8757V87.2757C50.68 87.4357 49.32 87.5557 48 87.5557C42.64 87.5557 37.04 86.3557 32.4 84.3557C26.36 81.7157 22 77.7157 22 73.0757V49.9957ZM56 51.5557C56 55.9739 52.4183 59.5557 48 59.5557C43.5817 59.5557 40 55.9739 40 51.5557C40 47.1374 43.5817 43.5557 48 43.5557C52.4183 43.5557 56 47.1374 56 51.5557Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
+       </g>
+diff --git a/chrome/browser/resources/chromeos/login/screens.ts b/chrome/browser/resources/chromeos/login/screens.ts
+index f910c22c00..fcc648c357 100644
+--- a/chrome/browser/resources/chromeos/login/screens.ts
++++ b/chrome/browser/resources/chromeos/login/screens.ts
+@@ -11,6 +11,7 @@ import './screens/common/add_child.js';
+ import './screens/common/ai_intro.js';
+ import './screens/common/app_downloading.js';
+ import './screens/common/app_launch_splash.js';
++import './screens/common/aura_local_account.js';
+ import './screens/common/categories_selection.js';
+ import './screens/common/choobe.js';
+ import './screens/common/consolidated_consent.js';
+@@ -103,6 +104,11 @@ export const commonScreensList: OobeTypes.ScreensList = [
+   },
+   {tag: 'app-downloading-element', id: 'app-downloading'},
+   {tag: 'app-launch-splash-element', id: 'app-launch-splash'},
++  {
++    tag: 'aura-local-account-element',
++    id: 'aura-local-account',
++    condition: 'isAuraDeLocalAccountEnabled',
++  },
+   {
+     tag: 'apply-online-password-element',
+     id: 'apply-online-password',
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html
+new file mode 100644
+index 0000000000..e1c4394ded
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html
+@@ -0,0 +1,71 @@
++<!--
++Copyright 2026 The Chromium Authors
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<style include="oobe-dialog-host-styles cros-color-overrides">
++  .field-stack {
++    display: flex;
++    flex-direction: column;
++    gap: 16px;
++    width: 100%;
++  }
++
++  .password-note {
++    color: var(--cros-text-color-secondary);
++    font: var(--oobe-default-font);
++    margin-top: 4px;
++  }
++
++  :host-context(.jelly-enabled) cr-input {
++    --cr-input-background-color: var(--cros-sys-input_field_on_shaded);
++  }
++
++  :host-context(.jelly-enabled) .password-note {
++    color: var(--cros-sys-on_surface_variant);
++    font: var(--cros-body-2-font);
++  }
++</style>
++
++<oobe-adaptive-dialog id="auraLocalAccountDialog" role="dialog"
++    single-column>
++  <iron-icon slot="icon" icon="oobe-32:lock"></iron-icon>
++  <h1 slot="title">
++    [[i18nDynamic(locale, 'auraLocalAccountTitle')]]
++  </h1>
++  <div slot="subtitle">
++    [[i18nDynamic(locale, 'auraLocalAccountSubtitle')]]
++  </div>
++  <div slot="content" class="layout vertical center center-justified">
++    <div class="field-stack">
++      <cr-input id="displayNameInput"
++          value="{{displayName_}}"
++          label="[[i18nDynamic(locale, 'auraLocalAccountDisplayName')]]"
++          placeholder="[[i18nDynamic(
++              locale, 'auraLocalAccountDisplayNamePlaceholder')]]"
++          maxlength="80">
++      </cr-input>
++      <cr-input id="passwordHintInput"
++          value="{{passwordHint_}}"
++          label="[[i18nDynamic(locale, 'auraLocalAccountPasswordHint')]]"
++          placeholder="[[i18nDynamic(
++              locale, 'auraLocalAccountPasswordHintPlaceholder')]]"
++          maxlength="120">
++      </cr-input>
++      <div class="password-note">
++        [[i18nDynamic(locale, 'auraLocalAccountPasswordNote')]]
++      </div>
++    </div>
++  </div>
++  <div slot="back-navigation">
++    <oobe-back-button id="backButton" on-click="onBackClicked_">
++    </oobe-back-button>
++  </div>
++  <div slot="bottom-buttons">
++    <oobe-text-button id="startButton" inverse class="focus-on-show"
++        text-key="auraLocalAccountStart"
++        on-click="onStartClicked_">
++    </oobe-text-button>
++  </div>
++</oobe-adaptive-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
+new file mode 100644
+index 0000000000..23707a5934
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
+@@ -0,0 +1,84 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import '//resources/ash/common/cr_elements/cros_color_overrides.css.js';
++import '//resources/ash/common/cr_elements/cr_input/cr_input.js';
++import '//resources/polymer/v3_0/iron-icon/iron-icon.js';
++import '../../components/buttons/oobe_back_button.js';
++import '../../components/buttons/oobe_text_button.js';
++import '../../components/common_styles/oobe_common_styles.css.js';
++import '../../components/common_styles/oobe_dialog_host_styles.css.js';
++import '../../components/dialogs/oobe_adaptive_dialog.js';
++import '../../components/oobe_icons.html.js';
++
++import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
++import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
++
++import {OobeUiState} from '../../components/display_manager_types.js';
++import {LoginScreenMixin} from '../../components/mixins/login_screen_mixin.js';
++import {OobeDialogHostMixin} from '../../components/mixins/oobe_dialog_host_mixin.js';
++import {OobeI18nMixin} from '../../components/mixins/oobe_i18n_mixin.js';
++
++import {getTemplate} from './aura_local_account.html.js';
++
++enum UserAction {
++  BACK = 'back',
++  START_SESSION = 'start-session',
++}
++
++const AuraLocalAccountBase =
++    OobeDialogHostMixin(LoginScreenMixin(OobeI18nMixin(PolymerElement)));
++
++export class AuraLocalAccount extends AuraLocalAccountBase {
++  static get is() {
++    return 'aura-local-account-element' as const;
++  }
++
++  static get template(): HTMLTemplateElement {
++    return getTemplate();
++  }
++
++  static get properties(): PolymerElementProperties {
++    return {
++      displayName_: {
++        type: String,
++        value: '',
++      },
++
++      passwordHint_: {
++        type: String,
++        value: '',
++      },
++    };
++  }
++
++  private displayName_: string;
++  private passwordHint_: string;
++
++  override ready(): void {
++    super.ready();
++    this.initializeLoginScreen('AuraLocalAccountScreen');
++  }
++
++  override getOobeUIInitialState(): OobeUiState {
++    return OobeUiState.ONBOARDING;
++  }
++
++  private onBackClicked_(): void {
++    this.userActed(UserAction.BACK);
++  }
++
++  private onStartClicked_(): void {
++    this.userActed(
++        [UserAction.START_SESSION, this.displayName_, this.passwordHint_]);
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    [AuraLocalAccount.is]: AuraLocalAccount;
++  }
++}
++
++customElements.define(AuraLocalAccount.is, AuraLocalAccount);
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+index 56a4169683..815b8de3ac 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+@@ -25,6 +25,46 @@ found in the LICENSE file.
+     margin-bottom: 10px;
+   }
+ 
++  #userType.local-accounts-enabled {
++    display: grid;
++    gap: 12px;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    max-width: 760px;
++    width: 100%;
++  }
++
++  #userType.local-accounts-enabled cr-card-radio-button {
++    margin-bottom: 0;
++  }
++
++  #userType.local-accounts-enabled cr-card-radio-button:not(:last-child) {
++    margin-bottom: 0;
++  }
++
++  #userType.local-accounts-enabled .card-container {
++    min-height: 118px;
++    padding-inline-end: 40px;
++    padding-inline-start: 16px;
++  }
++
++  #userType.local-accounts-enabled .card-content {
++    padding-inline-end: 12px;
++    padding-inline-start: 16px;
++  }
++
++  #userType.local-accounts-enabled .card-icon {
++    --iron-icon-height: 40px;
++    --iron-icon-width: 40px;
++    flex: 0 0 auto;
++  }
++
++  @media screen and (max-width: 720px) {
++    #userType.local-accounts-enabled {
++      display: flex;
++      flex-direction: column;
++    }
++  }
++
+ </style>
+ <oobe-adaptive-dialog id="userCreationDialog"
+     for-step="create"
+@@ -37,7 +77,9 @@ found in the LICENSE file.
+     [[i18nDynamic(locale, subtitleKey_)]]
+   </div>
+   <div slot="content" class="layout vertical landscape-vertical-centered">
+-    <cr-radio-group id="userType" selected="{{selectedUserType}}">
++    <cr-radio-group id="userType"
++        class$="[[getUserTypeClass_(isAuraDeLocalAccountEnabled_)]]"
++        selected="{{selectedUserType}}">
+       <cr-card-radio-button id="selfButton" class="flex" name="self">
+         <div class="card-container">
+           <hd-iron-icon class="card-icon" icon1x="oobe-48:avatar"
+@@ -53,6 +95,23 @@ found in the LICENSE file.
+           </div>
+         </div>
+       </cr-card-radio-button>
++      <cr-card-radio-button id="localButton"
++          hidden="[[!isAuraDeLocalAccountEnabled_]]"
++          class="flex" name="local">
++        <div class="card-container">
++          <hd-iron-icon class="card-icon" icon1x="oobe-48:local-account"
++              icon2x="oobe-96:local-account">
++          </hd-iron-icon>
++          <div class="card-content">
++            <div class="card-label">
++              [[getLocalCardLabel_(locale)]]
++            </div>
++            <div class="card-text">
++              [[getLocalCardText_(locale)]]
++            </div>
++          </div>
++        </div>
++      </cr-card-radio-button>
+       <cr-card-radio-button id="childButton" class="flex" name="child">
+         <div class="card-container">
+           <hd-iron-icon class="card-icon" icon1x="oobe-48:child-user"
+@@ -86,7 +145,6 @@ found in the LICENSE file.
+         </div>
+       </cr-card-radio-button>
+     </cr-radio-group>
+-    </div>
+   </div>
+   <div slot="back-navigation">
+     <oobe-back-button id="backButton" on-click="onBackClicked_"
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+index f24b9f07a6..ec4a3a9540 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+@@ -56,6 +56,7 @@ enum UserCreationUIState {
+  * User type for setting up the device.
+  */
+ enum UserCreationUserType {
++  LOCAL = 'local',
+   SELF = 'self',
+   CHILD = 'child',
+   ENROLL = 'enroll',
+@@ -73,6 +74,7 @@ enum EnrollTriageMethod {
+  * Available user actions.
+  */
+ enum UserAction {
++  LOCAL_ACCOUNT = 'local-account',
+   SIGNIN = 'signin',
+   SIGNIN_TRIAGE = 'signin-triage',
+   SIGNIN_SCHOOL = 'signin-school',
+@@ -156,6 +158,17 @@ export class UserCreation extends UserCreationScreenElementBase {
+        * enable the Next and Back buttons.
+        */
+       isOobeLoaded_: Boolean,
++
++      /**
++       * Whether AuraDE local account setup is available in this build/session.
++       */
++      isAuraDeLocalAccountEnabled_: {
++        type: Boolean,
++        value() {
++          return loadTimeData.getBoolean('isAuraDeLocalAccountEnabled');
++        },
++        readOnly: true,
++      },
+     };
+   }
+ 
+@@ -167,10 +180,15 @@ export class UserCreation extends UserCreationScreenElementBase {
+   subtitleKey_: string;
+   isOobeLoaded_: boolean;
+   private readonly isOobeSoftwareUpdateEnabled_: boolean;
++  private readonly isAuraDeLocalAccountEnabled_: boolean;
+ 
+   constructor() {
+     super();
+-    if (this.isOobeSoftwareUpdateEnabled_) {
++    if (this.isAuraDeLocalAccountEnabled_) {
++      this.selectedUserType = UserCreationUserType.SELF;
++      this.titleKey_ = 'userCreationUpdatedTitle';
++      this.subtitleKey_ = 'userCreationUpdatedSubtitle';
++    } else if (this.isOobeSoftwareUpdateEnabled_) {
+       this.selectedUserType = '';
+       this.titleKey_ = 'userCreationUpdatedTitle';
+       this.subtitleKey_ = 'userCreationUpdatedSubtitle';
+@@ -203,6 +221,19 @@ export class UserCreation extends UserCreationScreenElementBase {
+ 
+   override onBeforeShow(): void {
+     super.onBeforeShow();
++    if (this.isAuraDeLocalAccountEnabled_) {
++      this.selectedUserType = UserCreationUserType.SELF;
++      if (!loadTimeData.getBoolean('isOobeFlow')) {
++        this.titleKey_ = 'userCreationAddPersonUpdatedTitle';
++        this.subtitleKey_ = 'userCreationAddPersonUpdatedSubtitle';
++      } else {
++        this.titleKey_ = 'userCreationUpdatedTitle';
++        this.subtitleKey_ = 'userCreationUpdatedSubtitle';
++      }
++
++      return;
++    }
++
+     if (this.isOobeSoftwareUpdateEnabled_) {
+       this.restoreOobeUIState();
+       if (!loadTimeData.getBoolean('isOobeFlow')) {
+@@ -296,7 +327,9 @@ export class UserCreation extends UserCreationScreenElementBase {
+ 
+   private onNextClicked_(): void {
+     if (this.uiStep === UserCreationUIState.CREATE) {
+-      if (this.selectedUserType === UserCreationUserType.SELF) {
++      if (this.selectedUserType === UserCreationUserType.LOCAL) {
++        this.userActed(UserAction.LOCAL_ACCOUNT);
++      } else if (this.selectedUserType === UserCreationUserType.SELF) {
+         this.userActed(UserAction.SIGNIN);
+       } else if (this.selectedUserType === UserCreationUserType.CHILD) {
+         if (this.isOobeSoftwareUpdateEnabled_) {
+@@ -359,6 +392,18 @@ export class UserCreation extends UserCreationScreenElementBase {
+     return this.i18nDynamic(locale, 'createForSelfDescription');
+   }
+ 
++  private getLocalCardLabel_(locale: string): string {
++    return this.i18nDynamic(locale, 'userCreationLocalButtonTitle');
++  }
++
++  private getLocalCardText_(locale: string): string {
++    return this.i18nDynamic(locale, 'userCreationLocalButtonDescription');
++  }
++
++  private getUserTypeClass_(isAuraDeLocalAccountEnabled: boolean): string {
++    return isAuraDeLocalAccountEnabled ? 'local-accounts-enabled' : '';
++  }
++
+   private getChildCardLabel_(locale: string): string {
+     if (this.isOobeSoftwareUpdateEnabled_) {
+       return this.i18nDynamic(locale, 'userCreationChildButtonTitle');
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts b/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
+index 012a8b16fc..0163f96de4 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
+@@ -292,6 +292,8 @@ export class OobeWelcomeScreen extends OobeWelcomeScreenBase {
+   override onBeforeHide(): void {
+     super.onBeforeHide();
+     this.cleanupChromeVoxHint();
++    // A hidden native modal keeps the rest of OOBE inert and breaks hit testing.
++    this.closeChromeVoxHint();
+   }
+ 
+   private cancel(): void {
+diff --git a/chrome/browser/ui/webui/ash/login/BUILD.gn b/chrome/browser/ui/webui/ash/login/BUILD.gn
+index ec8945f916..269e56268f 100644
+--- a/chrome/browser/ui/webui/ash/login/BUILD.gn
++++ b/chrome/browser/ui/webui/ash/login/BUILD.gn
+@@ -21,6 +21,8 @@ static_library("login") {
+     "app_launch_splash_screen_handler.h",
+     "arc_vm_data_migration_screen_handler.cc",
+     "arc_vm_data_migration_screen_handler.h",
++    "aura_local_account_screen_handler.cc",
++    "aura_local_account_screen_handler.h",
+     "auto_enrollment_check_screen_handler.cc",
+     "auto_enrollment_check_screen_handler.h",
+     "base_screen_handler.cc",
+diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+new file mode 100644
+index 0000000000..c41931232a
+--- /dev/null
++++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h"
++
++#include "components/login/localized_values_builder.h"
++
++namespace ash {
++
++AuraLocalAccountScreenHandler::AuraLocalAccountScreenHandler()
++    : BaseScreenHandler(kScreenId) {}
++
++AuraLocalAccountScreenHandler::~AuraLocalAccountScreenHandler() = default;
++
++void AuraLocalAccountScreenHandler::DeclareLocalizedValues(
++    ::login::LocalizedValuesBuilder* builder) {
++  builder->Add("auraLocalAccountTitle", "Set up your local account");
++  builder->Add("auraLocalAccountSubtitle",
++               "AuraDE will use this Linux user and store files in your home "
++               "folder.");
++  builder->Add("auraLocalAccountDisplayName", "Display name");
++  builder->Add("auraLocalAccountDisplayNamePlaceholder", "Local user");
++  builder->Add("auraLocalAccountPasswordHint", "Password hint");
++  builder->Add("auraLocalAccountPasswordHintPlaceholder",
++               "Optional hint shown only on this device");
++  builder->Add("auraLocalAccountPasswordNote",
++               "Linux password changes require AuraDE account helper support.");
++  builder->Add("auraLocalAccountBack", "Back");
++  builder->Add("auraLocalAccountStart", "Continue");
++}
++
++void AuraLocalAccountScreenHandler::Show() {
++  ShowInWebUI();
++}
++
++base::WeakPtr<AuraLocalAccountView> AuraLocalAccountScreenHandler::AsWeakPtr() {
++  return weak_ptr_factory_.GetWeakPtr();
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h
+new file mode 100644
+index 0000000000..5fd1e6bfa3
+--- /dev/null
++++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h
+@@ -0,0 +1,50 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
++
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/ui/webui/ash/login/base_screen_handler.h"
++
++namespace ash {
++
++class AuraLocalAccountScreen;
++
++class AuraLocalAccountView {
++ public:
++  inline constexpr static StaticOobeScreenId kScreenId{
++      "aura-local-account", "AuraLocalAccountScreen"};
++
++  virtual ~AuraLocalAccountView() = default;
++
++  virtual void Show() = 0;
++  virtual base::WeakPtr<AuraLocalAccountView> AsWeakPtr() = 0;
++};
++
++class AuraLocalAccountScreenHandler final : public AuraLocalAccountView,
++                                            public BaseScreenHandler {
++ public:
++  using TView = AuraLocalAccountView;
++
++  AuraLocalAccountScreenHandler();
++  ~AuraLocalAccountScreenHandler() override;
++
++  AuraLocalAccountScreenHandler(const AuraLocalAccountScreenHandler&) = delete;
++  AuraLocalAccountScreenHandler& operator=(
++      const AuraLocalAccountScreenHandler&) = delete;
++
++ private:
++  void Show() override;
++  base::WeakPtr<AuraLocalAccountView> AsWeakPtr() override;
++
++  void DeclareLocalizedValues(
++      ::login::LocalizedValuesBuilder* builder) override;
++
++  base::WeakPtrFactory<AuraLocalAccountView> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
+diff --git a/chrome/browser/ui/webui/ash/login/oobe_ui.cc b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
+index 4dde123e20..10ea2f53c7 100644
+--- a/chrome/browser/ui/webui/ash/login/oobe_ui.cc
++++ b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
+@@ -55,6 +55,7 @@
+ #include "chrome/browser/ui/webui/ash/login/app_downloading_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/arc_vm_data_migration_screen_handler.h"
++#include "chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/auto_enrollment_check_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/base_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/categories_selection_screen_handler.h"
+@@ -353,6 +354,9 @@ void CreateAndAddOobeUIDataSource(Profile* profile,
+ 
+   source->AddBoolean("isOobeSoftwareUpdateEnabled",
+                      features::IsOobeSoftwareUpdateEnabled());
++  source->AddBoolean(
++      "isAuraDeLocalAccountEnabled",
++      command_line->HasSwitch("aurade-enable-local-accounts"));
+ 
+   source->AddBoolean("isSplitModifierKeyboardInfoEnabled",
+                      features::IsOobeSplitModifierKeyboardInfoEnabled());
+@@ -516,6 +520,7 @@ void OobeUI::ConfigureOobeDisplay() {
+   AddWebUIHandler(std::make_unique<SshConfiguredHandler>());
+ 
+   AddScreenHandler(std::make_unique<AppLaunchSplashScreenHandler>());
++  AddScreenHandler(std::make_unique<AuraLocalAccountScreenHandler>());
+ 
+   AddScreenHandler(std::make_unique<DeviceDisabledScreenHandler>());
+ 
+diff --git a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+index 9847d16006..ccdc83dc87 100644
+--- a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+@@ -43,6 +43,9 @@ void UserCreationScreenHandler::DeclareLocalizedValues(
+                IDS_OOBE_USER_CREATION_CHILD_BUTTON_LABEL);
+   builder->Add("createForChildDescription",
+                IDS_OOBE_USER_CREATION_CHILD_BUTTON_DESCRIPTION);
++  builder->Add("userCreationLocalButtonTitle", "Local account");
++  builder->Add("userCreationLocalButtonDescription",
++               "Use this Linux account with local files and settings.");
+ 
+   builder->Add("userCreationPersonalButtonTitle",
+                IDS_OOBE_USER_CREATION_PERSONEL_USE_BUTTON_LABEL);

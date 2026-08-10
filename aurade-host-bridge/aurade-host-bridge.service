@@ -1,0 +1,23 @@
+[Unit]
+Description=AuraDE Linux host integration bridge
+After=dbus.service
+Wants=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.aurade.HostBridge
+ExecStart=/usr/bin/aurade-host-bridge
+Restart=on-failure
+RestartSec=2
+User=root
+PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,475 @@
+diff --git a/ash/ambient/backdrop/ambient_backend_controller_impl.cc b/ash/ambient/backdrop/ambient_backend_controller_impl.cc
+index eb34dd7ea8..9201e69380 100644
+--- a/ash/ambient/backdrop/ambient_backend_controller_impl.cc
++++ b/ash/ambient/backdrop/ambient_backend_controller_impl.cc
+@@ -29,12 +29,16 @@
+ #include "base/json/json_reader.h"
+ #include "base/logging.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/task/sequenced_task_runner.h"
+ #include "base/time/time.h"
+ #include "base/uuid.h"
+ #include "chromeos/assistant/internal/ambient/backdrop_client_config.h"
+ #include "chromeos/assistant/internal/ambient/utils.h"
+ #include "chromeos/assistant/internal/proto/backdrop/backdrop.pb.h"
++#include "components/account_id/account_id.h"
+ #include "components/prefs/pref_service.h"
++#include "components/user_manager/user.h"
+ #include "components/user_manager/user_manager.h"
+ #include "google_apis/gaia/gaia_id.h"
+ #include "net/base/load_flags.h"
+@@ -58,6 +62,15 @@ constexpr char kProtoMimeType[] = "application/protobuf";
+ 
+ constexpr int kMaxPreviewImages = 4;
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++constexpr char kAuraLocalPreviewSlideshow[] =
++    "chrome://personalization/images/slideshow.png";
++constexpr char kAuraLocalPreviewBreeze[] =
++    "chrome://personalization/images/feel_the_breeze.png";
++constexpr char kAuraLocalPreviewFloat[] =
++    "chrome://personalization/images/float_on_by.png";
++
+ // Max body size in bytes to download.
+ constexpr int kMaxBodySizeBytes = 1 * 1024 * 1024;  // 1 MiB
+ 
+@@ -106,6 +119,72 @@ std::string GetClientId() {
+   return client_id;
+ }
+ 
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
++bool IsAuraLocalAmbientAccountActive() {
++  const user_manager::User* active_user =
++      user_manager::UserManager::Get()->GetActiveUser();
++  return active_user && IsAuraLocalAccount(active_user->GetAccountId());
++}
++
++std::vector<GURL> GetAuraLocalPreviewUrls() {
++  return {GURL(kAuraLocalPreviewSlideshow), GURL(kAuraLocalPreviewBreeze),
++          GURL(kAuraLocalPreviewFloat)};
++}
++
++AmbientSettings CreateAuraLocalAmbientSettings() {
++  AmbientSettings settings;
++  settings.topic_source = personalization_app::mojom::TopicSource::kArtGallery;
++  settings.show_weather = false;
++
++  ArtSetting featured;
++  featured.album_id = kAmbientModeFeaturedPhotoAlbumId;
++  featured.enabled = true;
++  featured.visible = true;
++  featured.title = "Featured photos";
++  featured.description = "Bundled local screen saver images";
++  featured.preview_image_url = kAuraLocalPreviewSlideshow;
++  settings.art_settings.emplace_back(std::move(featured));
++
++  ArtSetting breeze;
++  breeze.album_id = "aurade-feel-the-breeze";
++  breeze.enabled = true;
++  breeze.visible = true;
++  breeze.title = "Feel the Breeze";
++  breeze.description = "Bundled local screen saver animation";
++  breeze.preview_image_url = kAuraLocalPreviewBreeze;
++  settings.art_settings.emplace_back(std::move(breeze));
++
++  ArtSetting float_on_by;
++  float_on_by.album_id = "aurade-float-on-by";
++  float_on_by.enabled = true;
++  float_on_by.visible = true;
++  float_on_by.title = "Float On By";
++  float_on_by.description = "Bundled local screen saver animation";
++  float_on_by.preview_image_url = kAuraLocalPreviewFloat;
++  settings.art_settings.emplace_back(std::move(float_on_by));
++
++  return settings;
++}
++
++ScreenUpdate CreateAuraLocalScreenUpdate(int num_topics) {
++  ScreenUpdate update;
++  const std::vector<GURL> preview_urls = GetAuraLocalPreviewUrls();
++  for (int i = 0; i < num_topics; ++i) {
++    AmbientModeTopic topic;
++    topic.url = preview_urls[i % preview_urls.size()].spec();
++    topic.details = "AuraDE local screen saver";
++    topic.topic_type = ::ambient::TopicType::kFeatured;
++    update.next_topics.emplace_back(std::move(topic));
++  }
++  return update;
++}
++
+ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
+     const BackdropClientConfig::Request& request) {
+   auto resource_request = std::make_unique<network::ResourceRequest>();
+@@ -391,6 +470,16 @@ void AmbientBackendControllerImpl::FetchScreenUpdateInfo(
+     bool show_pair_personal_portraits,
+     const gfx::Size& screen_size,
+     OnScreenUpdateInfoFetchedCallback callback) {
++  if (IsAuraLocalAmbientAccountActive()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](OnScreenUpdateInfoFetchedCallback callback,
++               ScreenUpdate update) { std::move(callback).Run(update); },
++            std::move(callback), CreateAuraLocalScreenUpdate(num_topics)));
++    return;
++  }
++
+   Shell::Get()->ambient_controller()->RequestAccessToken(base::BindOnce(
+       &AmbientBackendControllerImpl::FetchScreenUpdateInfoInternal,
+       weak_factory_.GetWeakPtr(), num_topics, show_pair_personal_portraits,
+@@ -400,6 +489,16 @@ void AmbientBackendControllerImpl::FetchScreenUpdateInfo(
+ void AmbientBackendControllerImpl::FetchPreviewImages(
+     const gfx::Size& preview_size,
+     OnPreviewImagesFetchedCallback callback) {
++  if (IsAuraLocalAmbientAccountActive()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](OnPreviewImagesFetchedCallback callback,
++               std::vector<GURL> urls) { std::move(callback).Run(urls); },
++            std::move(callback), GetAuraLocalPreviewUrls()));
++    return;
++  }
++
+   constexpr int num_topics = kMaxPreviewImages;
+   OnScreenUpdateInfoFetchedCallback combined_callback =
+       base::BindOnce(&ToPreviewUrls).Then(std::move(callback));
+@@ -418,6 +517,18 @@ void AmbientBackendControllerImpl::GetSettings(GetSettingsCallback callback) {
+ void AmbientBackendControllerImpl::UpdateSettings(
+     const AmbientSettings settings,
+     UpdateSettingsCallback callback) {
++  if (IsAuraLocalAmbientAccountActive()) {
++    aura_local_settings_ = settings;
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](UpdateSettingsCallback callback, AmbientSettings settings) {
++              std::move(callback).Run(/*success=*/true, settings);
++            },
++            std::move(callback), settings));
++    return;
++  }
++
+   auto* ambient_controller = Shell::Get()->ambient_controller();
+ 
+   // Clear disk cache when Settings changes.
+@@ -446,6 +557,16 @@ void AmbientBackendControllerImpl::FetchPersonalAlbums(
+ void AmbientBackendControllerImpl::FetchWeather(
+     std::optional<std::string> weather_client_id,
+     FetchWeatherCallback callback) {
++  if (IsAuraLocalAmbientAccountActive()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(
++                       [](FetchWeatherCallback callback) {
++                         std::move(callback).Run(std::nullopt);
++                       },
++                       std::move(callback)));
++    return;
++  }
++
+   auto response_handler =
+       [](FetchWeatherCallback callback,
+          std::unique_ptr<BackdropURLLoader> backdrop_url_loader,
+@@ -705,6 +826,21 @@ void AmbientBackendControllerImpl::FetchSettingsAndAlbums(
+     int banner_height,
+     int num_albums,
+     OnSettingsAndAlbumsFetchedCallback callback) {
++  if (IsAuraLocalAmbientAccountActive()) {
++    if (!aura_local_settings_.has_value()) {
++      aura_local_settings_ = CreateAuraLocalAmbientSettings();
++    }
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](OnSettingsAndAlbumsFetchedCallback callback,
++               AmbientSettings settings) {
++              std::move(callback).Run(settings, PersonalAlbums());
++            },
++            std::move(callback), aura_local_settings_.value()));
++    return;
++  }
++
+   auto on_done = base::BarrierClosure(
+       /*num_callbacks=*/2,
+       base::BindOnce(&AmbientBackendControllerImpl::OnSettingsAndAlbumsFetched,
+diff --git a/ash/ambient/backdrop/ambient_backend_controller_impl.h b/ash/ambient/backdrop/ambient_backend_controller_impl.h
+index 49bb640848..bc75405b90 100644
+--- a/ash/ambient/backdrop/ambient_backend_controller_impl.h
++++ b/ash/ambient/backdrop/ambient_backend_controller_impl.h
+@@ -125,6 +125,8 @@ class AmbientBackendControllerImpl : public AmbientBackendController {
+   // empty values if server returns with error.
+   ash::PersonalAlbums personal_albums_;
+ 
++  std::optional<ash::AmbientSettings> aura_local_settings_;
++
+   BackdropClientConfig backdrop_client_config_;
+ 
+   base::WeakPtrFactory<AmbientBackendControllerImpl> weak_factory_{this};
+diff --git a/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc b/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
+index d0fea22d14..91adbf2224 100644
+--- a/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
++++ b/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
+@@ -13,6 +13,7 @@
+ #include "ash/public/cpp/ambient/common/ambient_settings.h"
+ #include "ash/webui/personalization_app/mojom/personalization_app.mojom-shared.h"
+ #include "base/check.h"
++#include "base/environment.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/task/sequenced_task_runner.h"
+@@ -33,8 +34,29 @@ constexpr char kFakeUrl[] = "chrome://ambient";
+ 
+ constexpr char kFakeDetails[] = "fake-photo-attribution";
+ 
++constexpr char kAuraLocalPreviewSlideshow[] =
++    "chrome://personalization/images/slideshow.png";
++constexpr char kAuraLocalPreviewBreeze[] =
++    "chrome://personalization/images/feel_the_breeze.png";
++constexpr char kAuraLocalPreviewFloat[] =
++    "chrome://personalization/images/float_on_by.png";
++
+ constexpr std::array<const char*, 2> kFakeBackupPhotoUrls = {
+     "http://fake-backup-photo-1.com", "http://fake-backup-photo-2.com"};
++constexpr std::array<const char*, 2> kAuraLocalBackupPhotoUrls = {
++    kAuraLocalPreviewSlideshow, kAuraLocalPreviewBreeze};
++
++bool IsAuraLocalAmbientBackendEnabled() {
++  auto environment = base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar("AURADE_ENABLE_LOCAL_AMBIENT_BACKEND");
++  return value.has_value() && value.value() != "0";
++}
++
++std::vector<GURL> GetAuraLocalPreviewUrls() {
++  return {GURL(kAuraLocalPreviewSlideshow), GURL(kAuraLocalPreviewBreeze),
++          GURL(kAuraLocalPreviewFloat)};
++}
+ 
+ AmbientSettings CreateFakeSettings() {
+   AmbientSettings settings;
+@@ -66,6 +88,41 @@ AmbientSettings CreateFakeSettings() {
+   return settings;
+ }
+ 
++AmbientSettings CreateAuraLocalSettings() {
++  AmbientSettings settings;
++  settings.topic_source = personalization_app::mojom::TopicSource::kArtGallery;
++  settings.temperature_unit = kTemperatureUnit;
++
++  ArtSetting slideshow;
++  slideshow.album_id = "aurade-slideshow";
++  slideshow.enabled = true;
++  slideshow.title = "Featured photos";
++  slideshow.description = "Bundled local screen saver images";
++  slideshow.preview_image_url = kAuraLocalPreviewSlideshow;
++  slideshow.visible = true;
++  settings.art_settings.emplace_back(std::move(slideshow));
++
++  ArtSetting breeze;
++  breeze.album_id = "aurade-feel-the-breeze";
++  breeze.enabled = true;
++  breeze.title = "Feel the Breeze";
++  breeze.description = "Bundled local screen saver animation";
++  breeze.preview_image_url = kAuraLocalPreviewBreeze;
++  breeze.visible = true;
++  settings.art_settings.emplace_back(std::move(breeze));
++
++  ArtSetting float_on_by;
++  float_on_by.album_id = "aurade-float-on-by";
++  float_on_by.enabled = true;
++  float_on_by.title = "Float On By";
++  float_on_by.description = "Bundled local screen saver animation";
++  float_on_by.preview_image_url = kAuraLocalPreviewFloat;
++  float_on_by.visible = true;
++  settings.art_settings.emplace_back(std::move(float_on_by));
++
++  return settings;
++}
++
+ PersonalAlbums CreateFakeAlbums() {
+   PersonalAlbums albums;
+   PersonalAlbum album0;
+@@ -100,15 +157,20 @@ void FakeAmbientBackendControllerImpl::FetchScreenUpdateInfo(
+         custom_num_topics_to_return_.has_value()
+             ? std::min(custom_num_topics_to_return_.value(), num_topics)
+             : num_topics;
++    const std::vector<GURL> aura_local_urls = GetAuraLocalPreviewUrls();
+     for (int i = 0; i < num_topics_to_return; ++i) {
+       ash::AmbientModeTopic topic;
+-      topic.url = kFakeUrl;
+-      topic.details = kFakeDetails;
++      topic.url = IsAuraLocalAmbientBackendEnabled()
++                      ? aura_local_urls[i % aura_local_urls.size()].spec()
++                      : kFakeUrl;
++      topic.details = IsAuraLocalAmbientBackendEnabled()
++                          ? "AuraDE local screen saver"
++                          : kFakeDetails;
+       topic.is_portrait = is_portrait_;
+       if ((show_pair_personal_portraits &&
+            topic_type_ == ::ambient::kPersonal && is_portrait_) ||
+           has_related_image_) {
+-        topic.related_image_url = kFakeUrl;
++        topic.related_image_url = topic.url;
+       }
+       topic.topic_type = topic_type_;
+ 
+@@ -133,7 +195,9 @@ void FakeAmbientBackendControllerImpl::FetchScreenUpdateInfo(
+ void FakeAmbientBackendControllerImpl::FetchPreviewImages(
+     const gfx::Size& preview_size,
+     OnPreviewImagesFetchedCallback callback) {
+-  std::vector<GURL> urls = {GURL(kFakeUrl)};
++  std::vector<GURL> urls = IsAuraLocalAmbientBackendEnabled()
++                               ? GetAuraLocalPreviewUrls()
++                               : std::vector<GURL>{GURL(kFakeUrl)};
+   // Pretend to respond asynchronously.
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE, base::BindOnce(std::move(callback), urls));
+@@ -145,6 +209,12 @@ void FakeAmbientBackendControllerImpl::UpdateSettings(
+   // |show_weather| should always be set to true.
+   DCHECK(settings.show_weather);
+   current_temperature_unit_ = settings.temperature_unit;
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(std::move(callback), /*success=*/true, settings));
++    return;
++  }
+   if (update_auto_reply_.has_value()) {
+     std::move(callback).Run(update_auto_reply_.value(), settings);
+     return;
+@@ -158,6 +228,13 @@ void FakeAmbientBackendControllerImpl::FetchSettingsAndAlbums(
+     int banner_height,
+     int num_albums,
+     OnSettingsAndAlbumsFetchedCallback callback) {
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(std::move(callback), CreateAuraLocalSettings(),
++                       PersonalAlbums()));
++    return;
++  }
+   pending_fetch_settings_albums_callback_ = std::move(callback);
+ }
+ 
+@@ -173,20 +250,32 @@ void FakeAmbientBackendControllerImpl::FetchWeather(
+ 
+ const std::array<const char*, 2>&
+ FakeAmbientBackendControllerImpl::GetBackupPhotoUrls() const {
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    return kAuraLocalBackupPhotoUrls;
++  }
+   return kFakeBackupPhotoUrls;
+ }
+ 
+ std::array<const char*, 2>
+ FakeAmbientBackendControllerImpl::GetTimeOfDayVideoPreviewImageUrls(
+     AmbientVideo video) const {
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    return kAuraLocalBackupPhotoUrls;
++  }
+   return kFakeBackupPhotoUrls;
+ }
+ 
+ const char* FakeAmbientBackendControllerImpl::GetPromoBannerUrl() const {
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    return kAuraLocalPreviewSlideshow;
++  }
+   return kFakeUrl;
+ }
+ 
+ const char* FakeAmbientBackendControllerImpl::GetTimeOfDayProductName() const {
++  if (IsAuraLocalAmbientBackendEnabled()) {
++    return "AuraDE";
++  }
+   return "Product Name";
+ }
+ 
+diff --git a/chrome/browser/ash/ambient/ambient_client_impl.cc b/chrome/browser/ash/ambient/ambient_client_impl.cc
+index 5fd199cae1..2038552059 100644
+--- a/chrome/browser/ash/ambient/ambient_client_impl.cc
++++ b/chrome/browser/ash/ambient/ambient_client_impl.cc
+@@ -12,6 +12,7 @@
+ #include "ash/public/cpp/image_downloader.h"
+ #include "base/check.h"
+ #include "base/functional/callback.h"
++#include "base/strings/string_util.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/signin/identity_manager_factory.h"
+@@ -90,6 +91,20 @@ bool HasPrimaryAccount(const Profile* profile) {
+   return identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
+ }
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraLocalAccount(const user_manager::User* user) {
++  if (!user)
++    return false;
++
++  const AccountId& account_id = user->GetAccountId();
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
+ bool IsEmailDomainSupported(const user_manager::User* user) {
+   const std::string email = user->GetAccountId().GetUserEmail();
+   DCHECK(!email.empty());
+@@ -123,23 +138,26 @@ bool AmbientClientImpl::IsAmbientModeAllowed() {
+   if (!IsPrimaryUser())
+     return false;
+ 
++  auto* profile = GetProfileForActiveUser();
++  if (!profile)
++    return false;
++
++  if (profile->IsOffTheRecord())
++    return false;
++
++  if (IsAuraLocalAccount(active_user))
++    return true;
++
+   // When this check is removed to start supporting enterprise users,
+   // please update kAmbientClientNetworkTag and network annotation tags
+   // in ash/ambient package to reflect that this is an enterprise feature.
+   if (!IsEmailDomainSupported(active_user))
+     return false;
+ 
+-  auto* profile = GetProfileForActiveUser();
+-  if (!profile)
+-    return false;
+-
+   // Primary account might be missing during unittests.
+   if (!HasPrimaryAccount(profile))
+     return false;
+ 
+-  if (profile->IsOffTheRecord())
+-    return false;
+-
+   return true;
+ }
+ 
+@@ -148,6 +166,13 @@ void AmbientClientImpl::SetAmbientModeAllowedForTesting(bool allowed) {
+ }
+ 
+ void AmbientClientImpl::RequestAccessToken(GetAccessTokenCallback callback) {
++  if (IsAuraLocalAccount(GetActiveUser())) {
++    std::move(callback).Run(/*gaia_id=*/GaiaId(),
++                            /*access_token=*/std::string(),
++                            /*expiration_time=*/base::Time::Now());
++    return;
++  }
++
+   auto* profile = GetProfileForActiveUser();
+   DCHECK(profile);
+ 

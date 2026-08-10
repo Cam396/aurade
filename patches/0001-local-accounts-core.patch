@@ -1,0 +1,340 @@
+diff --git a/chrome/browser/ash/drive/file_system_util.cc b/chrome/browser/ash/drive/file_system_util.cc
+index 560d9e579b..69085f7119 100644
+--- a/chrome/browser/ash/drive/file_system_util.cc
++++ b/chrome/browser/ash/drive/file_system_util.cc
+@@ -48,6 +48,16 @@ using user_manager::UserManager;
+ 
+ namespace {
+ 
++constexpr char kAuraDeLocalAccountsSwitch[] = "aurade-enable-local-accounts";
++
++bool IsAuraDeLocalUser(const User* user) {
++  return user && !base::SysInfo::IsRunningOnChromeOS() &&
++         base::CommandLine::ForCurrentProcess()->HasSwitch(
++             kAuraDeLocalAccountsSwitch) &&
++         base::StartsWith(user->username_hash(), "local-",
++                          base::CompareCase::SENSITIVE);
++}
++
+ ConnectionStatus GetDeviceOnlineStatus() {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+   using enum ConnectionStatus;
+@@ -152,6 +162,9 @@ DriveAvailability CheckDriveAvailabilityForProfile(
+   if (!user || !user->HasGaiaAccount()) {
+     return DriveAvailability::kNotAvailableForAccountType;
+   }
++  if (IsAuraDeLocalUser(user)) {
++    return DriveAvailability::kNotAvailableForAccountType;
++  }
+ 
+   // Disable Drive if the flag has been passed and it is a test image.
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+diff --git a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
+index 9e017fba6c..eea333f3d7 100644
+--- a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
++++ b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
+@@ -68,6 +68,16 @@ static bool g_skip_profile_download = false;
+ 
+ static bool g_skip_default_user_image_download = false;
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
+ // Saves `image_bytes` at `image_path`, and delete the old file at
+ // `old_image_path` if needed.
+ bool SaveAndDeleteImage(scoped_refptr<base::RefCountedBytes> image_bytes,
+@@ -1001,7 +1011,7 @@ void UserImageManagerImpl::TryToCreateImageSyncObserver() {
+   // must not be started so that the policy-set image does not get synced out.
+   // User image can be synced iff it has gaia account.
+   if (!user_image_sync_observer_ && user && user->HasGaiaAccount() &&
+-      !IsUserImageManaged()) {
++      !IsAuraLocalAccount(user->GetAccountId()) && !IsUserImageManaged()) {
+     user_image_sync_observer_ = std::make_unique<UserImageSyncObserver>(user);
+   }
+ }
+@@ -1029,7 +1039,8 @@ bool UserImageManagerImpl::IsUserLoggedInAndHasGaiaAccount() const {
+   if (!user) {
+     return false;
+   }
+-  return user->is_logged_in() && user->HasGaiaAccount();
++  return user->is_logged_in() && user->HasGaiaAccount() &&
++         !IsAuraLocalAccount(user->GetAccountId());
+ }
+ 
+ bool UserImageManagerImpl::IsCustomizationSelectorsPrefEnabled() const {
+diff --git a/chrome/browser/ash/login/users/user_manager_delegate_impl.cc b/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
+index d02c610dda..65411e53f6 100644
+--- a/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
++++ b/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
+@@ -14,6 +14,7 @@
+ #include "base/logging.h"
+ #include "base/notreached.h"
+ #include "base/path_service.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -58,28 +59,11 @@ void UserManagerDelegateImpl::OverrideDirHome(
+ // as the current user.
+ void UserManagerDelegateImpl::CheckProfileOnLogin(
+     const user_manager::User& user) {
+-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+-          ::switches::kTestType)) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: local Linux users store their Chromium profile in a
++    // normal home-directory path rather than a ChromeOS cryptohome mount.
+     return;
+   }
+-
+-  UserDataAuthClient::Get()->IsMounted(
+-      user_data_auth::IsMountedRequest(),
+-      base::BindOnce([](std::optional<user_data_auth::IsMountedReply> result) {
+-        if (!result.has_value()) {
+-          LOG(ERROR) << "IsMounted call failed.";
+-          return;
+-        }
+-
+-        LOG_IF(ERROR, !result->is_mounted()) << "Cryptohome is not mounted.";
+-      }));
+-
+-  base::FilePath user_profile_dir =
+-      ash::BrowserContextHelper::Get()->GetBrowserContextPathByUserIdHash(
+-          user.username_hash());
+-  CHECK(
+-      !g_browser_process->profile_manager()->GetProfileByPath(user_profile_dir))
+-      << "The user profile was loaded before we mounted the cryptohome.";
+ }
+ 
+ void UserManagerDelegateImpl::RemoveProfileByAccountId(
+diff --git a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
+index d76a89d551..c07d9b2c79 100644
+--- a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
++++ b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
+@@ -14,6 +14,7 @@
+ #include "base/logging.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/path_service.h"
++#include "base/strings/string_util.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/task/thread_pool.h"
+@@ -68,6 +69,17 @@ const base::FilePath::CharType kPolicyExternalDataDir[] =
+ // How long we'll block session initialization to try to refresh policy.
+ constexpr base::TimeDelta kPolicyRefreshTimeout = base::Seconds(10);
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) &&
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix,
++                          base::CompareCase::SENSITIVE);
++}
++
+ // Called when the user policy loading fails with a fatal error, and the user
+ // session has to be terminated.
+ void OnUserPolicyFatalError(const AccountId& account_id) {
+@@ -112,6 +124,13 @@ std::unique_ptr<UserCloudPolicyManagerAsh> CreateUserCloudPolicyManagerAsh(
+   //   |UserCloudPolicyManagerAsh| is created here.
+   // All other user types do not have user policy.
+   const AccountId& account_id = user->GetAccountId();
++  if (IsAuraLocalAccount(account_id)) {
++    DLOG(WARNING) << "No policy loaded for AuraDE local user";
++    known_user.SetProfileRequiresPolicy(
++        account_id, ProfileRequiresPolicy::kNoPolicyRequired);
++    return nullptr;
++  }
++
+   if (user->GetType() != user_manager::UserType::kChild &&
+       !signin::AccountManagedStatusFinder::MayBeEnterpriseUserBasedOnEmail(
+           account_id.GetUserEmail())) {
+diff --git a/components/signin/internal/identity_manager/account_fetcher_service.cc b/components/signin/internal/identity_manager/account_fetcher_service.cc
+index de9aecddc3..5d6141881e 100644
+--- a/components/signin/internal/identity_manager/account_fetcher_service.cc
++++ b/components/signin/internal/identity_manager/account_fetcher_service.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "components/signin/internal/identity_manager/account_fetcher_service.h"
+ 
++#include <cstring>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -14,6 +15,7 @@
+ #include "base/metrics/field_trial.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/notreached.h"
++#include "base/strings/string_util.h"
+ #include "base/trace_event/trace_event.h"
+ #include "base/values.h"
+ #include "build/build_config.h"
+@@ -41,6 +43,51 @@
+ namespace {
+ 
+ const base::TimeDelta kRefreshFromTokenServiceDelay = base::Hours(24);
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraDeLocalAccount(const CoreAccountId& account_id,
++                          const AccountInfo& info) {
++  return base::StartsWith(account_id.ToString(), kAuraLocalGaiaIdPrefix) ||
++         base::StartsWith(info.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix) ||
++         base::EndsWith(info.GetEmail(), kAuraLocalAccountDomain);
++}
++
++std::string GetAuraDeLocalUsername(const CoreAccountId& account_id,
++                                   const AccountInfo& info) {
++  const std::string email(info.GetEmail());
++  if (base::EndsWith(email, kAuraLocalAccountDomain)) {
++    return email.substr(0, email.size() - strlen(kAuraLocalAccountDomain));
++  }
++
++  const std::string gaia_id = info.GetGaiaId().ToString();
++  if (base::StartsWith(gaia_id, kAuraLocalGaiaIdPrefix)) {
++    return gaia_id.substr(strlen(kAuraLocalGaiaIdPrefix));
++  }
++
++  const std::string account_id_string = account_id.ToString();
++  if (base::StartsWith(account_id_string, kAuraLocalGaiaIdPrefix)) {
++    return account_id_string.substr(strlen(kAuraLocalGaiaIdPrefix));
++  }
++
++  return "local";
++}
++
++AccountInfo CreateAuraDeLocalAccountInfo(const CoreAccountId& account_id,
++                                         const AccountInfo& info) {
++  const std::string username = GetAuraDeLocalUsername(account_id, info);
++  const std::string gaia_id = kAuraLocalGaiaIdPrefix + username;
++  const std::string email = username + kAuraLocalAccountDomain;
++  return AccountInfo::Builder(GaiaId(gaia_id), email)
++      .SetAccountId(account_id)
++      .SetFullName(username)
++      .SetGivenName(username)
++      .SetHostedDomain(std::string())
++      .SetAvatarUrl(std::string())
++      .SetIsChildAccount(signin::Tribool::kFalse)
++      .Build();
++}
+ 
+ }  // namespace
+ 
+@@ -255,6 +302,11 @@ void AccountFetcherService::RefreshAccountInfo(const CoreAccountId& account_id,
+   account_tracker_service_->StartTrackingAccount(account_id);
+ 
+   AccountInfo info = account_tracker_service_->GetAccountInfo(account_id);
++  if (IsAuraDeLocalAccount(account_id, info)) {
++    account_tracker_service_->SeedAccountInfo(
++        CreateAuraDeLocalAccountInfo(account_id, info));
++    return;
++  }
+ 
+   if (!only_fetch_if_invalid ||
+       !info.GetAccountCapabilities().AreAllCapabilitiesKnown()) {
+diff --git a/components/user_manager/user.h b/components/user_manager/user.h
+index 871f9ab188..9c258b385d 100644
+--- a/components/user_manager/user.h
++++ b/components/user_manager/user.h
+@@ -206,6 +206,7 @@ class USER_MANAGER_EXPORT User {
+   friend class ash::UserSessionManager;
+ 
+   // For testing:
++  friend class UserManagerImpl;
+   friend class FakeUserManager;
+   friend class ash::FakeChromeUserManager;
+   friend class ash::UserAddingScreenTest;
+diff --git a/components/user_manager/user_manager_impl.cc b/components/user_manager/user_manager_impl.cc
+index f4d6da255e..d2e2a27a4d 100644
+--- a/components/user_manager/user_manager_impl.cc
++++ b/components/user_manager/user_manager_impl.cc
+@@ -42,6 +42,7 @@
+ #include "components/prefs/scoped_user_pref_update.h"
+ #include "components/user_manager/known_user.h"
+ #include "components/user_manager/multi_user/multi_user_sign_in_policy.h"
++#include "components/user_manager/user.h"
+ #include "components/user_manager/user_directory_integrity_manager.h"
+ #include "components/user_manager/user_manager_policy_util.h"
+ #include "components/user_manager/user_manager_pref_names.h"
+@@ -58,10 +59,20 @@ namespace {
+ // one regular user logging out and a different regular user logging in.
+ const int kLogoutToLoginDelayMaxSec = 1800;
+ 
++constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
++
+ // Used for serializing information about the owner user. The existing entries
+ // should never be deleted / renumbered.
+ enum class OwnerAccountType { kGoogleEmail = 1 };
+ 
++bool IsAuraLocalAccount(const AccountId& account_id) {
++  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
++                        base::CompareCase::SENSITIVE) ||
++         base::StartsWith(account_id.GetGaiaId().ToString(),
++                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++}
++
+ // This reads integer value from kUserType Local State preference and
+ // interprets it as UserType. It is used in initial users load.
+ UserType GetStoredUserType(const base::DictValue& prefs_user_types,
+@@ -717,6 +728,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
+     const AccountId& account_id,
+     User::OAuthTokenStatus oauth_token_status) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (IsAuraLocalAccount(account_id)) {
++    oauth_token_status = User::OAUTH2_TOKEN_STATUS_VALID;
++  }
+ 
+   DVLOG(1) << "Saving user OAuth token status in Local State";
+   User* user = FindUserAndModify(account_id);
+@@ -742,6 +756,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
+ void UserManagerImpl::SaveForceOnlineSignin(const AccountId& account_id,
+                                             bool force_online_signin) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (IsAuraLocalAccount(account_id)) {
++    force_online_signin = false;
++  }
+ 
+   User* const user = FindUserAndModify(account_id);
+   if (user) {
+@@ -1455,9 +1472,8 @@ User* UserManagerImpl::AddGaiaUser(const AccountId& account_id,
+   SaveUserType(user);
+ 
+   user->set_oauth_token_status(LoadUserOAuthStatus(account_id));
+-  SaveUserDisplayName(account_id,
+-                      base::UTF8ToUTF16(user->GetAccountName(
+-                          /*use_display_email=*/true)));
++  SaveUserDisplayName(account_id, base::UTF8ToUTF16(user->GetAccountName(
++                                      /*use_display_email=*/true)));
+ 
+   // Add to the persisted list.
+   persisted_users_.push_back(user);
+@@ -1568,6 +1584,9 @@ void UserManagerImpl::NotifyOnLogin() {
+ User::OAuthTokenStatus UserManagerImpl::LoadUserOAuthStatus(
+     const AccountId& account_id) const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (IsAuraLocalAccount(account_id)) {
++    return User::OAUTH2_TOKEN_STATUS_VALID;
++  }
+ 
+   const base::DictValue& prefs_oauth_status =
+       local_state_->GetDict(prefs::kUserOAuthTokenStatus);
+@@ -1583,6 +1602,9 @@ User::OAuthTokenStatus UserManagerImpl::LoadUserOAuthStatus(
+ 
+ bool UserManagerImpl::LoadForceOnlineSignin(const AccountId& account_id) const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (IsAuraLocalAccount(account_id)) {
++    return false;
++  }
+ 
+   const base::DictValue& prefs_force_online =
+       local_state_->GetDict(prefs::kUserForceOnlineSignin);

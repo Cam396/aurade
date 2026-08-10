@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Interactive front end for aurade-install. The engine remains noninteractive.
+set -Eeuo pipefail
+
+ENGINE=${AURADE_INSTALL_ENGINE:-/usr/local/sbin/aurade-install}
+[[ -x $ENGINE ]] || ENGINE="$(dirname "$0")/aurade-install"
+[[ -x $ENGINE ]] || { echo 'aurade-installer: aurade-install engine not found' >&2; exit 1; }
+
+if (( EUID != 0 )); then
+  echo 'aurade-installer: run as root from the AuraDE installation image' >&2
+  exit 1
+fi
+
+snapshot_default=
+[[ ! -r /etc/aurade-installer/snapshot ]] || read -r snapshot_default </etc/aurade-installer/snapshot
+snapshot_default=${snapshot_default:-$(date -u +%Y/%m/%d)}
+bundle_default=/opt/aurade/repo
+repo_key_default=$bundle_default/aurade-repository.gpg
+fingerprint_default=
+[[ ! -r /etc/aurade-installer/repo-fingerprint ]] || read -r fingerprint_default </etc/aurade-installer/repo-fingerprint
+repo_url_default=https://repo.aurade.invalid/stable/x86_64
+[[ ! -r /etc/aurade-installer/repo-url ]] || read -r repo_url_default </etc/aurade-installer/repo-url
+
+printf '%s\n' 'AuraDE installer' 'This program will show a dry-run plan before it can erase a disk.' ''
+lsblk -d -o NAME,PATH,SIZE,MODEL,TRAN,TYPE
+printf '\nTarget disk (for example /dev/sda or /dev/nvme0n1): '
+read -r target
+target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
+printf 'Hostname [aurade]: '
+read -r hostname
+hostname=${hostname:-aurade}
+printf 'Initial username: '
+read -r username
+printf 'Arch snapshot [%s]: ' "$snapshot_default"
+read -r snapshot
+snapshot=${snapshot:-$snapshot_default}
+
+while true; do
+  read -r -s -p 'Account password: ' password
+  printf '\n'
+  read -r -s -p 'Confirm account password: ' password_confirm
+  printf '\n'
+  [[ -n $password && $password == "$password_confirm" ]] && break
+  printf '%s\n' 'Passwords were empty or did not match.' >&2
+done
+
+read -r -p 'Encrypt the root filesystem with LUKS2? [Y/n]: ' encrypt_answer
+encrypt_answer=${encrypt_answer:-Y}
+luks_password=
+if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
+  while true; do
+    read -r -s -p 'Disk encryption passphrase: ' luks_password
+    printf '\n'
+    read -r -s -p 'Confirm disk encryption passphrase: ' luks_confirm
+    printf '\n'
+    [[ -n $luks_password && $luks_password == "$luks_confirm" ]] && break
+    printf '%s\n' 'Passphrases were empty or did not match.' >&2
+  done
+fi
+
+secret_dir=$(mktemp -d /run/aurade-installer.XXXXXX)
+chmod 700 "$secret_dir"
+cleanup() {
+  unset password password_confirm luks_password luks_confirm
+  rm -rf -- "$secret_dir"
+}
+trap cleanup EXIT INT TERM
+printf '%s' "$password" | openssl passwd -6 -stdin >"$secret_dir/password.hash"
+chmod 600 "$secret_dir/password.hash"
+unset password password_confirm
+
+common_args=(
+  --target "$target"
+  --hostname "$hostname"
+  --username "$username"
+  --password-hash-file "$secret_dir/password.hash"
+  --arch-snapshot "$snapshot"
+  --bundle-dir "$bundle_default"
+  --repo-url "$repo_url_default"
+)
+
+if [[ -r $repo_key_default && -n $fingerprint_default ]]; then
+  common_args+=(--repo-key "$repo_key_default" --repo-fingerprint "$fingerprint_default")
+else
+  printf '%s\n' 'WARNING: this image has no repository trust key; package hashes will be checked but pacman signatures cannot be required.' >&2
+  read -r -p 'Type ALLOW-UNSIGNED to use this development image: ' unsigned_confirmation
+  [[ $unsigned_confirmation == ALLOW-UNSIGNED ]] || exit 1
+  common_args+=(--allow-unsigned)
+fi
+
+if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
+  printf '%s' "$luks_password" >"$secret_dir/luks.passphrase"
+  chmod 600 "$secret_dir/luks.passphrase"
+  unset luks_password luks_confirm
+  common_args+=(--encrypt --luks-passphrase-file "$secret_dir/luks.passphrase")
+fi
+
+printf '\n%s\n' 'Dry-run installation plan:'
+"$ENGINE" "${common_args[@]}" --dry-run
+
+token="ERASE:$target"
+printf '\nThe target will be irreversibly erased. Type exactly: %s\n> ' "$token"
+read -r confirmation
+[[ $confirmation == "$token" ]] || { echo 'Confirmation did not match; nothing was written.' >&2; exit 1; }
+
+"$ENGINE" "${common_args[@]}" --execute --confirm "$confirmation"
+printf '%s\n' 'Installation complete. Remove the installation media and reboot.'

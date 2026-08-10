@@ -1,0 +1,26 @@
+#!/bin/bash
+set -u
+
+: "${AURADE_TEST_SESSION_LOG:?AURADE_TEST_SESSION_LOG must name a writable log}"
+
+{
+  printf 'start pid=%s argc=%s\n' "$$" "$#"
+  index=0
+  for argument in "$@"; do
+    printf 'arg[%s]=<%s>\n' "${index}" "${argument}"
+    index=$((index + 1))
+  done
+} >>"${AURADE_TEST_SESSION_LOG}"
+
+stop() {
+  printf 'stop pid=%s\n' "$$" >>"${AURADE_TEST_SESSION_LOG}"
+  exit 0
+}
+
+trap stop HUP INT TERM
+if [[ "${AURADE_TEST_IGNORE_TERM:-0}" == 1 ]]; then
+  trap '' TERM
+fi
+while :; do
+  sleep 0.05
+done

@@ -1,0 +1,130 @@
+diff --git a/ash/webui/settings/public/constants/gen_routes.py b/ash/webui/settings/public/constants/gen_routes.py
+index f5ff2a32b9122313396942bfa6a1634fe79db062..621b70c6d249234d20cb22485a3915582a6638d6 100755
+--- a/ash/webui/settings/public/constants/gen_routes.py
++++ b/ash/webui/settings/public/constants/gen_routes.py
+@@ -18,15 +18,8 @@ import sys
+ 
+ # Path of the <chromium>/src directory.
+ CHROMIUM_SRC_PATH = pathlib.Path(__file__).parents[5].resolve(strict=True)
+-
+-# CoG workspaces have a .citc directory in the parent of the repository root,
+-# and the repository root itself is named 'chromium' instead of 'src'.
+-is_cog = (CHROMIUM_SRC_PATH.parent / '.citc').is_dir()
+-if CHROMIUM_SRC_PATH.name != 'src' and not (
+-    is_cog and CHROMIUM_SRC_PATH.name == 'chromium'):
+-  raise AssertionError(
+-      f'CHROMIUM_SRC_PATH "{CHROMIUM_SRC_PATH}" should end in "src" (or '
+-      f'"chromium" in CoG).')
++# AuraDE compatibility: validation builds may bind the Chromium source root at
++# a path whose basename is not "src".
+ 
+ # Insert chromium mojom path to beginning to make sure we prefer this one.
+ # https://crbug.com/1422422
+diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
+index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980be2e59aca 100644
+--- a/ui/base/l10n/l10n_util.cc
++++ b/ui/base/l10n/l10n_util.cc
+@@ -200,6 +200,16 @@ struct AvailableLocalesTraits
+ base::LazyInstance<std::vector<std::string>, AvailableLocalesTraits>
+     g_available_locales = LAZY_INSTANCE_INITIALIZER;
+ 
++bool ShouldRelaxPlaceholderDChecksForAuraDE() {
++  // HACK(AuraDE): AuraDE standalone Linux builds can enable ChromeOS shell
++  // surfaces whose generated/localized strings are not always placeholder-
++  // compatible with the exact Ash caller. Do not crash the shell on debug
++  // placeholder validation when AuraDE is explicitly launched.
++  return base::CommandLine::InitializedForCurrentProcess() &&
++         base::CommandLine::ForCurrentProcess()->HasSwitch(
++             "aurade-enable-local-accounts");
++}
++
+ }  // namespace
+ 
+ namespace l10n_util {
+@@ -625,23 +635,26 @@ std::u16string FormatString(const std::u16string& format_string,
+                             const std::vector<std::u16string>& replacements,
+                             std::vector<size_t>* offsets) {
+ #if DCHECK_IS_ON()
+-  // Make sure every replacement string is being used, so we don't just silently
+-  // fail to insert one.
+-  //
+-  // $9 is the highest allowed placeholder.
+-  for (size_t i = 0; i < 9; ++i) {
+-    bool placeholder_should_exist = i < replacements.size();
+-
+-    std::u16string placeholder = u"$";
+-    placeholder += static_cast<char16_t>('1' + static_cast<char>(i));
+-    size_t pos = format_string.find(placeholder);
+-    if (placeholder_should_exist) {
+-      DCHECK_NE(std::string::npos, pos) << " Didn't find a " << placeholder
+-                                        << " placeholder in " << format_string;
+-    } else {
+-      DCHECK_EQ(std::string::npos, pos)
+-          << " Unexpectedly found a " << placeholder << " placeholder in "
+-          << format_string;
++  if (!ShouldRelaxPlaceholderDChecksForAuraDE()) {
++    // Make sure every replacement string is being used, so we don't just
++    // silently fail to insert one.
++    //
++    // $9 is the highest allowed placeholder.
++    for (size_t i = 0; i < 9; ++i) {
++      bool placeholder_should_exist = i < replacements.size();
++
++      std::u16string placeholder = u"$";
++      placeholder += static_cast<char16_t>('1' + static_cast<char>(i));
++      size_t pos = format_string.find(placeholder);
++      if (placeholder_should_exist) {
++        DCHECK_NE(std::string::npos, pos) << " Didn't find a " << placeholder
++                                          << " placeholder in "
++                                          << format_string;
++      } else {
++        DCHECK_EQ(std::string::npos, pos)
++            << " Unexpectedly found a " << placeholder << " placeholder in "
++            << format_string;
++      }
+     }
+   }
+ #endif
+@@ -736,8 +749,12 @@ std::u16string GetStringFUTF16(int message_id,
+   std::vector<size_t> offsets;
+   std::vector<std::u16string> replacements = {a};
+   std::u16string result = GetStringFUTF16(message_id, replacements, &offsets);
+-  DCHECK_EQ(1u, offsets.size());
+-  *offset = offsets[0];
++  if (ShouldRelaxPlaceholderDChecksForAuraDE() && offsets.empty()) {
++    *offset = 0;
++  } else {
++    DCHECK_EQ(1u, offsets.size());
++    *offset = offsets[0];
++  }
+   return result;
+ }
+ 
+diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
+index 73e2f1e74967f6f71062363adb7d48e17c21cfe6..495f1b0d7722ed597f4114de47b2b8b372e66d3a 100644
+--- a/ui/base/resource/resource_bundle.cc
++++ b/ui/base/resource/resource_bundle.cc
+@@ -34,6 +34,7 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/synchronization/lock.h"
++#include "base/system/sys_info.h"
+ #include "base/trace_event/typed_macros.h"
+ #include "build/build_config.h"
+ #include "net/filter/gzip_header.h"
+@@ -1124,6 +1125,15 @@ void ResourceBundle::InitDefaultFontList() {
+   // font list doesn't need to be overridden by variations.
+   std::string font_family =
+       base::UTF16ToUTF8(GetLocalizedStringImpl(IDS_UI_FONT_FAMILY_CROS));
++  // AuraDE compatibility: AuraDE runs the ChromeOS target on generic Linux,
++  // where missing or stale locale packs can hand back a bare family name from
++  // the host font stack. The ChromeOS default font path requires an explicit
++  // pixel size, so normalize only that generic-Linux case instead of letting
++  // zygotes abort in FontList::SetDefaultFontDescription().
++  if (!base::SysInfo::IsRunningOnChromeOS() && !font_family.empty() &&
++      !font_family.ends_with("px")) {
++    font_family = base::StrCat({font_family, ", 12px"});
++  }
+   gfx::FontList::SetDefaultFontDescription(font_family);
+ 
+   // TODO(yukishiino): Remove SetDefaultFontDescription() once the migration to

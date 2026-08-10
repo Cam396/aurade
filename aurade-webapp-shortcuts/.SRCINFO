@@ -1,0 +1,17 @@
+pkgbase = aurade-webapp-shortcuts
+	pkgdesc = AuraDE web session helper for browser and PWA shared sign-in
+	pkgver = 0.1.0
+	pkgrel = 8
+	url = https://github.com/aurade/aurade
+	install = aurade-webapp-shortcuts.install
+	arch = any
+	license = BSD-3-Clause
+	depends = bash
+	depends = curl
+	depends = chromiumos-ash
+	source = aurade-web-session
+	source = LICENSE
+	sha256sums = b2ce1ea995867ebb7a7b6ecdf0f265799c8fffcf32a606b55085e270a0cabac2
+	sha256sums = 9c033deac8331b1b528539ebca616a5e0404f1e96202b6ad314ad30c964579ca
+
+pkgname = aurade-webapp-shortcuts

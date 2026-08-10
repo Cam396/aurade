@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>AuraDE</vendor>
+
+  <action id="org.aurade.host-bridge.bluetooth-control">
+    <description>Control Bluetooth devices</description>
+    <message>Authentication is required to control Bluetooth devices.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.aurade.host-bridge.storage-control">
+    <description>Mount, unmount, or safely remove storage</description>
+    <message>Authentication is required to control storage devices.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.aurade.host-bridge.storage-format">
+    <description>Format removable storage</description>
+    <message>Administrator authentication is required to erase and format removable storage.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.aurade.host-bridge.package-upgrade">
+    <description>Update installed system packages</description>
+    <message>Administrator authentication is required to update system packages.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.aurade.host-bridge.package-uninstall">
+    <description>Uninstall system packages</description>
+    <message>Administrator authentication is required to uninstall system packages.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
+

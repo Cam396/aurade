@@ -1,0 +1,50 @@
+# Maintainer: AuraDE Contributors
+#
+# shill-nm-adapter — Bridge that provides the org.chromium.flimflam DBus
+# interface required by ChromeOS Ash, translating to/from NetworkManager.
+# Allows the ChromeOS Ash desktop build to use the standard Linux network
+# stack without any Chromium source patches.
+
+pkgname=shill-nm-adapter
+pkgver=0.1.0
+pkgrel=2
+pkgdesc="Shill-to-NetworkManager DBus bridge for ChromeOS Ash"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=(
+    'dbus'
+    'python'
+    'python-dbus'
+    'python-gobject'
+    'glib2'
+    'networkmanager'
+)
+makedepends=()
+source=(
+    "shill_nm_adapter.py"
+    "shill-nm-adapter.service"
+    "org.chromium.flimflam.conf"
+    "LICENSE"
+)
+sha256sums=('e2eac683e5e8f6ec57f07851614b37901d32831f685fd2a8f69e94c085f71886'
+            '7d4df043634a73de04e2b05264e5258d5a404eefb53dda8e2924320299c7558a'
+            '102f2ceaa1ace82f86644e226937fdd072e330268de8d27220b9719f4dd181ca'
+            '95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10')
+
+package() {
+    # Install the daemon
+    install -Dm755 "${srcdir}/shill_nm_adapter.py" \
+        "${pkgdir}/usr/bin/shill-nm-adapter"
+
+    # Install systemd unit
+    install -Dm644 "${srcdir}/shill-nm-adapter.service" \
+        "${pkgdir}/usr/lib/systemd/system/shill-nm-adapter.service"
+
+    # Allow the system daemon to provide ChromeOS Shill's DBus name.
+    install -Dm644 "${srcdir}/org.chromium.flimflam.conf" \
+        "${pkgdir}/usr/share/dbus-1/system.d/org.chromium.flimflam.conf"
+
+    install -Dm644 "${srcdir}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

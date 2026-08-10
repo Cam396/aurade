@@ -1,0 +1,408 @@
+diff --git a/chrome/browser/ash/file_manager/extract_io_task.cc b/chrome/browser/ash/file_manager/extract_io_task.cc
+index 8beb61dde7..3c8dfa9bc5 100644
+--- a/chrome/browser/ash/file_manager/extract_io_task.cc
++++ b/chrome/browser/ash/file_manager/extract_io_task.cc
+@@ -7,6 +7,7 @@
+ #include <grp.h>
+ 
+ #include <optional>
++#include <string_view>
+ #include <utility>
+ 
+ #include "base/check_op.h"
+@@ -15,6 +16,7 @@
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
+ #include "base/metrics/histogram_macros.h"
++#include "base/process/launch.h"
+ #include "base/strings/strcat.h"
+ #include "base/strings/string_util.h"
+ #include "base/system/sys_info.h"
+@@ -36,11 +38,81 @@
+ 
+ namespace file_manager {
+ namespace io_task {
++namespace {
++
++constexpr std::string_view kArchiveExtensions[] = {
++    ".zip",    ".tar", ".tar.gz", ".tgz",     ".tar.bz2", ".tbz2",
++    ".tar.xz", ".txz", ".tar.lz", ".tar.zst", ".7z",      ".rar",
++};
++
++bool PathEndsWith(const std::string& lower_name, std::string_view extension) {
++  return base::EndsWith(lower_name, extension, base::CompareCase::SENSITIVE);
++}
++
++}  // namespace
+ 
+ void RecordUmaExtractStatus(ExtractStatus status) {
+   UMA_HISTOGRAM_ENUMERATION(kExtractTaskStatusHistogramName, status);
+ }
+ 
++// static
++bool ExtractIOTask::IsArchiveExtension(const base::FilePath& path) {
++  const std::string lower_name = base::ToLowerASCII(path.BaseName().value());
++  for (std::string_view extension : kArchiveExtensions) {
++    if (PathEndsWith(lower_name, extension)) {
++      return true;
++    }
++  }
++  return false;
++}
++
++// static
++ExtractIOTask::ArchiveType ExtractIOTask::GetArchiveType(
++    const base::FilePath& path) {
++  const std::string lower_name = base::ToLowerASCII(path.BaseName().value());
++  if (PathEndsWith(lower_name, ".zip")) {
++    return ArchiveType::kZip;
++  }
++  if (PathEndsWith(lower_name, ".7z")) {
++    return ArchiveType::kSevenZ;
++  }
++  if (PathEndsWith(lower_name, ".rar")) {
++    return ArchiveType::kRar;
++  }
++  if (PathEndsWith(lower_name, ".tar")) {
++    return ArchiveType::kTar;
++  }
++  if (PathEndsWith(lower_name, ".tgz") || PathEndsWith(lower_name, ".tar.gz")) {
++    return ArchiveType::kTarGz;
++  }
++  if (PathEndsWith(lower_name, ".tbz2") ||
++      PathEndsWith(lower_name, ".tar.bz2")) {
++    return ArchiveType::kTarBz2;
++  }
++  if (PathEndsWith(lower_name, ".txz") || PathEndsWith(lower_name, ".tar.xz")) {
++    return ArchiveType::kTarXz;
++  }
++  if (PathEndsWith(lower_name, ".tar.lz")) {
++    return ArchiveType::kTarLz;
++  }
++  if (PathEndsWith(lower_name, ".tar.zst")) {
++    return ArchiveType::kTarZst;
++  }
++  return ArchiveType::kUnknown;
++}
++
++// static
++std::string ExtractIOTask::GetArchiveStem(const base::FilePath& path) {
++  const std::string name = path.BaseName().value();
++  const std::string lower_name = base::ToLowerASCII(name);
++  for (std::string_view extension : kArchiveExtensions) {
++    if (PathEndsWith(lower_name, extension)) {
++      return name.substr(0, name.size() - extension.size());
++    }
++  }
++  return path.BaseName().RemoveExtension().value();
++}
++
+ ExtractIOTask::ExtractIOTask(
+     std::vector<storage::FileSystemURL> source_urls,
+     std::string password,
+@@ -59,11 +131,11 @@ ExtractIOTask::ExtractIOTask(
+   progress_.SetDestinationFolder(parent_folder_, profile);
+   progress_.bytes_transferred = 0;
+   progress_.total_bytes = 0;
+-  // Store all the ZIP files in the selection so we have
++  // Store all the supported archive files in the selection so we have
+   // a proper count of how many need to be extracted.
+   for (const storage::FileSystemURL& source_url : source_urls_) {
+     const base::FilePath source_path = source_url.path();
+-    if (source_path.MatchesExtension(".zip") &&
++    if (IsArchiveExtension(source_path) &&
+         ash::FileSystemBackend::CanHandleURL(source_url)) {
+       progress_.sources.emplace_back(source_url, std::nullopt);
+     }
+@@ -90,6 +162,14 @@ void ExtractIOTask::ZipListenerCallback(uint64_t bytes) {
+ }
+ 
+ void ExtractIOTask::FinishedExtraction(base::FilePath directory, bool success) {
++  DCHECK_GT(extractCount_, 0u);
++  if (progress_.state == State::kCancelled) {
++    if (--extractCount_ == 0) {
++      Complete();
++    }
++    return;
++  }
++
+   if (success) {
+     // Open a new window to show the extracted content.
+     platform_util::ShowItemInFolder(profile_, directory);
+@@ -97,7 +177,6 @@ void ExtractIOTask::FinishedExtraction(base::FilePath directory, bool success) {
+     any_archive_failed_ = true;
+   }
+ 
+-  DCHECK_GT(extractCount_, 0u);
+   if (--extractCount_ == 0) {
+     cancellation_chain_ = base::DoNothing();
+     progress_.state = any_archive_failed_ ? State::kError : State::kSuccess;
+@@ -155,7 +234,20 @@ void ExtractIOTask::ExtractIntoNewDirectory(
+     base::FilePath source_file,
+     bool created_ok) {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-  if (created_ok) {
++  if (!created_ok) {
++    LOG(ERROR) << "Cannot create directory "
++               << zip::Redact(destination_directory);
++    ZipExtractCallback(base::FilePath(), false);
++    return;
++  }
++
++  const ArchiveType type = GetArchiveType(source_file);
++  if (type == ArchiveType::kUnknown) {
++    LOG(ERROR) << "Unsupported archive type: " << zip::Redact(source_file);
++    ZipExtractCallback(destination_directory, false);
++    return;
++  }
++  if (type == ArchiveType::kZip) {
+     // Accumulate the new cancellation callback into the cancellation chain.
+     cancellation_chain_ =
+         unzip::Unzip(unzip::LaunchUnzipper(), source_file,
+@@ -169,10 +261,84 @@ void ExtractIOTask::ExtractIntoNewDirectory(
+                                     destination_directory))
+             .Then(std::move(cancellation_chain_));
+   } else {
+-    LOG(ERROR) << "Cannot create directory "
+-               << zip::Redact(destination_directory);
+-    ZipExtractCallback(base::FilePath(), false);
++    // Non-zip archives extracted via CLI tools on a thread pool.
++    ExtractArchiveViaCli(type, source_file, destination_directory);
++  }
++}
++
++void ExtractIOTask::ExtractArchiveViaCli(
++    ArchiveType type,
++    const base::FilePath& source_file,
++    const base::FilePath& destination_directory) {
++  // Build the CLI command based on archive type.
++  std::vector<std::string> argv;
++  switch (type) {
++    case ArchiveType::kTar:
++    case ArchiveType::kTarGz:
++    case ArchiveType::kTarBz2:
++    case ArchiveType::kTarXz:
++    case ArchiveType::kTarLz:
++    case ArchiveType::kTarZst:
++      argv = {"tar", "xf", source_file.value(), "-C",
++              destination_directory.value()};
++      break;
++    case ArchiveType::kSevenZ:
++      argv = {"7z", "x", source_file.value(),
++              "-o" + destination_directory.value(), "-y"};
++      if (!password_.empty()) {
++        argv.push_back("-p" + password_);
++      }
++      break;
++    case ArchiveType::kRar:
++      argv = {"unrar", "x", source_file.value(), destination_directory.value(),
++              "-y"};
++      if (!password_.empty()) {
++        argv.push_back("-p" + password_);
++      }
++      break;
++    case ArchiveType::kUnknown:
++    case ArchiveType::kZip:
++      NOTREACHED();
+   }
++
++  // Run extraction on a thread pool (blocking I/O). The process handle stays
++  // local to the lambda; there is no shared state with the UI thread.
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::WithBaseSyncPrimitives(),
++       base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(
++          [](const std::vector<std::string>& argv) -> bool {
++            if (argv.empty()) {
++              LOG(ERROR) << "No extraction command specified";
++              return false;
++            }
++            base::LaunchOptions options;
++            base::Process process = base::LaunchProcess(argv, options);
++            if (!process.IsValid()) {
++              LOG(ERROR) << "Failed to launch: " << argv.front();
++              return false;
++            }
++            int exit_code;
++            if (!process.WaitForExit(&exit_code)) {
++              LOG(ERROR) << "Failed to wait for: " << argv.front();
++              return false;
++            }
++            return exit_code == 0;
++          },
++          std::move(argv)),
++      base::BindOnce(&ExtractIOTask::CliExtractCallback,
++                     weak_ptr_factory_.GetWeakPtr(), destination_directory));
++}
++
++void ExtractIOTask::CliExtractCallback(base::FilePath destination_directory,
++                                       bool success) {
++  // Apply directory permissions and finish.
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetDirectoryPermissions, destination_directory, success),
++      base::BindOnce(&ExtractIOTask::FinishedExtraction,
++                     weak_ptr_factory_.GetWeakPtr(), destination_directory));
+ }
+ 
+ bool CreateExtractionDirectory(const base::FilePath& destination_directory) {
+@@ -241,8 +407,9 @@ void ExtractIOTask::ExtractAllSources() {
+   for (size_t index = 0; index < progress_.sources.size(); ++index) {
+     const EntryStatus& source = progress_.sources[index];
+     const base::FilePath source_file = source.url.path().BaseName();
++    const std::string stem = GetArchiveStem(source.url.path());
+     util::GenerateUnusedFilename(
+-        parent_folder_, source_file.RemoveExtension(), file_system_context_,
++        parent_folder_, base::FilePath(stem), file_system_context_,
+         base::BindOnce(&ExtractIOTask::ExtractArchive,
+                        weak_ptr_factory_.GetWeakPtr(), index));
+   }
+@@ -326,17 +493,35 @@ void ExtractIOTask::CheckSizeThenExtract() {
+ void ExtractIOTask::GotScopedFileAccess(
+     file_access::ScopedFileAccess file_access) {
+   file_access_ = std::move(file_access);
+-  CheckSizeThenExtract();
++
++  // Check if any sources are non-zip archives. If so, skip the zip-specific
++  // size checking and go directly to extraction.
++  bool has_non_zip = false;
++  for (const EntryStatus& source : progress_.sources) {
++    if (GetArchiveType(source.url.path()) != ArchiveType::kZip) {
++      has_non_zip = true;
++      break;
++    }
++  }
++
++  if (has_non_zip) {
++    // Non-zip archives: skip size estimation (which uses the unzip service)
++    // and extract directly.
++    speedometer_.SetTotalBytes(progress_.total_bytes);
++    ExtractAllSources();
++  } else {
++    CheckSizeThenExtract();
++  }
+ }
+ 
+ void ExtractIOTask::GetScopedFileAccess() {
+-  std::vector<base::FilePath> zip_files;
++  std::vector<base::FilePath> archive_files;
+   for (const EntryStatus& source : progress_.sources) {
+-    zip_files.push_back(source.url.path());
++    archive_files.push_back(source.url.path());
+   }
+   file_access::RequestFilesAccessForSystem(
+-      {zip_files}, base::BindOnce(&ExtractIOTask::GotScopedFileAccess,
+-                                  weak_ptr_factory_.GetWeakPtr()));
++      {archive_files}, base::BindOnce(&ExtractIOTask::GotScopedFileAccess,
++                                      weak_ptr_factory_.GetWeakPtr()));
+ }
+ 
+ void ExtractIOTask::Execute(IOTask::ProgressCallback progress_callback,
+@@ -362,6 +547,9 @@ void ExtractIOTask::Execute(IOTask::ProgressCallback progress_callback,
+ void ExtractIOTask::Cancel() {
+   progress_.state = State::kCancelled;
+   RecordUmaExtractStatus(ExtractStatus::kCancelled);
++  // In-flight CLI processes (tar/7z/unrar) on the thread pool are not
++  // interruptible; they will finish and their reply callbacks will fire, but
++  // FinishedExtraction preserves the terminal kCancelled state.
+   std::move(cancellation_chain_).Run();
+   cancellation_chain_ = base::DoNothing();
+ }
+diff --git a/chrome/browser/ash/file_manager/extract_io_task.h b/chrome/browser/ash/file_manager/extract_io_task.h
+index 6cab465e3e..64fdaba178 100644
+--- a/chrome/browser/ash/file_manager/extract_io_task.h
++++ b/chrome/browser/ash/file_manager/extract_io_task.h
+@@ -45,9 +45,24 @@ enum class ExtractStatus {
+ 
+ class ExtractIOTask : public IOTask {
+  public:
+-  // Create a task to extract any ZIP files in |source_urls|. These
+-  // must be under the |parent_folder| directory, and the resulting extraction
+-  // will be created there.
++  // Supported archive types beyond zip (extracted via CLI tools on
++  // linux-chromeos).
++  enum class ArchiveType {
++    kUnknown,
++    kZip,
++    kTar,
++    kTarGz,
++    kTarBz2,
++    kTarXz,
++    kTarLz,
++    kTarZst,
++    kSevenZ,
++    kRar,
++  };
++
++  // Create a task to extract any supported archive files in |source_urls|.
++  // These must be under the |parent_folder| directory, and the resulting
++  // extraction will be created there.
+   ExtractIOTask(std::vector<storage::FileSystemURL> source_urls,
+                 std::string password,
+                 storage::FileSystemURL parent_folder,
+@@ -59,10 +74,20 @@ class ExtractIOTask : public IOTask {
+   void Execute(ProgressCallback progress_callback,
+                CompleteCallback complete_callback) override;
+ 
+-  // Cancels ongoing unzips. Must be called on the same sequence as
++  // Cancels ongoing extractions. Must be called on the same sequence as
+   // ExtractIntoNewDirectory and FinishedExtraction.
+   void Cancel() override;
+ 
++  // Returns the ArchiveType for a given path based on its extension.
++  static ArchiveType GetArchiveType(const base::FilePath& path);
++
++  // Returns true if |path| has a supported archive extension.
++  static bool IsArchiveExtension(const base::FilePath& path);
++
++  // Returns the filename stem after stripping the archive extension.
++  // Handles compound extensions like .tar.gz correctly.
++  static std::string GetArchiveStem(const base::FilePath& path);
++
+  private:
+   void Complete();
+ 
+@@ -72,6 +97,8 @@ class ExtractIOTask : public IOTask {
+ 
+   void ZipListenerCallback(uint64_t bytes);
+ 
++  // Dispatches extraction based on archive type: zip uses the unzip service,
++  // other formats use CLI tools.
+   void ExtractIntoNewDirectory(base::FilePath destination_directory,
+                                base::FilePath source_file,
+                                bool created_ok);
+@@ -95,13 +122,22 @@ class ExtractIOTask : public IOTask {
+   // Prevention features are enabled, managed archives cannot be opened.
+   void GotScopedFileAccess(file_access::ScopedFileAccess file_access);
+ 
+-  // Retrieves a scoped file access object for the zip files under examination
+-  // and calls `GotScopedFileAccess`. This is required to open the zip files
++  // Retrieves a scoped file access object for the files under examination
++  // and calls `GotScopedFileAccess`. This is required to open the files
+   // when Data Leak Prevention features are enabled. When these features are not
+   // enabled, `GotScopedFileAccess` is directly called with a default
+   // always-allow file access object.
+   void GetScopedFileAccess();
+ 
++  // Runs CLI-based extraction on a thread pool. Posts result back to
++  // CliExtractCallback.
++  void ExtractArchiveViaCli(ArchiveType type,
++                            const base::FilePath& source_file,
++                            const base::FilePath& destination_directory);
++
++  // Callback for when CLI extraction completes on the UI thread.
++  void CliExtractCallback(base::FilePath destination_directory, bool success);
++
+   // URLs of the files that have archives in them for extraction.
+   const std::vector<storage::FileSystemURL> source_urls_;
+ 
+@@ -140,7 +176,7 @@ class ExtractIOTask : public IOTask {
+   // ongoing unzipping operations.
+   base::OnceClosure cancellation_chain_ = base::DoNothing();
+ 
+-  // Scoped file access object required to open the zipped files when Data Leak
++  // Scoped file access object required to open the files when Data Leak
+   // Prevention features are enabled.
+   std::optional<file_access::ScopedFileAccess> file_access_;
+ 

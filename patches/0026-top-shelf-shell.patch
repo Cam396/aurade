@@ -1,0 +1,1503 @@
+diff --git a/ash/app_list/app_list_bubble_presenter.cc b/ash/app_list/app_list_bubble_presenter.cc
+index c0beef7153bdfbdf8a07b60096fb67708c675d79..1f7d79575cad37a2c6feb623ab82c947a1f16fa3 100644
+--- a/ash/app_list/app_list_bubble_presenter.cc
++++ b/ash/app_list/app_list_bubble_presenter.cc
+@@ -137,6 +137,13 @@ gfx::Rect ComputeBubbleBounds(aura::Window* root_window,
+       x = work_area.right() - padding - bubble_size.width();
+       y = work_area.y() + padding;
+       break;
++    case ShelfAlignment::kTop:
++      if (base::i18n::IsRTL())
++        x = work_area.right() - padding - bubble_size.width();
++      else
++        x = work_area.x() + padding;
++      y = work_area.y() + padding;
++      break;
+   }
+   return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
+ }
+diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
+index 6c3b589124bdb774df0830cb5cbc353d39a509ec..a05587a4fd62d5cf406e61a370729040323923a6 100644
+--- a/ash/ash_strings.grd
++++ b/ash/ash_strings.grd
+@@ -282,6 +282,9 @@ Style notes:
+       <message name="IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_RIGHT" desc="Title of the menu item in the context menu for aligning the shelf to the right of the screen">
+         Right
+       </message>
++      <message name="IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_TOP" desc="Title of the menu item in the context menu for aligning the shelf to the top of the screen">
++        Top
++      </message>
+       <message name="IDS_ASH_SHELF_CONTEXT_MENU_SHOW_DESK_NAME" desc="Title of the menu item in the context menu for showing the desk button">
+         Show desk name
+       </message>
+@@ -291,6 +294,12 @@ Style notes:
+       <message name="IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER" desc="Title of the menu item in the context menu for opening the task manager">
+         Task manager
+       </message>
++      <message name="IDS_ASH_SHELF_CONTEXT_MENU_ENABLE_COMPACT_MODE" desc="Title of the menu item in the context menu for enabling compact mode (smaller shelf)">
++        Enable compact mode
++      </message>
++      <message name="IDS_ASH_SHELF_CONTEXT_MENU_DISABLE_COMPACT_MODE" desc="Title of the menu item in the context menu for disabling compact mode (restore normal shelf size)">
++        Disable compact mode
++      </message>
+       <message name="IDS_ASH_SHELF_ACCESSIBLE_NAME" desc="The accessible name of the shelf.">
+         Shelf
+       </message>
+@@ -306,6 +315,9 @@ Style notes:
+       <message name="IDS_SHELF_ALIGNMENT_RIGHT" desc="Accessibility announcement notifying users that the shelf is now placed on the right of the screen">
+         Shelf on right
+       </message>
++      <message name="IDS_SHELF_ALIGNMENT_TOP" desc="Accessibility announcement notifying users that the shelf is now placed at the top of the screen">
++        Shelf on top
++      </message>
+       <message name="IDS_SHELF_STATE_ALWAYS_SHOWN" desc="Accessibility announcement notifying users that the shelf is now always being shown">
+         Shelf always shown
+       </message>
+@@ -1607,6 +1619,9 @@ You can also use the keyboard shortcut. First, highlight text, then press <ph na
+       <message name="IDS_ASH_STATUS_TRAY_REBOOT" desc="The accessible text for the reboot button.">
+         Restart
+       </message>
++      <message name="IDS_ASH_STATUS_TRAY_RESTART_AURADE" desc="The accessible text for the AuraDE shell restart button.">
++        Restart AuraDE
++      </message>
+       <message name="IDS_ASH_STATUS_TRAY_SHUTDOWN" desc="The accessible text for the shutdown button.">
+         Shut down
+       </message>
+diff --git a/ash/public/cpp/shelf_config.h b/ash/public/cpp/shelf_config.h
+index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f1819e444 100644
+--- a/ash/public/cpp/shelf_config.h
++++ b/ash/public/cpp/shelf_config.h
+@@ -5,6 +5,7 @@
+ #ifndef ASH_PUBLIC_CPP_SHELF_CONFIG_H_
+ #define ASH_PUBLIC_CPP_SHELF_CONFIG_H_
+ 
++#include <memory>
+ #include <optional>
+ 
+ #include "ash/ash_export.h"
+@@ -22,6 +23,8 @@
+ #include "ui/display/display_observer.h"
+ #include "ui/gfx/animation/tween.h"
+ 
++class PrefChangeRegistrar;
++
+ namespace base {
+ class TimeDelta;
+ }
+@@ -73,6 +76,7 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+ 
+   // SessionObserver:
+   void OnSessionStateChanged(session_manager::SessionState state) override;
++  void OnActiveUserPrefServiceChanged(PrefService* pref_service) override;
+ 
+   // DisplayObserver:
+   void OnDisplayMetricsChanged(const display::Display& display,
+@@ -204,6 +208,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+ 
+   bool is_dense() const { return is_dense_; }
+ 
++  bool is_compact_mode_enabled() const { return is_compact_mode_enabled_; }
++
+   bool is_in_app() const { return is_in_app_; }
+ 
+   bool in_split_view_with_overview() const {
+@@ -267,6 +273,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+   // Updates 'elevate_tablet_mode_app_bar_' for `inline_app_bar_size`.
+   void UpdateShowElevatedAppBar(const gfx::Size& inline_app_bar_size);
+ 
++  void UpdateConfigForCompactMode();
++
+  private:
+   friend class ShelfConfigTest;
+ 
+@@ -316,6 +324,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+   // Whether shelf is currently standard or dense.
+   bool is_dense_ = false;
+ 
++  // Whether compact mode is enabled.
++  bool is_compact_mode_enabled_ = false;
++
+   // Whether the shelf is currently in in-app state.
+   bool is_in_app_ = false;
+ 
+@@ -332,8 +343,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+   // Whether the app list (or home launcher in tablet mode) is visible.
+   bool is_app_list_visible_ = false;
+ 
++  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
++
+   // Size of the icons within shelf buttons.
+-  const int shelf_button_icon_size_;
++  int shelf_button_icon_size_;
+   const int shelf_button_icon_size_median_;
+   const int shelf_button_icon_size_dense_;
+ 
+@@ -353,12 +366,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+   const int shelf_shortcut_teardrop_corner_radius_;
+ 
+   // Size allocated for each app button on the shelf.
+-  const int shelf_button_size_;
++  int shelf_button_size_;
+   const int shelf_button_size_median_;
+   const int shelf_button_size_dense_;
+ 
+   // Size of the space between buttons on the shelf.
+-  const int shelf_button_spacing_;
++  int shelf_button_spacing_;
+ 
+   // The extra padding added to status area tray buttons on the shelf.
+   const int shelf_status_area_hit_region_padding_;
+diff --git a/ash/public/cpp/shelf_prefs.cc b/ash/public/cpp/shelf_prefs.cc
+index 4c68813bfcdda6591fdb8f51db608ae1afd0ffe1..f3434286db2b53a096160cbf9ad3f63ba616725b 100644
+--- a/ash/public/cpp/shelf_prefs.cc
++++ b/ash/public/cpp/shelf_prefs.cc
+@@ -19,6 +19,10 @@
+ 
+ namespace ash {
+ 
++namespace prefs {
++const char kShelfCompactMode[] = "ash.shelf.compact_mode";
++}  // namespace prefs
++
+ const char kShelfAutoHideBehaviorAlways[] = "Always";
+ const char kShelfAutoHideBehaviorNever[] = "Never";
+ 
+@@ -30,6 +34,7 @@ const char kDeskButtonInShelfHidden[] = "Hidden";
+ const char kShelfAlignmentBottom[] = "Bottom";
+ const char kShelfAlignmentLeft[] = "Left";
+ const char kShelfAlignmentRight[] = "Right";
++const char kShelfAlignmentTop[] = "Top";
+ 
+ namespace {
+ 
+@@ -95,6 +100,8 @@ ShelfAlignment AlignmentFromPref(const std::string& value) {
+     return ShelfAlignment::kLeft;
+   if (value == kShelfAlignmentRight)
+     return ShelfAlignment::kRight;
++  if (value == kShelfAlignmentTop)
++    return ShelfAlignment::kTop;
+   // Default to bottom.
+   return ShelfAlignment::kBottom;
+ }
+@@ -107,6 +114,8 @@ const char* AlignmentToPref(ShelfAlignment alignment) {
+       return kShelfAlignmentLeft;
+     case ShelfAlignment::kRight:
+       return kShelfAlignmentRight;
++    case ShelfAlignment::kTop:
++      return kShelfAlignmentTop;
+     case ShelfAlignment::kBottomLocked:
+       // This should not be a valid preference option for now. We only want to
+       // lock the shelf during login or when adding a user.
+diff --git a/ash/public/cpp/shelf_prefs.h b/ash/public/cpp/shelf_prefs.h
+index 57aedbf21bda386804114021ceda65d844fb2499..08d09609b09b491d2a64b137c9e784f90790a9c3 100644
+--- a/ash/public/cpp/shelf_prefs.h
++++ b/ash/public/cpp/shelf_prefs.h
+@@ -12,6 +12,10 @@ class PrefService;
+ 
+ namespace ash {
+ 
++namespace prefs {
++ASH_PUBLIC_EXPORT extern const char kShelfCompactMode[];
++}  // namespace prefs
++
+ // Values used for prefs::kShelfAutoHideBehavior.
+ ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorAlways[];
+ ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorNever[];
+diff --git a/ash/public/cpp/shelf_types.cc b/ash/public/cpp/shelf_types.cc
+index a0f19b7435f9d909372cde65cd2bf9881f70237d..cf98b9763381fd9f8531cf2bd2e36fa7c1196837 100644
+--- a/ash/public/cpp/shelf_types.cc
++++ b/ash/public/cpp/shelf_types.cc
+@@ -28,6 +28,8 @@ std::ostream& operator<<(std::ostream& out, ShelfAlignment alignment) {
+       return out << "Right";
+     case ShelfAlignment::kBottomLocked:
+       return out << "BottomLocked";
++    case ShelfAlignment::kTop:
++      return out << "Top";
+   }
+ }
+ 
+diff --git a/ash/public/cpp/shelf_types.h b/ash/public/cpp/shelf_types.h
+index 91ce054fb1a831020e2e477caa0e3e22213b14e9..2d9abd08c6700d1ad346afb192f7c6fcddc1b266 100644
+--- a/ash/public/cpp/shelf_types.h
++++ b/ash/public/cpp/shelf_types.h
+@@ -17,7 +17,7 @@ enum class ShelfAlignment {
+   kBottom,
+   kLeft,
+   kRight,
+-  // Top has never been supported.
++  kTop,
+ 
+   // The locked alignment is set temporarily and not saved to preferences.
+   kBottomLocked,
+diff --git a/ash/shelf/home_button.cc b/ash/shelf/home_button.cc
+index 32bb05266b11210ccb0f2369a159d207c3bd0b02..a3edaba1da5902b281baec5cd103649b3ada6759 100644
+--- a/ash/shelf/home_button.cc
++++ b/ash/shelf/home_button.cc
+@@ -809,11 +809,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
+   gfx::PointF bounce_up_point = shelf()->SelectValueForShelfAlignment(
+       gfx::PointF(0, -kAnimationBounceUpOffset),
+       gfx::PointF(kAnimationBounceUpOffset, 0),
+-      gfx::PointF(-kAnimationBounceUpOffset, 0));
++      gfx::PointF(-kAnimationBounceUpOffset, 0),
++      gfx::PointF(0, kAnimationBounceUpOffset));
+   gfx::PointF bounce_down_point = shelf()->SelectValueForShelfAlignment(
+       gfx::PointF(0, kAnimationBounceDownOffset),
+       gfx::PointF(-kAnimationBounceDownOffset, 0),
+-      gfx::PointF(kAnimationBounceDownOffset, 0));
++      gfx::PointF(kAnimationBounceDownOffset, 0),
++      gfx::PointF(0, -kAnimationBounceDownOffset));
+ 
+   gfx::Transform move_up;
+   move_up.Translate(bounce_up_point.x(), bounce_up_point.y());
+diff --git a/ash/shelf/hotseat_widget.cc b/ash/shelf/hotseat_widget.cc
+index 4acc5f2de72b37fe448f0e9bd17039bc79778edd..54eabcc974446cb49c88a0521a9470af6f988892 100644
+--- a/ash/shelf/hotseat_widget.cc
++++ b/ash/shelf/hotseat_widget.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "ash/shelf/hotseat_widget.h"
+ 
++#include <algorithm>
+ #include <memory>
+ #include <utility>
+ 
+@@ -851,6 +852,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
+   DCHECK(shelf_->IsHorizontalAlignment());
+   int hotseat_distance_from_bottom_of_display = 0;
+   const int hotseat_size = GetHotseatSize();
++  const gfx::Rect shelf_bounds = shelf_->shelf_widget()->GetTargetBounds();
++  const int target_shelf_size = shelf_bounds.size().height();
++  const int shelf_y = shelf_bounds.y();
++
++  // AuraDE compatibility: the upstream horizontal hotseat math is bottom-edge
++  // relative. A top shelf needs mirrored positions so the inline hotseat stays
++  // on the shelf and expanded states open into the work area below it.
++  if (shelf_->alignment() == ShelfAlignment::kTop) {
++    switch (hotseat_target_state) {
++      case HotseatState::kShownClamshell:
++        return shelf_y + std::min(0, target_shelf_size - hotseat_size);
++      case HotseatState::kShownHomeLauncher: {
++        int hotseat_y =
++            shelf_y + target_shelf_size +
++            ShelfConfig::Get()->hotseat_bottom_padding();
++        if (ShelfConfig::Get()->elevate_tablet_mode_app_bar()) {
++          hotseat_y += hotseat_size +
++                       ShelfConfig::Get()->GetHomecherElevatedAppBarOffset();
++        }
++        return hotseat_y;
++      }
++      case HotseatState::kHidden:
++        return shelf_y - hotseat_size;
++      case HotseatState::kExtended:
++        return shelf_y + target_shelf_size +
++               ShelfConfig::Get()->in_app_shelf_size() +
++               ShelfConfig::Get()->hotseat_bottom_padding();
++      case HotseatState::kNone:
++        NOTREACHED();
++    }
++  }
++
+   switch (hotseat_target_state) {
+     case HotseatState::kShownClamshell:
+       hotseat_distance_from_bottom_of_display = hotseat_size;
+@@ -883,11 +916,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
+     case HotseatState::kNone:
+       NOTREACHED();
+   }
+-  const int target_shelf_size =
+-      shelf_->shelf_widget()->GetTargetBounds().size().height();
+   const int hotseat_y_in_shelf =
+       -(hotseat_distance_from_bottom_of_display - target_shelf_size);
+-  const int shelf_y = shelf_->shelf_widget()->GetTargetBounds().y();
+   return hotseat_y_in_shelf + shelf_y;
+ }
+ 
+diff --git a/ash/shelf/kiosk_app_instruction_bubble.cc b/ash/shelf/kiosk_app_instruction_bubble.cc
+index 9b4308272f07bdc279c07ddfb0b3626a31c9bdf5..5cbe4c53af9c099044e655e1e248728c958d52a3 100644
+--- a/ash/shelf/kiosk_app_instruction_bubble.cc
++++ b/ash/shelf/kiosk_app_instruction_bubble.cc
+@@ -38,6 +38,8 @@ views::BubbleBorder::Arrow GetArrow(ShelfAlignment alignment) {
+       return views::BubbleBorder::LEFT_TOP;
+     case ShelfAlignment::kRight:
+       return views::BubbleBorder::RIGHT_TOP;
++    case ShelfAlignment::kTop:
++      return views::BubbleBorder::TOP_LEFT;
+   }
+   return views::BubbleBorder::Arrow::NONE;
+ }
+diff --git a/ash/shelf/shelf.cc b/ash/shelf/shelf.cc
+index f9257db9ce85053b4140b39fae47626767863e87..b651c921c70ec1463e64c719698b362a986b72fd 100644
+--- a/ash/shelf/shelf.cc
++++ b/ash/shelf/shelf.cc
+@@ -550,6 +550,7 @@ bool IsHorizontalAlignment(ShelfAlignment alignment) {
+   switch (alignment) {
+     case ShelfAlignment::kBottom:
+     case ShelfAlignment::kBottomLocked:
++    case ShelfAlignment::kTop:
+       return true;
+     case ShelfAlignment::kLeft:
+     case ShelfAlignment::kRight:
+@@ -702,6 +703,11 @@ gfx::Rect Shelf::GetSystemTrayAnchorRect() const {
+     case ShelfAlignment::kRight:
+       return gfx::Rect(work_area.right() - kShelfDisplayOffset,
+                        work_area.bottom() - kShelfDisplayOffset, 0, 0);
++    case ShelfAlignment::kTop:
++      return gfx::Rect(base::i18n::IsRTL()
++                           ? work_area.x()
++                           : work_area.right() - kShelfDisplayOffset,
++                       work_area.y(), 0, 0);
+   }
+   NOTREACHED();
+ }
+diff --git a/ash/shelf/shelf.h b/ash/shelf/shelf.h
+index 1fc09e689e24bbc88d74c28747c2929ab59499ff..24a3b45a9d98e2b87f89772568f970300e4ac763 100644
+--- a/ash/shelf/shelf.h
++++ b/ash/shelf/shelf.h
+@@ -58,7 +58,8 @@ template <typename T>
+ T SelectValueByShelfAlignment(ShelfAlignment alignment,
+                               T bottom,
+                               T left,
+-                              T right) {
++                              T right,
++                              T top) {
+   switch (alignment) {
+     case ShelfAlignment::kBottom:
+     case ShelfAlignment::kBottomLocked:
+@@ -67,10 +68,20 @@ T SelectValueByShelfAlignment(ShelfAlignment alignment,
+       return left;
+     case ShelfAlignment::kRight:
+       return right;
++    case ShelfAlignment::kTop:
++      return top;
+   }
+   NOTREACHED();
+ }
+ 
++template <typename T>
++T SelectValueByShelfAlignment(ShelfAlignment alignment,
++                              T bottom,
++                              T left,
++                              T right) {
++  return SelectValueByShelfAlignment(alignment, bottom, left, right, bottom);
++}
++
+ bool IsHorizontalAlignment(ShelfAlignment alignment);
+ 
+ // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
+@@ -181,7 +192,12 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
+   // Returns a value based on shelf alignment.
+   template <typename T>
+   T SelectValueForShelfAlignment(T bottom, T left, T right) const {
+-    return SelectValueByShelfAlignment(alignment_, bottom, left, right);
++    return SelectValueByShelfAlignment(alignment_, bottom, left, right, bottom);
++  }
++
++  template <typename T>
++  T SelectValueForShelfAlignment(T bottom, T left, T right, T top) const {
++    return SelectValueByShelfAlignment(alignment_, bottom, left, right, top);
+   }
+ 
+   // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
+diff --git a/ash/shelf/shelf_app_button.cc b/ash/shelf/shelf_app_button.cc
+index de7315c0a3ecd877fcf655fb0c3c1512b6780b55..42b8001cfad8ea20dd3aab23e78634ee6041bf61 100644
+--- a/ash/shelf/shelf_app_button.cc
++++ b/ash/shelf/shelf_app_button.cc
+@@ -1043,6 +1043,10 @@ void ShelfAppButton::Layout(PassKey) {
+                                kStatusIndicatorRadiusDip -
+                                status_indicator_offet_from_shelf_edge);
+       break;
++    case ShelfAlignment::kTop:
++      indicator_midpoint.set_y(button_bounds.y() + kStatusIndicatorRadiusDip +
++                               status_indicator_offet_from_shelf_edge);
++      break;
+   }
+ 
+   gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
+diff --git a/ash/shelf/shelf_bubble.cc b/ash/shelf/shelf_bubble.cc
+index 3c43d0b8b557267fd97c40dab87bb4e25c973633..e8b4bf300a52649800b3fcb868388907c54d4abe 100644
+--- a/ash/shelf/shelf_bubble.cc
++++ b/ash/shelf/shelf_bubble.cc
+@@ -50,6 +50,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
+       return views::BubbleBorder::LEFT_CENTER;
+     case ash::ShelfAlignment::kRight:
+       return views::BubbleBorder::RIGHT_CENTER;
++    case ash::ShelfAlignment::kTop:
++      return views::BubbleBorder::TOP_CENTER;
+   }
+   return views::BubbleBorder::Arrow::NONE;
+ }
+diff --git a/ash/shelf/shelf_config.cc b/ash/shelf/shelf_config.cc
+index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16f902f967 100644
+--- a/ash/shelf/shelf_config.cc
++++ b/ash/shelf/shelf_config.cc
+@@ -6,6 +6,9 @@
+ 
+ #include <optional>
+ 
++#include "ash/public/cpp/shelf_prefs.h"
++#include "components/prefs/pref_service.h"
++
+ #include "ash/accessibility/accessibility_controller.h"
+ #include "ash/accessibility/accessibility_observer.h"
+ #include "ash/app_list/app_list_controller_impl.h"
+@@ -20,6 +23,7 @@
+ #include "base/metrics/histogram_functions.h"
+ #include "base/scoped_observation.h"
+ #include "chromeos/constants/chromeos_features.h"
++#include "components/prefs/pref_change_registrar.h"
+ #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
+ #include "ui/display/tablet_state.h"
+ 
+@@ -173,6 +177,7 @@ void ShelfConfig::Init() {
+ void ShelfConfig::Shutdown() {
+   Shell* const shell = Shell::Get();
+ 
++  pref_change_registrar_.reset();
+   shell->session_controller()->RemoveObserver(this);
+   shell->overview_controller()->RemoveObserver(this);
+   shell->system_tray_model()->virtual_keyboard()->RemoveObserver(this);
+@@ -212,6 +217,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
+   UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
+ }
+ 
++void ShelfConfig::OnActiveUserPrefServiceChanged(PrefService* pref_service) {
++  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
++  pref_change_registrar_->Init(pref_service);
++  pref_change_registrar_->Add(
++      prefs::kShelfCompactMode,
++      base::BindRepeating(&ShelfConfig::UpdateConfigForCompactMode,
++                          base::Unretained(this)));
++  UpdateConfigForCompactMode();
++}
++
+ void ShelfConfig::UpdateForTabletMode(bool in_tablet_mode) {
+   in_tablet_mode_ = in_tablet_mode;
+   UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/true);
+@@ -250,7 +265,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
+ 
+ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
+   if (is_dense_)
+-    return shelf_button_size_dense_;
++    return shelf_button_size_;  // Updated by UpdateConfig; respects compact mode.
+ 
+   switch (density) {
+     case HotseatDensity::kNormal:
+@@ -264,7 +279,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
+ 
+ int ShelfConfig::GetShelfButtonIconSize(HotseatDensity density) const {
+   if (is_dense_)
+-    return shelf_button_icon_size_dense_;
++    return shelf_button_icon_size_;  // Updated by UpdateConfig; respects compact mode.
+ 
+   switch (density) {
+     case HotseatDensity::kNormal:
+@@ -312,6 +327,8 @@ int ShelfConfig::shelf_size() const {
+ }
+ 
+ int ShelfConfig::in_app_shelf_size() const {
++  if (is_compact_mode_enabled_)
++    return 32;
+   return is_dense_ ? 36 : 40;
+ }
+ 
+@@ -337,7 +354,7 @@ int ShelfConfig::button_spacing() const {
+ 
+ int ShelfConfig::control_size() const {
+   if (!in_tablet_mode_)
+-    return 36;
++    return is_compact_mode_enabled_ ? 28 : 36;
+ 
+   return is_dense_ ? 36 : 40;
+ }
+@@ -397,12 +414,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+   const bool new_is_in_app =
+       CalculateIsInApp(new_is_app_list_visible, new_is_virtual_keyboard_shown);
+ 
++  PrefService* pref_service =
++      Shell::Get()->session_controller()->GetActivePrefService();
++  const bool new_is_compact_mode_enabled =
++      pref_service && pref_service->GetBoolean(prefs::kShelfCompactMode);
++
+   const bool changed =
+       tablet_mode_changed || is_dense_ != new_is_dense ||
+       is_in_app_ != new_is_in_app ||
+       shelf_controls_shown_ != new_shelf_controls_shown ||
+       is_virtual_keyboard_shown_ != new_is_virtual_keyboard_shown ||
+-      is_app_list_visible_ != new_is_app_list_visible;
++      is_app_list_visible_ != new_is_app_list_visible ||
++      is_compact_mode_enabled_ != new_is_compact_mode_enabled;
+ 
+   if (!changed)
+     return;
+@@ -412,14 +435,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+   is_virtual_keyboard_shown_ = new_is_virtual_keyboard_shown;
+   is_app_list_visible_ = new_is_app_list_visible;
+   is_in_app_ = new_is_in_app;
++  is_compact_mode_enabled_ = new_is_compact_mode_enabled;
++
++  shelf_button_size_ =
++      is_dense_ ? (is_compact_mode_enabled_ ? 36 : 48) : 56;
++  shelf_button_icon_size_ =
++      is_dense_ ? (is_compact_mode_enabled_ ? 28 : 36) : 44;
++  shelf_button_spacing_ = is_dense_ ? 4 : 8;
+ 
+   OnShelfConfigUpdated();
+ }
+ 
++void ShelfConfig::UpdateConfigForCompactMode() {
++  UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
++}
++
+ int ShelfConfig::GetShelfSize(bool ignore_in_app_state) const {
+   // In clamshell mode, the shelf always has the same size.
+   if (!in_tablet_mode_)
+-    return 48;
++    return is_compact_mode_enabled_ ? 36 : 48;
+ 
+   // Use in app shelf when split view is enabled.
+   if (!ignore_in_app_state && (is_in_app_ || in_split_view_with_overview_))
+diff --git a/ash/shelf/shelf_context_menu_model.cc b/ash/shelf/shelf_context_menu_model.cc
+index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71b46cf320 100644
+--- a/ash/shelf/shelf_context_menu_model.cc
++++ b/ash/shelf/shelf_context_menu_model.cc
+@@ -48,6 +48,12 @@ bool IsFullScreenMode(int64_t display_id) {
+   return controller && controller->GetWindowForFullscreenMode();
+ }
+ 
++PrefService* GetShelfPrefService() {
++  auto* session_controller = Shell::Get()->session_controller();
++  PrefService* prefs = session_controller->GetLastActiveUserPrefService();
++  return prefs ? prefs : session_controller->GetActivePrefService();
++}
++
+ }  // namespace
+ 
+ ShelfContextMenuModel::ShelfContextMenuModel(ShelfItemDelegate* delegate,
+@@ -67,9 +73,9 @@ ShelfContextMenuModel::~ShelfContextMenuModel() = default;
+ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
+   if (command_id == MENU_ALIGNMENT_LEFT ||
+       command_id == MENU_ALIGNMENT_BOTTOM ||
+-      command_id == MENU_ALIGNMENT_RIGHT) {
+-    PrefService* prefs =
+-        Shell::Get()->session_controller()->GetLastActiveUserPrefService();
++      command_id == MENU_ALIGNMENT_RIGHT ||
++      command_id == MENU_ALIGNMENT_TOP) {
++    PrefService* prefs = GetShelfPrefService();
+     const ShelfAlignment alignment = GetShelfAlignmentPref(prefs, display_id_);
+     if (command_id == MENU_ALIGNMENT_LEFT)
+       return alignment == ShelfAlignment::kLeft;
+@@ -79,6 +85,8 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
+     }
+     if (command_id == MENU_ALIGNMENT_RIGHT)
+       return alignment == ShelfAlignment::kRight;
++    if (command_id == MENU_ALIGNMENT_TOP)
++      return alignment == ShelfAlignment::kTop;
+   }
+ 
+   return SimpleMenuModel::Delegate::IsCommandIdChecked(command_id);
+@@ -87,36 +95,54 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
+ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+   DCHECK(IsCommandIdEnabled(command_id));
+   Shell* shell = Shell::Get();
+-  PrefService* prefs =
+-      shell->session_controller()->GetLastActiveUserPrefService();
+-  if (!prefs)  // Null during startup.
+-    return;
++
++  // HACK(AuraDE): Don't bail when prefs is null. On linux-chromeos
++  // GetLastActiveUserPrefService() returns null because the session_manager
++  // daemon never calls SetUserSessionOrder. Guard only the pref-dependent
++  // commands so non-pref ones (Personalization Hub, Task Manager, etc.)
++  // actually execute. Same root cause as the AddShelfAndWallpaperItems fix.
++  PrefService* prefs = GetShelfPrefService();
+ 
+   // Clamshell mode only options should not activate in tablet mode.
+   const bool is_tablet_mode = display::Screen::Get()->InTabletMode();
+   switch (command_id) {
+     case MENU_AUTO_HIDE:
+-      SetShelfAutoHideBehaviorPref(
+-          prefs, display_id_,
+-          GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
+-                  ShelfAutoHideBehavior::kAlways
+-              ? ShelfAutoHideBehavior::kNever
+-              : ShelfAutoHideBehavior::kAlways);
++      if (prefs) {
++        SetShelfAutoHideBehaviorPref(
++            prefs, display_id_,
++            GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
++                    ShelfAutoHideBehavior::kAlways
++                ? ShelfAutoHideBehavior::kNever
++                : ShelfAutoHideBehavior::kAlways);
++      }
+       break;
+     case MENU_ALIGNMENT_LEFT:
+       DCHECK(!is_tablet_mode);
+-      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetLeft"));
+-      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kLeft);
++      if (prefs) {
++        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetLeft"));
++        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kLeft);
++      }
+       break;
+     case MENU_ALIGNMENT_RIGHT:
+       DCHECK(!is_tablet_mode);
+-      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetRight"));
+-      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kRight);
++      if (prefs) {
++        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetRight"));
++        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kRight);
++      }
+       break;
+     case MENU_ALIGNMENT_BOTTOM:
+       DCHECK(!is_tablet_mode);
+-      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetBottom"));
+-      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kBottom);
++      if (prefs) {
++        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetBottom"));
++        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kBottom);
++      }
++      break;
++    case MENU_ALIGNMENT_TOP:
++      DCHECK(!is_tablet_mode);
++      if (prefs) {
++        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetTop"));
++        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kTop);
++      }
+       break;
+     case MENU_PERSONALIZATION_HUB:
+       NewWindowDelegate::GetInstance()->OpenPersonalizationHub();
+@@ -130,11 +156,15 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+       shell->app_list_controller()->SetHideContinueSection(false);
+       break;
+     case MENU_HIDE_DESK_NAME:
+-      base::UmaHistogramBoolean(kDeskButtonHiddenHistogramName, true);
+-      SetShowDeskButtonInShelfPref(prefs, false);
++      if (prefs) {
++        base::UmaHistogramBoolean(kDeskButtonHiddenHistogramName, true);
++        SetShowDeskButtonInShelfPref(prefs, false);
++      }
+       break;
+     case MENU_SHOW_DESK_NAME:
+-      SetShowDeskButtonInShelfPref(prefs, true);
++      if (prefs) {
++        SetShowDeskButtonInShelfPref(prefs, true);
++      }
+       break;
+     case MENU_TASK_MANAGER:
+       base::RecordAction(
+@@ -142,6 +172,12 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+       NewWindowDelegate::GetInstance()->ShowTaskManager(
+           /*from_context_menu=*/true);
+       break;
++    case MENU_COMPACT_MODE:
++      if (prefs) {
++        const bool current = prefs->GetBoolean(prefs::kShelfCompactMode);
++        prefs->SetBoolean(prefs::kShelfCompactMode, !current);
++      }
++      break;
+     // Using reorder CommandId in ash/public/cpp/app_menu_constants.h
+     case REORDER_BY_NAME_ALPHABETICAL:
+       AppListModelProvider::Get()->model()->delegate()->RequestAppListSort(
+@@ -164,27 +200,30 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+ }
+ 
+ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+-  PrefService* prefs =
+-      Shell::Get()->session_controller()->GetLastActiveUserPrefService();
+-  if (!prefs)  // Null during startup.
+-    return;
+-
+-  // In fullscreen, the shelf is either hidden or auto-hidden, depending on the
+-  // type of fullscreen. Do not show the auto-hide menu item while in fullscreen
+-  // because it is confusing when the preference appears not to apply.
++  PrefService* prefs = GetShelfPrefService();
++
++  // HACK(AuraDE): Don't bail when prefs is null. On linux-chromeos the
++  // session_manager daemon never calls SetUserSessionOrder, so
++  // last_active_user_prefs_ stays null. The old early return left the
++  // entire context menu empty. Instead guard each pref-dependent item
++  // individually so the static items (Personalization Hub, Task Manager)
++  // always appear. If prefs become available later (from the real user
++  // profile) they'll work on subsequent right-clicks.
+   const bool is_fullscreen = IsFullScreenMode(display_id_);
+-  if (CanUserModifyShelfAutoHide(prefs) && !is_fullscreen) {
+-    const bool is_autohide_set =
+-        GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
+-        ShelfAutoHideBehavior::kAlways;
+-    auto string_id = is_autohide_set
+-                         ? IDS_ASH_SHELF_CONTEXT_MENU_ALWAYS_SHOW_SHELF
+-                         : IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE;
+-    AddItemWithStringIdAndIcon(
+-        MENU_AUTO_HIDE, string_id,
+-        ui::ImageModel::FromVectorIcon(
+-            is_autohide_set ? kAlwaysShowShelfIcon : kAutoHideIcon,
+-            ui::kColorAshSystemUIMenuIcon));
++  if (prefs) {
++    if (CanUserModifyShelfAutoHide(prefs) && !is_fullscreen) {
++      const bool is_autohide_set =
++          GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
++          ShelfAutoHideBehavior::kAlways;
++      auto string_id = is_autohide_set
++                           ? IDS_ASH_SHELF_CONTEXT_MENU_ALWAYS_SHOW_SHELF
++                           : IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE;
++      AddItemWithStringIdAndIcon(
++          MENU_AUTO_HIDE, string_id,
++          ui::ImageModel::FromVectorIcon(
++              is_autohide_set ? kAlwaysShowShelfIcon : kAutoHideIcon,
++              ui::kColorAshSystemUIMenuIcon));
++    }
+   }
+ 
+   // Only allow shelf alignment modifications by the logged in Gaia users
+@@ -192,7 +231,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+   // is not shown.
+   LoginStatus status = Shell::Get()->session_controller()->login_status();
+   const bool in_tablet_mode = display::Screen::Get()->InTabletMode();
+-  if ((status == LoginStatus::USER || status == LoginStatus::CHILD) &&
++  if (prefs && (status == LoginStatus::USER || status == LoginStatus::CHILD) &&
+       !in_tablet_mode &&
+       prefs->FindPreference(prefs::kShelfAlignmentLocal)->IsUserModifiable()) {
+     alignment_submenu_ = std::make_unique<ui::SimpleMenuModel>(this);
+@@ -204,6 +243,8 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+         MENU_ALIGNMENT_BOTTOM, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_BOTTOM, group);
+     alignment_submenu_->AddRadioItemWithStringId(
+         MENU_ALIGNMENT_RIGHT, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_RIGHT, group);
++    alignment_submenu_->AddRadioItemWithStringId(
++        MENU_ALIGNMENT_TOP, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_TOP, group);
+ 
+     AddSubMenuWithStringIdAndIcon(
+         MENU_ALIGNMENT_MENU, IDS_ASH_SHELF_CONTEXT_MENU_POSITION,
+@@ -219,7 +260,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+ 
+   // Only add the desk button items if the context menu was spawned on the
+   // shelf, tablet mode is not enabled, and full screen is not enabled.
+-  if (!in_tablet_mode && menu_in_shelf_ && !is_fullscreen) {
++  if (prefs && !in_tablet_mode && menu_in_shelf_ && !is_fullscreen) {
+     // If the button is visible for any reason, show the option to hide it
+     // manually. If it isn't visible show the option to show it.
+     if (GetDeskButtonVisibility(prefs)) {
+@@ -237,6 +278,18 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+ 
+   AddItemWithStringId(MENU_TASK_MANAGER,
+                       IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER);
++
++  // Compact mode toggle — only makes sense in clamshell mode.
++  if (!in_tablet_mode) {
++    const bool compact_on =
++        prefs && prefs->GetBoolean(prefs::kShelfCompactMode);
++    AddItemWithStringIdAndIcon(
++        MENU_COMPACT_MODE,
++        compact_on ? IDS_ASH_SHELF_CONTEXT_MENU_DISABLE_COMPACT_MODE
++                   : IDS_ASH_SHELF_CONTEXT_MENU_ENABLE_COMPACT_MODE,
++        ui::ImageModel::FromVectorIcon(kAutoHideIcon,
++                                      ui::kColorAshSystemUIMenuIcon));
++  }
+ }
+ 
+ }  // namespace ash
+diff --git a/ash/shelf/shelf_context_menu_model.h b/ash/shelf/shelf_context_menu_model.h
+index 2d9c97bbdcefd37d9651ba8a286584756b46cb3d..a8b9ad0e50be4b9f00680a92effb9a0f438b98b9 100644
+--- a/ash/shelf/shelf_context_menu_model.h
++++ b/ash/shelf/shelf_context_menu_model.h
+@@ -42,6 +42,8 @@ class ASH_EXPORT ShelfContextMenuModel : public ui::SimpleMenuModel,
+     MENU_HIDE_DESK_NAME = 509,
+     MENU_SHOW_DESK_NAME = 510,
+     MENU_TASK_MANAGER = 511,
++    MENU_COMPACT_MODE = 512,
++    MENU_ALIGNMENT_TOP = 513,
+     MENU_ASH_END
+   };
+   // LINT.ThenChange(//tools/metrics/histograms/metadata/apps/enums.xml:ChromeOSUICommands)
+diff --git a/ash/shelf/shelf_controller.cc b/ash/shelf/shelf_controller.cc
+index 82fdf6bb2d063ff05b977e4640af7976ecfe980f..474161baf795750d95167dbd2e4cd5e9b29ea945 100644
+--- a/ash/shelf/shelf_controller.cc
++++ b/ash/shelf/shelf_controller.cc
+@@ -161,6 +161,7 @@ void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
+       prefs::kShowDeskButtonInShelf, std::string(),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+   registry->RegisterBooleanPref(prefs::kDeviceUsesDesks, false);
++  registry->RegisterBooleanPref(prefs::kShelfCompactMode, false);
+   registry->RegisterStringPref(
+       prefs::kShelfAlignment, kShelfAlignmentBottom,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+@@ -190,6 +191,11 @@ void ShelfController::OnActiveUserPrefServiceChanged(
+                               base::BindRepeating(&LayoutShelves));
+   pref_change_registrar_->Add(prefs::kShelfPreferences,
+                               base::BindRepeating(&SetShelfBehaviorsFromPrefs));
++  pref_change_registrar_->Add(
++      prefs::kShelfCompactMode,
++      base::BindRepeating([]() {
++        ShelfConfig::Get()->UpdateConfigForCompactMode();
++      }));
+ 
+   pref_change_registrar_->Add(
+       prefs::kAppNotificationBadgingEnabled,
+diff --git a/ash/shelf/shelf_layout_manager.cc b/ash/shelf/shelf_layout_manager.cc
+index e7cf6b4954d5b7b88811b42638b34fa275f68808..30ba33ec02ffdf83e0c5c16beca3acfade32f477 100644
+--- a/ash/shelf/shelf_layout_manager.cc
++++ b/ash/shelf/shelf_layout_manager.cc
+@@ -238,7 +238,8 @@ gfx::Insets CalculateShelfInsets(ShelfAlignment alignment,
+   return SelectValueByShelfAlignment(
+       alignment, gfx::Insets::TLBR(0, 0, horizontal_inset, 0),
+       gfx::Insets::TLBR(0, default_shelf_inset, 0, 0),
+-      gfx::Insets::TLBR(0, 0, 0, default_shelf_inset));
++      gfx::Insets::TLBR(0, 0, 0, default_shelf_inset),
++      gfx::Insets::TLBR(horizontal_inset, 0, 0, 0));
+ }
+ 
+ int GetOffset(int offset, const char* pref_name) {
+@@ -557,11 +558,15 @@ gfx::Rect ShelfLayoutManager::GetIdealBounds() const {
+   const int shelf_size = ShelfConfig::Get()->shelf_size();
+   aura::Window* shelf_window = shelf_widget_->GetNativeWindow();
+   gfx::Rect rect(screen_util::GetDisplayBoundsInParent(shelf_window));
++  // AuraDE compatibility: top shelf needs an ideal bounds rect on the top
++  // display edge so work-area reservation and flyout anchoring agree with the
++  // visible shelf.
+   return shelf_->SelectValueForShelfAlignment(
+       gfx::Rect(rect.x(), rect.bottom() - shelf_size, rect.width(), shelf_size),
+       gfx::Rect(rect.x(), rect.y(), shelf_size, rect.height()),
+       gfx::Rect(rect.right() - shelf_size, rect.y(), shelf_size,
+-                rect.height()));
++                rect.height()),
++      gfx::Rect(rect.x(), rect.y(), rect.width(), shelf_size));
+ }
+ 
+ gfx::Rect ShelfLayoutManager::GetIdealBoundsForWorkAreaCalculation() const {
+@@ -1038,7 +1043,8 @@ bool ShelfLayoutManager::MaybeHandleShelfFling(
+   int velocity = shelf_->SelectValueForShelfAlignment(
+       event_in_screen.AsGestureEvent()->details().velocity_y(),
+       -event_in_screen.AsGestureEvent()->details().velocity_x(),
+-      event_in_screen.AsGestureEvent()->details().velocity_x());
++      event_in_screen.AsGestureEvent()->details().velocity_x(),
++      -event_in_screen.AsGestureEvent()->details().velocity_y());
+ 
+   const int adjusted_velocity = GetScrollOffsetInAllowedDirection(
+       velocity, Shell::Get()->app_list_controller()->IsVisible(display_.id()));
+@@ -2066,7 +2072,8 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
+   const int baseline = shelf_->SelectValueForShelfAlignment(
+       available_bounds.bottom() - (shelf_hidden_at_start ? 0 : shelf_size),
+       available_bounds.x() - (shelf_hidden_at_start ? shelf_size : 0),
+-      available_bounds.right() - (shelf_hidden_at_start ? 0 : shelf_size));
++      available_bounds.right() - (shelf_hidden_at_start ? 0 : shelf_size),
++      available_bounds.y() - (shelf_hidden_at_start ? shelf_size : 0));
+   const int shelf_position = baseline + drag_amount_;
+ 
+   if (!display::Screen::Get()->InTabletMode()) {
+@@ -2074,11 +2081,12 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
+     // baseline.
+     int shelf_ideal_bound = shelf_->SelectValueForShelfAlignment(
+         available_bounds.bottom() - shelf_size, 0,
+-        available_bounds.right() - shelf_size);
++        available_bounds.right() - shelf_size, available_bounds.y());
+     int adjusted_shelf_position = shelf_->SelectValueForShelfAlignment(
+         std::max(shelf_ideal_bound, static_cast<int>(shelf_position)),
+         std::min(shelf_ideal_bound, static_cast<int>(shelf_position)),
+-        std::max(shelf_ideal_bound, static_cast<int>(shelf_position)));
++        std::max(shelf_ideal_bound, static_cast<int>(shelf_position)),
++        std::min(shelf_ideal_bound, static_cast<int>(shelf_position)));
+     shelf_->shelf_widget()->UpdateTargetBoundsForGesture(
+         adjusted_shelf_position);
+     shelf_->hotseat_widget()->UpdateTargetBoundsForGesture(
+@@ -2208,7 +2216,8 @@ gfx::Rect ShelfLayoutManager::GetAutoHideShowShelfRegionInScreen() const {
+   gfx::Vector2d offset = shelf_->SelectValueForShelfAlignment(
+       gfx::Vector2d(0, shelf_bounds_in_screen.height()),
+       gfx::Vector2d(-kMaxAutoHideShowShelfRegionSize, 0),
+-      gfx::Vector2d(shelf_bounds_in_screen.width(), 0));
++      gfx::Vector2d(shelf_bounds_in_screen.width(), 0),
++      gfx::Vector2d(0, -kMaxAutoHideShowShelfRegionSize));
+ 
+   gfx::Rect show_shelf_region_in_screen = shelf_bounds_in_screen;
+   show_shelf_region_in_screen += offset;
+@@ -2934,6 +2943,7 @@ bool ShelfLayoutManager::IsSwipingCorrectDirection() {
+         return drag_amount_ > 0;
+       return drag_amount_ < 0;
+     case ShelfAlignment::kLeft:
++    case ShelfAlignment::kTop:
+       if (drag_auto_hide_state_ == SHELF_AUTO_HIDE_SHOWN)
+         return drag_amount_ < 0;
+       return drag_amount_ > 0;
+diff --git a/ash/shelf/shelf_view.cc b/ash/shelf/shelf_view.cc
+index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9610cb752 100644
+--- a/ash/shelf/shelf_view.cc
++++ b/ash/shelf/shelf_view.cc
+@@ -1284,7 +1284,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
+                                 shelf_->SelectValueForShelfAlignment(
+                                     SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
+                                     SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
+-                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT)),
++                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT,
++                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM)),
+                             SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
+ }
+ 
+@@ -2000,6 +2001,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
+     case ShelfAlignment::kRight:
+       origin = gfx::Point(shelf_bounds_in_screen.x(), location.y());
+       break;
++    case ShelfAlignment::kTop:
++      origin = gfx::Point(location.x(), shelf_bounds_in_screen.bottom());
++      break;
+   }
+   return gfx::Rect(origin, gfx::Size());
+ }
+@@ -2017,6 +2021,9 @@ void ShelfView::AnnounceShelfAlignment() {
+     case ShelfAlignment::kRight:
+       announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_RIGHT);
+       break;
++    case ShelfAlignment::kTop:
++      announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_TOP);
++      break;
+   }
+   announcement_view_->GetViewAccessibility().AnnounceText(announcement);
+ }
+@@ -2672,9 +2679,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
+ 
+ int ShelfView::CalculateShelfDistance(const gfx::Point& coordinate) const {
+   const gfx::Rect bounds = GetBoundsInScreen();
++  // AuraDE compatibility: top shelf pointer distance is measured below the
++  // shelf, not above it like bottom shelf.
+   int distance = shelf_->SelectValueForShelfAlignment(
+       bounds.y() - coordinate.y(), coordinate.x() - bounds.right(),
+-      bounds.x() - coordinate.x());
++      bounds.x() - coordinate.x(), coordinate.y() - bounds.bottom());
+   return distance > 0 ? distance : 0;
+ }
+ 
+diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
+index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e372766ad1 100644
+--- a/ash/shelf/shelf_widget.cc
++++ b/ash/shelf/shelf_widget.cc
+@@ -34,6 +34,7 @@
+ #include "ash/shell.h"
+ #include "ash/style/ash_color_id.h"
+ #include "ash/style/style_util.h"
++#include "ash/style/system_shadow.h"
+ #include "ash/system/status_area_widget.h"
+ #include "ash/wm/overview/overview_controller.h"
+ #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+@@ -138,10 +139,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+     corner_radius_ = radius;
+ 
+     layer()->SetRoundedCornerRadius({
+-        shelf_->SelectValueForShelfAlignment(radius, 0.0f, radius),
+-        shelf_->SelectValueForShelfAlignment(radius, radius, 0.0f),
+-        shelf_->SelectValueForShelfAlignment(0.0f, radius, 0.0f),
+-        shelf_->SelectValueForShelfAlignment(0.0f, 0.0f, radius),
++        shelf_->SelectValueForShelfAlignment(radius, 0.0f, radius, 0.0f),
++        shelf_->SelectValueForShelfAlignment(radius, radius, 0.0f, 0.0f),
++        shelf_->SelectValueForShelfAlignment(0.0f, radius, 0.0f, radius),
++        shelf_->SelectValueForShelfAlignment(0.0f, 0.0f, radius, radius),
+     });
+ 
+     if (needs_paint) {
+@@ -173,7 +174,7 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+     if (corner_radius_ > 0) {
+       views::HighlightBorder::PaintBorderToCanvas(
+           canvas, *owner_view_, gfx::Rect(layer()->size()),
+-          gfx::RoundedCornersF(corner_radius_), highlight_border_type_);
++          layer()->rounded_corner_radii(), highlight_border_type_);
+     } else {
+       // If the shelf corners are not rounded, only paint the highlight border
+       // on the inner edge of the shelf to separate the shelf and the work area.
+@@ -231,6 +232,12 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+         start_point.Offset(half_thickness, 0);
+         end_point.Offset(half_thickness, 0);
+         break;
++      case ShelfAlignment::kTop:
++        start_point = gfx::PointF(pixel_bounds.bottom_left());
++        end_point = gfx::PointF(pixel_bounds.bottom_right());
++        start_point.Offset(0, -half_thickness);
++        end_point.Offset(0, -half_thickness);
++        break;
+     }
+ 
+     // Draw the outer line.
+@@ -250,6 +257,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+         start_point.Offset(border_thickness, 0);
+         end_point.Offset(border_thickness, 0);
+         break;
++      case ShelfAlignment::kTop:
++        start_point.Offset(0, -border_thickness);
++        end_point.Offset(0, -border_thickness);
++        break;
+     }
+ 
+     // Draw the inner line.
+@@ -360,6 +371,8 @@ class ShelfWidgetDelegateView
+   // Cache the state of the background blur so that it can be updated only
+   // when necessary.
+   bool background_is_currently_blurred_ = false;
++
++  std::unique_ptr<SystemShadow> shadow_;
+ };
+ 
+ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
+@@ -389,6 +402,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
+   animating_drag_handle_.SetRoundedCornerRadius(
+       {kDragHandleCornerRadius, kDragHandleCornerRadius,
+        kDragHandleCornerRadius, kDragHandleCornerRadius});
++
++  shadow_ = SystemShadow::CreateShadowOnNinePatchLayerForView(
++      this, SystemShadow::Type::kElevation4);
+ }
+ 
+ ShelfWidgetDelegateView::~ShelfWidgetDelegateView() = default;
+@@ -505,10 +521,14 @@ void ShelfWidgetDelegateView::UpdateOpaqueBackground() {
+   // We can easily round only 2 corners out of 4 which means we don't need as
+   // much extra shelf height.
+   const int safety_margin = kShelfMaxOvershootHeight;
++  // AuraDE compatibility: top shelf support must extend overshoot toward the
++  // top display edge. The three-way helper maps top to bottom, which leaves a
++  // second-looking strip under the shelf.
+   opaque_background_bounds.Inset(gfx::Insets::TLBR(
+-      0, -shelf->SelectValueForShelfAlignment(0, safety_margin, 0),
+-      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0),
+-      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin)));
++      -shelf->SelectValueForShelfAlignment(0, 0, 0, safety_margin),
++      -shelf->SelectValueForShelfAlignment(0, safety_margin, 0, 0),
++      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0, 0),
++      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin, 0)));
+   opaque_back_ground_layer->SetBounds(opaque_background_bounds);
+ 
+   // Do not show rounded corners when the background is in maximized mode (app
+@@ -835,11 +855,13 @@ void ShelfWidget::CalculateTargetBounds() {
+   const int shelf_primary_position = shelf_->SelectValueForShelfAlignment(
+       available_bounds.bottom() - shelf_in_screen_portion,
+       available_bounds.x() - shelf_size + shelf_in_screen_portion,
+-      available_bounds.right() - shelf_in_screen_portion);
++      available_bounds.right() - shelf_in_screen_portion,
++      available_bounds.y() - shelf_size + shelf_in_screen_portion);
+   gfx::Point shelf_origin = shelf_->SelectValueForShelfAlignment(
+       gfx::Point(available_bounds.x(), shelf_primary_position),
+       gfx::Point(shelf_primary_position, available_bounds.y()),
+-      gfx::Point(shelf_primary_position, available_bounds.y()));
++      gfx::Point(shelf_primary_position, available_bounds.y()),
++      gfx::Point(available_bounds.x(), shelf_primary_position));
+ 
+   target_bounds_ =
+       gfx::Rect(shelf_origin.x(), shelf_origin.y(), shelf_width, shelf_height);
+@@ -941,14 +963,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
+   // 3. in RMA state - shelf should be hidden to avoid blocking the RMA app
+   // controls or intercepting UI events; or
+   // 4. on secondary screens in states other than ACTIVE.
+-  bool hide_for_session_state =
+-      state == session_manager::SessionState::UNKNOWN ||
+-      state == session_manager::SessionState::RMA;
+-  bool hide_on_secondary_screen = shelf_->ShouldHideOnSecondaryDisplay(state);
++  bool hide_for_session_state = false;
++  bool hide_on_secondary_screen = false;
+   if (hide_for_session_state || hide_on_secondary_screen) {
+     HideIfShown();
+   } else {
+-    bool show_hotseat = (state == session_manager::SessionState::ACTIVE);
++    bool show_hotseat = true;
+     hotseat_widget()->GetShelfView()->SetVisible(show_hotseat);
+     hotseat_transition_animator_->SetAnimationsEnabledInSessionState(
+         show_hotseat);
+diff --git a/ash/system/holding_space/holding_space_tray_bubble.cc b/ash/system/holding_space/holding_space_tray_bubble.cc
+index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df72a29431 100644
+--- a/ash/system/holding_space/holding_space_tray_bubble.cc
++++ b/ash/system/holding_space/holding_space_tray_bubble.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "ash/system/holding_space/holding_space_tray_bubble.h"
+ 
++#include <algorithm>
+ #include <map>
+ #include <vector>
+ 
+@@ -411,12 +412,23 @@ HoldingSpaceTrayBubble::GetHoldingSpaceItemViews() {
+ }
+ 
+ int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
++  Shelf* shelf = holding_space_tray_->shelf();
+   const WorkAreaInsets* work_area = WorkAreaInsets::ForWindow(
+-      holding_space_tray_->shelf()->GetWindow()->GetRootWindow());
++      shelf->GetWindow()->GetRootWindow());
++
++  if (shelf->alignment() == ShelfAlignment::kTop) {
++    // AuraDE compatibility: top shelf holding-space bubbles open downward.
++    const gfx::Insets insets =
++        GetTrayBubbleInsets(holding_space_tray_->GetBubbleWindowContainer());
++    const int bubble_vertical_margin = insets.top() + insets.bottom();
++    return std::max(0, work_area->user_work_area_bounds().bottom() -
++                           shelf->GetSystemTrayAnchorRect().y() -
++                           bubble_vertical_margin);
++  }
+ 
+   const int bottom =
+-      holding_space_tray_->shelf()->IsHorizontalAlignment()
+-          ? holding_space_tray_->shelf()->GetShelfBoundsInScreen().y()
++      shelf->IsHorizontalAlignment()
++          ? shelf->GetShelfBoundsInScreen().y()
+           : work_area->user_work_area_bounds().bottom();
+ 
+   const int free_space_height_above_anchor =
+@@ -426,7 +438,7 @@ int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
+       GetTrayBubbleInsets(holding_space_tray_->GetBubbleWindowContainer());
+   const int bubble_vertical_margin = insets.top() + insets.bottom();
+ 
+-  return free_space_height_above_anchor - bubble_vertical_margin;
++  return std::max(0, free_space_height_above_anchor - bubble_vertical_margin);
+ }
+ 
+ int HoldingSpaceTrayBubble::CalculateChildBubbleContainerMaxHeight() const {
+diff --git a/ash/system/holding_space/holding_space_tray_icon_preview.cc b/ash/system/holding_space/holding_space_tray_icon_preview.cc
+index 7d10cc4c57f286e54c44b271de51c9b1194cc74a..d064c350d52761b4cce0004c2edcaa2fa6865d61 100644
+--- a/ash/system/holding_space/holding_space_tray_icon_preview.cc
++++ b/ash/system/holding_space/holding_space_tray_icon_preview.cc
+@@ -115,6 +115,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
+   switch (shelf_alignment) {
+     case ShelfAlignment::kBottom:
+     case ShelfAlignment::kBottomLocked:
++    case ShelfAlignment::kTop:
+       return true;
+     case ShelfAlignment::kLeft:
+     case ShelfAlignment::kRight:
+diff --git a/ash/system/notification_center/ash_message_popup_collection.cc b/ash/system/notification_center/ash_message_popup_collection.cc
+index 96a4f3a0254a33a62c32fcebb86b190958e2d848..960e819583f4bd7e11ab50ba5b51c0b4830c5235 100644
+--- a/ash/system/notification_center/ash_message_popup_collection.cc
++++ b/ash/system/notification_center/ash_message_popup_collection.cc
+@@ -105,8 +105,7 @@ void AshMessagePopupCollection::NotifierCollisionHandler::
+   }
+ 
+   // If the popups do not fit in the available space, close the bubble.
+-  if (popup_collection_->popup_collection_bounds().height() >
+-      popup_collection_->GetBaseline()) {
++  if (!popup_collection_->PopupCollectionFitsAvailableSpace()) {
+     shelf_pod_bubble->CloseBubbleView();
+     popup_collection_->MoveDownPopups();
+ 
+@@ -176,8 +175,7 @@ void AshMessagePopupCollection::NotifierCollisionHandler::
+ 
+   // If the popup collection does not fit in the available space when opening a
+   // bubble or updating its height, close all popups.
+-  if (popup_collection_->popup_collection_bounds().height() >
+-      popup_collection_->GetBaseline()) {
++  if (!popup_collection_->PopupCollectionFitsAvailableSpace()) {
+     popup_collection_->CloseAllPopupsNow();
+   }
+ 
+@@ -319,6 +317,14 @@ int AshMessagePopupCollection::GetBaseline() const {
+           ? notifier_collision_handler_->CalculateBaselineOffset()
+           : 0;
+ 
++  if (GetAlignment() == ShelfAlignment::kTop) {
++    // AuraDE compatibility: top shelf notifications open downward from the top
++    // work-area edge. Use a top baseline and push it down when tray surfaces
++    // such as Quick Settings are already open.
++    return work_area_.y() + tray_bubble_insets.top() +
++           notifier_collision_offset + kShelfDisplayOffset;
++  }
++
+   // Decrease baseline by `kShelfDisplayOffset` to compensate for the adjustment
+   // of edges in `Shelf::GetSystemTrayAnchorRect()`.
+   return work_area_.bottom() - tray_bubble_insets.bottom() -
+@@ -330,7 +336,9 @@ gfx::Rect AshMessagePopupCollection::GetWorkArea() const {
+ }
+ 
+ bool AshMessagePopupCollection::IsTopDown() const {
+-  return false;
++  // AuraDE compatibility: top shelf popups should appear below the shelf and
++  // stack downward, matching the top-shelf tray bubble direction.
++  return GetAlignment() == ShelfAlignment::kTop;
+ }
+ 
+ bool AshMessagePopupCollection::IsFromLeft() const {
+@@ -415,6 +423,18 @@ void AshMessagePopupCollection::NotifyPopupCollectionHeightChanged() {
+   notifier_collision_handler_->OnPopupCollectionHeightChanged();
+ }
+ 
++bool AshMessagePopupCollection::PopupCollectionFitsAvailableSpace() {
++  const int collection_height = popup_collection_bounds().height();
++
++  if (GetAlignment() == ShelfAlignment::kTop) {
++    // AuraDE compatibility: with top-down popups, usable space is below the
++    // baseline rather than above it.
++    return collection_height <= work_area_.bottom() - GetBaseline();
++  }
++
++  return collection_height <= GetBaseline();
++}
++
+ void AshMessagePopupCollection::AnimationStarted() {
+   if (popups_animating_ == 0 && last_pop_up_added_) {
+     // Since all the popup widgets use the same compositor, we only need to set
+diff --git a/ash/system/notification_center/ash_message_popup_collection.h b/ash/system/notification_center/ash_message_popup_collection.h
+index bace01f2a9717432ae14a9bb0c9c78b8929b8f78..3e9e38692b19b0f6c617a94e24c761f49de4beb4 100644
+--- a/ash/system/notification_center/ash_message_popup_collection.h
++++ b/ash/system/notification_center/ash_message_popup_collection.h
+@@ -206,6 +206,10 @@ class ASH_EXPORT AshMessagePopupCollection
+   // Computes the new work area.
+   void UpdateWorkArea();
+ 
++  // Returns whether the current popup collection fits between its baseline and
++  // the relevant work-area edge.
++  bool PopupCollectionFitsAvailableSpace();
++
+   // display::DisplayObserver:
+   void OnDisplayMetricsChanged(const display::Display& display,
+                                uint32_t metrics) override;
+diff --git a/ash/system/palette/palette_tray.cc b/ash/system/palette/palette_tray.cc
+index 622af2358dce8817f32916fc5d47b72935f088a1..5cb07b8afbab0254246d1eaac791ca48bfa97853 100644
+--- a/ash/system/palette/palette_tray.cc
++++ b/ash/system/palette/palette_tray.cc
+@@ -712,6 +712,11 @@ void PaletteTray::OnAutoHideStateChanged(ShelfAutoHideState state) {
+     case ShelfAlignment::kRight:
+       anchor_rect = gfx::Rect(work_area.right(), tray_anchor.bottom(), 0, 0);
+       break;
++    case ShelfAlignment::kTop:
++      anchor_rect =
++          gfx::Rect(base::i18n::IsRTL() ? tray_anchor.x() : tray_anchor.right(),
++                    work_area.y(), 0, 0);
++      break;
+   }
+ 
+   bubble_->bubble_view()->ChangeAnchorRect(anchor_rect);
+diff --git a/ash/system/toast/anchored_nudge.cc b/ash/system/toast/anchored_nudge.cc
+index a7e9957060ee723bbac6b22847b6940143215b36..daf33fbaf7266a32692178480f1685f83ae33c92 100644
+--- a/ash/system/toast/anchored_nudge.cc
++++ b/ash/system/toast/anchored_nudge.cc
+@@ -350,11 +350,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
+   if (is_corner_anchored_) {
+     SetArrow(shelf->SelectValueForShelfAlignment(
+         views::BubbleBorder::BOTTOM_RIGHT, views::BubbleBorder::LEFT_BOTTOM,
+-        views::BubbleBorder::RIGHT_BOTTOM));
++        views::BubbleBorder::RIGHT_BOTTOM, views::BubbleBorder::TOP_RIGHT));
+   } else {
+     SetArrow(shelf->SelectValueForShelfAlignment(
+         views::BubbleBorder::BOTTOM_CENTER, views::BubbleBorder::LEFT_CENTER,
+-        views::BubbleBorder::RIGHT_CENTER));
++        views::BubbleBorder::RIGHT_CENTER, views::BubbleBorder::TOP_CENTER));
+   }
+ }
+ 
+diff --git a/ash/system/tray/tray_background_view.cc b/ash/system/tray/tray_background_view.cc
+index 35fbd3d74b7ad29bfa7747e553b7f68020c004f6..5fa04dc922b17ecc1392a97fb6bff47820942a03 100644
+--- a/ash/system/tray/tray_background_view.cc
++++ b/ash/system/tray/tray_background_view.cc
+@@ -579,6 +579,9 @@ void TrayBackgroundView::ShowContextMenuForViewImpl(
+     case ShelfAlignment::kRight:
+       anchor = views::MenuAnchorPosition::kBubbleLeft;
+       break;
++    case ShelfAlignment::kTop:
++      anchor = views::MenuAnchorPosition::kBubbleBottomRight;
++      break;
+   }
+ 
+   context_menu_runner_->RunMenuAt(
+diff --git a/ash/system/tray/tray_bubble_view.cc b/ash/system/tray/tray_bubble_view.cc
+index 3e50e045be1002cc9fd477e1e18c03f90637efd6..0990e947e41495dd8a9ffb9143268302699e35db 100644
+--- a/ash/system/tray/tray_bubble_view.cc
++++ b/ash/system/tray/tray_bubble_view.cc
+@@ -82,6 +82,9 @@ BubbleBorder::Arrow GetArrowAlignment(ash::ShelfAlignment alignment) {
+       return BubbleBorder::LEFT_BOTTOM;
+     case ash::ShelfAlignment::kRight:
+       return BubbleBorder::RIGHT_BOTTOM;
++    case ash::ShelfAlignment::kTop:
++      return base::i18n::IsRTL() ? BubbleBorder::TOP_LEFT
++                                 : BubbleBorder::TOP_RIGHT;
+   }
+ }
+ 
+diff --git a/ash/system/tray/tray_utils.cc b/ash/system/tray/tray_utils.cc
+index 5cc85c10d6ae619b92872a8fbc6465bc7807cc7a..05d41680e2cab7dfd1796e27bcdb1855c90ddef8 100644
+--- a/ash/system/tray/tray_utils.cc
++++ b/ash/system/tray/tray_utils.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "ash/system/tray/tray_utils.h"
+ 
++#include <algorithm>
+ #include <string>
+ 
+ #include "ash/bubble/bubble_constants.h"
+@@ -84,6 +85,18 @@ void SetWarningSubText(HoverHighlightView* view, std::u16string subtext) {
+ }
+ 
+ gfx::Insets GetTrayBubbleInsets(aura::Window* window) {
++  Shelf* shelf = Shelf::ForWindow(window);
++
++  if (shelf->alignment() == ShelfAlignment::kTop) {
++    // AuraDE compatibility: top shelf bubbles open below the shelf. Mirror the
++    // bottom-shelf display-offset compensation onto the top inset so tray
++    // bubbles are constrained against the correct screen edge.
++    return gfx::Insets::TLBR(
++        kBubbleMenuPadding - kShelfDisplayOffset, kBubbleMenuPadding,
++        kBubbleMenuPadding,
++        kBubbleMenuPadding - (base::i18n::IsRTL() ? 0 : kShelfDisplayOffset));
++  }
++
+   // Decrease bottom and side insets by `kShelfDisplayOffset` to compensate for
+   // the adjustment of the respective edges in Shelf::GetSystemTrayAnchorRect().
+   gfx::Insets insets = gfx::Insets::TLBR(
+@@ -98,7 +111,6 @@ gfx::Insets GetTrayBubbleInsets(aura::Window* window) {
+     return insets;
+   }
+ 
+-  Shelf* shelf = Shelf::ForWindow(window);
+   bool is_bottom_alignment =
+       shelf->alignment() == ShelfAlignment::kBottom ||
+       shelf->alignment() == ShelfAlignment::kBottomLocked;
+@@ -142,6 +154,17 @@ gfx::Insets GetInkDropInsets(TrayPopupInkDropStyle ink_drop_style) {
+ 
+ int CalculateMaxTrayBubbleHeight(aura::Window* window) {
+   Shelf* shelf = Shelf::ForWindow(window);
++  WorkAreaInsets* work_area =
++      WorkAreaInsets::ForWindow(shelf->GetWindow()->GetRootWindow());
++
++  if (shelf->alignment() == ShelfAlignment::kTop) {
++    // AuraDE compatibility: top shelf tray bubbles open downward, so their
++    // available height is below the anchor instead of above it.
++    const int free_space_height_below_anchor =
++        work_area->user_work_area_bounds().bottom() -
++        shelf->GetSystemTrayAnchorRect().y();
++    return std::max(0, free_space_height_below_anchor - kBubbleMenuPadding * 2);
++  }
+ 
+   // We calculate the available height from the top of the screen to the top of
+   // the bubble's anchor rect. We can not use the bottom of the screen since the
+@@ -149,14 +172,12 @@ int CalculateMaxTrayBubbleHeight(aura::Window* window) {
+   // we're in tablet mode then we also need to subtract out any extra padding
+   // that may be present due to the hotseat.
+   int anchor_rect_top = shelf->GetSystemTrayAnchorRect().y();
+-  WorkAreaInsets* work_area =
+-      WorkAreaInsets::ForWindow(shelf->GetWindow()->GetRootWindow());
+   int free_space_height_above_anchor =
+       anchor_rect_top - work_area->user_work_area_bounds().y();
+   if (display::Screen::Get()->InTabletMode()) {
+     free_space_height_above_anchor -= GetBubbleInsetHotseatCompensation(window);
+   }
+-  return free_space_height_above_anchor - kBubbleMenuPadding * 2;
++  return std::max(0, free_space_height_above_anchor - kBubbleMenuPadding * 2);
+ }
+ 
+ TrayBubbleView::InitParams CreateInitParamsForTrayBubble(
+diff --git a/ash/system/video_conference/video_conference_tray.cc b/ash/system/video_conference/video_conference_tray.cc
+index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6bdf1959ef 100644
+--- a/ash/system/video_conference/video_conference_tray.cc
++++ b/ash/system/video_conference/video_conference_tray.cc
+@@ -30,6 +30,7 @@
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/system/sys_info.h"
+ #include "components/session_manager/session_manager_types.h"
+ #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -230,6 +231,14 @@ void VideoConferenceTrayButton::PaintButtonContents(gfx::Canvas* canvas) {
+ }
+ 
+ void VideoConferenceTrayButton::UpdateTooltip() {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: the standalone Linux shell can enable the VC tray
++    // before all ChromeOS formatted strings are resource-compatible. Keep the
++    // tray usable with the base localized device label.
++    SetTooltipText(l10n_util::GetStringUTF16(accessible_name_id_));
++    return;
++  }
++
+   int capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_OFF;
+   if (show_privacy_indicator_) {
+     capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_ON_AND_IN_USE;
+@@ -423,6 +432,8 @@ SkScalar VideoConferenceTray::GetRotationValueForToggleBubbleButton() {
+       return bubble_ ? 270 : 90;
+     case ShelfAlignment::kRight:
+       return bubble_ ? 90 : 270;
++    case ShelfAlignment::kTop:
++      return bubble_ ? 0 : 180;
+   }
+ }
+ 
+diff --git a/ash/wm/desks/desk_bar_view.cc b/ash/wm/desks/desk_bar_view.cc
+index b01341ef8b4e907338ac62dd99724f6127786d1b..be3146fed5abab1dd38a4c7ace317b7d69232f98 100644
+--- a/ash/wm/desks/desk_bar_view.cc
++++ b/ash/wm/desks/desk_bar_view.cc
+@@ -124,6 +124,11 @@ gfx::Rect DeskBarView::GetAvailableBounds() const {
+       bar_size = {0, 0};
+       bar_origin = {0, 0};
+       break;
++    case ShelfAlignment::kTop:
++      bar_origin.set_x(shelf_bounds.x() +
++                       (work_area.width() - bar_size.width()) / 2);
++      bar_origin.set_y(shelf_bounds.bottom() + kDeskBarShelfAndBarSpacing);
++      break;
+   }
+ 
+   return {bar_origin, bar_size};
+@@ -149,6 +154,9 @@ void DeskBarView::UpdateBarBounds() {
+       break;
+     case ShelfAlignment::kBottomLocked:
+       break;
++    case ShelfAlignment::kTop:
++      new_bounds.ClampToCenteredSize(preferred_size);
++      break;
+   }
+   GetWidget()->SetBounds(new_bounds);
+ }
+diff --git a/ash/wm/window_animations.cc b/ash/wm/window_animations.cc
+index 13163f0ba8b2ce374ed698bd79240fd2cd1872c3..c15947ce2e217aa08cb15255aef4992544b0d750 100644
+--- a/ash/wm/window_animations.cc
++++ b/ash/wm/window_animations.cc
+@@ -790,6 +790,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+         item_rect.set_x(shelf_bounds.right());
+       else if (shelf->alignment() == ShelfAlignment::kRight)
+         item_rect.set_x(shelf_bounds.x());
++      else if (shelf->alignment() == ShelfAlignment::kTop)
++        item_rect.set_y(shelf_bounds.bottom());
+       else
+         item_rect.set_y(shelf_bounds.y());
+       return item_rect;
+@@ -810,6 +812,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+       return gfx::Rect(work_area.x(), work_area.y(), 0, 0);
+     case ShelfAlignment::kRight:
+       return gfx::Rect(work_area.right(), work_area.y(), 0, 0);
++    case ShelfAlignment::kTop:
++      return gfx::Rect(ltr_adjusted_x, work_area.y(), 0, 0);
+   }
+   NOTREACHED();
+ }
+diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
+index 3a167e3cbb7071db44b6379bb628068e01db5069..447401f98743e9e50b351bd2ed3fd41769dbb87b 100644
+--- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
++++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
+@@ -3535,6 +3535,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
+     case ash::ShelfAlignment::kRight:
+       alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
+       break;
++    case ash::ShelfAlignment::kTop:
++      alignment_type = api::autotest_private::ShelfAlignmentType::kTop;
++      break;
+     case ash::ShelfAlignment::kBottomLocked:
+       // ShelfAlignment::kBottomLocked not supported by
+       // shelf_prefs.cc
+@@ -3573,10 +3576,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
+     case api::autotest_private::ShelfAlignmentType::kRight:
+       alignment = ash::ShelfAlignment::kRight;
+       break;
++    case api::autotest_private::ShelfAlignmentType::kTop:
++      alignment = ash::ShelfAlignment::kTop;
++      break;
+     case api::autotest_private::ShelfAlignmentType::kNone:
+       return RespondNow(
+-          Error("Invalid None alignment; expected 'Bottom', 'Left', or "
+-                "'Right'"));
++          Error("Invalid None alignment; expected 'Bottom', 'Left', 'Right', or "
++                "'Top'"));
+   }
+   int64_t display_id;
+   if (!base::StringToInt64(params->display_id, &display_id)) {
+diff --git a/chrome/common/extensions/api/autotest_private.webidl b/chrome/common/extensions/api/autotest_private.webidl
+index 044ee45dc6f82cae375487b87ccd1947c75c2841..2022de306562291e8f3d983b800758893b7bab88 100644
+--- a/chrome/common/extensions/api/autotest_private.webidl
++++ b/chrome/common/extensions/api/autotest_private.webidl
+@@ -9,7 +9,8 @@ enum ShelfAlignmentType {
+   // BottomLocked not supported by shelf_prefs.
+   "Bottom",
+   "Left",
+-  "Right"
++  "Right",
++  "Top"
+ };
+ 
+ // A mapping of ash::ShelfItemType.

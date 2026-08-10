@@ -1,0 +1,15 @@
+[Unit]
+Description=Validate and promote the weekly AuraDE Chromium upstream candidate
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/aurade/weekly-upstream.conf
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/aurade/release-build.conf
+EnvironmentFile=/etc/aurade/weekly-upstream.conf
+ExecStart=/usr/bin/bash /usr/local/src/aurade/ci/update-chromium-candidate.sh --run
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+TimeoutStartSec=infinity

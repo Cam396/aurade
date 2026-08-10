@@ -1,0 +1,16 @@
+# Optional AuraDE Google API/OAuth configuration.
+#
+# Do not ship real values in public packages or source control. This file is
+# only a template for local developer testing or private deployments.
+#
+# Chromium/Ash reads these environment variables at startup. A user override may
+# be placed at ~/.config/aurade/google-api.conf.
+
+GOOGLE_API_KEY=
+GOOGLE_DEFAULT_CLIENT_ID=
+GOOGLE_DEFAULT_CLIENT_SECRET=
+
+# Optional main-client-specific overrides. Leave blank unless a Google Cloud
+# project explicitly issues separate main client credentials.
+GOOGLE_CLIENT_ID_MAIN=
+GOOGLE_CLIENT_SECRET_MAIN=

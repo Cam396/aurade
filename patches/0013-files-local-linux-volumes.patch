@@ -1,0 +1,665 @@
+diff --git a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
+index 0d9cfa0d35..7dcff98b93 100644
+--- a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
++++ b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
+@@ -8,6 +8,7 @@
+ #include "base/files/file.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "chrome/browser/ash/file_manager/fileapi_util.h"
++#include "chrome/browser/ash/file_manager/volume.h"
+ #include "chrome/browser/ash/file_manager/volume_manager.h"
+ #include "chrome/browser/ash/fileapi/file_system_backend.h"
+ #include "chrome/browser/extensions/chrome_extension_function_details.h"
+@@ -15,6 +16,7 @@
+ #include "content/public/browser/child_process_security_policy.h"
+ #include "content/public/browser/storage_partition.h"
+ #include "content/public/common/child_process_id.h"
++#include "storage/common/file_system/file_system_util.h"
+ 
+ namespace extensions {
+ 
+@@ -60,7 +62,26 @@ FileManagerPrivateInternalGetVolumeRootFunction::Run() {
+   auto* const backend = ash::FileSystemBackend::Get(*file_system_context);
+   DCHECK(backend);
+   file_manager::util::FileDefinition fd;
+-  if (!backend->GetVirtualPath(volume->mount_path(), &fd.virtual_path)) {
++  if (volume->type() == file_manager::VOLUME_TYPE_LOCAL_ROOT) {
++    // AuraDE compatibility: host filesystem volumes are registered with their
++    // volume id as the external mount name. Return that exact external root
++    // instead of resolving by path, because roots such as "/" and "/home"
++    // intentionally overlap.
++    const url::Origin origin = url::Origin::Create(source_url());
++    backend->GrantFileAccessToOrigin(
++        origin, base::FilePath::FromUTF8Unsafe(volume->volume_id()));
++
++    file_manager::util::EntryDefinition entry_definition;
++    entry_definition.file_system_root_url =
++        storage::GetExternalFileSystemRootURIString(source_url(),
++                                                    volume->volume_id());
++    entry_definition.file_system_name = volume->volume_id();
++    entry_definition.full_path = base::FilePath();
++    entry_definition.is_directory = true;
++    entry_definition.error = base::File::FILE_OK;
++    return RespondNow(
++        WithArguments(ConvertEntryDefinitionToValue(entry_definition)));
++  } else if (!backend->GetVirtualPath(volume->mount_path(), &fd.virtual_path)) {
+     return RespondNow(
+         Error("Cannot get virtual path for volume with ID '*'", volume_id));
+   }
+diff --git a/chrome/browser/ash/extensions/file_manager/private_api_util.cc b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
+index 3ac02cc924..bb7296bbd0 100644
+--- a/chrome/browser/ash/extensions/file_manager/private_api_util.cc
++++ b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
+@@ -670,6 +670,9 @@ void VolumeToVolumeMetadata(Profile* profile,
+     case VOLUME_TYPE_GUEST_OS:
+       volume_metadata->volume_type = fmp::VolumeType::kGuestOs;
+       break;
++    case VOLUME_TYPE_LOCAL_ROOT:
++      volume_metadata->volume_type = fmp::VolumeType::kLocalRoot;
++      break;
+     case NUM_VOLUME_TYPE:
+       NOTREACHED();
+   }
+diff --git a/chrome/browser/ash/file_manager/path_util.cc b/chrome/browser/ash/file_manager/path_util.cc
+index 19ce35235a..232de197fc 100644
+--- a/chrome/browser/ash/file_manager/path_util.cc
++++ b/chrome/browser/ash/file_manager/path_util.cc
+@@ -12,6 +12,8 @@
+ #include "base/barrier_closure.h"
+ #include "base/base64.h"
+ #include "base/check_op.h"
++#include "base/command_line.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/no_destructor.h"
+ #include "base/pickle.h"
+@@ -91,6 +93,7 @@ constexpr char kCrostiniMapFusebox[] = "Fusebox";
+ constexpr char kCrostiniMapTeamDrives[] = "SharedDrives";
+ constexpr char kCrostiniMapSharedWithMe[] = "SharedWithMe";
+ constexpr char kCrostiniMapShortcutsSharedWithMe[] = "ShortcutsSharedWithMe";
++constexpr char kAuraDeLocalAccountsSwitch[] = "aurade-enable-local-accounts";
+ constexpr char kFolderNameDownloads[] = "Downloads";
+ constexpr char kFolderNameMyFiles[] = "MyFiles";
+ constexpr char kFolderNamePvmDefault[] = "PvmDefault";
+@@ -168,6 +171,12 @@ bool ShouldMountPrimaryUserDownloads(Profile* profile) {
+   return false;
+ }
+ 
++bool IsAuraDeLocalAccountMode() {
++  return !base::SysInfo::IsRunningOnChromeOS() &&
++         base::CommandLine::ForCurrentProcess()->HasSwitch(
++             kAuraDeLocalAccountsSwitch);
++}
++
+ // Extracts the Drive path from the given path located under the legacy Drive
+ // mount point. Returns an empty path if |path| is not under the legacy Drive
+ // mount point.
+@@ -394,6 +403,15 @@ FilePath GetMyFilesFolderForProfile(Profile* profile) {
+     return path;
+   }
+ 
++  // AuraDE local accounts use normal Linux home directories. Treat $HOME as
++  // "My files" so the Files app exposes Desktop, Documents, Downloads, etc.
++  if (IsAuraDeLocalAccountMode()) {
++    FilePath home = base::GetHomeDir();
++    if (!home.empty()) {
++      return home;
++    }
++  }
++
+   // Return $HOME/Downloads as MyFiles folder.
+   if (ShouldMountPrimaryUserDownloads(profile)) {
+     return DownloadPrefs::GetDefaultDownloadDirectory();
+@@ -1292,6 +1310,7 @@ std::optional<FilePath> GetDisplayablePath(Profile* profile, FilePath path) {
+     case VOLUME_TYPE_DOCUMENTS_PROVIDER:
+     case VOLUME_TYPE_MTP:
+     case VOLUME_TYPE_SMB:
++    case VOLUME_TYPE_LOCAL_ROOT:
+       result = FilePath(volume->volume_label());
+       break;
+     case VOLUME_TYPE_TESTING:
+diff --git a/chrome/browser/ash/file_manager/volume.cc b/chrome/browser/ash/file_manager/volume.cc
+index c12bf6fcd5..64e0c54b60 100644
+--- a/chrome/browser/ash/file_manager/volume.cc
++++ b/chrome/browser/ash/file_manager/volume.cc
+@@ -71,6 +71,8 @@ std::string_view VolumeTypeToString(const VolumeType type) {
+       return "system_internal";
+     case VOLUME_TYPE_GUEST_OS:
+       return "guest_os";
++    case VOLUME_TYPE_LOCAL_ROOT:
++      return "local_root";
+     case NUM_VOLUME_TYPE:
+       break;
+   }
+@@ -83,6 +85,10 @@ std::string_view VolumeTypeToString(const VolumeType type) {
+ std::string GenerateVolumeId(const Volume& volume) {
+   // For the same volume type, base names are unique, as mount points are
+   // flat for the same volume type.
++  if (volume.type() == VOLUME_TYPE_LOCAL_ROOT &&
++      volume.mount_path().BaseName().AsUTF8Unsafe() == "/") {
++    return base::StrCat({VolumeTypeToString(volume.type()), ":root"});
++  }
+   return base::StrCat({VolumeTypeToString(volume.type()), ":",
+                        volume.mount_path().BaseName().AsUTF8Unsafe()});
+ }
+@@ -414,6 +420,22 @@ std::unique_ptr<Volume> Volume::CreateForShareCache(base::FilePath mount_path) {
+   return volume;
+ }
+ 
++// static
++std::unique_ptr<Volume> Volume::CreateForLocalRoot(base::FilePath mount_path,
++                                                   base::FilePath source_path,
++                                                   std::string label) {
++  std::unique_ptr<Volume> volume(new Volume());
++  volume->type_ = VOLUME_TYPE_LOCAL_ROOT;
++  volume->source_ = SOURCE_SYSTEM;
++  volume->source_path_ = std::move(source_path);
++  volume->mount_path_ = std::move(mount_path);
++  volume->volume_id_ = GenerateVolumeId(*volume);
++  volume->volume_label_ = std::move(label);
++  volume->watchable_ = true;
++  volume->hidden_ = false;
++  return volume;
++}
++
+ // static
+ std::unique_ptr<Volume> Volume::CreateForTesting(base::FilePath path,
+                                                  VolumeType volume_type,
+diff --git a/chrome/browser/ash/file_manager/volume.h b/chrome/browser/ash/file_manager/volume.h
+index 5d47538b88..ba9ff2a26a 100644
+--- a/chrome/browser/ash/file_manager/volume.h
++++ b/chrome/browser/ash/file_manager/volume.h
+@@ -37,6 +37,7 @@ enum VolumeType {
+   VOLUME_TYPE_SMB = 10,
+   VOLUME_TYPE_SYSTEM_INTERNAL = 11,  // Internal volume never exposed to users.
+   VOLUME_TYPE_GUEST_OS = 12,  // Guest OS volumes (Crostini, Bruschetta, etc)
++  VOLUME_TYPE_LOCAL_ROOT = 13,  // Local filesystem root (linux-chromeos only)
+   // Append new values here.
+   NUM_VOLUME_TYPE,
+ };
+@@ -122,6 +123,10 @@ class Volume {
+ 
+   static std::unique_ptr<Volume> CreateForShareCache(base::FilePath mount_path);
+ 
++  static std::unique_ptr<Volume> CreateForLocalRoot(base::FilePath mount_path,
++                                                    base::FilePath source_path,
++                                                    std::string label);
++
+   static std::unique_ptr<Volume> CreateForTesting(
+       base::FilePath path,
+       VolumeType volume_type,
+diff --git a/chrome/browser/ash/file_manager/volume_manager.cc b/chrome/browser/ash/file_manager/volume_manager.cc
+index a65e03b2dd..05c21bb66d 100644
+--- a/chrome/browser/ash/file_manager/volume_manager.cc
++++ b/chrome/browser/ash/file_manager/volume_manager.cc
+@@ -295,6 +295,20 @@ void VolumeManager::Initialize() {
+   } else {
+     OnLocalUserFilesDisabled();
+   }
++
++  // AuraDE compatibility: on generic Linux, expose native Linux locations as
++  // Files app volumes so users can browse normal host paths instead of a
++  // ChromeOS sandbox-shaped subset. Defer the mount notifications until after
++  // profile service creation, because downstream Files observers can touch
++  // local path metadata and Chromium disallows blocking work in that startup
++  // scope.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    content::GetUIThreadTaskRunner({})->PostTask(
++        FROM_HERE,
++        base::BindOnce(&VolumeManager::RegisterAuraDELocalRootVolumes,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++
+   // For GA, also subscribe to SkyVault LocalFilesMigrationManager.
+   if (IsSkyVaultV2Enabled()) {
+     if (policy::local_user_files::
+@@ -1697,6 +1711,51 @@ void VolumeManager::UnmountDownloadsVolume() {
+   DoUnmountEvent(*Volume::CreateForDownloads(localVolume));
+ }
+ 
++void VolumeManager::RegisterAuraDELocalRootVolumes() {
++  const base::FilePath home = base::GetHomeDir();
++  if (!home.empty()) {
++    RegisterLocalRootVolume(u"Home", home.value());
++    RegisterLocalRootVolume(u"Desktop", home.AppendASCII("Desktop").value());
++    RegisterLocalRootVolume(u"Documents", home.AppendASCII("Documents").value());
++    RegisterLocalRootVolume(u"Downloads", home.AppendASCII("Downloads").value());
++    RegisterLocalRootVolume(u"Music", home.AppendASCII("Music").value());
++    RegisterLocalRootVolume(u"Pictures", home.AppendASCII("Pictures").value());
++    RegisterLocalRootVolume(u"Videos", home.AppendASCII("Videos").value());
++  }
++
++  RegisterLocalRootVolume(u"Filesystem Root", "/");
++  RegisterLocalRootVolume(u"Users", "/home");
++  // AuraDE compatibility: udisks2 mounts removable media below
++  // /run/media/$USER. Keep that standard hierarchy exposed as the stable
++  // local_root:media entry used by Files.
++  RegisterLocalRootVolume(u"Media", "/run/media");
++  RegisterLocalRootVolume(u"Mounts", "/mnt");
++  RegisterLocalRootVolume(u"Local Software", "/usr/local");
++  RegisterLocalRootVolume(u"Optional Software", "/opt");
++}
++
++void VolumeManager::RegisterLocalRootVolume(const std::u16string& label,
++                                            const std::string& path) {
++  const base::FilePath real_path(path);
++  std::unique_ptr<Volume> volume = Volume::CreateForLocalRoot(
++      real_path, real_path, base::UTF16ToUTF8(label));
++
++  // Register with ExternalMountPoints so the fileManagerPrivate API can
++  // resolve filesystem URLs for this path. Use the volume ID as the mount name
++  // so getVolumeRoot can bypass reverse path lookup for overlapping paths.
++  // AuraDE compatibility: register as kFileSystemTypeLocal, matching the
++  // standard Downloads mount. kFileSystemTypeLocalMedia is owned by the
++  // media-gallery backend, whose MediaPathFilter hides every non-media file
++  // from directory listings.
++  const std::string mount_name = volume->volume_id();
++  storage::ExternalMountPoints* const mount_points =
++      storage::ExternalMountPoints::GetSystemInstance();
++  mount_points->RevokeFileSystem(mount_name);
++  mount_points->RegisterFileSystem(mount_name, storage::kFileSystemTypeLocal,
++                                   storage::FileSystemMountOption(), real_path);
++  DoMountEvent(std::move(volume));
++}
++
+ void VolumeManager::MountArcRoots() {
+   DCHECK(IsArcEnabled(profile_));
+   if (arc_volumes_mounted_) {
+diff --git a/chrome/browser/ash/file_manager/volume_manager.h b/chrome/browser/ash/file_manager/volume_manager.h
+index 702560c380..5a7b488c11 100644
+--- a/chrome/browser/ash/file_manager/volume_manager.h
++++ b/chrome/browser/ash/file_manager/volume_manager.h
+@@ -365,6 +365,14 @@ class VolumeManager
+   // Unmounts and revokes the downloads volume.
+   void UnmountDownloadsVolume();
+ 
++  // Registers AuraDE's native Linux host filesystem roots after profile service
++  // startup finishes.
++  void RegisterAuraDELocalRootVolumes();
++
++  // Registers a local filesystem root as a mountable volume (linux-chromeos).
++  void RegisterLocalRootVolume(const std::u16string& label,
++                               const std::string& path);
++
+   // Mounts all ARC roots declared in arc_media_view_util.cc.
+   void MountArcRoots();
+ 
+diff --git a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
+index 0675d4fe03..5ae1ea7e00 100644
+--- a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
++++ b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
+@@ -100,6 +100,7 @@ SourceDestinationMatcherAsh::FsType SourceDestinationMatcherAsh::VolumeToFsType(
+     case file_manager::VOLUME_TYPE_SMB:
+       return SourceDestinationMatcherAsh::FsType::kSmb;
+     case file_manager::VOLUME_TYPE_SYSTEM_INTERNAL:
++    case file_manager::VOLUME_TYPE_LOCAL_ROOT:
+       return SourceDestinationMatcherAsh::FsType::kUnknown;
+     case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
+     case file_manager::VOLUME_TYPE_GUEST_OS:
+diff --git a/chrome/common/extensions/api/file_manager_private.idl b/chrome/common/extensions/api/file_manager_private.idl
+index 2d9406da81..2faedcc683 100644
+--- a/chrome/common/extensions/api/file_manager_private.idl
++++ b/chrome/common/extensions/api/file_manager_private.idl
+@@ -49,7 +49,8 @@ namespace fileManagerPrivate {
+ // Type of the mounted volume.
+ enum VolumeType { drive, downloads, removable, archive, provided, mtp,
+                   media_view, crostini, android_files, documents_provider,
+-                  testing, smb, system_internal, guest_os };
++                  testing, smb, system_internal, guest_os,
++                  local_root };
+ 
+ // Device type. Available if this is removable volume.
+ enum DeviceType { usb, sd, optical, mobile, unknown };
+diff --git a/storage/browser/file_system/external_mount_points.cc b/storage/browser/file_system/external_mount_points.cc
+index b38872766f..e67b6e9c22 100644
+--- a/storage/browser/file_system/external_mount_points.cc
++++ b/storage/browser/file_system/external_mount_points.cc
+@@ -11,6 +11,7 @@
+ #include "base/functional/callback.h"
+ #include "base/lazy_instance.h"
+ #include "base/strings/strcat.h"
++#include "base/strings/string_util.h"
+ #include "build/build_config.h"
+ #include "storage/browser/file_system/file_system_url.h"
+ #include "third_party/blink/public/common/storage_key/storage_key.h"
+@@ -44,6 +45,18 @@ bool IsOverlappingMountPathForbidden(FileSystemType type) {
+          type != kFileSystemTypeDeviceMedia;
+ }
+ 
++// HACK(AuraDE): AuraDE registers nested host-filesystem roots (for example
++// "/", "/home", and "$HOME/Downloads") as kFileSystemTypeLocal external
++// mounts that are resolved by mount name, never by reverse path lookup.
++// Allow those mounts to overlap existing local mounts and keep them out of
++// the path-to-name lookup map so they cannot shadow or evict the regular
++// non-overlapping mounts (such as the MyFiles mount) from reverse lookups.
++bool IsAuraDeLocalRootMount(const std::string& mount_name,
++                            FileSystemType type) {
++  return type == kFileSystemTypeLocal &&
++         base::StartsWith(mount_name, "local_root:");
++}
++
+ // Wrapper around ref-counted ExternalMountPoints that will be used to lazily
+ // create and initialize LazyInstance system ExternalMountPoints.
+ class SystemMountPointsLazyWrapper {
+@@ -139,8 +152,10 @@ bool ExternalMountPoints::RegisterFileSystem(
+ 
+   instance_map_[mount_name] =
+       std::make_unique<Instance>(type, path, mount_option);
+-  if (!path.empty() && IsOverlappingMountPathForbidden(type))
++  if (!path.empty() && IsOverlappingMountPathForbidden(type) &&
++      !IsAuraDeLocalRootMount(mount_name, type)) {
+     path_to_name_map_.insert(std::make_pair(path, mount_name));
++  }
+   return true;
+ }
+ 
+@@ -156,8 +171,10 @@ bool ExternalMountPoints::RevokeFileSystem(const std::string& mount_name) {
+   if (found == instance_map_.end())
+     return false;
+   Instance* instance = found->second.get();
+-  if (IsOverlappingMountPathForbidden(instance->type()))
++  if (IsOverlappingMountPathForbidden(instance->type()) &&
++      !IsAuraDeLocalRootMount(mount_name, instance->type())) {
+     path_to_name_map_.erase(NormalizeFilePath(instance->path()));
++  }
+   instance_map_.erase(found);
+   return true;
+ }
+@@ -352,7 +369,8 @@ bool ExternalMountPoints::ValidateNewMountPoint(const std::string& mount_name,
+   if (path.ReferencesParent() || !path.IsAbsolute())
+     return false;
+ 
+-  if (IsOverlappingMountPathForbidden(type)) {
++  if (IsOverlappingMountPathForbidden(type) &&
++      !IsAuraDeLocalRootMount(mount_name, type)) {
+     // Check there the new path does not overlap with one of the existing ones.
+     std::map<base::FilePath, std::string>::reverse_iterator potential_parent(
+         path_to_name_map_.upper_bound(path));
+diff --git a/ui/file_manager/file_manager/common/js/files_app_entry_types.ts b/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
+index 528525f446..a850aa8bb4 100644
+--- a/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
++++ b/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
+@@ -30,6 +30,25 @@ import {isSameEntry} from './entry_utils.js';
+ import {vmTypeToIconName} from './icon_util.js';
+ import {getVolumeTypeFromRootType, RootType, VolumeType} from './volume_manager_types.js';
+ 
++export function getLocalRootIconName(label: string): string {
++  switch (label) {
++    case 'Downloads':
++      return ICON_TYPES.DOWNLOADS;
++    case 'Filesystem Root':
++      return ICON_TYPES.COMPUTER;
++    case 'Users':
++      return ICON_TYPES.CROSTINI;
++    case 'Media':
++    case 'Mounts':
++      return ICON_TYPES.USB;
++    case 'Local Software':
++    case 'Optional Software':
++      return ICON_TYPES.UNKNOWN_REMOVABLE;
++    default:
++      return ICON_TYPES.FOLDER;
++  }
++}
++
+ export interface Metadata {
+   modificationTime: Date;
+   size: number;
+@@ -704,6 +723,9 @@ export class VolumeEntry extends FilesAppDirEntry {
+     if (this.volumeInfo.volumeType === VolumeType.DOWNLOADS) {
+       return VolumeType.MY_FILES;
+     }
++    if (this.volumeInfo.volumeType === VolumeType.LOCAL_ROOT) {
++      return getLocalRootIconName(this.volumeInfo.label);
++    }
+     return this.volumeInfo.volumeType;
+   }
+ 
+diff --git a/ui/file_manager/file_manager/common/js/shared_types.ts b/ui/file_manager/file_manager/common/js/shared_types.ts
+index e5290218a5..a55c36f032 100644
+--- a/ui/file_manager/file_manager/common/js/shared_types.ts
++++ b/ui/file_manager/file_manager/common/js/shared_types.ts
+@@ -33,6 +33,7 @@ export enum VolumeType {
+   SMB = 'smb',
+   SYSTEM_INTERNAL = 'system_internal',
+   TRASH = 'trash',
++  LOCAL_ROOT = 'local_root',
+ }
+ 
+ /**
+diff --git a/ui/file_manager/file_manager/common/js/translations.ts b/ui/file_manager/file_manager/common/js/translations.ts
+index d98e2e59a8..a10df9fc99 100644
+--- a/ui/file_manager/file_manager/common/js/translations.ts
++++ b/ui/file_manager/file_manager/common/js/translations.ts
+@@ -186,7 +186,8 @@ export function getRootTypeLabel(locationInfo: EntryLocation) {
+     case RootType.DOCUMENTS_PROVIDER:
+     case RootType.SMB:
+     case RootType.GUEST_OS:
+-      return volumeInfoLabel;
++    case RootType.LOCAL_ROOT:
++      return volumeInfoLabel || 'Computer';
+     default:
+       console.error('Unsupported root type: ' + locationInfo.rootType);
+       return volumeInfoLabel;
+diff --git a/ui/file_manager/file_manager/common/js/volume_manager_types.ts b/ui/file_manager/file_manager/common/js/volume_manager_types.ts
+index 2b80c8a7ca..51388f9046 100644
+--- a/ui/file_manager/file_manager/common/js/volume_manager_types.ts
++++ b/ui/file_manager/file_manager/common/js/volume_manager_types.ts
+@@ -94,6 +94,9 @@ export enum RootType {
+   // Root for mountable Guest OSs.
+   GUEST_OS = 'guest_os',
+ 
++  // Root for local filesystem roots (linux-chromeos).
++  LOCAL_ROOT = 'local_root',
++
+   // Root for android files.
+   ANDROID_FILES = 'android_files',
+ 
+@@ -152,6 +155,7 @@ export const RootTypesForUMA: Array<RootType|string> = [
+   'DEPRECATED_RECENT_VIDEOS',          // 26
+   RootType.TRASH,                      // 27
+   RootType.GUEST_OS,                   // 28
++  RootType.LOCAL_ROOT,                 // 29
+ ];
+ 
+ /** Error type of VolumeManager. */
+@@ -198,7 +202,8 @@ export function isNative(type: VolumeType): boolean {
+   return type === VolumeType.DOWNLOADS || type === VolumeType.DRIVE ||
+       type === VolumeType.ANDROID_FILES || type === VolumeType.CROSTINI ||
+       type === VolumeType.GUEST_OS || type === VolumeType.REMOVABLE ||
+-      type === VolumeType.ARCHIVE || type === VolumeType.SMB;
++      type === VolumeType.ARCHIVE || type === VolumeType.SMB ||
++      type === VolumeType.LOCAL_ROOT;
+ }
+ 
+ /** Gets volume type from root type. */
+@@ -241,6 +246,8 @@ export function getVolumeTypeFromRootType(rootType: RootType): VolumeType {
+       return VolumeType.SMB;
+     case RootType.TRASH:
+       return VolumeType.TRASH;
++    case RootType.LOCAL_ROOT:
++      return VolumeType.LOCAL_ROOT;
+     case RootType.RECENT:
+       assertNotReached('Unexpected root type: ' + rootType);
+     default:
+@@ -282,6 +289,8 @@ export function getRootTypeFromVolumeType(volumeType: VolumeType): RootType {
+       return RootType.SMB;
+     case VolumeType.TRASH:
+       return RootType.TRASH;
++    case VolumeType.LOCAL_ROOT:
++      return RootType.LOCAL_ROOT;
+     default:
+       assertNotReachedCase(volumeType, 'Unknown volume type: ' + volumeType);
+   }
+diff --git a/ui/file_manager/file_manager/state/ducks/all_entries.ts b/ui/file_manager/file_manager/state/ducks/all_entries.ts
+index 0f8f4ce3b2..f5b5acd63c 100644
+--- a/ui/file_manager/file_manager/state/ducks/all_entries.ts
++++ b/ui/file_manager/file_manager/state/ducks/all_entries.ts
+@@ -10,7 +10,7 @@ import {getParentEntry} from '../../common/js/api.js';
+ import {canHaveSubDirectories, isDirectoryEntry, isDriveRootEntryList, isEntryScannable, isEntrySupportUiChildren, isFakeEntryInDrive, isGrandRootEntryInDrive, isInsideDrive, isVolumeEntry, isVolumeFileData, readEntries, shouldSupportDriveSpecificIcons, sortEntries, supportsUiChildren, urlToEntry} from '../../common/js/entry_utils.js';
+ import {getIcon} from '../../common/js/file_type.js';
+ import type {FilesAppDirEntry, FilesAppEntry, VolumeEntry} from '../../common/js/files_app_entry_types.js';
+-import {EntryList} from '../../common/js/files_app_entry_types.js';
++import {EntryList, getLocalRootIconName} from '../../common/js/files_app_entry_types.js';
+ import {isSkyvaultV2Enabled} from '../../common/js/flags.js';
+ import {recordInterval, recordSmallCount, startInterval} from '../../common/js/metrics.js';
+ import {getEntryLabel, str} from '../../common/js/translations.js';
+@@ -26,7 +26,7 @@ import type {FileKey} from '../file_key.js';
+ import {getEntry, getFileData, getStore, getVolume} from '../store.js';
+ 
+ import {changeDirectory, hasDlpDisabledFiles} from './current_directory.js';
+-import {driveRootEntryListKey, myFilesEntryListKey, recentRootKey} from './volumes.js';
++import {computerRootEntryListKey, driveRootEntryListKey, myFilesEntryListKey, recentRootKey} from './volumes.js';
+ 
+ /**
+  * @fileoverview Entries slice of the store.
+@@ -164,6 +164,7 @@ function getEntryIcon(
+     [recentRootKey]: ICON_TYPES.RECENT,
+     [myFilesEntryListKey]: ICON_TYPES.MY_FILES,
+     [driveRootEntryListKey]: ICON_TYPES.SERVICE_DRIVE,
++    [computerRootEntryListKey]: ICON_TYPES.COMPUTER,
+   };
+ 
+   if (urlToIconPath[url]) {
+@@ -193,6 +194,8 @@ function getEntryIcon(
+     switch (entry.volumeInfo.volumeType) {
+       case VolumeType.DOWNLOADS:
+         return ICON_TYPES.MY_FILES;
++      case VolumeType.LOCAL_ROOT:
++        return getLocalRootIconName(entry.volumeInfo.label);
+       case VolumeType.SMB:
+         return ICON_TYPES.SMB;
+       case VolumeType.PROVIDED:
+diff --git a/ui/file_manager/file_manager/state/ducks/navigation.ts b/ui/file_manager/file_manager/state/ducks/navigation.ts
+index f362b029e9..81c653c793 100644
+--- a/ui/file_manager/file_manager/state/ducks/navigation.ts
++++ b/ui/file_manager/file_manager/state/ducks/navigation.ts
+@@ -9,7 +9,7 @@ import {VolumeType} from '../../common/js/volume_manager_types.js';
+ import {Slice} from '../../lib/base_store.js';
+ import {type AndroidApp, DialogType, type NavigationKey, type NavigationRoot, NavigationSection, NavigationType, type State, type Volume} from '../../state/state.js';
+ import {getMyFiles} from '../ducks/all_entries.js';
+-import {driveRootEntryListKey, oneDriveFakeRootKey, recentRootKey, trashRootKey} from '../ducks/volumes.js';
++import {computerRootEntryListKey, driveRootEntryListKey, oneDriveFakeRootKey, recentRootKey, trashRootKey} from '../ducks/volumes.js';
+ import {getEntry} from '../store.js';
+ 
+ /**
+@@ -22,6 +22,7 @@ export {slice as navigationSlice};
+ const sections = new Map<VolumeType, NavigationSection>();
+ // My Files.
+ sections.set(VolumeType.DOWNLOADS, NavigationSection.MY_FILES);
++sections.set(VolumeType.LOCAL_ROOT, NavigationSection.MY_FILES);
+ // Cloud.
+ sections.set(VolumeType.DRIVE, NavigationSection.CLOUD);
+ sections.set(VolumeType.SMB, NavigationSection.CLOUD);
+@@ -128,6 +129,28 @@ function refreshNavigationRootsReducer(currentState: State): State {
+     processedEntryKeys.add(myFilesEntry.toURL());
+   }
+ 
++  const {volumeManager} = window.fileManager;
++  const filteredVolumes =
++      Object.values<Volume>(currentState.volumes).filter(volume => {
++        const volumeEntry =
++            getEntry(currentState, volume.rootKey!) as VolumeEntry;
++        return volumeManager.isAllowedVolume(volumeEntry.volumeInfo);
++      });
++
++  const computerEntryExists =
++      currentState.uiEntries.includes(computerRootEntryListKey);
++  const computerEntry =
++      getEntry(currentState, computerRootEntryListKey) as EntryList | null;
++  if (computerEntryExists && computerEntry) {
++    roots.push({
++      key: computerEntry.toURL(),
++      section: NavigationSection.MY_FILES,
++      separator: false,
++      type: NavigationType.ENTRY_LIST,
++    });
++    processedEntryKeys.add(computerEntry.toURL());
++  }
++
+   // Add Google Drive - the only Drive.
+   // When drive pref changes from enabled to disabled, we remove the drive root
+   // key from the `state.uiEntries` immediately, but the drive root entry itself
+@@ -179,15 +202,6 @@ function refreshNavigationRootsReducer(currentState: State): State {
+     [VolumeType.ARCHIVE]: 5,
+     [VolumeType.MTP]: 6,
+   };
+-  // Filter volumes based on the volumeInfoList in volumeManager.
+-  const {volumeManager} = window.fileManager;
+-  const filteredVolumes =
+-      Object.values<Volume>(currentState.volumes).filter(volume => {
+-        const volumeEntry =
+-            getEntry(currentState, volume.rootKey!) as VolumeEntry;
+-        return volumeManager.isAllowedVolume(volumeEntry.volumeInfo);
+-      });
+-
+   function getVolumeOrder(volume: Volume) {
+     if (isOneDriveId(volume.providerId)) {
+       return 0;
+@@ -204,6 +218,7 @@ function refreshNavigationRootsReducer(currentState: State): State {
+                             // MediaView volumeType isn't displayed.
+                             !(v.volumeType === VolumeType.DOWNLOADS ||
+                               v.volumeType === VolumeType.DRIVE ||
++                              v.volumeType === VolumeType.LOCAL_ROOT ||
+                               v.volumeType === VolumeType.MEDIA_VIEW));
+                       })
+                       .sort((v1, v2) => {
+diff --git a/ui/file_manager/file_manager/state/ducks/volumes.ts b/ui/file_manager/file_manager/state/ducks/volumes.ts
+index dfe69ad70a..b1345f7c5b 100644
+--- a/ui/file_manager/file_manager/state/ducks/volumes.ts
++++ b/ui/file_manager/file_manager/state/ducks/volumes.ts
+@@ -34,6 +34,8 @@ export const drivePlaceHolderKey = `fake-entry://${RootType.DRIVE_FAKE_ROOT}`;
+ export const recentRootKey = `fake-entry://${RootType.RECENT}/all`;
+ export const trashRootKey = `fake-entry://${RootType.TRASH}`;
+ export const driveRootEntryListKey = `entry-list://${RootType.DRIVE_FAKE_ROOT}`;
++export const computerRootEntryListKey =
++    `entry-list://${RootType.LOCAL_ROOT}/computer`;
+ export const oneDriveFakeRootKey =
+     `fake-entry://${RootType.PROVIDED}/${ODFS_EXTENSION_ID}`;
+ export const makeRemovableParentKey =
+@@ -128,6 +130,19 @@ function appendChildIfNotExisted(
+   return false;
+ }
+ 
++function ensureComputerEntryList(currentState: State): EntryList {
++  let computerEntry =
++      getEntry(currentState, computerRootEntryListKey) as EntryList | null;
++  if (!computerEntry) {
++    computerEntry = new EntryList('Computer', RootType.LOCAL_ROOT, 'computer');
++    cacheEntries(currentState, [computerEntry]);
++  }
++  if (!currentState.uiEntries.includes(computerEntry.toURL())) {
++    currentState.uiEntries = [...currentState.uiEntries, computerEntry.toURL()];
++  }
++  return computerEntry;
++}
++
+ /**
+  * Given a volume info, check if we need to group it into a wrapper.
+  *
+@@ -230,6 +245,14 @@ function addVolumeReducer(currentState: State, payload: {
+     }
+   }
+ 
++  // AuraDE: group host Linux locations under a single Computer root, similar
++  // to "This PC", instead of flooding the sidebar with every mounted path.
++  if (volume.volumeType === VolumeType.LOCAL_ROOT) {
++    const computerEntry = ensureComputerEntryList(currentState);
++    volume.prefixKey = computerEntry.toURL();
++    appendChildIfNotExisted(computerEntry, newVolumeEntry);
++  }
++
+   // Handles Drive volume.
+   // It nests the Drive root (aka MyDrive) inside a EntryList for "Google
+   // Drive", and also the fake entries for "Offline" and "Shared with me".
+@@ -422,6 +445,10 @@ export async function*
+     }
+   }
+ 
++  if (volumeInfo.volumeType === VolumeType.LOCAL_ROOT) {
++    fileKeyToScan = computerRootEntryListKey;
++  }
++
+   if (!fileKeyToScan) {
+     return;
+   }

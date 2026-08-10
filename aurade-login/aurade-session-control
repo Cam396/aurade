@@ -1,0 +1,168 @@
+#!/bin/bash
+# User-facing lifecycle control constrained to the caller's logind session.
+set -euo pipefail
+
+die() {
+  echo "aurade-session-control: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: aurade-session-control status|lock|sign-out|switch-user|restart
+EOF
+}
+
+session_id="${XDG_SESSION_ID:-}"
+if [[ -z "${session_id}" ]] && command -v loginctl >/dev/null 2>&1; then
+  session_id="$(loginctl show-user "$(id -u)" --property=Display --value 2>/dev/null || true)"
+fi
+[[ "${session_id}" =~ ^[A-Za-z0-9_.-]+$ &&
+   "${session_id}" != "." && "${session_id}" != ".." ]] || \
+  die "no valid logind session"
+
+session_property() {
+  local property="$1"
+  loginctl show-session "${session_id}" --property="${property}" --value
+}
+
+require_own_session() {
+  local owner
+  owner="$(session_property User)" || die "cannot query session ${session_id}"
+  [[ "${owner}" == "$(id -u)" ]] || die "session ${session_id} is not owned by this user"
+}
+
+supervisor_pid() {
+  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  local state_dir="${runtime_dir}/aurade/sessions/${session_id}"
+  local pid_file="${state_dir}/session-supervisor.pid"
+  local pid proc_uid argument found=0
+  local -a cmdline=()
+  [[ -d "${runtime_dir}" && ! -L "${runtime_dir}" && -O "${runtime_dir}" ]] || \
+    die "invalid runtime directory"
+  [[ -d "${state_dir}" && ! -L "${state_dir}" && -O "${state_dir}" ]] || \
+    die "AuraDE session supervisor is not running"
+  [[ -f "${pid_file}" && ! -L "${pid_file}" && -O "${pid_file}" ]] || \
+    die "AuraDE session supervisor is not running"
+  read -r pid <"${pid_file}"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || die "invalid session supervisor pid"
+  [[ -r "/proc/${pid}/cmdline" ]] || die "stale session supervisor pid"
+  proc_uid="$(stat -c %u "/proc/${pid}" 2>/dev/null)" || \
+    die "cannot inspect session supervisor pid"
+  [[ "${proc_uid}" == "$(id -u)" ]] || die "session supervisor pid has the wrong owner"
+  while IFS= read -r -d '' argument; do
+    cmdline+=("${argument}")
+  done <"/proc/${pid}/cmdline"
+  for argument in "${cmdline[@]}"; do
+    if [[ "${argument##*/}" == aurade-session-supervisor ]]; then
+      found=1
+      break
+    fi
+  done
+  [[ "${found}" == 1 ]] || die "pid does not belong to AuraDE supervisor"
+  printf '%s\n' "${pid}"
+}
+
+find_greeter_session() {
+  local wanted_seat="$1" wanted_tty="${2:-}" candidate name candidate_seat candidate_tty
+  while read -r candidate _; do
+    [[ "${candidate}" =~ ^[A-Za-z0-9_.-]+$ ]] || continue
+    name="$(loginctl show-session "${candidate}" --property=Name --value 2>/dev/null || true)"
+    candidate_seat="$(loginctl show-session "${candidate}" --property=Seat --value 2>/dev/null || true)"
+    candidate_tty="$(loginctl show-session "${candidate}" --property=TTY --value 2>/dev/null || true)"
+    if [[ "${name}" == greeter && "${candidate_seat}" == "${wanted_seat}" &&
+          ( -z "${wanted_tty}" || "${candidate_tty}" == "${wanted_tty}" ) ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done < <(loginctl list-sessions --no-legend 2>/dev/null)
+  return 1
+}
+
+used_session_ttys() {
+  local candidate tty
+  while read -r candidate _; do
+    [[ "${candidate}" =~ ^[A-Za-z0-9_.-]+$ ]] || continue
+    tty="$(loginctl show-session "${candidate}" --property=TTY --value 2>/dev/null || true)"
+    [[ -z "${tty}" ]] || printf '%s\n' "${tty}"
+  done < <(loginctl list-sessions --no-legend 2>/dev/null)
+}
+
+status() {
+  local active state type seat locked
+  require_own_session
+  active="$(session_property Active)"
+  state="$(session_property State)"
+  type="$(session_property Type)"
+  seat="$(session_property Seat)"
+  locked="$(session_property LockedHint)"
+  printf '{"session":"%s","uid":%s,"active":"%s","state":"%s","type":"%s","seat":"%s","locked":"%s"}\n' \
+    "${session_id}" "$(id -u)" "${active}" "${state}" "${type}" "${seat}" "${locked}"
+}
+
+lock_session() {
+  require_own_session
+  command -v gtklock >/dev/null 2>&1 || die "gtklock is not installed"
+  loginctl lock-session "${session_id}" || true
+  gtklock --daemonize
+}
+
+switch_user() {
+  local seat greeter_session used_ttys vt attempt
+  require_own_session
+  seat="$(session_property Seat)"
+  [[ -n "${seat}" ]] || die "current session has no seat"
+  loginctl lock-session "${session_id}" || true
+  command -v gtklock >/dev/null 2>&1 || die "gtklock is not installed"
+  gtklock --daemonize
+  greeter_session="$(find_greeter_session "${seat}" || true)"
+  if [[ -z "${greeter_session}" ]]; then
+    used_ttys="$(used_session_ttys)"
+    vt=""
+    for attempt in 8 9 10 11 12; do
+      if ! grep -Fxq "tty${attempt}" <<<"${used_ttys}"; then
+        vt="${attempt}"
+        break
+      fi
+    done
+    [[ -n "${vt}" ]] || die "no free AuraDE greeter VT is available"
+    systemctl start "aurade-greetd-vt@${vt}.service" || \
+      die "cannot start the secondary greeter"
+    for attempt in {1..50}; do
+      greeter_session="$(find_greeter_session "${seat}" "tty${vt}" || true)"
+      [[ -z "${greeter_session}" ]] || break
+      sleep 0.1
+    done
+  fi
+  [[ "${greeter_session}" =~ ^[A-Za-z0-9_.-]+$ ]] || die "no greetd session is active on ${seat}"
+  exec loginctl activate "${greeter_session}"
+}
+
+case "${1:-}" in
+  status)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    status
+    ;;
+  lock)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    lock_session
+    ;;
+  sign-out)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    require_own_session
+    exec loginctl terminate-session "${session_id}"
+    ;;
+  switch-user)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    switch_user
+    ;;
+  restart)
+    [[ "$#" -eq 1 ]] || { usage; exit 2; }
+    require_own_session
+    kill -USR1 "$(supervisor_pid)"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

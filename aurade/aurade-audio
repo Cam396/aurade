@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# PipeWire/PulseAudio control helper for AuraDE on generic Linux.
+set -u
+
+usage() {
+    cat <<'EOF'
+Usage: aurade-audio COMMAND [ARGS...]
+
+Commands:
+  ensure                         Start PipeWire, pipewire-pulse, and WirePlumber.
+  status                         Print a human-readable audio status summary.
+  status-lines                   Print tab-separated device rows for integration.
+  status-json                    Print JSON device rows for integration.
+  set-default-output NAME        Set the default output sink.
+  set-default-input NAME         Set the default input source.
+  set-output-volume NAME PCT     Set output volume, for example 75.
+  set-input-volume NAME PCT      Set input volume, for example 75.
+  mute-output NAME 0|1           Set output mute state.
+  mute-input NAME 0|1            Set input mute state.
+  enable-quality-profile         Install AuraDE's user PipeWire quality profile.
+  disable-quality-profile        Remove AuraDE's user PipeWire quality profile.
+  restart                        Restart the user PipeWire stack.
+EOF
+}
+
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+state_dir() {
+    printf '%s\n' "${XDG_STATE_HOME:-${HOME}/.local/state}/aurade/audio"
+}
+
+config_dir() {
+    printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/pipewire/pipewire.conf.d"
+}
+
+quality_config_path() {
+    printf '%s/90-aurade-high-quality.conf\n' "$(config_dir)"
+}
+
+pulse_ready() {
+    have pactl && pactl info >/dev/null 2>&1
+}
+
+start_user_service() {
+    local unit="$1"
+    systemctl --user start "${unit}" >/dev/null 2>&1
+}
+
+stop_user_service() {
+    local unit="$1"
+    systemctl --user stop "${unit}" >/dev/null 2>&1 || true
+}
+
+systemd_user_ready() {
+    have systemctl && systemctl --user show-environment >/dev/null 2>&1
+}
+
+start_background_once() {
+    local process_name="$1"
+    shift
+    if pgrep -u "$(id -u)" -x "${process_name}" >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p "$(state_dir)"
+    ("$@" >>"$(state_dir)/${process_name}.log" 2>&1 &)
+}
+
+ensure_audio() {
+    if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if systemd_user_ready; then
+        start_user_service pipewire.service || true
+        start_user_service pipewire-pulse.service || true
+        start_user_service wireplumber.service || true
+    else
+        have pipewire && start_background_once pipewire pipewire || true
+        have pipewire-pulse && start_background_once pipewire-pulse pipewire-pulse || true
+        have wireplumber && start_background_once wireplumber wireplumber || true
+    fi
+
+    for _ in 1 2 3 4 5; do
+        pulse_ready && return 0
+        sleep 0.2
+    done
+    pulse_ready
+}
+
+restart_audio() {
+    if systemd_user_ready; then
+        stop_user_service wireplumber.service
+        stop_user_service pipewire-pulse.service
+        stop_user_service pipewire.service
+    else
+        pkill -u "$(id -u)" -x wireplumber >/dev/null 2>&1 || true
+        pkill -u "$(id -u)" -x pipewire-pulse >/dev/null 2>&1 || true
+        pkill -u "$(id -u)" -x pipewire >/dev/null 2>&1 || true
+    fi
+    ensure_audio
+}
+
+require_pactl() {
+    if ! have pactl; then
+        echo "aurade-audio: pactl not found; install libpulse." >&2
+        exit 3
+    fi
+}
+
+sanitize_percent() {
+    case "${1:-}" in
+        ''|*[!0-9]*)
+            echo "aurade-audio: volume must be a numeric percentage." >&2
+            exit 2
+            ;;
+        *)
+            printf '%s%%\n' "$1"
+            ;;
+    esac
+}
+
+device_lines_for() {
+    local kind="$1"
+    local direction="$2"
+    local default_name="$3"
+    local payload
+
+    payload="$(pactl --format=json list "${kind}" 2>/dev/null || printf '[]')"
+    PULSE_JSON="${payload}" AURADE_AUDIO_INCLUDE_MONITORS="${AURADE_AUDIO_INCLUDE_MONITORS:-0}" \
+        python3 - "$direction" "$default_name" <<'PY'
+import json
+import os
+import re
+import sys
+
+direction = sys.argv[1]
+default_name = sys.argv[2]
+include_monitors = os.environ.get("AURADE_AUDIO_INCLUDE_MONITORS") == "1"
+
+try:
+    items = json.loads(os.environ.get("PULSE_JSON") or "[]")
+except json.JSONDecodeError:
+    items = []
+
+def clean(value):
+    return str(value or "").replace("\t", " ").replace("\n", " ").strip()
+
+def percent_from(value):
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        for key in ("value_percent", "value_percentages", "values", "front-left", "mono"):
+            if key in value:
+                found = percent_from(value[key])
+                if found:
+                    return found
+        for child in value.values():
+            found = percent_from(child)
+            if found:
+                return found
+    if isinstance(value, list):
+        for child in value:
+            found = percent_from(child)
+            if found:
+                return found
+    match = re.search(r"([0-9]+)%", str(value))
+    return match.group(1) if match else ""
+
+def muted(value):
+    return "1" if str(value).lower() in ("1", "true", "yes", "muted") else "0"
+
+for item in items if isinstance(items, list) else []:
+    name = clean(item.get("name"))
+    description = clean(item.get("description")) or name
+    properties = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+    media_class = clean(properties.get("media.class") or properties.get("device.class"))
+    if direction == "input" and not include_monitors:
+        lowered = f"{description} {media_class}".lower()
+        if "monitor" in lowered and "microphone" not in lowered:
+            continue
+    index = clean(item.get("index")) or name
+    active = "1" if name and name == default_name else "0"
+    volume = percent_from(item.get("volume"))
+    mute = muted(item.get("mute"))
+    print(f"{direction}\t{index}\t{active}\t{volume}\t{mute}\t{name}\t{description}")
+PY
+}
+
+status_lines() {
+    require_pactl
+    local default_sink default_source
+    default_sink="$(pactl get-default-sink 2>/dev/null || true)"
+    default_source="$(pactl get-default-source 2>/dev/null || true)"
+    device_lines_for sinks output "${default_sink}"
+    device_lines_for sources input "${default_source}"
+}
+
+status_json() {
+    require_pactl
+    AURADE_AUDIO_LINES="$(status_lines)" python3 - <<'PY'
+import json
+import os
+
+devices = []
+for line in os.environ.get("AURADE_AUDIO_LINES", "").splitlines():
+    fields = line.split("\t")
+    if len(fields) < 7:
+        continue
+    direction, index, active, volume, mute, name, description = fields[:7]
+    devices.append({
+        "direction": direction,
+        "index": index,
+        "active": active == "1",
+        "volumePercent": int(volume) if volume.isdigit() else None,
+        "muted": mute == "1",
+        "name": name,
+        "description": description,
+    })
+print(json.dumps({"backend": "pipewire-pulse", "devices": devices}, indent=2, sort_keys=True))
+PY
+}
+
+print_status() {
+    echo "AuraDE audio backend: PipeWire with PulseAudio compatibility"
+    if ! have pactl; then
+        echo "Pulse server: unavailable (pactl not found; install libpulse)"
+        return 1
+    fi
+    if ! pulse_ready; then
+        echo "Pulse server: unavailable"
+        echo "Run: aurade-audio ensure"
+        return 1
+    fi
+
+    pactl info | awk -F': ' '
+        /Server Name/ { print "Pulse server: " $2 }
+        /Default Sink/ { print "Default output: " $2 }
+        /Default Source/ { print "Default input: " $2 }
+    '
+    echo
+    echo "Devices:"
+    status_lines | awk -F'\t' '{
+        kind = ($1 == "output") ? "Output" : "Input ";
+        active = ($3 == "1") ? "*" : " ";
+        vol = ($4 == "") ? "n/a" : $4 "%";
+        mute = ($5 == "1") ? "muted" : "unmuted";
+        printf "  %s %s %-30s volume=%-5s %s\n", active, kind, $7, vol, mute;
+    }'
+    if have wpctl; then
+        echo
+        echo "WirePlumber graph:"
+        wpctl status 2>/dev/null || true
+    fi
+}
+
+install_quality_profile() {
+    local target
+    target="$(quality_config_path)"
+    mkdir -p "$(dirname "${target}")"
+    cat >"${target}" <<'EOF'
+# AuraDE high-quality PipeWire profile.
+#
+# This keeps latency sane for desktop use while allowing rate switches for
+# common music/video material instead of resampling everything to one rate.
+context.properties = {
+    default.clock.rate          = 48000
+    default.clock.allowed-rates = [ 44100 48000 88200 96000 ]
+    default.clock.quantum       = 1024
+    default.clock.min-quantum   = 32
+    default.clock.max-quantum   = 2048
+}
+EOF
+    echo "Installed ${target}"
+    restart_audio || true
+}
+
+remove_quality_profile() {
+    local target
+    target="$(quality_config_path)"
+    rm -f "${target}"
+    echo "Removed ${target}"
+    restart_audio || true
+}
+
+if [ "$#" -lt 1 ]; then
+    usage
+    exit 2
+fi
+
+command_name="$1"
+shift
+
+case "${command_name}" in
+    ensure)
+        ensure_audio
+        ;;
+    status)
+        print_status
+        ;;
+    status-lines)
+        status_lines
+        ;;
+    status-json)
+        status_json
+        ;;
+    set-default-output)
+        require_pactl
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        pactl set-default-sink "$1"
+        ;;
+    set-default-input)
+        require_pactl
+        [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+        pactl set-default-source "$1"
+        ;;
+    set-output-volume)
+        require_pactl
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        volume="$(sanitize_percent "$2")"
+        pactl set-sink-volume "$1" "${volume}"
+        ;;
+    set-input-volume)
+        require_pactl
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        volume="$(sanitize_percent "$2")"
+        pactl set-source-volume "$1" "${volume}"
+        ;;
+    mute-output)
+        require_pactl
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        pactl set-sink-mute "$1" "$2"
+        ;;
+    mute-input)
+        require_pactl
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        pactl set-source-mute "$1" "$2"
+        ;;
+    enable-quality-profile)
+        install_quality_profile
+        ;;
+    disable-quality-profile)
+        remove_quality_profile
+        ;;
+    restart)
+        restart_audio
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo "aurade-audio: unknown command: ${command_name}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

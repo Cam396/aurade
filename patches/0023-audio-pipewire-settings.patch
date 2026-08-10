@@ -1,0 +1,2645 @@
+diff --git a/chrome/browser/resources/ash/settings/device_page/audio.html b/chrome/browser/resources/ash/settings/device_page/audio.html
+index 8d563b57a6..c312a527d4 100644
+--- a/chrome/browser/resources/ash/settings/device_page/audio.html
++++ b/chrome/browser/resources/ash/settings/device_page/audio.html
+@@ -81,6 +81,25 @@
+   paper-tooltip {
+     --paper-tooltip-min-width: max-content;
+   }
++
++  .linux-audio-details {
++    display: grid;
++    gap: 6px 24px;
++    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
++  }
++
++  .linux-audio-detail-label {
++    color: var(--cros-color-secondary);
++    font-size: 12px;
++    line-height: 16px;
++  }
++
++  .linux-audio-detail-value {
++    color: var(--cros-color-primary);
++    font-size: 13px;
++    line-height: 18px;
++    overflow-wrap: anywhere;
++  }
+ </style>
+ 
+ <!-- Output section -->
+@@ -293,6 +312,199 @@
+   </div>
+ </div>
+ 
++<div id="linuxAudio"
++    hidden="[[!isLinuxAudioVisible_(audioSystemProperties_.linuxProperties)]]">
++  <h2>$i18n{auradeAudioTitle}</h2>
++  <div id="linuxAudioSection" class="subsection">
++    <div id="linuxAudioBackendSubsection" class="settings-box">
++      <div class="start settings-box-text">
++        $i18n{auradeAudioBackendTitle}
++        <div class="secondary">
++          [[audioSystemProperties_.linuxProperties.backendName]]
++        </div>
++      </div>
++    </div>
++    <div id="linuxAudioQualitySubsection" class="settings-box">
++      <div class="start settings-box-text" id="linuxAudioQualityLabel">
++        $i18n{auradeAudioQualityTitle}
++        <div class="secondary">
++          [[getLinuxAudioProfileDescription_(
++              audioSystemProperties_.linuxProperties.activeQualityProfile
++            )]]
++        </div>
++      </div>
++      <select id="linuxAudioQualityDropdown" class="md-select"
++          on-change="onLinuxAudioQualityChanged_"
++          disabled="[[!audioSystemProperties_.linuxProperties.qualityControlsAvailable]]"
++          aria-labelledby="linuxAudioQualityLabel">
++        <option value="balanced"
++            selected="[[isLinuxAudioQualityBalanced_(
++                audioSystemProperties_.linuxProperties.activeQualityProfile
++              )]]">
++          $i18n{auradeAudioBalancedLabel}
++        </option>
++        <option value="high-quality"
++            selected="[[isLinuxAudioQualityHigh_(
++                audioSystemProperties_.linuxProperties.activeQualityProfile
++              )]]">
++          $i18n{auradeAudioHighQualityLabel}
++        </option>
++      </select>
++    </div>
++    <div id="linuxAudioProfileDetailsSubsection" class="settings-box">
++      <div class="start settings-box-text">
++        $i18n{auradeAudioProfileDetailsTitle}
++      </div>
++      <div class="linux-audio-details">
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioEngineRatesLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[getLinuxAudioEngineRates_(
++                audioSystemProperties_.linuxProperties.activeQualityProfile
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioQuantumLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[getLinuxAudioQuantum_(
++                audioSystemProperties_.linuxProperties.activeQualityProfile
++              )]]
++          </div>
++        </div>
++      </div>
++    </div>
++    <div id="linuxAudioOutputCapabilitiesSubsection" class="settings-box"
++        hidden="[[!audioSystemProperties_.linuxProperties.activeOutput]]">
++      <div class="start settings-box-text">
++        $i18n{auradeAudioOutputCapabilitiesTitle}
++        <div class="secondary">
++          [[audioSystemProperties_.linuxProperties.activeOutput.displayName]]
++        </div>
++      </div>
++      <div class="linux-audio-details">
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioDeviceNameLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[audioSystemProperties_.linuxProperties.activeOutput.deviceName]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioDeviceTypeLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[audioSystemProperties_.linuxProperties.activeOutput.deviceType]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioChannelsLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioChannels_(
++                audioSystemProperties_.linuxProperties.activeOutput.maxSupportedChannels
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioSampleRateLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioSampleRate_(
++                audioSystemProperties_.linuxProperties.activeOutput.sampleRate
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioLatencyLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioLatency_(
++                audioSystemProperties_.linuxProperties.activeOutput.nodeLatency
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioVolumeStepsLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioVolumeSteps_(
++                audioSystemProperties_.linuxProperties.activeOutput.numberOfVolumeSteps
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioSampleRateLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioSampleRate_(
++                audioSystemProperties_.linuxProperties.activeInput.sampleRate
++              )]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioLatencyLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioLatency_(
++                audioSystemProperties_.linuxProperties.activeInput.nodeLatency
++              )]]
++          </div>
++        </div>
++      </div>
++    </div>
++    <div id="linuxAudioInputCapabilitiesSubsection" class="settings-box"
++        hidden="[[!audioSystemProperties_.linuxProperties.activeInput]]">
++      <div class="start settings-box-text">
++        $i18n{auradeAudioInputCapabilitiesTitle}
++        <div class="secondary">
++          [[audioSystemProperties_.linuxProperties.activeInput.displayName]]
++        </div>
++      </div>
++      <div class="linux-audio-details">
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioDeviceNameLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[audioSystemProperties_.linuxProperties.activeInput.deviceName]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioDeviceTypeLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[audioSystemProperties_.linuxProperties.activeInput.deviceType]]
++          </div>
++        </div>
++        <div>
++          <div class="linux-audio-detail-label">
++            $i18n{auradeAudioChannelsLabel}
++          </div>
++          <div class="linux-audio-detail-value">
++            [[formatLinuxAudioChannels_(
++                audioSystemProperties_.linuxProperties.activeInput.maxSupportedChannels
++              )]]
++          </div>
++        </div>
++      </div>
++    </div>
++  </div>
++</div>
++
+ <div id="deviceSounds">
+   <h2>$i18n{deviceSoundsTitle}</h2>
+   <div id="deviceSoundsSection" class="subsection">
+diff --git a/chrome/browser/resources/ash/settings/device_page/audio.ts b/chrome/browser/resources/ash/settings/device_page/audio.ts
+index 7eeb624c93..8df66818c8 100644
+--- a/chrome/browser/resources/ash/settings/device_page/audio.ts
++++ b/chrome/browser/resources/ash/settings/device_page/audio.ts
+@@ -29,7 +29,7 @@ import {DeepLinkingMixin} from '../common/deep_linking_mixin.js';
+ import {RouteObserverMixin} from '../common/route_observer_mixin.js';
+ import {SettingsRadioGroupElement} from '../controls/settings_radio_group.js';
+ import type {AudioDevice, AudioSystemProperties} from '../mojom-webui/cros_audio_config.mojom-webui.js';
+-import {AudioDeviceType, AudioEffectState, AudioEffectType, AudioSystemPropertiesObserverReceiver, MuteState} from '../mojom-webui/cros_audio_config.mojom-webui.js';
++import {AudioDeviceType, AudioEffectState, AudioEffectType, AudioSystemPropertiesObserverReceiver, LinuxAudioQualityProfile, MuteState} from '../mojom-webui/cros_audio_config.mojom-webui.js';
+ import type {VoiceIsolationUIAppearance} from '../mojom-webui/cros_audio_config.mojom-webui.js';
+ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+ import type {AudioAndCaptionsPageBrowserProxy} from '../os_a11y_page/audio_and_captions_page_browser_proxy.js';
+@@ -501,6 +501,81 @@ export class SettingsAudioElement extends SettingsAudioElementBase {
+     return !this.batteryStatus_?.present;
+   }
+ 
++  private isLinuxAudioVisible_(): boolean {
++    return !!this.audioSystemProperties_?.linuxProperties;
++  }
++
++  private isLinuxAudioQualityBalanced_(): boolean {
++    return this.audioSystemProperties_?.linuxProperties?.activeQualityProfile ===
++        LinuxAudioQualityProfile.kBalanced;
++  }
++
++  private isLinuxAudioQualityHigh_(): boolean {
++    return this.audioSystemProperties_?.linuxProperties?.activeQualityProfile ===
++        LinuxAudioQualityProfile.kHighQuality;
++  }
++
++  private getLinuxAudioProfileDescription_(): string {
++    return this.isLinuxAudioQualityHigh_() ?
++        this.i18n('auradeAudioHighQualityDescription') :
++        this.i18n('auradeAudioBalancedDescription');
++  }
++
++  private formatLinuxAudioChannels_(channels: number|undefined): string {
++    if (!channels) {
++      return this.i18n('auradeAudioUnavailable');
++    }
++
++    return channels === 1 ? this.i18n('auradeAudioMonoChannel') :
++                            this.i18n('auradeAudioChannelCount', channels);
++  }
++
++  private formatLinuxAudioVolumeSteps_(steps: number|undefined): string {
++    if (!steps || steps <= 0) {
++      return this.i18n('auradeAudioUnavailable');
++    }
++
++    return this.i18n('auradeAudioVolumeStepCount', steps);
++  }
++
++  private formatLinuxAudioSampleRate_(sampleRate: number|undefined): string {
++    if (!sampleRate || sampleRate <= 0) {
++      return this.i18n('auradeAudioUnavailable');
++    }
++
++    return this.i18n('auradeAudioSampleRateHz', sampleRate);
++  }
++
++  private formatLinuxAudioLatency_(latency: string|undefined): string {
++    if (!latency) {
++      return this.i18n('auradeAudioUnavailable');
++    }
++
++    return latency;
++  }
++
++  private getLinuxAudioEngineRates_(): string {
++    return this.isLinuxAudioQualityHigh_() ?
++        this.i18n('auradeAudioHighQualityRates') :
++        this.i18n('auradeAudioBalancedRates');
++  }
++
++  private getLinuxAudioQuantum_(): string {
++    return this.isLinuxAudioQualityHigh_() ?
++        this.i18n('auradeAudioHighQualityQuantum') :
++        this.i18n('auradeAudioBalancedQuantum');
++  }
++
++  private onLinuxAudioQualityChanged_(): void {
++    const qualitySelect = this.shadowRoot!.querySelector<HTMLSelectElement>(
++        '#linuxAudioQualityDropdown');
++    assert(!!qualitySelect);
++    const profile = qualitySelect.value === 'high-quality' ?
++        LinuxAudioQualityProfile.kHighQuality :
++        LinuxAudioQualityProfile.kBalanced;
++    this.crosAudioConfig_.setLinuxAudioQualityProfile(profile);
++  }
++
+   private onDeviceStartupSoundRowClicked_(): void {
+     this.startupSoundEnabled_ = !this.startupSoundEnabled_;
+     this.audioAndCaptionsBrowserProxy_.setStartupSoundEnabled(
+diff --git a/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts b/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
+index 70f14bd94d..05dc3e51d7 100644
+--- a/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
++++ b/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
+@@ -10,7 +10,7 @@
+ import {assert} from 'chrome://resources/js/assert.js';
+ 
+ import type {AudioDevice, AudioSystemProperties, CrosAudioConfigInterface, VoiceIsolationUIAppearance} from '../mojom-webui/cros_audio_config.mojom-webui.js';
+-import {AudioDeviceType, AudioEffectState, AudioEffectType, MuteState} from '../mojom-webui/cros_audio_config.mojom-webui.js';
++import {AudioDeviceType, AudioEffectState, AudioEffectType, LinuxAudioQualityProfile, MuteState} from '../mojom-webui/cros_audio_config.mojom-webui.js';
+ 
+ export const defaultFakeMicJack: AudioDevice = {
+   id: BigInt(1),
+@@ -171,6 +171,7 @@ export const defaultFakeAudioSystemProperties: AudioSystemProperties = {
+   inputDevices: [fakeInternalFrontMic, fakeBluetoothMic],
+   inputMuteState: MuteState.kNotMuted,
+   voiceIsolationUiAppearance: fakeVoiceIsolationUIAppearance,
++  linuxProperties: null,
+ };
+ 
+ /** Creates an audio device based on provided device and isActive override. */
+@@ -340,6 +341,15 @@ export class FakeCrosAudioConfig implements FakeCrosAudioConfigInterface {
+     this.notifyAudioSystemPropertiesUpdated();
+   }
+ 
++  setLinuxAudioQualityProfile(profile: LinuxAudioQualityProfile): void {
++    if (!this.audioSystemProperties.linuxProperties) {
++      return;
++    }
++
++    this.audioSystemProperties.linuxProperties.activeQualityProfile = profile;
++    this.notifyAudioSystemPropertiesUpdated();
++  }
++
+   /**
+    * Returns true if hfpMicSrState is enabled on the device with id `deviceId`.
+    */
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
+index 324fab42f6..c67fc43cbe 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
+@@ -822,6 +822,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
+ 
+   html_source->AddLocalizedStrings(kAudioStrings);
+ 
++  html_source->AddString("auradeAudioTitle", "AuraDE audio");
++  html_source->AddString("auradeAudioBackendTitle", "Backend");
++  html_source->AddString("auradeAudioQualityTitle", "Quality profile");
++  html_source->AddString("auradeAudioBalancedLabel", "Balanced");
++  html_source->AddString(
++      "auradeAudioBalancedDescription",
++      "Desktop default latency and compatibility profile.");
++  html_source->AddString("auradeAudioHighQualityLabel", "High quality");
++  html_source->AddString(
++      "auradeAudioHighQualityDescription",
++      "Allows 44.1, 48, 88.2, and 96 kHz PipeWire engine rates.");
++  html_source->AddString("auradeAudioProfileDetailsTitle", "Profile details");
++  html_source->AddString("auradeAudioEngineRatesLabel", "Engine rates");
++  html_source->AddString("auradeAudioQuantumLabel", "Quantum");
++  html_source->AddString("auradeAudioBalancedRates", "PipeWire defaults");
++  html_source->AddString("auradeAudioBalancedQuantum", "PipeWire defaults");
++  html_source->AddString(
++      "auradeAudioHighQualityRates", "48 kHz default; 44.1/48/88.2/96 kHz");
++  html_source->AddString("auradeAudioHighQualityQuantum",
++                         "1024 frames; range 32-2048");
++  html_source->AddString("auradeAudioOutputCapabilitiesTitle",
++                         "Active output capabilities");
++  html_source->AddString("auradeAudioInputCapabilitiesTitle",
++                         "Active input capabilities");
++  html_source->AddString("auradeAudioDeviceNameLabel", "Device");
++  html_source->AddString("auradeAudioDeviceTypeLabel", "Type");
++  html_source->AddString("auradeAudioChannelsLabel", "Channels");
++  html_source->AddString("auradeAudioSampleRateLabel", "Sample rate");
++  html_source->AddString("auradeAudioLatencyLabel", "Node latency");
++  html_source->AddString("auradeAudioVolumeStepsLabel", "Volume steps");
++  html_source->AddString("auradeAudioUnavailable", "Unavailable");
++  html_source->AddString("auradeAudioMonoChannel", "Mono");
++  html_source->AddString("auradeAudioChannelCount", "$1 channels");
++  html_source->AddString("auradeAudioSampleRateHz", "$1 Hz");
++  html_source->AddString("auradeAudioVolumeStepCount", "$1 steps");
++
+   html_source->AddString(
+       "voiceIsolationLearnMoreLink",
+       DeviceSection::GetHelpUrlWithBoard(ash::external_urls::kVcLearnMoreURL));
+diff --git a/chromeos/ash/components/audio/audio_device.cc b/chromeos/ash/components/audio/audio_device.cc
+index 06329e7b86..071e25c946 100644
+--- a/chromeos/ash/components/audio/audio_device.cc
++++ b/chromeos/ash/components/audio/audio_device.cc
+@@ -160,6 +160,8 @@ AudioDevice::AudioDevice(const AudioNode& node) {
+   max_supported_channels = node.max_supported_channels;
+   audio_effect = node.audio_effect;
+   number_of_volume_steps = node.number_of_volume_steps;
++  sample_rate = node.sample_rate;
++  node_latency = node.node_latency;
+ }
+ 
+ AudioDevice::AudioDevice(const AudioDevice& other) = default;
+diff --git a/chromeos/ash/components/audio/audio_device.h b/chromeos/ash/components/audio/audio_device.h
+index 0344a90b0d..6fc39c89d9 100644
+--- a/chromeos/ash/components/audio/audio_device.h
++++ b/chromeos/ash/components/audio/audio_device.h
+@@ -127,6 +127,8 @@ struct COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) AudioDevice {
+   uint32_t max_supported_channels = 0;
+   uint32_t audio_effect = 0;
+   int32_t number_of_volume_steps = 0;
++  uint32_t sample_rate = 0;
++  std::string node_latency;
+   // The larger value means the higher priority.
+   uint32_t user_priority = kUserPriorityNone;
+ };
+diff --git a/chromeos/ash/components/audio/cros_audio_config.cc b/chromeos/ash/components/audio/cros_audio_config.cc
+index 20a1d00fd1..5f97dc11e3 100644
+--- a/chromeos/ash/components/audio/cros_audio_config.cc
++++ b/chromeos/ash/components/audio/cros_audio_config.cc
+@@ -17,6 +17,11 @@ void CrosAudioConfig::ObserveAudioSystemProperties(
+   observers_.Get(id)->OnPropertiesUpdated(GetAudioSystemProperties());
+ }
+ 
++mojom::LinuxAudioPropertiesPtr CrosAudioConfig::GetLinuxAudioProperties()
++    const {
++  return nullptr;
++}
++
+ mojom::AudioSystemPropertiesPtr CrosAudioConfig::GetAudioSystemProperties() {
+   auto properties = mojom::AudioSystemProperties::New();
+   properties->output_volume_percent = GetOutputVolumePercent();
+@@ -24,6 +29,7 @@ mojom::AudioSystemPropertiesPtr CrosAudioConfig::GetAudioSystemProperties() {
+   properties->output_mute_state = GetOutputMuteState();
+   properties->input_mute_state = GetInputMuteState();
+   properties->voice_isolation_ui_appearance = GetVoiceIsolationUIAppearance();
++  properties->linux_properties = GetLinuxAudioProperties();
+   GetAudioDevices(&properties->output_devices, &properties->input_devices);
+   return properties;
+ }
+diff --git a/chromeos/ash/components/audio/cros_audio_config.h b/chromeos/ash/components/audio/cros_audio_config.h
+index 1502ccbb92..d5d5c7be1b 100644
+--- a/chromeos/ash/components/audio/cros_audio_config.h
++++ b/chromeos/ash/components/audio/cros_audio_config.h
+@@ -40,6 +40,7 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) CrosAudioConfig
+   virtual mojom::MuteState GetInputMuteState() const = 0;
+   virtual mojom::VoiceIsolationUIAppearancePtr GetVoiceIsolationUIAppearance()
+       const = 0;
++  virtual mojom::LinuxAudioPropertiesPtr GetLinuxAudioProperties() const;
+ 
+  private:
+   // mojom::CrosAudioConfig:
+diff --git a/chromeos/ash/components/audio/cros_audio_config_impl.cc b/chromeos/ash/components/audio/cros_audio_config_impl.cc
+index 8fb0be20aa..b8f9f08729 100644
+--- a/chromeos/ash/components/audio/cros_audio_config_impl.cc
++++ b/chromeos/ash/components/audio/cros_audio_config_impl.cc
+@@ -4,8 +4,17 @@
+ 
+ #include "chromeos/ash/components/audio/cros_audio_config_impl.h"
+ 
++#include <optional>
++
++#include "base/command_line.h"
++#include "base/environment.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/process/launch.h"
++#include "base/system/sys_info.h"
++#include "base/task/thread_pool.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+ #include "chromeos/ash/components/audio/audio_device.h"
+@@ -36,6 +45,68 @@ constexpr char kOutputDeviceTypeHistogramName[] =
+     "ChromeOS.CrosAudioConfig.OutputDeviceTypeChangedTo";
+ constexpr char kInputDeviceTypeHistogramName[] =
+     "ChromeOS.CrosAudioConfig.InputDeviceTypeChangedTo";
++constexpr char kAuraAudioQualityConfigPath[] =
++    ".config/pipewire/pipewire.conf.d/90-aurade-high-quality.conf";
++constexpr char kAuraAudioHelperPath[] = "/usr/bin/aurade-audio";
++constexpr char kAuraHighQualityPipeWireConfig[] = R"(# AuraDE high-quality PipeWire profile.
++#
++# This keeps latency sane for desktop use while allowing rate switches for
++# common music/video material instead of resampling everything to one rate.
++context.properties = {
++    default.clock.rate          = 48000
++    default.clock.allowed-rates = [ 44100 48000 88200 96000 ]
++    default.clock.quantum       = 1024
++    default.clock.min-quantum   = 32
++    default.clock.max-quantum   = 2048
++}
++)";
++
++std::optional<base::FilePath> GetAuraAudioQualityConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kAuraAudioQualityConfigPath);
++}
++
++mojom::LinuxAudioQualityProfile ReadAuraAudioQualityProfileFromDisk() {
++  const std::optional<base::FilePath> config_path =
++      GetAuraAudioQualityConfigFile();
++  if (config_path && base::PathExists(*config_path)) {
++    return mojom::LinuxAudioQualityProfile::kHighQuality;
++  }
++  return mojom::LinuxAudioQualityProfile::kBalanced;
++}
++
++bool WriteAuraAudioQualityProfile(bool enabled) {
++  const std::optional<base::FilePath> config_path =
++      GetAuraAudioQualityConfigFile();
++  if (!config_path) {
++    return false;
++  }
++
++  if (!enabled) {
++    return base::DeleteFile(*config_path) || !base::PathExists(*config_path);
++  }
++
++  if (!base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++  return base::WriteFile(*config_path, kAuraHighQualityPipeWireConfig);
++}
++
++void RestartAuraAudioStackIfAvailable() {
++  base::FilePath helper(kAuraAudioHelperPath);
++  if (!base::PathExists(helper)) {
++    return;
++  }
++
++  base::CommandLine command_line(helper);
++  command_line.AppendArg("restart");
++  base::LaunchProcess(command_line, base::LaunchOptions());
++}
+ 
+ // Creates an inactive input device with default property configuration.
+ AudioDevice CreateStubInternalMic() {
+@@ -67,6 +138,14 @@ void UpdateInternalMicBasedOnAudioDevice(AudioDevice& internal_mic,
+   }
+ }
+ 
++bool SetAuraAudioQualityProfileOnBlockingThread(bool high_quality) {
++  if (!WriteAuraAudioQualityProfile(high_quality)) {
++    return false;
++  }
++  RestartAuraAudioStackIfAvailable();
++  return true;
++}
++
+ // Determines the correct `mojom::AudioEffectState` for an audio device
+ // depending on if:
+ //   - the overall device(chromebook) supports noise cancellation
+@@ -204,6 +283,20 @@ mojom::AudioDevicePtr GenerateMojoAudioDevice(const AudioDevice& device) {
+   return mojo_device;
+ }
+ 
++mojom::LinuxAudioEndpointPropertiesPtr GenerateLinuxAudioEndpointProperties(
++    const AudioDevice& device) {
++  mojom::LinuxAudioEndpointPropertiesPtr properties =
++      mojom::LinuxAudioEndpointProperties::New();
++  properties->display_name = device.display_name;
++  properties->device_name = device.device_name;
++  properties->device_type = AudioDevice::GetTypeString(device.type);
++  properties->max_supported_channels = device.max_supported_channels;
++  properties->number_of_volume_steps = device.number_of_volume_steps;
++  properties->sample_rate = device.sample_rate;
++  properties->node_latency = device.node_latency;
++  return properties;
++}
++
+ CrosAudioConfigImpl::CrosAudioConfigImpl()
+     : output_volume_metric_delay_timer_(
+           FROM_HERE,
+@@ -215,6 +308,16 @@ CrosAudioConfigImpl::CrosAudioConfigImpl()
+                                      this,
+                                      &CrosAudioConfigImpl::RecordInputGain) {
+   CrasAudioHandler::Get()->AddAudioObserver(this);
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: Settings property reads must stay non-blocking, so
++    // the persisted PipeWire quality profile is loaded on a blocking-capable
++    // worker and pushed back through the normal observer update path.
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&ReadAuraAudioQualityProfileFromDisk),
++        base::BindOnce(&CrosAudioConfigImpl::OnLinuxAudioQualityProfileRead,
++                       weak_factory_.GetWeakPtr()));
++  }
+ }
+ 
+ CrosAudioConfigImpl::~CrosAudioConfigImpl() {
+@@ -472,6 +575,60 @@ void CrosAudioConfigImpl::SetSpatialAudioEnabled(bool enabled) {
+   audio_handler->SetSpatialAudioState(enabled);
+ }
+ 
++void CrosAudioConfigImpl::SetLinuxAudioQualityProfile(
++    audio_config::mojom::LinuxAudioQualityProfile profile) {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return;
++  }
++
++  // AuraDE compatibility: generic Linux sessions use PipeWire rather than
++  // CRAS. Persist the user-facing quality profile in PipeWire's per-user
++  // config and restart the user audio stack when the helper is installed.
++  const bool high_quality =
++      profile == mojom::LinuxAudioQualityProfile::kHighQuality;
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraAudioQualityProfileOnBlockingThread,
++                     high_quality),
++      base::BindOnce(&CrosAudioConfigImpl::OnLinuxAudioQualityProfileWritten,
++                     weak_factory_.GetWeakPtr(), profile));
++}
++
++mojom::LinuxAudioPropertiesPtr CrosAudioConfigImpl::GetLinuxAudioProperties()
++    const {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return nullptr;
++  }
++
++  mojom::LinuxAudioPropertiesPtr properties =
++      mojom::LinuxAudioProperties::New();
++  properties->backend_name = "PipeWire";
++  properties->quality_controls_available =
++      GetAuraAudioQualityConfigFile().has_value();
++  properties->active_quality_profile = linux_audio_quality_profile_;
++
++  CrasAudioHandler* audio_handler = CrasAudioHandler::Get();
++  if (!audio_handler) {
++    return properties;
++  }
++
++  AudioDeviceList audio_devices;
++  audio_handler->GetAudioDevices(&audio_devices);
++  for (const auto& device : audio_devices) {
++    if (!device.active || !device.is_for_simple_usage()) {
++      continue;
++    }
++
++    if (device.is_input) {
++      properties->active_input = GenerateLinuxAudioEndpointProperties(device);
++    } else {
++      properties->active_output = GenerateLinuxAudioEndpointProperties(device);
++    }
++  }
++
++  return properties;
++}
++
+ void CrosAudioConfigImpl::RecordOutputVolume() {
+   base::UmaHistogramExactLinear(kOutputVolumeChangeHistogramName,
+                                 last_set_output_volume_,
+@@ -498,6 +655,24 @@ void CrosAudioConfigImpl::RecordInputGain() {
+   }
+ }
+ 
++void CrosAudioConfigImpl::OnLinuxAudioQualityProfileRead(
++    mojom::LinuxAudioQualityProfile profile) {
++  linux_audio_quality_profile_ = profile;
++  NotifyObserversAudioSystemPropertiesChanged();
++}
++
++void CrosAudioConfigImpl::OnLinuxAudioQualityProfileWritten(
++    mojom::LinuxAudioQualityProfile profile,
++    bool success) {
++  if (!success) {
++    LOG(ERROR) << "Unable to write AuraDE audio quality profile";
++    return;
++  }
++
++  linux_audio_quality_profile_ = profile;
++  NotifyObserversAudioSystemPropertiesChanged();
++}
++
+ void CrosAudioConfigImpl::OnOutputNodeVolumeChanged(uint64_t node_id,
+                                                     int volume) {
+   NotifyObserversAudioSystemPropertiesChanged();
+diff --git a/chromeos/ash/components/audio/cros_audio_config_impl.h b/chromeos/ash/components/audio/cros_audio_config_impl.h
+index 609c503a4b..0b87150128 100644
+--- a/chromeos/ash/components/audio/cros_audio_config_impl.h
++++ b/chromeos/ash/components/audio/cros_audio_config_impl.h
+@@ -6,6 +6,7 @@
+ #define CHROMEOS_ASH_COMPONENTS_AUDIO_CROS_AUDIO_CONFIG_IMPL_H_
+ 
+ #include "base/component_export.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/timer/timer.h"
+ #include "chromeos/ash/components/audio/cras_audio_handler.h"
+ #include "chromeos/ash/components/audio/cros_audio_config.h"
+@@ -61,11 +62,19 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) CrosAudioConfigImpl
+   void SetHfpMicSrEnabled(bool enabled) override;
+   void SetStyleTransferEnabled(bool enabled) override;
+   void SetSpatialAudioEnabled(bool enabled) override;
++  void SetLinuxAudioQualityProfile(
++      audio_config::mojom::LinuxAudioQualityProfile profile) override;
++  mojom::LinuxAudioPropertiesPtr GetLinuxAudioProperties() const override;
+ 
+   // Records the output volume percentage set by the user to metrics.
+   void RecordOutputVolume();
+   // Records the input gain percentage set by the user to metrics.
+   void RecordInputGain();
++  void OnLinuxAudioQualityProfileRead(
++      mojom::LinuxAudioQualityProfile profile);
++  void OnLinuxAudioQualityProfileWritten(
++      mojom::LinuxAudioQualityProfile profile,
++      bool success);
+ 
+   // CrasAudioHandler::AudioObserver:
+   void OnOutputNodeVolumeChanged(uint64_t node_id, int volume) override;
+@@ -95,6 +104,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) CrosAudioConfigImpl
+   int8_t last_set_output_volume_;
+   // The last input gain percentage set by the user. Used for metrics.
+   int8_t last_set_input_gain_;
++
++  mojom::LinuxAudioQualityProfile linux_audio_quality_profile_ =
++      mojom::LinuxAudioQualityProfile::kBalanced;
++
++  base::WeakPtrFactory<CrosAudioConfigImpl> weak_factory_{this};
+ };
+ 
+ }  // namespace ash::audio_config
+diff --git a/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom b/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
+index ed917ec58f..75f38c306e 100644
+--- a/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
++++ b/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
+@@ -78,6 +78,54 @@ struct VoiceIsolationUIAppearance {
+   bool show_effect_fallback_message;
+ };
+ 
++// AuraDE quality profiles available on generic Linux PipeWire sessions.
++enum LinuxAudioQualityProfile {
++  kBalanced,
++  kHighQuality,
++};
++
++// Linux-only endpoint details surfaced by AuraDE's PipeWire-backed audio path.
++struct LinuxAudioEndpointProperties {
++  // Human-readable device label shown in Settings.
++  string display_name;
++
++  // Lower-level device identifier reported by the native audio stack.
++  string device_name;
++
++  // Friendly type derived from the native audio stack.
++  string device_type;
++
++  // Channel count reported by the active node.
++  uint32 max_supported_channels;
++
++  // Output volume step count when the endpoint exposes one.
++  int32 number_of_volume_steps;
++
++  // Native node sample rate when the endpoint exposes one.
++  uint32 sample_rate;
++
++  // Native PipeWire node latency string, for example "1024/48000".
++  string node_latency;
++};
++
++// Linux-only audio backend and capability summary. Null on ChromeOS builds.
++struct LinuxAudioProperties {
++  // Backend currently serving the ChromeOS audio UI contract.
++  string backend_name;
++
++  // Whether the Settings UI can persist a user quality profile.
++  bool quality_controls_available;
++
++  // Quality profile currently selected for the user session.
++  LinuxAudioQualityProfile active_quality_profile;
++
++  // Active output endpoint details, when an output device exists.
++  LinuxAudioEndpointProperties? active_output;
++
++  // Active input endpoint details, when an input device exists.
++  LinuxAudioEndpointProperties? active_input;
++};
++
+ // Represents a user's audio device.
+ struct AudioDevice {
+   // Id of the audio device. Assigned to be unique each time a device is plugged
+@@ -139,6 +187,9 @@ struct AudioSystemProperties {
+ 
+   // The appearance of the voice isolation setting.
+   VoiceIsolationUIAppearance voice_isolation_ui_appearance;
++
++  // AuraDE Linux audio details. ChromeOS clients should ignore this field.
++  LinuxAudioProperties? linux_properties;
+ };
+ 
+ // Observer for changes to audio system properties.
+@@ -211,4 +262,7 @@ interface CrosAudioConfig {
+   // between different output devices, so changing the active output device will
+   // keep the enabled state from the previous active output device.
+   SetSpatialAudioEnabled(bool enabled);
++
++  // Sets the AuraDE Linux audio quality profile. No-op on ChromeOS.
++  SetLinuxAudioQualityProfile(LinuxAudioQualityProfile profile);
+ };
+diff --git a/chromeos/ash/components/dbus/audio/BUILD.gn b/chromeos/ash/components/dbus/audio/BUILD.gn
+index 1d0982fb52..5f4e2ddf90 100644
+--- a/chromeos/ash/components/dbus/audio/BUILD.gn
++++ b/chromeos/ash/components/dbus/audio/BUILD.gn
+@@ -2,13 +2,22 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
++import("//build/config/linux/pkg_config.gni")
++
+ assert(is_chromeos, "Non-Chrome-OS builds cannot depend on //chromeos/ash")
+ 
++pkg_config("pipewire_config") {
++  packages = [ "libpipewire-0.3" ]
++}
++
+ component("audio") {
+   output_name = "ash_dbus_audio"
+ 
+   defines = [ "IS_DBUS_AUDIO_IMPL" ]
+ 
++  configs += [ ":pipewire_config" ]
++  public_configs = [ ":pipewire_config" ]
++
+   deps = [
+     "//ash/constants",
+     "//base",
+@@ -27,6 +36,8 @@ component("audio") {
+     "fake_floss_media_client.h",
+     "floss_media_client.cc",
+     "floss_media_client.h",
++    "pipewire_cras_audio_client.cc",
++    "pipewire_cras_audio_client.h",
+     "voice_isolation_ui_appearance.cc",
+     "voice_isolation_ui_appearance.h",
+     "volume_state.cc",
+diff --git a/chromeos/ash/components/dbus/audio/audio_node.cc b/chromeos/ash/components/dbus/audio/audio_node.cc
+index 6d53f7d7a6..fc2ffbd403 100644
+--- a/chromeos/ash/components/dbus/audio/audio_node.cc
++++ b/chromeos/ash/components/dbus/audio/audio_node.cc
+@@ -28,7 +28,9 @@ AudioNode::AudioNode(bool is_input,
+                      uint64_t plugged_time,
+                      uint32_t max_supported_channels,
+                      uint32_t audio_effect,
+-                     int32_t number_of_volume_steps)
++                     int32_t number_of_volume_steps,
++                     uint32_t sample_rate,
++                     std::string node_latency)
+     : is_input(is_input),
+       id(id),
+       has_v2_stable_device_id(has_v2_stable_device_id),
+@@ -41,7 +43,9 @@ AudioNode::AudioNode(bool is_input,
+       plugged_time(plugged_time),
+       max_supported_channels(max_supported_channels),
+       audio_effect(audio_effect),
+-      number_of_volume_steps(number_of_volume_steps) {
++      number_of_volume_steps(number_of_volume_steps),
++      sample_rate(sample_rate),
++      node_latency(node_latency) {
+   DCHECK(!(audio_effect & (~(cras::EFFECT_TYPE_NOISE_CANCELLATION |
+                              cras::EFFECT_TYPE_HFP_MIC_SR |
+                              cras::EFFECT_TYPE_STYLE_TRANSFER))));
+@@ -73,8 +77,11 @@ std::string AudioNode::ToString() const {
+   base::StringAppendF(&result, "max_supported_channels= %s ",
+                       base::NumberToString(max_supported_channels).c_str());
+   base::StringAppendF(&result, "audio_effect = 0x%" PRIx32 " ", audio_effect);
+-  base::StringAppendF(&result, "number_of_volume_steps= %s",
++  base::StringAppendF(&result, "number_of_volume_steps= %s ",
+                       base::NumberToString(number_of_volume_steps).c_str());
++  base::StringAppendF(&result, "sample_rate= %s ",
++                      base::NumberToString(sample_rate).c_str());
++  base::StringAppendF(&result, "node_latency= %s", node_latency.c_str());
+   return result;
+ }
+ 
+diff --git a/chromeos/ash/components/dbus/audio/audio_node.h b/chromeos/ash/components/dbus/audio/audio_node.h
+index bbf8e6fc67..f13505fcad 100644
+--- a/chromeos/ash/components/dbus/audio/audio_node.h
++++ b/chromeos/ash/components/dbus/audio/audio_node.h
+@@ -41,6 +41,10 @@ struct COMPONENT_EXPORT(DBUS_AUDIO) AudioNode {
+   // (0), all output nodes should get a valid number (>0) if output nodes
+   // somehow get a number_of_volume_steps <=0, use 25 as default value.
+   int32_t number_of_volume_steps = 0;
++  // AuraDE compatibility: PipeWire can expose native node metadata that CRAS
++  // does not model. These remain unset for real ChromeOS CRAS nodes.
++  uint32_t sample_rate = 0;
++  std::string node_latency;
+   AudioNode();
+   AudioNode(bool is_input,
+             uint64_t id,
+@@ -54,7 +58,9 @@ struct COMPONENT_EXPORT(DBUS_AUDIO) AudioNode {
+             uint64_t plugged_time,
+             uint32_t max_supported_channels,
+             uint32_t audio_effect,
+-            int32_t number_of_volume_steps);
++            int32_t number_of_volume_steps,
++            uint32_t sample_rate = 0,
++            std::string node_latency = std::string());
+   AudioNode(const AudioNode& other);
+   ~AudioNode();
+ 
+diff --git a/chromeos/ash/components/dbus/audio/cras_audio_client.cc b/chromeos/ash/components/dbus/audio/cras_audio_client.cc
+index 4f8bc89d31..9d85317e5e 100644
+--- a/chromeos/ash/components/dbus/audio/cras_audio_client.cc
++++ b/chromeos/ash/components/dbus/audio/cras_audio_client.cc
+@@ -13,7 +13,9 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/ash/components/dbus/audio/fake_cras_audio_client.h"
++#include "chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h"
+ #include "chromeos/ash/components/dbus/audio/voice_isolation_ui_appearance.h"
+ #include "dbus/bus.h"
+ #include "dbus/message.h"
+@@ -1710,6 +1712,12 @@ void CrasAudioClient::Initialize(dbus::Bus* bus) {
+ 
+ // static
+ void CrasAudioClient::InitializeFake() {
++  // AuraDE compatibility: on generic Linux, Ash has no CRAS daemon. Use a
++  // native PipeWire-backed CRAS client instead of exposing fake audio devices.
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      PipeWireCrasAudioClient::Initialize()) {
++    return;
++  }
+   new FakeCrasAudioClient();
+ }
+ 
+diff --git a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
+index 55be4c6dbb..7abb69e3db 100644
+--- a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
++++ b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
+@@ -5,6 +5,7 @@
+ #include "chromeos/ash/components/dbus/audio/fake_cras_audio_client.h"
+ 
+ #include <algorithm>
++#include <cstdint>
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
+diff --git a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
+index c2f4beab73..e04e91f780 100644
+--- a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
++++ b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
+@@ -7,6 +7,8 @@
+ 
+ #include <stdint.h>
+ 
++#include <map>
++#include <string>
+ #include <vector>
+ 
+ #include "base/component_export.h"
+diff --git a/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc b/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
+index 27583dcf42..6de3c78415 100644
+--- a/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
++++ b/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
+@@ -8,7 +8,6 @@
+ 
+ #include "base/check_op.h"
+ #include "base/logging.h"
+-#include "base/notimplemented.h"
+ 
+ namespace ash {
+ 
+@@ -37,25 +36,25 @@ FakeFlossMediaClient* FakeFlossMediaClient::Get() {
+ 
+ void FakeFlossMediaClient::SetPlayerPlaybackStatus(
+     const std::string& playback_status) {
+-  NOTIMPLEMENTED();
++  playback_status_ = playback_status;
+ }
+ 
+ void FakeFlossMediaClient::SetPlayerIdentity(
+     const std::string& playback_identity) {
+-  NOTIMPLEMENTED();
++  playback_identity_ = playback_identity;
+ }
+ 
+ void FakeFlossMediaClient::SetPlayerPosition(const int64_t& position) {
+-  NOTIMPLEMENTED();
++  position_ = position;
+ }
+ 
+ void FakeFlossMediaClient::SetPlayerDuration(const int64_t& duration) {
+-  NOTIMPLEMENTED();
++  duration_ = duration;
+ }
+ 
+ void FakeFlossMediaClient::SetPlayerMetadata(
+     const std::map<std::string, std::string>& metadata) {
+-  NOTIMPLEMENTED();
++  metadata_ = metadata;
+ }
+ 
+ }  // namespace ash
+diff --git a/chromeos/ash/components/dbus/audio/fake_floss_media_client.h b/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
+index 5fe22265d4..62083bbeb8 100644
+--- a/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
++++ b/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
+@@ -7,6 +7,9 @@
+ 
+ #include <stdint.h>
+ 
++#include <map>
++#include <string>
++
+ #include "base/component_export.h"
+ #include "chromeos/ash/components/dbus/audio/floss_media_client.h"
+ 
+@@ -31,6 +34,13 @@ class COMPONENT_EXPORT(DBUS_AUDIO) FakeFlossMediaClient
+   void SetPlayerDuration(const int64_t& duration) override;
+   void SetPlayerMetadata(
+       const std::map<std::string, std::string>& metadata) override;
++
++ private:
++  std::string playback_status_;
++  std::string playback_identity_;
++  int64_t position_ = 0;
++  int64_t duration_ = 0;
++  std::map<std::string, std::string> metadata_;
+ };
+ 
+ }  // namespace ash
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+new file mode 100644
+index 0000000000..047fb816b5
+--- /dev/null
++++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+@@ -0,0 +1,1442 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h"
++
++#include <pipewire/extensions/metadata.h>
++#include <pipewire/node.h>
++#include <pipewire/pipewire.h>
++#include <spa/param/props.h>
++#include <spa/pod/builder.h>
++#include <spa/pod/parser.h>
++#include <spa/utils/keys.h>
++#include <stdint.h>
++
++#include <algorithm>
++#include <cmath>
++#include <limits>
++#include <map>
++#include <numeric>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/check.h"
++#include "base/compiler_specific.h"
++#include "base/containers/span.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/hash/hash.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/memory/raw_ptr.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
++#include "base/synchronization/lock.h"
++#include "base/task/bind_post_task.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
++#include "base/values.h"
++
++namespace ash {
++namespace {
++
++constexpr uint64_t kAuraOutputNodePrefix = 0xa0d1000000000000ULL;
++constexpr uint64_t kAuraInputNodePrefix = 0xa0d2000000000000ULL;
++constexpr char kDefaultSinkKey[] = "default.audio.sink";
++constexpr char kDefaultSourceKey[] = "default.audio.source";
++constexpr char kDefaultMetadataName[] = "default";
++constexpr char kMetadataJsonType[] = "Spa:String:JSON";
++constexpr uint32_t kMaxAudioChannels = 64;
++
++bool g_pipewire_initialized = false;
++
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wsign-compare"
++
++int PipeWireCoreAddListener(pw_core* core,
++                            spa_hook* listener,
++                            const pw_core_events* events,
++                            void* data) {
++  return pw_core_add_listener(core, listener, events, data);
++}
++
++int PipeWireCoreSync(pw_core* core, uint32_t id, int seq) {
++  return pw_core_sync(core, id, seq);
++}
++
++int PipeWireRegistryAddListener(pw_registry* registry,
++                                spa_hook* listener,
++                                const pw_registry_events* events,
++                                void* data) {
++  return pw_registry_add_listener(registry, listener, events, data);
++}
++
++int PipeWireMetadataAddListener(pw_metadata* metadata,
++                                spa_hook* listener,
++                                const pw_metadata_events* events,
++                                void* data) {
++  return pw_metadata_add_listener(metadata, listener, events, data);
++}
++
++int PipeWireMetadataSetProperty(pw_metadata* metadata,
++                                uint32_t subject,
++                                const char* key,
++                                const char* type,
++                                const char* value) {
++  return pw_metadata_set_property(metadata, subject, key, type, value);
++}
++
++int PipeWireNodeAddListener(pw_node* node,
++                            spa_hook* listener,
++                            const pw_node_events* events,
++                            void* data) {
++  return pw_node_add_listener(node, listener, events, data);
++}
++
++int PipeWireNodeSubscribeParams(pw_node* node, uint32_t* ids, uint32_t n_ids) {
++  return pw_node_subscribe_params(node, ids, n_ids);
++}
++
++int PipeWireNodeEnumParams(pw_node* node,
++                           int seq,
++                           uint32_t id,
++                           uint32_t start,
++                           uint32_t num,
++                           const spa_pod* filter) {
++  return pw_node_enum_params(node, seq, id, start, num, filter);
++}
++
++int PipeWireNodeSetParam(pw_node* node,
++                         uint32_t id,
++                         uint32_t flags,
++                         const spa_pod* param) {
++  return pw_node_set_param(node, id, flags, param);
++}
++
++#pragma clang diagnostic pop
++
++uint64_t StableNodeId(bool is_input, const std::string& node_name) {
++  return (is_input ? kAuraInputNodePrefix : kAuraOutputNodePrefix) |
++         base::PersistentHash(node_name);
++}
++
++const char* DictLookup(const spa_dict* props, const char* key) {
++  return props ? spa_dict_lookup(props, key) : nullptr;
++}
++
++std::string DictString(const spa_dict* props, const char* key) {
++  const char* value = DictLookup(props, key);
++  return value ? value : std::string();
++}
++
++uint32_t DictUInt32(const spa_dict* props, const char* key, uint32_t fallback) {
++  int value = 0;
++  if (!base::StringToInt(DictString(props, key), &value) || value <= 0) {
++    return fallback;
++  }
++  return static_cast<uint32_t>(value);
++}
++
++uint64_t DictUInt64(const spa_dict* props, const char* key, uint64_t fallback) {
++  uint64_t value = 0;
++  if (!base::StringToUint64(DictString(props, key), &value)) {
++    return fallback;
++  }
++  return value;
++}
++
++std::string ExtractMetadataNodeName(const char* value) {
++  if (!value) {
++    return std::string();
++  }
++
++  std::optional<base::Value> metadata =
++      base::JSONReader::Read(value, base::JSON_PARSE_RFC);
++  if (metadata && metadata->is_dict()) {
++    const std::string* name = metadata->GetDict().FindString("name");
++    if (name) {
++      return *name;
++    }
++  }
++
++  return value;
++}
++
++std::string PipeWireDefaultValue(const std::string& node_name) {
++  base::DictValue metadata;
++  metadata.Set("name", node_name);
++  std::string value;
++  CHECK(base::JSONWriter::Write(metadata, &value));
++  return value;
++}
++
++std::string FirstNonEmpty(std::initializer_list<std::string> values) {
++  for (const std::string& value : values) {
++    if (!value.empty()) {
++      return value;
++    }
++  }
++  return std::string();
++}
++
++std::string FirstNonEmpty(const std::vector<std::string>& values) {
++  for (const std::string& value : values) {
++    if (!value.empty()) {
++      return value;
++    }
++  }
++  return std::string();
++}
++
++std::string DeviceIdentityKey(bool is_input,
++                              const std::string& node_name,
++                              const spa_dict* props) {
++  std::vector<std::string> candidates = {
++      DictString(props, PW_KEY_DEVICE_SERIAL),
++      DictString(props, SPA_KEY_API_BLUEZ5_ADDRESS),
++      DictString(props, PW_KEY_DEVICE_BUS_PATH),
++      DictString(props, PW_KEY_DEVICE_STRING),
++      DictString(props, PW_KEY_DEVICE_SYSFS_PATH),
++      DictString(props, PW_KEY_OBJECT_PATH),
++  };
++
++  const std::string alsa_card_longname =
++      DictString(props, SPA_KEY_API_ALSA_CARD_LONGNAME);
++  const std::string alsa_pcm_device =
++      DictString(props, SPA_KEY_API_ALSA_PCM_DEVICE);
++  if (!alsa_card_longname.empty() || !alsa_pcm_device.empty()) {
++    candidates.push_back(alsa_card_longname + ":" + alsa_pcm_device);
++  }
++
++  const std::string alsa_card_id = DictString(props, SPA_KEY_API_ALSA_CARD_ID);
++  const std::string alsa_pcm_id = DictString(props, SPA_KEY_API_ALSA_PCM_ID);
++  if (!alsa_card_id.empty() || !alsa_pcm_id.empty()) {
++    candidates.push_back(alsa_card_id + ":" + alsa_pcm_id);
++  }
++
++  candidates.push_back(node_name);
++  const std::string key = FirstNonEmpty(candidates);
++  return base::StringPrintf("%s:%s", is_input ? "input" : "output",
++                            key.c_str());
++}
++
++std::string NodeType(bool is_input,
++                     const std::string& media_class,
++                     const std::string& bus,
++                     const std::string& form_factor,
++                     const std::string& api,
++                     const std::string& icon_name,
++                     const std::string& text) {
++  std::string haystack =
++      base::ToLowerASCII(media_class + " " + bus + " " + form_factor + " " +
++                         api + " " + icon_name + " " + text);
++  if (haystack.find("bluetooth") != std::string::npos ||
++      haystack.find("bluez") != std::string::npos) {
++    return "BLUETOOTH";
++  }
++  if (haystack.find("usb") != std::string::npos) {
++    return "USB";
++  }
++  if (haystack.find("hdmi") != std::string::npos ||
++      haystack.find("displayport") != std::string::npos ||
++      haystack.find("display port") != std::string::npos) {
++    return "HDMI";
++  }
++  if (haystack.find("headphone") != std::string::npos ||
++      haystack.find("headset") != std::string::npos ||
++      haystack.find("hands-free") != std::string::npos) {
++    return is_input ? "MIC" : "HEADPHONE";
++  }
++  if (is_input && (haystack.find("webcam") != std::string::npos ||
++                   haystack.find("microphone") != std::string::npos)) {
++    return "INTERNAL_MIC";
++  }
++  if (!is_input && haystack.find("speaker") != std::string::npos) {
++    return "INTERNAL_SPEAKER";
++  }
++  if (is_input) {
++    return "INTERNAL_MIC";
++  }
++  return "INTERNAL_SPEAKER";
++}
++
++int32_t PercentFromVolume(float volume) {
++  if (!std::isfinite(volume)) {
++    return 100;
++  }
++  return std::clamp(static_cast<int32_t>(std::lround(volume * 100.0f)), 0, 100);
++}
++
++float VolumeFromPercent(int32_t percent) {
++  return std::clamp(percent, 0, 100) / 100.0f;
++}
++
++}  // namespace
++
++struct PipeWireCrasAudioClient::State {
++  struct PipeWireNode {
++    uint32_t pipewire_id = 0;
++    uint64_t cras_node_id = 0;
++    uint64_t stable_device_id = 0;
++    raw_ptr<State> state = nullptr;
++    bool is_input = false;
++    std::string node_name;
++    std::string description;
++    std::string device_name;
++    std::string device_bus;
++    std::string device_form_factor;
++    std::string device_api;
++    std::string device_icon_name;
++    std::string media_class;
++    std::string type;
++    uint32_t channels = 2;
++    uint32_t sample_rate = 0;
++    std::string node_latency;
++    int32_t volume = 100;
++    bool muted = false;
++    uint64_t plugged_time = 0;
++    raw_ptr<pw_node> node = nullptr;
++    spa_hook listener = {};
++  };
++
++  struct NodeParamChange {
++    bool is_input = false;
++    bool is_active = false;
++    bool volume_changed = false;
++    bool mute_changed = false;
++    uint64_t node_id = 0;
++    int32_t volume = 100;
++    bool muted = false;
++  };
++
++  // Lock order: when a path needs both locks, it must take PipeWire's thread
++  // loop lock first and `lock` second. PipeWire callbacks already run under
++  // the thread loop, so reversing the order would deadlock against callbacks.
++  State() {
++    volume_state.output_volume = 100;
++    volume_state.input_gain = 100;
++  }
++
++  ~State() { Stop(); }
++
++  bool Start() {
++    if (!g_pipewire_initialized) {
++      pw_init(nullptr, nullptr);
++      g_pipewire_initialized = true;
++    }
++
++    thread_loop = pw_thread_loop_new("aurade-pipewire-audio", nullptr);
++    if (!thread_loop) {
++      return false;
++    }
++
++    context =
++        pw_context_new(pw_thread_loop_get_loop(thread_loop.get()), nullptr, 0);
++    if (!context) {
++      Stop();
++      return false;
++    }
++
++    core = pw_context_connect(context.get(), nullptr, 0);
++    if (!core) {
++      Stop();
++      return false;
++    }
++
++    PipeWireCoreAddListener(core.get(), &core_listener, &kCoreEvents, this);
++    registry = pw_core_get_registry(core.get(), PW_VERSION_REGISTRY, 0);
++    if (!registry) {
++      Stop();
++      return false;
++    }
++    PipeWireRegistryAddListener(registry.get(), &registry_listener,
++                                &kRegistryEvents, this);
++
++    if (pw_thread_loop_start(thread_loop.get()) < 0) {
++      Stop();
++      return false;
++    }
++
++    pw_thread_loop_lock(thread_loop.get());
++    sync_seq = PipeWireCoreSync(core.get(), PW_ID_CORE, 0);
++    while (!initial_sync_done && !core_failed) {
++      pw_thread_loop_wait(thread_loop.get());
++    }
++    pw_thread_loop_unlock(thread_loop.get());
++
++    started = !core_failed;
++    return started;
++  }
++
++  void Stop() {
++    if (thread_loop) {
++      pw_thread_loop_stop(thread_loop.get());
++    }
++
++    for (auto& [id, node] : nodes) {
++      if (node.node) {
++        spa_hook_remove(&node.listener);
++        pw_proxy_destroy(reinterpret_cast<pw_proxy*>(node.node.get()));
++      }
++    }
++    nodes.clear();
++
++    if (metadata) {
++      spa_hook_remove(&metadata_listener);
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(metadata.get()));
++      metadata = nullptr;
++    }
++    if (registry) {
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(registry.get()));
++      registry = nullptr;
++    }
++    if (core) {
++      pw_core_disconnect(core.get());
++      core = nullptr;
++    }
++    if (context) {
++      pw_context_destroy(context.get());
++      context = nullptr;
++    }
++    if (thread_loop) {
++      pw_thread_loop_destroy(thread_loop.get());
++      thread_loop = nullptr;
++    }
++    started = false;
++  }
++
++  void RebuildAudioStateLocked() EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    node_list.clear();
++    pipewire_id_by_cras_id.clear();
++    name_by_cras_id.clear();
++
++    uint64_t active_output = 0;
++    uint64_t active_input = 0;
++    uint64_t first_output = 0;
++    uint64_t first_input = 0;
++
++    for (const auto& [pipewire_id, node] : nodes) {
++      if (!node.node) {
++        continue;
++      }
++
++      const uint64_t cras_id = node.cras_node_id;
++      pipewire_id_by_cras_id[cras_id] = pipewire_id;
++      name_by_cras_id[cras_id] = node.node_name;
++
++      if (node.is_input) {
++        if (!first_input) {
++          first_input = cras_id;
++        }
++        if (!default_source_name.empty() &&
++            default_source_name == node.node_name) {
++          active_input = cras_id;
++        }
++      } else {
++        if (!first_output) {
++          first_output = cras_id;
++        }
++        if (!default_sink_name.empty() && default_sink_name == node.node_name) {
++          active_output = cras_id;
++        }
++      }
++    }
++
++    if (!active_output) {
++      active_output = first_output;
++    }
++    if (!active_input) {
++      active_input = first_input;
++    }
++    active_output_node_id = active_output;
++    active_input_node_id = active_input;
++
++    for (const auto& [pipewire_id, node] : nodes) {
++      if (!node.node) {
++        continue;
++      }
++      const bool active =
++          node.cras_node_id == (node.is_input ? active_input : active_output);
++      AudioNode audio_node(
++          node.is_input, node.cras_node_id, true, node.stable_device_id,
++          node.stable_device_id,
++          node.device_name.empty() ? node.description : node.device_name,
++          node.type,
++          node.description.empty() ? node.node_name : node.description, active,
++          node.plugged_time, node.channels, node.is_input ? 1 : 0,
++          node.is_input ? 0 : NUMBER_OF_VOLUME_STEPS_DEFAULT,
++          node.sample_rate, node.node_latency);
++      node_list.push_back(std::move(audio_node));
++
++      if (active) {
++        if (node.is_input) {
++          volume_state.input_gain = node.volume;
++          volume_state.input_mute = node.muted;
++        } else {
++          volume_state.output_volume = node.volume;
++          volume_state.output_system_mute = node.muted;
++          volume_state.output_user_mute = node.muted;
++        }
++      }
++    }
++  }
++
++  void RefreshNodeIdentityLocked(PipeWireNode& node, const spa_dict* props)
++      EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    if (!props) {
++      return;
++    }
++
++    std::string node_name = DictString(props, PW_KEY_NODE_NAME);
++    if (!node_name.empty()) {
++      node.node_name = node_name;
++    }
++
++    std::string description = DictString(props, PW_KEY_NODE_DESCRIPTION);
++    if (description.empty()) {
++      description = DictString(props, PW_KEY_NODE_NICK);
++    }
++    if (description.empty()) {
++      description = DictString(props, PW_KEY_MEDIA_NAME);
++    }
++    if (description.empty()) {
++      description = DictString(props, PW_KEY_DEVICE_DESCRIPTION);
++    }
++    if (!description.empty()) {
++      node.description = description;
++    }
++
++    node.device_name = FirstNonEmpty({
++        DictString(props, PW_KEY_DEVICE_PRODUCT_NAME),
++        DictString(props, PW_KEY_DEVICE_DESCRIPTION),
++        DictString(props, SPA_KEY_API_ALSA_CARD_LONGNAME),
++        DictString(props, SPA_KEY_API_ALSA_CARD_NAME),
++        node.description,
++        node.node_name,
++    });
++    node.device_bus = DictString(props, PW_KEY_DEVICE_BUS);
++    node.device_form_factor = DictString(props, PW_KEY_DEVICE_FORM_FACTOR);
++    node.device_api = DictString(props, PW_KEY_DEVICE_API);
++    if (node.device_api.empty()) {
++      node.device_api = DictString(props, PW_KEY_FACTORY_NAME);
++    }
++    node.device_icon_name = DictString(props, PW_KEY_DEVICE_ICON_NAME);
++    node.channels =
++        DictUInt32(props, PW_KEY_AUDIO_CHANNELS, node.is_input ? 1u : 2u);
++    node.sample_rate = DictUInt32(props, PW_KEY_AUDIO_RATE, node.sample_rate);
++    node.node_latency = DictString(props, PW_KEY_NODE_LATENCY);
++    node.plugged_time =
++        DictUInt64(props, PW_KEY_NODE_PLUGGED,
++                   DictUInt64(props, PW_KEY_DEVICE_PLUGGED, node.plugged_time));
++    node.cras_node_id = StableNodeId(
++        node.is_input,
++        FirstNonEmpty(
++            {node.node_name,
++             DeviceIdentityKey(node.is_input, node.node_name, props)}));
++    node.stable_device_id = StableNodeId(
++        node.is_input, DeviceIdentityKey(node.is_input, node.node_name, props));
++    node.type = NodeType(
++        node.is_input, node.media_class, node.device_bus,
++        node.device_form_factor, node.device_api, node.device_icon_name,
++        node.description + " " + node.device_name + " " + node.node_name + " " +
++            DictString(props, PW_KEY_NODE_NAME));
++  }
++
++  void RefreshNodeInfoLocked(PipeWireNode& node, const pw_node_info* info)
++      EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    RefreshNodeIdentityLocked(node, info->props);
++    RebuildAudioStateLocked();
++  }
++
++  NodeParamChange ApplyPropsParamLocked(PipeWireNode& node,
++                                        const spa_pod* param)
++      EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    NodeParamChange change;
++    change.is_input = node.is_input;
++    change.node_id = node.cras_node_id;
++    change.volume = node.volume;
++    change.muted = node.muted;
++
++    if (!param) {
++      return change;
++    }
++
++    bool muted = node.muted;
++    const int32_t previous_volume = node.volume;
++    const bool previous_muted = node.muted;
++    uint32_t child_size = 0;
++    uint32_t child_type = 0;
++    uint32_t n_values = 0;
++    const void* values = nullptr;
++
++    uint32_t object_id = SPA_PARAM_Props;
++    spa_pod_parse_object(
++        param, SPA_TYPE_OBJECT_Props, &object_id, SPA_PROP_mute,
++        SPA_POD_OPT_Bool(&muted), SPA_PROP_channelVolumes,
++        SPA_POD_OPT_Array(&child_size, &child_type, &n_values, &values));
++
++    node.muted = muted;
++    if (values && child_type == SPA_TYPE_Float && child_size == sizeof(float) &&
++        n_values > 0 && n_values <= kMaxAudioChannels) {
++      // PipeWire's SPA parser returns array payloads as an untyped C pointer.
++      // Bound the channel count before reintroducing the float span.
++      auto volumes = UNSAFE_BUFFERS(
++          base::span(static_cast<const float*>(values), n_values));
++      const float sum = std::accumulate(volumes.begin(), volumes.end(), 0.0f);
++      node.volume = PercentFromVolume(sum / n_values);
++    }
++    RebuildAudioStateLocked();
++
++    change.is_active =
++        node.cras_node_id ==
++        (node.is_input ? active_input_node_id : active_output_node_id);
++    change.volume_changed = previous_volume != node.volume;
++    change.mute_changed = previous_muted != node.muted;
++    change.volume = node.volume;
++    change.muted = node.muted;
++    return change;
++  }
++
++  void PostNodesChangedIfNeeded() {
++    bool should_post = false;
++    {
++      base::AutoLock locked(lock);
++      if (!nodes_changed_pending) {
++        nodes_changed_pending = true;
++        should_post = true;
++      }
++    }
++    if (should_post && !on_nodes_changed.is_null()) {
++      on_nodes_changed.Run();
++    }
++  }
++
++  void PostActiveInputNodeChanged(uint64_t node_id) {
++    if (!on_active_input_node_changed.is_null()) {
++      on_active_input_node_changed.Run(node_id);
++    }
++  }
++
++  void PostActiveOutputNodeChanged(uint64_t node_id) {
++    if (!on_active_output_node_changed.is_null()) {
++      on_active_output_node_changed.Run(node_id);
++    }
++  }
++
++  void PostInputMuteChanged(bool mute_on) {
++    if (!on_input_mute_changed.is_null()) {
++      on_input_mute_changed.Run(mute_on);
++    }
++  }
++
++  void PostInputNodeGainChanged(uint64_t node_id, int volume) {
++    if (!on_input_node_gain_changed.is_null()) {
++      on_input_node_gain_changed.Run(node_id, volume);
++    }
++  }
++
++  void PostOutputMuteChanged(bool mute_on) {
++    if (!on_output_mute_changed.is_null()) {
++      on_output_mute_changed.Run(mute_on);
++    }
++  }
++
++  void PostOutputNodeVolumeChanged(uint64_t node_id, int volume) {
++    if (!on_output_node_volume_changed.is_null()) {
++      on_output_node_volume_changed.Run(node_id, volume);
++    }
++  }
++
++  static void OnCoreDone(void* data, uint32_t id, int seq) {
++    auto* state = static_cast<State*>(data);
++    if (id == PW_ID_CORE && seq == state->sync_seq) {
++      state->initial_sync_done = true;
++      pw_thread_loop_signal(state->thread_loop.get(), false);
++    }
++  }
++
++  static void OnCoreError(void* data,
++                          uint32_t id,
++                          int seq,
++                          int res,
++                          const char* message) {
++    auto* state = static_cast<State*>(data);
++    state->core_failed = true;
++    pw_thread_loop_signal(state->thread_loop.get(), false);
++  }
++
++  static void OnRegistryGlobal(void* data,
++                               uint32_t id,
++                               uint32_t permissions,
++                               const char* type,
++                               uint32_t version,
++                               const spa_dict* props) {
++    auto* state = static_cast<State*>(data);
++    if (!type) {
++      return;
++    }
++
++    if (std::string(type) == PW_TYPE_INTERFACE_Metadata) {
++      // AuraDE compatibility: PipeWire can expose more than one metadata
++      // object. A single CRAS client only needs the default metadata, and a
++      // single spa_hook must not be reused across multiple proxy listener
++      // lists.
++      if (DictString(props, PW_KEY_METADATA_NAME) != kDefaultMetadataName) {
++        return;
++      }
++      {
++        base::AutoLock locked(state->lock);
++        if (state->metadata) {
++          return;
++        }
++      }
++      pw_metadata* metadata = static_cast<pw_metadata*>(pw_registry_bind(
++          state->registry.get(), id, type, PW_VERSION_METADATA, 0));
++      if (!metadata) {
++        return;
++      }
++      PipeWireMetadataAddListener(metadata, &state->metadata_listener,
++                                  &kMetadataEvents, state);
++      {
++        base::AutoLock locked(state->lock);
++        state->metadata = metadata;
++        state->metadata_id = id;
++      }
++      return;
++    }
++
++    if (std::string(type) != PW_TYPE_INTERFACE_Node) {
++      return;
++    }
++
++    std::string media_class = DictString(props, PW_KEY_MEDIA_CLASS);
++    const bool is_sink = media_class == "Audio/Sink";
++    const bool is_source = media_class == "Audio/Source";
++    if (!is_sink && !is_source) {
++      return;
++    }
++
++    pw_node* pipewire_node = static_cast<pw_node*>(
++        pw_registry_bind(state->registry.get(), id, type, PW_VERSION_NODE, 0));
++    if (!pipewire_node) {
++      return;
++    }
++
++    PipeWireNode node;
++    node.pipewire_id = id;
++    node.state = state;
++    node.node = pipewire_node;
++    node.is_input = is_source;
++    node.media_class = media_class;
++    node.node_name = DictString(props, PW_KEY_NODE_NAME);
++    if (node.node_name.empty()) {
++      node.node_name = base::StringPrintf("pipewire-node-%u", id);
++    }
++    {
++      base::AutoLock locked(state->lock);
++      state->RefreshNodeIdentityLocked(node, props);
++    }
++    if (node.description.empty()) {
++      node.description = node.node_name;
++    }
++    if (node.device_name.empty()) {
++      node.device_name = node.description;
++    }
++    if (node.type.empty()) {
++      node.type = NodeType(node.is_input, node.media_class, node.device_bus,
++                           node.device_form_factor, node.device_api,
++                           node.device_icon_name,
++                           node.description + " " + node.node_name);
++    }
++    if (!node.stable_device_id) {
++      node.stable_device_id = StableNodeId(node.is_input, node.node_name);
++    }
++    if (!node.cras_node_id) {
++      node.cras_node_id = StableNodeId(node.is_input, node.node_name);
++    }
++
++    PipeWireNode* stored_node = nullptr;
++    {
++      base::AutoLock locked(state->lock);
++      auto node_iter = state->nodes.emplace(id, std::move(node)).first;
++      stored_node = &node_iter->second;
++      state->RebuildAudioStateLocked();
++    }
++    PipeWireNodeAddListener(stored_node->node.get(), &stored_node->listener,
++                            &kNodeEvents, stored_node);
++    uint32_t params[] = {SPA_PARAM_Props};
++    PipeWireNodeSubscribeParams(stored_node->node.get(), params, 1);
++    PipeWireNodeEnumParams(stored_node->node.get(), 0, SPA_PARAM_Props, 0,
++                           UINT32_MAX, nullptr);
++    state->PostNodesChangedIfNeeded();
++  }
++
++  static void OnRegistryGlobalRemove(void* data, uint32_t id) {
++    auto* state = static_cast<State*>(data);
++    bool changed = false;
++    pw_metadata* metadata_to_destroy = nullptr;
++    pw_node* node_to_destroy = nullptr;
++    {
++      base::AutoLock locked(state->lock);
++      if (id == state->metadata_id) {
++        if (state->metadata) {
++          spa_hook_remove(&state->metadata_listener);
++          metadata_to_destroy = state->metadata;
++        }
++        state->metadata = nullptr;
++        state->metadata_id = 0;
++      } else {
++        auto node = state->nodes.find(id);
++        if (node != state->nodes.end()) {
++          if (node->second.node) {
++            spa_hook_remove(&node->second.listener);
++            node_to_destroy = node->second.node;
++          }
++          state->nodes.erase(node);
++          state->RebuildAudioStateLocked();
++          changed = true;
++        }
++      }
++    }
++    if (metadata_to_destroy) {
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(metadata_to_destroy));
++    }
++    if (node_to_destroy) {
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(node_to_destroy));
++    }
++    if (changed) {
++      state->PostNodesChangedIfNeeded();
++    }
++  }
++
++  static int OnMetadataProperty(void* data,
++                                uint32_t subject,
++                                const char* key,
++                                const char* type,
++                                const char* value) {
++    auto* state = static_cast<State*>(data);
++    if (!key) {
++      return 0;
++    }
++    bool changed = false;
++    {
++      base::AutoLock locked(state->lock);
++      if (std::string(key) == kDefaultSinkKey) {
++        state->default_sink_name = ExtractMetadataNodeName(value);
++        state->RebuildAudioStateLocked();
++        changed = true;
++      } else if (std::string(key) == kDefaultSourceKey) {
++        state->default_source_name = ExtractMetadataNodeName(value);
++        state->RebuildAudioStateLocked();
++        changed = true;
++      }
++    }
++    if (changed) {
++      state->PostNodesChangedIfNeeded();
++    }
++    return 0;
++  }
++
++  static void OnNodeInfo(void* data, const pw_node_info* info) {
++    auto* node_data = static_cast<PipeWireNode*>(data);
++    if (!node_data || !node_data->state || !info) {
++      return;
++    }
++    State* state = node_data->state;
++    {
++      base::AutoLock locked(state->lock);
++      state->RefreshNodeInfoLocked(*node_data, info);
++    }
++    state->PostNodesChangedIfNeeded();
++  }
++
++  static void OnNodeParam(void* data,
++                          int seq,
++                          uint32_t id,
++                          uint32_t index,
++                          uint32_t next,
++                          const spa_pod* param) {
++    if (id != SPA_PARAM_Props) {
++      return;
++    }
++    auto* node_data = static_cast<PipeWireNode*>(data);
++    if (!node_data || !node_data->state) {
++      return;
++    }
++    State* state = node_data->state;
++    NodeParamChange change;
++    {
++      base::AutoLock locked(state->lock);
++      change = state->ApplyPropsParamLocked(*node_data, param);
++    }
++    if (change.volume_changed) {
++      if (change.is_input) {
++        state->PostInputNodeGainChanged(change.node_id, change.volume);
++      } else {
++        state->PostOutputNodeVolumeChanged(change.node_id, change.volume);
++      }
++    }
++    if (change.mute_changed && change.is_active) {
++      if (change.is_input) {
++        state->PostInputMuteChanged(change.muted);
++      } else {
++        state->PostOutputMuteChanged(change.muted);
++      }
++    }
++  }
++
++  static const pw_core_events kCoreEvents;
++  static const pw_registry_events kRegistryEvents;
++  static const pw_metadata_events kMetadataEvents;
++  static const pw_node_events kNodeEvents;
++
++  mutable base::Lock lock;
++  bool started = false;
++  bool initial_sync_done = false;
++  bool core_failed = false;
++  int sync_seq = 0;
++
++  raw_ptr<pw_thread_loop> thread_loop = nullptr;
++  raw_ptr<pw_context> context = nullptr;
++  raw_ptr<pw_core> core = nullptr;
++  raw_ptr<pw_registry> registry = nullptr;
++  raw_ptr<pw_metadata> metadata = nullptr;
++  uint32_t metadata_id = 0;
++  spa_hook core_listener = {};
++  spa_hook registry_listener = {};
++  spa_hook metadata_listener = {};
++
++  std::map<uint32_t, PipeWireNode> nodes;
++  std::map<uint64_t, uint32_t> pipewire_id_by_cras_id;
++  std::map<uint64_t, std::string> name_by_cras_id;
++  AudioNodeList node_list;
++  VolumeState volume_state;
++  uint64_t active_output_node_id = 0;
++  uint64_t active_input_node_id = 0;
++  std::string default_sink_name;
++  std::string default_source_name;
++  bool nodes_changed_pending = false;
++  base::RepeatingCallback<void(uint64_t)> on_active_input_node_changed;
++  base::RepeatingCallback<void(uint64_t)> on_active_output_node_changed;
++  base::RepeatingCallback<void(bool)> on_input_mute_changed;
++  base::RepeatingCallback<void(uint64_t, int)> on_input_node_gain_changed;
++  base::RepeatingClosure on_nodes_changed;
++  base::RepeatingCallback<void(bool)> on_output_mute_changed;
++  base::RepeatingCallback<void(uint64_t, int)> on_output_node_volume_changed;
++};
++
++const pw_core_events PipeWireCrasAudioClient::State::kCoreEvents = {
++    PW_VERSION_CORE_EVENTS,
++    nullptr,
++    PipeWireCrasAudioClient::State::OnCoreDone,
++    nullptr,
++    PipeWireCrasAudioClient::State::OnCoreError,
++};
++
++const pw_registry_events PipeWireCrasAudioClient::State::kRegistryEvents = {
++    PW_VERSION_REGISTRY_EVENTS,
++    PipeWireCrasAudioClient::State::OnRegistryGlobal,
++    PipeWireCrasAudioClient::State::OnRegistryGlobalRemove,
++};
++
++const pw_metadata_events PipeWireCrasAudioClient::State::kMetadataEvents = {
++    PW_VERSION_METADATA_EVENTS,
++    PipeWireCrasAudioClient::State::OnMetadataProperty,
++};
++
++const pw_node_events PipeWireCrasAudioClient::State::kNodeEvents = {
++    PW_VERSION_NODE_EVENTS,
++    PipeWireCrasAudioClient::State::OnNodeInfo,
++    PipeWireCrasAudioClient::State::OnNodeParam,
++};
++
++bool PipeWireCrasAudioClient::Initialize() {
++  auto* client = new PipeWireCrasAudioClient();
++  if (!client->Start()) {
++    delete client;
++    return false;
++  }
++  return true;
++}
++
++PipeWireCrasAudioClient::PipeWireCrasAudioClient()
++    : state_(std::make_unique<State>()) {
++  scoped_refptr<base::SequencedTaskRunner> task_runner =
++      base::SequencedTaskRunner::GetCurrentDefault();
++  state_->on_active_input_node_changed = base::BindPostTask(
++      task_runner, base::BindRepeating(
++                       &PipeWireCrasAudioClient::NotifyActiveInputNodeChanged,
++                       weak_factory_.GetWeakPtr()));
++  state_->on_active_output_node_changed = base::BindPostTask(
++      task_runner, base::BindRepeating(
++                       &PipeWireCrasAudioClient::NotifyActiveOutputNodeChanged,
++                       weak_factory_.GetWeakPtr()));
++  state_->on_input_mute_changed = base::BindPostTask(
++      task_runner,
++      base::BindRepeating(&PipeWireCrasAudioClient::NotifyInputMuteChanged,
++                          weak_factory_.GetWeakPtr()));
++  state_->on_input_node_gain_changed = base::BindPostTask(
++      task_runner,
++      base::BindRepeating(&PipeWireCrasAudioClient::NotifyInputNodeGainChanged,
++                          weak_factory_.GetWeakPtr()));
++  state_->on_nodes_changed = base::BindPostTask(
++      task_runner,
++      base::BindRepeating(&PipeWireCrasAudioClient::NotifyNodesChanged,
++                          weak_factory_.GetWeakPtr()));
++  state_->on_output_mute_changed = base::BindPostTask(
++      task_runner,
++      base::BindRepeating(&PipeWireCrasAudioClient::NotifyOutputMuteChanged,
++                          weak_factory_.GetWeakPtr()));
++  state_->on_output_node_volume_changed = base::BindPostTask(
++      task_runner, base::BindRepeating(
++                       &PipeWireCrasAudioClient::NotifyOutputNodeVolumeChanged,
++                       weak_factory_.GetWeakPtr()));
++}
++
++PipeWireCrasAudioClient::~PipeWireCrasAudioClient() = default;
++
++bool PipeWireCrasAudioClient::Start() {
++  return state_->Start();
++}
++
++void PipeWireCrasAudioClient::AddObserver(Observer* observer) {
++  observers_.AddObserver(observer);
++}
++
++void PipeWireCrasAudioClient::RemoveObserver(Observer* observer) {
++  observers_.RemoveObserver(observer);
++}
++
++bool PipeWireCrasAudioClient::HasObserver(const Observer* observer) const {
++  return observers_.HasObserver(observer);
++}
++
++void PipeWireCrasAudioClient::NotifyActiveInputNodeChanged(uint64_t node_id) {
++  for (auto& observer : observers_) {
++    observer.ActiveInputNodeChanged(node_id);
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyActiveOutputNodeChanged(uint64_t node_id) {
++  for (auto& observer : observers_) {
++    observer.ActiveOutputNodeChanged(node_id);
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyInputMuteChanged(bool mute_on) {
++  for (auto& observer : observers_) {
++    observer.InputMuteChanged(mute_on);
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyInputNodeGainChanged(uint64_t node_id,
++                                                         int volume) {
++  for (auto& observer : observers_) {
++    observer.InputNodeGainChanged(node_id, volume);
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyNodesChanged() {
++  {
++    base::AutoLock locked(state_->lock);
++    state_->nodes_changed_pending = false;
++  }
++  for (auto& observer : observers_) {
++    observer.NodesChanged();
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyOutputMuteChanged(bool mute_on) {
++  for (auto& observer : observers_) {
++    observer.OutputMuteChanged(mute_on);
++  }
++}
++
++void PipeWireCrasAudioClient::NotifyOutputNodeVolumeChanged(uint64_t node_id,
++                                                            int volume) {
++  for (auto& observer : observers_) {
++    observer.OutputNodeVolumeChanged(node_id, volume);
++  }
++}
++
++void PipeWireCrasAudioClient::GetVolumeState(
++    chromeos::DBusMethodCallback<VolumeState> callback) {
++  VolumeState volume_state;
++  {
++    base::AutoLock locked(state_->lock);
++    volume_state = state_->volume_state;
++  }
++  std::move(callback).Run(volume_state);
++}
++
++void PipeWireCrasAudioClient::GetDefaultOutputBufferSize(
++    chromeos::DBusMethodCallback<int> callback) {
++  std::move(callback).Run(512);
++}
++
++void PipeWireCrasAudioClient::GetSystemAecSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::GetSystemAecGroupId(
++    chromeos::DBusMethodCallback<int32_t> callback) {
++  std::move(callback).Run(0);
++}
++
++void PipeWireCrasAudioClient::GetSystemNsSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::GetSystemAgcSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::GetNodes(
++    chromeos::DBusMethodCallback<AudioNodeList> callback) {
++  AudioNodeList node_list;
++  {
++    base::AutoLock locked(state_->lock);
++    node_list = state_->node_list;
++  }
++  std::move(callback).Run(node_list);
++}
++
++void PipeWireCrasAudioClient::GetNumberOfActiveOutputStreams(
++    chromeos::DBusMethodCallback<int> callback) {
++  std::move(callback).Run(0);
++}
++
++void PipeWireCrasAudioClient::GetNumberOfInputStreamsWithPermission(
++    chromeos::DBusMethodCallback<ClientTypeToInputStreamCount> callback) {
++  std::move(callback).Run(ClientTypeToInputStreamCount());
++}
++
++void PipeWireCrasAudioClient::GetNumberOfNonChromeOutputStreams(
++    chromeos::DBusMethodCallback<int32_t> callback) {
++  std::move(callback).Run(0);
++}
++
++void PipeWireCrasAudioClient::GetSpeakOnMuteDetectionEnabled(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++bool PipeWireCrasAudioClient::SetDefaultNode(uint64_t node_id, bool is_input) {
++  pw_thread_loop* loop = nullptr;
++  std::string node_name;
++
++  {
++    base::AutoLock locked(state_->lock);
++    auto name = state_->name_by_cras_id.find(node_id);
++    if (name == state_->name_by_cras_id.end()) {
++      return false;
++    }
++    node_name = name->second;
++    loop = state_->thread_loop;
++  }
++
++  if (loop) {
++    const std::string value = PipeWireDefaultValue(node_name);
++    pw_thread_loop_lock(loop);
++    pw_metadata* metadata = nullptr;
++    {
++      base::AutoLock locked(state_->lock);
++      metadata = state_->metadata;
++    }
++    if (metadata) {
++      PipeWireMetadataSetProperty(
++          metadata, 0, is_input ? kDefaultSourceKey : kDefaultSinkKey,
++          kMetadataJsonType, value.c_str());
++    }
++    pw_thread_loop_unlock(loop);
++  }
++
++  {
++    base::AutoLock locked(state_->lock);
++    if (is_input) {
++      state_->default_source_name = node_name;
++    } else {
++      state_->default_sink_name = node_name;
++    }
++    state_->RebuildAudioStateLocked();
++  }
++  return true;
++}
++
++bool PipeWireCrasAudioClient::SetNodeProps(uint64_t node_id,
++                                           std::optional<int32_t> volume,
++                                           std::optional<bool> mute) {
++  pw_thread_loop* loop = nullptr;
++
++  {
++    base::AutoLock locked(state_->lock);
++    loop = state_->thread_loop;
++  }
++
++  if (!loop) {
++    return false;
++  }
++
++  pw_thread_loop_lock(loop);
++  pw_node* node = nullptr;
++  uint32_t channels = 2;
++  {
++    base::AutoLock locked(state_->lock);
++    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
++    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
++      auto pipewire_node = state_->nodes.find(pipewire_id->second);
++      if (pipewire_node != state_->nodes.end()) {
++        node = pipewire_node->second.node;
++        channels = std::max(pipewire_node->second.channels, 1u);
++      }
++    }
++  }
++  if (!node) {
++    pw_thread_loop_unlock(loop);
++    return false;
++  }
++
++  uint8_t buffer[512];
++  spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
++  spa_pod_frame frame;
++  spa_pod_builder_push_object(&builder, &frame, SPA_TYPE_OBJECT_Props,
++                              SPA_PARAM_Props);
++  if (mute.has_value()) {
++    spa_pod_builder_prop(&builder, SPA_PROP_mute, 0);
++    spa_pod_builder_bool(&builder, *mute);
++  }
++  if (volume.has_value()) {
++    std::vector<float> channel_volumes(channels, VolumeFromPercent(*volume));
++    spa_pod_builder_prop(&builder, SPA_PROP_channelVolumes, 0);
++    spa_pod_builder_array(&builder, sizeof(float), SPA_TYPE_Float, channels,
++                          channel_volumes.data());
++  }
++  const spa_pod* pod =
++      static_cast<const spa_pod*>(spa_pod_builder_pop(&builder, &frame));
++
++  const int result = PipeWireNodeSetParam(node, SPA_PARAM_Props, 0, pod);
++  pw_thread_loop_unlock(loop);
++  return result >= 0;
++}
++
++void PipeWireCrasAudioClient::SetOutputNodeVolume(uint64_t node_id,
++                                                  int32_t volume) {
++  if (!SetNodeProps(node_id, std::clamp(volume, 0, 100), std::nullopt)) {
++    return;
++  }
++  {
++    base::AutoLock locked(state_->lock);
++    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
++    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
++      state_->nodes[pipewire_id->second].volume = std::clamp(volume, 0, 100);
++      state_->RebuildAudioStateLocked();
++    }
++  }
++  state_->PostOutputNodeVolumeChanged(node_id, std::clamp(volume, 0, 100));
++}
++
++void PipeWireCrasAudioClient::SetOutputUserMute(bool mute_on) {
++  uint64_t node_id = 0;
++  {
++    base::AutoLock locked(state_->lock);
++    node_id = state_->active_output_node_id;
++  }
++  if (node_id) {
++    SetNodeProps(node_id, std::nullopt, mute_on);
++  }
++  {
++    base::AutoLock locked(state_->lock);
++    state_->volume_state.output_user_mute = mute_on;
++    state_->volume_state.output_system_mute = mute_on;
++    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
++    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
++      state_->nodes[pipewire_id->second].muted = mute_on;
++      state_->RebuildAudioStateLocked();
++    }
++  }
++  state_->PostOutputMuteChanged(mute_on);
++}
++
++void PipeWireCrasAudioClient::SetInputNodeGain(uint64_t node_id, int32_t gain) {
++  if (!SetNodeProps(node_id, std::clamp(gain, 0, 100), std::nullopt)) {
++    return;
++  }
++  {
++    base::AutoLock locked(state_->lock);
++    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
++    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
++      state_->nodes[pipewire_id->second].volume = std::clamp(gain, 0, 100);
++      state_->RebuildAudioStateLocked();
++    }
++  }
++  state_->PostInputNodeGainChanged(node_id, std::clamp(gain, 0, 100));
++}
++
++void PipeWireCrasAudioClient::SetInputMute(bool mute_on) {
++  uint64_t node_id = 0;
++  {
++    base::AutoLock locked(state_->lock);
++    node_id = state_->active_input_node_id;
++  }
++  if (node_id) {
++    SetNodeProps(node_id, std::nullopt, mute_on);
++  }
++  {
++    base::AutoLock locked(state_->lock);
++    state_->volume_state.input_mute = mute_on;
++    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
++    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
++      state_->nodes[pipewire_id->second].muted = mute_on;
++      state_->RebuildAudioStateLocked();
++    }
++  }
++  state_->PostInputMuteChanged(mute_on);
++}
++
++void PipeWireCrasAudioClient::GetAudioEffectDlcs(
++    chromeos::DBusMethodCallback<std::string> callback) {
++  std::move(callback).Run(std::string());
++}
++
++void PipeWireCrasAudioClient::GetVoiceIsolationUIAppearance(
++    chromeos::DBusMethodCallback<VoiceIsolationUIAppearance> callback) {
++  std::move(callback).Run(VoiceIsolationUIAppearance());
++}
++
++void PipeWireCrasAudioClient::SetVoiceIsolationUIEnabled(
++    bool voice_isolation_on) {}
++
++void PipeWireCrasAudioClient::SetVoiceIsolationUIPreferredEffect(
++    uint32_t effect_mode) {}
++
++void PipeWireCrasAudioClient::SetKrispNoiseCancellationEnabled(
++    bool krisp_noise_cancellation_on) {}
++
++void PipeWireCrasAudioClient::SetNoiseCancellationEnabled(
++    bool noise_cancellation_enabled) {}
++
++void PipeWireCrasAudioClient::GetNoiseCancellationSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::SetStyleTransferEnabled(
++    bool style_transfer_enabled) {}
++
++void PipeWireCrasAudioClient::GetStyleTransferSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::SetActiveOutputNode(uint64_t node_id) {
++  if (!SetDefaultNode(node_id, false)) {
++    return;
++  }
++  state_->PostActiveOutputNodeChanged(node_id);
++}
++
++void PipeWireCrasAudioClient::SetActiveInputNode(uint64_t node_id) {
++  if (!SetDefaultNode(node_id, true)) {
++    return;
++  }
++  state_->PostActiveInputNodeChanged(node_id);
++}
++
++void PipeWireCrasAudioClient::SetHotwordModel(
++    uint64_t node_id,
++    const std::string& hotword_model,
++    chromeos::VoidDBusMethodCallback callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::SetFixA2dpPacketSize(bool enabled) {}
++
++void PipeWireCrasAudioClient::SetFlossEnabled(bool enabled) {}
++
++void PipeWireCrasAudioClient::SetSpeakOnMuteDetection(bool enabled) {}
++
++void PipeWireCrasAudioClient::SetEwmaPowerReportEnabled(bool enabled) {}
++
++void PipeWireCrasAudioClient::SetSidetoneEnabled(bool enabled) {}
++
++void PipeWireCrasAudioClient::GetSidetoneSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::AddActiveInputNode(uint64_t node_id) {
++  SetActiveInputNode(node_id);
++}
++
++void PipeWireCrasAudioClient::RemoveActiveInputNode(uint64_t node_id) {}
++
++void PipeWireCrasAudioClient::AddActiveOutputNode(uint64_t node_id) {
++  SetActiveOutputNode(node_id);
++}
++
++void PipeWireCrasAudioClient::RemoveActiveOutputNode(uint64_t node_id) {}
++
++void PipeWireCrasAudioClient::SwapLeftRight(uint64_t node_id, bool swap) {}
++
++void PipeWireCrasAudioClient::SetDisplayRotation(
++    uint64_t node_id,
++    cras::DisplayRotation rotation) {}
++
++void PipeWireCrasAudioClient::SetGlobalOutputChannelRemix(
++    int32_t channels,
++    const std::vector<double>& mixer) {}
++
++void PipeWireCrasAudioClient::SetPlayerPlaybackStatus(
++    const std::string& playback_status) {}
++
++void PipeWireCrasAudioClient::SetPlayerIdentity(
++    const std::string& playback_identity) {}
++
++void PipeWireCrasAudioClient::SetPlayerPosition(const int64_t& position) {}
++
++void PipeWireCrasAudioClient::SetPlayerDuration(const int64_t& duration) {}
++
++void PipeWireCrasAudioClient::SetPlayerMetadata(
++    const std::map<std::string, std::string>& metadata) {}
++
++void PipeWireCrasAudioClient::ResendBluetoothBattery() {}
++
++void PipeWireCrasAudioClient::WaitForServiceToBeAvailable(
++    chromeos::WaitForServiceToBeAvailableCallback callback) {
++  std::move(callback).Run(state_->started);
++}
++
++void PipeWireCrasAudioClient::SetForceRespectUiGains(
++    bool force_respect_ui_gains) {}
++
++void PipeWireCrasAudioClient::GetNumStreamIgnoreUiGains(
++    chromeos::DBusMethodCallback<int> callback) {
++  std::move(callback).Run(0);
++}
++
++void PipeWireCrasAudioClient::SetHfpMicSrEnabled(bool hfp_mic_sr_on) {}
++
++void PipeWireCrasAudioClient::GetHfpMicSrSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++void PipeWireCrasAudioClient::GetNumberOfArcStreams(
++    chromeos::DBusMethodCallback<int32_t> callback) {
++  std::move(callback).Run(0);
++}
++
++void PipeWireCrasAudioClient::SetSpatialAudio(bool spatial_audio) {}
++
++void PipeWireCrasAudioClient::GetSpatialAudioSupported(
++    chromeos::DBusMethodCallback<bool> callback) {
++  std::move(callback).Run(false);
++}
++
++}  // namespace ash
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h
+new file mode 100644
+index 0000000000..db6d4bb5a9
+--- /dev/null
++++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h
+@@ -0,0 +1,145 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_CRAS_AUDIO_CLIENT_H_
++#define CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_CRAS_AUDIO_CLIENT_H_
++
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/component_export.h"
++#include "base/containers/flat_map.h"
++#include "base/memory/weak_ptr.h"
++#include "base/observer_list.h"
++#include "chromeos/ash/components/dbus/audio/cras_audio_client.h"
++#include "chromeos/ash/components/dbus/audio/voice_isolation_ui_appearance.h"
++
++namespace ash {
++
++class COMPONENT_EXPORT(DBUS_AUDIO) PipeWireCrasAudioClient
++    : public CrasAudioClient {
++ public:
++  using ClientTypeToInputStreamCount = base::flat_map<std::string, uint32_t>;
++
++  static bool Initialize();
++
++  PipeWireCrasAudioClient();
++  PipeWireCrasAudioClient(const PipeWireCrasAudioClient&) = delete;
++  PipeWireCrasAudioClient& operator=(const PipeWireCrasAudioClient&) = delete;
++  ~PipeWireCrasAudioClient() override;
++
++  void GetVolumeState(
++      chromeos::DBusMethodCallback<VolumeState> callback) override;
++  void GetDefaultOutputBufferSize(
++      chromeos::DBusMethodCallback<int> callback) override;
++  void GetSystemAecSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void GetSystemAecGroupId(
++      chromeos::DBusMethodCallback<int32_t> callback) override;
++  void GetSystemNsSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void GetSystemAgcSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void GetNodes(chromeos::DBusMethodCallback<AudioNodeList> callback) override;
++  void GetNumberOfActiveOutputStreams(
++      chromeos::DBusMethodCallback<int> callback) override;
++  void GetNumberOfInputStreamsWithPermission(
++      chromeos::DBusMethodCallback<ClientTypeToInputStreamCount> callback)
++      override;
++  void GetNumberOfNonChromeOutputStreams(
++      chromeos::DBusMethodCallback<int32_t> callback) override;
++  void GetSpeakOnMuteDetectionEnabled(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void SetOutputNodeVolume(uint64_t node_id, int32_t volume) override;
++  void SetOutputUserMute(bool mute_on) override;
++  void SetInputNodeGain(uint64_t node_id, int32_t gain) override;
++  void SetInputMute(bool mute_on) override;
++  void GetAudioEffectDlcs(
++      chromeos::DBusMethodCallback<std::string> callback) override;
++  void GetVoiceIsolationUIAppearance(
++      chromeos::DBusMethodCallback<VoiceIsolationUIAppearance> callback)
++      override;
++  void SetVoiceIsolationUIEnabled(bool voice_isolation_on) override;
++  void SetVoiceIsolationUIPreferredEffect(uint32_t effect_mode) override;
++  void SetKrispNoiseCancellationEnabled(
++      bool krisp_noise_cancellation_on) override;
++  void SetNoiseCancellationEnabled(bool noise_cancellation_enabled) override;
++  void GetNoiseCancellationSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void SetStyleTransferEnabled(bool style_transfer_enabled) override;
++  void GetStyleTransferSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void SetActiveOutputNode(uint64_t node_id) override;
++  void SetActiveInputNode(uint64_t node_id) override;
++  void SetHotwordModel(uint64_t node_id,
++                       const std::string& hotword_model,
++                       chromeos::VoidDBusMethodCallback callback) override;
++  void SetFixA2dpPacketSize(bool enabled) override;
++  void SetFlossEnabled(bool enabled) override;
++  void SetSpeakOnMuteDetection(bool enabled) override;
++  void SetEwmaPowerReportEnabled(bool enabled) override;
++  void SetSidetoneEnabled(bool enabled) override;
++  void GetSidetoneSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void AddActiveInputNode(uint64_t node_id) override;
++  void RemoveActiveInputNode(uint64_t node_id) override;
++  void AddActiveOutputNode(uint64_t node_id) override;
++  void RemoveActiveOutputNode(uint64_t node_id) override;
++  void SwapLeftRight(uint64_t node_id, bool swap) override;
++  void SetDisplayRotation(uint64_t node_id,
++                          cras::DisplayRotation rotation) override;
++  void SetGlobalOutputChannelRemix(int32_t channels,
++                                   const std::vector<double>& mixer) override;
++  void SetPlayerPlaybackStatus(const std::string& playback_status) override;
++  void SetPlayerIdentity(const std::string& playback_identity) override;
++  void SetPlayerPosition(const int64_t& position) override;
++  void SetPlayerDuration(const int64_t& duration) override;
++  void SetPlayerMetadata(
++      const std::map<std::string, std::string>& metadata) override;
++  void ResendBluetoothBattery() override;
++  void WaitForServiceToBeAvailable(
++      chromeos::WaitForServiceToBeAvailableCallback callback) override;
++  void SetForceRespectUiGains(bool force_respect_ui_gains) override;
++  void GetNumStreamIgnoreUiGains(
++      chromeos::DBusMethodCallback<int> callback) override;
++  void SetHfpMicSrEnabled(bool hfp_mic_sr_on) override;
++  void GetHfpMicSrSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void GetNumberOfArcStreams(
++      chromeos::DBusMethodCallback<int32_t> callback) override;
++  void SetSpatialAudio(bool spatial_audio) override;
++  void GetSpatialAudioSupported(
++      chromeos::DBusMethodCallback<bool> callback) override;
++  void AddObserver(Observer* observer) override;
++  void RemoveObserver(Observer* observer) override;
++  bool HasObserver(const Observer* observer) const override;
++
++ private:
++  struct State;
++
++  void NotifyActiveInputNodeChanged(uint64_t node_id);
++  void NotifyActiveOutputNodeChanged(uint64_t node_id);
++  void NotifyInputMuteChanged(bool mute_on);
++  void NotifyInputNodeGainChanged(uint64_t node_id, int volume);
++  void NotifyNodesChanged();
++  void NotifyOutputMuteChanged(bool mute_on);
++  void NotifyOutputNodeVolumeChanged(uint64_t node_id, int volume);
++
++  bool Start();
++  bool SetDefaultNode(uint64_t node_id, bool is_input);
++  bool SetNodeProps(uint64_t node_id,
++                    std::optional<int32_t> volume,
++                    std::optional<bool> mute);
++
++  std::unique_ptr<State> state_;
++  base::ObserverList<Observer, /*check_empty=*/false> observers_;
++  base::WeakPtrFactory<PipeWireCrasAudioClient> weak_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_CRAS_AUDIO_CLIENT_H_

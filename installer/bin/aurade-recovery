@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Non-destructive Btrfs/systemd-boot recovery controls for an installed AuraDE system.
+set -Eeuo pipefail
+
+ROOT=/
+COMMAND=${1:-help}
+shift || true
+CONFIRM=
+LABEL=
+SET_ROLLBACK=0
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-recovery COMMAND [options]
+
+Commands:
+  status                    Show install manifest, boot state, and snapshots
+  snapshot --label NAME     Create a read-only recovery snapshot
+           [--set-rollback] Also point the rollback boot entry at the snapshot
+  boot-normal               Select the normal entry for the next boot
+  boot-rollback             Select the configured rollback entry for next boot
+  default-normal --confirm SET-DEFAULT:aurade.conf
+  default-rollback --confirm SET-DEFAULT:aurade-rollback.conf
+  refresh-bootloader        Reinstall systemd-boot files without EFI variable writes
+  collect [collector args]  Run aurade-hardware-qualify
+
+Options:
+  --root PATH               Mounted installed root (default /)
+  --label NAME              Snapshot label (letters, digits, dot, underscore, dash)
+  --set-rollback            Update aurade-rollback.conf after creating a snapshot
+  --confirm TOKEN           Required only for persistent default changes
+
+No command deletes a snapshot or modifies a filesystem layout.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --root) ROOT=${2:?}; shift 2 ;;
+    --label) LABEL=${2:?}; shift 2 ;;
+    --set-rollback) SET_ROLLBACK=1; shift ;;
+    --confirm) CONFIRM=${2:?}; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+ROOT=$(readlink -f -- "$ROOT")
+ENTRY_DIR=$ROOT/boot/loader/entries
+SNAPSHOT_DIR=$ROOT/.snapshots
+
+require_root() {
+  (( EUID == 0 )) || { echo 'aurade-recovery: this operation requires root' >&2; exit 1; }
+}
+
+case "$COMMAND" in
+  help|-h|--help)
+    usage
+    ;;
+  status)
+    [[ ! -r $ROOT/etc/aurade-install/manifest ]] || cat "$ROOT/etc/aurade-install/manifest"
+    printf '%s\n' '--- boot entries ---'
+    bootctl --root="$ROOT" --esp-path=/boot status 2>&1 || true
+    printf '%s\n' '--- snapshots ---'
+    btrfs subvolume list -s "$ROOT" 2>&1 || true
+    ;;
+  snapshot)
+    require_root
+    [[ $LABEL =~ ^[A-Za-z0-9._-]{1,48}$ ]] || { echo 'aurade-recovery: --label is required and has invalid characters' >&2; exit 2; }
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    destination=$SNAPSHOT_DIR/manual-${stamp}-${LABEL}/snapshot
+    [[ ! -e $destination ]] || { echo "aurade-recovery: snapshot exists: $destination" >&2; exit 1; }
+    install -d -m 0750 "$(dirname "$destination")"
+    btrfs subvolume snapshot -r "$ROOT" "$destination"
+    if (( SET_ROLLBACK )); then
+      normal_entry=$ENTRY_DIR/aurade.conf
+      rollback_entry=$ENTRY_DIR/aurade-rollback.conf
+      snapshot_name=$(basename "$(dirname "$destination")")
+      snapshot_subvolume=@snapshots/$snapshot_name/snapshot
+      rollback_boot_dir=$ROOT/boot/aurade-rollback/$snapshot_name
+      [[ -r $normal_entry ]] || { echo "aurade-recovery: missing entry: $normal_entry" >&2; exit 1; }
+      install -d -m 0755 "$rollback_boot_dir"
+      while read -r artifact; do
+        [[ $artifact == /* && $artifact != *..* ]] || {
+          echo "aurade-recovery: unsafe boot artifact path: $artifact" >&2
+          exit 1
+        }
+        [[ -r $ROOT/boot$artifact ]] || {
+          echo "aurade-recovery: missing boot artifact: $ROOT/boot$artifact" >&2
+          exit 1
+        }
+        install -m 0644 "$ROOT/boot$artifact" "$rollback_boot_dir/$(basename "$artifact")"
+      done < <(awk '$1 == "linux" || $1 == "initrd" { print $2 }' "$normal_entry")
+      rollback_tmp=$(mktemp "${rollback_entry}.tmp.XXXXXX")
+      trap 'rm -f "${rollback_tmp:-}"' EXIT
+      awk -v subvolume="$snapshot_subvolume" -v label="$LABEL" -v boot_id="$snapshot_name" '
+        /^title[[:space:]]/ {
+          print "title AuraDE rollback (" label ")"
+          next
+        }
+        /^(linux|initrd)[[:space:]]/ {
+          artifact = $2
+          sub(/^.*\//, "", artifact)
+          print $1 " /aurade-rollback/" boot_id "/" artifact
+          next
+        }
+        /^options[[:space:]]/ {
+          if (!sub(/rootflags=subvol=[^[:space:]]+/, "rootflags=subvol=" subvolume))
+            exit 42
+        }
+        { print }
+      ' "$normal_entry" >"$rollback_tmp" || {
+        echo 'aurade-recovery: normal boot entry has no Btrfs root subvolume' >&2
+        exit 1
+      }
+      chmod 0644 "$rollback_tmp"
+      mv -f "$rollback_tmp" "$rollback_entry"
+      trap - EXIT
+      find "$ROOT/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -type d \
+        ! -name "$snapshot_name" -exec rm -rf -- {} +
+    fi
+    printf '%s\n' "$destination"
+    ;;
+  boot-normal|boot-rollback)
+    require_root
+    entry=aurade.conf
+    [[ $COMMAND != boot-rollback ]] || entry=aurade-rollback.conf
+    [[ -r $ENTRY_DIR/$entry ]] || { echo "aurade-recovery: missing entry: $ENTRY_DIR/$entry" >&2; exit 1; }
+    bootctl --root="$ROOT" --esp-path=/boot set-oneshot "$entry"
+    ;;
+  default-normal|default-rollback)
+    require_root
+    entry=aurade.conf
+    [[ $COMMAND != default-rollback ]] || entry=aurade-rollback.conf
+    [[ $CONFIRM == SET-DEFAULT:$entry ]] || { echo "aurade-recovery: use --confirm SET-DEFAULT:$entry" >&2; exit 1; }
+    [[ -r $ENTRY_DIR/$entry ]] || { echo "aurade-recovery: missing entry: $ENTRY_DIR/$entry" >&2; exit 1; }
+    bootctl --root="$ROOT" --esp-path=/boot set-default "$entry"
+    ;;
+  refresh-bootloader)
+    require_root
+    bootctl --root="$ROOT" --esp-path=/boot --no-variables install
+    ;;
+  collect)
+    exec aurade-hardware-qualify "$@"
+    ;;
+  *)
+    echo "aurade-recovery: unknown command: $COMMAND" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

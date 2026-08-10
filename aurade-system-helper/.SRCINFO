@@ -1,0 +1,19 @@
+pkgbase = aurade-system-helper
+	pkgdesc = Privileged system helper for AuraDE desktop integration
+	pkgver = 0.1.0
+	pkgrel = 2
+	url = https://github.com/aurade/aurade
+	arch = any
+	license = BSD-3-Clause
+	depends = bash
+	depends = pacman
+	depends = polkit
+	depends = systemd
+	source = aurade-system-helper
+	source = org.aurade.system-helper.policy
+	source = LICENSE
+	sha256sums = 597084be2ed3570a09ce9c31c1feccaf3b7fb413e1a2d93fb3fca3ac9a8b1b8f
+	sha256sums = 1f60a6ba6dc906daccb309d8c2b5679c819cec8d30b2c41eb7aabb9fae75c728
+	sha256sums = 95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10
+
+pkgname = aurade-system-helper

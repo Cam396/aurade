@@ -1,0 +1,199 @@
+#!/bin/bash
+# Collects a privacy-conscious AuraDE hardware/debug report for real-machine
+# bring-up. The archive is user-readable only and avoids known credential files.
+set -u
+
+usage() {
+    cat <<'EOF'
+Usage: aurade-hardware-report [--full] [--output-dir DIR]
+
+Creates a compressed report archive with host hardware, display, GPU, audio,
+input, package, and recent AuraDE logs. By default it avoids high-volume logs.
+
+Options:
+  --full            Include larger journal/dmesg slices.
+  --output-dir DIR  Write the working directory and archive under DIR.
+  -h, --help        Show this help.
+EOF
+}
+
+full=0
+base_dir="${AURADE_REPORT_BASE_DIR:-${HOME}}"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --full)
+            full=1
+            shift
+            ;;
+        --output-dir)
+            if [ "$#" -lt 2 ]; then
+                echo "aurade-hardware-report: --output-dir requires a path" >&2
+                exit 2
+            fi
+            base_dir="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "aurade-hardware-report: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+report_dir="${base_dir%/}/aurade-hardware-report-${timestamp}"
+archive="${report_dir}.tar.gz"
+
+umask 077
+mkdir -p "${report_dir}"/{commands,files,logs,sysfs}
+
+redact_stream() {
+    sed -E \
+        -e 's/(GOOGLE_[A-Z0-9_]*(KEY|SECRET|TOKEN|CLIENT_ID)[A-Z0-9_]*=)[^[:space:]]+/\1[redacted]/g' \
+        -e 's/((api|oauth|client|refresh|access)[-_]?(key|secret|token)[=:])[A-Za-z0-9._~+\/-]+/\1[redacted]/Ig'
+}
+
+run_capture() {
+    local name="$1"
+    shift
+    {
+        printf '$'
+        printf ' %q' "$@"
+        printf '\n\n'
+        "$@" 2>&1 || true
+    } | redact_stream >"${report_dir}/commands/${name}.txt"
+}
+
+run_shell_capture() {
+    local name="$1"
+    shift
+    {
+        printf '$ %s\n\n' "$*"
+        bash -lc "$*" 2>&1 || true
+    } | redact_stream >"${report_dir}/commands/${name}.txt"
+}
+
+copy_file() {
+    local src="$1"
+    local dest="$2"
+    [ -e "${src}" ] || return 0
+    mkdir -p "$(dirname "${report_dir}/${dest}")"
+    if [ -f "${src}" ]; then
+        redact_stream <"${src}" >"${report_dir}/${dest}"
+    else
+        cp -a "${src}" "${report_dir}/${dest}" 2>/dev/null || true
+    fi
+}
+
+copy_tree_listing() {
+    local src="$1"
+    local dest="$2"
+    [ -e "${src}" ] || return 0
+    find "${src}" -maxdepth 3 -mindepth 1 -printf '%M %u %g %s %p -> %l\n' \
+        >"${report_dir}/${dest}" 2>&1 || true
+}
+
+cat >"${report_dir}/README.txt" <<EOF
+AuraDE hardware report
+Generated UTC: ${timestamp}
+Host user: $(id -un 2>/dev/null || true)
+Kernel: $(uname -a 2>/dev/null || true)
+
+This report is intended for AuraDE bring-up on real hardware. It redacts common
+Google/API token patterns and does not copy /etc/aurade/google-api.conf.
+Review before sharing publicly.
+EOF
+
+run_capture os-release cat /etc/os-release
+run_capture uname uname -a
+run_capture uptime uptime
+run_capture loginctl loginctl
+run_capture loginctl-seat0 loginctl seat-status seat0
+run_shell_capture loginctl-session-status 'for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do echo "## session $s"; loginctl session-status "$s" --no-pager; done'
+run_capture systemd-inhibitors systemd-inhibit --list --no-pager
+run_capture systemctl-failed systemctl --failed --no-pager
+run_capture user-systemctl-failed systemctl --user --failed --no-pager
+run_capture aurade-packages pacman -Q aurade aurade-full aurade-ai chromiumos-ash aurade-system-helper aurade-account-helper aurade-webapp-shortcuts shill-nm-adapter
+run_shell_capture aurade-files 'pacman -Ql aurade chromiumos-ash aurade-system-helper aurade-account-helper aurade-webapp-shortcuts shill-nm-adapter 2>/dev/null | sort'
+run_shell_capture aurade-processes 'ps -eo pid,ppid,stat,ni,pri,pcpu,pmem,comm,args | grep -E "chrome|aurade|weston|Xwayland|NetworkManager|shill|pipewire|wireplumber|cras|ollama" | grep -v grep'
+run_shell_capture aurade-effective-flags 'tr "\0" " " </proc/$(pgrep -n chrome 2>/dev/null || echo 0)/cmdline 2>/dev/null'
+
+run_capture cpu lscpu
+run_capture memory free -h
+run_capture meminfo cat /proc/meminfo
+run_capture block-devices lsblk -o NAME,PATH,TYPE,SIZE,FSTYPE,FSVER,LABEL,MOUNTPOINTS,MODEL,SERIAL
+run_capture filesystems findmnt -R
+run_capture pci lspci -nnk
+run_capture usb lsusb
+run_capture kernel-modules lsmod
+run_capture kernel-command-line cat /proc/cmdline
+
+run_shell_capture power-supply-sysfs 'for d in /sys/class/power_supply/*; do [ -e "$d" ] || continue; echo "## $d"; find "$d" -maxdepth 1 -type f -print -exec sh -c "printf \"  \"; cat \"$1\" 2>/dev/null | head -c 512; printf \"\n\"" sh {} \; 2>/dev/null; done'
+run_shell_capture backlight-sysfs 'for d in /sys/class/backlight/*; do [ -e "$d" ] || continue; echo "## $d"; find "$d" -maxdepth 1 -type f -print -exec sh -c "printf \"  \"; cat \"$1\" 2>/dev/null | head -c 512; printf \"\n\"" sh {} \; 2>/dev/null; done'
+run_shell_capture lid-state 'for d in /proc/acpi/button/lid/*; do [ -e "$d" ] || continue; echo "## $d"; cat "$d/state" 2>/dev/null || true; done'
+run_capture upower upower -d
+run_capture brightnessctl brightnessctl --list
+
+run_capture drm-devices ls -la /dev/dri
+run_shell_capture drm-sysfs 'for d in /sys/class/drm/*; do echo "## $d"; find "$d" -maxdepth 2 -type f -print -exec sh -c "printf \"  \"; cat \"$1\" 2>/dev/null | head -c 512; printf \"\n\"" sh {} \; 2>/dev/null; done'
+run_shell_capture hwmon-sysfs 'for h in /sys/class/hwmon/hwmon*; do echo "## $h"; find "$h" -maxdepth 1 -type f -print -exec sh -c "printf \"  \"; cat \"$1\" 2>/dev/null | head -c 512; printf \"\n\"" sh {} \; 2>/dev/null; done'
+run_capture sensors sensors
+run_capture glxinfo glxinfo -B
+run_capture eglinfo eglinfo -B
+run_capture vulkaninfo vulkaninfo --summary
+run_capture vainfo vainfo
+
+run_capture wayland-info wayland-info
+run_capture weston-info weston-info
+run_capture xrandr xrandr --verbose
+run_shell_capture display-env 'printf "XDG_SESSION_TYPE=%s\nWAYLAND_DISPLAY=%s\nDISPLAY=%s\nXDG_RUNTIME_DIR=%s\n" "${XDG_SESSION_TYPE:-}" "${WAYLAND_DISPLAY:-}" "${DISPLAY:-}" "${XDG_RUNTIME_DIR:-}"'
+
+run_capture audio-pactl pactl info
+run_capture audio-pactl-sinks pactl list sinks
+run_capture audio-pactl-sources pactl list sources
+run_capture audio-wpctl wpctl status
+run_capture audio-aplay aplay -l
+run_capture audio-arecord arecord -l
+run_capture audio-pw-cli pw-cli info all
+run_capture aurade-audio-status aurade-audio status
+run_capture aurade-audio-lines aurade-audio status-lines
+run_capture aurade-audio-json aurade-audio status-json
+
+run_capture input-libinput libinput list-devices
+run_capture input-proc cat /proc/bus/input/devices
+
+run_capture network-ip ip addr
+run_capture network-routes ip route
+run_capture network-nmcli nmcli device show
+run_capture network-systemd systemctl status NetworkManager shill-nm-adapter --no-pager
+
+copy_file /etc/aurade/features.conf files/etc-aurade-features.conf
+copy_file /tmp/aurade-openvt.log logs/aurade-openvt.log
+copy_file "${HOME}/.config/aurade/features.conf" files/user-aurade-features.conf
+copy_file "${HOME}/.config/aurade/display.conf" files/user-aurade-display.conf
+copy_tree_listing "${HOME}/.local/state/aurade" files/user-state-aurade-tree.txt
+copy_tree_listing /etc/aurade files/etc-aurade-tree.txt
+copy_tree_listing /usr/share/wayland-sessions files/wayland-sessions-tree.txt
+copy_tree_listing /usr/share/xsessions files/xsessions-tree.txt
+copy_tree_listing /usr/share/applications files/applications-tree.txt
+
+if [ "${full}" -eq 1 ]; then
+    run_capture journal-boot journalctl -b --no-pager
+    run_capture user-journal-boot journalctl --user -b --no-pager
+    run_capture dmesg dmesg -T
+else
+    run_capture journal-boot-short journalctl -b -n 500 --no-pager
+    run_capture user-journal-boot-short journalctl --user -b -n 300 --no-pager
+    run_capture dmesg-short dmesg -T -l emerg,alert,crit,err,warn
+fi
+
+tar -C "$(dirname "${report_dir}")" -czf "${archive}" "$(basename "${report_dir}")"
+chmod 600 "${archive}"
+
+printf '%s\n' "${archive}"

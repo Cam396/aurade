@@ -1,0 +1,318 @@
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
+index 9cbe27a2f2..6587d7f2e6 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
+@@ -16,6 +16,7 @@
+ #include "base/functional/bind.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "base/values.h"
+ #include "chrome/browser/ash/account_manager/account_apps_availability.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+@@ -31,11 +32,15 @@
+ #include "components/signin/public/base/consent_level.h"
+ #include "components/signin/public/identity_manager/tribool.h"
+ #include "components/user_manager/user.h"
++#include "content/public/browser/page_navigator.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui_message_handler.h"
++#include "content/public/common/referrer.h"
+ #include "google_apis/gaia/gaia_id.h"
+ #include "google_apis/gaia/google_service_auth_error.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "ui/base/l10n/l10n_util.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/webui/web_ui_util.h"
+ #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
+@@ -49,6 +54,9 @@ namespace {
+ constexpr char kFamilyLink[] = "Family Link";
+ constexpr char kAccountRemovedToastId[] =
+     "settings_account_manager_account_removed";
++constexpr char kAuraDEGoogleAccountWebSigninUrl[] =
++    "https://accounts.google.com/AccountChooser?"
++    "continue=https%3A%2F%2Fmyaccount.google.com%2F&service=accountsettings";
+ 
+ ::account_manager::AccountKey GetAccountKeyFromJsCallback(
+     const base::DictValue& dictionary) {
+@@ -384,6 +392,20 @@ base::ListValue AccountManagerUIHandler::GetSecondaryGaiaAccounts(
+ 
+ void AccountManagerUIHandler::HandleAddAccount(const base::ListValue& args) {
+   AllowJavascript();
++
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: the ChromeOS add-account dialog requires real GAIA
++    // OS integration. On generic Linux, send users to normal Google web sign-in
++    // so the shared AuraDE browser profile gets web cookies instead.
++    content::OpenURLParams params(
++        GURL(kAuraDEGoogleAccountWebSigninUrl), content::Referrer(),
++        WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
++        /*is_renderer_initiated=*/false);
++    web_ui()->GetWebContents()->OpenURL(params,
++                                        /*navigation_handle_callback=*/{});
++    return;
++  }
++
+   ShowSettingsAddAccountDialog(profile_);
+ }
+ 
+diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+index cca031f22b..b946c1ec2e 100644
+--- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
++++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+@@ -11,12 +11,19 @@
+ #include "base/check_op.h"
+ #include "base/command_line.h"
+ #include "base/feature_list.h"
++#include "base/functional/bind.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "chrome/browser/web_applications/preinstalled_app_install_features.h"
++#include "chrome/browser/web_applications/web_app_helpers.h"
++#include "chrome/browser/web_applications/web_app_install_info.h"
+ #include "chrome/common/chrome_switches.h"
++#include "extensions/common/constants.h"
++#include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
+ 
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ #include "chrome/browser/web_applications/preinstalled_web_apps/gmail.h"
+@@ -26,6 +33,7 @@
+ #include "chrome/browser/web_applications/preinstalled_web_apps/google_sheets.h"
+ #include "chrome/browser/web_applications/preinstalled_web_apps/google_slides.h"
+ #include "chrome/browser/web_applications/preinstalled_web_apps/youtube.h"
++#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/constants/web_app_id_constants.h"
+@@ -45,8 +53,6 @@
+ #include "google_apis/gaia/gaia_auth_util.h"
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+-
+ namespace web_app {
+ namespace {
+ 
+@@ -68,13 +74,13 @@ BASE_FEATURE_PARAM(bool,
+ #if BUILDFLAG(IS_CHROMEOS)
+ bool IsGoogleInternalAccount() {
+   Profile* profile = ProfileManager::GetActiveUserProfile();
+-  if (!profile)
++  if (!profile) {
+     return false;
++  }
+   return gaia::IsGoogleInternalAccountEmail(profile->GetProfileUserName());
+ }
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+-
+ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
+     Profile& profile,
+     const std::optional<DeviceInfo>& device_info) {
+@@ -125,6 +131,108 @@ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
+ }
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
++#if BUILDFLAG(IS_CHROMEOS)
++
++ExternalInstallOptions MakeAuraDePwa(const char* install_url,
++                                     const char* start_url,
++                                     const char* scope,
++                                     std::u16string title,
++                                     const char* expected_app_id = nullptr,
++                                     const char* replacement_app_id = nullptr) {
++  GURL app_start_url(start_url);
++  GURL app_scope(scope);
++  ExternalInstallOptions options(GURL(install_url),
++                                 mojom::UserDisplayMode::kStandalone,
++                                 ExternalInstallSource::kExternalDefault);
++  options.user_type_allowlist = {"unmanaged", "managed", "child"};
++  options.load_and_await_service_worker_registration = false;
++  options.is_preferred_app_for_supported_links = true;
++  options.fallback_app_name = base::UTF16ToUTF8(title);
++  options.app_info_factory = base::BindRepeating(
++      [](GURL start_url, GURL scope, std::u16string title) {
++        webapps::ManifestId manifest_id =
++            GenerateManifestIdFromStartUrlOnly(start_url);
++        auto info = std::make_unique<WebAppInstallInfo>(manifest_id, start_url);
++        info->title = std::move(title);
++        info->scope = scope;
++        info->display_mode = blink::mojom::DisplayMode::kStandalone;
++        return info;
++      },
++      app_start_url, app_scope, std::move(title));
++  if (expected_app_id) {
++    options.expected_app_id = webapps::AppId(expected_app_id);
++  }
++  if (replacement_app_id) {
++    options.uninstall_and_replace.push_back(webapps::AppId(replacement_app_id));
++  }
++  return options;
++}
++
++std::vector<ExternalInstallOptions> GetAuraDeGoogleWebApps() {
++  // AuraDE compatibility: unbranded generic-Linux AuraDE builds do not get the
++  // branded Chrome default-app list, but the desktop shell still needs real
++  // Chrome web apps instead of host .desktop URL launchers.
++  std::vector<ExternalInstallOptions> apps = {
++      MakeAuraDePwa(
++          "https://mail.google.com/mail/installwebapp?usp=chrome_default",
++          "https://mail.google.com/mail/?usp=installed_webapp",
++          "https://mail.google.com/mail/", u"Gmail", ash::kGmailAppId,
++          "pjkljhegncpnkpknbcohdijeoejaedia"),
++      MakeAuraDePwa(
++          "https://drive.google.com/drive/installwebapp?usp=chrome_default",
++          "https://drive.google.com/?lfhs=2", "https://drive.google.com/",
++          u"Google Drive", ash::kGoogleDriveAppId,
++          "apdfllckaahabafndbhieahigkjlhalf"),
++      MakeAuraDePwa("https://calendar.google.com/calendar/"
++                    "installwebapp?usp=chrome_default",
++                    "https://calendar.google.com/calendar/r",
++                    "https://calendar.google.com/calendar/", u"Google Calendar",
++                    ash::kGoogleCalendarAppId,
++                    "ejjicmeblgpmajnghnpcppodonldlgfn"),
++      MakeAuraDePwa(
++          "https://docs.google.com/document/installwebapp?usp=chrome_default",
++          "https://docs.google.com/document/?usp=installed_webapp",
++          "https://docs.google.com/document/", u"Google Docs",
++          ash::kGoogleDocsAppId, "aohghmighlieiainnegkcijnfilokake"),
++      MakeAuraDePwa(
++          "https://docs.google.com/spreadsheets/"
++          "installwebapp?usp=chrome_default",
++          "https://docs.google.com/spreadsheets/?usp=installed_webapp",
++          "https://docs.google.com/spreadsheets/", u"Google Sheets",
++          ash::kGoogleSheetsAppId, "felcaaldnbdncclmgdcncolpebgiejap"),
++      MakeAuraDePwa(
++          "https://docs.google.com/presentation/"
++          "installwebapp?usp=chrome_default",
++          "https://docs.google.com/presentation/?usp=installed_webapp",
++          "https://docs.google.com/presentation/", u"Google Slides",
++          ash::kGoogleSlidesAppId, "aapocclcgogkmnckokdopfmhonfmgoek"),
++      MakeAuraDePwa(
++          "https://www.youtube.com/s/notifications/manifest/cr_install.html",
++          "https://www.youtube.com/?feature=ytca", "https://www.youtube.com/",
++          u"YouTube", ash::kYoutubeAppId, "blpcfgokakmgnkcojhhkbfbldkacnbeo"),
++      MakeAuraDePwa(
++          "https://meet.google.com/download/webapp?usp=chrome_default",
++          "https://meet.google.com/landing?lfhs=2", "https://meet.google.com/",
++          u"Google Meet", ash::kGoogleMeetAppId),
++      MakeAuraDePwa("https://keep.google.com/installwebapp?usp=chrome_default",
++                    "https://keep.google.com/?usp=installed_webapp",
++                    "https://keep.google.com/", u"Google Keep",
++                    ash::kGoogleKeepAppId, extension_misc::kGoogleKeepAppId),
++      MakeAuraDePwa(
++          "https://photos.google.com/installwebapp?usp=chrome_default",
++          "https://photos.google.com/", "https://photos.google.com/",
++          u"Google Photos"),
++  };
++  ExternalInstallOptions gemini =
++      MakeAuraDePwa("https://gemini.google.com/", "https://gemini.google.com/",
++                    "https://gemini.google.com/", u"Gemini", ash::kGeminiAppId);
++  gemini.only_use_app_info_factory = true;
++  apps.push_back(std::move(gemini));
++  return apps;
++}
++
++#endif  // BUILDFLAG(IS_CHROMEOS)
++
+ }  // namespace
+ 
+ DeviceInfo::DeviceInfo() = default;
+@@ -159,11 +267,13 @@ bool PreinstalledWebAppsDisabled() {
+ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
+     Profile& profile,
+     const std::optional<DeviceInfo>& device_info) {
+-  if (g_preinstalled_app_data_for_testing)
++  if (g_preinstalled_app_data_for_testing) {
+     return *g_preinstalled_app_data_for_testing;
++  }
+ 
+-  if (PreinstalledWebAppsDisabled())
++  if (PreinstalledWebAppsDisabled()) {
+     return {};
++  }
+ 
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -178,6 +288,11 @@ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
+ 
+   return GetChromeBrandedApps(profile, device_info);
+ #else
++#if BUILDFLAG(IS_CHROMEOS)
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return GetAuraDeGoogleWebApps();
++  }
++#endif  // BUILDFLAG(IS_CHROMEOS)
+   return {};
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ }
+@@ -202,13 +317,15 @@ std::vector<PreinstalledWebAppMigration> GetPreinstalledWebAppMigrations(
+   std::vector<PreinstalledWebAppMigration> migrations;
+   for (const ExternalInstallOptions& options :
+        GetPreinstalledWebApps(profile)) {
+-    if (!options.expected_app_id)
++    if (!options.expected_app_id) {
+       continue;
++    }
+ 
+     // All entries in the default web app migration had only one Chrome app to
+     // replace.
+-    if (options.uninstall_and_replace.size() != 1)
++    if (options.uninstall_and_replace.size() != 1) {
+       continue;
++    }
+ 
+     if (options.gate_on_feature &&
+         !IsPreinstalledAppInstallFeatureEnabled(*options.gate_on_feature)) {
+diff --git a/components/signin/core/browser/signin_header_helper.cc b/components/signin/core/browser/signin_header_helper.cc
+index 1a352d3b9d..640cf8576c 100644
+--- a/components/signin/core/browser/signin_header_helper.cc
++++ b/components/signin/core/browser/signin_header_helper.cc
+@@ -14,6 +14,7 @@
+ #include "base/notreached.h"
+ #include "base/strings/escape.h"
+ #include "base/strings/string_split.h"
++#include "base/system/sys_info.h"
+ #include "components/google/core/common/google_util.h"
+ #include "components/signin/core/browser/chrome_connected_header_helper.h"
+ #include "components/signin/core/browser/dice_response_params.h"
+@@ -88,6 +89,15 @@ std::string BuildMirrorRequestCookieIfPossible(
+     AccountConsistencyMethod account_consistency,
+     const content_settings::CookieSettings* cookie_settings,
+     int profile_mode_mask) {
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: this binary is built with ChromeOS code paths, but
++  // generic Linux sessions must use normal Google web sign-in. Mirror cookies
++  // make Gaia serve the ChromeOS add-account flow, which requires real CrOS
++  // GAIA integration and dead-ends public AuraDE builds.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return std::string();
++  }
++#endif
+   return ChromeConnectedHeaderHelper::BuildRequestCookieIfPossible(
+       url, gaia_id, account_consistency, cookie_settings, profile_mode_mask);
+ }
+@@ -160,6 +170,18 @@ void AppendOrRemoveMirrorRequestHeader(
+   ChromeConnectedHeaderHelper chrome_connected_helper(account_consistency);
+   std::string chrome_connected_header_value;
+ 
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: do not advertise ChromeOS account consistency when
++  // the ChromeOS binary is running as a generic Linux desktop environment.
++  // Without this, Google sign-in redirects into chrome://chrome-signin and the
++  // unsupported crosAddAccount flow instead of setting normal web cookies.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    chrome_connected_helper.AppendOrRemoveRequestHeader(
++        request, redirect_url, kChromeConnectedHeader, std::string());
++    return;
++  }
++#endif
++
+ #if BUILDFLAG(IS_CHROMEOS)
+   bool is_secondary_account_addition_disallowed =
+       (profile_mode_mask & PROFILE_MODE_ADD_ACCOUNT_DISABLED) != 0 &&

@@ -1,0 +1,14 @@
+diff --git a/ash/system/privacy_hub/geolocation_privacy_switch_controller.cc b/ash/system/privacy_hub/geolocation_privacy_switch_controller.cc
+index ea1a34a4aa..c69e0f70e6 100644
+--- a/ash/system/privacy_hub/geolocation_privacy_switch_controller.cc
++++ b/ash/system/privacy_hub/geolocation_privacy_switch_controller.cc
+@@ -24,7 +24,8 @@
+ namespace ash {
+ 
+ GeolocationPrivacySwitchController::GeolocationPrivacySwitchController()
+-    : session_observation_(this) {
++    : session_observation_(this),
++      cached_access_level_(GeolocationAccessLevel::kAllowed) {
+   session_observation_.Observe(Shell::Get()->session_controller());
+ }
+ 

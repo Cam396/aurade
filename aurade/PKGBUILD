@@ -1,0 +1,82 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade
+pkgver=152.1660893
+pkgrel=2
+pkgdesc="AuraDE desktop environment meta package"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=(
+    "chromiumos-ash>=${pkgver}"
+    'aurade-webapp-shortcuts'
+    'aurade-login'
+    'aurade-power'
+    'aurade-host-bridge'
+    'lm_sensors'
+    'mesa-utils'
+    'alsa-utils'
+    'alsa-ucm-conf'
+    'libpulse'
+    'pipewire'
+    'pipewire-alsa'
+    'pipewire-jack'
+    'pipewire-pulse'
+    'rtkit'
+    'speech-dispatcher'
+    'espeak-ng'
+    'wireplumber'
+    'upower'
+    'brightnessctl'
+    'pciutils'
+    'usbutils'
+    'vulkan-tools'
+    'libva-utils'
+    'wayland-utils'
+    'libinput'
+    'playerctl'
+)
+optdepends=(
+    'aurade-ai: Advanced Plus AI local Gemma model bootstrap and auto-download'
+    'vulkan-driver: hardware Vulkan acceleration when supported by the GPU'
+    'open-vm-tools: VMware guest integration and dynamic resize support inside VMware'
+)
+source=(
+    'aurade'
+    'aurade-session'
+    'aurade-shell'
+    'aurade-hardware-report'
+    'aurade-audio'
+    'aurade.desktop'
+    'aurade-shell.desktop'
+    'LICENSE'
+)
+sha256sums=('9a391d9366506b9e22c31cf9a0783ca433e373d7ec366277afcc7a0eb5e0d165'
+            '7f29e27409176316cb57bdd02b676a5c8ba0eec684af1fa58e0123bd3595f155'
+            '5e6519018eb83756b35e087673f123fd12fcc611c0f4a891ab2637a54db78714'
+            '8de2eb0d9d8c5ad88bdc73972ee94d3cd261c1d393958150c8fbb7046aaff0bf'
+            '16c1326f956011211fac43b5127325919df6089538e044864d9552b865dfaf5e'
+            'df1bf73bdd0e5cf435cf162951968e3ab7d9ae9f76763787530b14beb7c89b3d'
+            '5d6f2fded5b15ac208d5b4b1d9ea10145e6e0c511188885e67157555efe95eac'
+            'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
+
+package() {
+    install -Dm755 "${srcdir}/aurade" \
+        "${pkgdir}/usr/bin/aurade"
+    install -Dm755 "${srcdir}/aurade-session" \
+        "${pkgdir}/usr/bin/aurade-session"
+    install -Dm755 "${srcdir}/aurade-shell" \
+        "${pkgdir}/usr/bin/aurade-shell"
+    install -Dm755 "${srcdir}/aurade-hardware-report" \
+        "${pkgdir}/usr/bin/aurade-hardware-report"
+    install -Dm755 "${srcdir}/aurade-audio" \
+        "${pkgdir}/usr/bin/aurade-audio"
+
+    install -Dm644 "${srcdir}/aurade.desktop" \
+        "${pkgdir}/usr/share/wayland-sessions/aurade.desktop"
+    install -Dm644 "${srcdir}/aurade-shell.desktop" \
+        "${pkgdir}/usr/share/xsessions/aurade-shell.desktop"
+
+    install -Dm644 "${srcdir}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

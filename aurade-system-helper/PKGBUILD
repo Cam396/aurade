@@ -1,0 +1,27 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-system-helper
+pkgver=0.1.0
+pkgrel=2
+pkgdesc="Privileged system helper for AuraDE desktop integration"
+arch=('any')
+url="https://github.com/aurade/aurade"
+license=('BSD-3-Clause')
+depends=('bash' 'pacman' 'polkit' 'systemd')
+source=(
+  'aurade-system-helper'
+  'org.aurade.system-helper.policy'
+  'LICENSE'
+)
+sha256sums=('597084be2ed3570a09ce9c31c1feccaf3b7fb413e1a2d93fb3fca3ac9a8b1b8f'
+            '1f60a6ba6dc906daccb309d8c2b5679c819cec8d30b2c41eb7aabb9fae75c728'
+            '95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10')
+
+package() {
+  install -Dm755 aurade-system-helper \
+    "${pkgdir}/usr/bin/aurade-system-helper"
+  install -Dm644 org.aurade.system-helper.policy \
+    "${pkgdir}/usr/share/polkit-1/actions/org.aurade.system-helper.policy"
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
