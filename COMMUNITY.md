@@ -74,3 +74,10 @@ file reproducible bugs at https://github.com/Cam396/aurade/issues.
 Do not post passwords, API keys, private logs, or security vulnerabilities in
 Discord. Use the private GitHub security-advisory flow for security reports.
 ```
+
+## Initial bootstrap checkpoint (2026-08-09)
+
+The AuraDE Community server has been provisioned with the four categories in
+this blueprint, the support/development channels, the `Lounge` and
+`Pairing / Debug` voice rooms, and the six non-admin community roles. The
+existing default conversation and voice rooms were reused instead of deleted.
