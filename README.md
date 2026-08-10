@@ -143,6 +143,9 @@ changing the patch series. Keep AuraDE adaptations labeled with
 temporary workarounds. Every patch must apply with strict whitespace checking,
 and `.SRCINFO` must be regenerated from its `PKGBUILD`.
 
+For community setup, channels, roles, and moderation guidance, see
+[COMMUNITY.md](COMMUNITY.md). The starter server name is **AuraDE Community**.
+
 ## License and upstream notices
 
 AuraDE-authored packaging, helpers, scripts, and documentation are released
