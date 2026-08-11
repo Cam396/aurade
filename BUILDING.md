@@ -184,6 +184,12 @@ For a real image, omit `AURADE_ALLOW_UNSIGNED=1` and provide
 The complete image and its sidecar metadata are written under
 `AURADE_ISO_OUTPUT_DIR` or the installer work directory's `output/` folder.
 
+The live image automatically opens a root console on tty1 for installation and
+recovery. The live `root` account has an empty password on the console;
+`aurade-installer` prompts for the username and password that will exist on the
+installed system. The live root console is intentionally separate from the
+installed AuraDE login flow.
+
 Do not call an unsigned ISO stable, publish it as a supported download, or
 install it on a machine whose data cannot be restored.
 

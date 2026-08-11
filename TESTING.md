@@ -4,6 +4,14 @@ AuraDE's supported validation path is a running VMware guest checked over SSH.
 QEMU is not the project validation target. Physical laptop testing remains a
 separate qualification step.
 
+## Boot the ISO
+
+The live ISO opens an automatic root console on tty1. The live `root` account
+has an empty password for console recovery and does not create `auratest`. Run
+`aurade-installer` from that console to choose the installed username and
+password. The live root session is for installation and recovery only, not a
+shipped desktop login.
+
 ## Start the VM
 
 Use the host's `vmrun` operation and wait for the guest to finish booting:
