@@ -300,7 +300,11 @@ TARGET_ARCH=$(canonical_arch "$TARGET_ARCH")
 locate_repo
 install_dependencies
 run_installer_tests
-prepare_chromium
+if (( DO_BUILD || SOURCE_ONLY )); then
+  prepare_chromium
+else
+  log 'skipping Chromium bootstrap because no source/package action was requested'
+fi
 
 if (( SOURCE_ONLY )); then
   log "source preparation complete for $TARGET_ARCH"
