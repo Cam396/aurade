@@ -187,6 +187,25 @@ The complete image and its sidecar metadata are written under
 Do not call an unsigned ISO stable, publish it as a supported download, or
 install it on a machine whose data cannot be restored.
 
+## Prepare the AUR upload packet
+
+After VM and hardware feedback, export the package directories for the AUR:
+
+```bash
+export AURADE_AUR_OUTPUT="$AURADE_WORKDIR/aur-bundles"
+ci/export-aur-bundles.sh
+```
+
+This emits ten source/helper package directories plus the x86_64
+`chromiumos-ash-bin` package, which consumes the matching unsigned development
+payload from the GitHub release and provides `chromiumos-ash`; generated AUR
+meta-packages name the `-bin` dependency explicitly for AUR helper resolution.
+The large
+Chromium source recipe remains a maintainer build path rather than a one-click
+AUR build. See [AURADE_AUR.md](AURADE_AUR.md) for the per-package validation and
+upload checklist. Do not upload the generated packet until the feedback gate
+is accepted.
+
 ## 6. Validate the result
 
 Start the guest with the host's VMware operation before running the smoke

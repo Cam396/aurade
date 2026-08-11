@@ -28,6 +28,11 @@ the root only for the duration of the command and unmounting it on exit.
 `pacman-aurade.conf` is an example client-side pacman repository stanza for the
 private soak repo.
 
+`export-aur-bundles.sh` converts the monorepo package directories into
+self-contained per-package AUR upload directories. It includes an x86_64
+`chromiumos-ash-bin` wrapper for the current unsigned development payload;
+publish the generated directories only after the feedback gate.
+
 `write-source-manifest.sh` records the Chromium revision, current Chromium
 worktree status, patch-series hashes, and package source hashes. It writes to
 `${AURADE_WORKDIR}/source-manifest.md` by default.

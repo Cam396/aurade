@@ -46,6 +46,7 @@ browser PWAs in the user's session.
 | `ci/` | Patch, package, release, and VM smoke tooling |
 | `installer/` | ArchISO profile, installer, and recovery tools |
 | `build-aurade.sh` | Low-effort dependency, source, package, ISO, and test orchestrator |
+| `AURADE_AUR.md` | AUR package split and upload checklist |
 
 The current source snapshot carries 33 ordered Chromium patches and an
 11-package Arch set:
@@ -153,6 +154,25 @@ Do not use an unsigned artifact on a machine containing data you cannot
 restore. The installer and recovery documentation are development tooling
 until the repository is signed and a real laptop has passed the hardware
 matrix.
+
+## Prepare the AUR packages
+
+The next publication target is the Arch User Repository after the current
+pre-alpha feedback cycle. Generate one self-contained upload directory per
+package with:
+
+```bash
+export AURADE_WORKDIR="$PWD/.aurade-work"
+export AURADE_AUR_OUTPUT="$AURADE_WORKDIR/aur-bundles"
+ci/export-aur-bundles.sh
+```
+
+The exporter includes the ten small packages and an x86_64
+`chromiumos-ash-bin` wrapper for the current unsigned development payload.
+It intentionally does not copy Chromium checkouts, ISO/package archives,
+private documents, VM credentials, or build logs. See [AURADE_AUR.md](AURADE_AUR.md)
+for the per-package `makepkg`, `.SRCINFO`, `namcap`, and upload sequence. AUR
+publication is not a stable-release or ARM-support claim.
 
 ## Testing and reporting
 
