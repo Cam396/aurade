@@ -31,7 +31,7 @@ Examples:
     ash/webui/diagnostics_ui/backend/system \
     ash/webui/diagnostics_ui/resources
 
-  CHROME_SRC=/mnt/build/chromiumos/chromium_dev/src \
+  CHROME_SRC=/path/to/chromium/src \
     ci/export-chromium-diff.sh top-shelf ash/shelf ash/system/tray
 EOF
 }

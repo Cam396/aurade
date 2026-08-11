@@ -4,6 +4,8 @@ Start with [BUILDING.md](../BUILDING.md) for the public copy-paste workflow,
 [TESTING.md](../TESTING.md) for the VM matrix, and
 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) for common failures. This file
 covers maintainer-level CI, candidate promotion, and optional scheduled gates.
+Run `public-release-leak-gate.sh` before tagging or attaching release
+artifacts; it reports only redacted match counts.
 
 `build-private-repo.sh` builds the local Arch packages into `private-repo/` and
 creates a pacman database with `repo-add`.
@@ -17,8 +19,8 @@ package metadata/file lists, and cryptographically valid signatures when
 and keeps the previous repository as `.previous`.
 
 `bootstrap-arch-root.sh` creates an Arch validation root on a host with
-`pacstrap`, using `/mnt/build/aurade-work` by default for the root, pacman DB,
-and package cache.
+`pacstrap`, using the configured `AURADE_WORKDIR` for the root, pacman DB, and
+package cache.
 
 `run-in-arch-root.sh` runs a command inside that validation root, bind-mounting
 the root only for the duration of the command and unmounting it on exit.
@@ -28,7 +30,7 @@ private soak repo.
 
 `write-source-manifest.sh` records the Chromium revision, current Chromium
 worktree status, patch-series hashes, and package source hashes. It writes to
-`/mnt/build/aurade-work/source-manifest.md` by default.
+`${AURADE_WORKDIR}/source-manifest.md` by default.
 
 `export-chromium-diff.sh` exports selected tracked and untracked Chromium source
 changes into the AuraDE patch series without hand-copying diffs. It writes temp
@@ -116,7 +118,7 @@ run, that checkout can seed an independent bare repository using committed Git
 objects only; subsequent runs fetch weekly deltas into the CI-owned copy.
 
 Candidate IDs contain both the Chromium revision and patch-series digest. The
-state root (default `/mnt/build/aurade-work/chromium-update`) retains candidate
+state root (under the configured work directory) retains candidate
 metadata, transition history, per-gate logs, the replayed diff, changed files,
 target plan, source manifest, conflict evidence, and promotion history. The
 canonical `current` symlink is updated atomically, and
@@ -125,8 +127,8 @@ selects an earlier retained green generation without rebuilding it; `--resume`
 retries an immutable failed generation even if the moving branch has advanced.
 
 `materialize-chromium-candidate.sh` bridges source replay to real GN/build
-gates. It maintains an isolated warm gclient checkout (default
-`/mnt/build/aurade-work/chromium-candidate`), syncs exactly
+gates. It maintains an isolated warm gclient checkout under the configured
+work directory, syncs exactly
 `AURADE_CANDIDATE_SHA`, and leaves `src/out/Ash` intact between generations.
 Before syncing, it restores only the union of previously and currently
 patch-owned paths at the old base and refuses to proceed if any other source
@@ -242,8 +244,8 @@ Expected weekly upstream flow:
    `BUILD.gn` failures. Reuse `AURADE_GN_OUT_DIR` for every later gate.
 4. Enable `full-build`, `package`, `repo`, and `vm` only after cheap gates pass.
    Reuse the same candidate checkout and output directory across these gates.
-5. Consume the promoted SHA from
-   `/mnt/build/aurade-work/chromium-update/pins/last-known-good-sha`. Promotion
+5. Consume the promoted SHA from the configured update state root's
+   `pins/last-known-good-sha`. Promotion
    occurs only after all requested gates finish successfully.
 
 Patch export example:
@@ -288,9 +290,9 @@ Public install shape:
 - `pacman -S aurade` installs the base desktop, non-AI helpers, neutral web app
   launchers, sensor tools, and GPU diagnostic tools.
 - `pacman -S aurade-full` installs `aurade` plus `aurade-ai`.
-- `AURADE_WORKDIR=/mnt/build/aurade-work` controls where the Arch validation
+- `AURADE_WORKDIR=/path/to/workdir` controls where the Arch validation
   root and pacman cache are created by `bootstrap-arch-root.sh`.
-- `REPO_DIR=/mnt/build/aurade-work/private-repo` writes artifacts outside the
+- `REPO_DIR=/path/to/workdir/private-repo` writes artifacts outside the
   source tree.
 - `MAKEPKG_FLAGS="--force --noconfirm --clean"` avoids implicit dependency
   installation in pre-provisioned CI roots.
@@ -313,7 +315,7 @@ Public install shape:
 
 ## Chromium/Ash Incremental Builds
 
-The current packaged build output is `chromium_dev/src/out/Ash` with
+The current packaged build output is `$CHROME_SRC/out/Ash` with
 `is_component_build=false`. Keep that output directory stable. Do not flip
 `is_component_build`, `use_system_minigbm`, Rust, or remote-exec args in-place
 unless you intentionally want a large rebuild.

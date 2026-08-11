@@ -78,11 +78,10 @@ The live hierarchy is ordered below the setup bot and is intentionally scoped:
 - `Community` — general community identity.
 
 `#welcome`, `#rules`, and `#changelog` are read-only for ordinary members.
-`#announcements` is writable only by the project owner, `Founder`, and
-`Maintainer`. Discord join/leave system notices are routed to `#welcome`.
-The `STAFF` category is private. Keep `Administrator` limited to the owner;
-the setup bot's temporary Administrator grant should be downgraded after
-bootstrap.
+`#announcements` is intended for maintainers, and the `STAFF` category is
+private. Discord join/leave system notices should be routed to `#welcome`.
+Keep `Administrator` limited to the project owner and review every bot's role
+and channel access after installation.
 
 ## Bot checklist
 
@@ -109,16 +108,8 @@ Do not post passwords, API keys, private logs, or security vulnerabilities in
 Discord. Use the private GitHub security-advisory flow for security reports.
 ```
 
-## Initial bootstrap checkpoint (2026-08-09)
+## Setup note
 
-The AuraDE Community server has been provisioned with the categories and
-channels in this blueprint, the `Lounge`, `Pairing / Debug`, and `Contributor
-Hangout` voice rooms, and the scoped project roles above. The existing default
-conversation and voice rooms were reused instead of deleted. The owner has
-been assigned `Cam396 • Project Owner` and `Founder`.
-
-Project roles use scoped permissions rather than Administrator. A private
-`STAFF` category contains `staff-chat` and `mod-log`; server defaults use low
-member verification, explicit-content filtering, and mentions-only
-notifications. Join/leave notices target `#welcome`. The setup bot's existing
-Administrator grant still needs an owner-side downgrade after bootstrap.
+This page is a public community blueprint. Keep live moderation notes, bot
+bootstrap state, permission audits, and staff coordination in private
+maintainer records rather than publishing them here.

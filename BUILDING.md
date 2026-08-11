@@ -9,6 +9,13 @@ large, the first sync can take hours, and the current public repository does
 not publish a signed package repository. Treat every package and ISO produced
 by this document as development output.
 
+Choose a work directory outside the repository. The examples use a local
+default; set `AURADE_WORKDIR` to a larger separate disk when needed:
+
+```bash
+export AURADE_WORKDIR="${AURADE_WORKDIR:-$PWD/.aurade-work}"
+```
+
 ## Choose a path
 
 - **Package-source smoke:** checks and builds the ten non-Chromium packages.
@@ -20,6 +27,35 @@ by this document as development output.
 
 The maintainer-oriented details and optional candidate-controller gates are in
 [`ci/README.md`](ci/README.md).
+
+## One-command workflow
+
+On an Arch x86_64 host, the repository's orchestrator installs the host tools,
+clones depot_tools when needed, bootstraps the pinned Chromium source, creates
+the Arch validation root, builds the complete package repository, and can build
+the ISO:
+
+```bash
+./build-aurade.sh --all
+```
+
+Inspect the plan without changing the host first:
+
+```bash
+./build-aurade.sh --plan --all
+```
+
+On ARM64 or another architecture, the safe path is source preparation and
+patch verification only:
+
+```bash
+./build-aurade.sh --source-only --arch aarch64
+```
+
+That path proves the source and patch layer but deliberately does not claim a
+working ARM binary, Arch repository, or ISO. The Chromium package recipe and
+release orchestrator still need an architecture-specific build and runtime
+qualification before those targets can be enabled.
 
 ## Prerequisites
 
@@ -34,8 +70,8 @@ Use an Arch Linux host, container, or validation root. The host needs:
 
 Do not put Chromium checkouts, `chroot/`, `out/`, package caches, VM images,
 logs, or signing keys in this repository. Use a separate work directory. The
-scripts default to `/mnt/build/aurade-work`; set `AURADE_WORKDIR` when that
-location is unsuitable.
+scripts use `AURADE_WORKDIR` for build state; keep that directory outside the
+Git checkout.
 
 ## 1. Clone and run the cheap checks
 
@@ -48,6 +84,7 @@ AURADE_VERIFY_CHROMIUMOS_ASH=0 ci/arch-package-smoke.sh
 
 # Check patch names, ordering, whitespace, and package metadata before a build.
 git diff --check
+ci/public-release-leak-gate.sh
 ```
 
 Run the package smoke command inside an Arch validation root when the host is
@@ -59,11 +96,11 @@ copies the source inputs into it.
 This step requires root and may download the Arch build dependencies:
 
 ```bash
-sudo AURADE_WORKDIR=/mnt/build/aurade-work \
+sudo AURADE_WORKDIR="$AURADE_WORKDIR" \
   ./ci/bootstrap-arch-root.sh
 ```
 
-The default root is `/mnt/build/aurade-work/archroot`. To run only the cheap
+The validation root is `${AURADE_WORKDIR}/archroot`. To run only the cheap
 package smoke test there:
 
 ```bash
@@ -81,7 +118,7 @@ one. The current 33-patch series applies cleanly to the committed pin.
 ```bash
 ./ci/bootstrap-chromium-src.sh \
   --revision "$(cat pins/chromium.sha)" \
-  --target /mnt/build/aurade-work/chromium-bootstrap \
+  --target "$AURADE_WORKDIR/chromium-bootstrap" \
   --run --verify-series
 ```
 
@@ -96,19 +133,19 @@ be owned by the unprivileged build user who ran the bootstrap step.
 
 ```bash
 sudo env \
-  CHROME_SRC=/mnt/build/aurade-work/chromium-bootstrap/src \
-  AURADE_WORKDIR=/mnt/build/aurade-work \
+  CHROME_SRC="$AURADE_WORKDIR/chromium-bootstrap/src" \
+  AURADE_WORKDIR="$AURADE_WORKDIR" \
   ./ci/build-release-candidate.sh
 ```
 
 The output is promoted atomically to:
 
 ```text
-/mnt/build/aurade-work/private-repo/
+$AURADE_WORKDIR/private-repo/
 ```
 
 The builder also writes the Chromium/package source manifest to
-`/mnt/build/aurade-work/source-manifest.md`. The repository verifier writes
+`$AURADE_WORKDIR/source-manifest.md`. The repository verifier writes
 `SHA256SUMS` and rejects missing, duplicate, stale, unsigned-when-required, or
 unexpected packages.
 
@@ -117,7 +154,7 @@ the pinned build, the small-package/repository phase can be repeated without
 rebuilding Chromium:
 
 ```bash
-sudo env AURADE_WORKDIR=/mnt/build/aurade-work \
+sudo env AURADE_WORKDIR="$AURADE_WORKDIR" \
   ./ci/build-release-candidate.sh --reuse-chromium
 ```
 
@@ -136,9 +173,9 @@ First, stage and inspect an unsigned development profile:
 ```bash
 sudo env \
   AURADE_ARCH_SNAPSHOT=YYYY/MM/DD \
-  AURADE_REPO_DIR=/mnt/build/aurade-work/private-repo \
+  AURADE_REPO_DIR="$AURADE_WORKDIR/private-repo" \
   AURADE_ALLOW_UNSIGNED=1 \
-  AURADE_INSTALLER_WORK_ROOT=/mnt/build/aurade-work/installer \
+  AURADE_INSTALLER_WORK_ROOT="$AURADE_WORKDIR/installer" \
   ./installer/build-iso.sh --stage-only
 ```
 

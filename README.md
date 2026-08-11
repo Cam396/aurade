@@ -45,6 +45,7 @@ browser PWAs in the user's session.
 | `shill-nm-adapter/` | NetworkManager-to-Shill D-Bus bridge |
 | `ci/` | Patch, package, release, and VM smoke tooling |
 | `installer/` | ArchISO profile, installer, and recovery tools |
+| `build-aurade.sh` | Low-effort dependency, source, package, ISO, and test orchestrator |
 
 The current source snapshot carries 33 ordered Chromium patches and an
 11-package Arch set:
@@ -64,10 +65,22 @@ For the complete pinned build, release-repository, and ISO workflow, see
 ```bash
 git clone https://github.com/Cam396/aurade.git
 cd aurade
+export AURADE_WORKDIR="${AURADE_WORKDIR:-$PWD/.aurade-work}"
 
 # Installer and package-source checks; also builds the non-Chromium packages.
 AURADE_VERIFY_CHROMIUMOS_ASH=0 ci/arch-package-smoke.sh
 ```
+
+For the lowest-effort supported build on an Arch x86_64 host:
+
+```bash
+./build-aurade.sh --all
+```
+
+Use `./build-aurade.sh --plan --all` to inspect the workflow first. ARM64 and
+other architectures can run `./build-aurade.sh --source-only --arch aarch64`
+to clone Chromium and verify the patch series; binary and ISO production is
+not yet claimed for those targets.
 
 For a complete private repository, follow [BUILDING.md](BUILDING.md). After
 the validation root and pinned Chromium checkout are ready, the final
@@ -75,8 +88,8 @@ orchestration command is:
 
 ```bash
 sudo env \
-  CHROME_SRC=/mnt/build/aurade-work/chromium-bootstrap/src \
-  AURADE_WORKDIR=/mnt/build/aurade-work \
+  CHROME_SRC="$AURADE_WORKDIR/chromium-bootstrap/src" \
+  AURADE_WORKDIR="$AURADE_WORKDIR" \
   ./ci/build-release-candidate.sh
 ```
 
@@ -93,7 +106,7 @@ downloads tens of gigabytes and can take hours:
 ```bash
 ci/bootstrap-chromium-src.sh \
   --revision "$(cat pins/chromium.sha)" \
-  --target /mnt/build/aurade-work/chromium-bootstrap \
+  --target "$AURADE_WORKDIR/chromium-bootstrap" \
   --run --verify-series
 ```
 
@@ -107,6 +120,12 @@ Before spending build time, run the no-build integrity gate:
 ```bash
 CHROME_SRC=/path/to/chromium-bootstrap/src \
   ci/verify-patch-series.sh --expect-tree-match
+```
+
+Before tagging or attaching artifacts, run the read-only public leak gate:
+
+```bash
+ci/public-release-leak-gate.sh
 ```
 
 Do not put a Chromium checkout, `chroot/`, `out/`, package cache, VM image, or
