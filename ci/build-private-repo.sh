@@ -42,6 +42,13 @@ if [[ -n "${AURADE_NODEPS_PACKAGES:-}" ]]; then
 else
   NODEPS_PACKAGES=("${DEFAULT_NODEPS_PACKAGES[@]}")
 fi
+# Constrained builders may list package directories whose sandboxed checks
+# cannot run in their build root; normal builds leave this empty.
+if [[ -n "${AURADE_NOCHECK_PACKAGES:-}" ]]; then
+  read -r -a NOCHECK_PACKAGES <<<"${AURADE_NOCHECK_PACKAGES}"
+else
+  NOCHECK_PACKAGES=()
+fi
 
 read -r -a makepkg_flags <<<"${MAKEPKG_FLAGS:---force --syncdeps --noconfirm --clean}"
 
@@ -67,6 +74,9 @@ build_package() {
       flags+=("--nodeps")
     fi
   fi
+  if is_nocheck_package "${pkgdir}" && ! has_flag "--nocheck" "${flags[@]}"; then
+    flags+=("--nocheck")
+  fi
 
   echo "==> Building ${pkgdir}"
   (
@@ -90,6 +100,15 @@ is_nodeps_package() {
   local nodeps_pkg
   for nodeps_pkg in "${NODEPS_PACKAGES[@]}"; do
     [[ "${pkgdir}" == "${nodeps_pkg}" ]] && return 0
+  done
+  return 1
+}
+
+is_nocheck_package() {
+  local pkgdir="$1"
+  local nocheck_pkg
+  for nocheck_pkg in "${NOCHECK_PACKAGES[@]}"; do
+    [[ "${pkgdir}" == "${nocheck_pkg}" ]] && return 0
   done
   return 1
 }

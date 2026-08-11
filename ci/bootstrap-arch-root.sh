@@ -18,6 +18,7 @@ PACMAN_CACHE="${PACMAN_CACHE:-${WORKDIR}/pacman-cache}"
 PACKAGES=(
   base
   base-devel
+  bubblewrap
   git
   devtools
   namcap
