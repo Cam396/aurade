@@ -85,7 +85,6 @@ for package in "${SOURCE_PACKAGES[@]}"; do
   copy_package "${package}"
 done
 
-release_url="https://github.com/Cam396/aurade/releases/download/${RELEASE_TAG}/${RELEASE_ARCHIVE}"
 release_archive_template="${RELEASE_ARCHIVE//x86_64/\$CARCH}"
 release_url_template="https://github.com/Cam396/aurade/releases/download/${RELEASE_TAG}/${release_archive_template}"
 mkdir -p "${OUTPUT}/chromiumos-ash-bin"
