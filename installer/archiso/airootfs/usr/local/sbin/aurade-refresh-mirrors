@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Refresh the live-session mirrorlist without changing the install snapshot.
+set -Eeuo pipefail
+
+MIRRORLIST=${AURADE_MIRRORLIST:-/etc/pacman.d/mirrorlist}
+PACMAN_CONF=${AURADE_PACMAN_CONF:-/etc/pacman.conf}
+TMP=$(mktemp "${MIRRORLIST}.XXXXXX")
+trap 'rm -f -- "$TMP"' EXIT
+
+if ! command -v reflector >/dev/null 2>&1; then
+  printf '%s\n' 'aurade-refresh-mirrors: reflector is unavailable; retaining the bundled mirrorlist' >&2
+  exit 0
+fi
+
+if ! timeout 45s reflector \
+  --protocol https \
+  --latest 20 \
+  --completion-percent 100 \
+  --sort rate \
+  --save "$TMP"; then
+  printf '%s\n' 'aurade-refresh-mirrors: mirror discovery failed; retaining the bundled mirrorlist' >&2
+  exit 0
+fi
+
+if ! grep -qE '^[[:space:]]*Server[[:space:]]*=' "$TMP"; then
+  printf '%s\n' 'aurade-refresh-mirrors: reflector returned no usable servers; retaining the bundled mirrorlist' >&2
+  exit 0
+fi
+
+install -m 0644 -- "$TMP" "$MIRRORLIST"
+if grep -qE '^Server = https://archive\.archlinux\.org/repos/' "$PACMAN_CONF"; then
+  sed -i -E \
+    's|^Server = https://archive\.archlinux\.org/repos/[^[:space:]]+|Include = /etc/pacman.d/mirrorlist|' \
+    "$PACMAN_CONF"
+fi
+printf '%s\n' "aurade-refresh-mirrors: refreshed ${MIRRORLIST}" >&2

@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh AuraDE live-session Arch mirrors
+Wants=NetworkManager-online.target
+After=NetworkManager-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aurade-refresh-mirrors
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
