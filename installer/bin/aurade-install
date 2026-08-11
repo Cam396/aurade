@@ -102,6 +102,24 @@ run() {
   fi
 }
 
+run_pacstrap() {
+  if [[ $MODE == dry-run ]]; then
+    run pacstrap -K -C "$ARCH_PACMAN_CONF" "$@"
+    return
+  fi
+
+  local attempt
+  for attempt in 1 2 3; do
+    if pacstrap -K -C "$ARCH_PACMAN_CONF" "$@"; then
+      return 0
+    fi
+    if (( attempt < 3 )); then
+      log "pacstrap attempt ${attempt}/3 failed; retrying the package transaction"
+    fi
+  done
+  die 'pacstrap failed after three attempts'
+}
+
 write_target_file() {
   local relative=$1 mode=$2 content=$3
   local destination="${MOUNTPOINT%/}${relative}"
@@ -316,7 +334,8 @@ cat >"$ARCH_PACMAN_CONF" <<EOF
 [options]
 Architecture = auto
 CheckSpace
-ParallelDownloads = 5
+ParallelDownloads = 1
+DisableDownloadTimeout
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
@@ -363,7 +382,7 @@ run mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_DEVICE" "$MOUNTPOINT/ho
 run mount -o noatime,compress=zstd:3,subvol=@var_log "$ROOT_DEVICE" "$MOUNTPOINT/var/log"
 run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOINT/.snapshots"
 
-run pacstrap -K -C "$ARCH_PACMAN_CONF" "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
+run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
 run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
 
 if (( ! ALLOW_UNSIGNED )); then

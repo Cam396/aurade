@@ -75,6 +75,17 @@ also require a readable public key, a full matching fingerprint, and every
 package signature. Use `--stage-only` to validate the profile before spending
 time in `mkarchiso`.
 
+## The installer reports that an Arch download is too slow
+
+The installer uses a dated Arch snapshot so the base system stays matched to
+the package lock. The live image includes `reflector` and refreshes its live
+session mirrorlist when networking comes up, but it does not replace the
+installer's pinned snapshot with moving mirrors. The installer also uses a
+single download stream, disables pacman's low-speed abort, and retries the
+base transaction three times. If a first attempt still fails, reconnect the
+network and rerun `aurade-installer`; the target is checked and repartitioned
+only after the normal confirmation flow.
+
 ## Do not publish a workaround as a release
 
 Unsigned packages, stale ISOs, failed runtime gates, and unclassified crashes
