@@ -19,6 +19,7 @@ SOURCE_ONLY=0
 DO_BUILD=0
 DO_ISO=0
 DO_TEST=0
+DO_AUR=0
 ACTION_REQUESTED=0
 PLAN_ONLY=0
 REUSE_CHROMIUM=0
@@ -41,6 +42,7 @@ Actions:
   --packages            Build the complete 11-package repository (default).
   --iso                 Build an ISO from the verified local repository.
   --test                Run the complete VM smoke matrix after the build.
+  --aur                 Export separate AUR package upload directories.
   --plan                Print the workflow without cloning, installing, or building.
 
 Options:
@@ -270,6 +272,7 @@ while (($#)); do
     --packages) ACTION_REQUESTED=1; DO_BUILD=1; shift ;;
     --iso) ACTION_REQUESTED=1; DO_ISO=1; shift ;;
     --test) ACTION_REQUESTED=1; DO_TEST=1; shift ;;
+    --aur) ACTION_REQUESTED=1; DO_AUR=1; shift ;;
     --plan) PLAN_ONLY=1; shift ;;
     --repo) REPO_URL=${2:?}; shift 2 ;;
     --ref) REPO_REF=${2:?}; shift 2 ;;
@@ -291,13 +294,19 @@ if (( PLAN_ONLY )); then
   log "repository: $REPO_URL ($REPO_REF)"
   log "workdir: $WORKDIR"
   log "target architecture: $(canonical_arch "$TARGET_ARCH")"
-  log "actions: build=$DO_BUILD iso=$DO_ISO test=$DO_TEST source_only=$SOURCE_ONLY"
+  log "actions: build=$DO_BUILD iso=$DO_ISO test=$DO_TEST aur=$DO_AUR source_only=$SOURCE_ONLY"
   log "dependency installation: $((NO_DEPS ? 0 : 1))"
   exit 0
 fi
 mkdir -p "$WORKDIR"
 TARGET_ARCH=$(canonical_arch "$TARGET_ARCH")
 locate_repo
+if (( DO_AUR && !DO_BUILD && !DO_ISO && !DO_TEST && !SOURCE_ONLY )); then
+  log 'exporting AUR package bundles without installing build dependencies'
+  AURADE_WORKDIR="$WORKDIR" "$REPO_ROOT/ci/export-aur-bundles.sh"
+  log 'AuraDE AUR export complete'
+  exit 0
+fi
 install_dependencies
 run_installer_tests
 if (( DO_BUILD || SOURCE_ONLY )); then
@@ -322,6 +331,11 @@ fi
 
 if (( DO_TEST )); then
   run_vm_tests
+fi
+
+if (( DO_AUR )); then
+  log 'exporting AUR package bundles'
+  AURADE_WORKDIR="$WORKDIR" "$REPO_ROOT/ci/export-aur-bundles.sh"
 fi
 
 log 'AuraDE AIO workflow complete'
