@@ -46,6 +46,8 @@ fi
 grep -Fq -- '--typecode=2:8300' "$TMP/plain.out"
 grep -Fq -- 'aurade-powerd.service aurade-host-bridge.service aurade-greetd.service' \
   "$TMP/plain.out"
+grep -Fq -- 'seatd.service aurade-powerd.service' "$TMP/plain.out"
+grep -Fq -- 'useradd -m -G wheel\,audio\,video\,input\,storage\,seat' "$TMP/plain.out"
 grep -Fq -- '/boot/aurade-rollback/factory/vmlinuz-linux' "$TMP/plain.out"
 grep -Fq -- 'intel-ucode' "$TMP/plain.out"
 grep -Fq -- 'amd-ucode' "$TMP/plain.out"

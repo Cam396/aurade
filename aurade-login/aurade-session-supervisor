@@ -42,15 +42,23 @@ fi
 }
 stop_grace_seconds="${AURADE_SUPERVISOR_STOP_GRACE_SECONDS:-15}"
 stop_kill_seconds="${AURADE_SUPERVISOR_STOP_KILL_SECONDS:-5}"
+max_session_failures="${AURADE_SUPERVISOR_MAX_SESSION_FAILURES:-3}"
+retry_delay_seconds="${AURADE_SUPERVISOR_RETRY_DELAY_SECONDS:-2}"
 for duration in "${stop_grace_seconds}" "${stop_kill_seconds}"; do
   if [[ ! "${duration}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     echo "aurade-session-supervisor: invalid stop timeout" >&2
     exit 2
   fi
 done
+if [[ ! "${max_session_failures}" =~ ^[1-9][0-9]*$ ||
+      ! "${retry_delay_seconds}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "aurade-session-supervisor: invalid session retry policy" >&2
+  exit 2
+fi
 restart_requested=0
 stopping=0
 child_pid=""
+session_failures=0
 pid_tmp="${pid_file}.$$"
 
 fail_state() {
@@ -170,6 +178,20 @@ while [[ "${stopping}" == 0 ]]; do
   if [[ "${restart_requested}" == 1 ]]; then
     sleep 1
     continue
+  fi
+
+  # A compositor can fail transiently while logind/seatd is still assigning
+  # the DRM device. Keep the authenticated session alive for a bounded retry
+  # window instead of immediately returning to tuigreet and making a correct
+  # password look like a login failure. A clean exit remains a real sign-out.
+  if [[ "${status}" != 0 ]]; then
+    session_failures=$((session_failures + 1))
+    if (( session_failures < max_session_failures )); then
+      echo "aurade-session-supervisor: session exited with status ${status}; retry ${session_failures}/${max_session_failures}" >&2
+      sleep "${retry_delay_seconds}"
+      continue
+    fi
+    echo "aurade-session-supervisor: session failed ${session_failures} times; returning to greeter" >&2
   fi
 
   exit "${status}"
