@@ -94,6 +94,18 @@ the base install. The image still keeps the dated snapshot rather than
 silently switching to moving Reflector mirrors. The live `sshd` service is not
 enabled by default; start it manually only after setting credentials.
 
+### `keyring is not writable` or the installer keeps downloading the same packages
+
+Use an ISO built after the writable-keyring fix. The installer now includes
+`archlinux-keyring`, initializes a private writable keyring under its temporary
+work directory, and uses isolated pacman database/cache paths. It also stops
+immediately on a keyring or signature error instead of retrying the full
+package set. An older ISO cannot receive this fix without being rebuilt.
+
+If a rebuilt ISO still stops at this point, verify the live clock and network
+before retrying. The failure is intentionally reported before `wipefs` or
+`sgdisk`, so the target disk remains unchanged.
+
 ## Do not publish a workaround as a release
 
 Unsigned packages, stale ISOs, failed runtime gates, and unclassified crashes
