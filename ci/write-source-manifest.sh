@@ -37,7 +37,7 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
     echo
     echo "## Chromium Worktree Status"
     echo
-    git -C "${CHROME_SRC}" status --short || true
+    echo "- omitted from the public manifest; the build input is identified by the pinned revision above"
   else
     echo "- Chromium revision: unavailable"
   fi
