@@ -28,6 +28,11 @@ export AURADE_WORKDIR="${AURADE_WORKDIR:-$PWD/.aurade-work}"
 The maintainer-oriented details and optional candidate-controller gates are in
 [`ci/README.md`](ci/README.md).
 
+The full-build CI decision and runner sizing are documented in
+[`CI-BUILD-STRATEGY.md`](CI-BUILD-STRATEGY.md). In short, standard public
+GitHub-hosted runners are for the cheap checks; use a protected warm runner for
+the Chromium/package/ISO release job.
+
 ## One-command workflow
 
 On an Arch x86_64 host, the repository's orchestrator installs the host tools,

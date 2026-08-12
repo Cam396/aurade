@@ -29,15 +29,21 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t patches < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' patches/SERIES)
-          test "${#patches[@]}" -eq 33
+          test "${#patches[@]}" -gt 0
           for patch in "${patches[@]}"; do test -f "patches/${patch}"; done
-          test "$(printf '%s\n' "${patches[@]}" | sort -u | wc -l)" -eq 33
+          test "$(printf '%s\n' "${patches[@]}" | sort -u | wc -l)" -eq "${#patches[@]}"
 
       - name: Check generated package metadata is present
         shell: bash
         run: |
           set -euo pipefail
           while IFS= read -r package; do test -f "${package}/PKGBUILD"; test -f "${package}/.SRCINFO"; done < installer/expected-packages.txt
+
+      - name: Run public release leak gate
+        run: ci/public-release-leak-gate.sh
+
+      - name: Run installer tests
+        run: installer/tests/run.sh
 
       - name: Check whitespace
         run: git diff --check

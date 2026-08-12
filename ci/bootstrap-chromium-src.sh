@@ -23,7 +23,7 @@ ci/verify-patch-series.sh and build-chromeos-ash.sh via CHROME_SRC.
 
 Options:
   --revision SHA   Chromium src revision to pin. Default: HEAD of
-                   chromium_dev/src when present.
+                   chromium_dev/src when present, otherwise pins/chromium.sha.
   --target DIR     Checkout parent directory (holds .gclient and src/).
                    Default: /mnt/build/aurade-work/chromium-bootstrap
   --run            Actually perform the sync. Without this flag the script
@@ -68,11 +68,17 @@ done
 if [[ -z "${REVISION}" ]]; then
   if [[ -d "${REPO_ROOT}/chromium_dev/src/.git" ]]; then
     REVISION="$(git -C "${REPO_ROOT}/chromium_dev/src" rev-parse HEAD)"
+  elif [[ -r "${REPO_ROOT}/pins/chromium.sha" ]]; then
+    REVISION="$(tr -d '[:space:]' < "${REPO_ROOT}/pins/chromium.sha")"
   else
-    echo "No --revision given and no chromium_dev/src to derive it from." >&2
+    echo "No --revision given, no chromium_dev/src, and no pins/chromium.sha." >&2
     exit 2
   fi
 fi
+[[ "${REVISION}" =~ ^[0-9a-fA-F]{40}$ ]] || {
+  echo "Chromium revision must be a 40-character commit SHA: ${REVISION}" >&2
+  exit 2
+}
 
 if [[ ! -x "${DEPOT_TOOLS}/gclient" ]]; then
   echo "depot_tools not found at ${DEPOT_TOOLS} (set AURADE_DEPOT_TOOLS)." >&2

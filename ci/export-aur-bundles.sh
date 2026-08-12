@@ -34,6 +34,31 @@ die() {
   exit 1
 }
 
+generate_srcinfo() {
+  local package_dir="$1"
+  local generated
+  command -v makepkg >/dev/null 2>&1 || return 0
+  generated="${package_dir}/.SRCINFO.generated"
+
+  if (( EUID == 0 )); then
+    local build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
+    if ! command -v runuser >/dev/null 2>&1 || ! getent passwd "${build_user}" >/dev/null; then
+      printf 'export-aur-bundles: makepkg available but no unprivileged build user; regenerate .SRCINFO with makepkg before upload\n' >&2
+      return 0
+    fi
+    # makepkg checks that its build directory is writable even for
+    # --printsrcinfo. The exporter itself may run as root, so hand this
+    # package directory to the dedicated unprivileged build user first.
+    chown -R "${build_user}:" "${package_dir}"
+    runuser -u "${build_user}" -- bash -c 'cd -- "$1" && makepkg --printsrcinfo' \
+      bash "${package_dir}" >"${generated}"
+  else
+    (cd "${package_dir}" && makepkg --printsrcinfo >"${generated}")
+  fi
+  install -m 0644 "${generated}" "${package_dir}/.SRCINFO"
+  rm -f -- "${generated}"
+}
+
 [[ "${OUTPUT}" = /* && "${OUTPUT}" != / ]] ||
   die 'AURADE_AUR_OUTPUT must be an absolute, non-root path'
 [[ "${RELEASE_TAG}" =~ ^[A-Za-z0-9._/-]+$ ]] ||
@@ -58,6 +83,13 @@ copy_package() {
     die "missing package directory: ${package}"
   mkdir -p "${package_dir}"
   cp -a "${REPO_ROOT}/${package}/." "${package_dir}/"
+  local modified=0
+  if (( EUID == 0 )) && command -v chown >/dev/null 2>&1; then
+    local build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
+    if getent passwd "${build_user}" >/dev/null; then
+      chown -R "${build_user}:" "${package_dir}"
+    fi
+  fi
 
   # AUR helpers resolve dependency names before installing packages. Point
   # the generated meta/session helpers at the explicit -bin provider rather
@@ -67,13 +99,19 @@ copy_package() {
       sed -i 's/chromiumos-ash>=/chromiumos-ash-bin>=/' \
         "${package_dir}/PKGBUILD"
       rm -f "${package_dir}/.SRCINFO"
+      modified=1
       ;;
     aurade-login|aurade-webapp-shortcuts)
       sed -i "s/'chromiumos-ash'/'chromiumos-ash-bin'/g" \
         "${package_dir}/PKGBUILD"
       rm -f "${package_dir}/.SRCINFO"
+      modified=1
       ;;
   esac
+
+  if (( modified )); then
+    generate_srcinfo "${package_dir}"
+  fi
 
   find "${package_dir}" -type f -size +50M -print -quit | {
     read -r oversized || true
@@ -177,9 +215,17 @@ package() {
         return 1
     }
     bsdtar --exclude='.BUILDINFO' --exclude='.MTREE' --exclude='.PKGINFO' \\
-        -xpf "\${payload}" -C "\${pkgdir}"
+        --no-same-owner -xpf "\${payload}" -C "\${pkgdir}"
 }
 EOF
+
+if (( EUID == 0 )) && command -v chown >/dev/null 2>&1; then
+  build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
+  if getent passwd "${build_user}" >/dev/null; then
+    chown -R "${build_user}:" "${OUTPUT}/chromiumos-ash-bin"
+  fi
+fi
+generate_srcinfo "${OUTPUT}/chromiumos-ash-bin"
 
 commit="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD 2>/dev/null || printf unknown)"
 cat >"${OUTPUT}/AUR-EXPORT.md" <<EOF
@@ -198,8 +244,10 @@ chromiumos-ash for manual installs; generated AUR meta/session packages use
 the explicit chromiumos-ash-bin dependency so AUR helpers resolve it.
 There is no ARM binary claim.
 
-Before upload, run makepkg --printsrcinfo as an unprivileged Arch user,
-namcap PKGBUILD, and makepkg --verifysource in every directory.
+When an unprivileged Arch build user and \`makepkg\` are available, the exporter
+regenerates \`.SRCINFO\` for transformed/generated packages. Otherwise, run
+\`makepkg --printsrcinfo\` as an unprivileged Arch user before upload. In every
+case, run \`namcap PKGBUILD\` and \`makepkg --verifysource\` in every directory.
 Do not upload the parent repository, private engineering documents, VM
 credentials, build logs, ISO files, or package archives to an AUR package repo.
 EOF
