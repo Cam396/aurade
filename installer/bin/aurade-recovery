@@ -70,16 +70,11 @@ case "$COMMAND" in
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     destination=$SNAPSHOT_DIR/manual-${stamp}-${LABEL}/snapshot
     [[ ! -e $destination ]] || { echo "aurade-recovery: snapshot exists: $destination" >&2; exit 1; }
-    install -d -m 0750 "$(dirname "$destination")"
-    btrfs subvolume snapshot -r "$ROOT" "$destination"
+    normal_entry=$ENTRY_DIR/aurade.conf
+    rollback_entry=$ENTRY_DIR/aurade-rollback.conf
+    artifact_paths=()
     if (( SET_ROLLBACK )); then
-      normal_entry=$ENTRY_DIR/aurade.conf
-      rollback_entry=$ENTRY_DIR/aurade-rollback.conf
-      snapshot_name=$(basename "$(dirname "$destination")")
-      snapshot_subvolume=@snapshots/$snapshot_name/snapshot
-      rollback_boot_dir=$ROOT/boot/aurade-rollback/$snapshot_name
       [[ -r $normal_entry ]] || { echo "aurade-recovery: missing entry: $normal_entry" >&2; exit 1; }
-      install -d -m 0755 "$rollback_boot_dir"
       while read -r artifact; do
         [[ $artifact == /* && $artifact != *..* ]] || {
           echo "aurade-recovery: unsafe boot artifact path: $artifact" >&2
@@ -89,8 +84,32 @@ case "$COMMAND" in
           echo "aurade-recovery: missing boot artifact: $ROOT/boot$artifact" >&2
           exit 1
         }
-        install -m 0644 "$ROOT/boot$artifact" "$rollback_boot_dir/$(basename "$artifact")"
+        artifact_paths+=("$artifact")
       done < <(awk '$1 == "linux" || $1 == "initrd" { print $2 }' "$normal_entry")
+      ((${#artifact_paths[@]} > 0)) || { echo 'aurade-recovery: normal boot entry has no artifacts' >&2; exit 1; }
+      required_bytes=0
+      for artifact in "${artifact_paths[@]}"; do
+        artifact_bytes=$(stat -c '%s' "$ROOT/boot$artifact")
+        required_bytes=$((required_bytes + artifact_bytes))
+      done
+      available_bytes=$(df -B1 --output=avail "$ROOT/boot" | awk 'NR == 2 {print $1}')
+      reserve_bytes=${AURADE_ROLLBACK_RESERVE_BYTES:-33554432}
+      [[ $available_bytes =~ ^[0-9]+$ ]] || { echo 'aurade-recovery: could not measure ESP free space' >&2; exit 1; }
+      (( available_bytes >= required_bytes + reserve_bytes )) || {
+        echo "aurade-recovery: not enough ESP space for rollback artifacts (need $((required_bytes + reserve_bytes)) bytes, have $available_bytes)" >&2
+        exit 1
+      }
+    fi
+    install -d -m 0750 "$(dirname "$destination")"
+    btrfs subvolume snapshot -r "$ROOT" "$destination"
+    if (( SET_ROLLBACK )); then
+      snapshot_name=$(basename "$(dirname "$destination")")
+      snapshot_subvolume=@snapshots/$snapshot_name/snapshot
+      rollback_boot_dir=$ROOT/boot/aurade-rollback/$snapshot_name
+      install -d -m 0755 "$rollback_boot_dir"
+      for artifact in "${artifact_paths[@]}"; do
+        install -m 0644 "$ROOT/boot$artifact" "$rollback_boot_dir/$(basename "$artifact")"
+      done
       rollback_tmp=$(mktemp "${rollback_entry}.tmp.XXXXXX")
       trap 'rm -f "${rollback_tmp:-}"' EXIT
       awk -v subvolume="$snapshot_subvolume" -v label="$LABEL" -v boot_id="$snapshot_name" '

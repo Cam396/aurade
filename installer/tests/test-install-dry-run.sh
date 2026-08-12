@@ -47,6 +47,13 @@ grep -Fq -- '--typecode=2:8300' "$TMP/plain.out"
 grep -Fq -- 'aurade-powerd.service aurade-host-bridge.service aurade-greetd.service' \
   "$TMP/plain.out"
 grep -Fq -- '/boot/aurade-rollback/factory/vmlinuz-linux' "$TMP/plain.out"
+grep -Fq -- 'intel-ucode' "$TMP/plain.out"
+grep -Fq -- 'amd-ucode' "$TMP/plain.out"
+grep -Fq -- 'sof-firmware' "$TMP/plain.out"
+grep -Fq -- 'file:///var/cache/aurade/repo' "$ROOT/installer/bin/aurade-install"
+acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
+wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
+(( acquire_line < wipe_line ))
 if grep -Fq -- 'cryptsetup luksFormat' "$TMP/plain.out"; then
   echo 'unencrypted plan unexpectedly formats LUKS' >&2
   exit 1
