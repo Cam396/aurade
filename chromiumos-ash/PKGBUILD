@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=152.1660893
-pkgrel=4
+pkgrel=5
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -112,6 +112,8 @@ source=(
     'chromiumos-ash.sh'
     'chromiumos-ash-session.sh'
     'chromiumos-ash-session-child.sh'
+    'aurade-session-error'
+    'test-session-error.sh'
     'chromiumos-ash.desktop'
     'chromiumos-ash-wayland.desktop'
     'aurade.features.conf'
@@ -126,8 +128,10 @@ source=(
 )
 noextract=()
 sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
-            '6008d05c99cc53cccc669edf7aee725c0ab7689518a6bf94fdda1f99727ade06'
+            '78c9f9e64f696a74eb3ddc34ce1fca8757fed61ff72fbe377df2cb5152b7af7f'
             '4bc9eacc89c24a020ba2dc6af48fe569e51a54bb9567d1a1482eb7b8df215110'
+            '55f5c29ca897e9dc28d5e681a5e628b1afebe9ae4aefad11098ee370fd5dece1'
+            '20b17ccdb87b0d1562653bc72d10e52adfa0bd900f53a54a7b4e39829c67b33a'
             'f8c199d491d42a562e573592dd4f3fc66306f27e95c901e85fdd7360842fe821'
             '7c149f0add02dbed69c642bb8a057d9d921e8b4fc4effd85123ffb30f43a7d23'
             '84ea9c1d5108606f8db4ff4664847628bb9510a3e1b0d54adf49aad0143bd017'
@@ -140,6 +144,10 @@ sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
             'faf6afb84f522cedf3ea7e707e14177470001cc87be757466af172a79635d0d2'
             'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
 backup=('etc/aurade/features.conf')
+
+check() {
+    bash "${srcdir}/test-session-error.sh" "${srcdir}/aurade-session-error"
+}
 
 build() {
     # CHROME_SRC must point to a synced+patched ChromiumOS src dir
@@ -317,6 +325,8 @@ EOF
         "${pkgdir}/usr/bin/chromiumos-ash-session"
     install -Dm755 "${srcdir}/chromiumos-ash-session-child.sh" \
         "${pkgdir}/usr/bin/chromiumos-ash-session-child"
+    install -Dm755 "${srcdir}/aurade-session-error" \
+        "${pkgdir}/usr/bin/aurade-session-error"
 
     # Install X11 session entry for display managers.
     install -Dm644 "${srcdir}/chromiumos-ash.desktop" \
