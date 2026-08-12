@@ -18,7 +18,7 @@ bundle_default=/opt/aurade/repo
 repo_key_default=$bundle_default/aurade-repository.gpg
 fingerprint_default=
 [[ ! -r /etc/aurade-installer/repo-fingerprint ]] || read -r fingerprint_default </etc/aurade-installer/repo-fingerprint
-repo_url_default=https://repo.aurade.invalid/stable/x86_64
+repo_url_default=file:///var/cache/aurade/repo
 [[ ! -r /etc/aurade-installer/repo-url ]] || read -r repo_url_default </etc/aurade-installer/repo-url
 
 printf '%s\n' 'AuraDE installer' 'This program will show a dry-run plan before it can erase a disk.' ''
@@ -31,6 +31,15 @@ read -r hostname
 hostname=${hostname:-aurade}
 printf 'Initial username: '
 read -r username
+printf 'Timezone [UTC]: '
+read -r timezone
+timezone=${timezone:-UTC}
+printf 'Locale [en_US.UTF-8]: '
+read -r locale
+locale=${locale:-en_US.UTF-8}
+printf 'Keyboard layout [us]: '
+read -r keymap
+keymap=${keymap:-us}
 printf 'Arch snapshot [%s]: ' "$snapshot_default"
 read -r snapshot
 snapshot=${snapshot:-$snapshot_default}
@@ -73,6 +82,9 @@ common_args=(
   --target "$target"
   --hostname "$hostname"
   --username "$username"
+  --timezone "$timezone"
+  --locale "$locale"
+  --keymap "$keymap"
   --password-hash-file "$secret_dir/password.hash"
   --arch-snapshot "$snapshot"
   --bundle-dir "$bundle_default"

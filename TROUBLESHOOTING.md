@@ -86,6 +86,14 @@ base transaction three times. If a first attempt still fails, reconnect the
 network and rerun `aurade-installer`; the target is checked and repartitioned
 only after the normal confirmation flow.
 
+The installer now acquires and verifies the complete pinned Arch package
+closure before `wipefs` or `sgdisk` runs. After acquisition it builds a local
+file repository and pacstraps from that cache, so a transfer failure cannot
+leave an existing installation erased and a later network drop cannot break
+the base install. The image still keeps the dated snapshot rather than
+silently switching to moving Reflector mirrors. The live `sshd` service is not
+enabled by default; start it manually only after setting credentials.
+
 ## Do not publish a workaround as a release
 
 Unsigned packages, stale ISOs, failed runtime gates, and unclassified crashes

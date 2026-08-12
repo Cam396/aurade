@@ -13,6 +13,7 @@ while IFS= read -r name; do
   bsdtar -cf "$TMP/repo/${name}-1.0-1-any.pkg.tar.zst" \
     -C "$TMP/package" .PKGINFO
 done <"$ROOT/installer/expected-packages.txt"
+printf '%s\n' 'local repository database' >"$TMP/repo/aurade.db.tar.gz"
 printf '%s\n' 'must not enter the image' >"$TMP/repo/private-signing-key.txt"
 
 env \
@@ -29,11 +30,13 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
 [[ $actual -eq $expected ]]
 [[ ! -e $staged/private-signing-key.txt ]]
 [[ -r $staged/packages.lock ]]
+[[ -r $staged/aurade.db.tar.gz ]]
 (cd "$staged" && sha256sum -c \
   <(awk '!/^#/ {print $1 "  " $2}' packages.lock)) >/dev/null
 grep -Fxq reflector "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
+[[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
 
 echo 'installer ISO staging test: PASS'

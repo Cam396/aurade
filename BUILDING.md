@@ -190,6 +190,16 @@ recovery. The live `root` account has an empty password on the console;
 installed system. The live root console is intentionally separate from the
 installed AuraDE login flow.
 
+The installer performs a pre-destructive acquisition phase: it downloads and
+verifies the complete dated Arch package closure, creates a temporary local
+repository, and only then permits disk erasure. The post-install repository
+defaults to the staged local `file:///var/cache/aurade/repo` database for this
+unsigned development image; pass a real HTTPS repository URL and signing key
+for a beta image. The installer requires UEFI, installs both Intel and AMD
+microcode, selects the matching initrd at install time, and checks boot
+artifacts, enabled services, the locked root account, and repository contents
+before reporting success.
+
 Do not call an unsigned ISO stable, publish it as a supported download, or
 install it on a machine whose data cannot be restored.
 
