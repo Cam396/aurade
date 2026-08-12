@@ -148,7 +148,7 @@ build() {
 
     if [ ! -d "${chrome_src}" ]; then
         echo "ERROR: CHROME_SRC not found at ${chrome_src}"
-        echo "Run 'build-chromeos-ash.sh prepare' first."
+        echo "Run 'ci/bootstrap-chromium-src.sh --run' first."
         exit 1
     fi
 

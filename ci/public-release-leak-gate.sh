@@ -33,11 +33,13 @@ scan_current_and_history() {
   : >"$history"
 
   git -C "$ROOT" grep -I -n -E "$pattern" -- . \
-    ':!patches/**' ':!assets/**' ':!ci/public-release-leak-gate.sh' >"$current" 2>/dev/null || true
+    ':!assets/**' ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.ico' ':!*.webp' \
+    ':!ci/public-release-leak-gate.sh' >"$current" 2>/dev/null || true
   mapfile -t commits < <(git -C "$ROOT" rev-list --all)
   if ((${#commits[@]})); then
     git -C "$ROOT" grep -I -n -E "$pattern" "${commits[@]}" -- . \
-      ':!patches/**' ':!assets/**' ':!ci/public-release-leak-gate.sh' >"$history" 2>/dev/null || true
+      ':!assets/**' ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.ico' ':!*.webp' \
+      ':!ci/public-release-leak-gate.sh' >"$history" 2>/dev/null || true
   fi
   cat "$current" "$history" >"$TMP/${label}.all"
   report_matches "$label" "$pattern" "$TMP/${label}.all"
@@ -85,7 +87,7 @@ fi
 # These are public-facing status terms, not credentials. Keep the count visible
 # so a maintainer reviews changes without making ordinary release notes fail.
 git -C "$ROOT" grep -I -n -E 'NetworkService|SIGSEGV|coredump|private staff|Administrator' -- . \
-  ':!patches/**' ':!assets/**' >"$TMP/operational-review" 2>/dev/null || true
+  ':!assets/**' ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.ico' ':!*.webp' >"$TMP/operational-review" 2>/dev/null || true
 if [[ -s "$TMP/operational-review" ]]; then
   reviews=$(wc -l <"$TMP/operational-review")
 fi
