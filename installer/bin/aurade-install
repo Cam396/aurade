@@ -26,7 +26,7 @@ TIMEZONE=UTC
 LOCALE=en_US.UTF-8
 KEYMAP=us
 BASE_PACKAGES=(
-  base linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs dosfstools cryptsetup
+  base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs dosfstools cryptsetup
   gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
   pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
   xdg-utils polkit openssh bluez bluez-utils vim
@@ -41,6 +41,9 @@ WORK_DIR=
 ARCH_PACMAN_CONF=
 ARCH_LOCAL_PACMAN_CONF=
 ARCH_CACHE=
+ARCH_GPG_DIR=
+ARCH_DB_PATH=
+ARCH_LOG_FILE=
 MICROCODE_IMAGE=
 
 usage() {
@@ -106,16 +109,69 @@ run() {
   fi
 }
 
+run_logged() {
+  local log_path=$1
+  shift
+  if "$@" 2>&1 | tee -a "$log_path"; then
+    return 0
+  fi
+  local statuses=("${PIPESTATUS[@]}")
+  return "${statuses[0]}"
+}
+
+pacman_keyring_failure() {
+  local log_path=$1
+  grep -Eiq -- \
+    'keyring.*(not writable|permission denied|not found)|public keyring not found|required key missing from keyring|failed to initialize|unknown trust|invalid or corrupted.*PGP signature|signature from .* is unknown trust|GPGME error|could not open keyring|unknown public key' \
+    "$log_path"
+}
+
+die_keyring_failure() {
+  die 'pacman keyring/signature setup failed; package downloads were stopped instead of being retried. Check that the ISO contains archlinux-keyring, that the system clock is correct, and that the network is reachable'
+}
+
+prepare_arch_keyring() {
+  command -v pacman-key >/dev/null || die 'pacman-key is required to initialize the writable Arch keyring'
+  command -v gpg >/dev/null || die 'gpg is required to initialize the writable Arch keyring'
+  install -d -m 0700 "$ARCH_GPG_DIR"
+
+  # ArchISO may ship /etc/pacman.d/gnupg from a read-only squashfs. Copy only
+  # public state into the installer work directory; never copy private keys.
+  local keyring_file
+  for keyring_file in pubring.gpg trustdb.gpg gpg.conf dirmngr.conf dirmngr_ldapserver.conf; do
+    if [[ -r /etc/pacman.d/gnupg/$keyring_file ]]; then
+      cp -a --no-preserve=ownership \
+        "/etc/pacman.d/gnupg/$keyring_file" "$ARCH_GPG_DIR/$keyring_file"
+    fi
+  done
+  chmod -R u+rwX,go-rwx "$ARCH_GPG_DIR"
+
+  if [[ ! -s $ARCH_GPG_DIR/pubring.gpg || ! -s $ARCH_GPG_DIR/trustdb.gpg ]]; then
+    log 'initializing the writable Arch pacman keyring'
+    pacman-key --gpgdir "$ARCH_GPG_DIR" --init || die_keyring_failure
+  fi
+  [[ -r /usr/share/keyrings/archlinux.gpg ]] || \
+    die 'the ISO is missing /usr/share/keyrings/archlinux.gpg; include the archlinux-keyring package'
+  pacman-key --gpgdir "$ARCH_GPG_DIR" --populate archlinux || die_keyring_failure
+  [[ -r $ARCH_GPG_DIR/pubring.gpg && -r $ARCH_GPG_DIR/trustdb.gpg && -w $ARCH_GPG_DIR ]] || \
+    die_keyring_failure
+}
+
 run_pacstrap() {
   if [[ $MODE == dry-run ]]; then
-    run pacstrap -M -C "$ARCH_PACMAN_CONF" "$@"
+    run pacstrap -M -G -C "$ARCH_PACMAN_CONF" "$@"
     return
   fi
 
   local attempt
   for attempt in 1 2 3; do
-    if pacstrap -M -C "$ARCH_LOCAL_PACMAN_CONF" "$@"; then
+    local attempt_log="$WORK_DIR/pacstrap-${attempt}.log"
+    : >"$attempt_log"
+    if run_logged "$attempt_log" pacstrap -M -G -C "$ARCH_LOCAL_PACMAN_CONF" "$@"; then
       return 0
+    fi
+    if pacman_keyring_failure "$attempt_log"; then
+      die_keyring_failure
     fi
     if (( attempt < 3 )); then
       log "pacstrap attempt ${attempt}/3 failed; retrying the package transaction"
@@ -148,15 +204,20 @@ acquire_arch_packages() {
   local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
   for attempt in 1 2 3; do
     rm -f -- "$ARCH_CACHE"/*
+    local attempt_log="$WORK_DIR/arch-acquire-${attempt}.log"
+    : >"$attempt_log"
     log "acquiring the pinned Arch package set before touching $TARGET (attempt ${attempt}/3)"
-    if timeout --foreground "$acquire_timeout" \
+    if run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
           --disable-sandbox -Syy --noconfirm && \
-       timeout --foreground "$acquire_timeout" \
+       run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
-          --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
+        --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
       acquired=1
       break
+    fi
+    if pacman_keyring_failure "$attempt_log"; then
+      die_keyring_failure
     fi
     (( attempt < 3 )) && log 'Arch package acquisition failed; retrying without altering the target disk'
   done
@@ -173,6 +234,7 @@ acquire_arch_packages() {
 Architecture = auto
 CheckSpace
 ParallelDownloads = 1
+GPGDir = ${ARCH_GPG_DIR}
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Required
 
@@ -220,6 +282,9 @@ cleanup() {
   fi
   if (( CRYPT_OPENED )); then
     cryptsetup close "$CRYPT_NAME" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${ARCH_GPG_DIR:-} && -d ${ARCH_GPG_DIR:-} ]] && command -v gpgconf >/dev/null 2>&1; then
+    gpgconf --homedir "$ARCH_GPG_DIR" --kill all >/dev/null 2>&1 || true
   fi
   [[ -z ${WORK_DIR:-} ]] || rm -rf -- "$WORK_DIR"
   exit "$status"
@@ -411,7 +476,7 @@ if [[ $MODE == execute ]]; then
     break
   done
   log "target identity: model=${target_model:-unknown} serial=${target_serial:-unknown} transport=${target_transport:-unknown} by-id=${target_by_id:-unavailable}"
-  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap repo-add arch-chroot genfstab bootctl blkid timeout; do
+  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
 fi
@@ -423,12 +488,20 @@ WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
 ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
 ARCH_CACHE=$WORK_DIR/arch-cache
+ARCH_GPG_DIR=$WORK_DIR/gnupg
+ARCH_DB_PATH=$WORK_DIR/pacman-db
+ARCH_LOG_FILE=$WORK_DIR/pacman.log
+install -d -m 0755 "$ARCH_CACHE" "$ARCH_DB_PATH"
 cat >"$ARCH_PACMAN_CONF" <<EOF
 [options]
 Architecture = auto
 CheckSpace
 ParallelDownloads = 1
 DisableDownloadTimeout
+DBPath = ${ARCH_DB_PATH}
+CacheDir = ${ARCH_CACHE}
+GPGDir = ${ARCH_GPG_DIR}
+LogFile = ${ARCH_LOG_FILE}
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
@@ -438,6 +511,10 @@ Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
 [extra]
 Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
 EOF
+
+if [[ $MODE == execute ]]; then
+  prepare_arch_keyring
+fi
 
 # This is deliberately before wipefs/sgdisk. A stalled archive or broken
 # network must fail while the existing installation is still intact.
@@ -481,6 +558,9 @@ run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOI
 
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
 run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
+run install -d -m 0700 "$MOUNTPOINT/etc/pacman.d/gnupg"
+run cp -a --no-preserve=ownership "$ARCH_GPG_DIR/." "$MOUNTPOINT/etc/pacman.d/gnupg/"
+run chmod -R u+rwX,go-rwx "$MOUNTPOINT/etc/pacman.d/gnupg"
 
 if (( ! ALLOW_UNSIGNED )); then
   run install -Dm0644 "$REPO_KEY" "$MOUNTPOINT/usr/share/pacman/keyrings/aurade-repository.gpg"
