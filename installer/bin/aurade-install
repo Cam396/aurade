@@ -123,12 +123,33 @@ run_logged() {
 pacman_keyring_failure() {
   local log_path=$1
   grep -Eiq -- \
-    'keyring.*(not writable|permission denied|not found)|public keyring not found|required key missing from keyring|failed to initialize|unknown trust|invalid or corrupted.*PGP signature|signature from .* is unknown trust|GPGME error|could not open keyring|unknown public key' \
+    'keyring.*(not writable|permission denied|not found)|public keyring not found|required key missing from keyring|failed to initialize|unknown trust|signature from .* is unknown trust|GPGME error|could not open keyring|unknown public key|no public key|cannot check signature|keydb_search failed' \
     "$log_path"
 }
 
 die_keyring_failure() {
   die 'pacman keyring/signature setup failed; package downloads were stopped instead of being retried. Check that the ISO contains archlinux-keyring, that the system clock is correct, and that the network is reachable'
+}
+
+verify_arch_package_signatures() {
+  local log_path=$1 package signature failure=0
+  [[ -r $ARCH_GPG_DIR/pubring.gpg ]] || {
+    printf '%s\n' 'Arch package keyring has no public keyring file' >>"$log_path"
+    return 1
+  }
+  for package in "${ARCH_PACKAGE_FILES[@]}"; do
+    signature=${package}.sig
+    if [[ ! -r $signature ]]; then
+      printf 'missing Arch package signature: %s\n' "${package##*/}" >>"$log_path"
+      failure=1
+      continue
+    fi
+    if ! gpgv --keyring "$ARCH_GPG_DIR/pubring.gpg" "$signature" "$package" >>"$log_path" 2>&1; then
+      printf 'invalid Arch package signature: %s\n' "${package##*/}" >>"$log_path"
+      failure=1
+    fi
+  done
+  return "$failure"
 }
 
 prepare_arch_keyring() {
@@ -204,7 +225,7 @@ acquire_arch_packages() {
   command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
   install -d -m 0755 "$ARCH_CACHE"
 
-  local attempt acquired=0
+  local attempt acquired=0 signature_failure_seen=0
   local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
   for attempt in 1 2 3; do
     rm -f -- "$ARCH_CACHE"/*
@@ -217,20 +238,32 @@ acquire_arch_packages() {
        run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
         --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
-      acquired=1
-      break
+      mapfile -t ARCH_PACKAGE_FILES < <(
+        find "$ARCH_CACHE" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -print | LC_ALL=C sort
+      )
+      ((${#ARCH_PACKAGE_FILES[@]} > 0)) || die 'Arch package acquisition produced no package files'
+      if verify_arch_package_signatures "$attempt_log"; then
+        acquired=1
+        break
+      fi
+      if pacman_keyring_failure "$attempt_log"; then
+        die_keyring_failure
+      fi
+      signature_failure_seen=1
+      log 'one or more prefetched Arch package signatures were invalid; clearing the cache and retrying without touching the target disk'
     fi
     if pacman_keyring_failure "$attempt_log"; then
       die_keyring_failure
     fi
     (( attempt < 3 )) && log 'Arch package acquisition failed; retrying without altering the target disk'
   done
-  (( acquired )) || die 'could not acquire the complete pinned Arch package set; the target disk was not modified'
+  if (( ! acquired )); then
+    if (( signature_failure_seen )); then
+      die 'could not verify the complete pinned Arch package set after three attempts; the target disk was not modified'
+    fi
+    die 'could not acquire the complete pinned Arch package set; the target disk was not modified'
+  fi
 
-  mapfile -t ARCH_PACKAGE_FILES < <(
-    find "$ARCH_CACHE" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -print | LC_ALL=C sort
-  )
-  ((${#ARCH_PACKAGE_FILES[@]} > 0)) || die 'Arch package acquisition produced no package files'
   repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" "${ARCH_PACKAGE_FILES[@]}" >/dev/null || \
     die 'could not build the local Arch package repository'
   cat >"$ARCH_LOCAL_PACMAN_CONF" <<EOF
@@ -480,7 +513,7 @@ if [[ $MODE == execute ]]; then
     break
   done
   log "target identity: model=${target_model:-unknown} serial=${target_serial:-unknown} transport=${target_transport:-unknown} by-id=${target_by_id:-unavailable}"
-  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg; do
+  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg gpgv; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
