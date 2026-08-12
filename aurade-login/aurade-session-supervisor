@@ -44,6 +44,7 @@ stop_grace_seconds="${AURADE_SUPERVISOR_STOP_GRACE_SECONDS:-15}"
 stop_kill_seconds="${AURADE_SUPERVISOR_STOP_KILL_SECONDS:-5}"
 max_session_failures="${AURADE_SUPERVISOR_MAX_SESSION_FAILURES:-3}"
 retry_delay_seconds="${AURADE_SUPERVISOR_RETRY_DELAY_SECONDS:-2}"
+session_error_command="${AURADE_SESSION_ERROR_COMMAND:-/usr/bin/aurade-session-error}"
 for duration in "${stop_grace_seconds}" "${stop_kill_seconds}"; do
   if [[ ! "${duration}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     echo "aurade-session-supervisor: invalid stop timeout" >&2
@@ -156,6 +157,11 @@ request_stop() {
   stop_child
 }
 
+report_session_error() {
+  [[ -x "${session_error_command}" ]] || return 0
+  "${session_error_command}" "$@" || true
+}
+
 trap request_restart USR1
 trap request_stop HUP INT TERM
 
@@ -180,6 +186,14 @@ while [[ "${stopping}" == 0 ]]; do
     continue
   fi
 
+  # Status 78 is reserved for actionable preflight failures. Do not retry a
+  # missing render device or broken runtime directory and make the reason
+  # available to the greeter/log instead of presenting a password kickout.
+  if [[ "${status}" == 78 ]]; then
+    echo "aurade-session-supervisor: session preflight failed; see the AuraDE session report" >&2
+    exit "${status}"
+  fi
+
   # A compositor can fail transiently while logind/seatd is still assigning
   # the DRM device. Keep the authenticated session alive for a bounded retry
   # window instead of immediately returning to tuigreet and making a correct
@@ -192,6 +206,7 @@ while [[ "${stopping}" == 0 ]]; do
       continue
     fi
     echo "aurade-session-supervisor: session failed ${session_failures} times; returning to greeter" >&2
+    report_session_error session-failed "exit_status=${status}"
   fi
 
   exit "${status}"
