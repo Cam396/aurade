@@ -94,6 +94,17 @@ the base install. The image still keeps the dated snapshot rather than
 silently switching to moving Reflector mirrors. The live `sshd` service is not
 enabled by default; start it manually only after setting credentials.
 
+### Correct password, then a black screen and return to the greeter in VMware
+
+First check the guest's display settings. AuraDE's Wayland/Chromium session
+needs a usable DRM render device; enable VMware's **Accelerate 3D graphics**
+and reboot the guest. A VM with 3D disabled can authenticate successfully and
+then abort Chromium, producing the same visual symptom as a login failure.
+Use `journalctl --user -b` and `coredumpctl list` over SSH to distinguish this
+from a PAM or account problem. Physical hardware should be tested separately;
+do not add a global `--disable-gpu` workaround based only on a VMware guest
+with 3D disabled.
+
 ### `keyring is not writable` or the installer keeps downloading the same packages
 
 Use an ISO built after the writable-keyring fix. The installer now includes

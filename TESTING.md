@@ -20,6 +20,13 @@ Use the host's `vmrun` operation and wait for the guest to finish booting:
 vmrun -T ws start "/path/to/aurade.vmx" nogui
 ```
 
+For VMware guests, enable **Accelerate 3D graphics** (the VMX equivalent is
+`mks.enable3d = "TRUE"`) before testing the installed desktop. Without it,
+Weston can start without a usable render device and Chromium may abort after
+authentication, which looks like a black screen followed by a return to the
+greeter. That is a graphics-capability failure, not evidence that the account
+password was rejected.
+
 Do not run the smoke script against a guest that is still booting. The script
 does not start or restart the desktop session for you.
 
