@@ -45,6 +45,7 @@ ARCH_GPG_DIR=
 ARCH_DB_PATH=
 ARCH_LOG_FILE=
 MICROCODE_IMAGE=
+ARCH_KEYRING_FILES=(pubring.gpg trustdb.gpg gpg.conf dirmngr.conf dirmngr_ldapserver.conf)
 
 usage() {
   cat <<'EOF'
@@ -133,28 +134,31 @@ die_keyring_failure() {
 prepare_arch_keyring() {
   command -v pacman-key >/dev/null || die 'pacman-key is required to initialize the writable Arch keyring'
   command -v gpg >/dev/null || die 'gpg is required to initialize the writable Arch keyring'
-  install -d -m 0700 "$ARCH_GPG_DIR"
+  copy_public_keyring /etc/pacman.d/gnupg "$ARCH_GPG_DIR"
 
   # ArchISO may ship /etc/pacman.d/gnupg from a read-only squashfs. Copy only
   # public state into the installer work directory; never copy private keys.
-  local keyring_file
-  for keyring_file in pubring.gpg trustdb.gpg gpg.conf dirmngr.conf dirmngr_ldapserver.conf; do
-    if [[ -r /etc/pacman.d/gnupg/$keyring_file ]]; then
-      cp -a --no-preserve=ownership \
-        "/etc/pacman.d/gnupg/$keyring_file" "$ARCH_GPG_DIR/$keyring_file"
-    fi
-  done
-  chmod -R u+rwX,go-rwx "$ARCH_GPG_DIR"
-
   if [[ ! -s $ARCH_GPG_DIR/pubring.gpg || ! -s $ARCH_GPG_DIR/trustdb.gpg ]]; then
     log 'initializing the writable Arch pacman keyring'
     pacman-key --gpgdir "$ARCH_GPG_DIR" --init || die_keyring_failure
   fi
-  [[ -r /usr/share/keyrings/archlinux.gpg ]] || \
-    die 'the ISO is missing /usr/share/keyrings/archlinux.gpg; include the archlinux-keyring package'
+  [[ -r /usr/share/pacman/keyrings/archlinux.gpg ]] || \
+    die 'the ISO is missing /usr/share/pacman/keyrings/archlinux.gpg; include the archlinux-keyring package'
   pacman-key --gpgdir "$ARCH_GPG_DIR" --populate archlinux || die_keyring_failure
   [[ -r $ARCH_GPG_DIR/pubring.gpg && -r $ARCH_GPG_DIR/trustdb.gpg && -w $ARCH_GPG_DIR ]] || \
     die_keyring_failure
+}
+
+copy_public_keyring() {
+  local source_dir=$1 destination_dir=$2 keyring_file
+  install -d -m 0700 "$destination_dir"
+  for keyring_file in "${ARCH_KEYRING_FILES[@]}"; do
+    if [[ -r $source_dir/$keyring_file ]]; then
+      cp -a --no-preserve=ownership "$source_dir/$keyring_file" \
+        "$destination_dir/$keyring_file"
+    fi
+  done
+  chmod -R u+rwX,go-rwx "$destination_dir"
 }
 
 run_pacstrap() {
@@ -558,12 +562,16 @@ run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOI
 
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
 run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
-run install -d -m 0700 "$MOUNTPOINT/etc/pacman.d/gnupg"
-run cp -a --no-preserve=ownership "$ARCH_GPG_DIR/." "$MOUNTPOINT/etc/pacman.d/gnupg/"
-run chmod -R u+rwX,go-rwx "$MOUNTPOINT/etc/pacman.d/gnupg"
+if [[ $MODE == execute ]]; then
+  copy_public_keyring "$ARCH_GPG_DIR" "$MOUNTPOINT/etc/pacman.d/gnupg"
+else
+  printf ' + copy public Arch pacman keyring state from %q to %q (private keys excluded)\n' \
+    "$ARCH_GPG_DIR" "$MOUNTPOINT/etc/pacman.d/gnupg"
+fi
 
 if (( ! ALLOW_UNSIGNED )); then
   run install -Dm0644 "$REPO_KEY" "$MOUNTPOINT/usr/share/pacman/keyrings/aurade-repository.gpg"
+  run arch-chroot "$MOUNTPOINT" pacman-key --init
   run arch-chroot "$MOUNTPOINT" pacman-key --add /usr/share/pacman/keyrings/aurade-repository.gpg
   run arch-chroot "$MOUNTPOINT" pacman-key --lsign-key "$expected_fingerprint"
   if [[ $MODE == execute ]]; then
