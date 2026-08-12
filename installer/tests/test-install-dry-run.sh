@@ -62,6 +62,8 @@ grep -Fq -- 'invalid Arch package signature' "$ROOT/installer/bin/aurade-install
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
 grep -Fq -- 'package downloads were stopped instead of being retried' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'select an exact PATH from the table above' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'lsblk -dnro TYPE "$target"' "$ROOT/installer/bin/aurade-installer"
 acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
 wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
 (( acquire_line < wipe_line ))
