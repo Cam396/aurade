@@ -26,7 +26,7 @@ TIMEZONE=UTC
 LOCALE=en_US.UTF-8
 KEYMAP=us
 BASE_PACKAGES=(
-  base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs dosfstools cryptsetup
+  base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs seatd dosfstools cryptsetup
   gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
   pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
   xdg-utils polkit openssh bluez bluez-utils vim
@@ -483,12 +483,33 @@ if [[ $MODE == execute ]]; then
   for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
+  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
+  if [[ $secure_boot_state == enabled ]]; then
+    die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain'
+  fi
 fi
 
 log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"
 log "safety token: $ERASE_TOKEN"
 
-WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
+WORK_PARENT=${AURADE_INSTALL_WORK_DIR:-/var/tmp}
+WORK_PARENT_REQUESTED=$WORK_PARENT
+[[ $WORK_PARENT == /* && $WORK_PARENT != / ]] || die 'AURADE_INSTALL_WORK_DIR must be an absolute non-root path'
+if [[ -e $WORK_PARENT ]]; then
+  [[ -d $WORK_PARENT && -w $WORK_PARENT && -x $WORK_PARENT ]] || WORK_PARENT=
+else
+  install -d -m 0700 "$WORK_PARENT" 2>/dev/null || WORK_PARENT=
+fi
+if [[ -n $WORK_PARENT ]] && \
+    ! WORK_DIR=$(mktemp -d "$WORK_PARENT/aurade-install.XXXXXX"); then
+  WORK_PARENT=
+fi
+if [[ -z $WORK_PARENT ]]; then
+  log "could not use ${WORK_PARENT_REQUESTED}; falling back to /tmp for installer state"
+  [[ -d /tmp && -w /tmp && -x /tmp ]] || die 'neither the configured installer work directory nor /tmp is writable'
+  WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
+fi
+chmod 700 "$WORK_DIR"
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
 ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
 ARCH_CACHE=$WORK_DIR/arch-cache
@@ -612,7 +633,8 @@ else
   printf ' + enable locale %q in %q\n' "$LOCALE" "$MOUNTPOINT/etc/locale.gen"
 fi
 run arch-chroot "$MOUNTPOINT" locale-gen
-run arch-chroot "$MOUNTPOINT" useradd -m -G wheel,audio,video,input,storage -s /bin/bash "$USERNAME"
+target_groups=wheel,audio,video,input,storage,seat
+run arch-chroot "$MOUNTPOINT" useradd -m -G "$target_groups" -s /bin/bash "$USERNAME"
 if [[ $MODE == execute ]]; then
   arch-chroot "$MOUNTPOINT" usermod --password "$(<"$PASSWORD_HASH_FILE")" "$USERNAME"
 else
@@ -623,7 +645,7 @@ run arch-chroot "$MOUNTPOINT" passwd --lock root
 
 run arch-chroot "$MOUNTPOINT" systemctl enable \
   NetworkManager.service bluetooth.service systemd-timesyncd.service \
-  aurade-powerd.service aurade-host-bridge.service aurade-greetd.service
+  seatd.service aurade-powerd.service aurade-host-bridge.service aurade-greetd.service
 run arch-chroot "$MOUNTPOINT" systemctl set-default graphical.target
 
 if (( LUKS )); then
@@ -699,7 +721,7 @@ else
   done
   arch-chroot "$MOUNTPOINT" pacman -Q aurade chromiumos-ash >/dev/null || \
     die 'post-install verification failed: expected AuraDE packages are not installed'
-  arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service aurade-greetd.service >/dev/null || \
+  arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service seatd.service aurade-greetd.service >/dev/null || \
     die 'post-install verification failed: required services are not enabled'
   root_state=$(arch-chroot "$MOUNTPOINT" passwd -S root | awk '{print $2}')
   [[ $root_state == L* ]] || die 'post-install verification failed: installed root account is not locked'
