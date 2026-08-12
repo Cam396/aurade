@@ -93,6 +93,11 @@ finish in a fixed time.
   they compete for the same checkout.
 - Do not depend on GitHub's ordinary Actions cache for a 100+ GB Chromium
   checkout. A local persistent disk is faster, cheaper, and less failure-prone.
+- Do not route the finished ISO through `actions/upload-artifact`: GitHub Free
+  currently lists only 500 MB of Actions artifact storage, while the AuraDE
+  ISO is already larger than that. Upload the ISO, repository archive, and
+  checksums directly to the intended GitHub Release (or a separate artifact
+  host) after the release gates pass.
 
 ## Release acceptance
 
