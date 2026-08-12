@@ -17,7 +17,7 @@ ARCH_SNAPSHOT=
 BUNDLE_DIR=/opt/aurade/repo
 PACKAGE_LOCK=
 REPO_NAME=aurade
-REPO_URL=https://repo.aurade.invalid/stable/x86_64
+REPO_URL=${AURADE_DEFAULT_REPO_URL:-file:///var/cache/aurade/repo}
 REPO_KEY=
 REPO_FINGERPRINT=
 ALLOW_UNSIGNED=0
@@ -26,7 +26,7 @@ TIMEZONE=UTC
 LOCALE=en_US.UTF-8
 KEYMAP=us
 BASE_PACKAGES=(
-  base linux linux-firmware intel-ucode btrfs-progs dosfstools cryptsetup
+  base linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs dosfstools cryptsetup
   gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
   pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
   xdg-utils polkit openssh bluez bluez-utils vim
@@ -38,6 +38,10 @@ CRYPT_NAME=aurade-root
 CRYPT_OPENED=0
 TARGET_MOUNTED=0
 WORK_DIR=
+ARCH_PACMAN_CONF=
+ARCH_LOCAL_PACMAN_CONF=
+ARCH_CACHE=
+MICROCODE_IMAGE=
 
 usage() {
   cat <<'EOF'
@@ -104,13 +108,13 @@ run() {
 
 run_pacstrap() {
   if [[ $MODE == dry-run ]]; then
-    run pacstrap -K -C "$ARCH_PACMAN_CONF" "$@"
+    run pacstrap -M -C "$ARCH_PACMAN_CONF" "$@"
     return
   fi
 
   local attempt
   for attempt in 1 2 3; do
-    if pacstrap -K -C "$ARCH_PACMAN_CONF" "$@"; then
+    if pacstrap -M -C "$ARCH_LOCAL_PACMAN_CONF" "$@"; then
       return 0
     fi
     if (( attempt < 3 )); then
@@ -118,6 +122,65 @@ run_pacstrap() {
     fi
   done
   die 'pacstrap failed after three attempts'
+}
+
+acquire_arch_packages() {
+  if [[ $MODE == dry-run ]]; then
+    run install -d -m 0755 "$ARCH_CACHE"
+    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+      --disable-sandbox -Syy --noconfirm
+    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+      --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"
+    run repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" \
+      "$ARCH_CACHE"/'*.pkg.tar.*'
+    printf ' + write %q with a local file:// repository for the prefetched Arch packages\n' \
+      "$ARCH_LOCAL_PACMAN_CONF"
+    ARCH_LOCAL_PACMAN_CONF=$ARCH_PACMAN_CONF
+    return
+  fi
+
+  command -v pacman >/dev/null || die 'pacman is required to acquire Arch packages'
+  command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
+  command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
+  install -d -m 0755 "$ARCH_CACHE"
+
+  local attempt acquired=0
+  local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
+  for attempt in 1 2 3; do
+    rm -f -- "$ARCH_CACHE"/*
+    log "acquiring the pinned Arch package set before touching $TARGET (attempt ${attempt}/3)"
+    if timeout --foreground "$acquire_timeout" \
+        pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+          --disable-sandbox -Syy --noconfirm && \
+       timeout --foreground "$acquire_timeout" \
+        pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+          --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
+      acquired=1
+      break
+    fi
+    (( attempt < 3 )) && log 'Arch package acquisition failed; retrying without altering the target disk'
+  done
+  (( acquired )) || die 'could not acquire the complete pinned Arch package set; the target disk was not modified'
+
+  mapfile -t ARCH_PACKAGE_FILES < <(
+    find "$ARCH_CACHE" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -print | LC_ALL=C sort
+  )
+  ((${#ARCH_PACKAGE_FILES[@]} > 0)) || die 'Arch package acquisition produced no package files'
+  repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" "${ARCH_PACKAGE_FILES[@]}" >/dev/null || \
+    die 'could not build the local Arch package repository'
+  cat >"$ARCH_LOCAL_PACMAN_CONF" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+ParallelDownloads = 1
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Required
+
+[aurade-arch]
+SigLevel = Required DatabaseOptional
+Server = file://${ARCH_CACHE}
+EOF
+  log "verified ${#ARCH_PACKAGE_FILES[@]} prefetched Arch packages; installation will continue offline"
 }
 
 write_target_file() {
@@ -201,6 +264,7 @@ TARGET=$(canonical_device "$TARGET")
 [[ $HOSTNAME =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$ ]] || die 'invalid hostname'
 [[ $REPO_NAME =~ ^[a-zA-Z0-9._-]+$ ]] || die 'invalid repository name'
 [[ $REPO_URL =~ ^(https|file)://[^[:space:]\\]+$ ]] || die '--repo-url must be an HTTPS or file URL without whitespace'
+[[ $REPO_URL != *repo.aurade.invalid* ]] || die '--repo-url may not use the development placeholder host'
 [[ $MOUNTPOINT == /* && $MOUNTPOINT != / ]] || die '--mountpoint must be an absolute non-root path'
 [[ $TIMEZONE =~ ^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$ && $TIMEZONE != *..* ]] || die 'invalid timezone'
 [[ $LOCALE =~ ^[A-Za-z0-9_.@-]+$ ]] || die 'invalid locale'
@@ -305,6 +369,7 @@ ERASE_TOKEN="ERASE:$TARGET"
 if [[ $MODE == execute ]]; then
   (( EUID == 0 )) || die '--execute requires root'
   [[ $CONFIRM == "$ERASE_TOKEN" ]] || die "refusing write: --confirm must exactly equal $ERASE_TOKEN"
+  [[ -d /sys/firmware/efi ]] || die 'AuraDE currently requires booting the installer in UEFI mode'
   [[ -b $TARGET ]] || die "target is not a block device: $TARGET"
   target_type=$(lsblk -dnro TYPE "$TARGET")
   case "$target_type" in
@@ -320,7 +385,33 @@ if [[ $MODE == execute ]]; then
     [[ -z $mounted_source ]] && continue
     die "target or a child partition is mounted: $mounted_source"
   done < <(lsblk -lnpo NAME,MOUNTPOINTS "$TARGET" | awk '$2 != "" {print $1 " -> " $2}')
-  for command in sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacstrap arch-chroot genfstab bootctl blkid; do
+  while read -r device device_type; do
+    case "$device_type" in
+      crypt|dm|lvm|md|md[0-9]*|mpath)
+        die "target has an active device-mapper/RAID relationship: $device ($device_type)" ;;
+    esac
+  done < <(lsblk -lnpo NAME,TYPE "$TARGET")
+  while read -r swap_device; do
+    [[ -z $swap_device ]] && continue
+    if [[ $swap_device == "$TARGET" ]] || lsblk -snpo NAME "$swap_device" 2>/dev/null | grep -Fxq "$TARGET"; then
+      die "target or a child partition is active swap: $swap_device"
+    fi
+  done < <(swapon --show=NAME --noheadings 2>/dev/null || true)
+  target_bytes=$(blockdev --getsize64 "$TARGET")
+  min_target_bytes=${AURADE_MIN_DISK_BYTES:-17179869184}
+  (( target_bytes >= min_target_bytes )) || die 'target is too small (need at least 16 GiB)'
+  target_model=$(lsblk -dnro MODEL "$TARGET" | sed 's/[[:space:]]*$//' || true)
+  target_serial=$(lsblk -dnro SERIAL "$TARGET" | sed 's/[[:space:]]*$//' || true)
+  target_transport=$(lsblk -dnro TRAN "$TARGET" | sed 's/[[:space:]]*$//' || true)
+  target_by_id=
+  for candidate in /dev/disk/by-id/*; do
+    [[ -e $candidate ]] || continue
+    [[ $(readlink -f -- "$candidate") == "$TARGET" ]] || continue
+    target_by_id=$candidate
+    break
+  done
+  log "target identity: model=${target_model:-unknown} serial=${target_serial:-unknown} transport=${target_transport:-unknown} by-id=${target_by_id:-unavailable}"
+  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap repo-add arch-chroot genfstab bootctl blkid timeout; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
 fi
@@ -330,6 +421,8 @@ log "safety token: $ERASE_TOKEN"
 
 WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
+ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
+ARCH_CACHE=$WORK_DIR/arch-cache
 cat >"$ARCH_PACMAN_CONF" <<EOF
 [options]
 Architecture = auto
@@ -345,6 +438,10 @@ Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
 [extra]
 Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
 EOF
+
+# This is deliberately before wipefs/sgdisk. A stalled archive or broken
+# network must fail while the existing installation is still intact.
+acquire_arch_packages
 
 run wipefs --all --force "$TARGET"
 run sgdisk --zap-all "$TARGET"
@@ -434,6 +531,7 @@ else
   printf ' + arch-chroot %q usermod --password %q %q\n' "$MOUNTPOINT" '<redacted-crypt-hash>' "$USERNAME"
 fi
 write_target_file /etc/sudoers.d/10-aurade-wheel 0440 '%wheel ALL=(ALL:ALL) ALL\n'
+run arch-chroot "$MOUNTPOINT" passwd --lock root
 
 run arch-chroot "$MOUNTPOINT" systemctl enable \
   NetworkManager.service bluetooth.service systemd-timesyncd.service \
@@ -465,13 +563,33 @@ else
 fi
 
 write_target_file /boot/loader/loader.conf 0644 'default aurade.conf\ntimeout 4\nconsole-mode max\neditor no\n'
-write_target_file /boot/loader/entries/aurade.conf 0644 "title AuraDE\nlinux /vmlinuz-linux\ninitrd /intel-ucode.img\ninitrd /initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@ quiet\n"
+if [[ $MODE == execute ]]; then
+  cpu_vendor=$(awk -F: '$1 ~ /^[[:space:]]*vendor_id[[:space:]]*$/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' /proc/cpuinfo)
+  case "$cpu_vendor" in
+    GenuineIntel) MICROCODE_IMAGE=intel-ucode.img ;;
+    AuthenticAMD) MICROCODE_IMAGE=amd-ucode.img ;;
+    *) log "unknown CPU vendor ${cpu_vendor:-unknown}; omitting a microcode initrd" ;;
+  esac
+else
+  MICROCODE_IMAGE='<detected-microcode.img>'
+fi
+normal_entry="title AuraDE\nlinux /vmlinuz-linux\n"
+rollback_entry="title AuraDE factory rollback\nlinux /aurade-rollback/factory/vmlinuz-linux\n"
+if [[ -n $MICROCODE_IMAGE ]]; then
+  normal_entry+="initrd /${MICROCODE_IMAGE}\n"
+  rollback_entry+="initrd /aurade-rollback/factory/${MICROCODE_IMAGE}\n"
+fi
+normal_entry+="initrd /initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@ quiet\n"
+rollback_entry+="initrd /aurade-rollback/factory/initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@snapshots/0/snapshot systemd.unit=multi-user.target\n"
+write_target_file /boot/loader/entries/aurade.conf 0644 "$normal_entry"
 run install -d -m 0755 "$MOUNTPOINT/boot/aurade-rollback/factory"
-for artifact in vmlinuz-linux intel-ucode.img initramfs-linux.img; do
+BOOT_ARTIFACTS=(vmlinuz-linux initramfs-linux.img)
+[[ -z $MICROCODE_IMAGE ]] || BOOT_ARTIFACTS=(vmlinuz-linux "$MICROCODE_IMAGE" initramfs-linux.img)
+for artifact in "${BOOT_ARTIFACTS[@]}"; do
   run install -m 0644 "$MOUNTPOINT/boot/$artifact" \
     "$MOUNTPOINT/boot/aurade-rollback/factory/$artifact"
 done
-write_target_file /boot/loader/entries/aurade-rollback.conf 0644 "title AuraDE factory rollback\nlinux /aurade-rollback/factory/vmlinuz-linux\ninitrd /aurade-rollback/factory/intel-ucode.img\ninitrd /aurade-rollback/factory/initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@snapshots/0/snapshot systemd.unit=multi-user.target\n"
+write_target_file /boot/loader/entries/aurade-rollback.conf 0644 "$rollback_entry"
 
 run install -d -m 0750 "$MOUNTPOINT/etc/aurade-install" "$MOUNTPOINT/.snapshots/0"
 run cp "$PACKAGE_LOCK" "$MOUNTPOINT/etc/aurade-install/packages.lock"
@@ -480,6 +598,29 @@ run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/s
 write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
 run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
 run sync
+
+if [[ $MODE == dry-run ]]; then
+  printf ' + verify installed package set, fstab/UUIDs, boot artifacts, enabled units, locked root, and repository URL\n'
+else
+  [[ -s $MOUNTPOINT/etc/fstab ]] || die 'post-install verification failed: fstab is empty'
+  [[ -r $MOUNTPOINT/boot/loader/entries/aurade.conf && -r $MOUNTPOINT/boot/loader/entries/aurade-rollback.conf ]] || \
+    die 'post-install verification failed: systemd-boot entries are missing'
+  for artifact in "${BOOT_ARTIFACTS[@]}"; do
+    [[ -r $MOUNTPOINT/boot/$artifact && -r $MOUNTPOINT/boot/aurade-rollback/factory/$artifact ]] || \
+      die "post-install verification failed: boot artifact is missing: $artifact"
+  done
+  arch-chroot "$MOUNTPOINT" pacman -Q aurade chromiumos-ash >/dev/null || \
+    die 'post-install verification failed: expected AuraDE packages are not installed'
+  arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service aurade-greetd.service >/dev/null || \
+    die 'post-install verification failed: required services are not enabled'
+  root_state=$(arch-chroot "$MOUNTPOINT" passwd -S root | awk '{print $2}')
+  [[ $root_state == L* ]] || die 'post-install verification failed: installed root account is not locked'
+  ! grep -Rqs 'repo\\.aurade\\.invalid' "$MOUNTPOINT/etc" || \
+    die 'post-install verification failed: placeholder repository URL remains'
+  [[ -r $MOUNTPOINT/boot/EFI/BOOT/BOOTX64.EFI ]] || \
+    die 'post-install verification failed: UEFI fallback loader is missing'
+  log 'post-install verification passed'
+fi
 
 log 'installation plan completed'
 if [[ $MODE == dry-run ]]; then

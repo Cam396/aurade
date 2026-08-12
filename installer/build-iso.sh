@@ -24,7 +24,7 @@ WORK_ROOT=${AURADE_INSTALLER_WORK_ROOT:-/mnt/build/aurade-work/installer}
 OUTPUT_DIR=${AURADE_ISO_OUTPUT_DIR:-$WORK_ROOT/output}
 STAGE=$WORK_ROOT/profile
 BUILD_WORK=$WORK_ROOT/work
-REPO_URL=${AURADE_REPO_URL:-https://repo.aurade.invalid/stable/x86_64}
+REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 export SOURCE_DATE_EPOCH
@@ -52,6 +52,12 @@ while read -r _digest filename _pkgname _pkgver _arch; do
     "$STAGE/airootfs/opt/aurade/repo/$filename"
 done < <(awk '!/^#/ {print $1, $2, $3, $4, $5}' \
   "$STAGE/airootfs/opt/aurade/repo/packages.lock")
+for metadata in \
+  "$AURADE_REPO_DIR"/aurade.db "$AURADE_REPO_DIR"/aurade.db.* \
+  "$AURADE_REPO_DIR"/aurade.files "$AURADE_REPO_DIR"/aurade.files.*; do
+  [[ -f $metadata ]] || continue
+  install -m 0644 -- "$metadata" "$STAGE/airootfs/opt/aurade/repo/$(basename "$metadata")"
+done
 (
   cd "$STAGE/airootfs/opt/aurade/repo"
   sha256sum -c <(awk '!/^#/ {print $1 "  " $2}' packages.lock)
@@ -104,7 +110,6 @@ sed -i \
 
 install -d -m 0755 "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants"
 ln -s /usr/lib/systemd/system/NetworkManager.service "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
-ln -s /usr/lib/systemd/system/sshd.service "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service"
 ln -s /usr/lib/systemd/system/aurade-refresh-mirrors.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service"
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
