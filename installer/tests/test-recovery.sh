@@ -6,6 +6,8 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 install -d "$TMP/bin" "$TMP/root/boot/loader/entries" "$TMP/root/.snapshots"
+install -d "$TMP/root/boot/aurade-rollback/factory"
+printf '%s\n' factory-kernel >"$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux"
 printf '%s\n' kernel >"$TMP/root/boot/vmlinuz-linux"
 printf '%s\n' microcode >"$TMP/root/boot/intel-ucode.img"
 printf '%s\n' initramfs >"$TMP/root/boot/initramfs-linux.img"
@@ -40,5 +42,7 @@ grep -Eq '^initrd /aurade-rollback/manual-[0-9]{8}T[0-9]{6}Z-pre-update/initramf
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
 cmp -s "$TMP/root/boot/vmlinuz-linux" \
   "$TMP/root/boot/aurade-rollback/"manual-*-pre-update/vmlinuz-linux
+cmp -s "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" \
+  <(printf '%s\n' factory-kernel)
 
 echo 'recovery rollback test: PASS'
