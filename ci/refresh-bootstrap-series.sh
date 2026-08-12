@@ -35,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ ! -d "${CHROME_SRC}/.git" ]]; then
+if [[ ! -e "${CHROME_SRC}/.git" ]]; then
   echo "Pinned Chromium checkout not found: ${CHROME_SRC}" >&2
   exit 2
 fi
