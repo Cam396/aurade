@@ -24,9 +24,14 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
   echo "# AuraDE Source Manifest"
   echo
   echo "- Generated UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "- Repo root: ${REPO_ROOT}"
-  echo "- Chromium source: ${CHROME_SRC}"
-  if [[ -d "${CHROME_SRC}/.git" ]]; then
+  echo "- AuraDE repository: https://github.com/Cam396/aurade"
+  if git -C "${REPO_ROOT}" rev-parse HEAD >/dev/null 2>&1; then
+    echo "- AuraDE commit: $(git -C "${REPO_ROOT}" rev-parse HEAD)"
+  else
+    echo "- AuraDE commit: unavailable"
+  fi
+  echo "- Chromium source: pinned checkout (local path intentionally omitted)"
+  if [[ -e "${CHROME_SRC}/.git" ]]; then
     echo "- Chromium revision: $(git -C "${CHROME_SRC}" rev-parse HEAD)"
     echo "- Chromium branch: $(git -C "${CHROME_SRC}" rev-parse --abbrev-ref HEAD)"
     echo
@@ -70,7 +75,8 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
   for package_dir in "${package_dirs[@]}"; do
     echo
     echo "### ${package_dir}"
-    find "${REPO_ROOT}/${package_dir}" -maxdepth 3 -type f | sort | while read -r source_file; do
+    find "${REPO_ROOT}/${package_dir}" -maxdepth 3 -type f \
+      -not -path '*/__pycache__/*' -not -name '*.pyc' | sort | while read -r source_file; do
       source_hash="$(sha256sum "${source_file}" | awk '{print $1}')"
       echo "- ${source_hash}  ${source_file#"${REPO_ROOT}/"}"
     done
