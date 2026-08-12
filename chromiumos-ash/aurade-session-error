@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Report a session-start failure without hiding it behind a blank compositor.
+set -u
+
+error_kind="${1:-session-failed}"
+detail="${2:-}"
+state_dir="${AURADE_ERROR_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/aurade}"
+report="${state_dir}/session-error.txt"
+tmp_report="${report}.$$"
+
+case "${error_kind}" in
+  missing-render)
+    title='AuraDE could not start the desktop'
+    reason='No usable DRM render device was found.'
+    advice='Enable VMware 3D acceleration or install/enable a supported GPU driver, then reboot.'
+    ;;
+  missing-dri)
+    title='AuraDE could not start the desktop'
+    reason='The kernel did not expose a DRM device under /dev/dri.'
+    advice='Check the GPU kernel driver, firmware, and kernel logs, then reboot.'
+    ;;
+  render-permission)
+    title='AuraDE could not start the desktop'
+    reason='A DRM render device exists, but this account cannot access it.'
+    advice='Verify the video/render groups and seat permissions, then sign in again.'
+    ;;
+  missing-weston)
+    title='AuraDE could not start the desktop'
+    reason='The Weston compositor is not installed or is not executable.'
+    advice='Repair the aurade package installation before trying to log in again.'
+    ;;
+  runtime-dir)
+    title='AuraDE could not start the desktop'
+    reason='AuraDE could not create a private Wayland runtime directory.'
+    advice='Check the user session and /run/user permissions, then sign in again.'
+    ;;
+  compositor-failed)
+    title='AuraDE could not start the desktop'
+    reason='The compositor exited before a usable desktop appeared.'
+    advice='Check the saved report and coredump; verify GPU acceleration and drivers.'
+    ;;
+  session-failed)
+    title='AuraDE could not start the desktop'
+    reason='The compositor or desktop exited before the session became usable.'
+    advice='Check the session log and coredump report, then verify the GPU/render-device setup.'
+    ;;
+  *)
+    title='AuraDE session error'
+    reason="${error_kind}"
+    advice='Check the session log and coredump report before retrying.'
+    ;;
+esac
+
+mkdir -p "${state_dir}" 2>/dev/null || true
+if [[ -d "${state_dir}" && ! -L "${state_dir}" ]]; then
+  umask 077
+  chmod 700 "${state_dir}" 2>/dev/null || true
+  {
+    printf 'title=%s\n' "${title}"
+    printf 'reason=%s\n' "${reason}"
+    printf 'advice=%s\n' "${advice}"
+    printf 'kind=%s\n' "${error_kind}"
+    [[ -n "${detail}" ]] && printf 'detail=%s\n' "${detail}"
+    printf 'user=%s\n' "${USER:-unknown}"
+    printf 'uid=%s\n' "$(id -u 2>/dev/null || printf unknown)"
+    printf 'session=%s\n' "${XDG_SESSION_ID:-unknown}"
+    printf 'render_nodes='
+    for node in /dev/dri/renderD*; do
+      [[ -e "${node}" ]] || continue
+      printf '%s ' "${node}"
+    done
+    printf '\n'
+  } >"${tmp_report}" 2>/dev/null && mv -fT "${tmp_report}" "${report}" 2>/dev/null || rm -f "${tmp_report}"
+fi
+
+message=$(printf '\n%s\n\n%s\n%s\n\nReport: %s\n\n' \
+  "${title}" "${reason}" "${advice}" "${report}")
+printf '%s' "${message}" >&2
+if command -v logger >/dev/null 2>&1; then
+  logger -t aurade-session -- "${reason}${detail:+ (${detail})}" 2>/dev/null || true
+fi
+
+# The greeter/session normally owns the active VT. A best-effort write makes
+# this visible during a compositor failure; the state file and stderr remain
+# available when the VT is not writable.
+for tty_path in "${AURADE_ERROR_TTY:-}" /dev/tty /dev/console /dev/tty1; do
+  [[ -n "${tty_path}" && -w "${tty_path}" ]] || continue
+  {
+    printf '\033[2J\033[H'
+    printf '%s' "${message}"
+  } >"${tty_path}" 2>/dev/null && break
+done
+
+case "${error_kind}" in
+  missing-render|missing-dri|render-permission|missing-weston|runtime-dir) exit 78 ;;
+  *) exit 79 ;;
+esac

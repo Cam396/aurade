@@ -96,14 +96,22 @@ enabled by default; start it manually only after setting credentials.
 
 ### Correct password, then a black screen and return to the greeter in VMware
 
-First check the guest's display settings. AuraDE's Wayland/Chromium session
-needs a usable DRM render device; enable VMware's **Accelerate 3D graphics**
-and reboot the guest. A VM with 3D disabled can authenticate successfully and
-then abort Chromium, producing the same visual symptom as a login failure.
-Use `journalctl --user -b` and `coredumpctl list` over SSH to distinguish this
-from a PAM or account problem. Physical hardware should be tested separately;
-do not add a global `--disable-gpu` workaround based only on a VMware guest
-with 3D disabled.
+AuraDE now performs a render-device preflight before starting Weston. If no
+readable/writable `/dev/dri/renderD*` node is available, it stops immediately
+and prints an actionable message instead of retrying into a blank compositor.
+The same message is written to
+`~/.local/state/aurade/session-error.txt` and to the session journal when
+possible. Enable VMware's **Accelerate 3D graphics** and reboot the guest, or
+install/enable the correct physical GPU driver. A VM with 3D disabled can
+authenticate successfully and then abort Chromium, producing the same visual
+symptom as a login failure. Use `journalctl --user -b` and `coredumpctl list`
+to distinguish this from a PAM or account problem. Physical hardware should be
+tested separately; do not add a global `--disable-gpu` workaround based only on
+a VMware guest with 3D disabled.
+
+For diagnostics only, `AURADE_ALLOW_SOFTWARE_RENDERER=1` bypasses the
+preflight. It is not a supported fix and may still fail when Chromium requires
+hardware-backed rendering.
 
 ### `keyring is not writable` or the installer keeps downloading the same packages
 
