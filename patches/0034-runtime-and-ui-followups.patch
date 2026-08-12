@@ -1,0 +1,1269 @@
+--- a/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
++++ b/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ash/bluetooth/debug_logs_manager_factory.h"
+ 
+ #include "base/no_destructor.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/ash/bluetooth/debug_logs_manager.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -41,8 +42,9 @@
+ 
+ // static
+ DebugLogsManager* DebugLogsManagerFactory::GetForProfile(Profile* profile) {
+-  if (!profile)
++  if (!profile) {
+     return nullptr;
++  }
+ 
+   DebugLogsManagerService* service = static_cast<DebugLogsManagerService*>(
+       GetInstance()->GetServiceForBrowserContext(profile, true));
+@@ -76,11 +78,19 @@
+ std::unique_ptr<KeyedService>
+ DebugLogsManagerFactory::BuildServiceInstanceForBrowserContext(
+     content::BrowserContext* context) const {
++  // AuraDE compatibility: stock BlueZ does not provide ChromeOS's proprietary
++  // org.chromium.Bluetooth.Debug service. Avoid eagerly constructing the
++  // manager, which otherwise retries unsupported debug and quality methods.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return nullptr;
++  }
++
+   Profile* profile = Profile::FromBrowserContext(context);
+ 
+   // Only primary profiles have an associated logs manager.
+-  if (!ProfileHelper::Get()->IsPrimaryProfile(profile))
++  if (!ProfileHelper::Get()->IsPrimaryProfile(profile)) {
+     return nullptr;
++  }
+ 
+   return std::make_unique<DebugLogsManagerService>(profile);
+ }
+--- a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
++++ b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
+@@ -587,6 +587,15 @@
+         return this.i18nAdvanced('aboutUpdateToRollbackVersionDisallowed');
+       case UpdateStatus.DEFERRED:
+         return this.i18nAdvanced('aboutUpgradeNotUpToDate');
++      case UpdateStatus.FAILED:
++        if (!this.currentUpdateStatusEvent_.message) {
++          return this.i18nAdvanced('aboutUpgradeTryAgain');
++        }
++        // AuraDE compatibility: preserve detailed host-package errors without
++        // relying on switch fallthrough, which this target forbids.
++        return sanitizeInnerHtml(this.currentUpdateStatusEvent_.message, {
++          tags: ['br', 'pre'],
++        });
+       default:
+         let result = '';
+         const message = this.currentUpdateStatusEvent_.message;
+--- a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
++++ b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
+@@ -54,8 +54,14 @@
+ namespace {
+ 
+ ui::TextInputClient* GetCurrentTextInputClient() {
+-  const ui::InputMethod* input_method =
+-      ash::IMEBridge::Get()->GetInputContextHandler()->GetInputMethod();
++  auto* input_context_handler = ash::IMEBridge::Get()->GetInputContextHandler();
++  // AuraDE compatibility: generic-Linux sessions can legitimately have no
++  // ChromeOS text-input target; IMEBridge documents this state as nullable.
++  if (!input_context_handler) {
++    return nullptr;
++  }
++
++  const ui::InputMethod* input_method = input_context_handler->GetInputMethod();
+ 
+   return input_method != nullptr ? input_method->GetTextInputClient() : nullptr;
+ }
+@@ -260,6 +266,12 @@
+ void EditorMenuControllerImpl::GetEditorMenuCardContext(
+     base::OnceCallback<void(const EditorMenuCardContext&)> callback) {
+   if (card_session_ == nullptr) {
++    OnGetEditorCardMenuContext(
++        std::move(callback), LobsterMode::kBlocked,
++        EditorContext(EditorMode::kHardBlocked,
++                      EditorTextSelectionMode::kNoSelection,
++                      /*consent_status_settled=*/false,
++                      /*preset_queries=*/{}));
+     return;
+   }
+ 
+--- a/chrome/browser/ui/ash/read_write_cards/BUILD.gn
++++ b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
+@@ -59,6 +59,7 @@
+     ":read_write_cards",
+     ":read_write_cards_manager",
+     "//ash:test_support",
++    "//ash/constants",
+     "//base/test:test_support",
+     "//chrome/browser:global_features",
+     "//chrome/browser/ash/magic_boost",
+@@ -77,6 +78,7 @@
+     "//chromeos/constants",
+     "//content/public/browser",
+     "//ui/base",
++    "//ui/base/ime/ash",
+     "//ui/gfx/geometry",
+     "//ui/views",
+   ]
+--- a/chrome/browser/ui/webui/help/version_updater_chromeos.cc
++++ b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
+@@ -15,6 +15,7 @@
+ #include "base/memory/ptr_util.h"
+ #include "base/notimplemented.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
+ #include "chrome/browser/ash/login/startup_utils.h"
+ #include "chrome/browser/ash/login/wizard_controller.h"
+ #include "chrome/browser/ash/ownership/owner_settings_service_ash.h"
+@@ -166,8 +167,13 @@
+ void VersionUpdaterCros::ApplyDeferredUpdateAdvanced() {
+   UpdateEngineClient* update_engine_client = UpdateEngineClient::Get();
+ 
+-  DCHECK(update_engine_client->GetLastStatus().current_operation() ==
+-         update_engine::Operation::UPDATED_BUT_DEFERRED);
++  // A status notification may replace the deferred state before the WebUI
++  // processes an already queued click. Treat that stale action as a no-op
++  // instead of violating the update-engine state contract.
++  if (update_engine_client->GetLastStatus().current_operation() !=
++      update_engine::Operation::UPDATED_BUT_DEFERRED) {
++    return;
++  }
+ 
+   update_engine_client->ApplyDeferredUpdateAdvanced(
+       /*shutdown_after_update=*/false, base::DoNothing());
+@@ -368,6 +374,10 @@
+                  static_cast<int32_t>(
+                      update_engine::ErrorCode::kDownloadTransferError)) {
+         my_status = FAILED_DOWNLOAD;
++      } else if (!base::SysInfo::IsRunningOnChromeOS() &&
++                 status.last_attempt_error() ==
++                     static_cast<int32_t>(update_engine::ErrorCode::kError)) {
++        my_status = FAILED;
+       }
+       break;
+     case update_engine::Operation::CHECKING_FOR_UPDATE:
+--- a/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
++++ b/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
+@@ -13,6 +13,8 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/run_loop.h"
+ #include "base/test/mock_callback.h"
++#include "base/test/scoped_chromeos_version_info.h"
++#include "base/time/time.h"
+ #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
+ #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
+ #include "chromeos/ash/components/dbus/shill/shill_service_client.h"
+@@ -328,4 +330,81 @@
+             fake_update_engine_client_->apply_deferred_update_advanced_count());
+ }
+ 
++TEST_F(VersionUpdaterCrosTest, IgnoreStaleApplyDeferredUpdateAdvanced) {
++  update_engine::StatusResult status;
++  status.set_current_operation(update_engine::Operation::ERROR);
++  fake_update_engine_client_->set_default_status(status);
++
++  version_updater_->ApplyDeferredUpdateAdvanced();
++
++  EXPECT_EQ(0,
++            fake_update_engine_client_->apply_deferred_update_advanced_count());
++}
++
++TEST_F(VersionUpdaterCrosTest, GenericUpdateFailureIsVisibleOnGenericLinux) {
++  base::test::ScopedChromeOSVersionInfo version_info(/*lsb_release=*/"",
++                                                     base::Time());
++  SetEthernetService();
++
++  update_engine::StatusResult status;
++  status.set_current_operation(update_engine::Operation::ERROR);
++  status.set_last_attempt_error(
++      static_cast<int32_t>(update_engine::ErrorCode::kError));
++  fake_update_engine_client_->set_default_status(status);
++
++  StrictMock<base::MockCallback<VersionUpdater::StatusCallback>> mock_callback;
++  EXPECT_CALL(mock_callback, Run(VersionUpdater::FAILED, _, _, _, _, _, _));
++  version_updater_->GetUpdateStatus(mock_callback.Get());
++}
++
++TEST_F(VersionUpdaterCrosTest,
++       GenericUpdateFailureRemainsVisibleUntilSuccessfulRetry) {
++  base::test::ScopedChromeOSVersionInfo version_info(/*lsb_release=*/"",
++                                                     base::Time());
++  SetEthernetService();
++
++  update_engine::StatusResult status;
++  status.set_current_operation(update_engine::Operation::ERROR);
++  status.set_last_attempt_error(
++      static_cast<int32_t>(update_engine::ErrorCode::kError));
++  fake_update_engine_client_->set_default_status(status);
++
++  StrictMock<base::MockCallback<VersionUpdater::StatusCallback>> mock_callback;
++  testing::InSequence sequence;
++  EXPECT_CALL(mock_callback, Run(VersionUpdater::FAILED, _, _, _, _, _, _))
++      .Times(2);
++  EXPECT_CALL(mock_callback, Run(VersionUpdater::CHECKING, _, _, _, _, _, _));
++  EXPECT_CALL(mock_callback, Run(VersionUpdater::UPDATED, _, _, _, _, _, _));
++
++  version_updater_->GetUpdateStatus(mock_callback.Get());
++
++  status.set_current_operation(update_engine::Operation::IDLE);
++  fake_update_engine_client_->NotifyObserversThatStatusChanged(status);
++
++  status.set_current_operation(update_engine::Operation::CHECKING_FOR_UPDATE);
++  status.set_last_attempt_error(
++      static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++  fake_update_engine_client_->NotifyObserversThatStatusChanged(status);
++
++  status.set_current_operation(update_engine::Operation::IDLE);
++  fake_update_engine_client_->NotifyObserversThatStatusChanged(status);
++}
++
++TEST_F(VersionUpdaterCrosTest,
++       GenericUpdateFailureRetainsNativeChromeOSBehavior) {
++  base::test::ScopedChromeOSVersionInfo version_info(
++      "CHROMEOS_RELEASE_NAME=Chrome OS\n", base::Time());
++  SetEthernetService();
++
++  update_engine::StatusResult status;
++  status.set_current_operation(update_engine::Operation::ERROR);
++  status.set_last_attempt_error(
++      static_cast<int32_t>(update_engine::ErrorCode::kError));
++  fake_update_engine_client_->set_default_status(status);
++
++  StrictMock<base::MockCallback<VersionUpdater::StatusCallback>> mock_callback;
++  EXPECT_CALL(mock_callback, Run(VersionUpdater::UPDATED, _, _, _, _, _, _));
++  version_updater_->GetUpdateStatus(mock_callback.Get());
++}
++
+ }  // namespace chromeos
+--- a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
++++ b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
+@@ -239,6 +239,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const minVolumePercentFakeAudioSystemProperties:
+@@ -254,6 +255,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const mutedByUserFakeAudioSystemProperties:
+@@ -271,6 +273,7 @@
+       inputGainPercent: 0,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const mutedByPolicyFakeAudioSystemProperties:
+@@ -288,6 +291,7 @@
+       inputGainPercent: 0,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const mutedExternallyFakeAudioSystemProperties:
+@@ -305,6 +309,7 @@
+       inputGainPercent: 0,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const emptyOutputDevicesFakeAudioSystemProperties:
+@@ -319,6 +324,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const emptyInputDevicesFakeAudioSystemProperties:
+@@ -334,6 +340,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const activeSpeakerFakeAudioSystemProperties:
+@@ -349,6 +356,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const effectNoneAudioSystemProperties:
+@@ -363,6 +371,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const effectNoiseCancellationAudioSystemProperties:
+@@ -377,6 +386,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceNC,
++      linuxProperties: null,
+     };
+ 
+     const effectStyleTransferAudioSystemProperties:
+@@ -391,6 +401,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceST,
++      linuxProperties: null,
+     };
+ 
+     const effectBeamformingAudioSystemProperties:
+@@ -405,6 +416,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceBF,
++      linuxProperties: null,
+     };
+ 
+     const effectModeOptionsAudioSystemProperties:
+@@ -419,6 +431,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceEffectMode,
++      linuxProperties: null,
+     };
+ 
+     const effectFallbackMessageAudioSystemProperties:
+@@ -433,6 +446,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceFallback,
++      linuxProperties: null,
+     };
+ 
+     const hfpMicSrSupportedAudioSystemProperties:
+@@ -448,6 +462,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const muteByHardwareAudioSystemProperties:
+@@ -462,6 +477,7 @@
+       inputGainPercent: 0,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     setup(async () => {
+@@ -1371,6 +1387,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     const spatialAudioNotSupportedAudioSystemProperties:
+@@ -1385,6 +1402,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+ 
+     setup(async () => {
+--- a/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
++++ b/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
+@@ -58,6 +58,7 @@
+       inputMuteState: crosAudioConfigMojom.MuteState.MIN_VALUE,
+       voiceIsolationUiAppearance:
+           fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
++      linuxProperties: null,
+     };
+     crosAudioConfig.setAudioSystemProperties(updatedProperties);
+ 
+@@ -71,6 +72,7 @@
+     const updatedVolumeProperties:
+         crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       outputVolumePercent: outputVolumePercentExpected,
+     };
+     onPropertiesUpdated.addExpectation(updatedVolumeProperties);
+@@ -84,6 +86,7 @@
+         const updateActiveOutputDevice:
+             crosAudioConfigMojom.AudioSystemProperties = {
+           ...defaultProperties,
++          linuxProperties: null,
+           outputDevices: [
+             fakeCrosAudioConfig.createAudioDevice(
+                 fakeCrosAudioConfig.defaultFakeSpeaker, /*isActive=*/ true),
+@@ -102,6 +105,7 @@
+     const updateActiveInputDevice:
+         crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       inputDevices: [
+         fakeCrosAudioConfig.createAudioDevice(
+             fakeCrosAudioConfig.fakeInternalFrontMic, /*isActive=*/ false),
+@@ -119,6 +123,7 @@
+     const propertiesOutputMutedByUser:
+         crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       outputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
+     };
+     onPropertiesUpdated.addExpectation(propertiesOutputMutedByUser);
+@@ -128,6 +133,7 @@
+ 
+     const propertiesOutputUnmute: crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
+     };
+     onPropertiesUpdated.addExpectation(propertiesOutputUnmute);
+@@ -143,6 +149,7 @@
+ 
+     const updateInputGainMuted: crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       inputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
+     };
+     onPropertiesUpdated.addExpectation(updateInputGainMuted);
+@@ -163,6 +170,7 @@
+     const expectedGainPercent = 32;
+     const updatedProperties: crosAudioConfigMojom.AudioSystemProperties = {
+       ...defaultProperties,
++      linuxProperties: null,
+       inputGainPercent: expectedGainPercent,
+     };
+     onPropertiesUpdated.addExpectation(updatedProperties);
+@@ -182,6 +190,7 @@
+         const defaultNoiseCancellation:
+             crosAudioConfigMojom.AudioSystemProperties = {
+           ...defaultProperties,
++          linuxProperties: null,
+           inputDevices: [ncSupportedNotEnabled],
+         };
+         crosAudioConfig.setAudioSystemProperties(defaultNoiseCancellation);
+@@ -198,6 +207,7 @@
+         const enabledNoiseCancellation:
+             crosAudioConfigMojom.AudioSystemProperties = {
+           ...defaultNoiseCancellation,
++          linuxProperties: null,
+           inputDevices: [ncSupportedEnabled],
+         };
+         assertDeepEquals(
+@@ -219,6 +229,7 @@
+         const noNoiseCancellation:
+             crosAudioConfigMojom.AudioSystemProperties = {
+           ...defaultProperties,
++          linuxProperties: null,
+           inputDevices: [ncNotSupported],
+         };
+         crosAudioConfig.setAudioSystemProperties(noNoiseCancellation);
+--- a/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
++++ b/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
+@@ -7,10 +7,39 @@
+ import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
+ import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
+ 
++type AuraDisplayInfo =
++    Awaited<ReturnType<DevicePageBrowserProxy['getAuraDisplayInfo']>>;
++type AuraFeatureProfileInfo =
++    Awaited<ReturnType<DevicePageBrowserProxy['getAuraFeatureProfileInfo']>>;
++
+ export class TestDevicePageBrowserProxy extends TestBrowserProxy implements
+     DevicePageBrowserProxy {
+   acIdleBehavior: IdleBehavior|undefined;
+   batteryIdleBehavior: IdleBehavior|undefined;
++  auraDisplayInfo: AuraDisplayInfo = {
++    available: false,
++    connector: '',
++    configuredMode: '',
++    currentMode: '',
++    configuredScale: 1,
++    currentScale: 1,
++    modes: [],
++    scaleAvailable: false,
++    scaleOptions: [],
++    requiresRestart: false,
++    status: '',
++  };
++  auraFeatureProfileInfo: AuraFeatureProfileInfo = {
++    available: false,
++    configured: false,
++    configuredProfile: '',
++    currentProfile: '',
++    defaultProfile: '',
++    memoryGb: 0,
++    profiles: [],
++    requiresRestart: false,
++    status: '',
++  };
+   lastHighlightedDisplayId = '-1';
+   lidClosedBehavior: LidClosedBehavior|undefined;
+   powerSourceId = '-1';
+@@ -29,12 +58,17 @@
+ 
+   constructor() {
+     super([
++      'getAuraDisplayInfo',
++      'getAuraFeatureProfileInfo',
+       'getStorageEncryptionInfo',
+       'requestNoteTakingApps',
+       'requestPowerManagementSettings',
+       'setPreferredNoteTakingApp',
+       'showShortcutCustomizationApp',
+       'setAdaptiveCharging',
++      'setAuraDisplayMode',
++      'setAuraDisplayScale',
++      'setAuraFeatureProfile',
+       'setOptimizedCharging',
+       'showPlayStore',
+       'updatePowerStatus',
+@@ -147,6 +181,31 @@
+ 
+   dragDisplayDelta() {}
+ 
++  getAuraDisplayInfo(): Promise<AuraDisplayInfo> {
++    this.methodCalled('getAuraDisplayInfo');
++    return Promise.resolve(this.auraDisplayInfo);
++  }
++
++  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo> {
++    this.methodCalled('setAuraDisplayMode', mode);
++    return Promise.resolve(this.auraDisplayInfo);
++  }
++
++  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo> {
++    this.methodCalled('setAuraDisplayScale', scale);
++    return Promise.resolve(this.auraDisplayInfo);
++  }
++
++  getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo> {
++    this.methodCalled('getAuraFeatureProfileInfo');
++    return Promise.resolve(this.auraFeatureProfileInfo);
++  }
++
++  setAuraFeatureProfile(profile: string): Promise<AuraFeatureProfileInfo> {
++    this.methodCalled('setAuraFeatureProfile', profile);
++    return Promise.resolve(this.auraFeatureProfileInfo);
++  }
++
+   openMyFiles() {}
+ 
+   openBrowsingDataSettings() {}
+--- a/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
++++ b/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
+@@ -162,7 +162,9 @@
+         fireStatusChanged(UpdateStatus.FAILED);
+         assertNull(updateRowIcon.src);
+         assertEquals('os-settings:about-update-error', updateRowIcon.icon);
+-        assertEquals(0, statusMessageEl.innerText.trim().length);
++        assertEquals(
++            loadTimeData.getString('aboutUpgradeTryAgain'),
++            statusMessageEl.innerText.trim());
+ 
+         fireStatusChanged(UpdateStatus.DISABLED);
+         assertNull(updateRowIcon.src);
+--- a/chromeos/ash/components/dbus/BUILD.gn
++++ b/chromeos/ash/components/dbus/BUILD.gn
+@@ -73,6 +73,7 @@
+     "//chromeos/ash/components/dbus/session_manager:unit_tests",
+     "//chromeos/ash/components/dbus/shill:test_support",
+     "//chromeos/ash/components/dbus/system_clock:unit_tests",
++    "//chromeos/ash/components/dbus/update_engine:unit_tests",
+     "//chromeos/ash/components/dbus/userdataauth",
+     "//chromeos/ash/components/dbus/userdataauth:userdataauth_proto",
+     "//chromeos/ash/components/install_attributes:test_support",
+--- a/chromeos/ash/components/dbus/update_engine/BUILD.gn
++++ b/chromeos/ash/components/dbus/update_engine/BUILD.gn
+@@ -25,6 +25,20 @@
+   ]
+ }
+ 
++source_set("unit_tests") {
++  testonly = true
++  sources = [ "update_engine_client_unittest.cc" ]
++  deps = [
++    ":update_engine",
++    "//base",
++    "//base/test:test_support",
++    "//dbus",
++    "//dbus:test_support",
++    "//testing/gmock",
++    "//testing/gtest",
++  ]
++}
++
+ proto_library("proto") {
+   sources =
+       [ "//third_party/cros_system_api/dbus/update_engine/update_engine.proto" ]
+--- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
++++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
+@@ -424,8 +424,9 @@
+     }
+ 
+     last_status_ = status;
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.UpdateStatusChanged(status);
++    }
+   }
+ 
+   // Called when a response for SetReleaseChannel() is received.
+@@ -580,8 +581,9 @@
+     }
+ 
+     last_status_ = status;
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.UpdateStatusChanged(status);
++    }
+   }
+ 
+   // Called when the status update signal is initially connected.
+@@ -684,10 +686,11 @@
+                   GetChannelCallback callback) override {
+     VLOG(1) << "Requesting to get channel, get_current_channel="
+             << get_current_channel;
+-    if (get_current_channel)
++    if (get_current_channel) {
+       std::move(callback).Run(current_channel_);
+-    else
++    } else {
+       std::move(callback).Run(target_channel_);
++    }
+   }
+ 
+   void GetEolInfo(GetEolInfoCallback callback) override {
+@@ -765,8 +768,9 @@
+         NOTREACHED();
+     }
+     last_status_.set_current_operation(next_operation);
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.UpdateStatusChanged(last_status_);
++    }
+     if (last_status_.current_operation() != update_engine::Operation::IDLE) {
+       base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+           FROM_HERE,
+@@ -970,9 +974,11 @@
+     const base::DictValue& root = envelope->GetDict();
+     if (!root.FindBool("ok").value_or(false)) {
+       const base::DictValue* error = root.FindDict("error");
++      const std::string* code = error ? error->FindString("code") : nullptr;
+       const std::string* message =
+           error ? error->FindString("message") : nullptr;
+-      LOG(ERROR) << "AuraDE update: "
++      LOG(ERROR) << "AuraDE update"
++                 << (code ? " [" + *code + "]" : std::string()) << ": "
+                  << (message ? *message : "host bridge operation failed");
+       return std::nullopt;
+     }
+@@ -1054,6 +1060,11 @@
+   }
+ 
+   void PublishStatus(update_engine::Operation operation, double progress) {
++    if (operation != update_engine::Operation::ERROR &&
++        operation != update_engine::Operation::IDLE) {
++      last_status_.set_last_attempt_error(
++          static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++    }
+     last_status_.set_current_operation(operation);
+     last_status_.set_progress(progress);
+     last_status_.set_last_checked_time(base::Time::Now().ToTimeT());
+@@ -1069,6 +1080,28 @@
+     }
+   }
+ 
++  void PublishUpdateFailure(double progress) {
++    // AuraDE compatibility: authorization, bridge transport, and package-job
++    // failures have distinct host-bridge codes, but update_engine's public
++    // error enum has no accurate equivalents. Report the generic error instead
++    // of mislabeling every failure as a download problem, then recover to IDLE
++    // so Settings can issue another update request.
++    last_status_.set_last_attempt_error(
++        static_cast<int32_t>(update_engine::ErrorCode::kError));
++    PublishStatus(update_engine::Operation::ERROR, progress);
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(&UpdateEngineClientAura::RecoverFromUpdateFailure,
++                       weak_factory_.GetWeakPtr()));
++  }
++
++  void RecoverFromUpdateFailure() {
++    if (last_status_.current_operation() != update_engine::Operation::ERROR) {
++      return;
++    }
++    PublishStatus(update_engine::Operation::IDLE, 0.0);
++  }
++
+   void CheckForDeferredUpdates() {
+     if (check_in_flight_ || update_job_running_ || updates_available_ ||
+         last_status_.current_operation() ==
+@@ -1123,7 +1156,7 @@
+                        std::optional<base::DictValue> data) {
+     check_in_flight_ = false;
+     if (!data) {
+-      PublishStatus(update_engine::Operation::ERROR, 0.0);
++      PublishUpdateFailure(0.0);
+       if (callback) {
+         std::move(callback).Run(UPDATE_RESULT_FAILED);
+       }
+@@ -1132,7 +1165,7 @@
+ 
+     const base::ListValue* packages = data->FindList("packages");
+     if (!packages) {
+-      PublishStatus(update_engine::Operation::ERROR, 0.0);
++      PublishUpdateFailure(0.0);
+       if (callback) {
+         std::move(callback).Run(UPDATE_RESULT_FAILED);
+       }
+@@ -1183,7 +1216,7 @@
+     const std::string* job_id = data ? data->FindString("job_id") : nullptr;
+     if (!job_id || job_id->empty()) {
+       update_job_running_ = false;
+-      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      PublishUpdateFailure(update_progress_);
+       if (failure_callback) {
+         std::move(failure_callback).Run();
+       }
+@@ -1216,7 +1249,7 @@
+     if (!state) {
+       update_job_running_ = false;
+       update_job_id_.clear();
+-      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      PublishUpdateFailure(update_progress_);
+       return;
+     }
+ 
+@@ -1230,7 +1263,7 @@
+     update_job_running_ = false;
+     update_job_id_.clear();
+     if (*state != "succeeded") {
+-      PublishStatus(update_engine::Operation::ERROR, update_progress_);
++      PublishUpdateFailure(update_progress_);
+       return;
+     }
+ 
+--- a/chromeos/ash/components/disks/disk_mount_manager.cc
++++ b/chromeos/ash/components/disks/disk_mount_manager.cc
+@@ -43,8 +43,8 @@
+ #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
+ #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
+ #include "chromeos/ash/components/disks/disk.h"
+-#include "dbus/bus.h"
+ #include "chromeos/ash/components/disks/suspend_unmount_manager.h"
++#include "dbus/bus.h"
+ #include "dbus/message.h"
+ #include "dbus/object_path.h"
+ #include "dbus/object_proxy.h"
+@@ -791,7 +791,12 @@
+     }
+     OnMountCompleted(
+         {source_path, resolved_mount_path, type, error, 100, read_only});
+-    RefreshAuraDeStorage();
++    // AuraDE compatibility: a failed mount is already reflected in local
++    // DiskMountManager state. Refreshing immediately would re-announce the
++    // same unmounted disk and cause VolumeManager to retry without bound.
++    if (error == MountError::kSuccess) {
++      RefreshAuraDeStorage();
++    }
+   }
+ 
+   void OnAuraDeUnmount(UnmountPathCallback callback,
+@@ -866,7 +871,7 @@
+     std::optional<base::Value> event =
+         base::JSONReader::Read(json, base::JSON_PARSE_RFC);
+     if (!event || !event->is_dict() ||
+-        ReadAuraDeString(event->GetDict(), "domain") != "storage") {
++        ReadAuraDeString(event->GetDict(), "source") != "storage") {
+       return;
+     }
+     aurade_refresh_timer_.Start(
+@@ -1262,8 +1267,16 @@
+       DCHECK(disk_it != disks_.end());
+       disk->set_is_first_mount(false);
+       if (!want_to_keep) {
+-        VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
+-        disks_.erase(disk_it);
++        if (aurade_host_bridge_proxy_) {
++          // AuraDE compatibility: keep the enumerated disk after a transient
++          // bridge or authorization failure. Removing it here would make the
++          // next host refresh announce the same device as DISK_ADDED and start
++          // another automatic mount instead of preserving the error state.
++          VLOG(1) << "Kept unmounted Disk '" << disk->device_path() << "'";
++        } else {
++          VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
++          disks_.erase(disk_it);
++        }
+       }
+     }
+   }
+--- a/components/history_embeddings/content/history_embeddings_service.cc
++++ b/components/history_embeddings/content/history_embeddings_service.cc
+@@ -16,6 +16,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+@@ -840,7 +841,8 @@
+ 
+   if (!is_visibility_model_available || scored_url_rows.empty()) {
+     OnPassageVisibilityCalculated(std::move(callback), std::move(result),
+-                                  std::move(scored_url_rows), {});
++                                  std::move(scored_url_rows),
++                                  is_visibility_model_available, {});
+     return;
+   }
+ 
+@@ -852,7 +854,8 @@
+   page_content_annotations_service_->BatchAnnotate(
+       base::BindOnce(&HistoryEmbeddingsService::OnPassageVisibilityCalculated,
+                      weak_ptr_factory_.GetWeakPtr(), std::move(callback),
+-                     std::move(result), std::move(scored_url_rows)),
++                     std::move(result), std::move(scored_url_rows),
++                     is_visibility_model_available),
+       std::move(inputs),
+       page_content_annotations::AnnotationType::kContentVisibility);
+ }
+@@ -861,10 +864,16 @@
+     SearchResultCallback callback,
+     SearchResult result,
+     std::vector<ScoredUrlRow> scored_url_rows,
++    bool visibility_model_available,
+     const std::vector<page_content_annotations::BatchAnnotationResult>&
+         annotation_results) {
+   if (annotation_results.empty()) {
+-    scored_url_rows.clear();
++    // AuraDE compatibility: generic-Linux local embeddings are already
++    // filtered by the local search path when Chrome's proprietary visibility
++    // model is unavailable. Preserve ChromeOS's fail-closed behavior.
++    if (visibility_model_available || base::SysInfo::IsRunningOnChromeOS()) {
++      scored_url_rows.clear();
++    }
+   } else {
+     CHECK_EQ(scored_url_rows.size(), annotation_results.size());
+ 
+--- a/components/history_embeddings/content/history_embeddings_service.h
++++ b/components/history_embeddings/content/history_embeddings_service.h
+@@ -276,6 +276,7 @@
+       SearchResultCallback callback,
+       SearchResult result,
+       std::vector<ScoredUrlRow> scored_url_rows,
++      bool visibility_model_available,
+       const std::vector<page_content_annotations::BatchAnnotationResult>&
+           annotation_results);
+ 
+--- a/components/history_embeddings/content/history_embeddings_service_unittest.cc
++++ b/components/history_embeddings/content/history_embeddings_service_unittest.cc
+@@ -12,10 +12,12 @@
+ #include "base/path_service.h"
+ #include "base/run_loop.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
+ #include "base/task/cancelable_task_tracker.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/test/bind.h"
+ #include "base/test/metrics/histogram_tester.h"
++#include "base/test/scoped_chromeos_version_info.h"
+ #include "base/test/scoped_feature_list.h"
+ #include "base/test/task_environment.h"
+ #include "base/test/test_future.h"
+@@ -106,6 +108,7 @@
+   using HistoryEmbeddingsService::Storage;
+ 
+   using HistoryEmbeddingsService::OnPassagesEmbeddingsComputed;
++  using HistoryEmbeddingsService::OnPassageVisibilityCalculated;
+   using HistoryEmbeddingsService::OnSearchCompleted;
+   using HistoryEmbeddingsService::QueryIsFiltered;
+   using HistoryEmbeddingsService::RebuildAbsentEmbeddings;
+@@ -332,6 +335,62 @@
+   EXPECT_FALSE(future.Take().session_id.empty());
+ }
+ 
++TEST_F(HistoryEmbeddingsServiceTest,
++       MissingVisibilityModelKeepsResultsOnGenericLinux) {
++  base::test::ScopedChromeOSVersionInfo version_info(/*lsb_release=*/"",
++                                                     base::Time());
++  ASSERT_FALSE(base::SysInfo::IsRunningOnChromeOS());
++  AddTestHistoryPage("http://test.com");
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/false, {});
++
++  EXPECT_EQ(future.Take().scored_url_rows.size(), 1u);
++}
++
++TEST_F(HistoryEmbeddingsServiceTest,
++       MissingVisibilityModelRemainsFailClosedOnChromeOS) {
++  base::test::ScopedChromeOSVersionInfo version_info(
++      "CHROMEOS_RELEASE_NAME=Chrome OS\nCHROMEOS_RELEASE_VERSION=1",
++      base::Time::Now());
++  ASSERT_TRUE(base::SysInfo::IsRunningOnChromeOS());
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/false, {});
++
++  EXPECT_TRUE(future.Take().scored_url_rows.empty());
++}
++
++TEST_F(HistoryEmbeddingsServiceTest,
++       AvailableVisibilityModelWithNoAnnotationsFailsClosed) {
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/true, {});
++
++  EXPECT_TRUE(future.Take().scored_url_rows.empty());
++}
++
+ TEST_F(HistoryEmbeddingsServiceTest, SearchCallsCallbackWithAnswer) {
+   OverrideVisibilityScoresForTesting({
+       {"A passage with five words.", 1},
+--- /dev/null
++++ b/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc
+@@ -0,0 +1,306 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chromeos/ash/components/dbus/update_engine/update_engine_client.h"
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/test/task_environment.h"
++#include "base/time/time.h"
++#include "dbus/message.h"
++#include "dbus/mock_bus.h"
++#include "dbus/mock_object_proxy.h"
++#include "dbus/object_path.h"
++#include "testing/gmock/include/gmock/gmock.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++using ::testing::_;
++using ::testing::Return;
++
++namespace ash {
++
++namespace {
++
++constexpr char kAuraHostBridgeService[] = "org.aurade.HostBridge";
++constexpr char kAuraHostBridgePath[] = "/org/aurade/HostBridge";
++constexpr char kLoginManagerService[] = "org.freedesktop.login1";
++constexpr char kLoginManagerPath[] = "/org/freedesktop/login1";
++
++auto RespondWithJson(std::string expected_method, std::string json) {
++  return [expected_method = std::move(expected_method), json = std::move(json)](
++             dbus::MethodCall* method_call, int /* timeout_ms */,
++             dbus::MockObjectProxy::ResponseCallback callback) {
++    EXPECT_EQ(expected_method, method_call->GetMember());
++    std::unique_ptr<dbus::Response> response = dbus::Response::CreateEmpty();
++    dbus::MessageWriter writer(response.get());
++    writer.AppendString(json);
++    std::move(callback).Run(response.get());
++  };
++}
++
++auto RespondWithNoResponse(std::string expected_method) {
++  return [expected_method = std::move(expected_method)](
++             dbus::MethodCall* method_call, int /* timeout_ms */,
++             dbus::MockObjectProxy::ResponseCallback callback) {
++    EXPECT_EQ(expected_method, method_call->GetMember());
++    std::move(callback).Run(nullptr);
++  };
++}
++
++class RecordingUpdateEngineObserver : public UpdateEngineClient::Observer {
++ public:
++  void UpdateStatusChanged(const update_engine::StatusResult& status) override {
++    statuses.push_back(status);
++  }
++
++  std::vector<update_engine::StatusResult> statuses;
++};
++
++class UpdateEngineClientAuraTest : public ::testing::Test {
++ public:
++  UpdateEngineClientAuraTest()
++      : bus_(base::MakeRefCounted<::testing::NiceMock<dbus::MockBus>>(
++            dbus::Bus::Options{})),
++        host_bridge_proxy_(base::MakeRefCounted<dbus::MockObjectProxy>(
++            bus_.get(),
++            kAuraHostBridgeService,
++            dbus::ObjectPath(kAuraHostBridgePath))),
++        login_manager_proxy_(base::MakeRefCounted<dbus::MockObjectProxy>(
++            bus_.get(),
++            kLoginManagerService,
++            dbus::ObjectPath(kLoginManagerPath))) {}
++
++ protected:
++  void SetUp() override {
++    ON_CALL(*bus_, GetObjectProxy(kAuraHostBridgeService,
++                                  dbus::ObjectPath(kAuraHostBridgePath)))
++        .WillByDefault(Return(host_bridge_proxy_.get()));
++    ON_CALL(*bus_, GetObjectProxy(kLoginManagerService,
++                                  dbus::ObjectPath(kLoginManagerPath)))
++        .WillByDefault(Return(login_manager_proxy_.get()));
++
++    UpdateEngineClient::InitializeAura(bus_.get());
++    client_ = UpdateEngineClient::Get();
++    ASSERT_TRUE(client_);
++    client_->AddObserver(&observer_);
++  }
++
++  void TearDown() override {
++    if (UpdateEngineClient::Get()) {
++      if (client_ && client_->HasObserver(&observer_)) {
++        client_->RemoveObserver(&observer_);
++      }
++      UpdateEngineClient::Shutdown();
++    }
++    client_ = nullptr;
++  }
++
++  base::test::TaskEnvironment task_environment_{
++      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
++  scoped_refptr<dbus::MockBus> bus_;
++  scoped_refptr<dbus::MockObjectProxy> host_bridge_proxy_;
++  scoped_refptr<dbus::MockObjectProxy> login_manager_proxy_;
++  raw_ptr<UpdateEngineClient> client_ = nullptr;
++  RecordingUpdateEngineObserver observer_;
++};
++
++TEST_F(UpdateEngineClientAuraTest, FailureRecoversAndRetainedUpdateCanRetry) {
++  EXPECT_CALL(*host_bridge_proxy_, CallMethod(_, _, _))
++      .WillOnce(RespondWithJson(
++          "PacmanListUpdates",
++          R"({"ok":true,"data":{"packages":[{"name":"aurade","available_version":"152.1660893-9"}]}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":false,"error":{"code":"not_authorized","message":"the requested operation was not authorized"}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":true,"data":{"job_id":"0123456789abcdef0123456789abcdef","state":"running"}})"));
++
++  std::optional<UpdateEngineClient::UpdateCheckResult> first_result;
++  client_->RequestUpdateCheck(base::BindOnce(
++      [](std::optional<UpdateEngineClient::UpdateCheckResult>* result,
++         UpdateEngineClient::UpdateCheckResult value) { *result = value; },
++      &first_result));
++
++  ASSERT_TRUE(first_result.has_value());
++  EXPECT_EQ(*first_result,
++            UpdateEngineClient::UpdateCheckResult::UPDATE_RESULT_SUCCESS);
++  ASSERT_EQ(observer_.statuses.size(), 4u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::ERROR);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++  EXPECT_EQ(client_->GetLastStatus().current_operation(),
++            update_engine::Operation::ERROR);
++
++  task_environment_.RunUntilIdle();
++
++  ASSERT_EQ(observer_.statuses.size(), 5u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::IDLE);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++
++  std::optional<UpdateEngineClient::UpdateCheckResult> retry_result;
++  client_->RequestUpdateCheck(base::BindOnce(
++      [](std::optional<UpdateEngineClient::UpdateCheckResult>* result,
++         UpdateEngineClient::UpdateCheckResult value) { *result = value; },
++      &retry_result));
++
++  ASSERT_TRUE(retry_result.has_value());
++  EXPECT_EQ(*retry_result,
++            UpdateEngineClient::UpdateCheckResult::UPDATE_RESULT_SUCCESS);
++  ASSERT_EQ(observer_.statuses.size(), 6u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::DOWNLOADING);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++}
++
++TEST_F(UpdateEngineClientAuraTest, FreshCheckClearsPreviousError) {
++  EXPECT_CALL(*host_bridge_proxy_, CallMethod(_, _, _))
++      .WillOnce(RespondWithJson(
++          "PacmanListUpdates",
++          R"({"ok":false,"error":{"code":"transport_error","message":"package backend unavailable"}})"))
++      .WillOnce(RespondWithJson("PacmanListUpdates",
++                                R"({"ok":true,"data":{"packages":[]}})"));
++
++  std::optional<UpdateEngineClient::UpdateCheckResult> failed_result;
++  client_->RequestUpdateCheckWithoutApplying(base::BindOnce(
++      [](std::optional<UpdateEngineClient::UpdateCheckResult>* result,
++         UpdateEngineClient::UpdateCheckResult value) { *result = value; },
++      &failed_result));
++  ASSERT_TRUE(failed_result.has_value());
++  EXPECT_EQ(*failed_result,
++            UpdateEngineClient::UpdateCheckResult::UPDATE_RESULT_FAILED);
++  EXPECT_EQ(client_->GetLastStatus().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++
++  task_environment_.RunUntilIdle();
++
++  std::optional<UpdateEngineClient::UpdateCheckResult> retry_result;
++  client_->RequestUpdateCheckWithoutApplying(base::BindOnce(
++      [](std::optional<UpdateEngineClient::UpdateCheckResult>* result,
++         UpdateEngineClient::UpdateCheckResult value) { *result = value; },
++      &retry_result));
++
++  ASSERT_TRUE(retry_result.has_value());
++  EXPECT_EQ(*retry_result,
++            UpdateEngineClient::UpdateCheckResult::UPDATE_RESULT_SUCCESS);
++  ASSERT_GE(observer_.statuses.size(), 2u);
++  EXPECT_EQ(
++      observer_.statuses[observer_.statuses.size() - 2].current_operation(),
++      update_engine::Operation::CHECKING_FOR_UPDATE);
++  EXPECT_EQ(
++      observer_.statuses[observer_.statuses.size() - 2].last_attempt_error(),
++      static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++  EXPECT_EQ(client_->GetLastStatus().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++}
++
++TEST_F(UpdateEngineClientAuraTest, TerminalJobFailureRecoversAndCanRetry) {
++  EXPECT_CALL(*host_bridge_proxy_, CallMethod(_, _, _))
++      .WillOnce(RespondWithJson(
++          "PacmanListUpdates",
++          R"({"ok":true,"data":{"packages":[{"name":"aurade","available_version":"152.1660893-9"}]}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":true,"data":{"job_id":"0123456789abcdef0123456789abcdef","state":"running"}})"))
++      .WillOnce(RespondWithJson(
++          "JobGet",
++          R"({"ok":true,"data":{"state":"failed","error":{"code":"package_failed","message":"package job failed"}}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":true,"data":{"job_id":"fedcba9876543210fedcba9876543210","state":"running"}})"));
++
++  client_->RequestUpdateCheck(UpdateEngineClient::UpdateCheckCallback());
++  ASSERT_EQ(observer_.statuses.size(), 3u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::DOWNLOADING);
++
++  task_environment_.FastForwardBy(base::Milliseconds(250));
++
++  ASSERT_EQ(observer_.statuses.size(), 5u);
++  EXPECT_EQ(observer_.statuses[3].current_operation(),
++            update_engine::Operation::ERROR);
++  EXPECT_EQ(observer_.statuses[3].last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++  EXPECT_EQ(observer_.statuses[4].current_operation(),
++            update_engine::Operation::IDLE);
++  EXPECT_EQ(observer_.statuses[4].last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++
++  client_->RequestUpdateCheck(UpdateEngineClient::UpdateCheckCallback());
++
++  ASSERT_EQ(observer_.statuses.size(), 6u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::DOWNLOADING);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++}
++
++TEST_F(UpdateEngineClientAuraTest, JobGetTransportFailureRecoversAndCanRetry) {
++  EXPECT_CALL(*host_bridge_proxy_, CallMethod(_, _, _))
++      .WillOnce(RespondWithJson(
++          "PacmanListUpdates",
++          R"({"ok":true,"data":{"packages":[{"name":"aurade","available_version":"152.1660893-9"}]}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":true,"data":{"job_id":"0123456789abcdef0123456789abcdef","state":"running"}})"))
++      .WillOnce(RespondWithNoResponse("JobGet"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":true,"data":{"job_id":"fedcba9876543210fedcba9876543210","state":"running"}})"));
++
++  client_->RequestUpdateCheck(UpdateEngineClient::UpdateCheckCallback());
++  task_environment_.FastForwardBy(base::Milliseconds(250));
++
++  ASSERT_EQ(observer_.statuses.size(), 5u);
++  EXPECT_EQ(observer_.statuses[3].current_operation(),
++            update_engine::Operation::ERROR);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::IDLE);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kError));
++
++  client_->RequestUpdateCheck(UpdateEngineClient::UpdateCheckCallback());
++
++  ASSERT_EQ(observer_.statuses.size(), 6u);
++  EXPECT_EQ(observer_.statuses.back().current_operation(),
++            update_engine::Operation::DOWNLOADING);
++  EXPECT_EQ(observer_.statuses.back().last_attempt_error(),
++            static_cast<int32_t>(update_engine::ErrorCode::kSuccess));
++}
++
++TEST_F(UpdateEngineClientAuraTest, PostedFailureRecoveryIsLifetimeSafe) {
++  EXPECT_CALL(*host_bridge_proxy_, CallMethod(_, _, _))
++      .WillOnce(RespondWithJson(
++          "PacmanListUpdates",
++          R"({"ok":true,"data":{"packages":[{"name":"aurade","available_version":"152.1660893-9"}]}})"))
++      .WillOnce(RespondWithJson(
++          "PacmanUpgrade",
++          R"({"ok":false,"error":{"code":"not_authorized","message":"the requested operation was not authorized"}})"));
++
++  client_->RequestUpdateCheck(UpdateEngineClient::UpdateCheckCallback());
++  ASSERT_EQ(client_->GetLastStatus().current_operation(),
++            update_engine::Operation::ERROR);
++
++  client_->RemoveObserver(&observer_);
++  UpdateEngineClient::Shutdown();
++  client_ = nullptr;
++  task_environment_.RunUntilIdle();
++
++  EXPECT_EQ(UpdateEngineClient::Get(), nullptr);
++}
++
++}  // namespace
++
++}  // namespace ash
