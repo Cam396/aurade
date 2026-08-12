@@ -53,6 +53,8 @@ Environment:
   AURADE_VM_USER=root
   AURADE_TEST_USER=auratest
   AURADE_EXPECTED_CHROME_SHA=<sha256>
+  AURADE_VM_CHROME_LOG=<remote-log-path>  Optional Chrome log path for
+                                --accessibility-smoke when stderr is a tty.
   AURADE_REMOVABLE_AUTOMOUNT=0  Expect Chromium/host-bridge automounting and
                                 no user udiskie process. Set to 1 for the
                                 explicit udiskie recovery fallback.
@@ -297,7 +299,7 @@ if [[ "${open_core_apps}" == "1" ]]; then
     '"url": "chrome://settings/'
   verify_cdp_target \
     "Terminal" \
-    '' \
+    "chrome-untrusted://terminal/html/terminal.html" \
     '"title": ".*@.*:.*"' \
     '"url": "chrome-untrusted://terminal/html/terminal.html"'
 fi
@@ -329,7 +331,11 @@ if [[ "${accessibility_smoke}" == "1" ]]; then
   remote "chmod 755 /tmp/aurade-accessibility-cdp-smoke.py"
   chrome_pid="$(remote \
     "pgrep -o -f '^/usr/lib/chromiumos-ash/chrome --login-manager'")"
-  chrome_log="$(remote "readlink /proc/${chrome_pid}/fd/2")"
+  if [[ -n "${AURADE_VM_CHROME_LOG:-}" ]]; then
+    chrome_log="${AURADE_VM_CHROME_LOG}"
+  else
+    chrome_log="$(remote "readlink /proc/${chrome_pid}/fd/2")"
+  fi
   remote "python3 /tmp/aurade-accessibility-cdp-smoke.py \
     --chrome-log '${chrome_log}'"
 fi

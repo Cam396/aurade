@@ -258,6 +258,21 @@ EOF
         copy_runtime_dep "${runtime_dep}"
     done < <(sort -u "${runtime_deps}")
 
+    # AuraDE compatibility: Chromium's ChromeOS accessibility extensions are
+    # emitted as generated files under resources/.  GN runtime_deps currently
+    # lists their manifests but not every extension payload, so copying only
+    # runtime_deps leaves ChromeVox and Select-to-Speak unable to start.
+    # Preserve the complete generated trees in the package.
+    for resource_dir in \
+        accessibility \
+        chromeos/accessibility; do
+        if [ -d "${out_dir}/resources/${resource_dir}" ]; then
+            mkdir -p "${pkgdir}/usr/lib/chromiumos-ash/resources/${resource_dir}"
+            cp -a "${out_dir}/resources/${resource_dir}/." \
+                "${pkgdir}/usr/lib/chromiumos-ash/resources/${resource_dir}/"
+        fi
+    done
+
     if [ -e "${pkgdir}/usr/lib/chromiumos-ash/chrome_sandbox" ]; then
         mv "${pkgdir}/usr/lib/chromiumos-ash/chrome_sandbox" \
             "${pkgdir}/usr/lib/chromiumos-ash/chrome-sandbox"

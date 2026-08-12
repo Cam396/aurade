@@ -29,8 +29,14 @@ target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
 printf 'Hostname [aurade]: '
 read -r hostname
 hostname=${hostname:-aurade}
-printf 'Initial username: '
-read -r username
+while true; do
+  printf 'Initial username: '
+  read -r username
+  if [[ $username =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    break
+  fi
+  printf '%s\n' 'Username must start with a lowercase letter or underscore and contain only lowercase letters, digits, _ or -.' >&2
+done
 printf 'Timezone [UTC]: '
 read -r timezone
 timezone=${timezone:-UTC}
