@@ -136,7 +136,7 @@ case "$COMMAND" in
       mv -f "$rollback_tmp" "$rollback_entry"
       trap - EXIT
       find "$ROOT/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -type d \
-        ! -name "$snapshot_name" -exec rm -rf -- {} +
+        ! -name "$snapshot_name" ! -name factory -exec rm -rf -- {} +
     fi
     printf '%s\n' "$destination"
     ;;
