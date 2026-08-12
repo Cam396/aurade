@@ -34,6 +34,7 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
 (cd "$staged" && sha256sum -c \
   <(awk '!/^#/ {print $1 "  " $2}' packages.lock)) >/dev/null
 grep -Fxq reflector "$ROOT/installer/archiso/packages.x86_64"
+grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
