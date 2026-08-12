@@ -23,9 +23,22 @@ repo_url_default=file:///var/cache/aurade/repo
 
 printf '%s\n' 'AuraDE installer' 'This program will show a dry-run plan before it can erase a disk.' ''
 lsblk -d -o NAME,PATH,SIZE,MODEL,TRAN,TYPE
-printf '\nTarget disk (for example /dev/sda or /dev/nvme0n1): '
-read -r target
-target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
+while true; do
+  printf '\nTarget disk (select an exact PATH from the table above): '
+  read -r target
+  target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
+  if [[ -b $target ]] && [[ $(lsblk -dnro TYPE "$target" 2>/dev/null) == disk ]]; then
+    break
+  fi
+  printf '%s\n' 'That is not one of the discovered whole-disk block devices; nothing has been changed. Choose an exact PATH from the table.' >&2
+done
+target_size=$(lsblk -dnro SIZE "$target")
+target_model=$(lsblk -dnro MODEL "$target" | sed 's/[[:space:]]*$//' || true)
+target_serial=$(lsblk -dnro SERIAL "$target" | sed 's/[[:space:]]*$//' || true)
+target_transport=$(lsblk -dnro TRAN "$target" | sed 's/[[:space:]]*$//' || true)
+printf 'Selected disk: %s | size=%s | model=%s | serial=%s | transport=%s\n' \
+  "$target" "$target_size" "${target_model:-unknown}" \
+  "${target_serial:-unknown}" "${target_transport:-unknown}"
 printf 'Hostname [aurade]: '
 read -r hostname
 hostname=${hostname:-aurade}
