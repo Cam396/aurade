@@ -188,6 +188,46 @@ test_selected_command_restart_and_stop() {
   [[ ! -e "${pid_file}" ]] || fail "selected supervisor pid file survived stop"
 }
 
+test_failed_session_retries_before_greeter_return() {
+  local runtime_dir="${test_tmp}/failed-runtime"
+  local failure_log="${test_tmp}/failed-session.log"
+  local failing_child="${test_tmp}/failing-session-child"
+  local output="${test_tmp}/failed-supervisor.log"
+  local supervisor_pid status
+  mkdir -p "${runtime_dir}"
+  cat >"${failing_child}" <<'EOF'
+#!/bin/bash
+set -u
+printf 'failed-start pid=%s\n' "$$" >>"${AURADE_TEST_SESSION_LOG}"
+exit 7
+EOF
+  chmod 755 "${failing_child}"
+
+  AURADE_TEST_SESSION_LOG="${failure_log}" \
+    AURADE_SUPERVISOR_MAX_SESSION_FAILURES=2 \
+    AURADE_SUPERVISOR_RETRY_DELAY_SECONDS=0 \
+    XDG_RUNTIME_DIR="${runtime_dir}" \
+    XDG_SESSION_ID=aurade-failed \
+    /usr/bin/bash "${supervisor}" "${failing_child}" >"${output}" 2>&1 &
+  supervisor_pid=$!
+  if wait "${supervisor_pid}"; then
+    fail "failed session unexpectedly returned success"
+  else
+    status=$?
+  fi
+  [[ "${status}" == 7 ]] || fail "failed session returned status ${status}, expected 7"
+  [[ "$(grep -c '^failed-start ' "${failure_log}")" == 2 ]] || \
+    fail "failed session was not retried exactly once"
+  grep -Fxq \
+    'aurade-session-supervisor: session exited with status 7; retry 1/2' \
+    "${output}" || fail "retry diagnostic was not emitted"
+  grep -Fxq \
+    'aurade-session-supervisor: session failed 2 times; returning to greeter' \
+    "${output}" || fail "final failure diagnostic was not emitted"
+  [[ ! -e "${runtime_dir}/aurade/sessions/aurade-failed/session-supervisor.pid" ]] || \
+    fail "failed session pid file survived greeter return"
+}
+
 test_empty_command_rejected() {
   local runtime_dir="${test_tmp}/empty-command-runtime"
   local output="${test_tmp}/empty-command-supervisor.log"
@@ -546,6 +586,7 @@ bash -n "${supervisor}" "${session_control}" "${greetd_vt}"
 test_default_command
 test_cached_legacy_command_migrated
 test_selected_command_restart_and_stop
+test_failed_session_retries_before_greeter_return
 test_empty_command_rejected
 test_invalid_session_ids_rejected
 test_symlink_state_rejected

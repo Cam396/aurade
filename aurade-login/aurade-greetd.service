@@ -1,7 +1,8 @@
 [Unit]
 Description=AuraDE PAM greeter
 Documentation=man:greetd(1)
-After=systemd-user-sessions.service plymouth-quit-wait.service
+Wants=seatd.service
+After=systemd-user-sessions.service plymouth-quit-wait.service seatd.service
 Conflicts=getty@tty1.service
 
 [Service]
