@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install source-check dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
+
       - name: Check shell syntax
         shell: bash
         run: |
