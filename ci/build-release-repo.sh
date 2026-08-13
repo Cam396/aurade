@@ -10,8 +10,18 @@ chromium_pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
   "${REPO_ROOT}/chromiumos-ash/PKGBUILD")"
 chromium_pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' \
   "${REPO_ROOT}/chromiumos-ash/PKGBUILD")"
-default_chromium_package="/mnt/build/aurade-work/current-package/pkgdest/chromiumos-ash-${chromium_pkgver}-${chromium_pkgrel}-x86_64.pkg.tar.gz"
-CHROMIUMOS_ASH_PACKAGE="${CHROMIUMOS_ASH_PACKAGE:-${default_chromium_package}}"
+if [[ -z "${CHROMIUMOS_ASH_PACKAGE:-}" ]]; then
+  package_dir="${AURADE_WORKDIR:-/mnt/build/aurade-work}/current-package/pkgdest"
+  package_name="chromiumos-ash-${chromium_pkgver}-${chromium_pkgrel}-x86_64.pkg.tar.*"
+  mapfile -t package_candidates < <(find "${package_dir}" -maxdepth 1 -type f \
+    -name "${package_name}" ! -name '*.sig' -printf '%p\n' | LC_ALL=C sort)
+  if [[ "${#package_candidates[@]}" -ne 1 ]]; then
+    echo "Expected exactly one Chromium package matching ${package_name}, found ${#package_candidates[@]}" >&2
+    printf '  %s\n' "${package_candidates[@]}" >&2
+    exit 2
+  fi
+  CHROMIUMOS_ASH_PACKAGE="${package_candidates[0]}"
+fi
 staging="${target_repo}.staging.$$"
 previous="${target_repo}.previous"
 

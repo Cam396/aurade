@@ -219,11 +219,18 @@ source=("aurade-repository.tar.gz::${release_url_template}")
 sha256sums=('${RELEASE_SHA256}')
 
 package() {
-    local payload="\${srcdir}/repository/chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.gz"
-    [[ -f "\${payload}" ]] || {
-        printf 'missing Chromium payload in release archive: %s\\n' "\${payload}" >&2
+    local -a payloads=()
+    while IFS= read -r payload; do
+        payloads+=("\$payload")
+    done < <(find "\${srcdir}/repository" -maxdepth 1 -type f \\
+        -name "chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.*" \\
+        ! -name '*.sig' -print)
+    if (( \${#payloads[@]} != 1 )); then
+        printf 'expected exactly one Chromium payload in release archive, found %s\\n' \\
+            "\${#payloads[@]}" >&2
         return 1
-    }
+    fi
+    local payload="\${payloads[0]}"
     bsdtar --exclude='.BUILDINFO' --exclude='.MTREE' --exclude='.PKGINFO' \\
         --no-same-owner -xpf "\${payload}" -C "\${pkgdir}"
 }
