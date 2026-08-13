@@ -86,6 +86,11 @@ base transaction three times. If a first attempt still fails, reconnect the
 network and rerun `aurade-installer`; the target is checked and repartitioned
 only after the normal confirmation flow.
 
+The live preflight also probes the image's pinned snapshot over HTTPS when
+`curl` is available. A failed probe is reported as an archive/captive-portal
+issue without switching mirrors or touching the target disk; fix the network
+and rerun the preflight before continuing.
+
 The installer now acquires and verifies the complete pinned Arch package
 closure before `wipefs` or `sgdisk` runs. After acquisition it builds a local
 file repository and pacstraps from that cache, so a transfer failure cannot
