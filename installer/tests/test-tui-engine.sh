@@ -294,9 +294,13 @@ grep -Fq 'AuraDE is installed' "$TMP/out.gateback" ||
 } >"$TMP/keys.exportfail"
 AURADE_STUB_FAIL_AT=bootloader AURADE_TEST_EXPORT_DIR=/proc/aurade-cannot-write \
   run_flow exportfail && fail 'a failed install reported success'
-grep -Fq 'Could not save a report' "$TMP/out.exportfail" ||
+# Flatten the frame before matching: these sentences wrap, and an assertion
+# that depends on where they wrap breaks whenever the wording shifts.
+flatten() { tr -d '|' <"$1" | tr -s ' \n' '  ' ; }
+flatten "$TMP/out.exportfail" >"$TMP/exportfail.flat"
+grep -Fq 'Could not save a report' "$TMP/exportfail.flat" ||
   fail 'a failed export did not report the failure'
-! grep -Fq 'Saved to' "$TMP/out.exportfail" ||
+! grep -Fq 'Saved to' "$TMP/exportfail.flat" ||
   fail 'a failed export claimed the report was saved'
 [[ ! -e /proc/aurade-cannot-write ]] ||
   fail 'the export wrote somewhere it should not have'

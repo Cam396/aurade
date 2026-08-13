@@ -624,7 +624,7 @@ screen_failure() {
   tui_wrap "$(restart_advice "$stage")" warn
   tui_blank
   if [[ -n ${EXPORT_NOTICE:-} ]]; then
-    tui_note '*' "$EXPORT_NOTICE" "${EXPORT_NOTICE_KIND:-ok}"
+    tui_note '!' "$EXPORT_NOTICE" "${EXPORT_NOTICE_KIND:-ok}"
     tui_blank
   fi
   for option in "${FAILURE_OPTIONS[@]}"; do

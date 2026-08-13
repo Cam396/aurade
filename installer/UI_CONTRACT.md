@@ -56,6 +56,11 @@ Three tiers: 256 colour, 16 colour, and none. `NO_COLOR`, `TERM=dumb` and
 sequences at all. That tier is the serial console and screen reader path and
 has to stay fully operable, not merely legible.
 
+Rendered text is never glob-expanded. Word splitting inside the renderer runs
+with pathname expansion disabled, because journal messages, device paths and
+failure details can all contain `*` or `?`, and unquoted splitting replaces
+them with whatever filenames happen to match.
+
 `--render SCREEN [--journal FILE]` draws any single screen from fixture state
 and exits, which is how the layout is tested and how a support case is
 reproduced. `--list-screens` prints the set.
