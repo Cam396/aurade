@@ -129,6 +129,14 @@ device is unexpectedly small, or the model/serial does not match the disk you
 intend to erase. The installer never treats a SMART warning as permission to
 skip its exact-target confirmation.
 
+### Secure Boot warning
+
+AuraDE's current installed boot chain is unsigned. The interactive installer
+warns when firmware reports Secure Boot enabled, and the noninteractive engine
+refuses the execute path before `wipefs` until Secure Boot is disabled. Do not
+work around this by deleting the check; production Secure Boot signing and key
+provisioning are separate release work.
+
 ### Correct password, then a black screen and return to the greeter in VMware
 
 AuraDE now performs a render-device preflight before starting Weston. If no
