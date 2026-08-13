@@ -178,8 +178,8 @@ cleanup() {
     aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
       'installer stopped unexpectedly; inspect the private install log' \
       log shell reboot
-    aurade_journal_preserve_failure >/dev/null 2>&1 || true
   fi
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
   exit "$status"
 }
 trap cleanup EXIT
@@ -208,6 +208,38 @@ preserved_unexpected=$(find "$TMP/unexpected-failures" -type f -name journal.jso
 [[ -n $preserved_unexpected ]] || fail 'unexpected exit did not preserve the journal'
 [[ ! -e ${preserved_unexpected%/journal.jsonl}/install.log ]] || \
   fail 'unexpected-exit preservation copied the raw log'
+
+# A specific fatal cause clears the active stage before EXIT; cleanup must
+# still preserve the journal rather than treating the record as success.
+classified_journal="$TMP/classified.jsonl"
+classified_script="$TMP/classified-exit.sh"
+cat >"$classified_script" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. "${AURADE_TEST_JOURNAL_LIB}"
+aurade_journal_init execute /dev/does-not-exist
+aurade_journal_begin acquire 'downloading packages'
+aurade_journal_fail acquire 1 keyring_error 'keyring setup failed' log shell reboot
+cleanup() {
+  local status=$?
+  set +e
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap cleanup EXIT
+exit 41
+EOF
+chmod 0755 "$classified_script"
+if AURADE_TEST_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh" \
+  AURADE_JOURNAL_PATH="$classified_journal" \
+  AURADE_FAILURE_JOURNAL_DIR="$TMP/classified-failures" \
+  "$classified_script"; then
+  fail 'classified fatal fixture unexpectedly returned success'
+fi
+classified_preserved=$(find "$TMP/classified-failures" -type f -name journal.jsonl -print -quit)
+[[ -n $classified_preserved ]] || fail 'classified fatal journal was not preserved'
+grep -Fq '"cause":"keyring_error"' "$classified_preserved" || \
+  fail 'classified fatal cause was not preserved'
 
 if (( failures )); then
   printf 'installer journal test: FAIL (%d)\n' "$failures" >&2

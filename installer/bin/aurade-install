@@ -360,10 +360,14 @@ cleanup() {
   # A command can fail after a stage has started without passing through a
   # helper that knows the right cause code. Preserve a bounded, secret-free
   # failure record before tearing down mounts and private installer state.
-  if (( status != 0 )) && [[ -n ${_J_ACTIVE_STAGE:-} ]] && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
-    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
-      'installer stopped unexpectedly; inspect the private install log' \
-      log shell reboot
+  if (( status != 0 )) && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
+    if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+      aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
+        'installer stopped unexpectedly; inspect the private install log' \
+        log shell reboot
+    fi
+    # Preserve a specific die() record as well as a generic unexpected exit;
+    # the journal helper copies only structured, secret-free evidence.
     aurade_journal_preserve_failure >/dev/null 2>&1 || true
   fi
   if (( TARGET_MOUNTED )); then
