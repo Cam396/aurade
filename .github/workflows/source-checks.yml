@@ -25,7 +25,14 @@ jobs:
       - name: Check Python syntax without bytecode output
         run: |
           set -euo pipefail
-          while IFS= read -r file; do python3 -B -m py_compile "$file"; done < <(find . -type f -name '*.py' -not -path './.git/*' -print)
+          python3 -B - <<'PY'
+          import pathlib
+
+          for path in pathlib.Path('.').rglob('*.py'):
+              if '.git' in path.parts or '__pycache__' in path.parts:
+                  continue
+              compile(path.read_text(encoding='utf-8'), str(path), 'exec')
+          PY
 
       - name: Check patch series manifest
         shell: bash
@@ -41,6 +48,9 @@ jobs:
         run: |
           set -euo pipefail
           while IFS= read -r package; do test -f "${package}/PKGBUILD"; test -f "${package}/.SRCINFO"; done < installer/expected-packages.txt
+
+      - name: Run source integrity gate
+        run: ci/source-integrity-gate.sh
 
       - name: Run public release leak gate
         run: ci/public-release-leak-gate.sh

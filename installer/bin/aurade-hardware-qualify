@@ -21,8 +21,19 @@ EOF
 
 while (($#)); do
   case "$1" in
-    --output-dir) OUTPUT_DIR=${2:?}; shift 2 ;;
-    --since) SINCE=${2:?}; shift 2 ;;
+    --output-dir|--since)
+      [[ $# -ge 2 ]] || {
+        echo "aurade-hardware-qualify: $1 requires an argument" >&2
+        usage >&2
+        exit 2
+      }
+      if [[ $1 == --output-dir ]]; then
+        OUTPUT_DIR=$2
+      else
+        SINCE=$2
+      fi
+      shift 2
+      ;;
     --full) FULL=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "aurade-hardware-qualify: unknown option: $1" >&2; exit 2 ;;

@@ -15,6 +15,7 @@ while IFS= read -r name; do
 done <"$ROOT/installer/expected-packages.txt"
 printf '%s\n' 'local repository database' >"$TMP/repo/aurade.db.tar.gz"
 printf '%s\n' 'must not enter the image' >"$TMP/repo/private-signing-key.txt"
+(cd "$TMP/repo" && sha256sum aurade.db.tar.gz >SHA256SUMS)
 
 if env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
@@ -43,6 +44,7 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
 [[ $actual -eq $expected ]]
 [[ ! -e $staged/private-signing-key.txt ]]
 [[ -r $staged/packages.lock ]]
+[[ -r $staged/SHA256SUMS ]]
 [[ -r $staged/aurade.db.tar.gz ]]
 (cd "$staged" && sha256sum -c \
   <(awk '!/^#/ {print $1 "  " $2}' packages.lock)) >/dev/null
@@ -75,5 +77,20 @@ grep -Fq '/usr/local/lib/aurade/aurade-journal.sh' "$ROOT/installer/archiso/prof
 grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
+
+# Repository metadata is authenticated separately from the package lock when a
+# verified release repository supplies SHA256SUMS. A tampered database must
+# stop staging before mkarchiso can consume it.
+printf '%s\n' 'tampered repository database' >>"$TMP/repo/aurade.db.tar.gz"
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work-tampered" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/tampered.out" 2>&1; then
+  echo 'tampered repository metadata unexpectedly staged' >&2
+  exit 1
+fi
+grep -Fq 'source repository SHA256SUMS verification failed' "$TMP/tampered.out"
 
 echo 'installer ISO staging test: PASS'

@@ -148,6 +148,50 @@ fi
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
 [[ $perms == 600 ]] || fail "journal should be mode 600, found $perms"
 
+# A process can exit from the middle of a stage without a helper-specific
+# cause. The engine's EXIT trap must still leave a bounded, secret-free record
+# that the failure UI can render.
+unexpected_journal="$TMP/unexpected.jsonl"
+unexpected_raw="$TMP/unexpected.log"
+unexpected_script="$TMP/unexpected-exit.sh"
+cat >"$unexpected_script" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. "${AURADE_TEST_JOURNAL_LIB}"
+aurade_journal_init execute /dev/does-not-exist
+aurade_journal_begin pacstrap 'installing the base system'
+cleanup() {
+  local status=$?
+  set +e
+  if (( status != 0 )) && [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
+      'installer stopped unexpectedly; inspect the private install log' \
+      log shell reboot
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+exit 23
+EOF
+chmod 0755 "$unexpected_script"
+if AURADE_TEST_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh" \
+  AURADE_JOURNAL_PATH="$unexpected_journal" AURADE_JOURNAL_RAW="$unexpected_raw" \
+  "$unexpected_script"; then
+  fail 'unexpected-exit fixture unexpectedly returned success'
+fi
+python3 - "$unexpected_journal" <<'PY'
+import json, sys
+records = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert any(
+    record.get("stage") == "pacstrap"
+    and record.get("status") == "failed"
+    and record.get("cause") == "unexpected_exit"
+    and record.get("exit") == 23
+    and record.get("remediation") == ["log", "shell", "reboot"]
+    for record in records
+), records
+PY
+
 if (( failures )); then
   printf 'installer journal test: FAIL (%d)\n' "$failures" >&2
   exit 1
