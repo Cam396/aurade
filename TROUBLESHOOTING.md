@@ -94,6 +94,16 @@ the base install. The image still keeps the dated snapshot rather than
 silently switching to moving Reflector mirrors. The live `sshd` service is not
 enabled by default; start it manually only after setting credentials.
 
+### Swap, zram, and hibernation
+
+The beta installer deliberately creates no swap partition or swapfile, and it
+does not advertise hibernation support. This keeps the whole-disk Btrfs and
+rollback layout deterministic, but low-memory laptops may need additional
+pressure relief for Chromium. After installation, choose a documented Arch
+`zram-generator` configuration or a swapfile sized for the machine; do not
+assume hibernation works until resume has been tested with the selected
+encrypted-root and bootloader configuration.
+
 ### Correct password, then a black screen and return to the greeter in VMware
 
 AuraDE now performs a render-device preflight before starting Weston. If no
