@@ -49,6 +49,7 @@ install -Dm0755 "$ROOT/bin/aurade-install" "$STAGE/airootfs/usr/local/sbin/aurad
 install -Dm0755 "$ROOT/bin/aurade-installer" "$STAGE/airootfs/usr/local/sbin/aurade-installer"
 install -Dm0755 "$ROOT/bin/aurade-recovery" "$STAGE/airootfs/usr/local/sbin/aurade-recovery"
 install -Dm0755 "$ROOT/bin/aurade-hardware-qualify" "$STAGE/airootfs/usr/local/sbin/aurade-hardware-qualify"
+install -Dm0755 "$ROOT/bin/aurade-install-failure" "$STAGE/airootfs/usr/local/sbin/aurade-install-failure"
 install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"

@@ -14,6 +14,8 @@ VALIDATORS=${AURADE_VALIDATE_LIB:-/usr/local/lib/aurade/aurade-validate.sh}
 
 NETWORK_DIAGNOSTICS=${AURADE_NETWORK_DIAGNOSTICS:-/usr/local/sbin/aurade-network-diagnostics}
 [[ -x $NETWORK_DIAGNOSTICS ]] || NETWORK_DIAGNOSTICS="$(dirname "$0")/../archiso/airootfs/usr/local/sbin/aurade-network-diagnostics"
+FAILURE_HELPER=${AURADE_FAILURE_HELPER:-/usr/local/sbin/aurade-install-failure}
+[[ -x $FAILURE_HELPER ]] || FAILURE_HELPER="$(dirname "$0")/aurade-install-failure"
 
 if (( EUID != 0 )); then
   echo 'aurade-installer: run as root from the AuraDE installation image' >&2
@@ -196,13 +198,28 @@ if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
   common_args+=(--encrypt --luks-passphrase-file "$secret_dir/luks.passphrase")
 fi
 
+run_engine() {
+  local status
+  if "$ENGINE" "$@"; then
+    return 0
+  else
+    status=$?
+  fi
+  if [[ -x $FAILURE_HELPER ]]; then
+    "$FAILURE_HELPER" --status "$status" || true
+  else
+    printf '%s\n' "AuraDE installer stopped with status ${status}; inspect the private journal and log." >&2
+  fi
+  return "$status"
+}
+
 printf '\n%s\n' 'Dry-run installation plan:'
-"$ENGINE" "${common_args[@]}" --dry-run
+run_engine "${common_args[@]}" --dry-run
 
 token="ERASE:$target"
 printf '\nThe target will be irreversibly erased. Type exactly: %s\n> ' "$token"
 read -r confirmation
 [[ $confirmation == "$token" ]] || { echo 'Confirmation did not match; nothing was written.' >&2; exit 1; }
 
-"$ENGINE" "${common_args[@]}" --execute --confirm "$confirmation"
+run_engine "${common_args[@]}" --execute --confirm "$confirmation"
 printf '%s\n' 'Installation complete. Remove the installation media and reboot.'
