@@ -73,5 +73,8 @@ jobs:
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
 
+      - name: Run session error fixture
+        run: bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
+
       - name: Check whitespace
         run: git diff --check
