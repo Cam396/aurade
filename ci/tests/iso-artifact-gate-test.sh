@@ -20,9 +20,15 @@ SOURCE_DATE_EPOCH=1783814400 python3 "$ROOT/ci/write-iso-sbom.py" \
   --iso "$ISO" --repo-dir "$TMP/repo" --output "$ISO.sbom.spdx.json"
 (cd "$TMP" && sha256sum "$(basename "$ISO")") >"$ISO.sha256"
 sbom_sha=$(sha256sum "$ISO.sbom.spdx.json" | awk '{print $1}')
+iso_bytes=$(stat -c '%s' "$ISO")
+package_bytes=$(stat -c '%s' "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst")
 cat >"$ISO.build-info" <<EOF
 sbom_file=$(basename "$ISO.sbom.spdx.json")
 sbom_sha256=$sbom_sha
+iso_bytes=$iso_bytes
+iso_max_bytes=4294967296
+package_count=1
+package_bytes=$package_bytes
 EOF
 
 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO"
