@@ -22,6 +22,10 @@ pkgrel=$(awk -F= '$1 == "pkgrel" {print $2; exit}' "$ROOT/chromiumos-ash/PKGBUIL
 grep -Fq "pkgver=${pkgver}" "$TMP/aur/chromiumos-ash-bin/PKGBUILD"
 grep -Fq "pkgrel=${pkgrel}" "$TMP/aur/chromiumos-ash-bin/PKGBUILD"
 grep -Fq "sha256sums=('$digest')" "$TMP/aur/chromiumos-ash-bin/PKGBUILD"
+grep -Fq 'chromiumos-ash-${pkgver}-${pkgrel}-${CARCH}.pkg.tar.*' \
+  "$TMP/aur/chromiumos-ash-bin/PKGBUILD"
+grep -Fq 'expected exactly one Chromium payload' \
+  "$TMP/aur/chromiumos-ash-bin/PKGBUILD"
 if find "$TMP/aur" -type f -size +50M -print -quit | grep -q .; then
   echo 'AUR export fixture contains an oversized file' >&2
   exit 1
