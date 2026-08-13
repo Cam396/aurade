@@ -45,6 +45,7 @@ install -Dm0755 "$ROOT/bin/aurade-installer" "$STAGE/airootfs/usr/local/sbin/aur
 install -Dm0755 "$ROOT/bin/aurade-recovery" "$STAGE/airootfs/usr/local/sbin/aurade-recovery"
 install -Dm0755 "$ROOT/bin/aurade-hardware-qualify" "$STAGE/airootfs/usr/local/sbin/aurade-hardware-qualify"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
+install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"
 "$ROOT/tools/generate-package-lock.sh" "$AURADE_REPO_DIR" "$STAGE/airootfs/opt/aurade/repo/packages.lock" "$ROOT/expected-packages.txt"
 while read -r _digest filename _pkgname _pkgver _arch; do
