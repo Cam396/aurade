@@ -113,6 +113,7 @@ case "$COMMAND" in
     btrfs subvolume snapshot -r "$ROOT" "$destination"
     snapshot_created=1
     rollback_boot_dir=
+    rollback_tmp=
     cleanup_partial_snapshot() {
       local status=$? path
       set +e
@@ -126,6 +127,9 @@ case "$COMMAND" in
           find "$rollback_boot_dir" -depth -type f -delete 2>/dev/null || true
           find "$rollback_boot_dir" -depth -type l -delete 2>/dev/null || true
           find "$rollback_boot_dir" -depth -type d -empty -delete 2>/dev/null || true
+        fi
+        if [[ -n ${rollback_tmp:-} ]]; then
+          rm -f -- "$rollback_tmp" 2>/dev/null || true
         fi
       fi
       exit "$status"
