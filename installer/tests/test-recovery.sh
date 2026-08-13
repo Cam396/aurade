@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 install -d "$TMP/bin" "$TMP/root/boot/loader/entries" "$TMP/root/.snapshots"
 install -d "$TMP/root/boot/aurade-rollback/factory"
+printf '%s\n' baseline >"$TMP/root/upgrade-state"
 printf '%s\n' factory-kernel >"$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux"
 printf '%s\n' kernel >"$TMP/root/boot/vmlinuz-linux"
 printf '%s\n' microcode >"$TMP/root/boot/intel-ucode.img"
@@ -25,6 +26,12 @@ cat >"$TMP/bin/btrfs" <<'EOF'
 set -euo pipefail
 if [[ $1 == subvolume && $2 == snapshot && $3 == -r ]]; then
   mkdir -p "$5"
+  # The fixture models the one piece of state that matters to this test: a
+  # pre-update marker is captured in the read-only snapshot. It deliberately
+  # does not pretend to clone a real Btrfs tree.
+  if [[ -r "$4/upgrade-state" ]]; then
+    cp -- "$4/upgrade-state" "$5/upgrade-state"
+  fi
 elif [[ $1 == subvolume && $2 == delete && $3 == -- ]]; then
   rm -rf -- "$4"
 else
@@ -55,6 +62,27 @@ grep -Eq '^linux /aurade-rollback/manual-[0-9]{8}T[0-9]{6}Z-pre-update/vmlinuz-l
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
 grep -Eq '^initrd /aurade-rollback/manual-[0-9]{8}T[0-9]{6}Z-pre-update/initramfs-linux.img$' \
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
+[[ $(<"$snapshot/upgrade-state") == baseline ]]
+
+# Exercise the upgrade -> rollback sequence without claiming that a fixture
+# can perform a real Btrfs rollback. The simulated upgrade mutates the live
+# marker; boot-rollback must select the generated rollback entry, whose
+# snapshot still contains the pre-update marker, while factory artifacts stay
+# untouched.
+printf '%s\n' upgraded >"$TMP/root/upgrade-state"
+cat >"$TMP/bin/bootctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"${AURADE_TEST_BOOTCTL_LOG:?}"
+EOF
+chmod 0755 "$TMP/bin/bootctl"
+AURADE_TEST_BOOTCTL_LOG="$TMP/bootctl.log" PATH="$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" boot-rollback --root "$TMP/root"
+grep -Fq 'set-oneshot aurade-rollback.conf' "$TMP/bootctl.log"
+[[ $(<"$TMP/root/upgrade-state") == upgraded ]]
+[[ $(<"$snapshot/upgrade-state") == baseline ]]
+[[ -e "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" ]]
+
 cmp -s "$TMP/root/boot/vmlinuz-linux" \
   "$TMP/root/boot/aurade-rollback/"manual-*-pre-update/vmlinuz-linux
 cmp -s "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" \

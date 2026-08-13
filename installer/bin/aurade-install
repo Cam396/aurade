@@ -594,7 +594,9 @@ log "safety token: $ERASE_TOKEN"
 # Preflight is complete by this point: arguments are validated, the target is
 # resolved and proven not to back the running root, and the required commands
 # and Secure Boot state have been checked.
-aurade_journal_init "$MODE" "$TARGET"
+aurade_journal_init "$MODE" "$TARGET" || {
+  die 'cannot initialize the install journal; refusing to continue'
+}
 aurade_journal_begin preflight 'validating target and environment'
 aurade_journal_ok preflight
 

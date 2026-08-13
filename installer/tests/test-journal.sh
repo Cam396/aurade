@@ -155,6 +155,37 @@ if aurade_journal_may_resume bootloader /dev/null; then
   fail 'resume must refuse when target identity does not match'
 fi
 
+# Resume identity matching is strict even when a device exposes no serial:
+# a recorded WWN is sufficient, but an empty serial+WWN or a changed WWN is
+# never accepted. This pure helper test avoids pretending /dev/null is a disk.
+_J_TARGET_SERIAL=
+_J_TARGET_WWN=wwn-expected
+_J_TARGET_SIZE=4096
+aurade_journal_target_identity_matches '' wwn-expected 4096 || \
+  fail 'resume should accept a matching recorded WWN'
+if aurade_journal_target_identity_matches '' wwn-other 4096; then
+  fail 'resume accepted a changed WWN'
+fi
+_J_TARGET_WWN=
+if aurade_journal_target_identity_matches '' '' 4096; then
+  fail 'resume accepted a target with no stable identity'
+fi
+
+# A journal write failure must be observable to the caller rather than being
+# silently ignored. A regular file in the parent path makes the fixture fail
+# even when this suite runs as root.
+blocked_parent="$TMP/journal-parent-file"
+printf '%s\n' blocked >"$blocked_parent"
+blocked_journal="$blocked_parent/journal.jsonl"
+blocked_raw="$TMP/blocked.log"
+if (
+  export AURADE_JOURNAL_PATH="$blocked_journal" AURADE_JOURNAL_RAW="$blocked_raw"
+  . "$ROOT/installer/lib/aurade-journal.sh"
+  aurade_journal_init dry-run
+); then
+  fail 'journal initialization unexpectedly succeeded under a file parent'
+fi
+
 # ---- permissions -------------------------------------------------------------
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
 [[ $perms == 600 ]] || fail "journal should be mode 600, found $perms"
