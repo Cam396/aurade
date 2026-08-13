@@ -55,6 +55,10 @@ target_transport=$(lsblk -dnro TRAN "$target" | sed 's/[[:space:]]*$//' || true)
 printf 'Selected disk: %s | size=%s | model=%s | serial=%s | transport=%s\n' \
   "$target" "$target_size" "${target_model:-unknown}" \
   "${target_serial:-unknown}" "${target_transport:-unknown}"
+if [[ $target_transport == usb ]]; then
+  printf '%s\n' 'WARNING: this is a USB/removable disk. Confirm that it is the intended target; the installer will erase the entire device.' >&2
+fi
+printf '%s\n' 'Storage note: the installer creates a whole-disk UEFI layout; LUKS2 encryption and Btrfs recovery snapshots consume additional space.'
 while true; do
   printf 'Hostname [aurade]: '
   read -r hostname
