@@ -34,7 +34,9 @@ snapshot=$(PATH="$TMP/bin:$PATH" \
 [[ $snapshot == "$TMP/root/.snapshots/"manual-*-pre-update/snapshot ]]
 grep -Fxq 'title AuraDE rollback (pre-update)' \
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
-grep -Eq '^options root=UUID=test rw rootflags=subvol=@snapshots/manual-[0-9]{8}T[0-9]{6}Z-pre-update/snapshot quiet$' \
+grep -Eq '^options root=UUID=test rw rootflags=subvol=@snapshots/manual-[0-9]{8}T[0-9]{6}Z-pre-update/snapshot$' \
+  "$TMP/root/boot/loader/entries/aurade-rollback.conf"
+! grep -Eq '^options .* quiet([[:space:]]|$)' \
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
 grep -Eq '^linux /aurade-rollback/manual-[0-9]{8}T[0-9]{6}Z-pre-update/vmlinuz-linux$' \
   "$TMP/root/boot/loader/entries/aurade-rollback.conf"
