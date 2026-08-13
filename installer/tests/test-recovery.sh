@@ -23,10 +23,22 @@ cp "$TMP/root/boot/loader/entries/aurade.conf" "$TMP/normal-entry"
 cat >"$TMP/bin/btrfs" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $1 == subvolume && $2 == snapshot && $3 == -r ]]
-mkdir -p "$5"
+if [[ $1 == subvolume && $2 == snapshot && $3 == -r ]]; then
+  mkdir -p "$5"
+elif [[ $1 == subvolume && $2 == delete && $3 == -- ]]; then
+  rm -rf -- "$4"
+else
+  exit 2
+fi
 EOF
 chmod 0755 "$TMP/bin/btrfs"
+
+if AURADE_ROLLBACK_RETENTION=0 \
+  "$ROOT/installer/bin/aurade-recovery" help >"$TMP/retention.out" 2>&1; then
+  echo 'invalid rollback retention unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_ROLLBACK_RETENTION must be a positive integer' "$TMP/retention.out"
 
 snapshot=$(PATH="$TMP/bin:$PATH" \
   "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
@@ -47,6 +59,26 @@ cmp -s "$TMP/root/boot/vmlinuz-linux" \
   "$TMP/root/boot/aurade-rollback/"manual-*-pre-update/vmlinuz-linux
 cmp -s "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" \
   <(printf '%s\n' factory-kernel)
+
+# Retention prunes only old manual Btrfs snapshots and never touches the
+# factory rollback artifacts. The fixture btrfs command models subvolume
+# deletion without requiring a real block device.
+mkdir -p \
+  "$TMP/root/.snapshots/manual-20000101T000000Z-old-a/snapshot" \
+  "$TMP/root/.snapshots/manual-20000102T000000Z-old-b/snapshot"
+cp "$TMP/normal-entry" "$TMP/root/boot/loader/entries/aurade.conf"
+PATH="$TMP/bin:$PATH" AURADE_ROLLBACK_RETENTION=2 \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label retained >/dev/null
+manual_count=$(find "$TMP/root/.snapshots" -mindepth 2 -maxdepth 2 \
+  -type d -name snapshot -path "$TMP/root/.snapshots/manual-*/snapshot" | wc -l)
+[[ $manual_count -eq 2 ]] || {
+  echo "retention kept $manual_count manual snapshots (expected 2)" >&2
+  exit 1
+}
+[[ ! -e "$TMP/root/.snapshots/manual-20000101T000000Z-old-a" ]]
+[[ ! -e "$TMP/root/.snapshots/manual-20000102T000000Z-old-b" ]]
+[[ -e "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" ]]
 
 # A traversal-like boot artifact must be rejected before snapshot creation.
 cat >"$TMP/root/boot/loader/entries/aurade.conf" <<'EOF'
