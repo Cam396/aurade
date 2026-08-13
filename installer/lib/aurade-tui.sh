@@ -166,6 +166,24 @@ tui_pair() {
   tui_line "$(printf '%*s%s%*s%s' "$indent" '' "$left" "$gap" '' "$right")" "$token"
 }
 
+# Split a string into words without pathname expansion.
+#
+# `for word in $text` is the idiomatic way to do this and it is wrong here:
+# unquoted expansion globs, so a string containing * or ? is replaced by the
+# filenames it happens to match. Every string this file renders comes from
+# somewhere a glob character can appear - a journal message, a device path, a
+# failure detail - and the first time it happened, an export error turned into
+# a listing of the repository root.
+TUI_WORDS=()
+_tui_words() {
+  local had_noglob=1
+  [[ -o noglob ]] || had_noglob=0
+  set -f
+  # shellcheck disable=SC2206  # deliberate word splitting, globbing disabled
+  TUI_WORDS=( $1 )
+  (( had_noglob )) || set +f
+}
+
 # Greedy word wrap. Emits whole rows, so callers never compute a width.
 #
 # `hang` indents every line after the first, which is what a marked note needs:
@@ -186,7 +204,8 @@ tui_wrap() {
       (( limit > 0 )) || limit=1
     fi
   }
-  for word in $text; do
+  _tui_words "$text"
+  for word in "${TUI_WORDS[@]}"; do
     if [[ -z $line ]]; then
       line=$word
     elif (( ${#line} + 1 + ${#word} <= limit )); then
@@ -234,7 +253,8 @@ tui_field() {
       tui_line "$(printf '%*s%s' "$column" '' "$1")" "$token"
     fi
   }
-  for word in $value; do
+  _tui_words "$value"
+  for word in "${TUI_WORDS[@]}"; do
     if [[ -z $line ]]; then
       line=$word
     elif (( ${#line} + 1 + ${#word} <= limit )); then
