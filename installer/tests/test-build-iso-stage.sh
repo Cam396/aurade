@@ -50,6 +50,8 @@ grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
+grep -Fq -- 'empty root password' "$ROOT/installer/archiso/airootfs/etc/motd"
+grep -Fq -- 'untrusted network or physical access' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq '/usr/local/lib/aurade/aurade-validate.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/lib/aurade/aurade-journal.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
