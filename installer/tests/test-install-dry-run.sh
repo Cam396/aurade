@@ -91,6 +91,7 @@ grep -Fq -- 'aurade_valid_timezone "$timezone"' "$ROOT/installer/bin/aurade-inst
 grep -Fq -- 'aurade_valid_locale "$locale"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'aurade_valid_keymap "$keymap"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'loadkeys "$keymap"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- "confirmation=\${confirmation%\$'\\r'}" "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
