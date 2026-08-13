@@ -47,6 +47,8 @@ export MAKEPKG_FLAGS="${MAKEPKG_FLAGS:---force --noconfirm --clean --config ${ma
 "${SCRIPT_DIR}/build-private-repo.sh"
 rm -f "${makepkg_config}"
 if [[ -n "${GPGKEY:-}" ]]; then
+  : "${AURADE_REPO_KEYRING:?Set AURADE_REPO_KEYRING to an exported public repository key}"
+  : "${AURADE_REPO_FINGERPRINT:?Set AURADE_REPO_FINGERPRINT to the full repository signing fingerprint}"
   export AURADE_REQUIRE_SIGNATURES=1
 fi
 "${SCRIPT_DIR}/verify-release-repo.sh"
