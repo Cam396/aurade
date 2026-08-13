@@ -59,6 +59,7 @@ if [[ $target_transport == usb ]]; then
   printf '%s\n' 'WARNING: this is a USB/removable disk. Confirm that it is the intended target; the installer will erase the entire device.' >&2
 fi
 printf '%s\n' 'Storage note: the installer creates a whole-disk UEFI layout; LUKS2 encryption and Btrfs recovery snapshots consume additional space.'
+printf '%s\n' 'Memory note: no swap or hibernation setup is created by default; low-memory systems should add zram or a swapfile after installation.'
 while true; do
   printf 'Hostname [aurade]: '
   read -r hostname
