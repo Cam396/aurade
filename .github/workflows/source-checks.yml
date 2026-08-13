@@ -58,6 +58,9 @@ jobs:
       - name: Run installer tests
         run: installer/tests/run.sh
 
+      - name: Run ISO SBOM fixture test
+        run: ci/tests/iso-sbom-test.sh
+
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
 
