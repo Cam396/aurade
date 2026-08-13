@@ -20,6 +20,7 @@
 AURADE_JOURNAL_VERSION=1
 AURADE_JOURNAL_PATH=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
 AURADE_JOURNAL_RAW=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
+AURADE_FAILURE_JOURNAL_DIR=${AURADE_FAILURE_JOURNAL_DIR:-}
 
 # Stage order. Everything up to and including `confirm` leaves the disk
 # untouched; `partition` is the first stage that cannot be undone.
@@ -192,6 +193,27 @@ aurade_journal_fail() {
 # subprocess output; nothing here reaches the JSONL stream.
 aurade_journal_raw() {
   printf '%s\n' "$*" >>"$AURADE_JOURNAL_RAW" 2>/dev/null || true
+}
+
+# Preserve only the structured journal when a caller opts into a disk-backed
+# failure directory.  The installer work directory contains package caches,
+# temporary keyrings, and other private state; copying it wholesale would make
+# failure recovery a secret-retention mechanism.  A caller can point this at a
+# mounted writable volume when post-reboot evidence is required.  The copy is
+# deliberately best-effort so a full or read-only recovery volume never masks
+# the original installer failure.
+aurade_journal_preserve_failure() {
+  local destination
+  [[ -n $AURADE_FAILURE_JOURNAL_DIR ]] || return 0
+  [[ $AURADE_FAILURE_JOURNAL_DIR == /* && $AURADE_FAILURE_JOURNAL_DIR != / ]] || return 1
+  [[ -r $AURADE_JOURNAL_PATH ]] || return 0
+  install -d -m 0700 -- "$AURADE_FAILURE_JOURNAL_DIR" || return 1
+  destination=$(mktemp -d "$AURADE_FAILURE_JOURNAL_DIR/failure.XXXXXX") || return 1
+  if ! install -m 0600 -- "$AURADE_JOURNAL_PATH" "$destination/journal.jsonl"; then
+    rm -rf -- "$destination"
+    return 1
+  fi
+  printf '%s\n' "$destination"
 }
 
 # A resumed install may continue only when the next stage can safely re-run
