@@ -80,6 +80,10 @@ export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
 export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_BLOCK_DIR="$TMP/block"
 export AURADE_SNAPSHOT_FILE="$TMP/snapshot" AURADE_DISK_TABLE="$TMP/disks"
 export AURADE_PROBE_MEMINFO="$TMP/meminfo" AURADE_PROBE_DRI_DIR="$TMP/dri"
+# The production probe allows five seconds for an optional eglinfo call. This
+# fixture drives many independent installer flows, so bound that optional
+# lookup tightly while retaining the dedicated probe test's renderer cases.
+export AURADE_PROBE_GL_TIMEOUT=0.2
 export AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
 export AURADE_INSTALL_ENGINE="$TMP/stub-engine"
 export AURADE_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh"
