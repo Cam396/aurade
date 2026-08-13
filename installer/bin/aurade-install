@@ -559,9 +559,13 @@ if [[ $MODE == execute ]]; then
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
-  if [[ $secure_boot_state == enabled ]]; then
-    die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain'
-  fi
+  case $secure_boot_state in
+    enabled)
+      die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain' ;;
+    disabled) ;;
+    *)
+      die 'could not determine Secure Boot state; refuse the destructive install until firmware state is known (bootctl is-secure-boot)' ;;
+  esac
 fi
 
 log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"

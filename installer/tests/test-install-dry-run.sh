@@ -69,6 +69,8 @@ grep -Fq -- 'package downloads were stopped instead of being retried' "$ROOT/ins
 grep -Fq -- 'installer staging filesystem has ' "$TMP/plain.out"
 grep -Fq -- 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'Secure Boot is enabled' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Secure Boot state could not be determined' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'could not determine Secure Boot state' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'aurade_valid_arch_snapshot "$snapshot"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- '"$NETWORK_DIAGNOSTICS" --snapshot "$snapshot"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'select an exact PATH from the table above' "$ROOT/installer/bin/aurade-installer"
