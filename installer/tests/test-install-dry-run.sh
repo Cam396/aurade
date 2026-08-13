@@ -65,6 +65,7 @@ grep -Fq -- 'private keys excluded' "$TMP/plain.out"
 grep -Fq -- 'package downloads were stopped instead of being retried' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'installer staging filesystem has ' "$TMP/plain.out"
 grep -Fq -- 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'Secure Boot is enabled' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'select an exact PATH from the table above' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'lsblk -dnro TYPE "$target"' "$ROOT/installer/bin/aurade-installer"
 # The rules themselves are exercised by test-prompt-validation.sh against

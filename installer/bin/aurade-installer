@@ -81,6 +81,12 @@ if [[ -x $NETWORK_DIAGNOSTICS ]]; then
   fi
   printf '\n'
 fi
+if command -v bootctl >/dev/null 2>&1; then
+  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
+  if [[ $secure_boot_state == enabled ]]; then
+    printf '%s\n' 'WARNING: Secure Boot is enabled. AuraDE currently installs an unsigned systemd-boot chain; disable Secure Boot before the final confirmation or the engine will refuse the install.' >&2
+  fi
+fi
 lsblk -d -o NAME,PATH,SIZE,MODEL,TRAN,TYPE
 while true; do
   printf '\nTarget disk (select an exact PATH from the table above): '
