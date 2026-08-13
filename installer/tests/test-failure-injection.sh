@@ -91,8 +91,20 @@ fi
 grep -Fq 'password hash file must not be group/world accessible' "$TMP/perms.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/perms.out"
 
-# Encryption secrets use the same refusal boundary as account credentials.
+# Plaintext and multi-line credential files are rejected without reading a
+# secret into a shell variable or reaching the destructive plan.
 chmod 0600 "$TMP/password.hash"
+printf '%s\n%s\n' 'plaintext-password' 'second-line' >"$TMP/password.hash"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/plaintext.out" 2>&1; then
+  echo 'plaintext password unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/plaintext.out"
+! grep -Fq 'wipefs --all --force' "$TMP/plaintext.out"
+
+printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
+
+# Encryption secrets use the same refusal boundary as account credentials.
 chmod 0644 "$TMP/luks.passphrase"
 if "$ROOT/installer/bin/aurade-install" "${common[@]}" --encrypt \
     --luks-passphrase-file "$TMP/luks.passphrase" >"$TMP/luks-perms.out" 2>&1; then
