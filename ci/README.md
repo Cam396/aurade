@@ -37,6 +37,13 @@ publish the generated directories only after the feedback gate.
 worktree status, patch-series hashes, and package source hashes. It writes to
 `${AURADE_WORKDIR}/source-manifest.md` by default.
 
+`write-iso-sbom.py` writes a deterministic SPDX 2.3 inventory for a completed
+ISO and the package archives staged inside it. `installer/build-iso.sh` emits
+the SBOM as an ISO sidecar and can create/verify detached ISO and SBOM
+signatures with `AURADE_ISO_SIGNING_KEY`; set
+`AURADE_REQUIRE_ISO_SIGNATURE=1` for a release candidate. The fixture gate is
+`ci/tests/iso-sbom-test.sh`.
+
 `export-chromium-diff.sh` exports selected tracked and untracked Chromium source
 changes into the AuraDE patch series without hand-copying diffs. It writes temp
 files under `AURADE_WORKDIR` and appends the generated patch to `patches/SERIES`

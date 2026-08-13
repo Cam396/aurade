@@ -10,7 +10,9 @@ fail() {
   exit 1
 }
 
-[[ -d ${REPO_ROOT}/.git ]] || fail "not a Git worktree: ${REPO_ROOT}"
+[[ -e ${REPO_ROOT}/.git ]] || fail "not a Git worktree: ${REPO_ROOT}"
+git -C "${REPO_ROOT}" rev-parse --show-toplevel >/dev/null 2>&1 ||
+  fail "not a Git worktree: ${REPO_ROOT}"
 [[ -r ${EXPECTED} ]] || fail "expected package list is missing: ${EXPECTED}"
 
 declare -A seen=()
