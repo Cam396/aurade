@@ -52,13 +52,13 @@ actual_digest=$(sha256sum -- "$ISO" | awk '{print $1}')
   exit 1
 }
 
-python3 - "$sbom" "$basename_iso" "$actual_digest" "$build_info" <<'PY'
+python3 - "$sbom" "$basename_iso" "$actual_digest" "$build_info" "$ISO" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-sbom_path, iso_name, iso_digest, build_info_path = sys.argv[1:]
+sbom_path, iso_name, iso_digest, build_info_path, iso_path = sys.argv[1:]
 document = json.loads(pathlib.Path(sbom_path).read_text(encoding="utf-8"))
 if document.get("spdxVersion") != "SPDX-2.3":
     raise SystemExit("verify-iso-artifacts: SBOM is not SPDX-2.3")
@@ -83,6 +83,24 @@ if info.get("sbom_file") != pathlib.Path(sbom_path).name:
 sbom_digest = hashlib.sha256(pathlib.Path(sbom_path).read_bytes()).hexdigest()
 if info.get("sbom_sha256") != sbom_digest:
     raise SystemExit("verify-iso-artifacts: build-info SBOM digest mismatch")
+
+def positive_int(name):
+    value = info.get(name, "")
+    if not value.isdigit() or int(value) <= 0:
+        raise SystemExit(f"verify-iso-artifacts: build-info has invalid {name}")
+    return int(value)
+
+iso_bytes = positive_int("iso_bytes")
+iso_max_bytes = positive_int("iso_max_bytes")
+package_count = positive_int("package_count")
+package_bytes = positive_int("package_bytes")
+actual_iso_bytes = pathlib.Path(iso_path).stat().st_size
+if iso_bytes != actual_iso_bytes:
+    raise SystemExit("verify-iso-artifacts: build-info ISO size mismatch")
+if iso_bytes > iso_max_bytes:
+    raise SystemExit("verify-iso-artifacts: ISO exceeds build-info size ceiling")
+if package_count < 1 or package_bytes < 1:
+    raise SystemExit("verify-iso-artifacts: build-info package closure is empty")
 PY
 
 if [[ -e $iso_signature || -e $sbom_signature || $REQUIRE_SIGNATURE == 1 ]]; then
