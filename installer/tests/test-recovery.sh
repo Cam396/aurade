@@ -150,4 +150,39 @@ if find "$TMP/root/.snapshots" -mindepth 1 -maxdepth 1 -name '*low-space*' -prin
   exit 1
 fi
 
+# A failure after Btrfs snapshot creation must clean only the newly-created
+# subvolume and partial rollback directory. The fixture's install wrapper
+# injects failure while copying a boot artifact; the real btrfs deletion path
+# is still exercised through the disposable fake command above.
+install -d "$TMP/failing-install-bin"
+cat >"$TMP/failing-install-bin/install" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+joined=" $* "
+if [[ $joined == *'/boot/aurade-rollback/manual-'* && $joined != *' -d '* ]]; then
+  exit 42
+fi
+exec /usr/bin/install "$@"
+EOF
+chmod 0755 "$TMP/failing-install-bin/install"
+cp "$TMP/normal-entry" "$TMP/root/boot/loader/entries/aurade.conf"
+if PATH="$TMP/failing-install-bin:$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label injected --set-rollback >"$TMP/injected.out" 2>&1; then
+  echo 'post-snapshot failure fixture unexpectedly passed' >&2
+  exit 1
+fi
+if grep -Fq 'failed to remove partial snapshot' "$TMP/injected.out"; then
+  echo 'post-snapshot failure left an orphan snapshot' >&2
+  exit 1
+fi
+if find "$TMP/root/.snapshots" -mindepth 1 -maxdepth 1 -name '*injected*' -print -quit | grep -q .; then
+  echo 'post-snapshot failure left a snapshot directory' >&2
+  exit 1
+fi
+if find "$TMP/root/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -name '*injected*' -print -quit | grep -q .; then
+  echo 'post-snapshot failure left rollback artifacts' >&2
+  exit 1
+fi
+
 echo 'recovery rollback test: PASS'

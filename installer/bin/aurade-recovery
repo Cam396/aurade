@@ -111,6 +111,26 @@ case "$COMMAND" in
     fi
     install -d -m 0750 "$(dirname "$destination")"
     btrfs subvolume snapshot -r "$ROOT" "$destination"
+    snapshot_created=1
+    rollback_boot_dir=
+    cleanup_partial_snapshot() {
+      local status=$? path
+      set +e
+      if (( status != 0 && snapshot_created )); then
+        if ! btrfs subvolume delete -- "$destination" >/dev/null 2>&1; then
+          printf '%s\n' "aurade-recovery: failed to remove partial snapshot after an error: $destination" >&2
+        else
+          rmdir -- "$(dirname "$destination")" 2>/dev/null || true
+        fi
+        if [[ -n ${rollback_boot_dir:-} && -d $rollback_boot_dir ]]; then
+          find "$rollback_boot_dir" -depth -type f -delete 2>/dev/null || true
+          find "$rollback_boot_dir" -depth -type l -delete 2>/dev/null || true
+          find "$rollback_boot_dir" -depth -type d -empty -delete 2>/dev/null || true
+        fi
+      fi
+      exit "$status"
+    }
+    trap cleanup_partial_snapshot EXIT
     if (( SET_ROLLBACK )); then
       snapshot_name=$(basename "$(dirname "$destination")")
       snapshot_subvolume=@snapshots/$snapshot_name/snapshot
@@ -149,8 +169,14 @@ case "$COMMAND" in
       chmod 0644 "$rollback_tmp"
       mv -f "$rollback_tmp" "$rollback_entry"
       find "$ROOT/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -type d \
-        ! -name "$snapshot_name" ! -name factory -exec rm -rf -- {} +
+        ! -name "$snapshot_name" ! -name factory -exec sh -c '
+          find "$1" -depth -type f -delete
+          find "$1" -depth -type l -delete
+          find "$1" -depth -type d -empty -delete
+        ' _ {} \;
     fi
+    snapshot_created=0
+    trap - EXIT
     # Keep the factory snapshot plus a bounded number of manual snapshots.
     # Deleting a Btrfs subvolume must go through btrfs(8); a failed delete is
     # reported but never replaced with a dangerous recursive removal.
