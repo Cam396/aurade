@@ -64,6 +64,18 @@ grep -Fq -- 'private keys excluded' "$TMP/plain.out"
 grep -Fq -- 'package downloads were stopped instead of being retried' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'select an exact PATH from the table above' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'lsblk -dnro TYPE "$target"' "$ROOT/installer/bin/aurade-installer"
+# The rules themselves are exercised by test-prompt-validation.sh against
+# fixture roots. Assert only that the front end delegates to them instead of
+# re-implementing the checks inline, where they cannot be tested.
+grep -Fq -- 'aurade_valid_hostname "$hostname"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'aurade_valid_username "$username"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'aurade_valid_timezone "$timezone"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'aurade_valid_locale "$locale"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'aurade_valid_keymap "$keymap"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'loadkeys "$keymap"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
 acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
 wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
 (( acquire_line < wipe_line ))
