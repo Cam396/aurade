@@ -12,6 +12,17 @@ AURADE_ZONEINFO_DIR=${AURADE_ZONEINFO_DIR:-/usr/share/zoneinfo}
 AURADE_LOCALE_DIR=${AURADE_LOCALE_DIR:-/usr/share/i18n/locales}
 AURADE_KEYMAP_DIR=${AURADE_KEYMAP_DIR:-/usr/share/kbd/keymaps}
 
+# Terminal transitions can leave CR/LF delimiters in a line read after a
+# long package-acquisition phase. Normalize only those line delimiters; the
+# destructive confirmation caller still performs an exact token comparison,
+# so other control bytes remain a refusal.
+aurade_normalize_confirmation() {
+  local value=$1
+  value=${value//$'\r'/}
+  value=${value//$'\n'/}
+  printf '%s' "$value"
+}
+
 # A timezone must name an installed zone file. The excluded names are the
 # metadata files tzdata ships alongside the zones; they are readable but are
 # not valid values for timedatectl/localtime.

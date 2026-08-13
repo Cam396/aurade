@@ -60,6 +60,19 @@ accept aurade_valid_keymap us
 accept aurade_valid_hostname aurade
 accept aurade_valid_arch_snapshot 2026/07/12
 
+# Confirmation normalization is behavioral: line delimiters are removed, but
+# other control bytes remain and therefore cannot satisfy an exact token.
+normalized=$(aurade_normalize_confirmation $'ERASE:/dev/sda\r\n')
+[[ $normalized == 'ERASE:/dev/sda' ]] || {
+  printf 'FAIL: CR/LF confirmation delimiters were not normalized\n' >&2
+  failures=$((failures + 1))
+}
+normalized=$(aurade_normalize_confirmation $'\x1bERASE:/dev/sda')
+[[ $normalized != 'ERASE:/dev/sda' ]] || {
+  printf 'FAIL: non-line control byte was silently normalized\n' >&2
+  failures=$((failures + 1))
+}
+
 accept aurade_valid_timezone America/Chicago
 accept aurade_valid_timezone Europe/Paris
 reject aurade_valid_timezone America/Nowhere
