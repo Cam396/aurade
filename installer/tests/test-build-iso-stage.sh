@@ -18,6 +18,19 @@ printf '%s\n' 'must not enter the image' >"$TMP/repo/private-signing-key.txt"
 (cd "$TMP/repo" && sha256sum aurade.db.tar.gz >SHA256SUMS)
 
 if env \
+  AURADE_ARCH_SNAPSHOT=2026/02/30 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_invalid_date" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/invalid_date.out" 2>&1; then
+  echo 'impossible snapshot date unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-iso: AURADE_ARCH_SNAPSHOT is not a real calendar date' \
+  "$TMP/invalid_date.out"
+[[ ! -e $TMP/work_invalid_date ]]
+
+if env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
   AURADE_REPO_DIR="$TMP/repo" \
   AURADE_ALLOW_UNSIGNED=1 \
