@@ -36,6 +36,10 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
 grep -Fxq reflector "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
+grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
+grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
+grep -Fq 'package_count=' "$ROOT/installer/build-iso.sh"
+grep -Fq 'package_bytes=' "$ROOT/installer/build-iso.sh"
 grep -Fxq 'LocalFileSigLevel = Required' "$ROOT/installer/archiso/pacman.conf"
 grep -Fxq 'LocalFileSigLevel = Required' \
   "$ROOT/installer/archiso/airootfs/etc/pacman.conf"
