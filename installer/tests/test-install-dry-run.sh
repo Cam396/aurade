@@ -48,6 +48,9 @@ grep -Fq -- 'aurade-powerd.service aurade-host-bridge.service aurade-greetd.serv
   "$TMP/plain.out"
 grep -Fq -- 'seatd.service aurade-powerd.service' "$TMP/plain.out"
 grep -Fq -- 'useradd -m -G wheel\,audio\,video\,input\,storage\,seat' "$TMP/plain.out"
+grep -Fq -- 'chpasswd --encrypted' "$ROOT/installer/bin/aurade-install"
+! grep -Fq -- 'usermod --password "$(<"$PASSWORD_HASH_FILE")"' \
+  "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '/boot/aurade-rollback/factory/vmlinuz-linux' "$TMP/plain.out"
 grep -Fq -- 'intel-ucode' "$TMP/plain.out"
 grep -Fq -- 'amd-ucode' "$TMP/plain.out"

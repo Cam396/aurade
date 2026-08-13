@@ -410,9 +410,11 @@ normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null 
 
 [[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
 [[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'
-IFS= read -r PASSWORD_HASH <"$PASSWORD_HASH_FILE" || true
-[[ $PASSWORD_HASH == \$* ]] || die 'password hash must be a crypt(3) hash, not plaintext'
-unset PASSWORD_HASH
+if ! awk 'BEGIN { count = 0; valid = 0 }
+  NF { count++; valid = ($0 ~ /^\$[^[:space:]]+$/) }
+  END { exit !(count == 1 && valid) }' "$PASSWORD_HASH_FILE"; then
+  die 'password hash must be a single crypt(3) hash, not plaintext'
+fi
 
 if (( LUKS )); then
   [[ -r $LUKS_PASSPHRASE_FILE ]] || die '--encrypt requires a readable --luks-passphrase-file'
@@ -728,9 +730,14 @@ run arch-chroot "$MOUNTPOINT" locale-gen
 target_groups=wheel,audio,video,input,storage,seat
 run arch-chroot "$MOUNTPOINT" useradd -m -G "$target_groups" -s /bin/bash "$USERNAME"
 if [[ $MODE == execute ]]; then
-  arch-chroot "$MOUNTPOINT" usermod --password "$(<"$PASSWORD_HASH_FILE")" "$USERNAME"
+  # Stream the validated file through the chroot instead of putting the
+  # password hash in a shell argument or environment entry visible to other
+  # processes. `chpasswd --encrypted` consumes USER:HASH on stdin.
+  awk -v username="$USERNAME" '{ print username ":" $0 }' "$PASSWORD_HASH_FILE" |
+    arch-chroot "$MOUNTPOINT" chpasswd --encrypted
 else
-  printf ' + arch-chroot %q usermod --password %q %q\n' "$MOUNTPOINT" '<redacted-crypt-hash>' "$USERNAME"
+  printf ' + stream a redacted crypt(3) hash to %q chpasswd --encrypted for %q\n' \
+    "$MOUNTPOINT" "$USERNAME"
 fi
 write_target_file /etc/sudoers.d/10-aurade-wheel 0440 '%wheel ALL=(ALL:ALL) ALL\n'
 run arch-chroot "$MOUNTPOINT" passwd --lock root
