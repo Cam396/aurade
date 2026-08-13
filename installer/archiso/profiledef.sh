@@ -21,4 +21,5 @@ file_permissions=(
   ["/usr/local/sbin/aurade-hardware-qualify"]=0:0:755
   ["/usr/local/sbin/aurade-refresh-mirrors"]=0:0:755
   ["/usr/local/lib/aurade/aurade-validate.sh"]=0:0:644
+  ["/usr/local/lib/aurade/aurade-journal.sh"]=0:0:644
 )

@@ -4,6 +4,16 @@ set -Eeuo pipefail
 
 PROGRAM=${0##*/}
 SELF_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
+
+JOURNAL_LIB=${AURADE_JOURNAL_LIB:-/usr/local/lib/aurade/aurade-journal.sh}
+[[ -r $JOURNAL_LIB ]] || JOURNAL_LIB="$SELF_DIR/../lib/aurade-journal.sh"
+[[ -r $JOURNAL_LIB ]] || {
+  printf '%s: install journal library not found\n' "${0##*/}" >&2
+  exit 1
+}
+# shellcheck source=../lib/aurade-journal.sh
+. "$JOURNAL_LIB"
+
 MODE=dry-run
 TARGET=
 CONFIRM=
@@ -525,6 +535,13 @@ fi
 log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"
 log "safety token: $ERASE_TOKEN"
 
+# Preflight is complete by this point: arguments are validated, the target is
+# resolved and proven not to back the running root, and the required commands
+# and Secure Boot state have been checked.
+aurade_journal_init "$MODE" "$TARGET"
+aurade_journal_begin preflight 'validating target and environment'
+aurade_journal_ok preflight
+
 WORK_PARENT=${AURADE_INSTALL_WORK_DIR:-/var/tmp}
 WORK_PARENT_REQUESTED=$WORK_PARENT
 [[ $WORK_PARENT == /* && $WORK_PARENT != / ]] || die 'AURADE_INSTALL_WORK_DIR must be an absolute non-root path'
@@ -576,8 +593,16 @@ fi
 
 # This is deliberately before wipefs/sgdisk. A stalled archive or broken
 # network must fail while the existing installation is still intact.
+aurade_journal_begin acquire 'downloading and verifying packages'
 acquire_arch_packages
+aurade_journal_ok acquire
 
+# Everything above this line is reversible: the disk has not been touched and
+# an abandoned run costs only the downloads. Everything below it is not.
+aurade_journal_begin confirm 'erase token accepted'
+aurade_journal_ok confirm
+
+aurade_journal_begin partition 'partitioning the disk'
 run wipefs --all --force "$TARGET"
 run sgdisk --zap-all "$TARGET"
 ROOT_PARTITION_TYPE=8300
@@ -586,6 +611,9 @@ run sgdisk --clear --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:AURADE_E
   --new=2:0:0 --typecode="2:${ROOT_PARTITION_TYPE}" --change-name=2:AURADE_ROOT "$TARGET"
 run partprobe "$TARGET"
 run udevadm settle
+aurade_journal_ok partition
+
+aurade_journal_begin format 'creating filesystems'
 run mkfs.fat -F 32 -n AURADE_ESP "$ESP_PART"
 
 ROOT_DEVICE=$ROOT_PART
@@ -598,6 +626,9 @@ if (( LUKS )); then
   ROOT_DEVICE=/dev/mapper/$CRYPT_NAME
 fi
 run mkfs.btrfs -f -L AURADE_ROOT "$ROOT_DEVICE"
+aurade_journal_ok format
+
+aurade_journal_begin mount 'creating subvolumes and mounting'
 run install -d -m 0755 "$MOUNTPOINT"
 run mount "$ROOT_DEVICE" "$MOUNTPOINT"
 if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
@@ -613,8 +644,11 @@ run mount "$ESP_PART" "$MOUNTPOINT/boot"
 run mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_DEVICE" "$MOUNTPOINT/home"
 run mount -o noatime,compress=zstd:3,subvol=@var_log "$ROOT_DEVICE" "$MOUNTPOINT/var/log"
 run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOINT/.snapshots"
+aurade_journal_ok mount
 
+aurade_journal_begin pacstrap 'installing the base system'
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
+aurade_journal_ok pacstrap
 run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
 if [[ $MODE == execute ]]; then
   copy_public_keyring "$ARCH_GPG_DIR" "$MOUNTPOINT/etc/pacman.d/gnupg"
@@ -650,6 +684,7 @@ fi
 
 run arch-chroot "$MOUNTPOINT" pacman -U --needed --noconfirm "${PACKAGE_FILES[@]}"
 
+aurade_journal_begin configure 'configuring the installed system'
 if [[ $MODE == execute ]]; then
   genfstab -U "$MOUNTPOINT" >"$MOUNTPOINT/etc/fstab"
 else
@@ -689,6 +724,9 @@ if (( LUKS )); then
   fi
 fi
 run arch-chroot "$MOUNTPOINT" mkinitcpio -P
+aurade_journal_ok configure
+
+aurade_journal_begin bootloader 'installing the bootloader'
 run bootctl --root="$MOUNTPOINT" --esp-path=/boot --no-variables install
 
 if [[ $MODE == execute ]]; then
@@ -738,10 +776,15 @@ run install -d -m 0750 "$MOUNTPOINT/etc/aurade-install" "$MOUNTPOINT/.snapshots/
 run cp "$PACKAGE_LOCK" "$MOUNTPOINT/etc/aurade-install/packages.lock"
 run install -Dm0755 "$SELF_DIR/aurade-recovery" "$MOUNTPOINT/usr/local/sbin/aurade-recovery"
 run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/sbin/aurade-hardware-qualify"
+aurade_journal_ok bootloader
+
+aurade_journal_begin snapshot 'creating the factory snapshot'
 write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
 run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
 run sync
+aurade_journal_ok snapshot
 
+aurade_journal_begin verify-install 'verifying the installation'
 if [[ $MODE == dry-run ]]; then
   printf ' + verify installed package set, fstab/UUIDs, boot artifacts, enabled units, locked root, and repository URL\n'
 else
@@ -764,6 +807,9 @@ else
     die 'post-install verification failed: UEFI fallback loader is missing'
   log 'post-install verification passed'
 fi
+
+aurade_journal_ok verify-install
+aurade_journal_emit done ok 'installation complete'
 
 log 'installation plan completed'
 if [[ $MODE == dry-run ]]; then
