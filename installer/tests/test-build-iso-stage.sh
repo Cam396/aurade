@@ -36,14 +36,23 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
 grep -Fxq reflector "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
+grep -Fxq 'LocalFileSigLevel = Required' "$ROOT/installer/archiso/pacman.conf"
+grep -Fxq 'LocalFileSigLevel = Required' \
+  "$ROOT/installer/archiso/airootfs/etc/pacman.conf"
+grep -Fxq 'LocalFileSigLevel = Optional' \
+  "$TMP/work/profile/pacman.conf"
+grep -Fxq 'LocalFileSigLevel = Optional' \
+  "$TMP/work/profile/airootfs/etc/pacman.conf"
 grep -Fq 'cow_spacesize=4G' \
   "$ROOT/installer/archiso/efiboot/loader/entries/01-aurade-linux.conf"
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
 grep -Fq '/usr/local/lib/aurade/aurade-validate.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/lib/aurade/aurade-journal.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
 

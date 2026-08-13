@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Read-only live-session network and clock preflight for actionable installer errors.
+set -Eeuo pipefail
+
+QUIET=0
+while (($#)); do
+  case $1 in
+    --quiet) QUIET=1; shift ;;
+    -h|--help)
+      printf '%s\n' 'Usage: aurade-network-diagnostics [--quiet]'
+      exit 0
+      ;;
+    *) printf 'aurade-network-diagnostics: unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+issues=0
+report() {
+  (( QUIET )) || printf '  %s\n' "$*"
+}
+issue() {
+  issues=$((issues + 1))
+  (( QUIET )) || printf '  ERROR: %s\n' "$*" >&2
+}
+
+if ! command -v ip >/dev/null 2>&1; then
+  issue 'iproute2 is unavailable; cannot inspect the network interface or default route'
+else
+  if ip -o link show up 2>/dev/null | awk -F': ' '$2 != "lo" {found=1} END {exit !found}'; then
+    report 'an active network interface is present'
+  else
+    issue 'no active network interface was detected; connect Wi-Fi or Ethernet before installing'
+  fi
+  if ip route show default 2>/dev/null | grep -q '^default '; then
+    report 'a default route is present'
+  else
+    issue 'no default route is configured; package acquisition will not reach the Arch snapshot'
+  fi
+fi
+
+if ! command -v getent >/dev/null 2>&1; then
+  issue 'getent is unavailable; cannot verify DNS resolution'
+elif getent ahosts archive.archlinux.org >/dev/null 2>&1; then
+  report 'DNS resolves archive.archlinux.org'
+else
+  issue 'DNS cannot resolve archive.archlinux.org; check the connection or captive portal'
+fi
+
+if command -v timedatectl >/dev/null 2>&1; then
+  ntp_state=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
+  if [[ $ntp_state == yes ]]; then
+    report 'system clock is synchronized'
+  else
+    issue 'system clock is not synchronized; correct the date before signature verification'
+  fi
+else
+  report 'timedatectl is unavailable; verify the system clock manually before installing'
+fi
+
+if (( issues )); then
+  (( QUIET )) || printf 'Network preflight: %d issue(s); installation will still acquire and verify packages before disk changes.\n' "$issues" >&2
+  exit 1
+fi
+report 'Network preflight: ready for bounded package acquisition'

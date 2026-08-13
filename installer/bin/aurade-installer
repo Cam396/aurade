@@ -12,6 +12,9 @@ VALIDATORS=${AURADE_VALIDATE_LIB:-/usr/local/lib/aurade/aurade-validate.sh}
 # shellcheck source=../lib/aurade-validate.sh
 . "$VALIDATORS"
 
+NETWORK_DIAGNOSTICS=${AURADE_NETWORK_DIAGNOSTICS:-/usr/local/sbin/aurade-network-diagnostics}
+[[ -x $NETWORK_DIAGNOSTICS ]] || NETWORK_DIAGNOSTICS="$(dirname "$0")/../archiso/airootfs/usr/local/sbin/aurade-network-diagnostics"
+
 if (( EUID != 0 )); then
   echo 'aurade-installer: run as root from the AuraDE installation image' >&2
   exit 1
@@ -28,6 +31,13 @@ repo_url_default=file:///var/cache/aurade/repo
 [[ ! -r /etc/aurade-installer/repo-url ]] || read -r repo_url_default </etc/aurade-installer/repo-url
 
 printf '%s\n' 'AuraDE installer' 'This program will show a dry-run plan before it can erase a disk.' ''
+if [[ -x $NETWORK_DIAGNOSTICS ]]; then
+  printf '%s\n' 'Network and clock preflight:'
+  if ! "$NETWORK_DIAGNOSTICS"; then
+    printf '%s\n' 'The preflight found an issue. Package acquisition remains bounded and happens before any disk change; fix the issue now if possible.' >&2
+  fi
+  printf '\n'
+fi
 lsblk -d -o NAME,PATH,SIZE,MODEL,TRAN,TYPE
 while true; do
   printf '\nTarget disk (select an exact PATH from the table above): '

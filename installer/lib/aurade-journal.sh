@@ -33,6 +33,7 @@ _J_ID=
 _J_SEQ=0
 _J_ATTEMPT=1
 _J_STAGE_START=0
+_J_ACTIVE_STAGE=
 _J_TARGET_PATH=
 _J_TARGET_SERIAL=
 _J_TARGET_WWN=
@@ -148,6 +149,7 @@ aurade_journal_emit() {
 aurade_journal_begin() {
   local stage=$1 message=${2:-}
   _J_STAGE_START=$(date +%s)
+  _J_ACTIVE_STAGE=$stage
   aurade_journal_emit "$stage" running "$message" \
     "\"index\":$(aurade_stage_index "$stage"),\"of\":${#AURADE_STAGES[@]}"
 }
@@ -166,6 +168,7 @@ aurade_journal_ok() {
     elapsed=$(( ($(date +%s) - _J_STAGE_START) * 1000 ))
   fi
   aurade_journal_emit "$stage" ok "$message" "\"elapsed_ms\":${elapsed}"
+  [[ $_J_ACTIVE_STAGE == "$stage" ]] && _J_ACTIVE_STAGE=
 }
 
 # Bounded cause codes. The UI maps these to explanations and remediations, so
@@ -182,6 +185,7 @@ aurade_journal_fail() {
   [[ $exit_code =~ ^[0-9]+$ ]] || exit_code=1
   aurade_journal_emit "$stage" failed "$message" \
     "\"exit\":${exit_code},\"cause\":\"$(_json_escape "$cause")\",\"resumable\":${resumable},\"remediation\":[${remediation}]"
+  [[ $_J_ACTIVE_STAGE == "$stage" ]] && _J_ACTIVE_STAGE=
 }
 
 # Append unstructured output to the raw log. This is the only sink for

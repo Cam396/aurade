@@ -106,6 +106,19 @@ log() {
   printf '[aurade-install] %s\n' "$*" >&2
 }
 
+check_workspace_capacity() {
+  local path=$1 minimum=${AURADE_MIN_WORKSPACE_BYTES:-2147483648}
+  local available_kib available_bytes
+  [[ $minimum =~ ^[0-9]+$ ]] || die 'AURADE_MIN_WORKSPACE_BYTES must be an integer byte count'
+  available_kib=$(df -Pk -- "$path" 2>/dev/null | awk 'NR == 2 {print $4; exit}')
+  [[ $available_kib =~ ^[0-9]+$ ]] || die "cannot determine free space on installer staging filesystem: $path"
+  available_bytes=$((available_kib * 1024))
+  if (( available_bytes < minimum )); then
+    die "installer staging filesystem has ${available_bytes} bytes free; need at least ${minimum} bytes for the package cache (choose a disk-backed AURADE_INSTALL_WORK_DIR)"
+  fi
+  log "installer staging filesystem has ${available_bytes} bytes free (minimum ${minimum})"
+}
+
 print_command() {
   printf ' +'
   printf ' %q' "$@"
@@ -324,6 +337,14 @@ partition_path() {
 cleanup() {
   local status=$?
   set +e
+  # A command can fail after a stage has started without passing through a
+  # helper that knows the right cause code. Preserve a bounded, secret-free
+  # failure record before tearing down mounts and private installer state.
+  if (( status != 0 )) && [[ -n ${_J_ACTIVE_STAGE:-} ]] && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
+    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
+      'installer stopped unexpectedly; inspect the private install log' \
+      log shell reboot
+  fi
   if (( TARGET_MOUNTED )); then
     umount -R "$MOUNTPOINT" >/dev/null 2>&1 || true
   fi
@@ -560,6 +581,7 @@ if [[ -z $WORK_PARENT ]]; then
   WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
 fi
 chmod 700 "$WORK_DIR"
+check_workspace_capacity "$WORK_PARENT"
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
 ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
 ARCH_CACHE=$WORK_DIR/arch-cache
