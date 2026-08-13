@@ -565,6 +565,7 @@ aurade_journal_ok preflight
 
 WORK_PARENT=${AURADE_INSTALL_WORK_DIR:-/var/tmp}
 WORK_PARENT_REQUESTED=$WORK_PARENT
+WORKSPACE_FS_PATH=$WORK_PARENT
 [[ $WORK_PARENT == /* && $WORK_PARENT != / ]] || die 'AURADE_INSTALL_WORK_DIR must be an absolute non-root path'
 if [[ -e $WORK_PARENT ]]; then
   [[ -d $WORK_PARENT && -w $WORK_PARENT && -x $WORK_PARENT ]] || WORK_PARENT=
@@ -579,9 +580,10 @@ if [[ -z $WORK_PARENT ]]; then
   log "could not use ${WORK_PARENT_REQUESTED}; falling back to /tmp for installer state"
   [[ -d /tmp && -w /tmp && -x /tmp ]] || die 'neither the configured installer work directory nor /tmp is writable'
   WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
+  WORKSPACE_FS_PATH=/tmp
 fi
 chmod 700 "$WORK_DIR"
-check_workspace_capacity "$WORK_PARENT"
+check_workspace_capacity "$WORKSPACE_FS_PATH"
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
 ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
 ARCH_CACHE=$WORK_DIR/arch-cache

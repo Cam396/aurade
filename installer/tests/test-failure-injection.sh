@@ -81,6 +81,17 @@ fi
 grep -Fq 'installer helper is missing' "$TMP/helper.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
 
+# If the requested staging path cannot be used, the engine falls back to /tmp
+# and measures capacity on the filesystem that actually holds its workdir.
+touch "$TMP/not-a-directory"
+if ! AURADE_INSTALL_WORK_DIR="$TMP/not-a-directory" \
+  "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/fallback.out" 2>&1; then
+  cat "$TMP/fallback.out" >&2
+  exit 1
+fi
+grep -Fq 'could not use ' "$TMP/fallback.out"
+grep -Fq 'installer staging filesystem has ' "$TMP/fallback.out"
+
 # A disk-backed staging requirement that cannot fit must fail before package
 # acquisition, making low-memory/tmpfs failures actionable and bounded.
 if AURADE_MIN_WORKSPACE_BYTES=999999999999999999 \
