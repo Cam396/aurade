@@ -13,7 +13,8 @@ creates a pacman database with `repo-add`.
 `build-release-repo.sh` builds the seven small packages and combines them with
 an explicitly supplied current `chromiumos-ash` artifact in a fresh staging
 directory. `verify-release-repo.sh` requires exactly the package set listed in
-`installer/expected-packages.txt`, exact `.SRCINFO` metadata, matching repository-database versions, valid
+`installer/expected-packages.txt`, exact `.SRCINFO` metadata, matching
+repository-database versions, valid
 package metadata/file lists, an exact pre-existing `SHA256SUMS` manifest, and
 cryptographically valid signatures when
 `AURADE_REQUIRE_SIGNATURES=1`. Signed verification requires an isolated public
