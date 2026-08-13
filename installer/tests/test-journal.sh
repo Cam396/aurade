@@ -26,13 +26,16 @@ aurade_journal_init execute
 aurade_journal_begin preflight 'checking hardware'
 aurade_journal_ok preflight
 aurade_journal_begin acquire 'downloading packages'
+[[ $_J_ACTIVE_STAGE == acquire ]] || fail 'begin should record the active stage'
 aurade_journal_progress acquire 42 '612/1041 packages'
 aurade_journal_ok acquire
+[[ -z $_J_ACTIVE_STAGE ]] || fail 'ok should clear the active stage'
 aurade_journal_begin partition
 aurade_journal_begin bootloader
 aurade_journal_fail bootloader 1 esp-readonly \
   'bootctl could not write to the EFI system partition' \
   retry export log shell reboot
+[[ -z $_J_ACTIVE_STAGE ]] || fail 'fail should clear the active stage'
 # Values that would break naive JSON emission.
 aurade_journal_emit configure running 'quote " backslash \ newline
 tab	end'
