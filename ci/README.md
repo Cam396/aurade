@@ -14,12 +14,16 @@ creates a pacman database with `repo-add`.
 an explicitly supplied current `chromiumos-ash` artifact in a fresh staging
 directory. `verify-release-repo.sh` requires exactly the current eleven-package
 set, exact `.SRCINFO` metadata, matching repository-database versions, valid
-package metadata/file lists, and cryptographically valid signatures when
+package metadata/file lists, an exact pre-existing `SHA256SUMS` manifest, and
+cryptographically valid signatures when
 `AURADE_REQUIRE_SIGNATURES=1`. Signed verification requires an isolated public
 keyring in `AURADE_REPO_KEYRING` and its full primary fingerprint in
 `AURADE_REPO_FINGERPRINT`; package and database signatures are checked with
 `gpgv` against that keyring, not an ambient user keyring. A successful build
 atomically promotes staging and keeps the previous repository as `.previous`.
+`write-release-checksums.sh` is called before verification during promotion;
+`verify-release-checksums.sh` is also suitable for a read-only check of a
+staged or downloaded repository and rejects altered, missing, or unlisted files.
 
 `bootstrap-arch-root.sh` creates an Arch validation root on a host with
 `pacstrap`, using the configured `AURADE_WORKDIR` for the root, pacman DB, and

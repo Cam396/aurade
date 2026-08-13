@@ -82,6 +82,7 @@ database="${REPO_DIR}/${REPO_NAME}.db.tar.gz"
   echo "Missing repository database: ${database}" >&2
   exit 1
 }
+REPO_DIR="${REPO_DIR}" "${SCRIPT_DIR}/verify-release-checksums.sh"
 
 while IFS= read -r -d '' repository_file; do
   repository_name="${repository_file##*/}"
@@ -210,10 +211,4 @@ for package_name in "${!database_versions[@]}"; do
   }
 done
 
-mapfile -d '' checksum_files < <(find "${REPO_DIR}" -maxdepth 1 -type f \
-  ! -name SHA256SUMS -printf '%f\0' | sort -z)
-(
-  cd "${REPO_DIR}"
-  sha256sum -- "${checksum_files[@]}"
-) >"${REPO_DIR}/SHA256SUMS"
 echo "Release repository verified: ${#package_files[@]} current packages"

@@ -67,6 +67,9 @@ jobs:
       - name: Run repository signature policy fixture
         run: ci/tests/release-signature-policy-test.sh
 
+      - name: Run repository checksum-manifest fixture
+        run: ci/tests/release-checksum-manifest-test.sh
+
       - name: Run AUR export policy fixture
         run: ci/tests/aur-export-policy-test.sh
 
