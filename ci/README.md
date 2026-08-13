@@ -14,9 +14,16 @@ creates a pacman database with `repo-add`.
 an explicitly supplied current `chromiumos-ash` artifact in a fresh staging
 directory. `verify-release-repo.sh` requires exactly the current eleven-package
 set, exact `.SRCINFO` metadata, matching repository-database versions, valid
-package metadata/file lists, and cryptographically valid signatures when
-`AURADE_REQUIRE_SIGNATURES=1`. A successful build atomically promotes staging
-and keeps the previous repository as `.previous`.
+package metadata/file lists, an exact pre-existing `SHA256SUMS` manifest, and
+cryptographically valid signatures when
+`AURADE_REQUIRE_SIGNATURES=1`. Signed verification requires an isolated public
+keyring in `AURADE_REPO_KEYRING` and its full primary fingerprint in
+`AURADE_REPO_FINGERPRINT`; package and database signatures are checked with
+`gpgv` against that keyring, not an ambient user keyring. A successful build
+atomically promotes staging and keeps the previous repository as `.previous`.
+`write-release-checksums.sh` is called before verification during promotion;
+`verify-release-checksums.sh` is also suitable for a read-only check of a
+staged or downloaded repository and rejects altered, missing, or unlisted files.
 
 `bootstrap-arch-root.sh` creates an Arch validation root on a host with
 `pacstrap`, using the configured `AURADE_WORKDIR` for the root, pacman DB, and
@@ -31,11 +38,29 @@ private soak repo.
 `export-aur-bundles.sh` converts the monorepo package directories into
 self-contained per-package AUR upload directories. It includes an x86_64
 `chromiumos-ash-bin` wrapper for the current unsigned development payload;
-publish the generated directories only after the feedback gate.
+publish the generated directories only after the feedback gate. Set
+`AURADE_AUR_ARCHIVE_SHA256` from the current release manifest; the exporter
+rejects an omitted/stale digest and derives the Chromium package version from
+the checked-out `PKGBUILD`.
 
 `write-source-manifest.sh` records the Chromium revision, current Chromium
 worktree status, patch-series hashes, and package source hashes. It writes to
 `${AURADE_WORKDIR}/source-manifest.md` by default.
+
+`write-iso-sbom.py` writes a deterministic SPDX 2.3 inventory for a completed
+ISO and the package archives staged inside it. `installer/build-iso.sh` emits
+the SBOM as an ISO sidecar and can create/verify detached ISO and SBOM
+signatures with `AURADE_ISO_SIGNING_KEY` and the full primary fingerprint in
+`AURADE_ISO_SIGNING_FINGERPRINT`; set `AURADE_REQUIRE_ISO_SIGNATURE=1` for a
+release candidate. The fixture gate is `ci/tests/iso-sbom-test.sh`. Before
+uploading an image, run
+`ci/verify-iso-artifacts.sh path/to/aurade-1-x86_64.iso` to verify the checksum,
+SBOM digest/namespace, `.build-info`, and (when signed) the exact detached
+signer fingerprint; add `--require-signature` for a candidate. Its fixture gate
+is `ci/tests/iso-artifact-gate-test.sh`.
+`ci/verify-iso-structure.sh path/to/aurade-1-x86_64.iso --full` additionally
+inspects the UEFI fallback loader, boot-entry policy, and the extracted
+SquashFS payload without booting or touching a disk.
 
 `export-chromium-diff.sh` exports selected tracked and untracked Chromium source
 changes into the AuraDE patch series without hand-copying diffs. It writes temp
@@ -312,7 +337,9 @@ Public install shape:
   uses for its scratch worktree.
 - `AURADE_VM_HOST`, `AURADE_VM_USER`, `AURADE_TEST_USER`, and
   `AURADE_EXPECTED_CHROME_SHA` configure `ci/vm-smoke.sh`.
-- `GPGKEY=<key-id>` signs package files and the repo database.
+- `GPGKEY=<key-id>` signs package files and the repo database; release builds
+  also require `AURADE_REPO_KEYRING=<public-key-file>` and
+  `AURADE_REPO_FINGERPRINT=<full-fingerprint>` for pinned verification.
 - `AURADE_SIGN_PACKAGES=0` leaves package files unsigned while still allowing
   repo database signing when `GPGKEY` is set.
 - `AURADE_INSTALL_SMOKE=1 ci/arch-package-smoke.sh` additionally installs the

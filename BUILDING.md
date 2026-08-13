@@ -119,7 +119,7 @@ sudo ./ci/run-in-arch-root.sh /usr/bin/runuser -u aurabuild -- \
 
 Use the immutable Chromium source commit in `pins/chromium.sha`. The package
 version (`152.1660893`) is not a Git revision and must not be substituted for
-one. The current 33-patch series applies cleanly to the committed pin.
+one. The current 34-patch series applies cleanly to the committed pin.
 
 ```bash
 ./ci/bootstrap-chromium-src.sh \
@@ -190,7 +190,12 @@ For a real image, omit `AURADE_ALLOW_UNSIGNED=1` and provide
 The complete image and its sidecar metadata are written under
 `AURADE_ISO_OUTPUT_DIR` or the installer work directory's `output/` folder.
 The builder records ISO size and package-closure count/bytes in `.build-info`
-and rejects an image larger than `AURADE_MAX_ISO_BYTES` (4 GiB by default).
+and writes a deterministic SPDX 2.3 package inventory to
+`.iso.sbom.spdx.json`. When `AURADE_ISO_SIGNING_KEY` is provided, it also
+writes and verifies detached `.sig` sidecars for both the ISO and the SBOM.
+Set `AURADE_REQUIRE_ISO_SIGNATURE=1` for a candidate build so an unsigned
+image fails closed. The builder rejects an image larger than
+`AURADE_MAX_ISO_BYTES` (4 GiB by default).
 Set that variable explicitly when a documented release profile requires a
 different ceiling; do not remove the check for a release build.
 

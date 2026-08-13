@@ -241,13 +241,25 @@ build_iso() {
   fi
 
   log "building package-locked ISO for Arch snapshot $INSTALLER_SNAPSHOT"
-  as_root_env \
-    AURADE_ARCH_SNAPSHOT="$INSTALLER_SNAPSHOT" \
-    AURADE_REPO_DIR="$repo_dir" \
-    AURADE_REPO_URL="${AURADE_REPO_URL:-file:///var/cache/aurade/repo}" \
-    AURADE_ALLOW_UNSIGNED="$allow_unsigned" \
-    AURADE_INSTALLER_WORK_ROOT="$WORKDIR/installer" \
-    "$REPO_ROOT/installer/build-iso.sh"
+  local -a build_env=(
+    "AURADE_ARCH_SNAPSHOT=$INSTALLER_SNAPSHOT"
+    "AURADE_REPO_DIR=$repo_dir"
+    "AURADE_REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}"
+    "AURADE_ALLOW_UNSIGNED=$allow_unsigned"
+    "AURADE_INSTALLER_WORK_ROOT=$WORKDIR/installer"
+  )
+  # sudo/env does not reliably preserve release-specific variables. Pass the
+  # public verification key, ISO signing policy, and size budget explicitly so
+  # `--all` cannot silently downgrade a requested candidate build to unsigned.
+  local variable
+  for variable in \
+    AURADE_REPO_KEY AURADE_REPO_FINGERPRINT AURADE_ISO_SIGNING_KEY \
+    AURADE_REQUIRE_ISO_SIGNATURE AURADE_MAX_ISO_BYTES; do
+    if [[ -n ${!variable+x} ]]; then
+      build_env+=("$variable=${!variable}")
+    fi
+  done
+  as_root_env "${build_env[@]}" "$REPO_ROOT/installer/build-iso.sh"
 }
 
 run_vm_tests() {

@@ -30,7 +30,8 @@ PATH="$TMP/bin:$PATH" \
   "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-refresh-mirrors" \
   >"$TMP/success.out" 2>&1
 grep -Fxq 'Server = https://mirror.example.invalid/$repo/os/$arch' "$TMP/mirrorlist"
-grep -Fxq 'Include = /etc/pacman.d/mirrorlist' "$TMP/pacman.conf"
+grep -Fxq 'Server = https://archive.archlinux.org/repos/2026/07/12/$repo/os/$arch' "$TMP/pacman.conf"
+grep -Fq 'live pacman.conf was left unchanged' "$TMP/success.out"
 
 # A failed discovery must leave both the bundled list and the pinned config
 # untouched so troubleshooting remains reproducible.

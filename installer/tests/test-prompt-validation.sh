@@ -60,6 +60,19 @@ accept aurade_valid_keymap us
 accept aurade_valid_hostname aurade
 accept aurade_valid_arch_snapshot 2026/07/12
 
+# Confirmation normalization is behavioral: line delimiters are removed, but
+# other control bytes remain and therefore cannot satisfy an exact token.
+normalized=$(aurade_normalize_confirmation $'ERASE:/dev/sda\r\n')
+[[ $normalized == 'ERASE:/dev/sda' ]] || {
+  printf 'FAIL: CR/LF confirmation delimiters were not normalized\n' >&2
+  failures=$((failures + 1))
+}
+normalized=$(aurade_normalize_confirmation $'\x1bERASE:/dev/sda')
+[[ $normalized != 'ERASE:/dev/sda' ]] || {
+  printf 'FAIL: non-line control byte was silently normalized\n' >&2
+  failures=$((failures + 1))
+}
+
 accept aurade_valid_timezone America/Chicago
 accept aurade_valid_timezone Europe/Paris
 reject aurade_valid_timezone America/Nowhere
@@ -109,6 +122,22 @@ reject aurade_valid_arch_snapshot 2026/02/30
 reject aurade_valid_arch_snapshot 2026/13/01
 reject aurade_valid_arch_snapshot 2026-07-12
 reject aurade_valid_arch_snapshot ''
+
+# The destructive confirmation gate must bind to the complete disk identity,
+# not merely a reused /dev path. Virtual disks without serial/WWN remain
+# usable through the size/model/transport tuple.
+if ! aurade_target_identity_matches \
+  /dev/vda 16G VirtIO disk '' '' /dev/vda 16G VirtIO disk '' ''; then
+  fail 'matching virtual-disk identity was rejected'
+fi
+if aurade_target_identity_matches \
+  /dev/vda 16G VirtIO disk SERIAL-1 WWN-1 /dev/vda 16G VirtIO disk SERIAL-2 WWN-1; then
+  fail 'changed serial was accepted at the confirmation gate'
+fi
+if aurade_target_identity_matches \
+  /dev/vda 16G VirtIO disk '' '' /dev/vda 32G VirtIO disk '' ''; then
+  fail 'changed disk size was accepted at the confirmation gate'
+fi
 
 # A missing keymap directory must reject rather than abort the front end
 # under `set -e`, so the prompt can explain itself instead of exiting.

@@ -16,6 +16,13 @@ jobs:
       - name: Install source-check dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
 
+      - name: Verify archive tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v bsdtar
+          bsdtar --version
+
       - name: Check shell syntax
         shell: bash
         run: |
@@ -55,11 +62,32 @@ jobs:
       - name: Run public release leak gate
         run: ci/public-release-leak-gate.sh
 
-      - name: Run installer tests
+      - name: Run installer source and refusal tests
         run: installer/tests/run.sh
+
+      - name: Run ISO SBOM fixture test
+        run: ci/tests/iso-sbom-test.sh
+
+      - name: Run ISO artifact sidecar gate
+        run: ci/tests/iso-artifact-gate-test.sh
+
+      - name: Run repository signature policy fixture
+        run: ci/tests/release-signature-policy-test.sh
+
+      - name: Run repository checksum-manifest fixture
+        run: ci/tests/release-checksum-manifest-test.sh
+
+      - name: Run AUR export policy fixture
+        run: ci/tests/aur-export-policy-test.sh
+
+      - name: Run ISO structure fixture
+        run: ci/tests/iso-structure-script-test.sh
 
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
+
+      - name: Run session error fixture
+        run: bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
 
       - name: Check whitespace
         run: git diff --check

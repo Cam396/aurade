@@ -21,6 +21,7 @@
 AURADE_JOURNAL_VERSION=1
 AURADE_JOURNAL_PATH=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
 AURADE_JOURNAL_RAW=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
+AURADE_FAILURE_JOURNAL_DIR=${AURADE_FAILURE_JOURNAL_DIR:-}
 
 # Stage order. Everything up to and including `confirm` leaves the disk
 # untouched; `partition` is the first stage that cannot be undone.
@@ -108,17 +109,35 @@ aurade_journal_set_target() {
 }
 
 aurade_journal_init() {
-  local mode=$1 target=${2:-}
-  install -d -m 0700 "$(dirname "$AURADE_JOURNAL_PATH")" 2>/dev/null || true
+  local mode=$1 target=${2:-} journal_dir raw_dir
+  journal_dir=$(dirname -- "$AURADE_JOURNAL_PATH")
+  raw_dir=$(dirname -- "$AURADE_JOURNAL_RAW")
+  install -d -m 0700 -- "$journal_dir" "$raw_dir" 2>/dev/null || {
+    printf 'aurade-journal: cannot create journal directories\n' >&2
+    return 1
+  }
   _J_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || printf 'unknown-%s' "$$")
   _J_SEQ=0
   _J_ATTEMPT=${AURADE_INSTALL_ATTEMPT:-1}
   if [[ -n $target ]]; then
     aurade_journal_set_target "$target"
   fi
-  : >"$AURADE_JOURNAL_PATH" 2>/dev/null || true
-  : >"$AURADE_JOURNAL_RAW" 2>/dev/null || true
-  chmod 0600 "$AURADE_JOURNAL_PATH" "$AURADE_JOURNAL_RAW" 2>/dev/null || true
+  : >"$AURADE_JOURNAL_PATH" 2>/dev/null || {
+    printf 'aurade-journal: cannot create structured journal: %s\n' "$AURADE_JOURNAL_PATH" >&2
+    return 1
+  }
+  : >"$AURADE_JOURNAL_RAW" 2>/dev/null || {
+    printf 'aurade-journal: cannot create raw log: %s\n' "$AURADE_JOURNAL_RAW" >&2
+    return 1
+  }
+  chmod 0600 "$AURADE_JOURNAL_PATH" "$AURADE_JOURNAL_RAW" 2>/dev/null || {
+    printf 'aurade-journal: cannot restrict journal permissions\n' >&2
+    return 1
+  }
+  [[ -w $AURADE_JOURNAL_PATH && -w $AURADE_JOURNAL_RAW ]] || {
+    printf 'aurade-journal: journal paths are not writable\n' >&2
+    return 1
+  }
   aurade_journal_emit start started "mode=${mode}"
 }
 
@@ -130,7 +149,7 @@ aurade_journal_emit() {
   if aurade_stage_reversible "$stage"; then reversible=true; fi
   if aurade_stage_idempotent "$stage"; then idempotent=true; fi
   _J_SEQ=$((_J_SEQ + 1))
-  {
+  if ! {
     printf '{"v":%s,"install_id":"%s","seq":%s,"attempt":%s,"t":"%s",' \
       "$AURADE_JOURNAL_VERSION" "$(_json_escape "$_J_ID")" \
       "$_J_SEQ" "$_J_ATTEMPT" "$(_j_now)"
@@ -144,7 +163,10 @@ aurade_journal_emit() {
       printf ',%s' "$extra"
     fi
     printf ',"target":%s}\n' "$(_j_target_json)"
-  } >>"$AURADE_JOURNAL_PATH" 2>/dev/null || true
+  } >>"$AURADE_JOURNAL_PATH" 2>/dev/null; then
+    printf 'aurade-journal: cannot append structured journal: %s\n' "$AURADE_JOURNAL_PATH" >&2
+    return 1
+  fi
 }
 
 aurade_journal_begin() {
@@ -195,16 +217,48 @@ aurade_journal_raw() {
   printf '%s\n' "$*" >>"$AURADE_JOURNAL_RAW" 2>/dev/null || true
 }
 
+# Preserve only the structured journal when a caller opts into a disk-backed
+# failure directory.  The installer work directory contains package caches,
+# temporary keyrings, and other private state; copying it wholesale would make
+# failure recovery a secret-retention mechanism.  A caller can point this at a
+# mounted writable volume when post-reboot evidence is required.  The copy is
+# deliberately best-effort so a full or read-only recovery volume never masks
+# the original installer failure.
+aurade_journal_preserve_failure() {
+  local destination
+  [[ -n $AURADE_FAILURE_JOURNAL_DIR ]] || return 0
+  [[ $AURADE_FAILURE_JOURNAL_DIR == /* && $AURADE_FAILURE_JOURNAL_DIR != / ]] || return 1
+  [[ -r $AURADE_JOURNAL_PATH ]] || return 0
+  install -d -m 0700 -- "$AURADE_FAILURE_JOURNAL_DIR" || return 1
+  destination=$(mktemp -d "$AURADE_FAILURE_JOURNAL_DIR/failure.XXXXXX") || return 1
+  if ! install -m 0600 -- "$AURADE_JOURNAL_PATH" "$destination/journal.jsonl"; then
+    rm -rf -- "$destination"
+    return 1
+  fi
+  printf '%s\n' "$destination"
+}
+
 # A resumed install may continue only when the next stage can safely re-run
 # AND the disk currently present is the disk the journal describes. Either
 # check failing leaves the user with export, log, shell and reboot.
+aurade_journal_target_identity_matches() {
+  local serial=$1 wwn=$2 size=$3
+  [[ -n $_J_TARGET_SERIAL || -n $_J_TARGET_WWN ]] || return 1
+  [[ -n $_J_TARGET_SERIAL ]] && [[ $serial == "$_J_TARGET_SERIAL" ]] || {
+    [[ -z $_J_TARGET_SERIAL ]] || return 1
+  }
+  [[ -n $_J_TARGET_WWN ]] && [[ $wwn == "$_J_TARGET_WWN" ]] || {
+    [[ -z $_J_TARGET_WWN ]] || return 1
+  }
+  [[ $_J_TARGET_SIZE =~ ^[1-9][0-9]*$ && $size == "$_J_TARGET_SIZE" ]]
+}
+
 aurade_journal_may_resume() {
-  local stage=$1 device=$2 serial size
+  local stage=$1 device=$2 serial wwn size
   aurade_stage_idempotent "$stage" || return 1
   [[ -b $device ]] || return 1
   serial=$(lsblk -dnro SERIAL "$device" 2>/dev/null | head -1 || true)
+  wwn=$(lsblk -dnro WWN "$device" 2>/dev/null | head -1 || true)
   size=$(blockdev --getsize64 "$device" 2>/dev/null || printf '0')
-  [[ $serial == "$_J_TARGET_SERIAL" ]] || return 1
-  [[ $size == "$_J_TARGET_SIZE" ]] || return 1
-  return 0
+  aurade_journal_target_identity_matches "$serial" "$wwn" "$size"
 }

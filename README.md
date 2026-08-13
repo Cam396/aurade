@@ -50,7 +50,7 @@ browser PWAs in the user's session.
 | `OPUS_GUI_TUI_HANDOFF.md` | Finish-gated GUI/TUI installer contract |
 | `CITATION.cff` | Machine-readable project metadata and citation record |
 
-The current source snapshot carries 33 ordered Chromium patches and an
+The current source snapshot carries 34 ordered Chromium patches and an
 11-package Arch set:
 
 `aurade`, `aurade-account-helper`, `aurade-ai`, `aurade-full`,

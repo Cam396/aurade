@@ -80,6 +80,15 @@ mode-0600 journal/log, `c` to collect a redacted hardware bundle, `s` for a
 diagnostic shell, `r` for an explicitly confirmed reboot, and `q` to return.
 Review exported hardware archives before sharing them.
 
+For a run that must survive the live session or a reboot, set
+`AURADE_FAILURE_JOURNAL_DIR` to an absolute directory on a mounted,
+disk-backed volume before starting the engine. On an unexpected exit AuraDE
+copies only the mode-0600 structured JSONL journal there; package caches,
+temporary keyrings, passphrase files, and the raw command log are never
+copied. This is evidence preservation, not resume support: the execute-path
+contract still requires a fresh disposable run to prove recovery after a
+post-wipe failure.
+
 The execute-path boundary and the assertions needed for a beta install are
 defined in [installer/EXECUTE_PATH_CONTRACT.md](installer/EXECUTE_PATH_CONTRACT.md).
 The source tests intentionally do not claim to prove partitioning, LUKS,

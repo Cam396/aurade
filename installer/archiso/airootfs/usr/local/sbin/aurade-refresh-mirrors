@@ -3,7 +3,6 @@
 set -Eeuo pipefail
 
 MIRRORLIST=${AURADE_MIRRORLIST:-/etc/pacman.d/mirrorlist}
-PACMAN_CONF=${AURADE_PACMAN_CONF:-/etc/pacman.conf}
 TMP=$(mktemp "${MIRRORLIST}.XXXXXX")
 trap 'rm -f -- "$TMP"' EXIT
 
@@ -28,9 +27,4 @@ if ! grep -qE '^[[:space:]]*Server[[:space:]]*=' "$TMP"; then
 fi
 
 install -m 0644 -- "$TMP" "$MIRRORLIST"
-if grep -qE '^Server = https://archive\.archlinux\.org/repos/' "$PACMAN_CONF"; then
-  sed -i -E \
-    's|^Server = https://archive\.archlinux\.org/repos/[^[:space:]]+|Include = /etc/pacman.d/mirrorlist|' \
-    "$PACMAN_CONF"
-fi
-printf '%s\n' "aurade-refresh-mirrors: refreshed ${MIRRORLIST}" >&2
+printf '%s\n' "aurade-refresh-mirrors: refreshed ${MIRRORLIST}; live pacman.conf was left unchanged" >&2
