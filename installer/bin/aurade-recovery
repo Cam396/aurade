@@ -124,8 +124,13 @@ case "$COMMAND" in
           next
         }
         /^options[[:space:]]/ {
-          if (!sub(/rootflags=subvol=[^[:space:]]+/, "rootflags=subvol=" subvolume))
+          line = $0
+          gsub(/[[:space:]]quiet([[:space:]]|$)/, " ", line)
+          sub(/[[:space:]]+$/, "", line)
+          if (!sub(/rootflags=subvol=[^[:space:]]+/, "rootflags=subvol=" subvolume, line))
             exit 42
+          print line
+          next
         }
         { print }
       ' "$normal_entry" >"$rollback_tmp" || {
