@@ -114,6 +114,24 @@ printf 'Selected disk: %s | size=%s | model=%s | serial=%s | transport=%s\n' \
 if [[ $target_transport == usb ]]; then
   printf '%s\n' 'WARNING: this is a USB/removable disk. Confirm that it is the intended target; the installer will erase the entire device.' >&2
 fi
+# SMART probing is advisory and deliberately happens before the destructive
+# confirmation. Some USB bridges do not pass SMART through, and smartctl is
+# not present in every live image, so neither condition blocks installation.
+if ! command -v smartctl >/dev/null 2>&1; then
+  printf '%s\n' 'SMART health: smartctl is unavailable; inspect the disk health manually if this is a physical target.' >&2
+else
+  smart_health_output=
+  smart_health_status=0
+  smart_health_output=$(smartctl -H "$target" 2>&1) || smart_health_status=$?
+  if grep -Eiq 'SMART (overall-health|Health Status).*([[:space:]]|:)(FAILED|FAIL|BAD)\b' <<<"$smart_health_output"; then
+    printf '%s\n' 'WARNING: SMART reported a failing health status. Do not continue unless you understand the risk and have a verified backup.' >&2
+  elif grep -Eiq 'SMART (overall-health|Health Status).*([[:space:]]|:)(PASSED|OK)\b' <<<"$smart_health_output"; then
+    printf '%s\n' 'SMART health: passed (advisory; this does not replace a backup).' >&2
+  else
+    printf 'SMART health: unavailable or unsupported (smartctl exit %s); inspect the disk manually before continuing.\n' \
+      "$smart_health_status" >&2
+  fi
+fi
 printf '%s\n' 'Storage note: the installer creates a whole-disk UEFI layout; LUKS2 encryption and Btrfs recovery snapshots consume additional space.'
 printf '%s\n' 'Memory note: no swap or hibernation setup is created by default; low-memory systems should add zram or a swapfile after installation.'
 while true; do

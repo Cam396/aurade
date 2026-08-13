@@ -95,6 +95,11 @@ grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-i
 grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'USB/removable disk' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'smartctl -H "$target"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'smartctl is unavailable' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'SMART reported a failing health status' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'SMART health: passed' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'does not replace a backup' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'LUKS2 encryption and Btrfs recovery snapshots consume additional space' \
   "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'no swap or hibernation setup is created by default' "$ROOT/installer/bin/aurade-installer"
