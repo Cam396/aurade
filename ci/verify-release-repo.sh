@@ -210,5 +210,4 @@ if ((${#version_mismatches[@]} > 0)); then
   printf '  - %s\n' "${version_mismatches[@]}" >&2
   exit 1
 fi
-
 echo "Release repository verified: ${#package_files[@]} current packages"
