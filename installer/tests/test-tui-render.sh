@@ -229,6 +229,34 @@ render question-username none ascii >"$TMP/username.out"
 grep -Eq '^\|  > _ +\|' "$TMP/username.out" ||
   fail 'the username field was pre-filled with something'
 
+# --- rendered text is never glob-expanded ----------------------------------
+# Journal messages, device paths and failure details can all contain * or ?,
+# and an unquoted `for word in $text` replaces them with matching filenames.
+# The first time this happened, an export error rendered as a listing of the
+# repository root.
+cat >"$TMP/glob.jsonl" <<'EOF'
+{"v":1,"stage":"configure","status":"failed","exit":1,"cause":"unexpected_exit","message":"no match for /dev/sd* or ?? in the table","resumable":true,"target":{"path":"/dev/nvme0n1"}}
+EOF
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
+  --journal "$TMP/glob.jsonl" >"$TMP/glob.out"
+grep -Fq '/dev/sd*' "$TMP/glob.out" ||
+  fail 'a message containing a glob was not rendered literally'
+grep -Fq '??' "$TMP/glob.out" ||
+  fail 'a message containing ?? was not rendered literally'
+# Rendered again from a directory holding one uniquely named file: if any glob
+# is expanded, that name is what it expands to. Matching on ordinary words
+# would not distinguish expansion from prose that happens to say "installer".
+install -d "$TMP/globdir"
+: >"$TMP/globdir/GLOBCANARY-must-not-appear"
+( cd "$TMP/globdir" && env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+    "$TUI" --render failure --journal "$TMP/glob.jsonl" ) >"$TMP/glob-cwd.out"
+! grep -Fq GLOBCANARY "$TMP/glob-cwd.out" ||
+  fail 'rendering expanded a glob against the working directory'
+cmp -s "$TMP/glob.out" "$TMP/glob-cwd.out" ||
+  fail 'the same journal rendered differently from a different directory'
+# And the frame still holds.
+measure "$TMP/glob.out" || fail 'a glob-bearing message broke the frame'
+
 # --- long labels and values are laid out, not clipped -----------------------
 # Both of these carry the sentence a user needs in order to act, so losing the
 # end of one at the frame is a functional defect rather than a cosmetic one.
