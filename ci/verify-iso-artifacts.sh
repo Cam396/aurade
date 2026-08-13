@@ -90,8 +90,26 @@ if [[ -e $iso_signature || -e $sbom_signature || $REQUIRE_SIGNATURE == 1 ]]; the
     echo 'verify-iso-artifacts: both ISO and SBOM signatures are required together' >&2
     exit 1
   }
-  gpg --batch --verify "$iso_signature" "$ISO" >/dev/null
-  gpg --batch --verify "$sbom_signature" "$sbom" >/dev/null
+  signing_fingerprint=$(awk -F= '$1 == "iso_signing_fingerprint" {print toupper($2); exit}' "$build_info")
+  [[ $signing_fingerprint =~ ^[0-9A-F]{40,64}$ ]] || {
+    echo 'verify-iso-artifacts: build-info lacks a full ISO signing fingerprint' >&2
+    exit 1
+  }
+  verify_signature() {
+    local signature=$1 payload=$2 label=$3 status signer primary
+    if ! status=$(gpg --batch --status-fd 1 --verify "$signature" "$payload" 2>/dev/null); then
+      echo "verify-iso-artifacts: invalid $label signature" >&2
+      return 1
+    fi
+    signer=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print toupper($3); exit}' <<<"$status")
+    primary=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print toupper($NF); exit}' <<<"$status")
+    [[ $signer == "$signing_fingerprint" || $primary == "$signing_fingerprint" ]] || {
+      echo "verify-iso-artifacts: $label signer fingerprint does not match build-info" >&2
+      return 1
+    }
+  }
+  verify_signature "$iso_signature" "$ISO" ISO
+  verify_signature "$sbom_signature" "$sbom" SBOM
 fi
 
 printf 'ISO artifact verification: PASS (%s)\n' "$basename_iso"
