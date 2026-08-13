@@ -81,4 +81,15 @@ fi
 grep -Fq 'installer helper is missing' "$TMP/helper.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
 
+# A disk-backed staging requirement that cannot fit must fail before package
+# acquisition, making low-memory/tmpfs failures actionable and bounded.
+if AURADE_MIN_WORKSPACE_BYTES=999999999999999999 \
+  "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/capacity.out" 2>&1; then
+  echo 'impossible staging capacity unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$TMP/capacity.out"
+! grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
+! grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
+
 echo 'installer failure-injection test: PASS'
