@@ -50,6 +50,7 @@ if [[ -n "${GPGKEY:-}" ]]; then
 fi
 "${SCRIPT_DIR}/build-private-repo.sh"
 rm -f "${makepkg_config}"
+REPO_DIR="${staging}" "${SCRIPT_DIR}/write-release-checksums.sh"
 if [[ -n "${GPGKEY:-}" ]]; then
   export AURADE_REQUIRE_SIGNATURES=1
 fi
