@@ -104,7 +104,7 @@ reset_state
   echo enter                       # timezone
   echo enter                       # disk
   typed '-illegal-'; echo enter    # hostname: rejected
-  for i in $(seq 12); do echo backspace; done
+  for i in $(seq 30); do echo backspace; done   # clear the pre-filled default too
   typed 'good-name'; echo enter    # hostname: accepted
   typed 'alex'; echo enter
   typed 'pw'; echo enter; typed 'pw'; echo enter
