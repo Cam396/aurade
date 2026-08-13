@@ -16,6 +16,19 @@ done <"$ROOT/installer/expected-packages.txt"
 printf '%s\n' 'local repository database' >"$TMP/repo/aurade.db.tar.gz"
 printf '%s\n' 'must not enter the image' >"$TMP/repo/private-signing-key.txt"
 
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_MAX_ISO_BYTES=invalid \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_invalid" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/invalid_max_bytes.out" 2>&1; then
+  echo 'non-numeric AURADE_MAX_ISO_BYTES unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' "$TMP/invalid_max_bytes.out"
+[[ ! -e $TMP/work_invalid ]]
+
 env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
   AURADE_REPO_DIR="$TMP/repo" \
