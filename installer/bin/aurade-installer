@@ -281,6 +281,10 @@ fi
 token="ERASE:$target"
 printf '\nThe target will be irreversibly erased. Type exactly: %s\n> ' "$token"
 read -r confirmation
+# Some firmware/console combinations leave a carriage return when the
+# terminal is switched back from package-acquisition output. Normalize that
+# delimiter before comparing the destructive confirmation token.
+confirmation=${confirmation%$'\r'}
 [[ $confirmation == "$token" ]] || { echo 'Confirmation did not match; nothing was written.' >&2; exit 1; }
 
 run_engine "${common_args[@]}" --execute --confirm "$confirmation"
