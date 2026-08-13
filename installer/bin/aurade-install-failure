@@ -79,15 +79,25 @@ latest_failed_record() {
 }
 
 report() {
-  local record stage cause message
+  local record stage cause message advice
   record=$(latest_failed_record || true)
   stage=$(extract_field stage "$record")
   cause=$(extract_field cause "$record")
   message=$(extract_field message "$record")
+  case $cause in
+    keyring_error) advice='Verify the ISO keyring, package signatures, system clock, and network before retrying.' ;;
+    capacity_error) advice='Choose a writable disk-backed staging directory with enough free space, then retry.' ;;
+    network_error) advice='Check the interface, route, DNS, clock, and pinned Arch snapshot before retrying.' ;;
+    secure_boot_error) advice='Disable Secure Boot or provide a signed boot chain before retrying.' ;;
+    target_error) advice='Recheck the selected disk identity and ensure it is not mounted or in use.' ;;
+    storage_error) advice='Inspect the raw log for the mount/filesystem failure and verify disk health.' ;;
+    *) advice='Review the private log and hardware bundle before retrying.' ;;
+  esac
   printf '\nAuraDE installer stopped (exit status %s).\n' "$STATUS" >&2
   if [[ -n $stage ]]; then printf '  stage: %s\n' "$stage" >&2; fi
   if [[ -n $cause ]]; then printf '  cause: %s\n' "$cause" >&2; fi
   if [[ -n $message ]]; then printf '  detail: %s\n' "$message" >&2; fi
+  printf '  next: %s\n' "$advice" >&2
   printf '  journal: %s\n  raw log: %s\n' "$JOURNAL" "$RAW_LOG" >&2
   printf '%s\n' 'Raw command output is kept separate and is not shown here automatically.' >&2
 }

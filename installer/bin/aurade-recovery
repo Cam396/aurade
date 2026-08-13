@@ -8,6 +8,7 @@ shift || true
 CONFIRM=
 LABEL=
 SET_ROLLBACK=0
+RETENTION=${AURADE_ROLLBACK_RETENTION:-3}
 
 usage() {
   cat <<'EOF'
@@ -30,6 +31,9 @@ Options:
   --set-rollback            Update aurade-rollback.conf after creating a snapshot
   --confirm TOKEN           Required only for persistent default changes
 
+Environment:
+  AURADE_ROLLBACK_RETENTION Number of manual snapshots to retain (default: 3)
+
 No command deletes a snapshot or modifies a filesystem layout.
 EOF
 }
@@ -44,6 +48,11 @@ while (($#)); do
     *) break ;;
   esac
 done
+
+[[ $RETENTION =~ ^[1-9][0-9]*$ ]] || {
+  echo 'aurade-recovery: AURADE_ROLLBACK_RETENTION must be a positive integer' >&2
+  exit 2
+}
 
 ROOT=$(readlink -f -- "$ROOT")
 ENTRY_DIR=$ROOT/boot/loader/entries
@@ -102,6 +111,30 @@ case "$COMMAND" in
     fi
     install -d -m 0750 "$(dirname "$destination")"
     btrfs subvolume snapshot -r "$ROOT" "$destination"
+    snapshot_created=1
+    rollback_boot_dir=
+    rollback_tmp=
+    cleanup_partial_snapshot() {
+      local status=$? path
+      set +e
+      if (( status != 0 && snapshot_created )); then
+        if ! btrfs subvolume delete -- "$destination" >/dev/null 2>&1; then
+          printf '%s\n' "aurade-recovery: failed to remove partial snapshot after an error: $destination" >&2
+        else
+          rmdir -- "$(dirname "$destination")" 2>/dev/null || true
+        fi
+        if [[ -n ${rollback_boot_dir:-} && -d $rollback_boot_dir ]]; then
+          find "$rollback_boot_dir" -depth -type f -delete 2>/dev/null || true
+          find "$rollback_boot_dir" -depth -type l -delete 2>/dev/null || true
+          find "$rollback_boot_dir" -depth -type d -empty -delete 2>/dev/null || true
+        fi
+        if [[ -n ${rollback_tmp:-} ]]; then
+          rm -f -- "$rollback_tmp" 2>/dev/null || true
+        fi
+      fi
+      exit "$status"
+    }
+    trap cleanup_partial_snapshot EXIT
     if (( SET_ROLLBACK )); then
       snapshot_name=$(basename "$(dirname "$destination")")
       snapshot_subvolume=@snapshots/$snapshot_name/snapshot
@@ -140,8 +173,31 @@ case "$COMMAND" in
       chmod 0644 "$rollback_tmp"
       mv -f "$rollback_tmp" "$rollback_entry"
       find "$ROOT/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -type d \
-        ! -name "$snapshot_name" ! -name factory -exec rm -rf -- {} +
+        ! -name "$snapshot_name" ! -name factory -exec sh -c '
+          find "$1" -depth -type f -delete
+          find "$1" -depth -type l -delete
+          find "$1" -depth -type d -empty -delete
+        ' _ {} \;
     fi
+    snapshot_created=0
+    trap - EXIT
+    # Keep the factory snapshot plus a bounded number of manual snapshots.
+    # Deleting a Btrfs subvolume must go through btrfs(8); a failed delete is
+    # reported but never replaced with a dangerous recursive removal.
+    mapfile -t manual_snapshots < <(
+      find "$SNAPSHOT_DIR" -mindepth 2 -maxdepth 2 -type d -name snapshot \
+        -path "$SNAPSHOT_DIR/manual-*/snapshot" -printf '%h\n' | LC_ALL=C sort
+    )
+    while ((${#manual_snapshots[@]} > RETENTION)); do
+      oldest=${manual_snapshots[0]}
+      if btrfs subvolume delete -- "$oldest/snapshot" >/dev/null 2>&1; then
+        rmdir -- "$oldest" 2>/dev/null || true
+      else
+        printf '%s\n' "aurade-recovery: could not prune old snapshot: $oldest" >&2
+        break
+      fi
+      manual_snapshots=("${manual_snapshots[@]:1}")
+    done
     printf '%s\n' "$destination"
     ;;
   boot-normal|boot-rollback)

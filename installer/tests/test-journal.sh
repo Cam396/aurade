@@ -12,6 +12,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 export AURADE_JOURNAL_PATH="$TMP/journal.jsonl"
 export AURADE_JOURNAL_RAW="$TMP/install.log"
+export AURADE_FAILURE_JOURNAL_DIR="$TMP/failure-evidence"
 
 # shellcheck source=../lib/aurade-journal.sh
 . "$ROOT/installer/lib/aurade-journal.sh"
@@ -129,6 +130,16 @@ fi
 grep -q 'failed to commit transaction' "$AURADE_JOURNAL_RAW" \
   || fail 'raw log did not receive the output'
 
+# Failure persistence is opt-in and structured-only: the package cache and
+# raw log must never be copied into the disk-backed evidence directory.
+preserved=$(aurade_journal_preserve_failure)
+[[ -r $preserved/journal.jsonl ]] || fail 'failure journal was not preserved'
+[[ $(stat -c '%a' "$preserved/journal.jsonl") == 600 ]] || \
+  fail 'preserved journal should be mode 600'
+[[ ! -e $preserved/install.log ]] || fail 'raw log leaked into preserved evidence'
+grep -Fq '"stage":"bootloader"' "$preserved/journal.jsonl" || \
+  fail 'preserved journal contents are incomplete'
+
 # ---- resume safety -----------------------------------------------------------
 # A stage that cannot safely re-run must never be offered as resumable.
 if aurade_journal_may_resume snapshot /dev/null; then
@@ -143,6 +154,38 @@ _J_TARGET_SIZE=999999999999
 if aurade_journal_may_resume bootloader /dev/null; then
   fail 'resume must refuse when target identity does not match'
 fi
+
+# Resume identity matching is strict even when a device exposes no serial:
+# a recorded WWN is sufficient, but an empty serial+WWN or a changed WWN is
+# never accepted. This pure helper test avoids pretending /dev/null is a disk.
+_J_TARGET_SERIAL=
+_J_TARGET_WWN=wwn-expected
+_J_TARGET_SIZE=4096
+aurade_journal_target_identity_matches '' wwn-expected 4096 || \
+  fail 'resume should accept a matching recorded WWN'
+if aurade_journal_target_identity_matches '' wwn-other 4096; then
+  fail 'resume accepted a changed WWN'
+fi
+_J_TARGET_WWN=
+if aurade_journal_target_identity_matches '' '' 4096; then
+  fail 'resume accepted a target with no stable identity'
+fi
+
+# A journal write failure must be observable to the caller rather than being
+# silently ignored. A regular file in the parent path makes the fixture fail
+# even when this suite runs as root.
+blocked_parent="$TMP/journal-parent-file"
+printf '%s\n' blocked >"$blocked_parent"
+blocked_journal="$blocked_parent/journal.jsonl"
+blocked_raw="$TMP/blocked.log"
+if (
+  export AURADE_JOURNAL_PATH="$blocked_journal" AURADE_JOURNAL_RAW="$blocked_raw"
+  . "$ROOT/installer/lib/aurade-journal.sh"
+  aurade_journal_init dry-run
+) >"$TMP/blocked.out" 2>&1; then
+  fail 'journal initialization unexpectedly succeeded under a file parent'
+fi
+grep -Fq 'cannot create structured journal' "$TMP/blocked.out"
 
 # ---- permissions -------------------------------------------------------------
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
@@ -168,6 +211,7 @@ cleanup() {
       'installer stopped unexpectedly; inspect the private install log' \
       log shell reboot
   fi
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
   exit "$status"
 }
 trap cleanup EXIT
@@ -176,6 +220,7 @@ EOF
 chmod 0755 "$unexpected_script"
 if AURADE_TEST_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh" \
   AURADE_JOURNAL_PATH="$unexpected_journal" AURADE_JOURNAL_RAW="$unexpected_raw" \
+  AURADE_FAILURE_JOURNAL_DIR="$TMP/unexpected-failures" \
   "$unexpected_script"; then
   fail 'unexpected-exit fixture unexpectedly returned success'
 fi
@@ -191,6 +236,42 @@ assert any(
     for record in records
 ), records
 PY
+preserved_unexpected=$(find "$TMP/unexpected-failures" -type f -name journal.jsonl -print -quit)
+[[ -n $preserved_unexpected ]] || fail 'unexpected exit did not preserve the journal'
+[[ ! -e ${preserved_unexpected%/journal.jsonl}/install.log ]] || \
+  fail 'unexpected-exit preservation copied the raw log'
+
+# A specific fatal cause clears the active stage before EXIT; cleanup must
+# still preserve the journal rather than treating the record as success.
+classified_journal="$TMP/classified.jsonl"
+classified_script="$TMP/classified-exit.sh"
+cat >"$classified_script" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+. "${AURADE_TEST_JOURNAL_LIB}"
+aurade_journal_init execute /dev/does-not-exist
+aurade_journal_begin acquire 'downloading packages'
+aurade_journal_fail acquire 1 keyring_error 'keyring setup failed' log shell reboot
+cleanup() {
+  local status=$?
+  set +e
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap cleanup EXIT
+exit 41
+EOF
+chmod 0755 "$classified_script"
+if AURADE_TEST_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh" \
+  AURADE_JOURNAL_PATH="$classified_journal" \
+  AURADE_FAILURE_JOURNAL_DIR="$TMP/classified-failures" \
+  "$classified_script"; then
+  fail 'classified fatal fixture unexpectedly returned success'
+fi
+classified_preserved=$(find "$TMP/classified-failures" -type f -name journal.jsonl -print -quit)
+[[ -n $classified_preserved ]] || fail 'classified fatal journal was not preserved'
+grep -Fq '"cause":"keyring_error"' "$classified_preserved" || \
+  fail 'classified fatal cause was not preserved'
 
 if (( failures )); then
   printf 'installer journal test: FAIL (%d)\n' "$failures" >&2

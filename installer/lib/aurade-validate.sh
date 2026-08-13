@@ -13,6 +13,17 @@ AURADE_ZONEINFO_DIR=${AURADE_ZONEINFO_DIR:-/usr/share/zoneinfo}
 AURADE_LOCALE_DIR=${AURADE_LOCALE_DIR:-/usr/share/i18n/locales}
 AURADE_KEYMAP_DIR=${AURADE_KEYMAP_DIR:-/usr/share/kbd/keymaps}
 
+# Terminal transitions can leave CR/LF delimiters in a line read after a
+# long package-acquisition phase. Normalize only those line delimiters; the
+# destructive confirmation caller still performs an exact token comparison,
+# so other control bytes remain a refusal.
+aurade_normalize_confirmation() {
+  local value=$1
+  value=${value//$'\r'/}
+  value=${value//$'\n'/}
+  printf '%s' "$value"
+}
+
 # A timezone must name an installed zone file. The excluded names are the
 # metadata files tzdata ships alongside the zones; they are readable but are
 # not valid values for timedatectl/localtime.
@@ -83,4 +94,22 @@ aurade_valid_arch_snapshot() {
   [[ $snapshot =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || return 1
   normalized=$(date -u -d "${snapshot//\//-}" +%Y/%m/%d 2>/dev/null || true)
   [[ $normalized == "$snapshot" ]]
+}
+
+# Compare the disk selected before the prompts with the disk still present at
+# the destructive confirmation gate. Model/transport/size are always required;
+# a serial or WWN, when the device exposes one, is an additional stable match.
+# This keeps ordinary virtual disks usable while refusing a changed identity
+# between the dry run and erase confirmation.
+aurade_target_identity_matches() {
+  local expected_path=$1 expected_size=$2 expected_model=$3 expected_transport=$4
+  local expected_serial=$5 expected_wwn=$6 current_path=$7 current_size=$8
+  local current_model=$9 current_transport=${10} current_serial=${11} current_wwn=${12}
+  [[ $expected_path == "$current_path" &&
+     $expected_size == "$current_size" &&
+     $expected_model == "$current_model" &&
+     $expected_transport == "$current_transport" ]] || return 1
+  [[ -z $expected_serial || $expected_serial == "$current_serial" ]] || return 1
+  [[ -z $expected_wwn || $expected_wwn == "$current_wwn" ]] || return 1
+  return 0
 }

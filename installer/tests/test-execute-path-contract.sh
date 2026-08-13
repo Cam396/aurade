@@ -14,7 +14,10 @@ for marker in \
   'First boot reaches the greeter' \
   'factory rollback' \
   'machine-readable journal' \
-  'does not prove partitioning'; do
+  'does not prove partitioning' \
+  'installer/tests/test-execute-path-gate.sh' \
+  'AURADE_EXECUTE_PATH_TEST=1' \
+  'full disposable execute-path evidence'; do
   grep -Fq -- "$marker" "$CONTRACT" || {
     echo "execute-path contract missing required assertion: $marker" >&2
     exit 1

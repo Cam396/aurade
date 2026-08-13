@@ -43,6 +43,23 @@ fi
 grep -Fq 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' "$TMP/invalid_max_bytes.out"
 [[ ! -e $TMP/work_invalid ]]
 
+# A release build must not silently claim provenance when signatures are
+# required.  Stage-only mode still validates this policy before touching the
+# work directory, so this is safe to exercise without mkarchiso or a keyring.
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_REQUIRE_ISO_SIGNATURE=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_unsigned_required" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/unsigned_required.out" 2>&1; then
+  echo 'signature-required stage unexpectedly passed without a signing key' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_ISO_SIGNING_KEY is required when ISO signatures are required' \
+  "$TMP/unsigned_required.out"
+[[ ! -e $TMP/work_unsigned_required ]]
+
 env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
   AURADE_REPO_DIR="$TMP/repo" \
