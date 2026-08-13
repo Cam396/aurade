@@ -73,6 +73,72 @@ if (( FULL )); then
       exit 1
     }
   done
+
+  # The lock file is part of the release provenance, so verify it against the
+  # package archives inside the final squashfs rather than trusting the
+  # pre-mkarchiso staging directory. Extracting individual files with
+  # unsquashfs keeps this gate bounded without materialising the whole live
+  # filesystem a second time.
+  lock_file="$TMP/packages.lock"
+  unsquashfs -cat "$image" opt/aurade/repo/packages.lock >"$lock_file" 2>"$TMP/lock.err" || {
+    echo 'verify-iso-structure: cannot extract embedded packages.lock' >&2
+    exit 1
+  }
+  lock_entries="$TMP/lock.entries"
+  if ! awk '
+    BEGIN { valid = 1; count = 0 }
+    !/^#/ && NF {
+      if (NF < 2 || $1 !~ /^[[:xdigit:]]{64}$/ || $2 !~ /^[^/]+[.]pkg[.]tar[.][^/]+$/) {
+        valid = 0
+        next
+      }
+      print $1 "\t" $2
+      count++
+    }
+    END { exit !(valid && count > 0) }
+  ' "$lock_file" >"$lock_entries"; then
+    echo 'verify-iso-structure: embedded packages.lock is malformed' >&2
+    exit 1
+  fi
+  if [[ $(cut -f2 "$lock_entries" | sort | uniq -d | head -1) ]]; then
+    echo 'verify-iso-structure: embedded packages.lock contains duplicate archives' >&2
+    exit 1
+  fi
+
+  mapfile -t embedded_packages < <(
+    awk '$1 ~ /^squashfs-root\/opt\/aurade\/repo\/[^/]+[.]pkg[.]tar[.][^/]+$/ {
+      sub(/^squashfs-root\/opt\/aurade\/repo\//, "", $1)
+      print $1
+    }' "$contents"
+  )
+  package_index=0
+  while IFS=$'\t' read -r expected filename; do
+    package_index=$((package_index + 1))
+    matches=0
+    for embedded in "${embedded_packages[@]}"; do
+      [[ $embedded == "$filename" ]] && matches=$((matches + 1))
+    done
+    if (( matches != 1 )); then
+      echo "verify-iso-structure: lock archive is not embedded exactly once: $filename" >&2
+      exit 1
+    fi
+    package_file="$TMP/package-${package_index}.pkg"
+    unsquashfs -cat "$image" "opt/aurade/repo/$filename" >"$package_file" 2>"$TMP/package.err" || {
+      echo "verify-iso-structure: cannot extract locked archive: $filename" >&2
+      exit 1
+    }
+    actual=$(sha256sum "$package_file" | awk '{print $1}')
+    [[ $actual == "$expected" ]] || {
+      echo "verify-iso-structure: package checksum mismatch: $filename" >&2
+      exit 1
+    }
+  done <"$lock_entries"
+  for embedded in "${embedded_packages[@]}"; do
+    grep -Fqx -- "$embedded" <(cut -f2 "$lock_entries") || {
+      echo "verify-iso-structure: unlisted package archive in ISO: $embedded" >&2
+      exit 1
+    }
+  done
 fi
 
 if (( FULL )); then
