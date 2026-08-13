@@ -1,0 +1,546 @@
+#!/usr/bin/env bash
+# The model process behind the graphical installer.
+#
+# The graphical front end is a renderer and nothing else. It owns pixels,
+# focus order and wording layout; it owns no question, no validation rule, no
+# argument list, no secret and no opinion about what is reversible. Everything
+# in that second list already exists in shell, has tests, and is the code the
+# text installer runs. So this program sources that code and speaks it over a
+# pipe, and the graphical front end asks it.
+#
+# The reuse is deliberate and total. `aurade-installer-tui` can be sourced with
+# AURADE_INSTALLER_TUI_LIB=1, which defines every function and stops before its
+# entry point. That gives this bridge the identical `build_engine_args`,
+# `hash_password`, `write_secret`, `apply_answer`, `disk_table`, journal
+# readers and stage vocabulary the text installer uses. A graphical installer
+# that built its own argument list would be a second implementation of the one
+# join where a mistake reaches a destructive engine, and the two would drift.
+#
+# The dependency runs one way. Nothing here is on the text installer's path, so
+# a broken or absent GUI cannot affect the fallback, which is the renderer this
+# product guarantees.
+#
+# Protocol: one command per line on stdin, one line of JSON per response on
+# stdout. Commands that carry a value read exactly one more line, unmodified,
+# so a passphrase containing spaces survives - the text installer has already
+# shipped that bug once, in a widget that dropped the space key.
+#
+# Secrets are held in this process and written only by `write_secret`. They are
+# never echoed back, never logged, and never appear in a response. The renderer
+# sends a password once and can never read it again.
+
+set -Eeuo pipefail
+
+GB_SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+
+GB_TUI=${AURADE_INSTALLER_TUI:-}
+if [[ -z $GB_TUI ]]; then
+  for _candidate in /usr/local/sbin/aurade-installer-tui "$GB_SELF_DIR/aurade-installer-tui"; do
+    [[ -r $_candidate ]] || continue
+    GB_TUI=$_candidate
+    break
+  done
+fi
+[[ -n $GB_TUI && -r $GB_TUI ]] || {
+  echo 'aurade-installer-gui-bridge: cannot find aurade-installer-tui' >&2
+  exit 1
+}
+
+export AURADE_INSTALLER_TUI_LIB=1
+# shellcheck source=/dev/null
+. "$GB_TUI"
+unset AURADE_INSTALLER_TUI_LIB
+
+# --------------------------------------------------------------------------
+# Options
+# --------------------------------------------------------------------------
+
+while (($#)); do
+  case $1 in
+    # Exported, not merely set: the engine is a child process and reads these
+    # from its environment. Setting them privately would point the renderer at
+    # one journal and the engine at another.
+    --journal) JOURNAL_FILE=$2; export AURADE_JOURNAL_PATH=$2; shift 2 ;;
+    --raw-log) RAW_LOG=$2; export AURADE_JOURNAL_RAW=$2; shift 2 ;;
+    --plan-only) PLAN_ONLY=1; shift ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: aurade-installer-gui-bridge [options]
+
+Reads commands on stdin and writes one line of JSON per command on stdout.
+This is the model process for aurade-installer-gui; it is not a user command.
+
+Options:
+  --journal FILE   Structured journal to read progress and failure from
+  --raw-log FILE   Private unstructured installer log
+  --plan-only      Build and check a plan; the execute command does not exist
+EOF
+      exit 0
+      ;;
+    *) echo "aurade-installer-gui-bridge: unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer-gui.XXXXXX")
+chmod 700 "$SECRET_DIR"
+install -d -m 0700 "$(dirname "$JOURNAL_FILE")" 2>/dev/null || true
+install -d -m 0700 "$(dirname "$RAW_LOG")" 2>/dev/null || true
+
+GB_PLANNED=0
+GB_ENGINE_PID=
+
+# --------------------------------------------------------------------------
+# JSON output
+# --------------------------------------------------------------------------
+#
+# `_json_escape` comes from aurade-journal.sh, which is already sourced and
+# already the escaper the journal itself is written with. Responses are built
+# whole and printed once, so a reader never sees half a record.
+
+_gb_str() { printf '"%s"' "$(_json_escape "${1-}")"; }
+
+_gb_bool() { if "$@"; then printf 'true'; else printf 'false'; fi; }
+
+_gb_emit() { printf '%s\n' "$1"; }
+
+_gb_ok() { _gb_emit "{\"ok\":true${1:+,$1}}"; }
+
+_gb_err() { _gb_emit "{\"ok\":false,\"error\":$(_gb_str "$1")}"; }
+
+# --------------------------------------------------------------------------
+# Read-only views
+# --------------------------------------------------------------------------
+
+# Which questions are currently askable. The encryption passphrase exists only
+# when encryption was chosen, and that rule lives in `visible_questions`, so the
+# renderer asks again after an answer that could change it rather than keeping
+# a second copy of the condition.
+gb_visible() {
+  local id out='[' sep=''
+  for id in $(visible_questions); do
+    out+="${sep}$(_gb_str "$id")"; sep=','
+  done
+  out+=']'
+  _gb_emit "$out"
+}
+
+gb_manifest() {
+  local id out sep=''
+  out='{"order":['
+  for id in $(visible_questions); do
+    out+="${sep}$(_gb_str "$id")"; sep=','
+  done
+  out+='],"advanced":['
+  sep=''
+  for id in "${AURADE_QUESTION_IDS[@]}"; do
+    aurade_question_is_advanced "$id" || continue
+    out+="${sep}$(_gb_str "$id")"; sep=','
+  done
+  out+='],"questions":{'
+  sep=''
+  for id in "${AURADE_QUESTION_IDS[@]}"; do
+    out+="${sep}$(_gb_str "$id"):{"
+    out+="\"label\":$(_gb_str "$(aurade_question_field "$id" label)"),"
+    out+="\"short\":$(_gb_str "$(aurade_question_field "$id" short)"),"
+    out+="\"help\":$(_gb_str "$(aurade_question_field "$id" help)"),"
+    out+="\"type\":$(_gb_str "$(aurade_question_field "$id" type)"),"
+    out+="\"default\":$(_gb_str "$(aurade_question_default "$id")"),"
+    out+="\"error\":$(_gb_str "$(aurade_question_field "$id" error)"),"
+    out+="\"advanced\":$(_gb_bool aurade_question_is_advanced "$id"),"
+    out+="\"secret\":$(_gb_bool aurade_question_is_secret "$id")}"
+    sep=','
+  done
+  out+='}}'
+  _gb_emit "$out"
+}
+
+gb_disks() {
+  local out='[' sep='' path size model tran serial
+  while IFS='|' read -r path size model tran serial; do
+    [[ -n $path ]] || continue
+    out+="${sep}{\"path\":$(_gb_str "$path"),\"size\":$(_gb_str "$size"),"
+    out+="\"model\":$(_gb_str "$model"),\"transport\":$(_gb_str "$tran"),"
+    out+="\"serial\":$(_gb_str "$serial")}"
+    sep=','
+  done < <(disk_table)
+  out+=']'
+  _gb_emit "$out"
+}
+
+gb_probe() {
+  local out
+  aurade_probe_renderer
+  out='{'
+  out+="\"renderer\":$(_gb_str "$AURADE_PROBE_RENDERER"),"
+  out+="\"reason\":$(_gb_str "$AURADE_PROBE_REASON"),"
+  out+="\"graphics\":$(_gb_str "$AURADE_PROBE_GRAPHICS"),"
+  out+="\"memory\":$(_gb_str "$AURADE_PROBE_MEMORY"),"
+  out+="\"virt\":$(_gb_str "$AURADE_PROBE_VIRT"),"
+  out+="\"driver\":$(_gb_str "$AURADE_PROBE_DRIVER"),"
+  out+="\"node\":$(_gb_str "$AURADE_PROBE_NODE"),"
+  out+="\"gl\":$(_gb_str "$AURADE_PROBE_GL"),"
+  out+="\"advice\":$(_gb_str "$(aurade_probe_advice)"),"
+  out+="\"predicts_black_screen\":$(_gb_bool aurade_probe_predicts_black_screen)}"
+  _gb_emit "$out"
+}
+
+# The stage rows the progress view draws, in journal order, with the display
+# rule and the reversibility boundary both taken from the shared libraries
+# rather than restated here.
+gb_stages() {
+  local stage out='[' sep=''
+  for stage in "${AURADE_STAGES[@]}"; do
+    stage_displayed "$stage" || continue
+    out+="${sep}{\"stage\":$(_gb_str "$stage"),"
+    out+="\"label\":$(_gb_str "$(stage_label "$stage")"),"
+    out+="\"reversible\":$(_gb_bool aurade_stage_reversible "$stage")}"
+    sep=','
+  done
+  out+=']'
+  _gb_emit "$out"
+}
+
+gb_enum() {
+  local id=$1 out='[' sep='' candidate count=0
+  while IFS= read -r candidate; do
+    [[ -n $candidate ]] || continue
+    out+="${sep}$(_gb_str "$candidate")"; sep=','
+    count=$(( count + 1 ))
+    (( count < 5000 )) || break
+  done < <(enum_candidates "$id")
+  out+=']'
+  _gb_emit "$out"
+}
+
+# The review rows, with the same rule the text installer uses: a secret is
+# reported as having been set, never as its value.
+gb_answers() {
+  local id out='{' sep='' value
+  for id in "${AURADE_QUESTION_IDS[@]}"; do
+    if aurade_question_is_secret "$id"; then
+      [[ -n ${ANSWERS[$id]:-} ]] || continue
+      value='set'
+    else
+      value=${ANSWERS[$id]:-}
+      [[ -n $value ]] || continue
+    fi
+    out+="${sep}$(_gb_str "$id"):{\"short\":$(_gb_str "$(aurade_question_field "$id" short)"),"
+    out+="\"value\":$(_gb_str "$value"),"
+    out+="\"advanced\":$(_gb_bool aurade_question_is_advanced "$id")}"
+    sep=','
+  done
+  out+='}'
+  _gb_emit "$out"
+}
+
+# The erase gate's identity block, read from the same disk table the text
+# installer's gate reads.
+gb_target() {
+  local target=${ANSWERS[target]:-} out
+  [[ -n $target ]] || { _gb_err 'no disk has been chosen'; return 0; }
+  out='{"ok":true,'
+  out+="\"path\":$(_gb_str "$target"),"
+  out+="\"model\":$(_gb_str "$(disk_field "$target" 3)"),"
+  out+="\"serial\":$(_gb_str "$(disk_serial "$target")"),"
+  out+="\"size\":$(_gb_str "$(disk_field "$target" 2)"),"
+  out+="\"transport\":$(_gb_str "$(disk_field "$target" 4)"),"
+  out+="\"token\":$(_gb_str "ERASE:$target")}"
+  _gb_emit "$out"
+}
+
+# The live-session network and clock preflight, which is a read-only helper
+# that already exists and already has a test. The graphical installer shows
+# its result on a page of its own because "packages could not be downloaded"
+# is a much worse place to learn that the clock is wrong.
+#
+# This does not become a question. The engine has no flag for it, and the
+# manifest deliberately carries nothing the engine cannot consume.
+NETWORK_HELPER=${AURADE_NETWORK_HELPER:-/usr/local/sbin/aurade-network-diagnostics}
+[[ -x $NETWORK_HELPER ]] ||
+  NETWORK_HELPER="$GB_SELF_DIR/../archiso/airootfs/usr/local/sbin/aurade-network-diagnostics"
+
+gb_network() {
+  local status=0 report errors out='{' sep='' line
+  if [[ ! -x $NETWORK_HELPER ]]; then
+    _gb_emit '{"ok":false,"available":false,"notes":[],"issues":["The network check is missing from this image."]}'
+    return 0
+  fi
+  report=$(mktemp "${TMPDIR:-/tmp}/aurade-net.XXXXXX")
+  errors=$(mktemp "${TMPDIR:-/tmp}/aurade-net-err.XXXXXX")
+  "$NETWORK_HELPER" >"$report" 2>"$errors" || status=$?
+  out+="\"ok\":$(if (( status == 0 )); then printf 'true'; else printf 'false'; fi),"
+  out+='"available":true,"notes":['
+  while IFS= read -r line; do
+    line=${line#"${line%%[![:space:]]*}"}
+    [[ -n $line ]] || continue
+    out+="${sep}$(_gb_str "$line")"; sep=','
+  done <"$report"
+  out+='],"issues":['
+  sep=''
+  while IFS= read -r line; do
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line#ERROR: }
+    [[ -n $line ]] || continue
+    out+="${sep}$(_gb_str "$line")"; sep=','
+  done <"$errors"
+  out+=']}'
+  rm -f -- "$report" "$errors"
+  _gb_emit "$out"
+}
+
+gb_progress() {
+  local stage record status out='[' sep='' active='' pct detail elapsed running
+  for stage in "${AURADE_STAGES[@]}"; do
+    stage_displayed "$stage" || continue
+    record=$(journal_last_for_stage "$stage")
+    status=pending
+    pct=0
+    detail=''
+    elapsed=''
+    if [[ -n $record ]]; then
+      status=$(json_field status "$record")
+      detail=$(json_field message "$record")
+      case $status in
+        running)
+          active=$stage
+          pct=$(json_field pct "$record")
+          [[ $pct =~ ^[0-9]+$ ]] || pct=0
+          ;;
+        ok) elapsed=$(json_field elapsed_ms "$record") ;;
+      esac
+    fi
+    out+="${sep}{\"stage\":$(_gb_str "$stage"),"
+    out+="\"label\":$(_gb_str "$(stage_label "$stage")"),"
+    out+="\"status\":$(_gb_str "$status"),\"pct\":${pct:-0},"
+    out+="\"detail\":$(_gb_str "$detail"),"
+    out+="\"elapsed\":$(_gb_str "$(format_elapsed "${elapsed:-}")")}"
+    sep=','
+  done
+  out+=']'
+  running=false
+  if [[ -n $GB_ENGINE_PID ]] && kill -0 "$GB_ENGINE_PID" 2>/dev/null; then
+    running=true
+  fi
+  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"interruptible\":$(if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then printf 'false'; else printf 'true'; fi)}"
+}
+
+gb_failure() {
+  local record stage cause message out
+  record=$(journal_last_failed)
+  stage=$(json_field stage "$record")
+  cause=$(json_field cause "$record")
+  message=$(json_field message "$record")
+  out='{"ok":true,'
+  out+="\"stage\":$(_gb_str "$stage"),"
+  out+="\"label\":$(_gb_str "${stage:+$(stage_label "$stage")}"),"
+  out+="\"cause\":$(_gb_str "$cause"),"
+  out+="\"cause_text\":$(_gb_str "${cause:+$(cause_explanation "$cause")}"),"
+  out+="\"explanation\":$(_gb_str "${stage:+$(stage_explanation "$stage")}"),"
+  out+="\"detail\":$(_gb_str "$message"),"
+  out+="\"restart_advice\":$(_gb_str "$(restart_advice "$stage")"),"
+  out+="\"position\":$(_gb_str "$(stage_position "$stage")"),"
+  out+="\"reversible\":$(_gb_bool aurade_stage_reversible "${stage:-start}"),"
+  out+="\"raw_log\":$(_gb_str "$RAW_LOG")}"
+  _gb_emit "$out"
+}
+
+# --------------------------------------------------------------------------
+# Answers
+# --------------------------------------------------------------------------
+#
+# One entry point, so validation and immediate application happen for every
+# answer regardless of which widget produced it. `aurade_question_validate`
+# and `apply_answer` are the text installer's; nothing is re-decided here.
+
+gb_set() {
+  local id=$1 value=$2
+  aurade_question_exists "$id" || { _gb_err "unknown question: $id"; return 0; }
+  if ! aurade_question_validate "$id" "$value"; then
+    _gb_err "$(aurade_question_field "$id" error)"
+    return 0
+  fi
+  if ! apply_answer "$id" "$value"; then
+    _gb_err "${APPLY_ERROR:-That answer could not be applied.}"
+    return 0
+  fi
+  ANSWERS[$id]=$value
+  # A plan built from earlier answers is no longer the plan for these.
+  GB_PLANNED=0
+  _gb_ok
+}
+
+# Secret questions carry no validator in the manifest, because what makes a
+# password acceptable is that it was typed twice and is not empty, and both of
+# those are the renderer's business. What is not the renderer's business is
+# where the value then goes, which is why it comes here.
+gb_secret() {
+  local id=$1 value=$2
+  aurade_question_exists "$id" || { _gb_err "unknown question: $id"; return 0; }
+  aurade_question_is_secret "$id" || { _gb_err "$id is not a secret question"; return 0; }
+  [[ -n $value ]] || { _gb_err "$(aurade_question_field "$id" error)"; return 0; }
+  ANSWERS[$id]=$value
+  # Move secrets out of the answer map as soon as the renderer has finished
+  # sending them.  Passwords are hashed immediately; the LUKS passphrase is
+  # written to the private mode-0600 file immediately.  The plan step only
+  # assembles paths after this point, so it never needs the plaintext again.
+  case $id in
+    password)
+      if ! hash_password; then
+        _gb_err 'the account password could not be hashed on this system'
+        return 0
+      fi
+      ;;
+    luks_passphrase)
+      write_secret luks.passphrase "$value"
+      ANSWERS[$id]='set'
+      ;;
+  esac
+  GB_PLANNED=0
+  _gb_ok
+}
+
+gb_get() {
+  local id=$1
+  aurade_question_exists "$id" || { _gb_err "unknown question: $id"; return 0; }
+  if aurade_question_is_secret "$id"; then
+    _gb_emit "{\"ok\":true,\"value\":$(_gb_str "${ANSWERS[$id]:+set}")}"
+    return 0
+  fi
+  _gb_emit "{\"ok\":true,\"value\":$(_gb_str "${ANSWERS[$id]:-}")}"
+}
+
+# --------------------------------------------------------------------------
+# The engine
+# --------------------------------------------------------------------------
+
+# Hash the password, write the passphrase to its mode-0600 file, build the
+# argument list, and run the engine's own dry run. All four steps are the text
+# installer's functions. The plan the user approves is therefore the plan the
+# engine produced from these exact arguments, not a description of it.
+gb_plan() {
+  local status=0
+  [[ -n $ENGINE && -x $ENGINE ]] || { _gb_err 'the installation engine is missing from this image'; return 0; }
+  [[ -n ${ANSWERS[target]:-} ]] || { _gb_err 'no disk has been chosen'; return 0; }
+  if ! hash_password; then
+    _gb_err 'the account password could not be hashed on this system'
+    return 0
+  fi
+  if [[ ${ANSWERS[encrypt]:-no} == yes && ${ANSWERS[luks_passphrase]:-} != set ]]; then
+    write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"
+    ANSWERS[luks_passphrase]='set'
+  fi
+  build_engine_args
+  # `|| status=$?` and not `if ! ...`: inside an `if !` the value of `$?` is the
+  # status of the negation, which is always zero when the branch is taken. That
+  # exact mistake once made a failed dry run report a successful install.
+  status=0
+  "$ENGINE" "${ENGINE_ARGS[@]}" --dry-run >>"$RAW_LOG" 2>&1 || status=$?
+  if (( status != 0 )); then
+    GB_PLANNED=0
+    _gb_emit "{\"ok\":false,\"status\":${status},\"error\":\"the plan did not pass the engine's own checks\"}"
+    return 0
+  fi
+  GB_PLANNED=1
+  _gb_ok "\"plan_only\":$(if (( PLAN_ONLY )); then printf 'true'; else printf 'false'; fi)"
+}
+
+# The confirmation token is compared whole against the one built from the
+# canonical target. The engine independently requires the same token, so a
+# renderer bug here cannot by itself cause an erase.
+gb_execute() {
+  local token=$1 expected
+  (( GB_PLANNED )) || { _gb_err 'no checked plan; the plan step has to succeed first'; return 0; }
+  [[ -z $GB_ENGINE_PID ]] || { _gb_err 'the installation is already running'; return 0; }
+  expected="ERASE:${ANSWERS[target]:-}"
+  [[ $token == "$expected" ]] || { _gb_err 'the confirmation did not match the disk'; return 0; }
+  "$ENGINE" "${ENGINE_ARGS[@]}" --execute --confirm "$expected" >>"$RAW_LOG" 2>&1 &
+  GB_ENGINE_PID=$!
+  _gb_ok '"started":true'
+}
+
+gb_wait() {
+  local status=0
+  if [[ -z $GB_ENGINE_PID ]]; then
+    _gb_err 'nothing is running'
+    return 0
+  fi
+  wait "$GB_ENGINE_PID" || status=$?
+  GB_ENGINE_PID=
+  _gb_emit "{\"ok\":$(if (( status == 0 )); then printf 'true'; else printf 'false'; fi),\"status\":${status}}"
+}
+
+# Whether saving the report worked is decided by looking at the artifact, not
+# at the helper's exit status: the helper exits with the install's own status
+# on success and 2 on failure, and the install status may itself be 2.
+gb_export() {
+  local status=$1
+  [[ $status =~ ^[0-9]+$ ]] || status=1
+  if export_report "$status"; then
+    _gb_emit "{\"ok\":true,\"notice\":$(_gb_str "$EXPORT_NOTICE")}"
+  else
+    _gb_emit "{\"ok\":false,\"notice\":$(_gb_str "$EXPORT_NOTICE"),\"error\":$(_gb_str "$EXPORT_NOTICE")}"
+  fi
+}
+
+# --------------------------------------------------------------------------
+# Dispatch
+# --------------------------------------------------------------------------
+#
+# Two tables, chosen once at startup. In plan-only mode `execute` is not a
+# command that is refused; it is a command that does not exist, which is the
+# same shape as the text installer's terminal `planned` state. A flag consulted
+# just before a destructive call is one edit away from being consulted after it.
+
+_gb_common() {
+  local command=$1 argument=$2 value
+  case $command in
+    manifest)  gb_manifest ;;
+    visible)   gb_visible ;;
+    disks)     gb_disks ;;
+    probe)     gb_probe ;;
+    network)   gb_network ;;
+    stages)    gb_stages ;;
+    enum)      gb_enum "$argument" ;;
+    answers)   gb_answers ;;
+    target)    gb_target ;;
+    progress)  gb_progress ;;
+    failure)   gb_failure ;;
+    get)       gb_get "$argument" ;;
+    set)       IFS= read -r value || value=''; gb_set "$argument" "$value" ;;
+    secret)    IFS= read -r value || value=''; gb_secret "$argument" "$value" ;;
+    plan)      gb_plan ;;
+    export)    gb_export "$argument" ;;
+    ping)      _gb_ok ;;
+    *)         return 1 ;;
+  esac
+  return 0
+}
+
+_gb_dispatch_plan_only() {
+  _gb_common "$1" "$2" && return 0
+  _gb_err "unknown command: $1"
+}
+
+_gb_dispatch_full() {
+  local command=$1 argument=$2
+  case $command in
+    execute) gb_execute "$argument"; return 0 ;;
+    wait)    gb_wait; return 0 ;;
+  esac
+  _gb_common "$command" "$argument" && return 0
+  _gb_err "unknown command: $command"
+}
+
+GB_DISPATCH=_gb_dispatch_full
+(( ! PLAN_ONLY )) || GB_DISPATCH=_gb_dispatch_plan_only
+
+while IFS= read -r line; do
+  [[ -n $line ]] || continue
+  gb_command=${line%% *}
+  gb_argument=''
+  [[ $gb_command == "$line" ]] || gb_argument=${line#* }
+  [[ $gb_command != quit ]] || break
+  "$GB_DISPATCH" "$gb_command" "$gb_argument"
+done
+
+exit 0

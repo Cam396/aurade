@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Start the best installer this machine can actually display.
+#
+# One command in the message of the day, two renderers behind it. The choice is
+# made by `aurade-probe.sh` - the same probe both front ends use - and it is
+# made before anything is drawn, because a graphical installer that discovers
+# it cannot open a window has already produced the black screen it exists to
+# prevent.
+#
+# The graphical path needs a compositor: GTK 4 on a bare virtual console has
+# nothing to draw on. `cage` is on the image for exactly this and nothing else,
+# so if it is missing, or if it exits without ever showing anything, the text
+# installer runs instead. Falling back is not a failure mode here; it is the
+# guaranteed path, and it does the same install.
+
+set -Eeuo pipefail
+
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+
+_find() {
+  local name=$1 candidate
+  for candidate in "/usr/local/sbin/$name" "$SELF_DIR/$name"; do
+    [[ -x $candidate ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+_find_lib() {
+  local name=$1 candidate
+  for candidate in "/usr/local/lib/aurade/$name" "$SELF_DIR/../lib/$name"; do
+    [[ -r $candidate ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-installer-start [options]
+
+Runs the graphical installer when this machine can display one, and the text
+installer when it cannot. Both ask the same questions and run the same engine.
+
+Options:
+  --text             Use the text installer regardless of what the probe finds
+  --graphical        Try the graphical installer even if the probe advises text
+  --plan-only        Ask the questions and check the plan; never offer to erase
+  -h, --help         This message
+
+Environment:
+  AURADE_FORCE_TUI=1 Same as --text
+EOF
+}
+
+MODE=auto
+PASSTHROUGH=()
+while (($#)); do
+  case $1 in
+    --text)      MODE=text; shift ;;
+    --graphical) MODE=graphical; shift ;;
+    --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
+    -h|--help)   usage; exit 0 ;;
+    *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# `--graphical` is an explicit diagnostic override. Carry it through to the
+# Python entry point as well as bypassing this dispatcher's probe; otherwise
+# the second probe would immediately undo the user's choice.
+if [[ $MODE == graphical ]]; then
+  PASSTHROUGH+=(--force)
+fi
+
+TUI=$(_find aurade-installer-tui) || {
+  echo 'aurade-installer-start: the text installer is missing from this image' >&2
+  exit 1
+}
+
+run_text() {
+  exec "$TUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
+}
+
+[[ $MODE != text && ${AURADE_FORCE_TUI:-0} != 1 ]] || run_text
+
+GUI=$(_find aurade-installer-gui) || run_text
+
+if [[ $MODE == auto ]]; then
+  probe_lib=$(_find_lib aurade-probe.sh) || run_text
+  # shellcheck source=/dev/null
+  . "$probe_lib"
+  aurade_probe_renderer
+  if [[ $AURADE_PROBE_RENDERER != gui ]]; then
+    # The probe's advice is worth printing even on the way to the text
+    # installer: on a virtual machine it is usually a setting the user can
+    # change, and it is the same finding the graphics screen will repeat.
+    printf 'aurade-installer-start: %s\n' "$(aurade_probe_advice)" >&2
+    run_text
+  fi
+fi
+
+# Already inside a session with a display: run the front end directly.
+if [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]]; then
+  exec "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
+fi
+
+command -v cage >/dev/null 2>&1 || {
+  echo 'aurade-installer-start: no compositor on this image; using the text installer' >&2
+  run_text
+}
+
+# `cage` exits with its client's status. A compositor that cannot start at all
+# exits before the installer draws anything, and that is indistinguishable here
+# from an installer the user quit - so the text installer is offered rather
+# than assumed, and the user is told which happened.
+status=0
+cage -- "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} || status=$?
+if (( status != 0 )); then
+  printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
+    "$status" >&2
+  printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+fi
+exit "$status"

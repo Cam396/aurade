@@ -80,6 +80,12 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*' \
   <(awk '!/^#/ {print $1 "  " $2}' packages.lock)) >/dev/null
 grep -Fxq reflector "$ROOT/installer/archiso/packages.x86_64"
 grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
+# The graphical installer's whole toolkit, including the compositor. GTK 4 on
+# a bare virtual console has nothing to draw on, so a package list with the
+# toolkit and no compositor ships a front end that can never be displayed.
+for package in gtk4 libadwaita python-gobject cage; do
+  grep -Fxq "$package" "$ROOT/installer/archiso/packages.x86_64"
+done
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
@@ -98,6 +104,12 @@ grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-start ]]
+for module in __init__ bridge flow app; do
+  [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$module.py ]]
+done
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-questions.sh ]]
@@ -112,9 +124,24 @@ grep -Fq '/usr/local/lib/aurade/aurade-questions.sh' "$ROOT/installer/archiso/pr
 grep -Fq '/usr/local/lib/aurade/aurade-tui.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/lib/aurade/aurade-probe.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/sbin/aurade-installer-tui' "$ROOT/installer/archiso/profiledef.sh"
+for staged in /usr/local/sbin/aurade-installer-gui \
+  /usr/local/sbin/aurade-installer-gui-bridge \
+  /usr/local/sbin/aurade-installer-start \
+  /usr/local/lib/aurade/aurade_gui/bridge.py \
+  /usr/local/lib/aurade/aurade_gui/flow.py \
+  /usr/local/lib/aurade/aurade_gui/app.py; do
+  grep -Fq "$staged" "$ROOT/installer/archiso/profiledef.sh"
+done
+grep -Fq 'aurade-installer-start' "$ROOT/installer/archiso/airootfs/etc/motd"
 # The staged front end must resolve its libraries from the image, not from a
 # source tree that will not exist on the installation media.
 grep -Fq '/usr/local/lib/aurade/$name' "$ROOT/installer/bin/aurade-installer-tui"
+grep -Fq '/usr/local/lib/aurade/$name' "$ROOT/installer/bin/aurade-installer-start"
+grep -Fq '/usr/local/lib/aurade' "$ROOT/installer/bin/aurade-installer-gui"
+grep -Fq '/usr/local/sbin/aurade-installer-gui-bridge' \
+  "$ROOT/installer/lib/aurade_gui/bridge.py"
+grep -Fq '/usr/local/sbin/aurade-installer-tui' \
+  "$ROOT/installer/bin/aurade-installer-gui-bridge"
 grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
