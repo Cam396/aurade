@@ -21,6 +21,7 @@ set -e
 grep -Fq 'stage: acquire' "$TMP/report.out"
 grep -Fq 'cause: archive-unreachable' "$TMP/report.out"
 grep -Fq 'detail: archive unavailable' "$TMP/report.out"
+grep -Fq 'next: Check the interface, route, DNS, clock' "$TMP/report.out"
 ! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"
 
 cat >"$TMP/escaped-journal.jsonl" <<'EOF'
