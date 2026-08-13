@@ -67,4 +67,18 @@ fi
 grep -Fq -- '--target must be an absolute /dev path' "$TMP/target.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/target.out"
 
+# A staged installer missing its recovery helper must fail before it can read
+# or modify a target. Use a copied engine so the real source tree is untouched.
+install -d -m 0755 "$TMP/engine/lib"
+cp "$ROOT/installer/bin/aurade-install" "$TMP/engine/aurade-install"
+cp "$ROOT/installer/lib/aurade-journal.sh" "$TMP/engine/lib/aurade-journal.sh"
+chmod 0755 "$TMP/engine/aurade-install"
+if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
+  "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper.out" 2>&1; then
+  echo 'missing helper unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'installer helper is missing' "$TMP/helper.out"
+! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
+
 echo 'installer failure-injection test: PASS'
