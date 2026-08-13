@@ -44,7 +44,8 @@ install -d "$TMP/dri-virtual"
 probe() {
   # A fresh shell each time: the probe sets globals, and a test that reused
   # them could pass on a value left behind by the previous case.
-  env AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$2" \
+  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+    AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$2" \
     AURADE_PROBE_MIN_GUI_MIB="${3:-6144}" AURADE_FORCE_TUI="${4:-0}" \
     AURADE_PROBE_DRM_DIR="${5:-$TMP/drm-empty}" PATH="${6:-$PATH}" \
     bash -c '
@@ -99,7 +100,8 @@ check 'unreadable meminfo reason' "$reason" low-memory
 # working acceleration, and a screen that says otherwise is how a user comes to
 # trust this check and then meets a black desktop.
 advice_for() {
-  env AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
+  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+    AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
     AURADE_PROBE_DRM_DIR="${2:-$TMP/drm-empty}" PATH="${3:-$PATH}" bash -c '
       set -Eeuo pipefail
       . '"$ROOT"'/installer/lib/aurade-probe.sh
@@ -192,7 +194,8 @@ grep -Fq reached-the-end "$TMP/errexit.out" || fail 'the probe did not return co
 
 # --- advice is specific, and names the virtual machine when there is one -----
 advice() {
-  env AURADE_PROBE_DRI_DIR="$TMP/absent" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
+  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+    AURADE_PROBE_DRI_DIR="$TMP/absent" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
     PATH="$1:$PATH" bash -c '
       set -Eeuo pipefail
       . '"$ROOT"'/installer/lib/aurade-probe.sh
@@ -218,7 +221,8 @@ bare_advice=$(advice "$TMP/bare-bin")
 
 # --- every reason code has advice written for it -----------------------------
 for reason in ok forced no-dri-dir no-render-node low-memory virtual-gpu-only software-rendering; do
-  text=$(env AURADE_PROBE_DRI_DIR="$TMP/dri-ok" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" bash -c '
+  text=$(env AURADE_PROBE_GL_TIMEOUT=0.2 \
+    AURADE_PROBE_DRI_DIR="$TMP/dri-ok" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" bash -c '
     . '"$ROOT"'/installer/lib/aurade-probe.sh
     AURADE_PROBE_VIRT=none
     aurade_probe_advice '"$reason"'
