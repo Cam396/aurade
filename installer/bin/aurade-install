@@ -102,7 +102,23 @@ EOF
 }
 
 die() {
-  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  local message=$* cause=installer_error journal_message
+  # Keep fatal-stage records machine-readable and bounded. The full diagnostic
+  # still goes to stderr/raw logs; the structured journal gets only a short
+  # caller-authored message and a stable cause code for front ends.
+  if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    case $message in
+      *keyring*|*signature*) cause=keyring_error ;;
+      *staging\ filesystem*|*capacity*|*free\ space*) cause=capacity_error ;;
+      *Secure\ Boot*) cause=secure_boot_error ;;
+      *target*|*disk*|*partition*) cause=target_error ;;
+      *mount*|*filesystem*|*subvolume*) cause=storage_error ;;
+    esac
+    journal_message=${message:0:256}
+    aurade_journal_fail "$_J_ACTIVE_STAGE" 1 "$cause" "$journal_message" \
+      log shell reboot
+  fi
+  printf '%s: %s\n' "$PROGRAM" "$message" >&2
   exit 1
 }
 
