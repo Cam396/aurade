@@ -49,6 +49,9 @@ signatures with `AURADE_ISO_SIGNING_KEY`; set
 `ci/verify-iso-artifacts.sh path/to/aurade-1-x86_64.iso` to verify the checksum,
 SBOM digest/namespace, and `.build-info`; add `--require-signature` for a
 candidate. Its fixture gate is `ci/tests/iso-artifact-gate-test.sh`.
+`ci/verify-iso-structure.sh path/to/aurade-1-x86_64.iso --full` additionally
+inspects the UEFI fallback loader, boot-entry policy, and the extracted
+SquashFS payload without booting or touching a disk.
 
 `export-chromium-diff.sh` exports selected tracked and untracked Chromium source
 changes into the AuraDE patch series without hand-copying diffs. It writes temp
