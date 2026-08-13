@@ -67,16 +67,43 @@ else
 fi
 
 unreachable="$TMP/unreachable"
-git -C "$ROOT" fsck --no-reflogs --unreachable --no-progress 2>/dev/null |
-  awk '$2 == "blob" {print $3}' >"$unreachable" || true
+git -C "$ROOT" fsck --no-reflogs --unreachable --no-progress 2>/dev/null >"$unreachable" || true
 unreachable_matches="$TMP/unreachable-matches"
 : >"$unreachable_matches"
+declare -A scanned_blobs=()
+declare -A excluded_blobs=()
+scan_unreachable_blob() {
+  local blob=$1
+  [[ -n ${scanned_blobs[$blob]:-} || -n ${excluded_blobs[$blob]:-} ]] && return 0
+  scanned_blobs[$blob]=1
+  git -C "$ROOT" cat-file blob "$blob" 2>/dev/null |
+    grep -a -n -E -- '-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|DISCORD_MESSAGE_PACKET|\.discord-bot-token|(^|[^[:alnum:]])(sk-|gh[pousr]_)[A-Za-z0-9_-]{16,}' \
+      >>"$unreachable_matches" 2>/dev/null || true
+}
+
+# Scan unreachable commits with paths so the scanner does not flag its own
+# credential-pattern source code. Reachable/history scans above already exclude
+# this public scanner path; applying the same rule to unreachable trees avoids a
+# false positive without weakening checks for any user or build artifact.
+while IFS= read -r commit; do
+  [[ -n "$commit" ]] || continue
+  while read -r _mode type blob path; do
+    [[ $type == blob && -n $blob ]] || continue
+    if [[ $path == ci/public-release-leak-gate.sh ]]; then
+      excluded_blobs[$blob]=1
+      continue
+    fi
+    unset "excluded_blobs[$blob]"
+    scan_unreachable_blob "$blob"
+  done < <(git -C "$ROOT" ls-tree -r --full-tree "$commit")
+done < <(awk '$2 == "commit" {print $3}' "$unreachable")
+
+# Orphaned unreachable blobs have no path to classify, so they are scanned as
+# well. Blobs already excluded from the known scanner path stay excluded.
 while IFS= read -r blob; do
   [[ -n "$blob" ]] || continue
-  git -C "$ROOT" cat-file blob "$blob" 2>/dev/null |
-    rg -I -n -E '-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|DISCORD_MESSAGE_PACKET|\.discord-bot-token|(^|[^[:alnum:]])(sk-|gh[pousr]_)[A-Za-z0-9_-]{16,}' \
-      >>"$unreachable_matches" 2>/dev/null || true
-done <"$unreachable"
+  scan_unreachable_blob "$blob"
+done < <(awk '$2 == "blob" {print $3}' "$unreachable")
 if [[ -s "$unreachable_matches" ]]; then
   printf 'FAIL %-18s secret-like unreachable blob content\n' history
   failures=$((failures + 1))
