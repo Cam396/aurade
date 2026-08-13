@@ -111,6 +111,7 @@ die() {
       *keyring*|*signature*) cause=keyring_error ;;
       *staging\ filesystem*|*capacity*|*free\ space*) cause=capacity_error ;;
       *Secure\ Boot*) cause=secure_boot_error ;;
+      *archive*|*acquire*|*network*|*DNS*|*route*|*clock*) cause=network_error ;;
       *target*|*disk*|*partition*) cause=target_error ;;
       *mount*|*filesystem*|*subvolume*) cause=storage_error ;;
     esac

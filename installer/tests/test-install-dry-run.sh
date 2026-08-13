@@ -65,6 +65,7 @@ grep -Fq -- 'gpgv --keyring "$ARCH_GPG_DIR/pubring.gpg"' "$ROOT/installer/bin/au
 grep -Fq -- 'invalid Arch package signature' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'cause=keyring_error' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'cause=capacity_error' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'cause=network_error' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
