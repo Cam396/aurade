@@ -31,7 +31,10 @@ private soak repo.
 `export-aur-bundles.sh` converts the monorepo package directories into
 self-contained per-package AUR upload directories. It includes an x86_64
 `chromiumos-ash-bin` wrapper for the current unsigned development payload;
-publish the generated directories only after the feedback gate.
+publish the generated directories only after the feedback gate. Set
+`AURADE_AUR_ARCHIVE_SHA256` from the current release manifest; the exporter
+rejects an omitted/stale digest and derives the Chromium package version from
+the checked-out `PKGBUILD`.
 
 `write-source-manifest.sh` records the Chromium revision, current Chromium
 worktree status, patch-series hashes, and package source hashes. It writes to
