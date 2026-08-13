@@ -159,7 +159,7 @@ fi
 # a recorded WWN is sufficient, but an empty serial+WWN or a changed WWN is
 # never accepted. This pure helper test avoids pretending /dev/null is a disk.
 _J_TARGET_SERIAL=
-_J_TARGET_WWN=wwn-expected
+_J_TARGET_WWN='wwn-expected'
 _J_TARGET_SIZE=4096
 aurade_journal_target_identity_matches '' wwn-expected 4096 || \
   fail 'resume should accept a matching recorded WWN'
