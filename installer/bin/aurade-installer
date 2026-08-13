@@ -30,6 +30,47 @@ fingerprint_default=
 repo_url_default=file:///var/cache/aurade/repo
 [[ ! -r /etc/aurade-installer/repo-url ]] || read -r repo_url_default </etc/aurade-installer/repo-url
 
+secret_dir=$(mktemp -d /run/aurade-installer.XXXXXX)
+chmod 700 "$secret_dir"
+secure_remove() {
+  local file=$1
+  [[ -e $file ]] || return 0
+  if command -v shred >/dev/null 2>&1; then
+    shred --force --remove --zero "$file" >/dev/null 2>&1 || rm -f -- "$file"
+  else
+    : >"$file"
+    rm -f -- "$file"
+  fi
+}
+cleanup() {
+  local file
+  if [[ -d ${secret_dir:-} ]]; then
+    while IFS= read -r -d '' file; do secure_remove "$file"; done \
+      < <(find "$secret_dir" -type f -print0 2>/dev/null || true)
+    rmdir -- "$secret_dir" 2>/dev/null || rm -rf -- "$secret_dir"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+read_secret_file() {
+  local prompt=$1 destination=$2 response confirmation
+  while true; do
+    read -r -s -p "$prompt: " response
+    printf '\n'
+    read -r -s -p "Confirm $prompt: " confirmation
+    printf '\n'
+    if [[ -n $response && $response == "$confirmation" ]]; then
+      umask 077
+      printf '%s' "$response" >"$destination"
+      chmod 600 "$destination"
+      unset response confirmation
+      return 0
+    fi
+    unset response confirmation
+    printf '%s\n' 'Values were empty or did not match.' >&2
+  done
+}
+
 printf '%s\n' 'AuraDE installer' 'This program will show a dry-run plan before it can erase a disk.' ''
 if [[ -x $NETWORK_DIAGNOSTICS ]]; then
   printf '%s\n' 'Network and clock preflight:'
@@ -114,39 +155,20 @@ printf 'Arch snapshot [%s]: ' "$snapshot_default"
 read -r snapshot
 snapshot=${snapshot:-$snapshot_default}
 
-while true; do
-  read -r -s -p 'Account password: ' password
-  printf '\n'
-  read -r -s -p 'Confirm account password: ' password_confirm
-  printf '\n'
-  [[ -n $password && $password == "$password_confirm" ]] && break
-  printf '%s\n' 'Passwords were empty or did not match.' >&2
-done
+read_secret_file 'Account password' "$secret_dir/password"
+command -v openssl >/dev/null 2>&1 || {
+  echo 'aurade-installer: openssl is required to hash the account password' >&2
+  exit 1
+}
+openssl passwd -6 -stdin <"$secret_dir/password" >"$secret_dir/password.hash"
+chmod 600 "$secret_dir/password.hash"
+secure_remove "$secret_dir/password"
 
 read -r -p 'Encrypt the root filesystem with LUKS2? [Y/n]: ' encrypt_answer
 encrypt_answer=${encrypt_answer:-Y}
-luks_password=
 if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
-  while true; do
-    read -r -s -p 'Disk encryption passphrase: ' luks_password
-    printf '\n'
-    read -r -s -p 'Confirm disk encryption passphrase: ' luks_confirm
-    printf '\n'
-    [[ -n $luks_password && $luks_password == "$luks_confirm" ]] && break
-    printf '%s\n' 'Passphrases were empty or did not match.' >&2
-  done
+  read_secret_file 'Disk encryption passphrase' "$secret_dir/luks.passphrase"
 fi
-
-secret_dir=$(mktemp -d /run/aurade-installer.XXXXXX)
-chmod 700 "$secret_dir"
-cleanup() {
-  unset password password_confirm luks_password luks_confirm
-  rm -rf -- "$secret_dir"
-}
-trap cleanup EXIT INT TERM
-printf '%s' "$password" | openssl passwd -6 -stdin >"$secret_dir/password.hash"
-chmod 600 "$secret_dir/password.hash"
-unset password password_confirm
 
 common_args=(
   --target "$target"
@@ -171,9 +193,6 @@ else
 fi
 
 if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
-  printf '%s' "$luks_password" >"$secret_dir/luks.passphrase"
-  chmod 600 "$secret_dir/luks.passphrase"
-  unset luks_password luks_confirm
   common_args+=(--encrypt --luks-passphrase-file "$secret_dir/luks.passphrase")
 fi
 
