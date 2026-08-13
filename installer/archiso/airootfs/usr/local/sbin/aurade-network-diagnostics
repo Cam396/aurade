@@ -3,15 +3,17 @@
 set -Eeuo pipefail
 
 QUIET=0
+SNAPSHOT=${AURADE_NETWORK_SNAPSHOT:-}
 while (($#)); do
   case $1 in
     --quiet) QUIET=1; shift ;;
+    --snapshot) SNAPSHOT=${2:?}; shift 2 ;;
     -h|--help)
-      printf '%s\n' 'Usage: aurade-network-diagnostics [--quiet]'
+      printf '%s\n' 'Usage: aurade-network-diagnostics [--quiet] [--snapshot YYYY/MM/DD]'
       exit 0
       ;;
     *) printf 'aurade-network-diagnostics: unknown option: %s\n' "$1" >&2; exit 2 ;;
-  esac
+esac
 done
 
 issues=0
@@ -22,6 +24,14 @@ issue() {
   issues=$((issues + 1))
   (( QUIET )) || printf '  ERROR: %s\n' "$*" >&2
 }
+
+if [[ -z $SNAPSHOT && -r /etc/aurade-installer/snapshot ]]; then
+  read -r SNAPSHOT </etc/aurade-installer/snapshot || true
+fi
+if [[ -n $SNAPSHOT && ! $SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]]; then
+  issue 'the configured Arch snapshot is malformed; verify the installer image metadata'
+  SNAPSHOT=
+fi
 
 if ! command -v ip >/dev/null 2>&1; then
   issue 'iproute2 is unavailable; cannot inspect the network interface or default route'
@@ -44,6 +54,20 @@ elif getent ahosts archive.archlinux.org >/dev/null 2>&1; then
   report 'DNS resolves archive.archlinux.org'
 else
   issue 'DNS cannot resolve archive.archlinux.org; check the connection or captive portal'
+fi
+
+if [[ -n $SNAPSHOT ]]; then
+  if command -v curl >/dev/null 2>&1; then
+    archive_url="https://archive.archlinux.org/repos/${SNAPSHOT}/core/os/x86_64/"
+    if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
+      --proto '=https' --output /dev/null "$archive_url"; then
+      report "pinned Arch snapshot responds (${SNAPSHOT})"
+    else
+      issue "pinned Arch snapshot is unreachable (${SNAPSHOT}); check archive health or a captive portal"
+    fi
+  else
+    report 'curl is unavailable; pinned Arch snapshot health was not probed'
+  fi
 fi
 
 if command -v timedatectl >/dev/null 2>&1; then
