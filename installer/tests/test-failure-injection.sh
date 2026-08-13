@@ -158,4 +158,14 @@ grep -Fq 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$TMP/capacity.out"
 ! grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
 
+# The encrypted execute path must reject a missing cryptsetup dependency
+# before the first erase command. This source-order assertion is intentionally
+# synthetic: proving the command itself would require a disposable target and
+# is outside the safe refusal suite's no-device boundary.
+grep -Fq -- "required command not found: cryptsetup" "$ROOT/installer/bin/aurade-install"
+cryptsetup_check_line=$(grep -n -- "required command not found: cryptsetup" \
+  "$ROOT/installer/bin/aurade-install" | head -1 | cut -d: -f1)
+wipe_line=$(grep -n -- 'wipefs --all --force' "$ROOT/installer/bin/aurade-install" | head -1 | cut -d: -f1)
+(( cryptsetup_check_line < wipe_line ))
+
 echo 'installer failure-injection test: PASS'

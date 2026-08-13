@@ -7,7 +7,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 cat >"$TMP/journal.jsonl" <<'EOF'
-{"v":1,"stage":"acquire","status":"failed","message":"archive unavailable","cause":"archive-unreachable","remediation":["retry","export","log"]}
+{"v":1,"stage":"acquire","status":"failed","message":"archive unavailable","cause":"network_error","remediation":["retry","export","log"]}
 EOF
 printf '%s\n' 'PRIVATE_RAW_SECRET=must-not-be-printed' >"$TMP/install.log"
 
@@ -19,7 +19,7 @@ status=$?
 set -e
 [[ $status -eq 7 ]]
 grep -Fq 'stage: acquire' "$TMP/report.out"
-grep -Fq 'cause: archive-unreachable' "$TMP/report.out"
+grep -Fq 'cause: network_error' "$TMP/report.out"
 grep -Fq 'detail: archive unavailable' "$TMP/report.out"
 grep -Fq 'next: Check the interface, route, DNS, clock' "$TMP/report.out"
 ! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"

@@ -595,6 +595,12 @@ if [[ $MODE == execute ]]; then
   for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg gpgv; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
+  # The encrypted path invokes cryptsetup after partitioning.  Check it with
+  # the other pre-erase dependencies so a missing binary cannot leave a
+  # partially partitioned target.
+  if (( LUKS )); then
+    command -v cryptsetup >/dev/null || die 'required command not found: cryptsetup'
+  fi
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
   case $secure_boot_state in
     enabled)
