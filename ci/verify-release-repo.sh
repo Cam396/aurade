@@ -124,6 +124,7 @@ done < <(find "${REPO_DIR}" -mindepth 1 -maxdepth 1 \
 declare -A expected_versions=()
 declare -A artifact_versions=()
 declare -A database_versions=()
+declare -a version_mismatches=()
 
 for package_dir in "${PACKAGE_DIRS[@]}"; do
   srcinfo="$(cd "${REPO_ROOT}/${package_dir}" && makepkg --printsrcinfo)"
@@ -188,27 +189,31 @@ fi
 
 for package_name in "${!expected_versions[@]}"; do
   expected="${expected_versions[${package_name}]}"
-  [[ "${artifact_versions[${package_name}]:-}" == "${expected}" ]] || {
-    echo "Artifact mismatch for ${package_name}: expected ${expected}, got ${artifact_versions[${package_name}]:-missing}" >&2
-    exit 1
-  }
-  [[ "${database_versions[${package_name}]:-}" == "${expected}" ]] || {
-    echo "Database mismatch for ${package_name}: expected ${expected}, got ${database_versions[${package_name}]:-missing}" >&2
-    exit 1
-  }
+  artifact_version="${artifact_versions[${package_name}]:-missing}"
+  database_version="${database_versions[${package_name}]:-missing}"
+  if [[ "${artifact_version}" != "${expected}" ]]; then
+    version_mismatches+=("Artifact mismatch for ${package_name}: expected ${expected}, found ${artifact_version}")
+  fi
+  if [[ "${database_version}" != "${expected}" ]]; then
+    version_mismatches+=("Database mismatch for ${package_name}: expected ${expected}, found ${database_version}")
+  fi
 done
 
 for package_name in "${!artifact_versions[@]}"; do
   [[ -n "${expected_versions[${package_name}]:-}" ]] || {
-    echo "Unexpected package artifact: ${package_name}" >&2
-    exit 1
+    version_mismatches+=("Unexpected package artifact: ${package_name} (not present in the expected package set)")
   }
 done
 for package_name in "${!database_versions[@]}"; do
   [[ -n "${expected_versions[${package_name}]:-}" ]] || {
-    echo "Unexpected package in repository database: ${package_name}" >&2
-    exit 1
+    version_mismatches+=("Unexpected package in repository database: ${package_name} (not present in the expected package set)")
   }
 done
+
+if ((${#version_mismatches[@]} > 0)); then
+  echo "Release repository package-set verification failed; review all findings before rebuilding or publishing:" >&2
+  printf '  - %s\n' "${version_mismatches[@]}" >&2
+  exit 1
+fi
 
 echo "Release repository verified: ${#package_files[@]} current packages"
