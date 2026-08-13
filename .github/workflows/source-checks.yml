@@ -55,7 +55,7 @@ jobs:
       - name: Run public release leak gate
         run: ci/public-release-leak-gate.sh
 
-      - name: Run installer tests
+      - name: Run installer source and refusal tests
         run: installer/tests/run.sh
 
       - name: Run ISO SBOM fixture test
