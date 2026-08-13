@@ -211,9 +211,43 @@ tui_note() {
 # A label/value table. The label column is fixed so values line up down the
 # screen; this is the disk identity block on the erase gate, where a reader
 # comparing a serial number against a sticker needs the columns stable.
+#
+# The value wraps into its own column rather than being truncated. Two of the
+# places this is used - the failed-stage detail and the graphics diagnosis -
+# carry exactly the sentence the user needs in order to act, and clipping it at
+# the frame is how that sentence gets lost.
+#
+# The separating space is printed explicitly rather than relying on the label
+# column's padding, so a label longer than the column still has one.
+AURADE_TUI_LABEL=16
 tui_field() {
-  local label=$1 value=$2 token=${3:-ink} indent=$(( AURADE_TUI_INDENT * 2 ))
-  tui_line "$(printf '%*s%-12s%s' "$indent" '' "$label" "$value")" "$token"
+  local label=$1 value=$2 token=${3:-ink}
+  local indent=$(( AURADE_TUI_INDENT * 2 )) column limit line='' word first=1
+  column=$(( indent + AURADE_TUI_LABEL + 1 ))
+  limit=$(( AURADE_TUI_INNER - column - AURADE_TUI_INDENT ))
+  (( limit > 0 )) || limit=1
+  _field_emit() {
+    if (( first )); then
+      tui_line "$(printf '%*s%-*s %s' "$indent" '' "$AURADE_TUI_LABEL" "$label" "$1")" "$token"
+      first=0
+    else
+      tui_line "$(printf '%*s%s' "$column" '' "$1")" "$token"
+    fi
+  }
+  for word in $value; do
+    if [[ -z $line ]]; then
+      line=$word
+    elif (( ${#line} + 1 + ${#word} <= limit )); then
+      line+=" $word"
+    else
+      _field_emit "$line"
+      line=$word
+    fi
+  done
+  if [[ -n $line ]] || (( first )); then
+    _field_emit "$line"
+  fi
+  unset -f _field_emit
 }
 
 # Menu row. The marker is ASCII on purpose; `>` is one column everywhere.

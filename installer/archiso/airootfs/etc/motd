@@ -1,6 +1,11 @@
 AuraDE installation and recovery environment
 
-Run `aurade-installer` for the reviewed interactive installation flow.
+Run `aurade-installer-tui` to install AuraDE. It asks a few questions, shows
+what it will do, and does not touch any disk until you confirm that disk by
+name. Add NO_COLOR=1 for a plain-text session, or AURADE_FORCE_TUI=1 to skip
+the graphics check.
+
+Run `aurade-installer` for the older prompt-by-prompt flow.
 Run `aurade-install --help` for noninteractive and image-based installs.
 Run `aurade-recovery --help` for rollback and evidence collection.
 

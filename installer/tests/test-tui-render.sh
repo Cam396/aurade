@@ -202,6 +202,36 @@ grep -Fq 'Nothing was written to the disk' "$TMP/reversible.out" ||
 render cancelled none ascii >"$TMP/cancelled"
 grep -Fq 'Nothing was changed' "$TMP/cancelled" || fail 'the cancelled screen does not say so'
 
+# --- long labels and values are laid out, not clipped -----------------------
+# Both of these carry the sentence a user needs in order to act, so losing the
+# end of one at the frame is a functional defect rather than a cosmetic one.
+render review none ascii >"$TMP/review.layout"
+grep -Eq '^\|    Disk passphrase +set' "$TMP/review.layout" ||
+  fail 'a label longer than its column ran into its value'
+grep -Fq 'the EFI system partition' "$TMP/failure" ||
+  fail 'the failure detail was truncated instead of wrapped'
+# A field value too long for one line continues in the value column.
+long_dri=$TMP/'dri-with-a-very-long-name-that-will-not-fit-on-one-line-at-all'
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_PROBE_DRI_DIR="$long_dri" \
+  "$TUI" --render fallback >"$TMP/longfield.out"
+grep -Fq 'dri-with-a-very-long-name' "$TMP/longfield.out" ||
+  fail 'a long field value did not appear at all'
+python3 - "$TMP/longfield.out" <<'PY' || fail 'a long field value did not wrap into its own column'
+import sys
+lines = open(sys.argv[1], encoding='utf-8').read().split('\n')
+for n, line in enumerate(lines):
+    if line.startswith('|    Graphics'):
+        follow = lines[n + 1]
+        # The continuation carries text and starts in the value column, not at
+        # the body indent, which is what distinguishes wrapping from a new row.
+        if follow[1:21].strip() == '' and follow[21:].strip():
+            sys.exit(0)
+        print(f'continuation line was {follow!r}', file=sys.stderr)
+        sys.exit(1)
+print('no Graphics field was rendered', file=sys.stderr)
+sys.exit(1)
+PY
+
 # --- a failure at a non-resumable stage offers no retry ---------------------
 cat >"$TMP/nonresumable.jsonl" <<'EOF'
 {"v":1,"stage":"snapshot","status":"failed","exit":1,"cause":"unexpected_exit","message":"a step ended without reporting why","resumable":false,"target":{"path":"/dev/nvme0n1"}}
