@@ -18,6 +18,7 @@ initrd /intel-ucode.img
 initrd /initramfs-linux.img
 options root=UUID=test rw rootflags=subvol=@ quiet
 EOF
+cp "$TMP/root/boot/loader/entries/aurade.conf" "$TMP/normal-entry"
 
 cat >"$TMP/bin/btrfs" <<'EOF'
 #!/usr/bin/env bash
@@ -46,5 +47,47 @@ cmp -s "$TMP/root/boot/vmlinuz-linux" \
   "$TMP/root/boot/aurade-rollback/"manual-*-pre-update/vmlinuz-linux
 cmp -s "$TMP/root/boot/aurade-rollback/factory/vmlinuz-linux" \
   <(printf '%s\n' factory-kernel)
+
+# A traversal-like boot artifact must be rejected before snapshot creation.
+cat >"$TMP/root/boot/loader/entries/aurade.conf" <<'EOF'
+title AuraDE
+linux /../escape-kernel
+options root=UUID=test rw rootflags=subvol=@ quiet
+EOF
+if PATH="$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label malformed --set-rollback >"$TMP/malformed.out" 2>&1; then
+  echo 'malformed boot artifact unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'unsafe boot artifact path' "$TMP/malformed.out"
+if find "$TMP/root/.snapshots" -mindepth 1 -maxdepth 1 -name '*malformed*' -print -quit | grep -q .; then
+  echo 'malformed path created a snapshot' >&2
+  exit 1
+fi
+
+# Low ESP space must be rejected before the Btrfs snapshot or boot-entry edit.
+cp "$TMP/normal-entry" "$TMP/root/boot/loader/entries/aurade.conf"
+install -d "$TMP/low-space-bin"
+cat >"$TMP/low-space-bin/df" <<'EOF'
+#!/usr/bin/env bash
+if [[ $1 == -B1 && $2 == --output=avail ]]; then
+  printf '%s\n%s\n' Avail 0
+else
+  exec /usr/bin/df "$@"
+fi
+EOF
+chmod 0755 "$TMP/low-space-bin/df"
+if PATH="$TMP/low-space-bin:$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label low-space --set-rollback >"$TMP/low-space.out" 2>&1; then
+  echo 'low ESP space unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'not enough ESP space for rollback artifacts' "$TMP/low-space.out"
+if find "$TMP/root/.snapshots" -mindepth 1 -maxdepth 1 -name '*low-space*' -print -quit | grep -q .; then
+  echo 'low ESP space created a snapshot' >&2
+  exit 1
+fi
 
 echo 'recovery rollback test: PASS'
