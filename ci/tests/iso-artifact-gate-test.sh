@@ -23,6 +23,10 @@ sbom_sha=$(sha256sum "$ISO.sbom.spdx.json" | awk '{print $1}')
 iso_bytes=$(stat -c '%s' "$ISO")
 package_bytes=$(stat -c '%s' "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst")
 cat >"$ISO.build-info" <<EOF
+arch_snapshot=2026/07/12
+source_date_epoch=1783814400
+repo_url=https://packages.example.invalid/aurade
+repo_fingerprint=unsigned
 sbom_file=$(basename "$ISO.sbom.spdx.json")
 sbom_sha256=$sbom_sha
 iso_bytes=$iso_bytes
@@ -32,6 +36,16 @@ package_bytes=$package_bytes
 EOF
 
 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO"
+
+# Required provenance must not be silently omitted from a release sidecar.
+sed -i '/^repo_url=/d' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/missing-provenance.out" 2>&1; then
+  echo 'artifact with missing repository provenance unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info is missing repo_url' "$TMP/missing-provenance.out"
+printf '%s\n' 'repo_url=https://packages.example.invalid/aurade' >>"$ISO.build-info"
+
 if AURADE_REQUIRE_ISO_SIGNATURE=1 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" \
     >"$TMP/env-unsigned.out" 2>&1; then
   echo 'environment signature policy unexpectedly passed without signatures' >&2
