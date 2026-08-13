@@ -94,6 +94,10 @@ Safety:
   --dry-run                    Print the complete plan (default)
   --execute                    Permit execution after every safety check passes
   --confirm TOKEN              Must exactly equal ERASE:<canonical target>
+
+Optional failure evidence:
+  AURADE_FAILURE_JOURNAL_DIR  Disk-backed directory for a secret-free copy of
+                              the structured journal after an unexpected exit
 EOF
 }
 
@@ -344,6 +348,7 @@ cleanup() {
     aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
       'installer stopped unexpectedly; inspect the private install log' \
       log shell reboot
+    aurade_journal_preserve_failure >/dev/null 2>&1 || true
   fi
   if (( TARGET_MOUNTED )); then
     umount -R "$MOUNTPOINT" >/dev/null 2>&1 || true
@@ -407,6 +412,10 @@ TARGET=$(canonical_device "$TARGET")
 normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
 [[ $normalized_snapshot == "$ARCH_SNAPSHOT" ]] || die '--arch-snapshot is not a real calendar date'
 [[ -n $PACKAGE_LOCK ]] || PACKAGE_LOCK="${BUNDLE_DIR%/}/packages.lock"
+if [[ -n $AURADE_FAILURE_JOURNAL_DIR ]]; then
+  [[ $AURADE_FAILURE_JOURNAL_DIR == /* && $AURADE_FAILURE_JOURNAL_DIR != / ]] || \
+    die 'AURADE_FAILURE_JOURNAL_DIR must be an absolute non-root path'
+fi
 
 [[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
 [[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'

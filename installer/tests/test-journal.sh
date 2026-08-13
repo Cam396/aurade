@@ -12,6 +12,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 export AURADE_JOURNAL_PATH="$TMP/journal.jsonl"
 export AURADE_JOURNAL_RAW="$TMP/install.log"
+export AURADE_FAILURE_JOURNAL_DIR="$TMP/failure-evidence"
 
 # shellcheck source=../lib/aurade-journal.sh
 . "$ROOT/installer/lib/aurade-journal.sh"
@@ -129,6 +130,16 @@ fi
 grep -q 'failed to commit transaction' "$AURADE_JOURNAL_RAW" \
   || fail 'raw log did not receive the output'
 
+# Failure persistence is opt-in and structured-only: the package cache and
+# raw log must never be copied into the disk-backed evidence directory.
+preserved=$(aurade_journal_preserve_failure)
+[[ -r $preserved/journal.jsonl ]] || fail 'failure journal was not preserved'
+[[ $(stat -c '%a' "$preserved/journal.jsonl") == 600 ]] || \
+  fail 'preserved journal should be mode 600'
+[[ ! -e $preserved/install.log ]] || fail 'raw log leaked into preserved evidence'
+grep -Fq '"stage":"bootloader"' "$preserved/journal.jsonl" || \
+  fail 'preserved journal contents are incomplete'
+
 # ---- resume safety -----------------------------------------------------------
 # A stage that cannot safely re-run must never be offered as resumable.
 if aurade_journal_may_resume snapshot /dev/null; then
@@ -167,6 +178,7 @@ cleanup() {
     aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
       'installer stopped unexpectedly; inspect the private install log' \
       log shell reboot
+    aurade_journal_preserve_failure >/dev/null 2>&1 || true
   fi
   exit "$status"
 }
@@ -176,6 +188,7 @@ EOF
 chmod 0755 "$unexpected_script"
 if AURADE_TEST_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh" \
   AURADE_JOURNAL_PATH="$unexpected_journal" AURADE_JOURNAL_RAW="$unexpected_raw" \
+  AURADE_FAILURE_JOURNAL_DIR="$TMP/unexpected-failures" \
   "$unexpected_script"; then
   fail 'unexpected-exit fixture unexpectedly returned success'
 fi
@@ -191,6 +204,10 @@ assert any(
     for record in records
 ), records
 PY
+preserved_unexpected=$(find "$TMP/unexpected-failures" -type f -name journal.jsonl -print -quit)
+[[ -n $preserved_unexpected ]] || fail 'unexpected exit did not preserve the journal'
+[[ ! -e ${preserved_unexpected%/journal.jsonl}/install.log ]] || \
+  fail 'unexpected-exit preservation copied the raw log'
 
 if (( failures )); then
   printf 'installer journal test: FAIL (%d)\n' "$failures" >&2

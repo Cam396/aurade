@@ -40,6 +40,12 @@ The plain and LUKS2 paths are recorded separately. Each run must cover:
 8. An injected failure after acquisition leaves a machine-readable journal,
    preserves the raw log separately, and leaves no leaked secrets or active
    mounts/mappings after cleanup.
+9. When `AURADE_FAILURE_JOURNAL_DIR` is configured on a mounted disk-backed
+   volume, an unexpected exit preserves a mode-0600 copy of the structured
+   journal only. Package caches, temporary keyrings, passphrase files, and raw
+   command output must not be copied into that directory. This evidence copy
+   does not claim that the installer can resume; resume remains a separate
+   transactional-recovery requirement.
 
 ## What source tests can and cannot claim
 
