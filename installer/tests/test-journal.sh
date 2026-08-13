@@ -182,9 +182,10 @@ if (
   export AURADE_JOURNAL_PATH="$blocked_journal" AURADE_JOURNAL_RAW="$blocked_raw"
   . "$ROOT/installer/lib/aurade-journal.sh"
   aurade_journal_init dry-run
-); then
+) >"$TMP/blocked.out" 2>&1; then
   fail 'journal initialization unexpectedly succeeded under a file parent'
 fi
+grep -Fq 'cannot create structured journal' "$TMP/blocked.out"
 
 # ---- permissions -------------------------------------------------------------
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
