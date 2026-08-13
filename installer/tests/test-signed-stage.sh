@@ -40,4 +40,21 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*.sig' | wc -l)
 grep -Fxq "$fingerprint" "$TMP/work/profile/airootfs/etc/aurade-installer/repo-fingerprint"
 ! grep -Fq 'development-unsigned' "$TMP/work/profile/airootfs/etc/aurade-installer/repo-fingerprint"
 
+# A detached signature that is present but corrupted must fail closed before
+# the profile is accepted. This exercises the real gpgv path with only the
+# disposable fixture key.
+first_package=$(find "$TMP/repo" -maxdepth 1 -type f -name '*.pkg.tar.zst.sig' -print -quit)
+printf '%s\n' 'corrupted signature' >>"$first_package"
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_REPO_KEY="$TMP/test-key.gpg" \
+  AURADE_REPO_FINGERPRINT="$fingerprint" \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work-invalid-signature" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/invalid-signature.out" 2>&1; then
+  echo 'corrupted package signature unexpectedly staged' >&2
+  exit 1
+fi
+grep -Fq 'invalid signature' "$TMP/invalid-signature.out"
+
 echo 'signed ISO staging test: PASS'
