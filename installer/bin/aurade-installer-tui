@@ -1149,10 +1149,21 @@ run_gate() {
 # has one.
 EXPORT_NOTICE=
 EXPORT_NOTICE_KIND=ok
+EXPORT_SEQ=0
 export_report() {
   local status=$1 stamp destination errors
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   destination="${EXPORT_DIR%/}/failure-${stamp}"
+  # The destination has to be one this call created, because "did anything get
+  # written here" is the whole test and a directory that already existed
+  # answers it with someone else's files. Two saves in the same second are
+  # ordinary - the second is usually a retry after fixing something - and the
+  # helper refuses a destination that exists, so without this the retry would
+  # fail and still report the first attempt's success.
+  while [[ -e $destination ]]; do
+    EXPORT_SEQ=$(( EXPORT_SEQ + 1 ))
+    destination="${EXPORT_DIR%/}/failure-${stamp}-${EXPORT_SEQ}"
+  done
   EXPORT_NOTICE_KIND=danger
   if [[ ! -x $FAILURE_HELPER ]]; then
     EXPORT_NOTICE='Cannot save a report: the diagnostic helper is missing from this image.'
