@@ -503,7 +503,7 @@ fi
 if [ "${AURADE_DISABLE_CHROMEOS_CONNECTED_DEVICE_FEATURES}" = "1" ]; then
     FLAGS+=(
         --aurade-disable-chromeos-connected-device-features
-        --disable-features=PhoneHub,EcheSWA,EcheSWASendStartSignaling,EcheSWACheckAndroidNetworkInfo
+        "--disable-features=PhoneHub,EcheSWA,EcheSWASendStartSignaling,EcheSWACheckAndroidNetworkInfo"
     )
 fi
 

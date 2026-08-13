@@ -45,10 +45,12 @@ if [[ "${AURADE_ALLOW_SOFTWARE_RENDERER:-0}" != 1 ]]; then
 fi
 
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export XDG_RUNTIME_DIR
 fi
 if ! mkdir -p "${XDG_RUNTIME_DIR}" 2>/dev/null; then
-    export XDG_RUNTIME_DIR="${TMPDIR:-/tmp}/aurade-runtime-$(id -u)"
+    XDG_RUNTIME_DIR="${TMPDIR:-/tmp}/aurade-runtime-$(id -u)"
+    export XDG_RUNTIME_DIR
     if ! mkdir -p "${XDG_RUNTIME_DIR}" 2>/dev/null; then
         [[ -x /usr/bin/aurade-session-error ]] && \
             /usr/bin/aurade-session-error runtime-dir 'runtime directory creation failed' || true
