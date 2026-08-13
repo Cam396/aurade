@@ -58,6 +58,7 @@ accept aurade_valid_timezone UTC
 accept aurade_valid_locale en_US.UTF-8
 accept aurade_valid_keymap us
 accept aurade_valid_hostname aurade
+accept aurade_valid_arch_snapshot 2026/07/12
 
 accept aurade_valid_timezone America/Chicago
 accept aurade_valid_timezone Europe/Paris
@@ -104,6 +105,10 @@ reject aurade_valid_hostname 'has space'
 reject aurade_valid_hostname 'under_score'
 reject aurade_valid_hostname ''
 reject aurade_valid_hostname "$(printf 'a%.0s' {1..64})"
+reject aurade_valid_arch_snapshot 2026/02/30
+reject aurade_valid_arch_snapshot 2026/13/01
+reject aurade_valid_arch_snapshot 2026-07-12
+reject aurade_valid_arch_snapshot ''
 
 # A missing keymap directory must reject rather than abort the front end
 # under `set -e`, so the prompt can explain itself instead of exiting.
