@@ -7,8 +7,18 @@ RESTART_DELAY="${AURADE_RESTART_DELAY:-1}"
 FAST_RESTART_WINDOW="${AURADE_FAST_RESTART_WINDOW:-60}"
 MAX_FAST_RESTARTS="${AURADE_MAX_FAST_RESTARTS:-5}"
 CHROME_COMMAND="${AURADE_CHROME_COMMAND:-/usr/bin/chromiumos-ash}"
+SESSION_ERROR="${AURADE_SESSION_ERROR:-/usr/bin/aurade-session-error}"
 FAST_RESTARTS=0
 UDISKIE_PID=""
+
+report_session_failure() {
+    local detail="$1"
+    if [ -x "${SESSION_ERROR}" ]; then
+        "${SESSION_ERROR}" compositor-failed "${detail}" || true
+    else
+        printf '%s\n' "AuraDE desktop session failed: ${detail}" >&2
+    fi
+}
 
 cleanup() {
     if [ -n "${UDISKIE_PID}" ]; then
@@ -51,6 +61,9 @@ while :; do
     RUNTIME="$((END_TIME - START_TIME))"
 
     if [ "${AURADE_SESSION_ON_EXIT:-restart}" = "exit" ]; then
+        if [ "${STATUS}" -ne 0 ]; then
+            report_session_failure "desktop exited with status=${STATUS} runtime=${RUNTIME}s"
+        fi
         exit "${STATUS}"
     fi
 
@@ -61,7 +74,9 @@ while :; do
     fi
 
     if [ "${FAST_RESTARTS}" -ge "${MAX_FAST_RESTARTS}" ]; then
-        echo "AuraDE exited ${FAST_RESTARTS} times quickly; not restarting." >&2
+        detail="desktop exited ${FAST_RESTARTS} times quickly; last_status=${STATUS}"
+        echo "AuraDE ${detail}; not restarting." >&2
+        report_session_failure "${detail}"
         exit "${STATUS}"
     fi
 
