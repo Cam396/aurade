@@ -40,6 +40,8 @@ grep -Fq 'cow_spacesize=4G' \
   "$ROOT/installer/archiso/efiboot/loader/entries/01-aurade-linux.conf"
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
+grep -Fq '/usr/local/lib/aurade/aurade-validate.sh' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
 
