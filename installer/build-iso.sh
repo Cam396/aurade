@@ -35,6 +35,7 @@ ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
+ISO_SIGNING_FINGERPRINT=${AURADE_ISO_SIGNING_FINGERPRINT:-}
 REQUIRE_ISO_SIGNATURE=${AURADE_REQUIRE_ISO_SIGNATURE:-0}
 export SOURCE_DATE_EPOCH
 
@@ -56,6 +57,21 @@ if [[ -n $ISO_SIGNING_KEY || $REQUIRE_ISO_SIGNATURE == 1 ]]; then
   }
   gpg --batch --list-secret-keys "$ISO_SIGNING_KEY" >/dev/null 2>&1 || {
     echo 'build-iso: ISO signing key is not available in the builder keyring' >&2
+    exit 1
+  }
+  expected_iso_fingerprint=${ISO_SIGNING_FINGERPRINT//[[:space:]]/}
+  expected_iso_fingerprint=${expected_iso_fingerprint^^}
+  [[ $expected_iso_fingerprint =~ ^[0-9A-F]{40,64}$ ]] || {
+    echo 'build-iso: AURADE_ISO_SIGNING_FINGERPRINT must be a full fingerprint when ISO signatures are enabled' >&2
+    exit 1
+  }
+  iso_key_fingerprints=$(gpg --batch --with-colons --list-secret-keys "$ISO_SIGNING_KEY" 2>/dev/null | \
+    awk -F: '$1 == "fpr" {print toupper($10)}') || {
+    echo 'build-iso: could not read ISO signing-key fingerprint' >&2
+    exit 1
+  }
+  grep -Fxq "$expected_iso_fingerprint" <<<"$iso_key_fingerprints" || {
+    echo 'build-iso: ISO signing key does not contain the requested fingerprint' >&2
     exit 1
   }
 fi
@@ -219,9 +235,11 @@ sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
   if [[ -f $iso.sig ]]; then
     printf 'iso_signature=%s\n' "$(basename "$iso.sig")"
     printf 'sbom_signature=%s\n' "$(basename "$sbom.sig")"
+    printf 'iso_signing_fingerprint=%s\n' "$expected_iso_fingerprint"
   else
     printf 'iso_signature=not-created\n'
     printf 'sbom_signature=not-created\n'
+    printf 'iso_signing_fingerprint=not-set\n'
   fi
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
   (cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock)
