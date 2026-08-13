@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Graphical front end for aurade-install.
+
+This starts the model process, asks it whether a graphical installer can run
+on this machine, and either draws one or hands over to the text installer.
+
+The handover is the important part and it runs first. The probe's second job -
+saying, while the disk is still intact, that the desktop about to be installed
+will not start here - is not something a graphical installer can do after it
+has failed to open a window. So the decision is made before any GTK import,
+and a missing toolkit, a missing display or a probe that says no all end the
+same way: exec the text installer, which is the renderer this product
+guarantees.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+SELF_DIR = os.path.dirname(os.path.realpath(__file__))
+
+for _lib in ("/usr/local/lib/aurade", os.path.join(SELF_DIR, "..", "lib")):
+    _lib = os.path.normpath(_lib)
+    if os.path.isdir(os.path.join(_lib, "aurade_gui")) and _lib not in sys.path:
+        sys.path.insert(0, _lib)
+
+try:
+    from aurade_gui.bridge import Bridge, BridgeError, find_bridge
+except ImportError as exc:  # pragma: no cover - packaging failure
+    print(f"aurade-installer-gui: cannot load the installer model: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+
+def find_tui() -> str | None:
+    override = os.environ.get("AURADE_INSTALLER_TUI")
+    if override:
+        return override if os.access(override, os.X_OK) else None
+    for candidate in (
+        "/usr/local/sbin/aurade-installer-tui",
+        os.path.join(SELF_DIR, "aurade-installer-tui"),
+    ):
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def fall_back(reason: str, argv: list[str]) -> int:
+    """Hand over to the text installer, saying why on the way out."""
+    tui = find_tui()
+    print(f"aurade-installer-gui: {reason}", file=sys.stderr)
+    if tui is None:
+        print(
+            "aurade-installer-gui: the text installer is missing from this image",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"aurade-installer-gui: starting the text installer instead", file=sys.stderr)
+    os.execv(tui, [tui, *argv])
+    return 1  # pragma: no cover - execv does not return
+
+
+def toolkit_available() -> tuple[bool, str]:
+    try:
+        import gi  # noqa: F401
+    except ImportError:
+        return False, "PyGObject is not installed on this image"
+    try:
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk  # noqa: F401
+    except (ImportError, ValueError) as exc:
+        return False, f"GTK 4 and libadwaita are not usable here: {exc}"
+    return True, ""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="aurade-installer-gui",
+        description="Graphical installer for AuraDE.",
+    )
+    parser.add_argument("--journal", default=os.environ.get(
+        "AURADE_JOURNAL_PATH", "/run/aurade-install/journal.jsonl"))
+    parser.add_argument("--raw-log", default=os.environ.get(
+        "AURADE_JOURNAL_RAW", "/run/aurade-install/install.log"))
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="ask the questions and check the plan; never offer to erase",
+    )
+    parser.add_argument(
+        "--self-check",
+        action="store_true",
+        help="report whether this image can run the graphical installer, and exit",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="draw the graphical installer even if the probe advises against it",
+    )
+    args = parser.parse_args()
+    passthrough = ["--journal", args.journal, "--raw-log", args.raw_log]
+    if args.plan_only:
+        passthrough.append("--plan-only")
+
+    bridge_path = find_bridge(SELF_DIR)
+    if bridge_path is None:
+        return fall_back("the installer model is missing from this image", passthrough)
+
+    ok, toolkit_reason = toolkit_available()
+
+    model = Bridge(
+        program=bridge_path,
+        journal=args.journal,
+        raw_log=args.raw_log,
+        plan_only=args.plan_only,
+    )
+    try:
+        model.start()
+        model.ping()
+        probe = model.probe()
+    except BridgeError as exc:
+        model.close()
+        return fall_back(str(exc), passthrough)
+
+    if args.self_check:
+        model.close()
+        print(f"toolkit: {'ok' if ok else toolkit_reason}")
+        print(f"model: ok ({bridge_path})")
+        print(f"renderer: {probe.get('renderer')} ({probe.get('reason')})")
+        print(f"graphics: {probe.get('graphics')}")
+        return 0 if ok else 1
+
+    if not ok:
+        model.close()
+        return fall_back(toolkit_reason, passthrough)
+
+    if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+        model.close()
+        return fall_back("no display is running for a graphical installer", passthrough)
+
+    if probe.get("renderer") != "gui" and not args.force:
+        model.close()
+        reason = probe.get("advice") or probe.get("graphics") or "graphics are not usable"
+        return fall_back(reason, passthrough)
+
+    if args.force and probe.get("renderer") != "gui":
+        print(
+            "aurade-installer-gui: --force overrides the graphics warning; "
+            "the installed desktop may still be unusable",
+            file=sys.stderr,
+        )
+
+    from aurade_gui.app import run
+
+    try:
+        return run(model, plan_only=args.plan_only)
+    finally:
+        model.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -4,7 +4,7 @@ What the front ends are allowed to be, and what they are not allowed to
 change. `installer/EXECUTE_PATH_CONTRACT.md` covers what a run must prove;
 this covers what the interface owes the person in front of it.
 
-## One engine, one journal, two renderers
+## One engine, one journal, three renderers
 
 `installer/bin/aurade-install` is the deterministic destructive engine. It is
 noninteractive, takes arguments, checks everything before it touches a disk,
@@ -23,8 +23,31 @@ A front end may not:
 - decide on its own what is reversible or resumable;
 - write a secret anywhere except a mode-0600 file it removes on exit.
 
-`installer/bin/aurade-installer-tui` is the current renderer. The older
+`installer/bin/aurade-installer-tui` is the text renderer and the guaranteed
+one. `installer/bin/aurade-installer-gui` is the graphical renderer. The older
 `installer/bin/aurade-installer` remains as a plain prompt-by-prompt flow.
+`installer/bin/aurade-installer-start` chooses between the first two using the
+probe, and is what the message of the day names.
+
+The graphical renderer owns no contract. It talks to
+`installer/bin/aurade-installer-gui-bridge`, which sources the text renderer
+with `AURADE_INSTALLER_TUI_LIB=1` and therefore holds the identical
+`build_engine_args`, `hash_password`, `write_secret`, `apply_answer`, disk
+table, journal readers and stage vocabulary. A graphical installer that built
+its own argument list would be a second implementation of the one join where a
+mistake reaches a destructive engine, and the two would drift.
+
+The dependency runs one way, and that direction is the point. Nothing in the
+bridge or the graphical front end is on the text installer's path, so a broken
+or absent graphical renderer cannot affect the fallback. Every way the
+graphical path can fail - no toolkit, no compositor, no display, a probe that
+says no - ends in the text installer, with the reason printed.
+
+Python is the graphical renderer's language because `python-gobject` is how
+GTK 4 is scripted and Python is already on the image. The split inside
+`installer/lib/aurade_gui/` follows one line: `bridge.py` and `flow.py` import
+no `gi` and are tested headlessly; `app.py` is widgets and is checked against
+the toolkit's own introspection data.
 
 ## Questions are data
 
@@ -90,6 +113,13 @@ to be able to go back:
 | Erase gate | returns to review |
 | Progress | nothing — no key is offered, because none is read |
 
+The graphical renderer states the same thing with a button rather than a
+footer, and the label comes from the same call that decides the action:
+`Flow.back_action` returns `quit`, `back` or nothing, and `Flow.back_label`
+is derived from it, so a button reading "Back" on a screen that quits is not
+expressible. `Escape` is bound to whatever that button does, and no control at
+all is drawn once the erase gate is behind the user.
+
 Returning to a question shows the answer already given, not the default.
 A "back" that silently rewrites an answer to its default is the same class of
 untruth as a wrong footer.
@@ -111,6 +141,16 @@ held in the renderer.
 `--plan-only` reaches a terminal `planned` state that has no transition to
 `execute`. It is not a flag checked before a destructive call; it is a state
 from which the destructive call is unreachable.
+
+Both renderers say this the same way. The bridge chooses one of two dispatch
+tables once at startup, and the plan-only table has no `execute` command to
+refuse — it reports `unknown command`. The graphical flow's transition graph
+is walked in its test, and `gate`, `progress` and `done` must all be absent
+from the set reachable from the welcome screen.
+
+Nothing reaches `--execute` without both a dry run the engine accepted and a
+confirmation token equal, whole, to `ERASE:<target>`. Those are two separate
+gates in the bridge and both are tested by trying to get past them.
 
 ## Answers that take effect immediately
 
@@ -135,10 +175,21 @@ cannot be used for this — it exits with the install's own status on success an
 checked directly. A failed export shows what went wrong and leaves the menu
 usable; it never shows "Saved".
 
+The destination has to be one the current call created. Two saves in the same
+second are ordinary — the second is usually a retry — and a directory that
+already held a previous export would answer "did this write anything" with
+someone else's files.
+
 There is deliberately no "try that step again". The journal records which
 stages could safely re-run, but the engine is a linear script with no entry
 point that starts at one, so invoking it again runs `wipefs` again. Offering a
 retry would erase the disk a second time.
+
+The graphical failure screen also has no "open a shell", which the text one
+offers. The image carries no terminal emulator, and a button that does nothing
+on the screen where the user is already stuck is worse than its absence. It
+shows the raw log in a window instead, and names the log's path so it can be
+reached from a console.
 
 When the engine grows a resume entry point, the option belongs on this screen
 gated on `aurade_journal_may_resume`, which requires both that the stage is
@@ -185,6 +236,10 @@ evidence alone and the wording claims no more than that.
 | `test-tui-flow.sh` | state transitions, validation failures, back/cancel, gate token, argument construction |
 | `test-probe.sh` | renderer decisions and fallback advice |
 | `test-tui-engine.sh` | the whole flow against a recording stub engine |
+| `test-gui-flow.sh` | page grouping, back/forward labels, plan-only unreachability |
+| `test-gui-bridge.sh` | the whole protocol against a recording stub engine, including secrets, refusals, progress and export |
+| `test-gui-launch.sh` | which renderer starts, and the fallback when the graphical one cannot |
+| `test-gui-widgets.sh` | every toolkit name against GTK's introspection data; skips when the toolkit is absent |
 
 The render and flow tests exist because this project has already shipped a
 prompt that hung at its own keyboard validation while `bash -n` and a
