@@ -95,7 +95,7 @@ The source tests intentionally do not claim to prove partitioning, LUKS,
 pacstrap, bootctl, first boot, or power-loss recovery.
 
 The major GUI/TUI installer follow-up is finish-gated and documented in
-[OPUS_GUI_TUI_HANDOFF.md](OPUS_GUI_TUI_HANDOFF.md); it must preserve these
+[GUI_TUI_HANDOFF.md](GUI_TUI_HANDOFF.md); it must preserve these
 validation boundaries rather than bypass them.
 
 ## Physical laptop qualification
