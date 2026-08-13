@@ -104,10 +104,13 @@ done
 target_size=$(lsblk -dnro SIZE "$target")
 target_model=$(lsblk -dnro MODEL "$target" | sed 's/[[:space:]]*$//' || true)
 target_serial=$(lsblk -dnro SERIAL "$target" | sed 's/[[:space:]]*$//' || true)
+target_wwn=$(lsblk -dnro WWN "$target" | sed 's/[[:space:]]*$//' || true)
 target_transport=$(lsblk -dnro TRAN "$target" | sed 's/[[:space:]]*$//' || true)
 printf 'Selected disk: %s | size=%s | model=%s | serial=%s | transport=%s\n' \
   "$target" "$target_size" "${target_model:-unknown}" \
   "${target_serial:-unknown}" "${target_transport:-unknown}"
+[[ -n $target_serial || -n $target_wwn ]] || \
+  printf '%s\n' 'WARNING: this disk exposes no serial or WWN; the final confirmation will also require its path, size, model, and transport to remain unchanged.' >&2
 if [[ $target_transport == usb ]]; then
   printf '%s\n' 'WARNING: this is a USB/removable disk. Confirm that it is the intended target; the installer will erase the entire device.' >&2
 fi
@@ -239,6 +242,23 @@ run_engine() {
 
 printf '\n%s\n' 'Dry-run installation plan:'
 run_engine "${common_args[@]}" --dry-run
+
+# Re-read the complete discovered identity immediately before the erase token
+# is accepted. A removable disk can be replaced at the same path while the
+# user is answering prompts; a matching path alone is not sufficient.
+current_target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
+current_size=$(lsblk -dnro SIZE "$current_target" 2>/dev/null || true)
+current_model=$(lsblk -dnro MODEL "$current_target" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+current_transport=$(lsblk -dnro TRAN "$current_target" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+current_serial=$(lsblk -dnro SERIAL "$current_target" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+current_wwn=$(lsblk -dnro WWN "$current_target" 2>/dev/null | sed 's/[[:space:]]*$//' || true)
+if ! aurade_target_identity_matches \
+  "$target" "$target_size" "$target_model" "$target_transport" \
+  "$target_serial" "$target_wwn" "$current_target" "$current_size" \
+  "$current_model" "$current_transport" "$current_serial" "$current_wwn"; then
+  printf '%s\n' 'The selected disk identity changed while the installer was running; nothing was erased. Restart and select the intended disk again.' >&2
+  exit 1
+fi
 
 token="ERASE:$target"
 printf '\nThe target will be irreversibly erased. Type exactly: %s\n> ' "$token"
