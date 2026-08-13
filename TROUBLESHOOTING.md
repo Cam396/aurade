@@ -104,6 +104,26 @@ pressure relief for Chromium. After installation, choose a documented Arch
 assume hibernation works until resume has been tested with the selected
 encrypted-root and bootloader configuration.
 
+### Disk health and erase warnings
+
+The installer requires a whole-disk target of at least 16 GiB, repeats the
+device's size/model/serial/transport identity immediately before the erase
+confirmation, and warns when the selected device is removable. Before an
+install on a physical disk, inspect both capacity and health from the live
+console:
+
+```bash
+lsblk -d -o NAME,PATH,SIZE,MODEL,SERIAL,TRAN
+smartctl -H /dev/<target-disk>
+smartctl -a /dev/<target-disk>
+```
+
+Some USB bridges do not pass SMART data through; an unavailable SMART result
+is not a health guarantee. Stop if the health query reports a failure, the
+device is unexpectedly small, or the model/serial does not match the disk you
+intend to erase. The installer never treats a SMART warning as permission to
+skip its exact-target confirmation.
+
 ### Correct password, then a black screen and return to the greeter in VMware
 
 AuraDE now performs a render-device preflight before starting Weston. If no
