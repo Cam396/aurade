@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Structured install journal for the AuraDE installer.
 #
 # The engine is a linear script; the front ends need to render progress,
@@ -27,7 +28,7 @@ AURADE_FAILURE_JOURNAL_DIR=${AURADE_FAILURE_JOURNAL_DIR:-}
 AURADE_STAGES=(
   preflight network acquire verify confirm
   partition format mount pacstrap configure
-  bootloader snapshot verify-install done
+  bootloader snapshot verify-install 'done'
 )
 
 _J_ID=

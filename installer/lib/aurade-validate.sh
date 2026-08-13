@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared input validation for the AuraDE installer front ends.
 #
 # These rules live in their own sourceable file for one reason: they depend on
