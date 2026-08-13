@@ -80,13 +80,24 @@ grep -Fq 'cow_spacesize=4G' \
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-questions.sh ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-tui.sh ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-probe.sh ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
 grep -Fq -- 'empty root password' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq -- 'untrusted network or physical access' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq '/usr/local/lib/aurade/aurade-validate.sh' "$ROOT/installer/archiso/profiledef.sh"
 grep -Fq '/usr/local/lib/aurade/aurade-journal.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq '/usr/local/lib/aurade/aurade-questions.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq '/usr/local/lib/aurade/aurade-tui.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq '/usr/local/lib/aurade/aurade-probe.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq '/usr/local/sbin/aurade-installer-tui' "$ROOT/installer/archiso/profiledef.sh"
+# The staged front end must resolve its libraries from the image, not from a
+# source tree that will not exist on the installation media.
+grep -Fq '/usr/local/lib/aurade/$name' "$ROOT/installer/bin/aurade-installer-tui"
 grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
