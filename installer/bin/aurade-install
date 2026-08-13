@@ -846,7 +846,7 @@ run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/s
 aurade_journal_ok bootloader
 
 aurade_journal_begin snapshot 'creating the factory snapshot'
-write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
+write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nswap_policy=none\nhibernation=unsupported\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
 run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
 run sync
 aurade_journal_ok snapshot
