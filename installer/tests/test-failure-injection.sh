@@ -136,6 +136,18 @@ fi
 grep -Fq 'installer helper is missing' "$TMP/helper.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
 
+# A readable directory must not satisfy the staged-helper contract. This
+# catches a malformed image before the engine can reach any destructive stage.
+rm -f -- "$TMP/engine/aurade-recovery"
+mkdir -m 0755 "$TMP/engine/aurade-recovery"
+if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
+  "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper-directory.out" 2>&1; then
+  echo 'helper directory unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-directory.out"
+! grep -Fq 'wipefs --all --force' "$TMP/helper-directory.out"
+
 # If the requested staging path cannot be used, the engine falls back to /tmp
 # and measures capacity on the filesystem that actually holds its workdir.
 touch "$TMP/not-a-directory"

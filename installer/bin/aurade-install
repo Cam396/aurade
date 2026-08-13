@@ -471,7 +471,9 @@ fi
 [[ -d $BUNDLE_DIR ]] || die "bundle directory does not exist: $BUNDLE_DIR"
 [[ -r $PACKAGE_LOCK ]] || die "package lock does not exist: $PACKAGE_LOCK"
 for helper in aurade-recovery aurade-hardware-qualify; do
-  [[ -r $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
+  [[ -e $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
+  [[ -f $SELF_DIR/$helper && -x $SELF_DIR/$helper ]] ||
+    die "installer helper must be a regular executable file: $SELF_DIR/$helper"
 done
 
 mapfile -t LOCK_LINES < <(awk 'NF && $1 !~ /^#/ {print}' "$PACKAGE_LOCK")
