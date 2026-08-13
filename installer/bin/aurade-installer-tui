@@ -1,0 +1,1265 @@
+#!/usr/bin/env bash
+# Keyboard-first front end for aurade-install.
+#
+# This renders the installer; it does not implement one. The destructive engine
+# stays exactly as it is - a noninteractive script that takes arguments, checks
+# everything before it touches the disk, and writes an append-only journal. All
+# this program does is ask the questions in installer/lib/aurade-questions.sh,
+# hand the answers to that engine, and render the journal back.
+#
+# Three things follow from that, and they are the whole design:
+#
+#   The question set is data. Adding a question is an edit to the manifest, not
+#   to this file, and the manifest is what the future graphical renderer reads
+#   too, so the two cannot ask different things.
+#
+#   Progress is a view of the journal, not a second account of what happened.
+#   `--render progress --journal FILE` draws the same screen from a file, which
+#   is how it gets tested and how a support case gets reproduced.
+#
+#   Cancellation is asymmetric because the disk is. Before the erase gate,
+#   quitting is free and the UI says so plainly. After it, a general cancel
+#   would leave a half-written disk in no defined state, so it is not offered
+#   at all - the only exit is through the failure screen, which knows whether
+#   the journal says resuming is safe.
+#
+# Nothing here changes the destructive boundary, the confirmation token, or the
+# journal contract. Where this program needs to know something about those, it
+# reads it from the same libraries the engine does.
+
+set -Eeuo pipefail
+
+# BASH_SOURCE rather than $0, so the library search works whether this file is
+# executed or sourced. Under `bash -c`, $0 is not the script path at all.
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+
+_find_lib() {
+  local name=$1 candidate
+  for candidate in "/usr/local/lib/aurade/$name" "$SELF_DIR/../lib/$name"; do
+    [[ -r $candidate ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh aurade-journal.sh; do
+  if ! _path=$(_find_lib "$_lib"); then
+    echo "aurade-installer-tui: cannot find $_lib" >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  . "$_path"
+done
+unset _lib _path
+
+ENGINE=${AURADE_INSTALL_ENGINE:-}
+if [[ -z $ENGINE ]]; then
+  for candidate in /usr/local/sbin/aurade-install "$SELF_DIR/aurade-install"; do
+    [[ -x $candidate ]] || continue
+    ENGINE=$candidate
+    break
+  done
+fi
+FAILURE_HELPER=${AURADE_FAILURE_HELPER:-/usr/local/sbin/aurade-install-failure}
+[[ -x $FAILURE_HELPER ]] || FAILURE_HELPER="$SELF_DIR/aurade-install-failure"
+
+RENDER_ONLY=
+JOURNAL_FILE=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
+RAW_LOG=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
+EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
+PLAN_ONLY=0
+EXIT_STATUS=0
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-installer-tui [options]
+
+Options:
+  --render SCREEN    Draw one screen and exit (for review and tests)
+  --journal FILE     Journal to render progress and failure screens from
+  --raw-log FILE     Private unstructured installer log
+  --plan-only        Ask the questions and show the plan; never offer to erase
+  --list-screens     Print the renderable screen names
+  -h, --help         This message
+EOF
+}
+
+# --------------------------------------------------------------------------
+# State
+# --------------------------------------------------------------------------
+
+declare -A ANSWERS=()
+SHOW_ADVANCED=0
+# Set while a screen needs a headline other than the question's own, so that
+# rendering never has to write to the shared question manifest.
+QUESTION_LABEL_OVERRIDE=
+SECRET_DIR=
+# shellcheck disable=SC2034  # read by main_flow's callers and by the flow test
+CANCELLED=0
+
+# Disk table: one `path|size|model|transport|serial` record per whole disk.
+#
+# Injectable, so the disk screen and the erase gate can be rendered and tested
+# without block devices. lsblk is read in pair mode rather than column mode
+# because disk models contain spaces, and positional parsing of a model like
+# "WDC WD10EZEX-08WN4A0" silently shifts the transport and serial columns - on
+# the one screen where a wrong serial number could get the wrong disk erased.
+disk_table() {
+  if [[ -n ${AURADE_DISK_TABLE:-} && -r ${AURADE_DISK_TABLE:-} ]]; then
+    cat "$AURADE_DISK_TABLE"
+    return 0
+  fi
+  lsblk -dnP -o PATH,SIZE,MODEL,TRAN,TYPE,SERIAL 2>/dev/null | awk '
+    function val(key,   start, rest, end) {
+      start = index($0, key "=\"")
+      if (!start) return ""
+      rest = substr($0, start + length(key) + 2)
+      end = index(rest, "\"")
+      if (!end) return ""
+      return substr(rest, 1, end - 1)
+    }
+    val("TYPE") == "disk" {
+      model = val("MODEL")
+      if (model == "") model = "unknown"
+      printf "%s|%s|%s|%s|%s\n", val("PATH"), val("SIZE"), model, val("TRAN"), val("SERIAL")
+    }'
+}
+
+cleanup() {
+  local file
+  if [[ -d ${SECRET_DIR:-} ]]; then
+    while IFS= read -r -d '' file; do
+      if command -v shred >/dev/null 2>&1; then
+        shred --force --remove --zero "$file" >/dev/null 2>&1 || rm -f -- "$file"
+      else
+        : >"$file"
+        rm -f -- "$file"
+      fi
+    done < <(find "$SECRET_DIR" -type f -print0 2>/dev/null || true)
+    rmdir -- "$SECRET_DIR" 2>/dev/null || rm -rf -- "$SECRET_DIR"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# --------------------------------------------------------------------------
+# Stage vocabulary
+# --------------------------------------------------------------------------
+
+# Journal stage names are engineering terms. These are what the user sees; the
+# journal keeps the real name so a support case and a screenshot still line up.
+stage_label() {
+  case $1 in
+    preflight)      printf 'Check this computer' ;;
+    network)        printf 'Connect to the network' ;;
+    acquire)        printf 'Download packages' ;;
+    verify)         printf 'Verify packages' ;;
+    confirm)        printf 'Confirm the disk' ;;
+    partition)      printf 'Partition the disk' ;;
+    format)         printf 'Create filesystems' ;;
+    mount)          printf 'Mount filesystems' ;;
+    pacstrap)       printf 'Install the base system' ;;
+    configure)      printf 'Configure the system' ;;
+    bootloader)     printf 'Install the bootloader' ;;
+    snapshot)       printf 'Create the recovery snapshot' ;;
+    verify-install) printf 'Verify the installation' ;;
+    done)           printf 'Finish' ;;
+    *)              printf '%s' "$1" ;;
+  esac
+}
+
+# What a failure at this stage means for the disk. The engine currently reports
+# one cause code, so the explanation is anchored on the stage, which is always
+# present, and refined by cause where a specific one is known.
+stage_explanation() {
+  case $1 in
+    preflight)  printf 'This computer did not meet one of the requirements. Nothing has been changed.' ;;
+    network)    printf 'The installer could not reach the package archive. Nothing has been changed.' ;;
+    acquire)    printf 'One or more packages could not be downloaded. Nothing has been changed, and no disk was touched.' ;;
+    verify)     printf 'A downloaded package did not match its expected signature or checksum. The installation stopped rather than install it. Nothing has been changed.' ;;
+    confirm)    printf 'The confirmation did not match the disk. Nothing has been changed.' ;;
+    partition)  printf 'The disk could not be partitioned. Its previous contents are already gone.' ;;
+    format)     printf 'The filesystems could not be created. The disk is partitioned but has no usable filesystem on it yet.' ;;
+    mount)      printf 'The new filesystems could not be mounted. The disk is partitioned and formatted.' ;;
+    pacstrap)   printf 'The base system could not be installed. The disk is partitioned and formatted, and every package is already downloaded and verified, so a fresh attempt will not need the network.' ;;
+    configure)  printf 'The system files are all in place but could not be configured.' ;;
+    bootloader) printf 'The system is installed but cannot start yet, because the bootloader was not written.' ;;
+    snapshot)   printf 'The system is installed and can start, but the factory recovery snapshot was not created, so rolling back to a clean state is not available on it.' ;;
+    verify-install) printf 'The installation finished but did not pass its own final check.' ;;
+    *)          printf 'The installation stopped. The journal below records exactly where.' ;;
+  esac
+}
+
+cause_explanation() {
+  case $1 in
+    unexpected_exit) printf 'A step ended without reporting why.' ;;
+    archive-unreachable) printf 'The Arch Linux Archive could not be reached for the pinned snapshot date.' ;;
+    signature-invalid) printf 'A package signature did not verify against the expected key.' ;;
+    esp-readonly) printf 'The EFI system partition mounted, but the firmware reported it read-only.' ;;
+    secure-boot) printf 'Secure Boot is enabled, and AuraDE installs an unsigned boot chain.' ;;
+    disk-too-small) printf 'The selected disk is smaller than the installation needs.' ;;
+    '') printf '' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# --------------------------------------------------------------------------
+# Journal reading
+# --------------------------------------------------------------------------
+
+# Pull one string field out of one JSONL record. The escape handling matters:
+# a message containing the literal text `"status":"failed"` must not be able to
+# impersonate a record field. Shared shape with aurade-install-failure.
+json_field() {
+  local field=$1 line=$2
+  awk -v marker="\"${field}\":" '
+    {
+      start = index($0, marker)
+      if (!start) exit
+      rest = substr($0, start + length(marker))
+      if (substr(rest, 1, 1) == "\"") {
+        rest = substr(rest, 2)
+        escaped = 0
+        result = ""
+        for (i = 1; i <= length(rest); i++) {
+          c = substr(rest, i, 1)
+          if (escaped) {
+            if (c == "n") result = result " "
+            else if (c == "t") result = result " "
+            else result = result c
+            escaped = 0
+          } else if (c == "\\") {
+            escaped = 1
+          } else if (c == "\"") {
+            print result; exit
+          } else {
+            result = result c
+          }
+        }
+      } else {
+        value = ""
+        for (i = 1; i <= length(rest); i++) {
+          c = substr(rest, i, 1)
+          if (c == "," || c == "}") break
+          value = value c
+        }
+        print value
+      }
+    }
+  ' <<<"$line"
+}
+
+journal_last_for_stage() {
+  local stage=$1
+  [[ -r $JOURNAL_FILE ]] || return 0
+  awk -v want="\"stage\":\"${stage}\"" '
+    index($0, want) { record = $0 } END { if (record) print record }
+  ' "$JOURNAL_FILE"
+}
+
+journal_last_failed() {
+  [[ -r $JOURNAL_FILE ]] || return 0
+  awk '/"status":"failed"/ { record = $0 } END { if (record) print record }' "$JOURNAL_FILE"
+}
+
+journal_status_for_stage() {
+  local record
+  record=$(journal_last_for_stage "$1")
+  [[ -n $record ]] || { printf 'pending'; return 0; }
+  json_field status "$record"
+}
+
+# --------------------------------------------------------------------------
+# Screens
+# --------------------------------------------------------------------------
+
+visible_questions() {
+  local id
+  for id in "${AURADE_QUESTION_ORDER[@]}"; do
+    # The passphrase question exists only if encryption was chosen. Asking for
+    # a passphrase that will not be used is a question with no honest answer.
+    if [[ $id == luks_passphrase && ${ANSWERS[encrypt]:-yes} != yes ]]; then
+      continue
+    fi
+    printf '%s\n' "$id"
+  done
+}
+
+screen_welcome() {
+  tui_clear
+  tui_header 'Welcome'
+  tui_blank
+  tui_wrap 'Install AuraDE' accent
+  tui_blank
+  tui_wrap 'This will ask a few questions, then install AuraDE on a disk you choose. Nothing is written to any disk until you confirm the exact disk by name.' ink
+  tui_blank
+  tui_wrap 'You can go back at any point before that confirmation, and quitting before it leaves this computer exactly as it is now.' dim
+  tui_blank
+  tui_field 'Move' 'up and down arrows' dim
+  tui_field 'Continue' 'enter' dim
+  tui_field 'Go back' 'esc' dim
+  tui_blank
+  tui_footer 'enter  continue' 'esc  quit'
+}
+
+screen_fallback() {
+  tui_clear
+  tui_header ''
+  tui_blank
+  tui_wrap 'Running the text installer.' accent
+  tui_blank
+  if aurade_probe_predicts_black_screen; then
+    tui_wrap 'This computer has no working 3D acceleration, so the graphical installer cannot start. The text installer does exactly the same thing.' ink
+  else
+    tui_wrap 'The graphical installer cannot start on this computer. The text installer does exactly the same thing.' ink
+  fi
+  tui_blank
+  tui_field 'Graphics' "$AURADE_PROBE_GRAPHICS" dim
+  tui_field 'Memory' "$AURADE_PROBE_MEMORY" dim
+  tui_blank
+  if aurade_probe_predicts_black_screen; then
+    tui_wrap "$(aurade_probe_advice)" warn
+  else
+    tui_wrap "$(aurade_probe_advice)" dim
+  fi
+  tui_blank
+  tui_footer 'enter  continue in text mode' "$AURADE_PROBE_REASON"
+}
+
+# One question screen, driven entirely by the manifest.
+screen_question() {
+  local id=$1 step=$2 total=$3 error=${4:-} buffer=${5:-} cursor=${6:-0}
+  local type label help
+  type=$(aurade_question_field "$id" type)
+  label=${QUESTION_LABEL_OVERRIDE:-$(aurade_question_field "$id" label)}
+  help=$(aurade_question_field "$id" help)
+
+  tui_clear
+  tui_header "Step $step of $total   $(tui_steps "$step" "$total")"
+  tui_blank
+  tui_wrap "$label" accent
+  tui_blank
+  tui_wrap "$help" dim
+  tui_blank
+  case $type in
+    disk)   widget_disk "$cursor" ;;
+    bool)   widget_bool "$cursor" ;;
+    enum)   widget_enum "$id" "$buffer" "$cursor" ;;
+    secret) widget_secret "$buffer" ;;
+    *)      widget_text "$buffer" ;;
+  esac
+  tui_blank
+  if [[ -n $error ]]; then
+    tui_wrap "$error" danger
+  fi
+  case $type in
+    disk|bool|enum)
+      tui_footer 'up/down  select    enter  continue' 'esc  back' ;;
+    *)
+      tui_footer 'type your answer    enter  continue' 'esc  back' ;;
+  esac
+}
+
+widget_text() {
+  tui_line "$(printf '  > %s_' "$1")" cyan
+}
+
+widget_secret() {
+  local masked='' i
+  for (( i = 0; i < ${#1}; i++ )); do masked+='*'; done
+  tui_line "$(printf '  > %s_' "$masked")" cyan
+}
+
+widget_bool() {
+  local cursor=$1
+  if (( cursor == 0 )); then
+    tui_item yes 'Yes, encrypt this disk'
+    tui_item no  'No, leave this disk unencrypted'
+  else
+    tui_item no  'Yes, encrypt this disk'
+    tui_item yes 'No, leave this disk unencrypted'
+  fi
+}
+
+widget_disk() {
+  local cursor=$1 index=0 line path size model tran removable=0
+  while IFS='|' read -r path size model tran _; do
+    [[ -n $path ]] || continue
+    line=$(printf '%-14s %8s  %-26s %s' "$path" "$size" "${model:0:26}" "$tran")
+    if (( index == cursor )); then
+      tui_item yes "$line"
+    else
+      tui_item no "$line"
+    fi
+    [[ $tran != usb ]] || removable=1
+    index=$(( index + 1 ))
+  done < <(disk_table)
+  if (( index == 0 )); then
+    tui_blank
+    tui_note '!' 'No disks were found. This computer may need a storage driver that the installation image does not include.' danger
+    return 0
+  fi
+  if (( removable )); then
+    tui_blank
+    tui_note '!' 'A removable disk is listed. That is probably the drive you started this installer from.' warn
+  fi
+}
+
+# Candidate values for the enum questions, from the same directories the
+# validators check, so a value that appears in the list always validates.
+enum_candidates() {
+  case $1 in
+    keymap)
+      find "$AURADE_KEYMAP_DIR" -type f \( -name '*.map.gz' -o -name '*.map' \) \
+        -printf '%f\n' 2>/dev/null | sed 's/\.map\(\.gz\)\?$//' | LC_ALL=C sort -u
+      ;;
+    timezone)
+      find "$AURADE_ZONEINFO_DIR" -type f -printf '%P\n' 2>/dev/null |
+        grep -Ev '(^|/)(posix|right)/|\.tab$|^leap|^tzdata' | LC_ALL=C sort -u
+      ;;
+    locale)
+      printf '%s\n' C.UTF-8
+      find "$AURADE_LOCALE_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null |
+        grep -E '^[a-z]{2,3}(_[A-Z]{2})?$' | sed 's/$/.UTF-8/' | LC_ALL=C sort -u
+      ;;
+  esac
+}
+
+ENUM_MATCHES=()
+enum_filter() {
+  local id=$1 filter=$2 candidate
+  ENUM_MATCHES=()
+  while IFS= read -r candidate; do
+    [[ -n $candidate ]] || continue
+    if [[ -z $filter || ${candidate,,} == *"${filter,,}"* ]]; then
+      ENUM_MATCHES+=("$candidate")
+    fi
+    (( ${#ENUM_MATCHES[@]} < 200 )) || break
+  done < <(enum_candidates "$id")
+}
+
+widget_enum() {
+  local id=$1 filter=$2 cursor=$3 shown=0 index=0 window=6 first=0
+  enum_filter "$id" "$filter"
+  tui_line "$(printf '  search: %s_' "$filter")" cyan
+  tui_blank
+  if (( ${#ENUM_MATCHES[@]} == 0 )); then
+    tui_wrap 'Nothing matches that. Clear the search with backspace to see the full list.' warn
+    return 0
+  fi
+  (( cursor < window )) || first=$(( cursor - window + 1 ))
+  for index in "${!ENUM_MATCHES[@]}"; do
+    (( index >= first )) || continue
+    (( shown < window )) || break
+    if (( index == cursor )); then
+      tui_item yes "${ENUM_MATCHES[index]}"
+    else
+      tui_item no "${ENUM_MATCHES[index]}"
+    fi
+    shown=$(( shown + 1 ))
+  done
+  if (( ${#ENUM_MATCHES[@]} > window )); then
+    tui_line "$(printf '     %d of %d shown; type to narrow' "$shown" "${#ENUM_MATCHES[@]}")" dim
+  fi
+}
+
+screen_review() {
+  local id short value
+  tui_clear
+  tui_header 'Review'
+  tui_blank
+  tui_wrap 'Check these before continuing' accent
+  tui_blank
+  for id in "${AURADE_QUESTION_ORDER[@]}"; do
+    aurade_question_exists "$id" || continue
+    short=$(aurade_question_field "$id" short)
+    if aurade_question_is_secret "$id"; then
+      value='set'
+      [[ -n ${ANSWERS[$id]:-} ]] || continue
+    else
+      value=${ANSWERS[$id]:-}
+      [[ -n $value ]] || continue
+    fi
+    tui_field "$short" "$value" ink
+  done
+  if (( SHOW_ADVANCED )); then
+    for id in "${AURADE_QUESTION_IDS[@]}"; do
+      aurade_question_is_advanced "$id" || continue
+      value=${ANSWERS[$id]:-}
+      [[ -n $value ]] || continue
+      tui_field "$(aurade_question_field "$id" short)" "$value" dim
+    done
+  fi
+  tui_blank
+  tui_wrap 'Nothing has been written to any disk yet.' ok
+  tui_blank
+  tui_footer 'enter  continue    a  advanced options' 'esc  back'
+}
+
+screen_gate() {
+  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran
+  size=$(disk_field "$target" 2)
+  model=$(disk_field "$target" 3)
+  serial=$(disk_serial "$target")
+  tran=$(disk_field "$target" 4)
+  tui_clear
+  tui_header 'Confirm erase'
+  tui_blank
+  tui_wrap "This erases $target completely." danger
+  tui_blank
+  tui_field 'Model' "${model:-unknown}" ink
+  tui_field 'Serial' "${serial:-unknown}" ink
+  tui_field 'Size' "${size:-unknown}" ink
+  tui_field 'Transport' "${tran:-unknown}" ink
+  tui_blank
+  tui_wrap 'Everything before this point can be undone. Nothing after it can. The packages are already downloaded and verified, so the installation will not need the network again.' ink
+  tui_blank
+  tui_wrap "Type ERASE:$target to continue" dim
+  tui_line "$(printf '  > %s_' "$typed")" cyan
+  tui_blank
+  tui_footer 'enter  erase and install' 'esc  go back'
+}
+
+disk_field() {
+  local target=$1 field=$2
+  disk_table | awk -F'|' -v want="$target" -v f="$field" '$1 == want { print $f; exit }'
+}
+
+disk_serial() {
+  disk_field "$1" 5
+}
+
+# Which stages get a row on the progress screen.
+#
+# AURADE_STAGES is the journal's vocabulary, not the engine's itinerary. The
+# engine folds its reachability checks into `preflight` and its signature and
+# checksum verification into `acquire`, so it never emits a `network` or
+# `verify` record, and `done` is a terminal marker rather than a step. Listing
+# those anyway produces a screen with rows that stay grey forever while the
+# ones below them complete, which reads as three steps that hung.
+#
+# This is a display rule, deliberately kept out of the journal contract: if the
+# engine later emits those stages, they belong here, and nothing else changes.
+stage_displayed() {
+  case $1 in
+    network|verify|done) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+screen_progress() {
+  local stage status label mark token elapsed pct detail record active=''
+  tui_clear
+  tui_header 'Installing'
+  tui_blank
+  for stage in "${AURADE_STAGES[@]}"; do
+    stage_displayed "$stage" || continue
+    record=$(journal_last_for_stage "$stage")
+    status=pending
+    [[ -z $record ]] || status=$(json_field status "$record")
+    label=$(stage_label "$stage")
+    elapsed=''
+    case $status in
+      ok)      mark=' + '; token=ok
+               elapsed=$(json_field elapsed_ms "$record")
+               [[ -z $elapsed ]] || elapsed=$(format_elapsed "$elapsed") ;;
+      running) mark=' > '; token=cyan; active=$stage ;;
+      failed)  mark=' ! '; token=danger ;;
+      *)       mark='   '; token=dim ;;
+    esac
+    tui_line "$(printf ' %s %-50s %8s' "$mark" "$label" "$elapsed")" "$token"
+    if [[ $status == running ]]; then
+      pct=$(json_field pct "$record")
+      detail=$(json_field message "$record")
+      [[ $pct =~ ^[0-9]+$ ]] || pct=0
+      tui_bar "$pct" "$detail"
+    fi
+  done
+  tui_blank
+  if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then
+    tui_wrap 'This part cannot be interrupted safely.' dim
+    tui_footer 'l  view log' 'cancel unavailable past this point'
+  else
+    tui_footer 'l  view log' 'esc  cancel'
+  fi
+}
+
+format_elapsed() {
+  local ms=$1 total
+  [[ $ms =~ ^[0-9]+$ ]] || { printf ''; return 0; }
+  total=$(( ms / 1000 ))
+  printf '%d:%02d' "$(( total / 60 ))" "$(( total % 60 ))"
+}
+
+screen_failure() {
+  local cursor=${1:-0} record stage cause message index=0 option
+  record=$(journal_last_failed)
+  stage=$(json_field stage "$record")
+  cause=$(json_field cause "$record")
+  message=$(json_field message "$record")
+
+  tui_clear
+  tui_header 'Install stopped'
+  tui_blank
+  if [[ -n $stage ]]; then
+    tui_wrap "$(stage_label "$stage") did not finish." accent
+  else
+    tui_wrap 'The installation stopped.' accent
+  fi
+  tui_blank
+  if [[ -n $cause ]]; then
+    tui_wrap "$(cause_explanation "$cause")" ink
+    tui_blank
+  fi
+  if [[ -n $stage ]]; then
+    tui_wrap "$(stage_explanation "$stage")" ink
+    tui_blank
+  fi
+  if [[ -n $message ]]; then
+    tui_note 'Detail:' "$message" dim
+    tui_blank
+  fi
+  tui_wrap "$(restart_advice "$stage")" warn
+  tui_blank
+  for option in "${FAILURE_OPTIONS[@]}"; do
+    if (( index == cursor )); then
+      tui_item yes "$option"
+    else
+      tui_item no "$option"
+    fi
+    index=$(( index + 1 ))
+  done
+  tui_blank
+  tui_footer 'up/down  select    enter  choose' "$(stage_position "$stage")"
+}
+
+# What starting over actually costs, decided by the reversibility boundary the
+# journal library defines rather than by a second opinion held here.
+restart_advice() {
+  local stage=${1:-}
+  if [[ -z $stage ]] || aurade_stage_reversible "$stage"; then
+    printf '%s' 'Nothing was written to the disk. You can start the installer again, or save a report first if you want to send it on.'
+  else
+    printf '%s' 'This installer cannot yet continue from where it stopped, and the disk has already been changed. Starting again erases it and begins from the beginning. Save a report first if you want a record of what happened.'
+  fi
+}
+
+# Position among the stages the progress screen shows, not among the journal's
+# full vocabulary. The user counted eleven rows on the previous screen; telling
+# them this was stage 11 of 14 invites them to look for three missing steps.
+stage_position() {
+  local stage=${1:-} candidate index=0 total=0 found=0
+  [[ -n $stage ]] || { printf ''; return 0; }
+  for candidate in "${AURADE_STAGES[@]}"; do
+    stage_displayed "$candidate" || continue
+    total=$(( total + 1 ))
+    if [[ $candidate == "$stage" ]]; then index=$total; found=1; fi
+  done
+  (( found )) || { printf ''; return 0; }
+  printf 'stage %s of %s' "$index" "$total"
+}
+
+# The remediation menu.
+#
+# There is deliberately no "try that step again" entry. The journal knows which
+# stages could safely re-run - that is what `resumable` records - but the engine
+# has no way to be told to start at one: it is a linear script, and invoking it
+# again runs `wipefs` again. An offer to retry would therefore erase the disk a
+# second time, which is worse than the failure it claims to recover from.
+#
+# When the engine grows a resume entry point, the option belongs here, gated on
+# aurade_journal_may_resume so it appears only when the stage is idempotent
+# *and* the disk present is still the disk the journal describes.
+FAILURE_OPTIONS=()
+build_failure_options() {
+  FAILURE_OPTIONS=(
+    'Save a diagnostic report'
+    'View the full log'
+    'Open a shell'
+    'Restart the computer'
+  )
+}
+
+screen_done() {
+  tui_clear
+  tui_header 'Finished'
+  tui_blank
+  tui_wrap 'AuraDE is installed.' ok
+  tui_blank
+  tui_wrap 'Remove the installation media and restart. Sign in with the username and password you chose.' ink
+  tui_blank
+  if [[ ${ANSWERS[encrypt]:-no} == yes ]]; then
+    tui_wrap 'This disk is encrypted. You will be asked for the disk passphrase each time the computer starts, before the sign-in screen appears.' dim
+    tui_blank
+  fi
+  tui_footer 'enter  restart now' 'esc  stay here'
+}
+
+screen_cancelled() {
+  tui_clear
+  tui_header 'Cancelled'
+  tui_blank
+  tui_wrap 'Nothing was changed.' ok
+  tui_blank
+  tui_wrap 'No disk was partitioned, formatted or written to. This computer is exactly as it was before the installer started.' ink
+  tui_blank
+  tui_footer 'enter  close' ''
+}
+
+# --------------------------------------------------------------------------
+# Input
+# --------------------------------------------------------------------------
+
+read_key() { tui_read_key; }
+
+# Text entry that redraws its screen on every keystroke. The redraw is the
+# whole screen rather than the input line, which is slower and much easier to
+# reason about than tracking a cursor position across a frame.
+prompt_text() {
+  local id=$1 step=$2 total=$3 buffer=${4:-} error='' key
+  while true; do
+    screen_question "$id" "$step" "$total" "$error" "$buffer"
+    error=''
+    key=$(read_key) || return 2
+    case $key in
+      enter)
+        [[ -n $buffer ]] || buffer=$(aurade_question_default "$id")
+        if aurade_question_validate "$id" "$buffer"; then
+          PROMPT_RESULT=$buffer
+          return 0
+        fi
+        error=$(aurade_question_field "$id" error)
+        ;;
+      esc) return 1 ;;
+      backspace) buffer=${buffer%?} ;;
+      space) buffer+=' ' ;;
+      up|down|left|right|tab) ;;
+      *) [[ ${#key} -ne 1 ]] || buffer+=$key ;;
+    esac
+  done
+}
+
+prompt_secret() {
+  local id=$1 step=$2 total=$3 first='' second='' stage=1 error='' key
+  while true; do
+    if (( stage == 1 )); then
+      screen_question "$id" "$step" "$total" "$error" "$first"
+    else
+      QUESTION_LABEL_OVERRIDE='Type it again to confirm'
+      screen_question "$id" "$step" "$total" "$error" "$second"
+      QUESTION_LABEL_OVERRIDE=
+    fi
+    error=''
+    key=$(read_key) || return 2
+    case $key in
+      enter)
+        if (( stage == 1 )); then
+          if [[ -z $first ]]; then
+            error=$(aurade_question_field "$id" error)
+          else
+            stage=2
+          fi
+        elif [[ $first == "$second" ]]; then
+          PROMPT_RESULT=$first
+          return 0
+        else
+          error=$(aurade_question_field "$id" error)
+          first=''; second=''; stage=1
+        fi
+        ;;
+      esc)
+        if (( stage == 2 )); then
+          second=''; stage=1
+        else
+          return 1
+        fi
+        ;;
+      backspace)
+        if (( stage == 1 )); then first=${first%?}; else second=${second%?}; fi ;;
+      # A passphrase may contain spaces, and dropping them here would be found
+      # out at the first boot, by a disk that will not unlock.
+      space)
+        if (( stage == 1 )); then first+=' '; else second+=' '; fi ;;
+      up|down|left|right|tab) ;;
+      *)
+        [[ ${#key} -eq 1 ]] || continue
+        if (( stage == 1 )); then first+=$key; else second+=$key; fi ;;
+    esac
+  done
+}
+
+prompt_bool() {
+  local id=$1 step=$2 total=$3 cursor=0 key
+  [[ $(aurade_question_default "$id") == yes ]] || cursor=1
+  while true; do
+    screen_question "$id" "$step" "$total" '' '' "$cursor"
+    key=$(read_key) || return 2
+    case $key in
+      enter) if (( cursor == 0 )); then PROMPT_RESULT=yes; else PROMPT_RESULT=no; fi; return 0 ;;
+      esc) return 1 ;;
+      up|down|tab) cursor=$(( (cursor + 1) % 2 )) ;;
+      y|Y) PROMPT_RESULT=yes; return 0 ;;
+      n|N) PROMPT_RESULT=no; return 0 ;;
+    esac
+  done
+}
+
+prompt_disk() {
+  local id=$1 step=$2 total=$3 cursor=0 key count
+  count=$(disk_table | grep -c . || true)
+  [[ $count =~ ^[0-9]+$ ]] || count=0
+  while true; do
+    screen_question "$id" "$step" "$total" '' '' "$cursor"
+    key=$(read_key) || return 2
+    case $key in
+      enter)
+        (( count > 0 )) || continue
+        PROMPT_RESULT=$(disk_table | sed -n "$(( cursor + 1 ))p" | cut -d'|' -f1)
+        [[ -n $PROMPT_RESULT ]] || continue
+        return 0 ;;
+      esc) return 1 ;;
+      up)   (( cursor > 0 )) && cursor=$(( cursor - 1 )) || cursor=0 ;;
+      down) (( cursor + 1 < count )) && cursor=$(( cursor + 1 )) || true ;;
+    esac
+  done
+}
+
+enum_index_of() {
+  local want=$1 index
+  for index in "${!ENUM_MATCHES[@]}"; do
+    if [[ ${ENUM_MATCHES[index]} == "$want" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  printf '0'
+  return 0
+}
+
+prompt_enum() {
+  local id=$1 step=$2 total=$3 filter='' cursor=0 key error=''
+  # Open on the default rather than on whatever sorts first. Every other
+  # question type accepts its default when the user presses enter, and a list
+  # that quietly starts somewhere else is the one place that promise breaks.
+  enum_filter "$id" ''
+  cursor=$(enum_index_of "$(aurade_question_default "$id")")
+  while true; do
+    screen_question "$id" "$step" "$total" "$error" "$filter" "$cursor"
+    error=''
+    key=$(read_key) || return 2
+    case $key in
+      enter)
+        enum_filter "$id" "$filter"
+        if (( ${#ENUM_MATCHES[@]} == 0 )); then
+          error=$(aurade_question_field "$id" error)
+          continue
+        fi
+        PROMPT_RESULT=${ENUM_MATCHES[cursor]:-}
+        if [[ -z $PROMPT_RESULT ]] || ! aurade_question_validate "$id" "$PROMPT_RESULT"; then
+          error=$(aurade_question_field "$id" error)
+          continue
+        fi
+        return 0 ;;
+      esc) return 1 ;;
+      up)   (( cursor > 0 )) && cursor=$(( cursor - 1 )) || cursor=0 ;;
+      down)
+        enum_filter "$id" "$filter"
+        (( cursor + 1 < ${#ENUM_MATCHES[@]} )) && cursor=$(( cursor + 1 )) || true ;;
+      backspace) filter=${filter%?}; cursor=0 ;;
+      space) ;;
+      tab|left|right) ;;
+      *) [[ ${#key} -ne 1 ]] || { filter+=$key; cursor=0; } ;;
+    esac
+  done
+}
+
+PROMPT_RESULT=
+ask() {
+  local id=$1 step=$2 total=$3 type
+  type=$(aurade_question_field "$id" type)
+  PROMPT_RESULT=
+  case $type in
+    disk)   prompt_disk "$id" "$step" "$total" ;;
+    bool)   prompt_bool "$id" "$step" "$total" ;;
+    enum)   prompt_enum "$id" "$step" "$total" ;;
+    secret) prompt_secret "$id" "$step" "$total" ;;
+    *)      prompt_text "$id" "$step" "$total" "${ANSWERS[$id]:-}" ;;
+  esac
+}
+
+# --------------------------------------------------------------------------
+# Engine invocation
+# --------------------------------------------------------------------------
+
+write_secret() {
+  local name=$1 value=$2
+  umask 077
+  printf '%s' "$value" >"$SECRET_DIR/$name"
+  chmod 600 "$SECRET_DIR/$name"
+}
+
+# Build the engine argument list from the manifest. Answers are matched to
+# flags here and nowhere else, so a question that gains a flag is wired up by
+# the manifest edit alone.
+#
+# Unanswered questions fall back to their resolved default rather than being
+# dropped. Advanced questions are skippable precisely because of this: the
+# engine requires `--arch-snapshot`, and a user who never opened the advanced
+# section has still, in effect, accepted the image's snapshot date.
+build_engine_args() {
+  local id flag value
+  ENGINE_ARGS=()
+  for id in "${AURADE_QUESTION_IDS[@]}"; do
+    flag=$(aurade_question_field "$id" flag)
+    [[ -n $flag ]] || continue
+    value=${ANSWERS[$id]:-}
+    [[ -n $value ]] || value=$(aurade_question_default "$id")
+    case $id in
+      encrypt)
+        [[ $value == yes ]] || continue
+        ENGINE_ARGS+=("$flag")
+        continue ;;
+      password)
+        [[ -n $value ]] || continue
+        ENGINE_ARGS+=("$flag" "$SECRET_DIR/password.hash")
+        continue ;;
+      luks_passphrase)
+        [[ ${ANSWERS[encrypt]:-no} == yes && -n $value ]] || continue
+        ENGINE_ARGS+=("$flag" "$SECRET_DIR/luks.passphrase")
+        continue ;;
+    esac
+    [[ -n $value ]] || continue
+    ENGINE_ARGS+=("$flag" "$value")
+  done
+  ENGINE_ARGS+=(--bundle-dir "${AURADE_BUNDLE_DIR:-/opt/aurade/repo}")
+  [[ -z ${AURADE_EXTRA_ENGINE_ARGS:-} ]] || {
+    # shellcheck disable=SC2206
+    local extra=($AURADE_EXTRA_ENGINE_ARGS)
+    ENGINE_ARGS+=("${extra[@]}")
+  }
+}
+ENGINE_ARGS=()
+
+# Hash the password immediately and drop the plaintext. The engine only ever
+# receives a crypt(3) hash in a mode-0600 file, so no part of this program
+# holds a recoverable password past this point, and there is nothing for the
+# journal or a diagnostic bundle to leak.
+hash_password() {
+  command -v openssl >/dev/null 2>&1 || {
+    echo 'aurade-installer-tui: openssl is required to hash the account password' >&2
+    return 1
+  }
+  write_secret password "${ANSWERS[password]}"
+  openssl passwd -6 -stdin <"$SECRET_DIR/password" >"$SECRET_DIR/password.hash"
+  chmod 600 "$SECRET_DIR/password.hash"
+  : >"$SECRET_DIR/password"
+  rm -f -- "$SECRET_DIR/password"
+  ANSWERS[password]='set'
+}
+
+run_engine_with_progress() {
+  local status=0 pid
+  "$ENGINE" "$@" >>"$RAW_LOG" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    screen_progress
+    sleep 0.3
+  done
+  wait "$pid" || status=$?
+  screen_progress
+  return "$status"
+}
+
+# --------------------------------------------------------------------------
+# Flow
+# --------------------------------------------------------------------------
+
+confirm_quit() {
+  local key
+  tui_clear
+  tui_header 'Quit?'
+  tui_blank
+  tui_wrap 'Quit the installer?' accent
+  tui_blank
+  tui_wrap 'Nothing has been written to any disk. This computer will be left exactly as it is now.' ink
+  tui_blank
+  tui_footer 'q  quit' 'any other key  keep going'
+  key=$(read_key) || return 1
+  [[ $key == q || $key == Q ]]
+}
+
+run_questions() {
+  local -a order=()
+  local id index=0 total step rc
+  mapfile -t order < <(visible_questions)
+  total=${#order[@]}
+  while (( index < total )); do
+    id=${order[index]}
+    step=$(( index + 1 ))
+    rc=0
+    ask "$id" "$step" "$total" || rc=$?
+    case $rc in
+      0)
+        ANSWERS[$id]=$PROMPT_RESULT
+        # Answering the encryption question changes which questions remain.
+        if [[ $id == encrypt ]]; then
+          mapfile -t order < <(visible_questions)
+          total=${#order[@]}
+        fi
+        index=$(( index + 1 ))
+        ;;
+      1)
+        if (( index == 0 )); then
+          # shellcheck disable=SC2034  # inspected by main_flow's callers
+          if confirm_quit; then CANCELLED=1; return 1; fi
+        else
+          index=$(( index - 1 ))
+        fi
+        ;;
+      *) CANCELLED=1; return 1 ;;
+    esac
+  done
+  return 0
+}
+
+run_advanced() {
+  local id step=0 total rc
+  local -a advanced=()
+  for id in "${AURADE_QUESTION_IDS[@]}"; do
+    aurade_question_is_advanced "$id" && advanced+=("$id") || true
+  done
+  total=${#advanced[@]}
+  (( total > 0 )) || return 0
+  SHOW_ADVANCED=1
+  for id in "${advanced[@]}"; do
+    step=$(( step + 1 ))
+    rc=0
+    ask "$id" "$step" "$total" || rc=$?
+    (( rc == 0 )) || return 0
+    ANSWERS[$id]=$PROMPT_RESULT
+  done
+  return 0
+}
+
+run_review() {
+  local key
+  while true; do
+    screen_review
+    key=$(read_key) || return 1
+    case $key in
+      enter) return 0 ;;
+      a|A) run_advanced ;;
+      esc) return 1 ;;
+    esac
+  done
+}
+
+# The erase gate. The token is built from the canonical target and compared
+# whole; the engine independently requires the same token, so a front end bug
+# here cannot by itself cause an erase.
+run_gate() {
+  local target=${ANSWERS[target]} token typed='' key
+  token="ERASE:$target"
+  while true; do
+    screen_gate "$typed"
+    key=$(read_key) || return 1
+    case $key in
+      enter) [[ $typed == "$token" ]] && return 0 || true ;;
+      esc) return 1 ;;
+      backspace) typed=${typed%?} ;;
+      space) typed+=' ' ;;
+      up|down|left|right|tab) ;;
+      *) [[ ${#key} -ne 1 ]] || typed+=$key ;;
+    esac
+  done
+}
+
+run_failure() {
+  local cursor=0 key status=$1 stamp destination
+  build_failure_options
+  while true; do
+    screen_failure "$cursor"
+    key=$(read_key) || return "$status"
+    case $key in
+      up)   (( cursor > 0 )) && cursor=$(( cursor - 1 )) || cursor=0 ;;
+      down) (( cursor + 1 < ${#FAILURE_OPTIONS[@]} )) && cursor=$(( cursor + 1 )) || true ;;
+      enter)
+        case ${FAILURE_OPTIONS[cursor]} in
+          'Save a diagnostic report')
+            stamp=$(date -u +%Y%m%dT%H%M%SZ)
+            destination="${EXPORT_DIR%/}/failure-${stamp}"
+            "$FAILURE_HELPER" --status "$status" --journal "$JOURNAL_FILE" \
+              --raw-log "$RAW_LOG" --export "$destination" >/dev/null 2>&1 || true
+            tui_line "  Saved to $destination" ok
+            sleep 2 ;;
+          'View the full log')
+            ${PAGER:-less} "$RAW_LOG" 2>/dev/null || true ;;
+          'Open a shell')
+            tui_clear
+            printf 'Type exit to return to the installer.\n'
+            bash || true ;;
+          'Restart the computer')
+            systemctl reboot || true
+            return "$status" ;;
+        esac
+        ;;
+      esc) return "$status" ;;
+    esac
+  done
+}
+
+main_flow() {
+  SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX")
+  chmod 700 "$SECRET_DIR"
+  install -d -m 0700 "$(dirname "$JOURNAL_FILE")" 2>/dev/null || true
+
+  aurade_probe_renderer
+  local key status=0
+  if [[ $AURADE_PROBE_RENDERER == tui && $AURADE_PROBE_REASON != forced ]]; then
+    screen_fallback
+    key=$(read_key) || true
+    [[ $key != esc ]] || { CANCELLED=1; screen_cancelled; return 0; }
+  fi
+
+  screen_welcome
+  key=$(read_key) || true
+  if [[ $key == esc || $key == q ]]; then
+    CANCELLED=1
+    screen_cancelled
+    return 0
+  fi
+
+  if ! run_questions; then
+    screen_cancelled
+    return 0
+  fi
+  if ! run_review; then
+    screen_cancelled
+    return 0
+  fi
+
+  hash_password
+  [[ ${ANSWERS[encrypt]:-no} != yes ]] || write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"
+  ANSWERS[luks_passphrase]='set'
+
+  build_engine_args
+
+  # The dry run happens before the gate, so the plan the user approves is the
+  # plan the engine produced rather than a description of it.
+  #
+  # The status is captured with `|| status=$?` rather than inside an `if !`
+  # block: there, `$?` is the status of the negation, which is always zero when
+  # the branch is taken. Reading it that way made a failed dry run report a
+  # successful install.
+  status=0
+  "$ENGINE" "${ENGINE_ARGS[@]}" --dry-run >>"$RAW_LOG" 2>&1 || status=$?
+  if (( status != 0 )); then
+    run_failure "$status" || status=$?
+    return "$status"
+  fi
+
+  if (( PLAN_ONLY )); then
+    screen_review
+    return 0
+  fi
+
+  if ! run_gate; then
+    screen_cancelled
+    return 0
+  fi
+
+  status=0
+  run_engine_with_progress "${ENGINE_ARGS[@]}" --execute \
+    --confirm "ERASE:${ANSWERS[target]}" || status=$?
+  if (( status != 0 )); then
+    run_failure "$status" || status=$?
+    return "$status"
+  fi
+  screen_done
+  return 0
+}
+
+# --------------------------------------------------------------------------
+# Entry
+# --------------------------------------------------------------------------
+
+# Sourcing this file with AURADE_INSTALLER_TUI_LIB=1 defines every function and
+# stops before the entry point runs.
+#
+# This exists so the state machine can be tested without root, without a
+# terminal and without a block device: the flow test sources this, drives
+# run_questions with a scripted key stream, and inspects ANSWERS and the engine
+# argument list directly. Testing the flow only through the real entry point
+# would mean testing it only where it needs root, which in practice means not
+# testing it - and the question flow is exactly the part where a wrong answer
+# reaches the destructive engine.
+if [[ -n ${AURADE_INSTALLER_TUI_LIB:-} ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+RENDERABLE=(welcome fallback review gate progress failure 'done' cancelled
+  question-target question-hostname question-username question-password
+  question-encrypt question-keymap question-timezone question-locale
+  question-snapshot)
+
+while (($#)); do
+  case $1 in
+    --render) RENDER_ONLY=${2:?}; shift 2 ;;
+    --journal) JOURNAL_FILE=$2; AURADE_JOURNAL_PATH=$2; shift 2 ;;
+    --raw-log) RAW_LOG=$2; AURADE_JOURNAL_RAW=$2; shift 2 ;;
+    --plan-only) PLAN_ONLY=1; shift ;;
+    --list-screens) printf '%s\n' "${RENDERABLE[@]}"; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "aurade-installer-tui: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# Scripted key input for the flow tests. Opened on a dedicated descriptor so
+# that a screen reading from stdin cannot consume the script.
+if [[ -n ${AURADE_TUI_KEYS:-} ]]; then
+  exec {_TUI_KEYFD}<"$AURADE_TUI_KEYS"
+  export _TUI_KEYFD
+fi
+
+if [[ -n $RENDER_ONLY ]]; then
+  # Deterministic fixture state, so a rendered screen is a function of the
+  # screen name alone and two runs are byte-identical.
+  ANSWERS[target]=${AURADE_RENDER_TARGET:-/dev/nvme0n1}
+  ANSWERS[hostname]=aurade
+  ANSWERS[username]=alex
+  ANSWERS[password]='set'
+  ANSWERS[encrypt]=yes
+  ANSWERS[luks_passphrase]='set'
+  ANSWERS[keymap]=us
+  ANSWERS[timezone]=UTC
+  ANSWERS[locale]=en_US.UTF-8
+  aurade_probe_renderer
+  case $RENDER_ONLY in
+    welcome)   screen_welcome ;;
+    fallback)  screen_fallback ;;
+    review)    screen_review ;;
+    gate)      screen_gate "${AURADE_RENDER_TYPED:-ERASE:${ANSWERS[target]}}" ;;
+    progress)  screen_progress ;;
+    failure)   build_failure_options; screen_failure 0 ;;
+    done)      screen_done ;;
+    cancelled) screen_cancelled ;;
+    question-*)
+      _qid=${RENDER_ONLY#question-}
+      aurade_question_exists "$_qid" || { echo "unknown question: $_qid" >&2; exit 2; }
+      screen_question "$_qid" 4 9 "${AURADE_RENDER_ERROR:-}" "${AURADE_RENDER_BUFFER:-}" 0 ;;
+    *) echo "aurade-installer-tui: unknown screen: $RENDER_ONLY" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
+
+if (( EUID != 0 )); then
+  echo 'aurade-installer-tui: run as root from the AuraDE installation image' >&2
+  exit 1
+fi
+[[ -n $ENGINE && -x $ENGINE ]] || {
+  echo 'aurade-installer-tui: aurade-install engine not found' >&2
+  exit 1
+}
+
+main_flow || EXIT_STATUS=$?
+exit "$EXIT_STATUS"

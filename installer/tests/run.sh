@@ -4,6 +4,11 @@ set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 
 "$ROOT/test-prompt-validation.sh"
+"$ROOT/test-questions.sh"
+"$ROOT/test-tui-render.sh"
+"$ROOT/test-tui-flow.sh"
+"$ROOT/test-probe.sh"
+"$ROOT/test-tui-engine.sh"
 "$ROOT/test-network-diagnostics.sh"
 "$ROOT/test-failure-injection.sh"
 "$ROOT/test-installer-failure.sh"
