@@ -383,7 +383,23 @@ cleanup() {
   [[ -z ${WORK_DIR:-} ]] || rm -rf -- "$WORK_DIR"
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+
+handle_cancel() {
+  local status=$1
+  set +e
+  trap - INT TERM
+  if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" cancelled \
+      'installer cancelled; inspect the private install log before retrying' \
+      log shell reboot || true
+  fi
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'handle_cancel 130' INT
+trap 'handle_cancel 143' TERM
 
 while (($#)); do
   case "$1" in
