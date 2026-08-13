@@ -6,6 +6,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-prompt-validation.sh"
 "$ROOT/test-network-diagnostics.sh"
 "$ROOT/test-failure-injection.sh"
+"$ROOT/test-installer-failure.sh"
 "$ROOT/test-refresh-mirrors.sh"
 "$ROOT/test-signed-stage.sh"
 "$ROOT/test-stage-reproducibility.sh"

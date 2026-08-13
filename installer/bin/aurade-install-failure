@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Small, non-GUI failure view shared by the interactive installer and future
+# front ends. It reads only bounded journal fields; raw command output stays in
+# the private log until the user explicitly exports it.
+set -Eeuo pipefail
+
+STATUS=1
+JOURNAL=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
+RAW_LOG=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
+EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
+NONINTERACTIVE=0
+EXPORT_REQUEST=
+
+usage() {
+  cat <<'EOF'
+Usage: aurade-install-failure --status CODE [options]
+
+Options:
+  --journal FILE       Machine-readable JSONL journal
+  --raw-log FILE       Private unstructured installer log
+  --export DIR         Copy the journal/log to a mode-0700 directory
+  --noninteractive     Print the report and return without prompting
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --status) STATUS=${2:?}; shift 2 ;;
+    --journal) JOURNAL=${2:?}; shift 2 ;;
+    --raw-log) RAW_LOG=${2:?}; shift 2 ;;
+    --export) EXPORT_REQUEST=${2:?}; shift 2 ;;
+    --noninteractive) NONINTERACTIVE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "aurade-install-failure: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[[ $STATUS =~ ^[0-9]+$ ]] || { echo 'aurade-install-failure: status must be numeric' >&2; exit 2; }
+
+extract_field() {
+  local field=$1 line=$2
+  sed -n 's/.*"'"$field"'":"\([^\"]*\)".*/\1/p' <<<"$line" | head -1
+}
+
+latest_failed_record() {
+  [[ -r $JOURNAL ]] || return 0
+  awk '/"status":"failed"/ { record=$0 } END { if (record) print record }' "$JOURNAL"
+}
+
+report() {
+  local record stage cause message
+  record=$(latest_failed_record || true)
+  stage=$(extract_field stage "$record")
+  cause=$(extract_field cause "$record")
+  message=$(extract_field message "$record")
+  printf '\nAuraDE installer stopped (exit status %s).\n' "$STATUS" >&2
+  if [[ -n $stage ]]; then printf '  stage: %s\n' "$stage" >&2; fi
+  if [[ -n $cause ]]; then printf '  cause: %s\n' "$cause" >&2; fi
+  if [[ -n $message ]]; then printf '  detail: %s\n' "$message" >&2; fi
+  printf '  journal: %s\n  raw log: %s\n' "$JOURNAL" "$RAW_LOG" >&2
+  printf '%s\n' 'Raw command output is kept separate and is not shown here automatically.' >&2
+}
+
+export_logs() {
+  local destination=$1 source
+  [[ $destination == /* && $destination != / ]] || {
+    echo 'aurade-install-failure: export directory must be an absolute non-root path' >&2
+    return 2
+  }
+  [[ ! -e $destination ]] || {
+    echo "aurade-install-failure: export directory already exists: $destination" >&2
+    return 1
+  }
+  install -d -m 0700 "$destination"
+  for source in "$JOURNAL" "$RAW_LOG"; do
+    [[ -r $source ]] || continue
+    install -m 0600 "$source" "$destination/$(basename "$source")"
+  done
+  printf 'Diagnostic logs exported to %s\n' "$destination" >&2
+}
+
+report
+if [[ -n $EXPORT_REQUEST ]]; then
+  export_logs "$EXPORT_REQUEST" || true
+  exit "$STATUS"
+fi
+(( NONINTERACTIVE )) && exit "$STATUS"
+[[ -t 0 ]] || exit "$STATUS"
+
+while true; do
+  printf '%s' '[e]xport logs, [c]ollect hardware bundle, [s]hell, [r]eboot, [q]uit [q]: ' >&2
+  IFS= read -r choice || choice=q
+  case ${choice,,} in
+    e)
+      stamp=$(date -u +%Y%m%dT%H%M%SZ)
+      export_logs "${EXPORT_DIR%/}/failure-${stamp}" || true
+      ;;
+    c)
+      if command -v aurade-hardware-qualify >/dev/null 2>&1; then
+        stamp=$(date -u +%Y%m%dT%H%M%SZ)
+        destination="${EXPORT_DIR%/}/support-${stamp}"
+        install -d -m 0700 "$destination"
+        aurade-hardware-qualify --output-dir "$destination" ||
+          echo 'Hardware bundle collection failed; review the installer logs.' >&2
+      else
+        echo 'aurade-hardware-qualify is not available in this environment.' >&2
+      fi
+      ;;
+    s) exec bash ;;
+    r)
+      read -r -p 'Reboot now? Type REBOOT to confirm: ' confirmation
+      if [[ $confirmation == REBOOT ]]; then
+        systemctl reboot
+        exit "$STATUS"
+      fi
+      ;;
+    q|'') exit "$STATUS" ;;
+    *) echo 'Choose e, c, s, r, or q.' >&2 ;;
+  esac
+done
