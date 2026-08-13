@@ -22,7 +22,13 @@ fail() { echo "test-tui-render: $*" >&2; exit 1; }
 
 install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" "$TMP/dri"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
-: >"$TMP/locales/en_US"; : >"$TMP/keymaps/i386/qwerty/us.map.gz"
+# Several candidates, deliberately including ones that sort before each
+# default: with a single-entry list, "opens on the default" would pass even if
+# the cursor never moved off zero.
+for _locale in en_US en_GB de_DE fr_FR aa_DJ; do : >"$TMP/locales/$_locale"; done
+for _keymap in us uk de fr colemak dvorak; do
+  : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"
+done
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
@@ -201,6 +207,27 @@ grep -Fq 'Nothing was written to the disk' "$TMP/reversible.out" ||
 
 render cancelled none ascii >"$TMP/cancelled"
 grep -Fq 'Nothing was changed' "$TMP/cancelled" || fail 'the cancelled screen does not say so'
+
+# --- defaults are visible, not applied invisibly on enter -------------------
+# Every question type accepts its default when the user presses enter, so the
+# screen has to show what that default is. An empty-looking field that quietly
+# means "aurade" is a default nobody can review before confirming it.
+render question-hostname none ascii >"$TMP/hostname.out"
+grep -Eq '^\|  > aurade_' "$TMP/hostname.out" ||
+  fail 'the hostname field does not show its default'
+render question-snapshot none ascii >"$TMP/snapshot.out"
+grep -Fq '2026/07/12' "$TMP/snapshot.out" ||
+  fail 'the snapshot field does not show the image default'
+render question-keymap none ascii >"$TMP/keymap.out"
+grep -Eq '^\|  > us +\|' "$TMP/keymap.out" ||
+  fail 'the keyboard list does not open on the default layout'
+render question-encrypt none ascii >"$TMP/encrypt.out"
+grep -Eq '^\|  > Yes,' "$TMP/encrypt.out" ||
+  fail 'the encryption question does not open on its default answer'
+# A question the user must answer has no default to show.
+render question-username none ascii >"$TMP/username.out"
+grep -Eq '^\|  > _ +\|' "$TMP/username.out" ||
+  fail 'the username field was pre-filled with something'
 
 # --- long labels and values are laid out, not clipped -----------------------
 # Both of these carry the sentence a user needs in order to act, so losing the

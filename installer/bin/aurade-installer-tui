@@ -717,6 +717,9 @@ read_key() { tui_read_key; }
 # reason about than tracking a cursor position across a frame.
 prompt_text() {
   local id=$1 step=$2 total=$3 buffer=${4:-} error='' key
+  # Show the default in the field rather than applying it invisibly on enter.
+  # A box that looks empty but means "aurade" is a default nobody can review.
+  [[ -n $buffer ]] || buffer=$(aurade_question_default "$id")
   while true; do
     screen_question "$id" "$step" "$total" "$error" "$buffer"
     error=''
@@ -1246,7 +1249,26 @@ if [[ -n $RENDER_ONLY ]]; then
     question-*)
       _qid=${RENDER_ONLY#question-}
       aurade_question_exists "$_qid" || { echo "unknown question: $_qid" >&2; exit 2; }
-      screen_question "$_qid" 4 9 "${AURADE_RENDER_ERROR:-}" "${AURADE_RENDER_BUFFER:-}" 0 ;;
+      _buffer=${AURADE_RENDER_BUFFER:-}
+      _cursor=0
+      _step=1
+      _total=${#AURADE_QUESTION_ORDER[@]}
+      _n=0
+      for _candidate in "${AURADE_QUESTION_ORDER[@]}"; do
+        _n=$(( _n + 1 ))
+        [[ $_candidate != "$_qid" ]] || _step=$_n
+      done
+      case $(aurade_question_field "$_qid" type) in
+        enum)
+          enum_filter "$_qid" "$_buffer"
+          _cursor=$(enum_index_of "$(aurade_question_default "$_qid")") ;;
+        text|date)
+          [[ -n $_buffer ]] || _buffer=$(aurade_question_default "$_qid") ;;
+        bool)
+          [[ $(aurade_question_default "$_qid") == yes ]] || _cursor=1 ;;
+      esac
+      screen_question "$_qid" "$_step" "$_total" "${AURADE_RENDER_ERROR:-}" \
+        "$_buffer" "$_cursor" ;;
     *) echo "aurade-installer-tui: unknown screen: $RENDER_ONLY" >&2; exit 2 ;;
   esac
   exit 0
