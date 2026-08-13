@@ -27,9 +27,14 @@ BUILD_WORK=$WORK_ROOT/work
 REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
+MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 export SOURCE_DATE_EPOCH
 
 [[ $WORK_ROOT == /* && $WORK_ROOT != / ]] || { echo 'build-iso: work root must be an absolute non-root path' >&2; exit 2; }
+[[ $MAX_ISO_BYTES =~ ^[0-9]+$ && $MAX_ISO_BYTES -gt 0 ]] || {
+  echo 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' >&2
+  exit 2
+}
 
 if [[ $ALLOW_UNSIGNED != 1 ]]; then
   : "${AURADE_REPO_KEY:?Signed images require AURADE_REPO_KEY}"
@@ -132,12 +137,23 @@ mkarchiso -v -w "$BUILD_WORK" -o "$OUTPUT_DIR" "$STAGE"
 
 iso=$(find "$OUTPUT_DIR" -maxdepth 1 -type f -name 'aurade-*.iso' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
 [[ -n $iso ]] || { echo 'build-iso: mkarchiso produced no AuraDE ISO' >&2; exit 1; }
+iso_bytes=$(stat -c '%s' "$iso")
+(( iso_bytes <= MAX_ISO_BYTES )) || {
+  echo "build-iso: ISO is ${iso_bytes} bytes, above AURADE_MAX_ISO_BYTES=${MAX_ISO_BYTES}" >&2
+  exit 1
+}
+package_count=$(find "$STAGE/airootfs/opt/aurade/repo" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' | wc -l)
+package_bytes=$(find "$STAGE/airootfs/opt/aurade/repo" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')
 (cd "$(dirname "$iso")" && sha256sum "$(basename "$iso")") | tee "$iso.sha256"
 {
   printf 'arch_snapshot=%s\n' "$AURADE_ARCH_SNAPSHOT"
   printf 'source_date_epoch=%s\n' "$SOURCE_DATE_EPOCH"
   printf 'repo_url=%s\n' "$REPO_URL"
   printf 'repo_fingerprint=%s\n' "${expected_fingerprint:-unsigned}"
+  printf 'iso_bytes=%s\n' "$iso_bytes"
+  printf 'iso_max_bytes=%s\n' "$MAX_ISO_BYTES"
+  printf 'package_count=%s\n' "$package_count"
+  printf 'package_bytes=%s\n' "$package_bytes"
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
   (cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock)
 } >"$iso.build-info"
