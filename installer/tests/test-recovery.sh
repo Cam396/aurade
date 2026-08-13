@@ -185,4 +185,44 @@ if find "$TMP/root/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -name '*injecte
   exit 1
 fi
 
+# A failure while atomically installing the generated boot entry must also
+# remove its temporary file. The pre-existing rollback entry remains intact;
+# cleanup is limited to the newly-created snapshot, artifacts, and temp file.
+install -d "$TMP/failing-mv-bin"
+cat >"$TMP/failing-mv-bin/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == -f && ${2:-} == *.tmp.* ]]; then
+  exit 43
+fi
+exec /usr/bin/mv "$@"
+EOF
+chmod 0755 "$TMP/failing-mv-bin/mv"
+cp "$TMP/root/boot/loader/entries/aurade-rollback.conf" \
+  "$TMP/rollback-entry-before-mv-failure"
+cp "$TMP/normal-entry" "$TMP/root/boot/loader/entries/aurade.conf"
+if PATH="$TMP/failing-mv-bin:$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label mv-failure --set-rollback >"$TMP/mv-failure.out" 2>&1; then
+  echo 'rollback-entry move failure fixture unexpectedly passed' >&2
+  exit 1
+fi
+if find "$TMP/root/boot/loader/entries" -maxdepth 1 \
+  -name 'aurade-rollback.conf.tmp.*' -print -quit | grep -q .; then
+  echo 'rollback-entry move failure left a temporary entry' >&2
+  exit 1
+fi
+cmp -s "$TMP/rollback-entry-before-mv-failure" \
+  "$TMP/root/boot/loader/entries/aurade-rollback.conf"
+if find "$TMP/root/.snapshots" -mindepth 1 -maxdepth 1 \
+  -name '*mv-failure*' -print -quit | grep -q .; then
+  echo 'rollback-entry move failure left a snapshot directory' >&2
+  exit 1
+fi
+if find "$TMP/root/boot/aurade-rollback" -mindepth 1 -maxdepth 1 \
+  -name '*mv-failure*' -print -quit | grep -q .; then
+  echo 'rollback-entry move failure left rollback artifacts' >&2
+  exit 1
+fi
+
 echo 'recovery rollback test: PASS'
