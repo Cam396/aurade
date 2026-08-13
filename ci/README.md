@@ -15,8 +15,11 @@ an explicitly supplied current `chromiumos-ash` artifact in a fresh staging
 directory. `verify-release-repo.sh` requires exactly the current eleven-package
 set, exact `.SRCINFO` metadata, matching repository-database versions, valid
 package metadata/file lists, and cryptographically valid signatures when
-`AURADE_REQUIRE_SIGNATURES=1`. A successful build atomically promotes staging
-and keeps the previous repository as `.previous`.
+`AURADE_REQUIRE_SIGNATURES=1`. Signed verification requires an isolated public
+keyring in `AURADE_REPO_KEYRING` and its full primary fingerprint in
+`AURADE_REPO_FINGERPRINT`; package and database signatures are checked with
+`gpgv` against that keyring, not an ambient user keyring. A successful build
+atomically promotes staging and keeps the previous repository as `.previous`.
 
 `bootstrap-arch-root.sh` creates an Arch validation root on a host with
 `pacstrap`, using the configured `AURADE_WORKDIR` for the root, pacman DB, and
@@ -330,7 +333,9 @@ Public install shape:
   uses for its scratch worktree.
 - `AURADE_VM_HOST`, `AURADE_VM_USER`, `AURADE_TEST_USER`, and
   `AURADE_EXPECTED_CHROME_SHA` configure `ci/vm-smoke.sh`.
-- `GPGKEY=<key-id>` signs package files and the repo database.
+- `GPGKEY=<key-id>` signs package files and the repo database; release builds
+  also require `AURADE_REPO_KEYRING=<public-key-file>` and
+  `AURADE_REPO_FINGERPRINT=<full-fingerprint>` for pinned verification.
 - `AURADE_SIGN_PACKAGES=0` leaves package files unsigned while still allowing
   repo database signing when `GPGKEY` is set.
 - `AURADE_INSTALL_SMOKE=1 ci/arch-package-smoke.sh` additionally installs the
