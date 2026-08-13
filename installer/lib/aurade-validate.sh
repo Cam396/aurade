@@ -83,3 +83,21 @@ aurade_valid_arch_snapshot() {
   normalized=$(date -u -d "${snapshot//\//-}" +%Y/%m/%d 2>/dev/null || true)
   [[ $normalized == "$snapshot" ]]
 }
+
+# Compare the disk selected before the prompts with the disk still present at
+# the destructive confirmation gate. Model/transport/size are always required;
+# a serial or WWN, when the device exposes one, is an additional stable match.
+# This keeps ordinary virtual disks usable while refusing a changed identity
+# between the dry run and erase confirmation.
+aurade_target_identity_matches() {
+  local expected_path=$1 expected_size=$2 expected_model=$3 expected_transport=$4
+  local expected_serial=$5 expected_wwn=$6 current_path=$7 current_size=$8
+  local current_model=$9 current_transport=${10} current_serial=${11} current_wwn=${12}
+  [[ $expected_path == "$current_path" &&
+     $expected_size == "$current_size" &&
+     $expected_model == "$current_model" &&
+     $expected_transport == "$current_transport" ]] || return 1
+  [[ -z $expected_serial || $expected_serial == "$current_serial" ]] || return 1
+  [[ -z $expected_wwn || $expected_wwn == "$current_wwn" ]] || return 1
+  return 0
+}
