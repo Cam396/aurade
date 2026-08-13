@@ -61,6 +61,9 @@ jobs:
       - name: Run ISO SBOM fixture test
         run: ci/tests/iso-sbom-test.sh
 
+      - name: Run ISO artifact sidecar gate
+        run: ci/tests/iso-artifact-gate-test.sh
+
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
 
