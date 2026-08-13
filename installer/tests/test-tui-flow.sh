@@ -23,7 +23,7 @@ install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
   "$TMP/block/nvme0n1" "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
 : >"$TMP/locales/en_US"; : >"$TMP/locales/fr_FR"
-: >"$TMP/keymaps/i386/qwerty/us.map.gz"; : >"$TMP/keymaps/i386/qwerty/fr.map.gz"
+for _keymap in us fr de; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
@@ -59,6 +59,7 @@ typed() {
 }
 
 # --- the whole default path, answered ---------------------------------------
+# shellcheck disable=SC2034  # SHOW_ADVANCED is read by the sourced front end
 reset_state() { ANSWERS=(); SHOW_ADVANCED=0; }
 
 reset_state
@@ -167,10 +168,8 @@ check 'password after mismatch' "${ANSWERS[password]}" 'agreed'
 reset_state
 { echo esc; echo q; } >"$TMP/keys"
 exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
-CANCELLED=0
 run_questions >/dev/null && fail 'quitting was reported as a completed flow'
 release
-check 'cancelled' "$CANCELLED" '1'
 
 reset_state
 {
@@ -181,10 +180,8 @@ reset_state
   echo n
 } >"$TMP/keys"
 exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
-CANCELLED=0
 run_questions >/dev/null || fail 'declining the quit prompt did not resume the flow'
 release
-check 'not cancelled' "$CANCELLED" '0'
 
 # --- the erase gate accepts only the exact token ----------------------------
 ANSWERS=([target]=/dev/sda)
@@ -257,6 +254,101 @@ grep -Fq '/dev/sda' "$TMP/review.out" || fail 'the review screen omits the targe
   fail 'the review screen printed a passphrase'
 ! grep -Fq 'correct horse' "$TMP/review.out" ||
   fail 'the review screen printed a password'
+
+# --- a validated keymap is applied immediately ------------------------------
+# The keyboard question is answered before any password, so the layout has to
+# take effect at the moment it is chosen rather than at the end of the flow.
+# A layout that is installed but will not load on this console must be caught
+# here, not discovered at a masked prompt.
+install -d "$TMP/stub"
+cat >"$TMP/stub/loadkeys" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >>"${AURADE_TEST_LOADKEYS_LOG:-/dev/null}"
+[[ $1 != "${AURADE_TEST_LOADKEYS_REJECT:-}" ]]
+STUB
+chmod +x "$TMP/stub/loadkeys"
+
+: >"$TMP/loadkeys.log"
+export AURADE_TEST_LOADKEYS_LOG="$TMP/loadkeys.log"
+
+# Present and succeeding: the answer is accepted and the layout was applied.
+APPLY_ERROR=x
+PATH="$TMP/stub:$PATH" apply_answer keymap fr || fail 'a loadable keymap was rejected'
+[[ -z $APPLY_ERROR ]] || fail 'a successful keymap left an error message behind'
+grep -Fxq fr "$TMP/loadkeys.log" || fail 'loadkeys was never called for the chosen keymap'
+
+# Present and failing: rejected, with something the user can act on.
+APPLY_ERROR=
+if AURADE_TEST_LOADKEYS_REJECT=de PATH="$TMP/stub:$PATH" apply_answer keymap de; then
+  fail 'a keymap that could not be loaded was accepted'
+fi
+[[ -n $APPLY_ERROR ]] || fail 'a rejected keymap produced no error message'
+[[ $APPLY_ERROR == *'could not be loaded'* ]] || fail "unhelpful keymap error: $APPLY_ERROR"
+
+# Absent: not an error. The image ships kbd, but a test host or serial console
+# may not, and refusing to continue would make the question unanswerable.
+APPLY_ERROR=x
+PATH='' apply_answer keymap fr || fail 'a missing loadkeys was treated as a failure'
+[[ -z $APPLY_ERROR ]] || fail 'a missing loadkeys produced an error message'
+
+# Questions with nothing to apply are unaffected.
+PATH='' apply_answer hostname aurade || fail 'a question with no apply step failed'
+
+# End to end through the prompt: a rejected layout re-asks instead of advancing.
+reset_state
+{
+  echo enter                       # locale
+  typed 'de'; echo enter           # keymap de -> loadkeys refuses
+  echo backspace; echo backspace
+  typed 'fr'; echo enter           # keymap fr -> accepted
+  echo enter                       # timezone
+  echo enter                       # disk
+  echo enter                       # hostname
+  typed 'alex'; echo enter
+  typed 'pw'; echo enter; typed 'pw'; echo enter
+  echo n
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+AURADE_TEST_LOADKEYS_REJECT=de PATH="$TMP/stub:$PATH" \
+  run_questions >"$TMP/keymap-flow.out" || fail 'the flow stalled on a rejected keymap'
+release
+check 'keymap after rejection' "${ANSWERS[keymap]}" 'fr'
+grep -Fq 'could not be loaded' "$TMP/keymap-flow.out" ||
+  fail 'the rejected keymap error was never shown'
+
+# --- going back shows the answer you gave, not the default ------------------
+# "esc back" is only truthful if the question it returns to still holds the
+# previous answer. Otherwise going back silently rewrites it to the default.
+reset_state
+ANSWERS=([encrypt]=no [target]=/dev/sdb [keymap]=fr)
+{ echo enter; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+prompt_bool encrypt 8 9 >/dev/null || fail 'the encryption question did not accept'
+release
+check 'bool remembered' "$PROMPT_RESULT" 'no'
+
+{ echo enter; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+prompt_disk target 4 9 >/dev/null || fail 'the disk question did not accept'
+release
+check 'disk remembered' "$PROMPT_RESULT" '/dev/sdb'
+
+{ echo enter; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+prompt_enum keymap 2 9 >/dev/null || fail 'the keymap question did not accept'
+release
+check 'enum remembered' "$PROMPT_RESULT" 'fr'
+
+# --- the first question offers quit; later ones offer back ------------------
+reset_state
+screen_question locale 1 9 >"$TMP/first.out"
+grep -Fq 'esc  quit' "$TMP/first.out" ||
+  fail 'the first question does not offer quit, which is what esc actually does there'
+screen_question hostname 5 9 >"$TMP/later.out"
+grep -Fq 'esc  back' "$TMP/later.out" ||
+  fail 'a later question does not offer back'
+! grep -Fq 'esc  quit' "$TMP/later.out" ||
+  fail 'a later question claims esc quits'
 
 # --- key decoding ------------------------------------------------------------
 check 'up arrow'    "$(tui_decode_key $'\033[A')" 'up'

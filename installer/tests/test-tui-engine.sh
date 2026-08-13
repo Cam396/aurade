@@ -102,8 +102,8 @@ answers() {
 }
 
 script_secret() {
-  local text=$1 pass
-  for pass in 1 2; do
+  local text=$1
+  for _ in 1 2; do
     local i
     for (( i = 0; i < ${#text}; i++ )); do
       if [[ ${text:i:1} == ' ' ]]; then echo space; else printf '%s\n' "${text:i:1}"; fi
@@ -129,7 +129,8 @@ run_flow() {
       AURADE_TUI_KEYS="$TMP/keys.$name" \
       AURADE_JOURNAL_PATH="$TMP/journal.$name.jsonl" \
       AURADE_JOURNAL_RAW="$TMP/raw.$name.log" \
-      AURADE_FAILURE_EXPORT_DIR="$TMP/export.$name" \
+      AURADE_FAILURE_EXPORT_DIR="${AURADE_TEST_EXPORT_DIR:-$TMP/export.$name}" \
+      AURADE_TEST_PLAN_ONLY="${AURADE_TEST_PLAN_ONLY:-0}" \
       bash -c '
         set -Eeuo pipefail
         . "$1"
@@ -138,6 +139,7 @@ run_flow() {
         JOURNAL_FILE=$AURADE_JOURNAL_PATH
         RAW_LOG=$AURADE_JOURNAL_RAW
         EXPORT_DIR=$AURADE_FAILURE_EXPORT_DIR
+        PLAN_ONLY=$AURADE_TEST_PLAN_ONLY
         main_flow
       ' _ "$ROOT/installer/bin/aurade-installer-tui" >"$TMP/out.$name" 2>&1
 }
@@ -239,6 +241,70 @@ if [[ -n $raw_export ]]; then
   ! grep -Fq "$PASSWORD" "$raw_export" || fail 'the exported raw log contains the password'
   ! grep -Fq "$PASSPHRASE" "$raw_export" || fail 'the exported raw log contains the passphrase'
 fi
+
+# --- --plan-only can never reach --execute ---------------------------------
+# The flag exists so an operator can see the plan without any risk at all, so
+# the guarantee has to be that no key sequence gets past it - including one
+# that types a correct erase token.
+{
+  answers
+  typed_token 'ERASE:/dev/sda'; echo enter
+  echo enter; echo enter; echo esc
+} >"$TMP/keys.planonly"
+AURADE_TEST_PLAN_ONLY=1 run_flow planonly ||
+  fail '--plan-only returned non-zero on a complete answer set'
+(( $(wc -l <"$TMP/calls.planonly") == 1 )) ||
+  fail "--plan-only ran the engine $(wc -l <"$TMP/calls.planonly") times instead of once"
+grep -Fq -- '--dry-run' "$TMP/calls.planonly" || fail '--plan-only did not run the dry run'
+! grep -Fq -- '--execute' "$TMP/calls.planonly" ||
+  fail '--plan-only reached a destructive invocation'
+! grep -Fq -- '--confirm' "$TMP/calls.planonly" ||
+  fail '--plan-only built a confirmation token'
+! grep -Fq 'Confirm erase' "$TMP/out.planonly" ||
+  fail '--plan-only displayed the erase gate'
+[[ ! -e /dev/sda ]] || true
+
+# --- going back from the erase gate returns to review, as the footer says ---
+{
+  answers
+  echo esc                                   # gate -> review
+  echo enter                                 # review -> prepare -> gate again
+  typed_token 'ERASE:/dev/sda'; echo enter   # now go through
+  echo enter
+} >"$TMP/keys.gateback"
+run_flow gateback || fail 'going back from the erase gate broke the flow'
+grep -Fq 'AuraDE is installed' "$TMP/out.gateback" ||
+  fail 'the install did not complete after going back and forward again'
+# Two dry runs, because returning to review re-validates the plan, then one
+# execute. The important part is that exactly one execute happened.
+(( $(grep -c -- '--execute' "$TMP/calls.gateback") == 1 )) ||
+  fail 'the engine executed more than once across a back-and-forward'
+(( $(grep -c -- '--dry-run' "$TMP/calls.gateback") == 2 )) ||
+  fail 'the plan was not re-validated after returning to the review screen'
+
+# --- a failed export says so, and the menu stays usable ---------------------
+# The helper exits with the install status on success and 2 on failure, so its
+# exit code cannot distinguish them. Reporting "Saved" for a report that was
+# never written is the failure this guards.
+{
+  answers; typed_token 'ERASE:/dev/sda'; echo enter
+  echo enter                     # save a diagnostic report -> must fail
+  echo down                      # menu still responds
+  echo esc
+} >"$TMP/keys.exportfail"
+AURADE_STUB_FAIL_AT=bootloader AURADE_TEST_EXPORT_DIR=/proc/aurade-cannot-write \
+  run_flow exportfail && fail 'a failed install reported success'
+grep -Fq 'Could not save a report' "$TMP/out.exportfail" ||
+  fail 'a failed export did not report the failure'
+! grep -Fq 'Saved to' "$TMP/out.exportfail" ||
+  fail 'a failed export claimed the report was saved'
+[[ ! -e /proc/aurade-cannot-write ]] ||
+  fail 'the export wrote somewhere it should not have'
+# The menu is redrawn after the failed attempt, so the user still has options.
+(( $(grep -c 'View the full log' "$TMP/out.exportfail") >= 2 )) ||
+  fail 'the failure menu did not survive a failed export'
+grep -Fq 'Open a shell' "$TMP/out.exportfail" ||
+  fail 'the failure menu lost its options after a failed export'
 
 # --- raw command output stays out of the structured journal -----------------
 # The journal is the contract the UI parses; a stray line of subprocess output

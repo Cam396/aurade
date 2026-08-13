@@ -95,8 +95,6 @@ SHOW_ADVANCED=0
 # rendering never has to write to the shared question manifest.
 QUESTION_LABEL_OVERRIDE=
 SECRET_DIR=
-# shellcheck disable=SC2034  # read by main_flow's callers and by the flow test
-CANCELLED=0
 
 # Disk table: one `path|size|model|transport|serial` record per whole disk.
 #
@@ -323,7 +321,7 @@ screen_fallback() {
     tui_wrap "$(aurade_probe_advice)" dim
   fi
   tui_blank
-  tui_footer 'enter  continue in text mode' "$AURADE_PROBE_REASON"
+  tui_footer 'enter  continue in text mode    esc  quit' "$AURADE_PROBE_REASON"
 }
 
 # One question screen, driven entirely by the manifest.
@@ -352,11 +350,14 @@ screen_question() {
   if [[ -n $error ]]; then
     tui_wrap "$error" danger
   fi
+  local back='esc  back'
+  # Only the first question exits the installer, so only its footer says so.
+  (( step > 1 )) || back='esc  quit'
   case $type in
     disk|bool|enum)
-      tui_footer 'up/down  select    enter  continue' 'esc  back' ;;
+      tui_footer 'up/down  select    enter  continue' "$back" ;;
     *)
-      tui_footer 'type your answer    enter  continue' 'esc  back' ;;
+      tui_footer 'type your answer    enter  continue' "$back" ;;
   esac
 }
 
@@ -578,10 +579,11 @@ screen_progress() {
   tui_blank
   if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then
     tui_wrap 'This part cannot be interrupted safely.' dim
-    tui_footer 'l  view log' 'cancel unavailable past this point'
-  else
-    tui_footer 'l  view log' 'esc  cancel'
   fi
+  # No key is read while the engine runs, so no key is offered. A footer that
+  # advertises `l view log` or `esc cancel` here would be inviting the user to
+  # press something that does nothing at the least recoverable moment.
+  tui_footer 'do not turn off this computer' "$(stage_position "$active")"
 }
 
 format_elapsed() {
@@ -621,6 +623,10 @@ screen_failure() {
   fi
   tui_wrap "$(restart_advice "$stage")" warn
   tui_blank
+  if [[ -n ${EXPORT_NOTICE:-} ]]; then
+    tui_note '*' "$EXPORT_NOTICE" "${EXPORT_NOTICE_KIND:-ok}"
+    tui_blank
+  fi
   for option in "${FAILURE_OPTIONS[@]}"; do
     if (( index == cursor )); then
       tui_item yes "$option"
@@ -692,7 +698,7 @@ screen_done() {
     tui_wrap 'This disk is encrypted. You will be asked for the disk passphrase each time the computer starts, before the sign-in screen appears.' dim
     tui_blank
   fi
-  tui_footer 'enter  restart now' 'esc  stay here'
+  tui_footer 'remove the installation media, then restart' ''
 }
 
 screen_cancelled() {
@@ -703,7 +709,7 @@ screen_cancelled() {
   tui_blank
   tui_wrap 'No disk was partitioned, formatted or written to. This computer is exactly as it was before the installer started.' ink
   tui_blank
-  tui_footer 'enter  close' ''
+  tui_footer 'nothing was written to any disk' ''
 }
 
 # --------------------------------------------------------------------------
@@ -728,8 +734,12 @@ prompt_text() {
       enter)
         [[ -n $buffer ]] || buffer=$(aurade_question_default "$id")
         if aurade_question_validate "$id" "$buffer"; then
-          PROMPT_RESULT=$buffer
-          return 0
+          if apply_answer "$id" "$buffer"; then
+            PROMPT_RESULT=$buffer
+            return 0
+          fi
+          error=$APPLY_ERROR
+          continue
         fi
         error=$(aurade_question_field "$id" error)
         ;;
@@ -793,7 +803,7 @@ prompt_secret() {
 
 prompt_bool() {
   local id=$1 step=$2 total=$3 cursor=0 key
-  [[ $(aurade_question_default "$id") == yes ]] || cursor=1
+  [[ ${ANSWERS[$id]:-$(aurade_question_default "$id")} == yes ]] || cursor=1
   while true; do
     screen_question "$id" "$step" "$total" '' '' "$cursor"
     key=$(read_key) || return 2
@@ -808,9 +818,17 @@ prompt_bool() {
 }
 
 prompt_disk() {
-  local id=$1 step=$2 total=$3 cursor=0 key count
+  local id=$1 step=$2 total=$3 cursor=0 key count previous index=0 path
   count=$(disk_table | grep -c . || true)
   [[ $count =~ ^[0-9]+$ ]] || count=0
+  previous=${ANSWERS[$id]:-}
+  if [[ -n $previous ]]; then
+    while IFS='|' read -r path _; do
+      [[ -n $path ]] || continue
+      [[ $path != "$previous" ]] || { cursor=$index; break; }
+      index=$(( index + 1 ))
+    done < <(disk_table)
+  fi
   while true; do
     screen_question "$id" "$step" "$total" '' '' "$cursor"
     key=$(read_key) || return 2
@@ -845,7 +863,7 @@ prompt_enum() {
   # question type accepts its default when the user presses enter, and a list
   # that quietly starts somewhere else is the one place that promise breaks.
   enum_filter "$id" ''
-  cursor=$(enum_index_of "$(aurade_question_default "$id")")
+  cursor=$(enum_index_of "${ANSWERS[$id]:-$(aurade_question_default "$id")}")
   while true; do
     screen_question "$id" "$step" "$total" "$error" "$filter" "$cursor"
     error=''
@@ -862,6 +880,11 @@ prompt_enum() {
           error=$(aurade_question_field "$id" error)
           continue
         fi
+        if ! apply_answer "$id" "$PROMPT_RESULT"; then
+          error=$APPLY_ERROR
+          PROMPT_RESULT=
+          continue
+        fi
         return 0 ;;
       esc) return 1 ;;
       up)   (( cursor > 0 )) && cursor=$(( cursor - 1 )) || cursor=0 ;;
@@ -874,6 +897,31 @@ prompt_enum() {
       *) [[ ${#key} -ne 1 ]] || { filter+=$key; cursor=0; } ;;
     esac
   done
+}
+
+# Some answers take effect the moment they are accepted, so that the rest of
+# the flow is operated with the setting the user just chose. The keyboard is
+# the one that matters: a layout that passes validation but will not load on
+# this console has to be caught here, not discovered at the password prompt
+# where the characters cannot be seen.
+#
+# A missing loadkeys is not a failure. The installation image ships kbd, but a
+# test host or a serial console may not have it, and refusing to continue
+# without it would make the keyboard question unanswerable.
+APPLY_ERROR=
+apply_answer() {
+  local id=$1 value=$2
+  APPLY_ERROR=
+  case $id in
+    keymap)
+      command -v loadkeys >/dev/null 2>&1 || return 0
+      if ! loadkeys "$value" >/dev/null 2>&1; then
+        APPLY_ERROR='That layout is installed but could not be loaded on this console. Choose another.'
+        return 1
+      fi
+      ;;
+  esac
+  return 0
 }
 
 PROMPT_RESULT=
@@ -948,6 +996,10 @@ ENGINE_ARGS=()
 # holds a recoverable password past this point, and there is nothing for the
 # journal or a diagnostic bundle to leak.
 hash_password() {
+  # Going back from the review screen can return here, and by then the answer
+  # has already been replaced by the marker. Re-hashing it would hash the
+  # literal string `set` and lock the user out of the system they just built.
+  [[ ${ANSWERS[password]:-} != set ]] || return 0
   command -v openssl >/dev/null 2>&1 || {
     echo 'aurade-installer-tui: openssl is required to hash the account password' >&2
     return 1
@@ -991,11 +1043,21 @@ confirm_quit() {
   [[ $key == q || $key == Q ]]
 }
 
+# `start` is the question to open on: 0 for the first, -1 for the last. The
+# last is what "go back" from the review screen means, and without an entry
+# point that footer would be a promise the flow cannot keep.
 run_questions() {
+  local start=${1:-0}
   local -a order=()
-  local id index=0 total step rc
+  local id index total step rc
   mapfile -t order < <(visible_questions)
   total=${#order[@]}
+  if (( start < 0 )); then
+    index=$(( total - 1 ))
+    (( index >= 0 )) || index=0
+  else
+    index=$start
+  fi
   while (( index < total )); do
     id=${order[index]}
     step=$(( index + 1 ))
@@ -1014,12 +1076,12 @@ run_questions() {
       1)
         if (( index == 0 )); then
           # shellcheck disable=SC2034  # inspected by main_flow's callers
-          if confirm_quit; then CANCELLED=1; return 1; fi
+          if confirm_quit; then return 1; fi
         else
           index=$(( index - 1 ))
         fi
         ;;
-      *) CANCELLED=1; return 1 ;;
+      *) return 1 ;;
     esac
   done
   return 0
@@ -1077,8 +1139,44 @@ run_gate() {
   done
 }
 
+# Copy the journal and log somewhere the user can carry them away, and be
+# honest about whether that worked.
+#
+# The helper's exit status cannot answer that question: it exits with the
+# install's own status on success and 2 on failure, and the install status may
+# itself be 2. So the artifact is checked directly, which is the thing that
+# actually matters, and the helper's own message is carried through when it
+# has one.
+EXPORT_NOTICE=
+EXPORT_NOTICE_KIND=ok
+export_report() {
+  local status=$1 stamp destination errors
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  destination="${EXPORT_DIR%/}/failure-${stamp}"
+  EXPORT_NOTICE_KIND=danger
+  if [[ ! -x $FAILURE_HELPER ]]; then
+    EXPORT_NOTICE='Cannot save a report: the diagnostic helper is missing from this image.'
+    return 1
+  fi
+  errors=$(mktemp "${TMPDIR:-/tmp}/aurade-export.XXXXXX")
+  "$FAILURE_HELPER" --status "$status" --journal "$JOURNAL_FILE" \
+    --raw-log "$RAW_LOG" --export "$destination" >/dev/null 2>"$errors" || true
+  if [[ -d $destination ]] && find "$destination" -type f -print -quit 2>/dev/null | grep -q .; then
+    EXPORT_NOTICE="Saved to $destination"
+    EXPORT_NOTICE_KIND=ok
+    rm -f -- "$errors"
+    return 0
+  fi
+  EXPORT_NOTICE=$(sed -n 's/^aurade-install-failure: //p' "$errors" 2>/dev/null | head -1 || true)
+  rm -f -- "$errors"
+  [[ -n $EXPORT_NOTICE ]] ||
+    EXPORT_NOTICE="nothing was written to $destination"
+  EXPORT_NOTICE="Could not save a report: $EXPORT_NOTICE"
+  return 1
+}
+
 run_failure() {
-  local cursor=0 key status=$1 stamp destination
+  local cursor=0 key status=$1
   build_failure_options
   while true; do
     screen_failure "$cursor"
@@ -1089,12 +1187,9 @@ run_failure() {
       enter)
         case ${FAILURE_OPTIONS[cursor]} in
           'Save a diagnostic report')
-            stamp=$(date -u +%Y%m%dT%H%M%SZ)
-            destination="${EXPORT_DIR%/}/failure-${stamp}"
-            "$FAILURE_HELPER" --status "$status" --journal "$JOURNAL_FILE" \
-              --raw-log "$RAW_LOG" --export "$destination" >/dev/null 2>&1 || true
-            tui_line "  Saved to $destination" ok
-            sleep 2 ;;
+            # Whether it worked or not, the outcome is shown on the next draw
+            # of this screen and the menu stays exactly where it was.
+            export_report "$status" || true ;;
           'View the full log')
             ${PAGER:-less} "$RAW_LOG" 2>/dev/null || true ;;
           'Open a shell')
@@ -1117,69 +1212,107 @@ main_flow() {
   install -d -m 0700 "$(dirname "$JOURNAL_FILE")" 2>/dev/null || true
 
   aurade_probe_renderer
-  local key status=0
+  local key status=0 rc=0 state=welcome entry=0
+
   if [[ $AURADE_PROBE_RENDERER == tui && $AURADE_PROBE_REASON != forced ]]; then
     screen_fallback
     key=$(read_key) || true
-    [[ $key != esc ]] || { CANCELLED=1; screen_cancelled; return 0; }
+    [[ $key != esc ]] || { screen_cancelled; return 0; }
   fi
 
-  screen_welcome
-  key=$(read_key) || true
-  if [[ $key == esc || $key == q ]]; then
-    CANCELLED=1
-    screen_cancelled
-    return 0
-  fi
+  # A state machine rather than a straight line, because "go back" has to be
+  # able to go back. Every screen whose footer offers `esc back` returns here
+  # and moves to the previous state; the two that offer `esc quit` are the
+  # welcome screen and the first question, and those are the only ways out
+  # before the erase gate.
+  while true; do
+    case $state in
+      welcome)
+        screen_welcome
+        key=$(read_key) || key=esc
+        if [[ $key == esc || $key == q ]]; then
+          state=cancelled
+        else
+          entry=0
+          state=questions
+        fi
+        ;;
 
-  if ! run_questions; then
-    screen_cancelled
-    return 0
-  fi
-  if ! run_review; then
-    screen_cancelled
-    return 0
-  fi
+      questions)
+        rc=0
+        run_questions "$entry" || rc=$?
+        entry=0
+        if (( rc == 0 )); then state=review; else state=cancelled; fi
+        ;;
 
-  hash_password
-  [[ ${ANSWERS[encrypt]:-no} != yes ]] || write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"
-  ANSWERS[luks_passphrase]='set'
+      review)
+        rc=0
+        run_review || rc=$?
+        if (( rc == 0 )); then
+          state=prepare
+        else
+          # `esc back` from the review screen reopens the last question.
+          entry=-1
+          state=questions
+        fi
+        ;;
 
-  build_engine_args
+      prepare)
+        hash_password || return 1
+        if [[ ${ANSWERS[encrypt]:-no} == yes && ${ANSWERS[luks_passphrase]:-} != set ]]; then
+          write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"
+          ANSWERS[luks_passphrase]='set'
+        fi
+        build_engine_args
 
-  # The dry run happens before the gate, so the plan the user approves is the
-  # plan the engine produced rather than a description of it.
-  #
-  # The status is captured with `|| status=$?` rather than inside an `if !`
-  # block: there, `$?` is the status of the negation, which is always zero when
-  # the branch is taken. Reading it that way made a failed dry run report a
-  # successful install.
-  status=0
-  "$ENGINE" "${ENGINE_ARGS[@]}" --dry-run >>"$RAW_LOG" 2>&1 || status=$?
-  if (( status != 0 )); then
-    run_failure "$status" || status=$?
-    return "$status"
-  fi
+        # The dry run happens before the gate, so the plan the user approves is
+        # the plan the engine produced rather than a description of it.
+        #
+        # The status is captured with `|| status=$?` rather than inside an
+        # `if !` block: there, `$?` is the status of the negation, which is
+        # always zero when the branch is taken. Reading it that way made a
+        # failed dry run report a successful install.
+        status=0
+        "$ENGINE" "${ENGINE_ARGS[@]}" --dry-run >>"$RAW_LOG" 2>&1 || status=$?
+        if (( status != 0 )); then
+          run_failure "$status" || status=$?
+          return "$status"
+        fi
+        if (( PLAN_ONLY )); then state=planned; else state=gate; fi
+        ;;
 
-  if (( PLAN_ONLY )); then
-    screen_review
-    return 0
-  fi
+      # --plan-only stops here, and this is the only transition out of
+      # `prepare` that it can take. There is no path from this state to
+      # `execute`, so the flag cannot reach a destructive invocation.
+      planned)
+        screen_review
+        return 0
+        ;;
 
-  if ! run_gate; then
-    screen_cancelled
-    return 0
-  fi
+      gate)
+        rc=0
+        run_gate || rc=$?
+        if (( rc == 0 )); then state=execute; else state=review; fi
+        ;;
 
-  status=0
-  run_engine_with_progress "${ENGINE_ARGS[@]}" --execute \
-    --confirm "ERASE:${ANSWERS[target]}" || status=$?
-  if (( status != 0 )); then
-    run_failure "$status" || status=$?
-    return "$status"
-  fi
-  screen_done
-  return 0
+      execute)
+        status=0
+        run_engine_with_progress "${ENGINE_ARGS[@]}" --execute \
+          --confirm "ERASE:${ANSWERS[target]}" || status=$?
+        if (( status != 0 )); then
+          run_failure "$status" || status=$?
+          return "$status"
+        fi
+        screen_done
+        return 0
+        ;;
+
+      cancelled)
+        screen_cancelled
+        return 0
+        ;;
+    esac
+  done
 }
 
 # --------------------------------------------------------------------------
