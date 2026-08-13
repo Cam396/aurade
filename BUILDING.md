@@ -188,6 +188,10 @@ For a real image, omit `AURADE_ALLOW_UNSIGNED=1` and provide
 `AURADE_REPO_KEY` and `AURADE_REPO_FINGERPRINT` for the signed repository.
 The complete image and its sidecar metadata are written under
 `AURADE_ISO_OUTPUT_DIR` or the installer work directory's `output/` folder.
+The builder records ISO size and package-closure count/bytes in `.build-info`
+and rejects an image larger than `AURADE_MAX_ISO_BYTES` (4 GiB by default).
+Set that variable explicitly when a documented release profile requires a
+different ceiling; do not remove the check for a release build.
 
 The live image automatically opens a root console on tty1 for installation and
 recovery. The live `root` account has an empty password on the console;
