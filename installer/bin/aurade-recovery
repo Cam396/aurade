@@ -8,6 +8,7 @@ shift || true
 CONFIRM=
 LABEL=
 SET_ROLLBACK=0
+RETENTION=${AURADE_ROLLBACK_RETENTION:-3}
 
 usage() {
   cat <<'EOF'
@@ -30,6 +31,9 @@ Options:
   --set-rollback            Update aurade-rollback.conf after creating a snapshot
   --confirm TOKEN           Required only for persistent default changes
 
+Environment:
+  AURADE_ROLLBACK_RETENTION Number of manual snapshots to retain (default: 3)
+
 No command deletes a snapshot or modifies a filesystem layout.
 EOF
 }
@@ -44,6 +48,11 @@ while (($#)); do
     *) break ;;
   esac
 done
+
+[[ $RETENTION =~ ^[1-9][0-9]*$ ]] || {
+  echo 'aurade-recovery: AURADE_ROLLBACK_RETENTION must be a positive integer' >&2
+  exit 2
+}
 
 ROOT=$(readlink -f -- "$ROOT")
 ENTRY_DIR=$ROOT/boot/loader/entries
@@ -142,6 +151,23 @@ case "$COMMAND" in
       find "$ROOT/boot/aurade-rollback" -mindepth 1 -maxdepth 1 -type d \
         ! -name "$snapshot_name" ! -name factory -exec rm -rf -- {} +
     fi
+    # Keep the factory snapshot plus a bounded number of manual snapshots.
+    # Deleting a Btrfs subvolume must go through btrfs(8); a failed delete is
+    # reported but never replaced with a dangerous recursive removal.
+    mapfile -t manual_snapshots < <(
+      find "$SNAPSHOT_DIR" -mindepth 2 -maxdepth 2 -type d -name snapshot \
+        -path "$SNAPSHOT_DIR/manual-*/snapshot" -printf '%h\n' | LC_ALL=C sort
+    )
+    while ((${#manual_snapshots[@]} > RETENTION)); do
+      oldest=${manual_snapshots[0]}
+      if btrfs subvolume delete -- "$oldest/snapshot" >/dev/null 2>&1; then
+        rmdir -- "$oldest" 2>/dev/null || true
+      else
+        printf '%s\n' "aurade-recovery: could not prune old snapshot: $oldest" >&2
+        break
+      fi
+      manual_snapshots=("${manual_snapshots[@]:1}")
+    done
     printf '%s\n' "$destination"
     ;;
   boot-normal|boot-rollback)
