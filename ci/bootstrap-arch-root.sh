@@ -119,7 +119,7 @@ Architecture = x86_64
 DBPath = ${PACMAN_DB}/
 CacheDir = ${PACMAN_CACHE}/
 SigLevel = Required DatabaseOptional
-LocalFileSigLevel = Optional
+LocalFileSigLevel = Required
 ParallelDownloads = 5
 CheckSpace
 

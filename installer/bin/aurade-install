@@ -600,7 +600,7 @@ CacheDir = ${ARCH_CACHE}
 GPGDir = ${ARCH_GPG_DIR}
 LogFile = ${ARCH_LOG_FILE}
 SigLevel = Required DatabaseOptional
-LocalFileSigLevel = Optional
+LocalFileSigLevel = Required
 
 [core]
 Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
