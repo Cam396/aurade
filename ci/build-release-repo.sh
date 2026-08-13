@@ -44,11 +44,13 @@ export REPO_NAME
 export AURADE_PACKAGES="aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full"
 export AURADE_NODEPS_PACKAGES="${AURADE_PACKAGES}"
 export MAKEPKG_FLAGS="${MAKEPKG_FLAGS:---force --noconfirm --clean --config ${makepkg_config}}"
-"${SCRIPT_DIR}/build-private-repo.sh"
-rm -f "${makepkg_config}"
 if [[ -n "${GPGKEY:-}" ]]; then
   : "${AURADE_REPO_KEYRING:?Set AURADE_REPO_KEYRING to an exported public repository key}"
   : "${AURADE_REPO_FINGERPRINT:?Set AURADE_REPO_FINGERPRINT to the full repository signing fingerprint}"
+fi
+"${SCRIPT_DIR}/build-private-repo.sh"
+rm -f "${makepkg_config}"
+if [[ -n "${GPGKEY:-}" ]]; then
   export AURADE_REQUIRE_SIGNATURES=1
 fi
 "${SCRIPT_DIR}/verify-release-repo.sh"
