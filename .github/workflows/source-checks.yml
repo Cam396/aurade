@@ -16,6 +16,13 @@ jobs:
       - name: Install source-check dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
 
+      - name: Verify archive tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v bsdtar
+          bsdtar --version
+
       - name: Check shell syntax
         shell: bash
         run: |
