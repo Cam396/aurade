@@ -28,11 +28,25 @@ install -d "$TMP/dri-empty" "$TMP/dri-ok"
 : >"$TMP/dri-ok/renderD128"
 : >"$TMP/dri-ok/card0"
 
+# A sysfs tree that says which driver is behind each render node. Without it a
+# render node is just a device file, which is the overclaim these tests guard.
+drm_tree() {
+  local root=$1 node=$2 driver=$3
+  install -d "$root/$node/device"
+  printf 'DRIVER=%s\nMODALIAS=pci:v00008086\n' "$driver" >"$root/$node/device/uevent"
+}
+install -d "$TMP/drm-real" "$TMP/drm-virtual" "$TMP/drm-empty"
+drm_tree "$TMP/drm-real" renderD128 i915
+drm_tree "$TMP/drm-virtual" renderD128 vgem
+install -d "$TMP/dri-virtual"
+: >"$TMP/dri-virtual/renderD128"
+
 probe() {
   # A fresh shell each time: the probe sets globals, and a test that reused
   # them could pass on a value left behind by the previous case.
   env AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$2" \
     AURADE_PROBE_MIN_GUI_MIB="${3:-6144}" AURADE_FORCE_TUI="${4:-0}" \
+    AURADE_PROBE_DRM_DIR="${5:-$TMP/drm-empty}" PATH="${6:-$PATH}" \
     bash -c '
       set -Eeuo pipefail
       . '"$ROOT"'/installer/lib/aurade-probe.sh
@@ -80,6 +94,90 @@ IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/abs
 check 'unreadable meminfo renderer' "$renderer" tui
 check 'unreadable meminfo reason' "$reason" low-memory
 
+# --- a render node is not a claim about 3D acceleration ---------------------
+# A renderD* device file proves a driver published a node. It does not prove
+# working acceleration, and a screen that says otherwise is how a user comes to
+# trust this check and then meets a black desktop.
+advice_for() {
+  env AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
+    AURADE_PROBE_DRM_DIR="${2:-$TMP/drm-empty}" PATH="${3:-$PATH}" bash -c '
+      set -Eeuo pipefail
+      . '"$ROOT"'/installer/lib/aurade-probe.sh
+      aurade_probe_renderer
+      aurade_probe_advice
+    '
+}
+healthy_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real")
+[[ $healthy_advice != *'can run the AuraDE desktop'* ]] ||
+  fail 'the probe still claims a render node proves the desktop will run'
+[[ $healthy_advice == *i915* ]] ||
+  fail 'the probe does not name the driver it actually found'
+[[ $healthy_advice == *'only proven once the desktop starts'* ]] ||
+  fail 'the probe does not say what it has not established'
+
+# The driver is reported in the graphics detail too.
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real")
+check 'real driver renderer' "$renderer" gui
+check 'real driver reason' "$reason" ok
+[[ $graphics == *'driver i915'* ]] || fail "the driver is missing from the detail: $graphics"
+
+# --- a virtual device is not a GPU ------------------------------------------
+# vgem and vkms publish render nodes and have no display output, so a check
+# that stops at "a render node exists" counts them as working graphics.
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-virtual" "$TMP/meminfo.big" 6144 0 "$TMP/drm-virtual")
+check 'virtual gpu renderer' "$renderer" tui
+check 'virtual gpu reason' "$reason" virtual-gpu-only
+check 'virtual gpu predicts a black screen' "$black" yes
+[[ $graphics == *vgem* ]] || fail 'the virtual device was not named'
+virtual_advice=$(advice_for "$TMP/dri-virtual" "$TMP/drm-virtual")
+[[ $virtual_advice == *'will not start'* ]] ||
+  fail 'the virtual-device advice does not say the desktop will not start'
+
+# --- the optional GL probe is optional, bounded, and believed when present --
+install -d "$TMP/gl-soft" "$TMP/gl-hard" "$TMP/gl-broken"
+printf '#!/bin/sh\necho "OpenGL renderer string: llvmpipe (LLVM 16.0.6, 256 bits)"\n' \
+  >"$TMP/gl-soft/eglinfo"
+printf '#!/bin/sh\necho "OpenGL renderer string: Mesa Intel(R) UHD Graphics 620"\n' \
+  >"$TMP/gl-hard/eglinfo"
+printf '#!/bin/sh\nexit 1\n' >"$TMP/gl-broken/eglinfo"
+chmod +x "$TMP"/gl-*/eglinfo
+
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real" "$TMP/gl-soft:$PATH")
+check 'software rendering renderer' "$renderer" tui
+check 'software rendering reason' "$reason" software-rendering
+check 'software rendering is not a black screen' "$black" no
+[[ $graphics == *llvmpipe* ]] || fail 'the software renderer was not reported'
+soft_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real" "$TMP/gl-soft:$PATH")
+[[ $soft_advice == *'drawn in software'* ]] ||
+  fail 'the software-rendering advice does not explain itself'
+[[ $soft_advice != *'will not start'* ]] ||
+  fail 'software rendering was described as a machine that cannot run the desktop'
+
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real" "$TMP/gl-hard:$PATH")
+check 'hardware rendering renderer' "$renderer" gui
+check 'hardware rendering reason' "$reason" ok
+hard_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real" "$TMP/gl-hard:$PATH")
+[[ $hard_advice == *'Hardware rendering is available'* ]] ||
+  fail 'a real renderer was not reported as hardware rendering'
+
+# A broken or absent eglinfo must leave the sysfs result exactly as it was.
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real" "$TMP/gl-broken:$PATH")
+check 'broken eglinfo renderer' "$renderer" gui
+check 'broken eglinfo reason' "$reason" ok
+[[ $graphics != *renderer* ]] || fail 'a failing GL probe still claimed a renderer'
+
+# --- the pre-erase warning for a missing GPU is unchanged -------------------
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-empty" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real")
+check 'no render node renderer, still' "$renderer" tui
+check 'no render node reason, still' "$reason" no-render-node
+check 'no render node still predicts a black screen' "$black" yes
+
 # --- the probe never fails ---------------------------------------------------
 # The front end runs under `set -e`. A probe that exits non-zero for the
 # ordinary "no graphics here" case would abort the installer rather than fall
@@ -119,7 +217,7 @@ bare_advice=$(advice "$TMP/bare-bin")
   fail 'bare metal was not told what is actually wrong'
 
 # --- every reason code has advice written for it -----------------------------
-for reason in ok forced no-dri-dir no-render-node low-memory; do
+for reason in ok forced no-dri-dir no-render-node low-memory virtual-gpu-only software-rendering; do
   text=$(env AURADE_PROBE_DRI_DIR="$TMP/dri-ok" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" bash -c '
     . '"$ROOT"'/installer/lib/aurade-probe.sh
     AURADE_PROBE_VIRT=none

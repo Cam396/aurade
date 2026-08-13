@@ -67,23 +67,68 @@ record of what happened, and it does not display stages the engine never
 emits: `network` and `verify` are folded into `preflight` and `acquire`, and a
 row that stays grey while the rows below it complete reads as a hung step.
 
-## Cancellation
+## Navigation and cancellation
 
-Asymmetric, because the disk is.
+Every footer states what the key actually does. This is a hard rule, not a
+style note: a footer offering `esc back` on a screen that exits is worse than
+no footer, because it is read at the moment the user is least sure.
+
+`main_flow` is a state machine rather than a straight line, because "back" has
+to be able to go back:
+
+| Screen | `esc` |
+| --- | --- |
+| Graphics check, welcome | quits |
+| First question | quits, after confirming |
+| Later questions | previous question |
+| Review | reopens the last question |
+| Erase gate | returns to review |
+| Progress | nothing — no key is offered, because none is read |
+
+Returning to a question shows the answer already given, not the default.
+A "back" that silently rewrites an answer to its default is the same class of
+untruth as a wrong footer.
+
+Returning to review re-runs the dry run, so the plan approved at the gate is
+always the plan for the answers currently held.
+
+Cancellation is asymmetric, because the disk is.
 
 | Region | Stages | Behaviour |
 | --- | --- | --- |
 | Reversible | `preflight` … `confirm` | Cancel freely. The UI states that nothing was written. |
 | The gate | typing `ERASE:<target>` | Last free exit. |
-| Irreversible | `partition` … `done` | No cancel is offered. |
+| Irreversible | `partition` … `done` | No cancel is offered, and none is advertised. |
 
 The boundary comes from `aurade_stage_reversible`, not from a second opinion
 held in the renderer.
+
+`--plan-only` reaches a terminal `planned` state that has no transition to
+`execute`. It is not a flag checked before a destructive call; it is a state
+from which the destructive call is unreachable.
+
+## Answers that take effect immediately
+
+Some answers are applied as soon as they are accepted, so the rest of the flow
+is operated with the setting just chosen. `apply_answer` owns this.
+
+The keyboard is the case that matters: the layout is chosen before any
+password, and a layout that passes validation but will not load on this
+console has to be rejected there rather than discovered at a masked prompt.
+A missing `loadkeys` is not a failure — the image ships `kbd`, but a test host
+or serial console may not, and refusing to continue would make the question
+unanswerable.
 
 ## Failure
 
 Every stop names the stage, explains what it means for the disk, and offers
 export, log, shell and restart.
+
+Saving a diagnostic report reports whether it worked. The helper's exit status
+cannot be used for this — it exits with the install's own status on success and
+2 on failure, and the install status may itself be 2 — so the artifact is
+checked directly. A failed export shows what went wrong and leaves the menu
+usable; it never shows "Saved".
 
 There is deliberately no "try that step again". The journal records which
 stages could safely re-run, but the engine is a linear script with no entry
@@ -110,10 +155,21 @@ has no working render node, it says so before the erase gate, because a
 successful install followed by a permanently black first boot on an
 already-erased disk is the worst failure available here.
 
-Low memory on the live image is reported differently from a missing GPU. The
-installed system has more memory available than the live image does, so low
-memory does not predict a black screen and must not be described as if it
-does.
+The probe claims only what it has established. A `renderD*` device file proves
+that a driver published a node; it does not prove working 3D acceleration, and
+the wording says so. Three distinctions are kept apart because they call for
+different advice:
+
+| Finding | Predicts a black desktop |
+| --- | --- |
+| No render node, or only `vgem`/`vkms` | yes |
+| Software rendering (`llvmpipe` and friends) | no — it will start, and be slow |
+| Low memory on the live image | no — the installed system has more |
+
+The kernel driver behind the node is read from sysfs, which is always present.
+An optional, time-bounded `eglinfo` probe refines the result when mesa-utils is
+on the image; when it is absent, slow or broken, the result stands on the sysfs
+evidence alone and the wording claims no more than that.
 
 ## Tests
 
