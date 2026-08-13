@@ -6,6 +6,12 @@ ENGINE=${AURADE_INSTALL_ENGINE:-/usr/local/sbin/aurade-install}
 [[ -x $ENGINE ]] || ENGINE="$(dirname "$0")/aurade-install"
 [[ -x $ENGINE ]] || { echo 'aurade-installer: aurade-install engine not found' >&2; exit 1; }
 
+VALIDATORS=${AURADE_VALIDATE_LIB:-/usr/local/lib/aurade/aurade-validate.sh}
+[[ -r $VALIDATORS ]] || VALIDATORS="$(dirname "$0")/../lib/aurade-validate.sh"
+[[ -r $VALIDATORS ]] || { echo 'aurade-installer: validation library not found' >&2; exit 1; }
+# shellcheck source=../lib/aurade-validate.sh
+. "$VALIDATORS"
+
 if (( EUID != 0 )); then
   echo 'aurade-installer: run as root from the AuraDE installation image' >&2
   exit 1
@@ -39,26 +45,56 @@ target_transport=$(lsblk -dnro TRAN "$target" | sed 's/[[:space:]]*$//' || true)
 printf 'Selected disk: %s | size=%s | model=%s | serial=%s | transport=%s\n' \
   "$target" "$target_size" "${target_model:-unknown}" \
   "${target_serial:-unknown}" "${target_transport:-unknown}"
-printf 'Hostname [aurade]: '
-read -r hostname
-hostname=${hostname:-aurade}
+while true; do
+  printf 'Hostname [aurade]: '
+  read -r hostname
+  hostname=${hostname:-aurade}
+  if aurade_valid_hostname "$hostname"; then
+    break
+  fi
+  printf '%s\n' 'Hostname must be 1-63 letters, digits or inner hyphens (for example aurade-laptop).' >&2
+done
 while true; do
   printf 'Initial username: '
   read -r username
-  if [[ $username =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+  if aurade_valid_username "$username"; then
     break
   fi
-  printf '%s\n' 'Username must start with a lowercase letter or underscore and contain only lowercase letters, digits, _ or -.' >&2
+  printf '%s\n' 'Username must start with a lowercase letter or underscore, contain only lowercase letters, digits, _ or -, and must not be a reserved system account.' >&2
 done
-printf 'Timezone [UTC]: '
-read -r timezone
-timezone=${timezone:-UTC}
-printf 'Locale [en_US.UTF-8]: '
-read -r locale
-locale=${locale:-en_US.UTF-8}
-printf 'Keyboard layout [us]: '
-read -r keymap
-keymap=${keymap:-us}
+while true; do
+  printf 'Timezone [UTC]: '
+  read -r timezone
+  timezone=${timezone:-UTC}
+  if aurade_valid_timezone "$timezone"; then
+    break
+  fi
+  printf '%s\n' 'Timezone must name an installed zone (for example America/Chicago or UTC).' >&2
+done
+while true; do
+  printf 'Locale [en_US.UTF-8]: '
+  read -r locale
+  locale=${locale:-en_US.UTF-8}
+  if aurade_valid_locale "$locale"; then
+    break
+  fi
+  printf '%s\n' 'Locale must name an installed locale (for example en_US.UTF-8 or C.UTF-8).' >&2
+done
+while true; do
+  printf 'Keyboard layout [us]: '
+  read -r keymap
+  keymap=${keymap:-us}
+  if aurade_valid_keymap "$keymap"; then
+    if command -v loadkeys >/dev/null 2>&1; then
+      loadkeys "$keymap" >/dev/null 2>&1 || {
+        printf '%s\n' 'The selected keyboard layout could not be loaded; choose another layout.' >&2
+        continue
+      }
+    fi
+    break
+  fi
+  printf '%s\n' 'Keyboard layout must name an installed keymap (for example us or us-altgr-intl).' >&2
+done
 printf 'Arch snapshot [%s]: ' "$snapshot_default"
 read -r snapshot
 snapshot=${snapshot:-$snapshot_default}
