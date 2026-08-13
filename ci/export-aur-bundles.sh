@@ -12,9 +12,17 @@ WORKDIR="${AURADE_WORKDIR:-${REPO_ROOT}/.aurade-work}"
 OUTPUT="${AURADE_AUR_OUTPUT:-${WORKDIR}/aur-bundles}"
 RELEASE_TAG="${AURADE_AUR_RELEASE_TAG:-v0.1.0-prealpha}"
 RELEASE_ARCHIVE="${AURADE_AUR_RELEASE_ARCHIVE:-aurade-v0.1.0-prealpha-x86_64-repository.tar.gz}"
-RELEASE_SHA256="${AURADE_AUR_ARCHIVE_SHA256:-87289829d7c1a99c29f50a21bc3c41a275c7793f7483c029e930da593bdd7ff0}"
-CHROMIUM_VERSION="${AURADE_AUR_CHROMIUM_VERSION:-152.1660893}"
-CHROMIUM_PKGREL="${AURADE_AUR_CHROMIUM_PKGREL:-4}"
+RELEASE_SHA256="${AURADE_AUR_ARCHIVE_SHA256:-}"
+CHROMIUM_VERSION=${AURADE_AUR_CHROMIUM_VERSION:-}
+CHROMIUM_PKGREL=${AURADE_AUR_CHROMIUM_PKGREL:-}
+if [[ -z $CHROMIUM_VERSION ]]; then
+  CHROMIUM_VERSION=$(awk -F= '$1 == "pkgver" {print $2; exit}' \
+    "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
+fi
+if [[ -z $CHROMIUM_PKGREL ]]; then
+  CHROMIUM_PKGREL=$(awk -F= '$1 == "pkgrel" {print $2; exit}' \
+    "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
+fi
 
 SOURCE_PACKAGES=(
   aurade-account-helper
@@ -65,6 +73,8 @@ generate_srcinfo() {
   die 'AURADE_AUR_RELEASE_TAG contains unsupported characters'
 [[ "${RELEASE_ARCHIVE}" =~ ^[A-Za-z0-9._-]+$ ]] ||
   die 'AURADE_AUR_RELEASE_ARCHIVE contains unsupported characters'
+[[ -n "${RELEASE_SHA256}" ]] ||
+  die 'AURADE_AUR_ARCHIVE_SHA256 is required; copy the current release archive digest instead of using stale metadata'
 [[ "${RELEASE_SHA256}" =~ ^[[:xdigit:]]{64}$ ]] ||
   die 'AURADE_AUR_ARCHIVE_SHA256 must be a 64-character hex digest'
 [[ "${CHROMIUM_VERSION}" =~ ^[0-9]+([.][0-9]+)*$ ]] ||
