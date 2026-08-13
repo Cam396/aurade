@@ -168,6 +168,27 @@ If a rebuilt ISO still stops at this point, verify the live clock and network
 before retrying. The failure is intentionally reported before `wipefs` or
 `sgdisk`, so the target disk remains unchanged.
 
+### Interactive installer failure view and log export
+
+If the interactive installer stops after a stage begins, it renders the latest
+bounded failure cause from `/run/aurade-install/journal.jsonl`. Raw command
+output remains separate in `/run/aurade-install/install.log`; it is not mixed
+into the machine-readable journal.
+
+The failure view offers:
+
+- `e` to export a mode-0600 journal and raw log bundle;
+- `c` to collect a redacted hardware-qualification bundle;
+- `s` to open a shell for inspection;
+- `r` to reboot after confirmation; and
+- `q` to leave the view without claiming that installation succeeded.
+
+Set `AURADE_FAILURE_EXPORT_DIR` to an absolute, non-root directory on removable
+media before starting the installer when the bundle should be written there.
+Review the exported archive before sharing it: hardware reports can include
+usernames, device serials, IP addresses, and crash metadata even after common
+secret patterns are redacted.
+
 ## Do not publish a workaround as a release
 
 Unsigned packages, stale ISOs, failed runtime gates, and unclassified crashes

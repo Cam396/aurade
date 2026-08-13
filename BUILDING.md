@@ -89,6 +89,7 @@ AURADE_VERIFY_CHROMIUMOS_ASH=0 ci/arch-package-smoke.sh
 
 # Check patch names, ordering, whitespace, and package metadata before a build.
 git diff --check
+ci/source-integrity-gate.sh
 ci/public-release-leak-gate.sh
 ```
 

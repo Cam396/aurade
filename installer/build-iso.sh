@@ -16,6 +16,11 @@ fi
   echo 'build-iso: AURADE_ARCH_SNAPSHOT must be YYYY/MM/DD' >&2
   exit 2
 }
+normalized_snapshot=$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
+[[ $normalized_snapshot == "$AURADE_ARCH_SNAPSHOT" ]] || {
+  echo 'build-iso: AURADE_ARCH_SNAPSHOT is not a real calendar date' >&2
+  exit 2
+}
 if (( ! STAGE_ONLY )); then
   command -v mkarchiso >/dev/null || { echo 'build-iso: install the archiso package first' >&2; exit 1; }
 fi
@@ -72,6 +77,24 @@ done
   cd "$STAGE/airootfs/opt/aurade/repo"
   sha256sum -c <(awk '!/^#/ {print $1 "  " $2}' packages.lock)
 ) >/dev/null
+if [[ -r ${AURADE_REPO_DIR%/}/SHA256SUMS ]]; then
+  install -m 0644 -- "${AURADE_REPO_DIR%/}/SHA256SUMS" \
+    "$STAGE/airootfs/opt/aurade/repo/SHA256SUMS"
+  (
+    cd "$AURADE_REPO_DIR"
+    sha256sum -c --quiet SHA256SUMS
+  ) || {
+    echo 'build-iso: source repository SHA256SUMS verification failed' >&2
+    exit 1
+  }
+  (
+    cd "$STAGE/airootfs/opt/aurade/repo"
+    sha256sum -c --quiet SHA256SUMS
+  ) || {
+    echo 'build-iso: staged repository SHA256SUMS verification failed' >&2
+    exit 1
+  }
+fi
 printf '%s\n' "$AURADE_ARCH_SNAPSHOT" >"$STAGE/airootfs/etc/aurade-installer/snapshot"
 
 if [[ $ALLOW_UNSIGNED == 1 ]]; then

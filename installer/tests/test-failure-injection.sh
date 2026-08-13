@@ -26,6 +26,8 @@ make_package() {
 cp "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst" "$TMP/original/"
 printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
 chmod 0600 "$TMP/password.hash"
+printf '%s\n' 'audit-passphrase' >"$TMP/luks.passphrase"
+chmod 0600 "$TMP/luks.passphrase"
 
 common=(
   --target /dev/aurade-test-disk
@@ -47,6 +49,37 @@ fi
 grep -Fq 'SHA-256 mismatch: aurade-1.0-1-any.pkg.tar.zst' "$TMP/hash.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/hash.out"
 
+# A digest can be correct while the archive metadata is for another package.
+# The engine must inspect .PKGINFO and reject the mismatch before any target
+# operation, rather than trusting the lock's name fields.
+printf 'pkgname = forged-package\npkgver = 1.0-1\narch = any\n' >"$TMP/package/.PKGINFO"
+bsdtar -cf "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst" -C "$TMP/package" .PKGINFO
+bad_digest=$(sha256sum "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst" | awk '{print $1}')
+awk -v digest="$bad_digest" '$2 == "aurade-1.0-1-any.pkg.tar.zst" {$1=digest} {print}' \
+  OFS=' ' "$TMP/packages.lock" >"$TMP/bad-metadata.lock"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" \
+    --package-lock "$TMP/bad-metadata.lock" >"$TMP/metadata.out" 2>&1; then
+  echo 'mismatched package metadata unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'package metadata does not match lock' "$TMP/metadata.out"
+! grep -Fq 'wipefs --all --force' "$TMP/metadata.out"
+
+# A package archive without .PKGINFO must fail closed as well.
+printf 'not package metadata\n' >"$TMP/package/README"
+rm -f -- "$TMP/package/.PKGINFO"
+bsdtar -cf "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst" -C "$TMP/package" README
+missing_digest=$(sha256sum "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst" | awk '{print $1}')
+awk -v digest="$missing_digest" '$2 == "aurade-1.0-1-any.pkg.tar.zst" {$1=digest} {print}' \
+  OFS=' ' "$TMP/packages.lock" >"$TMP/missing-metadata.lock"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" \
+    --package-lock "$TMP/missing-metadata.lock" >"$TMP/missing-metadata.out" 2>&1; then
+  echo 'missing package metadata unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'cannot read .PKGINFO' "$TMP/missing-metadata.out"
+! grep -Fq 'wipefs --all --force' "$TMP/missing-metadata.out"
+
 # Restore the exact package whose digest is recorded in the lock, then reject
 # a password file with unsafe permissions.
 cp "$TMP/original/aurade-1.0-1-any.pkg.tar.zst" "$TMP/repo/"
@@ -58,8 +91,18 @@ fi
 grep -Fq 'password hash file must not be group/world accessible' "$TMP/perms.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/perms.out"
 
-# An invalid target is rejected before any package or disk operation.
+# Encryption secrets use the same refusal boundary as account credentials.
 chmod 0600 "$TMP/password.hash"
+chmod 0644 "$TMP/luks.passphrase"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" --encrypt \
+    --luks-passphrase-file "$TMP/luks.passphrase" >"$TMP/luks-perms.out" 2>&1; then
+  echo 'insecure LUKS passphrase file unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'LUKS passphrase file must not be group/world accessible' "$TMP/luks-perms.out"
+! grep -Fq 'wipefs --all --force' "$TMP/luks-perms.out"
+
+# An invalid target is rejected before any package or disk operation.
 if "$ROOT/installer/bin/aurade-install" "${common[@]}" --target relative-disk >"$TMP/target.out" 2>&1; then
   echo 'invalid target unexpectedly passed' >&2
   exit 1

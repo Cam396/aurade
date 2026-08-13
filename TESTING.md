@@ -80,6 +80,15 @@ mode-0600 journal/log, `c` to collect a redacted hardware bundle, `s` for a
 diagnostic shell, `r` for an explicitly confirmed reboot, and `q` to return.
 Review exported hardware archives before sharing them.
 
+The execute-path boundary and the assertions needed for a beta install are
+defined in [installer/EXECUTE_PATH_CONTRACT.md](installer/EXECUTE_PATH_CONTRACT.md).
+The source tests intentionally do not claim to prove partitioning, LUKS,
+pacstrap, bootctl, first boot, or power-loss recovery.
+
+The major GUI/TUI installer follow-up is finish-gated and documented in
+[OPUS_GUI_TUI_HANDOFF.md](OPUS_GUI_TUI_HANDOFF.md); it must preserve these
+validation boundaries rather than bypass them.
+
 ## Physical laptop qualification
 
 VM results do not qualify hardware. On each laptop, test graphics, audio

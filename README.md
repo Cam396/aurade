@@ -47,6 +47,7 @@ browser PWAs in the user's session.
 | `installer/` | ArchISO profile, installer, and recovery tools |
 | `build-aurade.sh` | Low-effort dependency, source, package, ISO, and test orchestrator |
 | `AURADE_AUR.md` | AUR package split and upload checklist |
+| `OPUS_GUI_TUI_HANDOFF.md` | Finish-gated GUI/TUI installer contract |
 | `CITATION.cff` | Machine-readable project metadata and citation record |
 
 The current source snapshot carries 33 ordered Chromium patches and an
