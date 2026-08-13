@@ -74,6 +74,12 @@ ci/vm-smoke.sh \
 
 The full option list is available with `ci/vm-smoke.sh --help`.
 
+If the interactive installer stops, it shows the failed journal stage/cause
+without dumping raw package output. The failure view offers `e` to export the
+mode-0600 journal/log, `c` to collect a redacted hardware bundle, `s` for a
+diagnostic shell, `r` for an explicitly confirmed reboot, and `q` to return.
+Review exported hardware archives before sharing them.
+
 ## Physical laptop qualification
 
 VM results do not qualify hardware. On each laptop, test graphics, audio
