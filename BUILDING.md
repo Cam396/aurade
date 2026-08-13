@@ -119,7 +119,7 @@ sudo ./ci/run-in-arch-root.sh /usr/bin/runuser -u aurabuild -- \
 
 Use the immutable Chromium source commit in `pins/chromium.sha`. The package
 version (`152.1660893`) is not a Git revision and must not be substituted for
-one. The current 33-patch series applies cleanly to the committed pin.
+one. The current 34-patch series applies cleanly to the committed pin.
 
 ```bash
 ./ci/bootstrap-chromium-src.sh \

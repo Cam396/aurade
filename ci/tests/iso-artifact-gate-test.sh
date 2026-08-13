@@ -26,6 +26,12 @@ sbom_sha256=$sbom_sha
 EOF
 
 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO"
+if AURADE_REQUIRE_ISO_SIGNATURE=1 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" \
+    >"$TMP/env-unsigned.out" 2>&1; then
+  echo 'environment signature policy unexpectedly passed without signatures' >&2
+  exit 1
+fi
+grep -Fq 'both ISO and SBOM signatures are required together' "$TMP/env-unsigned.out"
 if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" --require-signature \
     >"$TMP/unsigned.out" 2>&1; then
   echo 'signature-required artifact unexpectedly passed without signatures' >&2

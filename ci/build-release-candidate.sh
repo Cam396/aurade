@@ -39,7 +39,20 @@ chrome_owner="$(stat -c '%U' "${CHROME_SRC}")"
 package_workdir="${WORKDIR}/current-package"
 pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' "${REPO_ROOT}/chromiumos-ash/PKGBUILD")"
 pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' "${REPO_ROOT}/chromiumos-ash/PKGBUILD")"
-chrome_package="${package_workdir}/pkgdest/chromiumos-ash-${pkgver}-${pkgrel}-x86_64.pkg.tar.gz"
+
+find_chromium_package() {
+  local package_dir="$1"
+  local package_name="chromiumos-ash-${pkgver}-${pkgrel}-x86_64.pkg.tar.*"
+  local -a candidates=()
+  mapfile -t candidates < <(find "${package_dir}" -maxdepth 1 -type f \
+    -name "${package_name}" ! -name '*.sig' -printf '%p\n' | LC_ALL=C sort)
+  if [[ "${#candidates[@]}" -ne 1 ]]; then
+    echo "Expected exactly one Chromium package matching ${package_name}, found ${#candidates[@]}" >&2
+    printf '  %s\n' "${candidates[@]}" >&2
+    exit 1
+  fi
+  printf '%s\n' "${candidates[0]}"
+}
 
 if [[ "${REUSE_CHROMIUM}" == 0 ]]; then
   runuser -u "${chrome_owner}" -- env \
@@ -47,6 +60,7 @@ if [[ "${REUSE_CHROMIUM}" == 0 ]]; then
     nice -n "${AURADE_BUILD_NICE:-10}" \
     "${SCRIPT_DIR}/build-current-chromiumos-ash-package.sh"
 fi
+chrome_package="$(find_chromium_package "${package_workdir}/pkgdest")"
 [[ -f "${chrome_package}" ]] || {
   echo "Missing current Chromium package: ${chrome_package}" >&2
   exit 1
