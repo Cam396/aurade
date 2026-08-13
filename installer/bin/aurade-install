@@ -94,11 +94,32 @@ Safety:
   --dry-run                    Print the complete plan (default)
   --execute                    Permit execution after every safety check passes
   --confirm TOKEN              Must exactly equal ERASE:<canonical target>
+
+Optional failure evidence:
+  AURADE_FAILURE_JOURNAL_DIR  Disk-backed directory for a secret-free copy of
+                              the structured journal after an unexpected exit
 EOF
 }
 
 die() {
-  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  local message=$* cause=installer_error journal_message
+  # Keep fatal-stage records machine-readable and bounded. The full diagnostic
+  # still goes to stderr/raw logs; the structured journal gets only a short
+  # caller-authored message and a stable cause code for front ends.
+  if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    case $message in
+      *keyring*|*signature*) cause=keyring_error ;;
+      *staging\ filesystem*|*capacity*|*free\ space*) cause=capacity_error ;;
+      *Secure\ Boot*) cause=secure_boot_error ;;
+      *archive*|*acquire*|*network*|*DNS*|*route*|*clock*) cause=network_error ;;
+      *target*|*disk*|*partition*) cause=target_error ;;
+      *mount*|*filesystem*|*subvolume*) cause=storage_error ;;
+    esac
+    journal_message=${message:0:256}
+    aurade_journal_fail "$_J_ACTIVE_STAGE" 1 "$cause" "$journal_message" \
+      log shell reboot
+  fi
+  printf '%s: %s\n' "$PROGRAM" "$message" >&2
   exit 1
 }
 
@@ -340,10 +361,15 @@ cleanup() {
   # A command can fail after a stage has started without passing through a
   # helper that knows the right cause code. Preserve a bounded, secret-free
   # failure record before tearing down mounts and private installer state.
-  if (( status != 0 )) && [[ -n ${_J_ACTIVE_STAGE:-} ]] && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
-    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
-      'installer stopped unexpectedly; inspect the private install log' \
-      log shell reboot
+  if (( status != 0 )) && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
+    if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+      aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
+        'installer stopped unexpectedly; inspect the private install log' \
+        log shell reboot
+    fi
+    # Preserve a specific die() record as well as a generic unexpected exit;
+    # the journal helper copies only structured, secret-free evidence.
+    aurade_journal_preserve_failure >/dev/null 2>&1 || true
   fi
   if (( TARGET_MOUNTED )); then
     umount -R "$MOUNTPOINT" >/dev/null 2>&1 || true
@@ -357,7 +383,23 @@ cleanup() {
   [[ -z ${WORK_DIR:-} ]] || rm -rf -- "$WORK_DIR"
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+
+handle_cancel() {
+  local status=$1
+  set +e
+  trap - INT TERM
+  if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" cancelled \
+      'installer cancelled; inspect the private install log before retrying' \
+      log shell reboot || true
+  fi
+  aurade_journal_preserve_failure >/dev/null 2>&1 || true
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'handle_cancel 130' INT
+trap 'handle_cancel 143' TERM
 
 while (($#)); do
   case "$1" in
@@ -407,6 +449,10 @@ TARGET=$(canonical_device "$TARGET")
 normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
 [[ $normalized_snapshot == "$ARCH_SNAPSHOT" ]] || die '--arch-snapshot is not a real calendar date'
 [[ -n $PACKAGE_LOCK ]] || PACKAGE_LOCK="${BUNDLE_DIR%/}/packages.lock"
+if [[ -n $AURADE_FAILURE_JOURNAL_DIR ]]; then
+  [[ $AURADE_FAILURE_JOURNAL_DIR == /* && $AURADE_FAILURE_JOURNAL_DIR != / ]] || \
+    die 'AURADE_FAILURE_JOURNAL_DIR must be an absolute non-root path'
+fi
 
 [[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
 [[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'
@@ -425,7 +471,9 @@ fi
 [[ -d $BUNDLE_DIR ]] || die "bundle directory does not exist: $BUNDLE_DIR"
 [[ -r $PACKAGE_LOCK ]] || die "package lock does not exist: $PACKAGE_LOCK"
 for helper in aurade-recovery aurade-hardware-qualify; do
-  [[ -r $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
+  [[ -e $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
+  [[ -f $SELF_DIR/$helper && -x $SELF_DIR/$helper && ! -L $SELF_DIR/$helper ]] ||
+    die "installer helper must be a regular executable file: $SELF_DIR/$helper"
 done
 
 mapfile -t LOCK_LINES < <(awk 'NF && $1 !~ /^#/ {print}' "$PACKAGE_LOCK")
@@ -549,10 +597,20 @@ if [[ $MODE == execute ]]; then
   for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg gpgv; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
-  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
-  if [[ $secure_boot_state == enabled ]]; then
-    die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain'
+  # The encrypted path invokes cryptsetup after partitioning.  Check it with
+  # the other pre-erase dependencies so a missing binary cannot leave a
+  # partially partitioned target.
+  if (( LUKS )); then
+    command -v cryptsetup >/dev/null || die 'required command not found: cryptsetup'
   fi
+  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
+  case $secure_boot_state in
+    enabled)
+      die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain' ;;
+    disabled) ;;
+    *)
+      die 'could not determine Secure Boot state; refuse the destructive install until firmware state is known (bootctl is-secure-boot)' ;;
+  esac
 fi
 
 log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"
@@ -561,7 +619,9 @@ log "safety token: $ERASE_TOKEN"
 # Preflight is complete by this point: arguments are validated, the target is
 # resolved and proven not to back the running root, and the required commands
 # and Secure Boot state have been checked.
-aurade_journal_init "$MODE" "$TARGET"
+aurade_journal_init "$MODE" "$TARGET" || {
+  die 'cannot initialize the install journal; refusing to continue'
+}
 aurade_journal_begin preflight 'validating target and environment'
 aurade_journal_ok preflight
 
@@ -810,7 +870,7 @@ run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/s
 aurade_journal_ok bootloader
 
 aurade_journal_begin snapshot 'creating the factory snapshot'
-write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
+write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nswap_policy=none\nhibernation=unsupported\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
 run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
 run sync
 aurade_journal_ok snapshot

@@ -23,6 +23,7 @@ normalized_snapshot=$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/de
 }
 if (( ! STAGE_ONLY )); then
   command -v mkarchiso >/dev/null || { echo 'build-iso: install the archiso package first' >&2; exit 1; }
+  command -v python3 >/dev/null || { echo 'build-iso: python3 is required to write the ISO SBOM' >&2; exit 1; }
 fi
 
 WORK_ROOT=${AURADE_INSTALLER_WORK_ROOT:-/mnt/build/aurade-work/installer}
@@ -33,6 +34,9 @@ REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
+ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
+ISO_SIGNING_FINGERPRINT=${AURADE_ISO_SIGNING_FINGERPRINT:-}
+REQUIRE_ISO_SIGNATURE=${AURADE_REQUIRE_ISO_SIGNATURE:-0}
 export SOURCE_DATE_EPOCH
 
 [[ $WORK_ROOT == /* && $WORK_ROOT != / ]] || { echo 'build-iso: work root must be an absolute non-root path' >&2; exit 2; }
@@ -40,6 +44,37 @@ export SOURCE_DATE_EPOCH
   echo 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' >&2
   exit 2
 }
+[[ $REQUIRE_ISO_SIGNATURE == 0 || $REQUIRE_ISO_SIGNATURE == 1 ]] || {
+  echo 'build-iso: AURADE_REQUIRE_ISO_SIGNATURE must be 0 or 1' >&2
+  exit 2
+}
+
+if [[ -n $ISO_SIGNING_KEY || $REQUIRE_ISO_SIGNATURE == 1 ]]; then
+  command -v gpg >/dev/null || { echo 'build-iso: gpg is required for ISO signatures' >&2; exit 1; }
+  [[ -n $ISO_SIGNING_KEY ]] || {
+    echo 'build-iso: AURADE_ISO_SIGNING_KEY is required when ISO signatures are required' >&2
+    exit 1
+  }
+  gpg --batch --list-secret-keys "$ISO_SIGNING_KEY" >/dev/null 2>&1 || {
+    echo 'build-iso: ISO signing key is not available in the builder keyring' >&2
+    exit 1
+  }
+  expected_iso_fingerprint=${ISO_SIGNING_FINGERPRINT//[[:space:]]/}
+  expected_iso_fingerprint=${expected_iso_fingerprint^^}
+  [[ $expected_iso_fingerprint =~ ^[0-9A-F]{40,64}$ ]] || {
+    echo 'build-iso: AURADE_ISO_SIGNING_FINGERPRINT must be a full fingerprint when ISO signatures are enabled' >&2
+    exit 1
+  }
+  iso_key_fingerprints=$(gpg --batch --with-colons --list-secret-keys "$ISO_SIGNING_KEY" 2>/dev/null | \
+    awk -F: '$1 == "fpr" {print toupper($10)}') || {
+    echo 'build-iso: could not read ISO signing-key fingerprint' >&2
+    exit 1
+  }
+  grep -Fxq "$expected_iso_fingerprint" <<<"$iso_key_fingerprints" || {
+    echo 'build-iso: ISO signing key does not contain the requested fingerprint' >&2
+    exit 1
+  }
+fi
 
 if [[ $ALLOW_UNSIGNED != 1 ]]; then
   : "${AURADE_REPO_KEY:?Signed images require AURADE_REPO_KEY}"
@@ -173,6 +208,23 @@ iso_bytes=$(stat -c '%s' "$iso")
 package_count=$(find "$STAGE/airootfs/opt/aurade/repo" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' | wc -l)
 package_bytes=$(find "$STAGE/airootfs/opt/aurade/repo" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')
 (cd "$(dirname "$iso")" && sha256sum "$(basename "$iso")") | tee "$iso.sha256"
+sbom="$iso.sbom.spdx.json"
+python3 "$ROOT/../ci/write-iso-sbom.py" \
+  --iso "$iso" \
+  --repo-dir "$STAGE/airootfs/opt/aurade/repo" \
+  --output "$sbom"
+if [[ -n $ISO_SIGNING_KEY ]]; then
+  gpg --batch --yes --local-user "$ISO_SIGNING_KEY" --detach-sign \
+    --output "$iso.sig" "$iso"
+  gpg --batch --verify "$iso.sig" "$iso" >/dev/null 2>&1
+  gpg --batch --yes --local-user "$ISO_SIGNING_KEY" --detach-sign \
+    --output "$sbom.sig" "$sbom"
+  gpg --batch --verify "$sbom.sig" "$sbom" >/dev/null 2>&1
+elif (( REQUIRE_ISO_SIGNATURE )); then
+  echo 'build-iso: refusing an unsigned ISO because AURADE_REQUIRE_ISO_SIGNATURE=1' >&2
+  exit 1
+fi
+sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
 {
   printf 'arch_snapshot=%s\n' "$AURADE_ARCH_SNAPSHOT"
   printf 'source_date_epoch=%s\n' "$SOURCE_DATE_EPOCH"
@@ -182,6 +234,17 @@ package_bytes=$(find "$STAGE/airootfs/opt/aurade/repo" -maxdepth 1 -type f -name
   printf 'iso_max_bytes=%s\n' "$MAX_ISO_BYTES"
   printf 'package_count=%s\n' "$package_count"
   printf 'package_bytes=%s\n' "$package_bytes"
+  printf 'sbom_file=%s\n' "$(basename "$sbom")"
+  printf 'sbom_sha256=%s\n' "$sbom_sha256"
+  if [[ -f $iso.sig ]]; then
+    printf 'iso_signature=%s\n' "$(basename "$iso.sig")"
+    printf 'sbom_signature=%s\n' "$(basename "$sbom.sig")"
+    printf 'iso_signing_fingerprint=%s\n' "$expected_iso_fingerprint"
+  else
+    printf 'iso_signature=not-created\n'
+    printf 'sbom_signature=not-created\n'
+    printf 'iso_signing_fingerprint=not-set\n'
+  fi
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
   (cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock)
 } >"$iso.build-info"

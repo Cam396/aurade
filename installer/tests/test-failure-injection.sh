@@ -136,6 +136,30 @@ fi
 grep -Fq 'installer helper is missing' "$TMP/helper.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
 
+# A readable directory must not satisfy the staged-helper contract. This
+# catches a malformed image before the engine can reach any destructive stage.
+rm -f -- "$TMP/engine/aurade-recovery"
+mkdir -m 0755 "$TMP/engine/aurade-recovery"
+if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
+  "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper-directory.out" 2>&1; then
+  echo 'helper directory unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-directory.out"
+! grep -Fq 'wipefs --all --force' "$TMP/helper-directory.out"
+
+# A symlink to an executable outside the staged engine must not satisfy the
+# helper contract. The staged image must contain the helper as a regular file.
+rm -rf -- "$TMP/engine/aurade-recovery"
+ln -s "$ROOT/installer/bin/aurade-recovery" "$TMP/engine/aurade-recovery"
+if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
+  "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper-symlink.out" 2>&1; then
+  echo 'helper symlink unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-symlink.out"
+! grep -Fq 'wipefs --all --force' "$TMP/helper-symlink.out"
+
 # If the requested staging path cannot be used, the engine falls back to /tmp
 # and measures capacity on the filesystem that actually holds its workdir.
 touch "$TMP/not-a-directory"
@@ -157,5 +181,15 @@ fi
 grep -Fq 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$TMP/capacity.out"
 ! grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
+
+# The encrypted execute path must reject a missing cryptsetup dependency
+# before the first erase command. This source-order assertion is intentionally
+# synthetic: proving the command itself would require a disposable target and
+# is outside the safe refusal suite's no-device boundary.
+grep -Fq -- "required command not found: cryptsetup" "$ROOT/installer/bin/aurade-install"
+cryptsetup_check_line=$(grep -n -- "required command not found: cryptsetup" \
+  "$ROOT/installer/bin/aurade-install" | head -1 | cut -d: -f1)
+wipe_line=$(grep -n -- 'wipefs --all --force' "$ROOT/installer/bin/aurade-install" | head -1 | cut -d: -f1)
+(( cryptsetup_check_line < wipe_line ))
 
 echo 'installer failure-injection test: PASS'
