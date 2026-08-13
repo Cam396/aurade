@@ -66,7 +66,8 @@ grep -Fq -- 'invalid Arch package signature' "$ROOT/installer/bin/aurade-install
 grep -Fq -- 'cause=keyring_error' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'cause=capacity_error' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'cause=network_error' "$ROOT/installer/bin/aurade-install"
-grep -Fq -- 'cause=cancelled' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" cancelled' \
+  "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'trap '\''handle_cancel 130'\'' INT' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
