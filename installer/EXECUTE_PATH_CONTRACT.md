@@ -55,3 +55,26 @@ before destructive commands. It does not prove partitioning, filesystems,
 LUKS, pacstrap, bootctl, first boot, or power-loss recovery. Those require the
 disposable execute-path run above and must remain open until their evidence is
 attached to `RELEASE_STATUS.md`.
+
+## Bounded execute-path fixture
+
+`installer/tests/test-execute-path-gate.sh` is an opt-in, root-only fixture
+for the first safe part of that run. With
+`AURADE_EXECUTE_PATH_TEST=1`, real UEFI boot, Secure Boot reported as disabled,
+the required installer tooling, and a disposable loop-device boundary, it
+creates a sparse 16-GiB backing file and attaches it as the target. It then
+executes the real installer with `--execute --allow-loop` and an intentionally
+impossible disk-backed staging-capacity requirement. The expected failure
+occurs after execute-mode preflight and journal initialization but before
+package acquisition, `wipefs`, partitioning, filesystems, mounts, or
+bootloader work. The fixture checks target identity, journal preservation,
+mode-0600 evidence, staging cleanup, and that the loop target has no new
+partitions or mounts.
+
+The default `installer/tests/run.sh` invocation records an explicit skip unless
+the opt-in variable is set. A skip is evidence that this boundary was not
+available; it is not an execute-path pass. A fixture pass means only that the
+pre-acquisition cleanup boundary executed and was checked. It does not claim a
+disk install, signatures, EFI state, first boot, rollback, or recovery. The
+full disposable execute-path evidence remains open until a maintainer runs it
+with real package acquisition and records the separate plain and LUKS2 results.
