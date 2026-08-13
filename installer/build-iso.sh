@@ -44,6 +44,8 @@ install -Dm0755 "$ROOT/bin/aurade-install" "$STAGE/airootfs/usr/local/sbin/aurad
 install -Dm0755 "$ROOT/bin/aurade-installer" "$STAGE/airootfs/usr/local/sbin/aurade-installer"
 install -Dm0755 "$ROOT/bin/aurade-recovery" "$STAGE/airootfs/usr/local/sbin/aurade-recovery"
 install -Dm0755 "$ROOT/bin/aurade-hardware-qualify" "$STAGE/airootfs/usr/local/sbin/aurade-hardware-qualify"
+install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
+  "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"
@@ -67,6 +69,10 @@ done
 printf '%s\n' "$AURADE_ARCH_SNAPSHOT" >"$STAGE/airootfs/etc/aurade-installer/snapshot"
 
 if [[ $ALLOW_UNSIGNED == 1 ]]; then
+  # Keep the exception visible in the image instead of inheriting a silent
+  # Optional default. Signed images retain Required local-file verification.
+  sed -i -E 's/^LocalFileSigLevel[[:space:]]*=.*/LocalFileSigLevel = Optional/' \
+    "$STAGE/pacman.conf" "$STAGE/airootfs/etc/pacman.conf"
   printf '%s\n' development-unsigned >"$STAGE/airootfs/etc/aurade-installer/repo-fingerprint"
 else
   for command in gpg gpgv; do
