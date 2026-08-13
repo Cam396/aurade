@@ -56,6 +56,7 @@ python3 - "$sbom" "$basename_iso" "$actual_digest" "$build_info" "$ISO" <<'PY'
 import hashlib
 import json
 import pathlib
+import re
 import sys
 
 sbom_path, iso_name, iso_digest, build_info_path, iso_path = sys.argv[1:]
@@ -83,6 +84,18 @@ if info.get("sbom_file") != pathlib.Path(sbom_path).name:
 sbom_digest = hashlib.sha256(pathlib.Path(sbom_path).read_bytes()).hexdigest()
 if info.get("sbom_sha256") != sbom_digest:
     raise SystemExit("verify-iso-artifacts: build-info SBOM digest mismatch")
+
+snapshot = info.get("arch_snapshot", "")
+if not re.fullmatch(r"\d{4}/\d{2}/\d{2}", snapshot):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid arch_snapshot")
+source_epoch = info.get("source_date_epoch", "")
+if not source_epoch.isdigit() or int(source_epoch) <= 0:
+    raise SystemExit("verify-iso-artifacts: build-info has invalid source_date_epoch")
+if not info.get("repo_url", ""):
+    raise SystemExit("verify-iso-artifacts: build-info is missing repo_url")
+repo_fingerprint = info.get("repo_fingerprint", "")
+if repo_fingerprint != "unsigned" and not re.fullmatch(r"[0-9A-Fa-f]{40,64}", repo_fingerprint):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid repo_fingerprint")
 
 def positive_int(name):
     value = info.get(name, "")
