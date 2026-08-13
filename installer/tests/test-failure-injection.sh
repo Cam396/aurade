@@ -148,6 +148,18 @@ fi
 grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-directory.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/helper-directory.out"
 
+# A symlink to an executable outside the staged engine must not satisfy the
+# helper contract. The staged image must contain the helper as a regular file.
+rm -rf -- "$TMP/engine/aurade-recovery"
+ln -s "$ROOT/installer/bin/aurade-recovery" "$TMP/engine/aurade-recovery"
+if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
+  "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper-symlink.out" 2>&1; then
+  echo 'helper symlink unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-symlink.out"
+! grep -Fq 'wipefs --all --force' "$TMP/helper-symlink.out"
+
 # If the requested staging path cannot be used, the engine falls back to /tmp
 # and measures capacity on the filesystem that actually holds its workdir.
 touch "$TMP/not-a-directory"

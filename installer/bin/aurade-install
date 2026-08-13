@@ -472,7 +472,7 @@ fi
 [[ -r $PACKAGE_LOCK ]] || die "package lock does not exist: $PACKAGE_LOCK"
 for helper in aurade-recovery aurade-hardware-qualify; do
   [[ -e $SELF_DIR/$helper ]] || die "installer helper is missing: $SELF_DIR/$helper"
-  [[ -f $SELF_DIR/$helper && -x $SELF_DIR/$helper ]] ||
+  [[ -f $SELF_DIR/$helper && -x $SELF_DIR/$helper && ! -L $SELF_DIR/$helper ]] ||
     die "installer helper must be a regular executable file: $SELF_DIR/$helper"
 done
 
