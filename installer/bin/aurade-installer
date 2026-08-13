@@ -160,8 +160,15 @@ while true; do
   printf '%s\n' 'Keyboard layout must name an installed keymap (for example us or us-altgr-intl).' >&2
 done
 printf 'Arch snapshot [%s]: ' "$snapshot_default"
-read -r snapshot
-snapshot=${snapshot:-$snapshot_default}
+while true; do
+  read -r snapshot
+  snapshot=${snapshot:-$snapshot_default}
+  if aurade_valid_arch_snapshot "$snapshot"; then
+    break
+  fi
+  printf '%s\n' 'Arch snapshot must be a real calendar date in YYYY/MM/DD format.' >&2
+  printf 'Arch snapshot [%s]: ' "$snapshot_default"
+done
 
 read_secret_file 'Account password' "$secret_dir/password"
 command -v openssl >/dev/null 2>&1 || {

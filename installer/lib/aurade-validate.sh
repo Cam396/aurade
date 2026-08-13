@@ -76,3 +76,10 @@ aurade_valid_hostname() {
   [[ $hostname =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
   return 0
 }
+
+aurade_valid_arch_snapshot() {
+  local snapshot=$1 normalized
+  [[ $snapshot =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || return 1
+  normalized=$(date -u -d "${snapshot//\//-}" +%Y/%m/%d 2>/dev/null || true)
+  [[ $normalized == "$snapshot" ]]
+}
