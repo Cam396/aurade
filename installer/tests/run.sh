@@ -15,6 +15,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-install-dry-run.sh"
 "$ROOT/test-build-iso-stage.sh"
 "$ROOT/test-execute-path-contract.sh"
+"$ROOT/test-execute-path-gate.sh"
 "$ROOT/../../ci/tests/runtime-risk-source-test.sh"
 if (( EUID == 0 )); then
   "$ROOT/test-recovery.sh"
