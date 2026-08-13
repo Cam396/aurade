@@ -7,7 +7,11 @@ usage() {
 }
 
 ISO=${1:-}
-REQUIRE_SIGNATURE=0
+REQUIRE_SIGNATURE=${AURADE_REQUIRE_ISO_SIGNATURE:-0}
+[[ $REQUIRE_SIGNATURE == 0 || $REQUIRE_SIGNATURE == 1 ]] || {
+  echo 'verify-iso-artifacts: AURADE_REQUIRE_ISO_SIGNATURE must be 0 or 1' >&2
+  exit 2
+}
 if [[ $# -gt 1 ]]; then
   [[ ${2:-} == --require-signature && $# -eq 2 ]] || {
     usage
