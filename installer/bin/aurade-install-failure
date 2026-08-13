@@ -25,10 +25,20 @@ EOF
 
 while (($#)); do
   case "$1" in
-    --status) STATUS=${2:?}; shift 2 ;;
-    --journal) JOURNAL=${2:?}; shift 2 ;;
-    --raw-log) RAW_LOG=${2:?}; shift 2 ;;
-    --export) EXPORT_REQUEST=${2:?}; shift 2 ;;
+    --status|--journal|--raw-log|--export)
+      (( $# >= 2 )) || {
+        echo "aurade-install-failure: $1 requires an argument" >&2
+        usage >&2
+        exit 2
+      }
+      case "$1" in
+        --status) STATUS=$2 ;;
+        --journal) JOURNAL=$2 ;;
+        --raw-log) RAW_LOG=$2 ;;
+        --export) EXPORT_REQUEST=$2 ;;
+      esac
+      shift 2
+      ;;
     --noninteractive) NONINTERACTIVE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "aurade-install-failure: unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -38,7 +48,29 @@ done
 
 extract_field() {
   local field=$1 line=$2
-  sed -n 's/.*"'"$field"'":"\([^\"]*\)".*/\1/p' <<<"$line" | head -1
+  awk -v marker="\"${field}\":\"" '
+    {
+      start = index($0, marker)
+      if (!start) exit
+      value = substr($0, start + length(marker))
+      escaped = 0
+      result = ""
+      for (i = 1; i <= length(value); i++) {
+        character = substr(value, i, 1)
+        if (escaped) {
+          result = result "\\" character
+          escaped = 0
+        } else if (character == "\\") {
+          escaped = 1
+        } else if (character == "\"") {
+          print result
+          exit
+        } else {
+          result = result character
+        }
+      }
+    }
+  ' <<<"$line"
 }
 
 latest_failed_record() {
@@ -61,7 +93,7 @@ report() {
 }
 
 export_logs() {
-  local destination=$1 source
+  local destination=$1 source copied=0
   [[ $destination == /* && $destination != / ]] || {
     echo 'aurade-install-failure: export directory must be an absolute non-root path' >&2
     return 2
@@ -74,13 +106,19 @@ export_logs() {
   for source in "$JOURNAL" "$RAW_LOG"; do
     [[ -r $source ]] || continue
     install -m 0600 "$source" "$destination/$(basename "$source")"
+    copied=1
   done
+  if (( ! copied )); then
+    rmdir -- "$destination" 2>/dev/null || true
+    echo 'aurade-install-failure: no readable journal or raw log was available to export' >&2
+    return 1
+  fi
   printf 'Diagnostic logs exported to %s\n' "$destination" >&2
 }
 
 report
 if [[ -n $EXPORT_REQUEST ]]; then
-  export_logs "$EXPORT_REQUEST" || true
+  export_logs "$EXPORT_REQUEST" || exit 2
   exit "$STATUS"
 fi
 (( NONINTERACTIVE )) && exit "$STATUS"
@@ -105,7 +143,7 @@ while true; do
         echo 'aurade-hardware-qualify is not available in this environment.' >&2
       fi
       ;;
-    s) exec bash ;;
+    s) bash ;;
     r)
       read -r -p 'Reboot now? Type REBOOT to confirm: ' confirmation
       if [[ $confirmation == REBOOT ]]; then
