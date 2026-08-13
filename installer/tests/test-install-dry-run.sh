@@ -83,6 +83,10 @@ grep -Fq -- 'USB/removable disk' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'LUKS2 encryption and Btrfs recovery snapshots consume additional space' \
   "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'no swap or hibernation setup is created by default' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'read_secret_file' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'openssl passwd -6 -stdin <"$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'secure_remove "$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
+! grep -Fq -- 'read -r -s -p '\''Account password: '\'' password' "$ROOT/installer/bin/aurade-installer"
 acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
 wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
 (( acquire_line < wipe_line ))
