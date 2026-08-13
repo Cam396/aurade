@@ -169,6 +169,13 @@ while true; do
   printf '%s\n' 'Arch snapshot must be a real calendar date in YYYY/MM/DD format.' >&2
   printf 'Arch snapshot [%s]: ' "$snapshot_default"
 done
+if [[ -x $NETWORK_DIAGNOSTICS && $snapshot != "$snapshot_default" ]]; then
+  printf '%s\n' 'Selected snapshot network probe:'
+  if ! "$NETWORK_DIAGNOSTICS" --snapshot "$snapshot"; then
+    printf '%s\n' 'The selected snapshot probe found an issue; acquisition remains bounded and occurs before any disk change.' >&2
+  fi
+  printf '\n'
+fi
 
 read_secret_file 'Account password' "$secret_dir/password"
 command -v openssl >/dev/null 2>&1 || {
