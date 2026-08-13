@@ -79,6 +79,9 @@ grep -Fq -- 'loadkeys "$keymap"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'USB/removable disk' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'LUKS2 encryption and Btrfs recovery snapshots consume additional space' \
+  "$ROOT/installer/bin/aurade-installer"
 acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
 wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
 (( acquire_line < wipe_line ))

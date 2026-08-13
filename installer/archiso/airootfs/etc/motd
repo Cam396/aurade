@@ -4,3 +4,7 @@ Run `aurade-installer` for the reviewed interactive installation flow.
 Run `aurade-install --help` for noninteractive and image-based installs.
 Run `aurade-recovery --help` for rollback and evidence collection.
 
+WARNING: tty1 is a local installation console with an empty root password.
+Do not expose this live session to an untrusted network or physical access.
+Create a normal account password during installation; this live root account
+is not copied to the installed system.
