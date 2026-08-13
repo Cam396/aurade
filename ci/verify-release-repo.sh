@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="${REPO_DIR:-${REPO_ROOT}/private-repo}"
 REPO_NAME="${REPO_NAME:-aurade}"
 REQUIRE_SIGNATURES="${AURADE_REQUIRE_SIGNATURES:-0}"
+REPO_KEYRING="${AURADE_REPO_KEYRING:-}"
+REPO_FINGERPRINT="${AURADE_REPO_FINGERPRINT:-}"
 PACKAGE_DIRS=(
   aurade-account-helper
   aurade-system-helper
@@ -28,11 +30,52 @@ for command in makepkg pacman bsdtar sha256sum; do
   }
 done
 if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
-  command -v gpg >/dev/null 2>&1 || {
-    echo "Missing required command: gpg" >&2
+  for command in gpg gpgv; do
+    command -v "${command}" >/dev/null 2>&1 || {
+      echo "Missing required command: ${command}" >&2
+      exit 2
+    }
+  done
+  [[ -r "${REPO_KEYRING}" ]] || {
+    echo "AURADE_REPO_KEYRING must name a readable public keyring when signatures are required" >&2
+    exit 2
+  }
+  normalized_fingerprint="${REPO_FINGERPRINT//[[:space:]]/}"
+  normalized_fingerprint="${normalized_fingerprint^^}"
+  [[ "${normalized_fingerprint}" =~ ^[0-9A-F]{40,64}$ ]] || {
+    echo "AURADE_REPO_FINGERPRINT must be a full fingerprint when signatures are required" >&2
+    exit 2
+  }
+  key_listing=$(gpg --batch --show-keys --with-colons "${REPO_KEYRING}" 2>/dev/null) || {
+    echo "AURADE_REPO_KEYRING could not be parsed" >&2
+    exit 2
+  }
+  if awk -F: '$1 == "sec" || $1 == "ssb" {found=1} END {exit !found}' <<<"${key_listing}"; then
+    echo "AURADE_REPO_KEYRING must contain public keys only" >&2
+    exit 2
+  fi
+  key_fingerprints=$(awk -F: '$1 == "fpr" {print toupper($10)}' <<<"${key_listing}")
+  grep -Fxq "${normalized_fingerprint}" <<<"${key_fingerprints}" || {
+    echo "AURADE_REPO_KEYRING does not contain AURADE_REPO_FINGERPRINT" >&2
     exit 2
   }
 fi
+
+verify_detached_signature() {
+  local signature=$1 payload=$2 label=$3 status signer primary
+  if ! status=$(gpgv --status-fd 1 --keyring "${REPO_KEYRING}" \
+      "${signature}" "${payload}" 2>/dev/null); then
+    echo "Invalid ${label} signature" >&2
+    return 1
+  fi
+  signer=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print toupper($3); exit}' <<<"${status}")
+  primary=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print toupper($NF); exit}' <<<"${status}")
+  [[ "${signer}" == "${normalized_fingerprint}" ||
+     "${primary}" == "${normalized_fingerprint}" ]] || {
+    echo "${label} signature signer does not match AURADE_REPO_FINGERPRINT" >&2
+    return 1
+  }
+}
 
 database="${REPO_DIR}/${REPO_NAME}.db.tar.gz"
 [[ -f "${database}" ]] || {
@@ -119,7 +162,7 @@ for package_file in "${package_files[@]}"; do
     exit 1
   fi
   if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
-    gpg --batch --verify "${package_file}.sig" "${package_file}" >/dev/null
+    verify_detached_signature "${package_file}.sig" "${package_file}" "${package_file##*/}"
   fi
 done
 
@@ -139,7 +182,7 @@ if [[ "${REQUIRE_SIGNATURES}" == 1 && ! -s "${database}.sig" ]]; then
   exit 1
 fi
 if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
-  gpg --batch --verify "${database}.sig" "${database}" >/dev/null
+  verify_detached_signature "${database}.sig" "${database}" "repository database"
 fi
 
 for package_name in "${!expected_versions[@]}"; do
