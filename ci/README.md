@@ -43,12 +43,14 @@ worktree status, patch-series hashes, and package source hashes. It writes to
 `write-iso-sbom.py` writes a deterministic SPDX 2.3 inventory for a completed
 ISO and the package archives staged inside it. `installer/build-iso.sh` emits
 the SBOM as an ISO sidecar and can create/verify detached ISO and SBOM
-signatures with `AURADE_ISO_SIGNING_KEY`; set
-`AURADE_REQUIRE_ISO_SIGNATURE=1` for a release candidate. The fixture gate is
-`ci/tests/iso-sbom-test.sh`. Before uploading an image, run
+signatures with `AURADE_ISO_SIGNING_KEY` and the full primary fingerprint in
+`AURADE_ISO_SIGNING_FINGERPRINT`; set `AURADE_REQUIRE_ISO_SIGNATURE=1` for a
+release candidate. The fixture gate is `ci/tests/iso-sbom-test.sh`. Before
+uploading an image, run
 `ci/verify-iso-artifacts.sh path/to/aurade-1-x86_64.iso` to verify the checksum,
-SBOM digest/namespace, and `.build-info`; add `--require-signature` for a
-candidate. Its fixture gate is `ci/tests/iso-artifact-gate-test.sh`.
+SBOM digest/namespace, `.build-info`, and (when signed) the exact detached
+signer fingerprint; add `--require-signature` for a candidate. Its fixture gate
+is `ci/tests/iso-artifact-gate-test.sh`.
 `ci/verify-iso-structure.sh path/to/aurade-1-x86_64.iso --full` additionally
 inspects the UEFI fallback loader, boot-entry policy, and the extracted
 SquashFS payload without booting or touching a disk.
