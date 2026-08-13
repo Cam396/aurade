@@ -118,6 +118,17 @@ capture metadata/system-failed.txt systemctl --failed --no-pager
 capture metadata/user-failed.txt systemctl --user --failed --no-pager
 capture metadata/install-manifest.txt cat /etc/aurade-install/manifest
 capture metadata/package-lock.txt cat /etc/aurade-install/packages.lock
+capture metadata/smartctl-scan.txt smartctl --scan-open
+capture_shell metadata/smartctl-health.txt '
+if ! command -v smartctl >/dev/null 2>&1; then
+  echo "smartctl is not installed; disk health was not probed"
+else
+  while read -r device device_type; do
+    [ "$device_type" = disk ] || continue
+    echo "## $device"
+    smartctl --health "$device" 2>&1 || true
+  done < <(lsblk -dnpo NAME,TYPE 2>/dev/null)
+fi'
 
 if [[ $SINCE == boot ]]; then
   journal_args=(-b)
