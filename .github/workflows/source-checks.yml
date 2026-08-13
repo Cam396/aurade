@@ -67,6 +67,9 @@ jobs:
       - name: Run AUR export policy fixture
         run: ci/tests/aur-export-policy-test.sh
 
+      - name: Run ISO structure fixture
+        run: ci/tests/iso-structure-script-test.sh
+
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
 
