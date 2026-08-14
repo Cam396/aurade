@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from json import loads as _json_loads
 from os import access as _os_access, environ as _os_environ, execv as _os_execv, X_OK as _X_OK
-from os.path import dirname as _os_dirname, exists as _os_exists, realpath as _os_realpath
+from os.path import dirname as _os_dirname, exists as _os_exists, join as _os_join, realpath as _os_realpath
 from re import match as _re_match
 from threading import Thread as _Thread
 
@@ -33,6 +33,102 @@ from . import flow as F  # noqa: E402
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
+
+# The live image carries the mark beside the installer. The source-tree
+# fallback keeps the same shell pleasant to run during development.
+BRAND_MARK_PATHS = (
+    "/usr/local/share/aurade/aurade-mark.svg",
+    _os_join(_os_dirname(__file__), "../../../assets/aurade-mark.svg"),
+)
+
+# AuraDE is deliberately not another stock Adwaita application. These
+# classes give the installer its own language while retaining the platform's
+# accessibility and system rendering paths.
+AURADE_CSS = """
+.aurade-shell { background-color: #eef2f8; }
+.aurade-rail {
+  background-color: #111a35;
+  color: #f7fbff;
+  padding: 28px 20px 22px 20px;
+}
+.aurade-mark-frame {
+  background-color: #27335f;
+  border-radius: 18px;
+  padding: 8px;
+}
+.aurade-mark-fallback {
+  color: #f7fbff;
+  font-size: 30px;
+  font-weight: 800;
+}
+.aurade-wordmark { color: #f7fbff; font-size: 24px; font-weight: 750; }
+.aurade-kicker {
+  color: #a9b7e4;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+.aurade-rail-rule { color: #33406d; margin-top: 4px; margin-bottom: 2px; }
+.aurade-step { border-radius: 11px; color: #9eacd5; padding: 8px 10px; }
+.aurade-step-number { color: #7888b7; font-size: 11px; font-weight: 700; }
+.aurade-step-active { background-color: #2c3a70; color: #ffffff; }
+.aurade-step-active .aurade-step-number { color: #8fe8ff; }
+.aurade-step-done { color: #9de8d4; }
+.aurade-step-done .aurade-step-number { color: #67c8b2; }
+.aurade-rail-spacer { min-height: 10px; }
+.aurade-safety {
+  background-color: #1b274d;
+  border: 1px solid #334275;
+  border-radius: 14px;
+  color: #c5d1f3;
+  padding: 12px;
+}
+.aurade-safety-title { color: #8fe8ff; font-weight: 700; }
+.aurade-safety-copy { color: #aab8df; font-size: 12px; }
+.aurade-main { background-color: #f5f7fb; }
+.aurade-header { background-color: #f5f7fb; padding: 10px 18px; }
+.aurade-content { background-color: #f5f7fb; }
+.aurade-page { padding-top: 10px; }
+.aurade-welcome {
+  background-color: #ffffff;
+  border: 1px solid #dfe5f0;
+  border-radius: 26px;
+  padding: 38px 42px;
+}
+.aurade-hero-mark { background-color: #111a35; border-radius: 26px; padding: 18px; }
+.aurade-eyebrow {
+  color: #5865d9;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+}
+.aurade-hero-title { color: #17213c; font-size: 30px; font-weight: 800; }
+.aurade-hero-body { color: #52617b; font-size: 15px; }
+.aurade-feature {
+  background-color: #f2f5fb;
+  border: 1px solid #e1e7f1;
+  border-radius: 15px;
+  padding: 14px;
+}
+.aurade-feature-title { color: #233253; font-weight: 700; }
+.aurade-feature-copy { color: #66748c; font-size: 12px; }
+.aurade-card {
+  background-color: #ffffff;
+  border: 1px solid #e1e7f1;
+  border-radius: 15px;
+}
+.aurade-section-caption {
+  color: #5a67d8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.aurade-footer { color: #77859c; font-size: 11px; }
+.aurade-status-ok { color: #187c69; font-weight: 700; }
+.aurade-status-warning { color: #98630b; font-weight: 700; }
+.aurade-status-danger { color: #b33c54; font-weight: 700; }
+.aurade-mono { font-family: monospace; }
+"""
 
 #: How often the progress page re-reads the journal. The journal is the only
 #: account of what happened; this is a view of it and keeps no tally.
@@ -52,11 +148,12 @@ def _wrapped(text: str, css: str | None = None, center: bool = False) -> Gtk.Lab
 
 
 def _page_box() -> Gtk.Box:
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-    box.set_margin_top(24)
-    box.set_margin_bottom(24)
-    box.set_margin_start(24)
-    box.set_margin_end(24)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+    box.set_margin_top(28)
+    box.set_margin_bottom(28)
+    box.set_margin_start(34)
+    box.set_margin_end(34)
+    box.add_css_class("aurade-page")
     return box
 
 
@@ -89,20 +186,28 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._network_report: dict | None = None
         self._busy: str | None = None
         self._closing = False
+        self.rail_steps: dict[str, Gtk.Widget] = {}
+        self.rail_step_labels: dict[str, Gtk.Label] = {}
+        self.rail_status: Gtk.Label | None = None
+        self.rail_safety: Gtk.Label | None = None
 
         self.set_title("AuraDE Installer")
-        self.set_default_size(940, 680)
+        self.set_default_size(1120, 760)
+
+        self._install_css()
 
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
         toolbar = Adw.ToolbarView()
-        self.toast_overlay.set_child(toolbar)
+        toolbar.add_css_class("aurade-content")
 
         self.header = Adw.HeaderBar()
+        self.header.add_css_class("aurade-header")
         self.header.set_show_end_title_buttons(False)
         self.header.set_show_start_title_buttons(False)
         self.back_button = Gtk.Button(label="Quit")
+        self.back_button.add_css_class("flat")
         self.back_button.connect("clicked", lambda *_: self.on_back())
         self.header.pack_start(self.back_button)
 
@@ -111,7 +216,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.forward_button.connect("clicked", lambda *_: self.on_forward())
         self.header.pack_end(self.forward_button)
 
-        self.title_widget = Adw.WindowTitle(title="AuraDE Installer", subtitle="")
+        self.title_widget = Adw.WindowTitle(title="Install AuraDE", subtitle="")
         self.header.set_title_widget(self.title_widget)
         toolbar.add_top_bar(self.header)
 
@@ -124,10 +229,121 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stack.set_vexpand(True)
         toolbar.set_content(self.stack)
 
+        shell = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        shell.add_css_class("aurade-shell")
+        shell.append(self._build_rail())
+        main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        main.add_css_class("aurade-main")
+        main.set_hexpand(True)
+        main.append(toolbar)
+        shell.append(main)
+        self.toast_overlay.set_child(shell)
+
         self._build_pages()
         self._install_shortcuts()
         self.connect("close-request", self._on_close_request)
         self.refresh()
+
+    def _install_css(self) -> None:
+        provider = Gtk.CssProvider()
+        provider.load_from_data(bytes(AURADE_CSS, "utf-8"))
+        display = self.get_display()
+        if display is not None:
+            Gtk.StyleContext.add_provider_for_display(display, provider, 600)
+
+    def _brand_mark(self, pixel_size: int = 54) -> Gtk.Widget:
+        for path in BRAND_MARK_PATHS:
+            if _os_exists(path):
+                image = Gtk.Image.new_from_file(path)
+                image.set_pixel_size(pixel_size)
+                image.add_css_class("aurade-mark-image")
+                return image
+        fallback = Gtk.Label(label="A")
+        fallback.add_css_class("aurade-mark-fallback")
+        fallback.set_width_chars(2)
+        fallback.set_xalign(0.5)
+        return fallback
+
+    def _build_rail(self) -> Gtk.Box:
+        rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        rail.set_size_request(238, -1)
+        rail.set_vexpand(True)
+        rail.add_css_class("aurade-rail")
+
+        brand = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        brand_mark = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        brand_mark.add_css_class("aurade-mark-frame")
+        brand_mark.append(self._brand_mark(48))
+        brand.append(brand_mark)
+        brand_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        wordmark = Gtk.Label(label="AuraDE")
+        wordmark.set_xalign(0)
+        wordmark.add_css_class("aurade-wordmark")
+        brand_text.append(wordmark)
+        kicker = Gtk.Label(label="INSTALLATION ENVIRONMENT")
+        kicker.set_xalign(0)
+        kicker.add_css_class("aurade-kicker")
+        brand_text.append(kicker)
+        brand.append(brand_text)
+        rail.append(brand)
+
+        rule = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        rule.add_css_class("aurade-rail-rule")
+        rail.append(rule)
+
+        phase_caption = Gtk.Label(label="SETUP PROGRESS")
+        phase_caption.set_xalign(0)
+        phase_caption.add_css_class("aurade-kicker")
+        rail.append(phase_caption)
+        for key, number, label in (
+            ("prepare", "01", "Prepare"),
+            ("configure", "02", "Configure"),
+            ("review", "03", "Review"),
+            ("install", "04", "Install"),
+            ("finish", "05", "Finish"),
+        ):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            row.add_css_class("aurade-step")
+            number_label = Gtk.Label(label=number)
+            number_label.set_xalign(0)
+            number_label.set_width_chars(2)
+            number_label.add_css_class("aurade-step-number")
+            row.append(number_label)
+            text_label = Gtk.Label(label=label)
+            text_label.set_xalign(0)
+            row.append(text_label)
+            self.rail_steps[key] = row
+            self.rail_step_labels[key] = text_label
+            rail.append(row)
+
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        spacer.add_css_class("aurade-rail-spacer")
+        rail.append(spacer)
+
+        status_caption = Gtk.Label(label="CURRENT MODE")
+        status_caption.set_xalign(0)
+        status_caption.add_css_class("aurade-kicker")
+        rail.append(status_caption)
+        self.rail_status = Gtk.Label(label="Ready to begin")
+        self.rail_status.set_xalign(0)
+        self.rail_status.set_wrap(True)
+        self.rail_status.add_css_class("aurade-safety-title")
+        rail.append(self.rail_status)
+
+        safety = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        safety.add_css_class("aurade-safety")
+        safety_title = Gtk.Label(label="SAFE UNTIL CONFIRMED")
+        safety_title.set_xalign(0)
+        safety_title.add_css_class("aurade-safety-title")
+        safety.append(safety_title)
+        self.rail_safety = Gtk.Label(label="Nothing is written until you confirm the target disk.")
+        self.rail_safety.set_xalign(0)
+        self.rail_safety.set_wrap(True)
+        self.rail_safety.add_css_class("aurade-safety-copy")
+        safety.append(self.rail_safety)
+        rail.append(safety)
+        return rail
 
     # -- async worker ------------------------------------------------------
 
@@ -184,14 +400,90 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stack.add_named(self._build_planned(), F.PLANNED)
 
     def _build_welcome(self) -> Gtk.Widget:
-        status = Adw.StatusPage(title=F.WELCOME_TITLE, description=F.WELCOME_BODY)
-        status.set_icon_name("drive-harddisk-symbolic")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_halign(Gtk.Align.CENTER)
-        assurance = _wrapped(F.WELCOME_ASSURANCE, css="dim-label", center=True)
-        body.append(assurance)
-        status.set_child(body)
-        return status
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        outer.set_margin_top(34)
+        outer.set_margin_bottom(34)
+        outer.set_margin_start(42)
+        outer.set_margin_end(42)
+
+        hero = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=28)
+        hero.set_halign(Gtk.Align.CENTER)
+        hero.add_css_class("aurade-welcome")
+        hero.set_hexpand(True)
+
+        copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        copy.set_valign(Gtk.Align.CENTER)
+        eyebrow = Gtk.Label(label="AURADE · CHROMEOS-INSPIRED SETUP")
+        eyebrow.set_xalign(0)
+        eyebrow.add_css_class("aurade-eyebrow")
+        copy.append(eyebrow)
+        title = Gtk.Label(label="A fresh start for your computer.")
+        title.set_xalign(0)
+        title.set_wrap(True)
+        title.set_max_width_chars(30)
+        title.add_css_class("aurade-hero-title")
+        copy.append(title)
+        body = _wrapped(F.WELCOME_BODY, css="aurade-hero-body")
+        body.set_max_width_chars(48)
+        copy.append(body)
+        assurance = _wrapped(F.WELCOME_ASSURANCE, css="aurade-footer")
+        assurance.set_max_width_chars(52)
+        copy.append(assurance)
+        hero.append(copy)
+
+        mark_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        mark_card.set_valign(Gtk.Align.CENTER)
+        mark_card.set_halign(Gtk.Align.CENTER)
+        mark_card.add_css_class("aurade-hero-mark")
+        mark_card.append(self._brand_mark(132))
+        mark_caption = Gtk.Label(label="AURADE")
+        mark_caption.add_css_class("aurade-kicker")
+        mark_caption.set_halign(Gtk.Align.CENTER)
+        mark_card.append(mark_caption)
+        hero.append(mark_card)
+        outer.append(hero)
+
+        section = Gtk.Label(label="WHAT YOU CAN EXPECT")
+        section.set_xalign(0)
+        section.add_css_class("aurade-section-caption")
+        outer.append(section)
+
+        features = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        features.set_homogeneous(True)
+        for title_text, copy_text in (
+            ("A calm setup", "A focused flow with clear answers and no hidden disk changes."),
+            ("Recovery built in", "Btrfs snapshots keep a pristine factory path available after install."),
+            ("Your choice, visible", "Encryption, keyboard, locale, and target identity stay in view."),
+        ):
+            feature = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            feature.add_css_class("aurade-feature")
+            feature_title = Gtk.Label(label=title_text)
+            feature_title.set_xalign(0)
+            feature_title.set_wrap(True)
+            feature_title.add_css_class("aurade-feature-title")
+            feature.append(feature_title)
+            feature_copy = Gtk.Label(label=copy_text)
+            feature_copy.set_xalign(0)
+            feature_copy.set_wrap(True)
+            feature_copy.add_css_class("aurade-feature-copy")
+            feature.append(feature_copy)
+            features.append(feature)
+        outer.append(features)
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        footer.set_halign(Gtk.Align.CENTER)
+        footer.add_css_class("aurade-safety")
+        footer_label = Gtk.Label(label="Nothing is written until you review the plan and confirm the exact target disk.")
+        footer_label.set_wrap(True)
+        footer_label.set_justify(Gtk.Justification.CENTER)
+        footer_label.add_css_class("aurade-safety-copy")
+        footer.append(footer_label)
+        outer.append(footer)
+
+        scroller.set_child(outer)
+        return scroller
 
     def _build_page(self, page: F.Page) -> Gtk.Widget:
         box = _page_box()
@@ -211,6 +503,7 @@ class InstallerWindow(Adw.ApplicationWindow):
                 if spec is None:
                     continue
                 group = Adw.PreferencesGroup(description=spec["help"])
+                group.add_css_class("aurade-card")
                 for row in self._build_question_rows(question, spec):
                     group.add(row)
                 self.widgets[f"group.{question}"] = group
@@ -226,6 +519,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _build_graphics(self, box: Gtk.Box) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="Graphics and hardware qualification")
+        group.add_css_class("aurade-card")
         self.widgets["graphics.summary"] = Adw.ActionRow(title="Renderer")
         self.widgets["graphics.detail"] = Adw.ActionRow(title="Detected graphics device")
         self.widgets["graphics.driver"] = Adw.ActionRow(title="Kernel driver")
@@ -238,6 +532,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(group)
 
         warn_group = Adw.PreferencesGroup(title="Hardware notice")
+        warn_group.add_css_class("aurade-card")
         warn_group.set_visible(False)
         self.widgets["graphics.warn_group"] = warn_group
 
@@ -262,12 +557,14 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _build_keymap_test(self) -> Gtk.Widget:
         group = Adw.PreferencesGroup(title="Keyboard test")
+        group.add_css_class("aurade-card")
         test_row = Adw.EntryRow(title="Test keyboard layout: type @, #, $, /, ~, |")
         group.add(test_row)
         return group
 
     def _build_network(self, box: Gtk.Box) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(title="Network and clock")
+        group.add_css_class("aurade-card")
         self.widgets["network.list"] = group
         box.append(group)
         note = _wrapped(
@@ -353,6 +650,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _build_disk_list(self) -> Gtk.Widget:
         group = Adw.PreferencesGroup(title="Disks in this computer")
+        group.add_css_class("aurade-card")
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         listbox.add_css_class("boxed-list")
@@ -370,10 +668,12 @@ class InstallerWindow(Adw.ApplicationWindow):
         box = _page_box()
         box.append(_wrapped("Check these before continuing.", css="dim-label"))
         group = Adw.PreferencesGroup(title="Configuration summary")
+        group.add_css_class("aurade-card")
         self.widgets["review.group"] = group
         box.append(group)
 
         preflight_group = Adw.PreferencesGroup(title="System and hardware preflight")
+        preflight_group.add_css_class("aurade-card")
         self.widgets["review.gfx"] = Adw.ActionRow(title="Graphics renderer")
         self.widgets["review.net"] = Adw.ActionRow(title="Network status")
         self.widgets["review.mem"] = Adw.ActionRow(title="System memory")
@@ -413,6 +713,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(warning_card)
 
         group = Adw.PreferencesGroup(title="Target disk identity")
+        group.add_css_class("aurade-card")
         for key, title in (
             ("path", "Device path"),
             ("model", "Model"),
@@ -429,6 +730,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(group)
         box.append(_wrapped(F.GATE_BODY))
         prompt = Adw.PreferencesGroup(title="Confirmation")
+        prompt.add_css_class("aurade-card")
         entry = Adw.EntryRow(title="Type the confirmation token exactly")
         entry.connect("changed", lambda *_: self.refresh_gate_button())
         entry.connect("entry-activated", lambda *_: self.on_forward())
@@ -463,6 +765,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         expander.set_expanded(False)
         self.widgets["progress.expander"] = expander
         exp_group = Adw.PreferencesGroup()
+        exp_group.add_css_class("aurade-card")
         exp_group.add(expander)
         box.append(exp_group)
 
@@ -478,6 +781,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box = _page_box()
 
         summary_group = Adw.PreferencesGroup(title="Installed System Summary")
+        summary_group.add_css_class("aurade-card")
         for key, title in (
             ("install_id", "Install ID"),
             ("target", "Target Disk"),
@@ -494,6 +798,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(summary_group)
 
         rec_group = Adw.PreferencesGroup(title="Recovery and Rollback Information")
+        rec_group.add_css_class("aurade-card")
         self.widgets["done.rec_snap"] = Adw.ActionRow(
             title="Factory Snapshot",
             subtitle="@snapshots/0/snapshot — read-only pristine factory state",
@@ -513,6 +818,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(rec_group)
 
         logs_group = Adw.PreferencesGroup(title="Installation Logs")
+        logs_group.add_css_class("aurade-card")
         self.widgets["done.journal_row"] = Adw.ActionRow(
             title="Structured Journal",
             subtitle="/var/log/aurade-install/journal.jsonl",
@@ -633,8 +939,61 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     # -- rendering ---------------------------------------------------------
 
+    def _rail_phase(self, state: str) -> str | None:
+        if state == "pages":
+            page = F.PAGES_BY_NAME[self.flow.current_page]
+            if page.name in ("graphics", "network"):
+                return "prepare"
+            return "configure"
+        return {
+            F.REVIEW: "review",
+            F.GATE: "review",
+            F.PROGRESS: "install",
+            F.DONE: "finish",
+        }.get(state)
+
+    def _refresh_rail(self, state: str) -> None:
+        active = self._rail_phase(state)
+        order = ("prepare", "configure", "review", "install", "finish")
+        active_index = order.index(active) if active in order else -1
+        for index, key in enumerate(order):
+            row = self.rail_steps.get(key)
+            if row is None:
+                continue
+            row.remove_css_class("aurade-step-active")
+            row.remove_css_class("aurade-step-done")
+            if active_index >= 0 and index < active_index:
+                row.add_css_class("aurade-step-done")
+            elif key == active:
+                row.add_css_class("aurade-step-active")
+
+        status = {
+            F.WELCOME: "Ready to begin",
+            F.REVIEW: "Review your choices",
+            F.GATE: "Final erase confirmation",
+            F.PROGRESS: "Installing AuraDE",
+            F.DONE: "Installation complete",
+            F.FAILURE: "Action needed",
+            F.CANCELLED: "Installation cancelled",
+            F.PLANNED: "Plan checked; no disk changes",
+        }.get(state)
+        if state == "pages":
+            status = F.PAGES_BY_NAME[self.flow.current_page].title
+        if self.rail_status is not None and status:
+            self.rail_status.set_text(status)
+
+        safety = {
+            F.GATE: "Type the exact token shown for this disk. This is the only erase gate.",
+            F.PROGRESS: "Disk changes are underway. Do not remove the installation media.",
+            F.DONE: "The install is complete. Remove the USB before restarting.",
+            F.FAILURE: "Review the journal and log before attempting another install.",
+        }.get(state, "Nothing is written until you confirm the target disk.")
+        if self.rail_safety is not None:
+            self.rail_safety.set_text(safety)
+
     def refresh(self) -> None:
         state = self.flow.state
+        self._refresh_rail(state)
         name = f"page:{self.flow.current_page}" if state == "pages" else state
         self.stack.set_visible_child_name(name)
 
