@@ -17,6 +17,7 @@ import glob
 import os
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 
 TESTS = os.path.dirname(os.path.realpath(__file__))
@@ -190,6 +191,28 @@ with session() as model:
         ).split()),
         "the bridge and the manifest disagree about which questions are advanced",
     )
+
+# The GTK renderer may have a worker doing preflight while a main-loop
+# callback polls or refreshes another view. The bridge must serialize those
+# calls rather than interleave JSON lines on its one subprocess pipe.
+with session() as model:
+    barrier = threading.Barrier(8)
+    errors: list[str] = []
+
+    def concurrent_ping() -> None:
+        try:
+            barrier.wait(timeout=5)
+            if not model.ping():
+                errors.append("ping returned false")
+        except Exception as exc:  # noqa: BLE001 - report every race failure
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=concurrent_ping) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+    check(not errors, f"concurrent bridge calls were not serialized: {errors}")
 
 # ---------------------------------------------------------------------------
 # Validation is delegated, never restated
