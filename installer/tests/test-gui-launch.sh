@@ -53,6 +53,9 @@ STUB
 cat >"$TMP/stub/cage" <<'STUB'
 #!/usr/bin/env bash
 printf 'cage %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+if [[ ${AURADE_CAGE_FAIL:-0} == 1 ]]; then
+  exit 17
+fi
 exit 0
 STUB
 chmod +x "$TMP/bin/aurade-installer-tui" "$TMP/stub/cage"
@@ -258,5 +261,17 @@ PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/empty-dri" \
   fail '--graphical failed to start the graphical path'
 grep -q -- '--force' "$TMP/launch.log" ||
   fail '--graphical did not carry the force override to the GUI'
+
+# A compositor can pass the probe and still fail when it programs a real DRM
+# plane. The launcher must explain that failure and hand the same plan-only
+# intent to the text installer rather than leaving the user at a blank console.
+launch
+out=$(AURADE_CAGE_FAIL=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" --plan-only 2>&1) ||
+  fail "a compositor failure did not fall back to text: $out"
+grep -q 'falling back to the text installer' <<<"$out" ||
+  fail "the compositor failure did not explain the fallback: $out"
+logged 'tui --plan-only' ||
+  fail 'the compositor failure dropped the plan-only handoff'
 
 echo 'installer GUI launch test: PASS'

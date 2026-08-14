@@ -57,11 +57,16 @@ EOF
 
 MODE=auto
 PASSTHROUGH=()
+TEXT_PASSTHROUGH=()
 while (($#)); do
   case $1 in
     --text)      MODE=text; shift ;;
     --graphical) MODE=graphical; shift ;;
-    --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
+    --plan-only)
+      PASSTHROUGH+=(--plan-only)
+      TEXT_PASSTHROUGH+=(--plan-only)
+      shift
+      ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -80,7 +85,7 @@ TUI=$(_find aurade-installer-tui) || {
 }
 
 run_text() {
-  exec "$TUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
+  exec "$TUI" "${TEXT_PASSTHROUGH[@]}"
 }
 
 [[ $MODE != text && ${AURADE_FORCE_TUI:-0} != 1 ]] || run_text
@@ -120,6 +125,8 @@ cage -- "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} || status=$?
 if (( status != 0 )); then
   printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
     "$status" >&2
-  printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+  printf '%s\n' \
+    'aurade-installer-start: the graphical display could not stay active; falling back to the text installer' >&2
+  exec "$TUI" "${TEXT_PASSTHROUGH[@]}"
 fi
 exit "$status"
