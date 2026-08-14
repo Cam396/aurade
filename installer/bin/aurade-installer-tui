@@ -1066,6 +1066,7 @@ run_questions() {
     case $rc in
       0)
         ANSWERS[$id]=$PROMPT_RESULT
+        PROMPT_RESULT=
         # Answering the encryption question changes which questions remain.
         if [[ $id == encrypt ]]; then
           mapfile -t order < <(visible_questions)
@@ -1102,6 +1103,7 @@ run_advanced() {
     ask "$id" "$step" "$total" || rc=$?
     (( rc == 0 )) || return 0
     ANSWERS[$id]=$PROMPT_RESULT
+    PROMPT_RESULT=
   done
   return 0
 }
