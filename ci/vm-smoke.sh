@@ -7,6 +7,7 @@ VM_USER="${AURADE_VM_USER:-root}"
 TEST_USER="${AURADE_TEST_USER:-auratest}"
 EXPECTED_CHROME_SHA="${AURADE_EXPECTED_CHROME_SHA:-}"
 REMOVABLE_AUTOMOUNT="${AURADE_REMOVABLE_AUTOMOUNT:-0}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 open_audio_settings=0
 open_core_apps=0
 files_volume_smoke=0
@@ -215,9 +216,19 @@ require_remote "Chrome login-manager process" \
   'pgrep -a -f "^/usr/lib/chromiumos-ash/chrome --login-manager"'
 
 if [[ "${release_package_smoke}" == "1" ]]; then
-  for package_dir in aurade-account-helper aurade-system-helper \
-      shill-nm-adapter aurade-power aurade-host-bridge chromiumos-ash \
-      aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full; do
+  expected_package_file="${AURADE_EXPECTED_PACKAGES_FILE:-${SCRIPT_DIR}/../installer/expected-packages.txt}"
+  [[ -r "${expected_package_file}" ]] || {
+    echo "Expected package list is unreadable: ${expected_package_file}" >&2
+    exit 1
+  }
+  mapfile -t release_packages < <(
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${expected_package_file}"
+  )
+  ((${#release_packages[@]} > 0)) || {
+    echo "Expected package list is empty: ${expected_package_file}" >&2
+    exit 1
+  }
+  for package_dir in "${release_packages[@]}"; do
     pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
       "${package_dir}/PKGBUILD")"
     pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' \
