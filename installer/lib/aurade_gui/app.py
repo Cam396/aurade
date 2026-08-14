@@ -633,6 +633,14 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.forward_button.remove_css_class("destructive-action")
             self.forward_button.add_css_class("suggested-action")
             self.forward_button.set_sensitive(True)
+        if self._busy is not None:
+            # Bridge.call is a line-oriented protocol; do not let navigation
+            # issue a second request while an asynchronous preflight is using
+            # the model process.
+            self.back_button.set_sensitive(False)
+            self.forward_button.set_sensitive(False)
+        else:
+            self.back_button.set_sensitive(True)
         GLib.idle_add(self._focus_first)
 
     def _title_for(self, state: str) -> str:
@@ -761,10 +769,46 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.close()
 
     def _refresh_network(self) -> None:
+        if self._network_report is None:
+            if self._busy != "network":
+                self._busy = "network"
+                self._clear_group("network", self.widgets["network.list"])
+                row = Adw.ActionRow(title="Checking network and clock…")
+                row.set_subtitle("The installer is running a read-only preflight.")
+                row.set_title_lines(0)
+                row.add_prefix(Gtk.Image.new_from_icon_name("content-loading-symbolic"))
+                self._add_row("network", self.widgets["network.list"], row)
+                self._run_async(
+                    self.model.network,
+                    self._on_network_done,
+                    self._on_network_error,
+                )
+            return
+
+        self._draw_network(self._network_report)
+
+    def _on_network_done(self, report: dict) -> None:
+        if self._busy != "network":
+            return
+        self._busy = None
+        self._network_report = report
+        self.refresh()
+
+    def _on_network_error(self, exc: Exception) -> None:
+        if self._busy != "network":
+            return
+        self._busy = None
+        self._network_report = {
+            "ok": False,
+            "available": False,
+            "notes": [],
+            "issues": [f"The network check could not run: {exc}"],
+        }
+        self.refresh()
+
+    def _draw_network(self, report: dict) -> None:
         group = self.widgets["network.list"]
         self._clear_group("network", group)
-        report = self.model.network()
-        self._network_report = report
         if not report.get("available", True):
             row = Adw.ActionRow(title="The network check is not available")
             row.set_subtitle(
