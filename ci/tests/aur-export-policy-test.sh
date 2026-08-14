@@ -13,8 +13,10 @@ AURADE_AUR_OUTPUT="$TMP/aur" \
   "$ROOT/ci/export-aur-bundles.sh" >"$TMP/export.out"
 
 count=$(find "$TMP/aur" -mindepth 1 -maxdepth 1 -type d | wc -l)
-[[ $count -eq 11 ]] || {
-  echo "expected 11 AUR package directories, found $count" >&2
+expected_count=$(sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' \
+  "$ROOT/installer/expected-packages.txt" | wc -l)
+[[ $count -eq $expected_count ]] || {
+  echo "expected $expected_count AUR package directories, found $count" >&2
   exit 1
 }
 pkgver=$(awk -F= '$1 == "pkgver" {print $2; exit}' "$ROOT/chromiumos-ash/PKGBUILD")
