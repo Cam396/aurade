@@ -355,6 +355,29 @@ partition_path() {
   esac
 }
 
+# systemd's `bootctl is-secure-boot` verb is not present in every ArchISO
+# snapshot.  Prefer it when available, then read the standard EFI variable
+# directly so an older live image does not turn a known-disabled VM into an
+# unexplained refusal.  Unknown remains fail-closed: only an explicit 0/1 is
+# safe to carry past the destructive preflight.
+secure_boot_state() {
+  local state secure_file byte
+  state=$(bootctl is-secure-boot 2>/dev/null || true)
+  case $state in
+    enabled|disabled) printf '%s\n' "$state"; return 0 ;;
+  esac
+  for secure_file in /sys/firmware/efi/efivars/SecureBoot-*; do
+    [[ -e $secure_file ]] || continue
+    byte=$(dd if="$secure_file" bs=1 skip=4 count=1 2>/dev/null |
+      od -An -t u1 2>/dev/null | awk 'NF {print $1; exit}')
+    case $byte in
+      1) printf 'enabled\n'; return 0 ;;
+      0) printf 'disabled\n'; return 0 ;;
+    esac
+  done
+  printf 'unknown\n'
+}
+
 cleanup() {
   local status=$?
   set +e
@@ -603,8 +626,8 @@ if [[ $MODE == execute ]]; then
   if (( LUKS )); then
     command -v cryptsetup >/dev/null || die 'required command not found: cryptsetup'
   fi
-  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
-  case $secure_boot_state in
+secure_boot_state=$(secure_boot_state)
+case $secure_boot_state in
     enabled)
       die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain' ;;
     disabled) ;;
