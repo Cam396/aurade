@@ -185,7 +185,10 @@ if (
 ) >"$TMP/blocked.out" 2>&1; then
   fail 'journal initialization unexpectedly succeeded under a file parent'
 fi
-grep -Fq 'cannot create structured journal' "$TMP/blocked.out"
+# Root can chmod an existing file and fail when creating the child journal;
+# an unprivileged build user fails one step earlier while creating the journal
+# directory. Both are the required fail-closed refusal path.
+grep -Eq 'cannot create (journal directories|structured journal)' "$TMP/blocked.out"
 
 # ---- permissions -------------------------------------------------------------
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
