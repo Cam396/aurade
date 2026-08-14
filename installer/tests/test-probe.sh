@@ -24,6 +24,10 @@ mem() { printf 'MemTotal:       %s kB\nMemAvailable:   %s kB\n' "$2" "$1" >"$TMP
 mem 16000000 16777216 big
 mem 3900000 4194304 small
 
+install -d "$TMP/vm-bin"
+printf '#!/bin/sh\necho vmware\n' >"$TMP/vm-bin/systemd-detect-virt"
+chmod +x "$TMP/vm-bin/systemd-detect-virt"
+
 install -d "$TMP/dri-empty" "$TMP/dri-ok"
 : >"$TMP/dri-ok/renderD128"
 : >"$TMP/dri-ok/card0"
@@ -38,13 +42,15 @@ drm_tree() {
 install -d "$TMP/drm-real" "$TMP/drm-virtual" "$TMP/drm-empty"
 drm_tree "$TMP/drm-real" renderD128 i915
 drm_tree "$TMP/drm-virtual" renderD128 vgem
+install -d "$TMP/drm-vmware"
+drm_tree "$TMP/drm-vmware" renderD128 vmwgfx
 install -d "$TMP/dri-virtual"
 : >"$TMP/dri-virtual/renderD128"
 
 probe() {
   # A fresh shell each time: the probe sets globals, and a test that reused
   # them could pass on a value left behind by the previous case.
-  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+  env -u DISPLAY -u WAYLAND_DISPLAY AURADE_PROBE_GL_TIMEOUT=0.2 \
     AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$2" \
     AURADE_PROBE_MIN_GUI_MIB="${3:-6144}" AURADE_FORCE_TUI="${4:-0}" \
     AURADE_PROBE_DRM_DIR="${5:-$TMP/drm-empty}" PATH="${6:-$PATH}" \
@@ -100,7 +106,7 @@ check 'unreadable meminfo reason' "$reason" low-memory
 # working acceleration, and a screen that says otherwise is how a user comes to
 # trust this check and then meets a black desktop.
 advice_for() {
-  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+  env -u DISPLAY -u WAYLAND_DISPLAY AURADE_PROBE_GL_TIMEOUT=0.2 \
     AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
     AURADE_PROBE_DRM_DIR="${2:-$TMP/drm-empty}" PATH="${3:-$PATH}" bash -c '
       set -Eeuo pipefail
@@ -166,6 +172,31 @@ hard_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real" "$TMP/gl-hard:$PATH")
 [[ $hard_advice == *'Hardware rendering is available'* ]] ||
   fail 'a real renderer was not reported as hardware rendering'
 
+# VMware can publish a render node while a headless live console still lacks a
+# visible DRM output for Cage. Auto mode must choose the text path instead of
+# presenting a blank compositor screen; the explicit override remains covered
+# below so this is not a way to disable GUI diagnostics.
+IFS='|' read -r renderer reason black graphics < \
+  <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-vmware" "$TMP/vm-bin:$PATH")
+check 'headless vmware renderer' "$renderer" tui
+check 'headless vmware reason' "$reason" vmware-kms-uncertain
+check 'headless vmware does not predict black screen' "$black" no
+vmware_gui_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-vmware" "$TMP/vm-bin:$PATH")
+[[ $vmware_gui_advice == *'visible DRM output'* ]] ||
+  fail 'headless VMware advice does not explain the display limitation'
+
+vmware_override=$(env \
+  AURADE_ALLOW_VMWARE_GUI=1 AURADE_PROBE_GL_TIMEOUT=0.2 \
+  AURADE_PROBE_DRI_DIR="$TMP/dri-ok" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
+  AURADE_PROBE_DRM_DIR="$TMP/drm-vmware" PATH="$TMP/vm-bin:$PATH" bash -c '
+    set -Eeuo pipefail
+    . '"$ROOT"'/installer/lib/aurade-probe.sh
+    aurade_probe_renderer
+    printf "%s|%s\n" "$AURADE_PROBE_RENDERER" "$AURADE_PROBE_REASON"
+  ')
+[[ $vmware_override == 'gui|ok' ]] ||
+  fail "explicit VMware GUI override was ignored: $vmware_override"
+
 # A broken or absent eglinfo must leave the sysfs result exactly as it was.
 IFS='|' read -r renderer reason black graphics < \
   <(probe "$TMP/dri-ok" "$TMP/meminfo.big" 6144 0 "$TMP/drm-real" "$TMP/gl-broken:$PATH")
@@ -194,7 +225,7 @@ grep -Fq reached-the-end "$TMP/errexit.out" || fail 'the probe did not return co
 
 # --- advice is specific, and names the virtual machine when there is one -----
 advice() {
-  env AURADE_PROBE_GL_TIMEOUT=0.2 \
+  env -u DISPLAY -u WAYLAND_DISPLAY AURADE_PROBE_GL_TIMEOUT=0.2 \
     AURADE_PROBE_DRI_DIR="$TMP/absent" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" \
     PATH="$1:$PATH" bash -c '
       set -Eeuo pipefail
@@ -220,8 +251,8 @@ bare_advice=$(advice "$TMP/bare-bin")
   fail 'bare metal was not told what is actually wrong'
 
 # --- every reason code has advice written for it -----------------------------
-for reason in ok forced no-dri-dir no-render-node low-memory virtual-gpu-only software-rendering; do
-  text=$(env AURADE_PROBE_GL_TIMEOUT=0.2 \
+for reason in ok forced no-dri-dir no-render-node low-memory virtual-gpu-only software-rendering vmware-kms-uncertain; do
+  text=$(env -u DISPLAY -u WAYLAND_DISPLAY AURADE_PROBE_GL_TIMEOUT=0.2 \
     AURADE_PROBE_DRI_DIR="$TMP/dri-ok" AURADE_PROBE_MEMINFO="$TMP/meminfo.big" bash -c '
     . '"$ROOT"'/installer/lib/aurade-probe.sh
     AURADE_PROBE_VIRT=none
