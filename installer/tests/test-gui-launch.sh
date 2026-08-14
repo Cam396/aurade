@@ -66,7 +66,41 @@ def require_version(namespace, version):
     return None
 PY
 install -d "$TMP/fake-gi/gi/repository"
-printf 'class Gtk: pass\nclass Adw: pass\n' >"$TMP/fake-gi/gi/repository/__init__.py"
+cat >"$TMP/fake-gi/gi/repository/__init__.py" <<'PY'
+class Gtk:
+    class Orientation: VERTICAL = 1; HORIZONTAL = 0
+    class Align: CENTER = 0; START = 1
+    class NaturalWrapMode: WORD = 0
+    class Justification: CENTER = 0; LEFT = 1
+    class PolicyType: NEVER = 0; AUTOMATIC = 1
+    class StackTransitionType: SLIDE_LEFT_RIGHT = 0
+    class SelectionMode: SINGLE = 0; NONE = 1
+    class ShortcutScope: GLOBAL = 0
+    Label = Box = ScrolledWindow = Stack = Button = Image = ListBox = ProgressBar = TextView = ShortcutController = Shortcut = ShortcutTrigger = CallbackAction = StringList = Widget = type("Widget", (), {})
+
+class Adw:
+    @staticmethod
+    def init(): pass
+    class Application:
+        def __init__(self, *args, **kwargs): pass
+        def run(self, *args, **kwargs): return 0
+    ApplicationWindow = Clamp = StatusPage = PreferencesGroup = ActionRow = EntryRow = PasswordEntryRow = SwitchRow = ComboRow = ExpanderRow = Banner = ToastOverlay = HeaderBar = WindowTitle = Toast = AlertDialog = Dialog = ToolbarView = type("AdwWidget", (), {})
+    class ResponseAppearance: DESTRUCTIVE = 0
+
+class Gio:
+    class ApplicationFlags: NON_UNIQUE = 0
+    Subprocess = SubprocessFlags = type("GioStub", (), {})
+
+class GLib:
+    SOURCE_REMOVE = False
+    SOURCE_CONTINUE = True
+    @staticmethod
+    def idle_add(*args, **kwargs): pass
+    @staticmethod
+    def timeout_add(*args, **kwargs): pass
+    @staticmethod
+    def source_remove(*args, **kwargs): pass
+PY
 
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' '/dev/sda|931.5G|WDC WD10EZEX|sata|WD-WCC6Y4KP1234' >"$TMP/disks"
@@ -87,6 +121,15 @@ launch() { : >"$TMP/launch.log"; }
 logged() { grep -Fq -- "$1" "$TMP/launch.log"; }
 
 # --- the entry point falls back rather than failing --------------------------
+
+# A missing bridge executable falls back to the text installer.
+launch
+out=$(AURADE_GUI_BRIDGE="$TMP/nonexistent" \
+  "$TMP/bin/aurade-installer-gui" --journal "$TMP/j" --raw-log "$TMP/r" 2>&1) ||
+  fail "missing bridge failed instead of falling back: $out"
+grep -q 'the installer model is missing' <<<"$out" ||
+  fail "missing bridge did not state reason: $out"
+logged 'tui ' || fail 'missing bridge did not reach the text installer'
 
 launch
 out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
@@ -114,6 +157,17 @@ out=$(PYTHONPATH="$TMP/fake-gi" AURADE_PROBE_DRI_DIR="$TMP/empty-dri" \
   fail "a machine with no GPU failed instead of falling back: $out"
 grep -q '3D acceleration' <<<"$out" || fail "the graphics advice was not shown: $out"
 logged 'tui ' || fail 'a machine with no GPU did not reach the text installer'
+
+# With --force, a probe predicting a black screen proceeds to GUI initialization
+# rather than falling back to the text installer.
+launch
+out=$(PYTHONPATH="$TMP/fake-gi" AURADE_PROBE_DRI_DIR="$TMP/empty-dri" \
+  WAYLAND_DISPLAY=wayland-0 \
+  "$TMP/bin/aurade-installer-gui" --force --journal "$TMP/j" --raw-log "$TMP/r" 2>&1) ||
+  fail "--force with no GPU failed: $out"
+grep -q -- '--force overrides the graphics warning' <<<"$out" ||
+  fail "--force did not announce the override: $out"
+! logged 'tui ' || fail '--force fell back to the text installer'
 
 # --plan-only survives the handover. A session the user started as plan-only
 # must not become one that can erase because the toolkit was missing.
