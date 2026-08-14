@@ -8,6 +8,7 @@ TEST_USER="${AURADE_TEST_USER:-auratest}"
 EXPECTED_CHROME_SHA="${AURADE_EXPECTED_CHROME_SHA:-}"
 REMOVABLE_AUTOMOUNT="${AURADE_REMOVABLE_AUTOMOUNT:-0}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 open_audio_settings=0
 open_core_apps=0
 files_volume_smoke=0
@@ -230,9 +231,9 @@ if [[ "${release_package_smoke}" == "1" ]]; then
   }
   for package_dir in "${release_packages[@]}"; do
     pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
-      "${package_dir}/PKGBUILD")"
+      "${REPO_ROOT}/${package_dir}/PKGBUILD")"
     pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' \
-      "${package_dir}/PKGBUILD")"
+      "${REPO_ROOT}/${package_dir}/PKGBUILD")"
     actual_version="$(remote "pacman -Q '${package_dir}' | awk '{print \$2}'")"
     if [[ "${actual_version}" != "${pkgver}-${pkgrel}" ]]; then
       echo "${package_dir}: expected ${pkgver}-${pkgrel}, got ${actual_version}" >&2
