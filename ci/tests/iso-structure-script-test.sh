@@ -40,7 +40,38 @@ for module in __init__ app bridge flow; do
   printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
 done
 printf '%s\n' enabled >"$TMP/squash/etc/aurade-installer/gui-enabled"
-printf '%s\n' '{}' >"$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
+python3 - "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" <<'PY'
+import json
+import pathlib
+import sys
+
+paths = [
+    "installer/bin/aurade-installer-gui",
+    "installer/bin/aurade-installer-gui-bridge",
+    "installer/bin/aurade-installer-start",
+    "installer/lib/aurade-probe.sh",
+    "installer/lib/aurade-questions.sh",
+    "installer/lib/aurade-validate.sh",
+    "installer/lib/aurade-journal.sh",
+    "installer/lib/aurade-tui.sh",
+    "installer/lib/aurade_gui/__init__.py",
+    "installer/lib/aurade_gui/app.py",
+    "installer/lib/aurade_gui/bridge.py",
+    "installer/lib/aurade_gui/flow.py",
+]
+manifest = {
+    "schema": 1,
+    "release": "0.2.0",
+    "status": "candidate",
+    "architectures": ["x86_64"],
+    "payload": [{"path": path, "sha256": "0" * 64} for path in paths],
+    "runtime_packages": ["cage", "gtk4", "libadwaita", "python-gobject"],
+    "public_release_policy": {"gui_in_0_1_0": False},
+}
+pathlib.Path(sys.argv[1]).write_text(json.dumps(manifest), encoding="utf-8")
+PY
+cp "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" \
+  "$TMP/valid-gui-release-manifest.json"
 printf '%s\n' 2026/07/12 >"$TMP/squash/etc/aurade-installer/snapshot"
 install -d "$TMP/package"
 printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
@@ -61,7 +92,33 @@ printf '%s\n' 'default aurade.conf' 'editor no' >"$TMP/iso-tree/loader/loader.co
 printf '%s\n' 'title AuraDE' 'options cow_spacesize=4G' \
   >"$TMP/iso-tree/loader/entries/01-aurade-linux.conf"
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/full.iso" .)
+printf 'gui_release=1\ngui_manifest_sha256=%s\n' \
+  "$(sha256sum "$TMP/valid-gui-release-manifest.json" | awk '{print $1}')" \
+  >"$TMP/full.iso.build-info"
 "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full
+"$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui
+
+# A malformed or downgraded embedded GUI manifest must fail the explicit
+# 0.2.0 artifact gate even when all GUI files and the marker are present.
+printf '%s\n' '{"schema":1,"release":"0.1.0"}' \
+  >"$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
+mksquashfs "$TMP/squash" "$TMP/iso-tree/arch/x86_64/airootfs.sfs" \
+  -noappend -quiet
+(cd "$TMP/iso-tree" && bsdtar -cf "$TMP/bad-gui-manifest.iso" .)
+printf 'gui_release=1\ngui_manifest_sha256=%s\n' \
+  "$(sha256sum "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" | awk '{print $1}')" \
+  >"$TMP/bad-gui-manifest.iso.build-info"
+if "$ROOT/ci/verify-iso-structure.sh" "$TMP/bad-gui-manifest.iso" \
+    --full --require-gui >"$TMP/bad-gui-manifest.out" 2>&1; then
+  echo 'ISO with a downgraded GUI manifest unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'embedded GUI manifest is not a 0.2.0 candidate' \
+  "$TMP/bad-gui-manifest.out"
+
+# Restore the valid manifest before the package-integrity mutations below.
+cp "$TMP/valid-gui-release-manifest.json" \
+  "$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
 
 # A changed archive with the old lock digest must fail the final-artifact gate.
 printf '%s\n' changed >"$TMP/package/README"
