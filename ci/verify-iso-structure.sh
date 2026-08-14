@@ -234,6 +234,13 @@ if sorted(manifest.get("runtime_packages", [])) != [
 policy = manifest.get("public_release_policy")
 if not isinstance(policy, dict) or policy.get("gui_in_0_1_0") is not False:
     raise SystemExit("verify-iso-structure: embedded GUI manifest does not exclude GUI from 0.1.0")
+for key in (
+    "artifact_signature_required",
+    "full_profile_build_required",
+    "physical_accelerated_runtime_required",
+):
+    if policy.get(key) is not True:
+        raise SystemExit(f"verify-iso-structure: embedded GUI policy is not fail-closed for {key}")
 PY
   fi
 fi
