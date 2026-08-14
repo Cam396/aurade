@@ -140,12 +140,13 @@ def main() -> int:
         model.close()
         return fall_back("no display is running for a graphical installer", passthrough)
 
-    if probe.get("renderer") != "gui" and not args.force:
+    predicts_black_screen = bool(probe.get("predicts_black_screen"))
+    if (probe.get("renderer") != "gui" or predicts_black_screen) and not args.force:
         model.close()
-        reason = probe.get("advice") or probe.get("graphics") or "graphics are not usable"
+        reason = probe.get("advice") or probe.get("reason") or probe.get("graphics") or "graphics are not usable"
         return fall_back(reason, passthrough)
 
-    if args.force and probe.get("renderer") != "gui":
+    if args.force and (probe.get("renderer") != "gui" or predicts_black_screen):
         print(
             "aurade-installer-gui: --force overrides the graphics warning; "
             "the installed desktop may still be unusable",
