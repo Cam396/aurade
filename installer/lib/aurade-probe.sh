@@ -23,6 +23,8 @@
 AURADE_PROBE_DRI_DIR=${AURADE_PROBE_DRI_DIR:-/dev/dri}
 AURADE_PROBE_MEMINFO=${AURADE_PROBE_MEMINFO:-/proc/meminfo}
 AURADE_PROBE_DRM_DIR=${AURADE_PROBE_DRM_DIR:-/sys/class/drm}
+AURADE_PROBE_EFI_DIR=${AURADE_PROBE_EFI_DIR:-/sys/firmware/efi}
+AURADE_PROBE_EFIVARS_DIR=${AURADE_PROBE_EFIVARS_DIR:-/sys/firmware/efi/efivars}
 
 # Render nodes that exist but are not a GPU. vgem and vkms are kernel test and
 # virtual devices; both publish a renderD* node, so a check that stops at "a
@@ -51,6 +53,39 @@ AURADE_PROBE_MEM_MIB=0
 AURADE_PROBE_NODE=
 AURADE_PROBE_DRIVER=
 AURADE_PROBE_GL=
+
+# These two checks are deliberately kept with the renderer probe. They are
+# read-only platform facts that decide whether the installed boot path can be
+# trusted, not GTK policy. The installer engine repeats the destructive check
+# immediately before writing the disk; this is the earlier explanation that
+# lets a person fix firmware before reaching that gate.
+aurade_probe_uefi() {
+  [[ -d $AURADE_PROBE_EFI_DIR ]]
+}
+
+aurade_probe_secure_boot() {
+  local state secure_file byte
+  if command -v bootctl >/dev/null 2>&1; then
+    state=$(bootctl is-secure-boot 2>/dev/null || true)
+    case $state in
+      enabled|disabled) printf '%s\n' "$state"; return 0 ;;
+    esac
+  fi
+  [[ -d $AURADE_PROBE_EFI_DIR ]] || {
+    printf 'not-applicable\n'
+    return 0
+  }
+  for secure_file in "$AURADE_PROBE_EFIVARS_DIR"/SecureBoot-*; do
+    [[ -e $secure_file ]] || continue
+    byte=$(dd if="$secure_file" bs=1 skip=4 count=1 2>/dev/null |
+      od -An -t u1 2>/dev/null | awk 'NF {print $1; exit}')
+    case $byte in
+      1) printf 'enabled\n'; return 0 ;;
+      0) printf 'disabled\n'; return 0 ;;
+    esac
+  done
+  printf 'unknown\n'
+}
 
 _probe_mem_mib() {
   local kib=0

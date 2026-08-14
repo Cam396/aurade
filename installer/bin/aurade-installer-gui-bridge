@@ -263,6 +263,13 @@ gb_probe() {
   _gb_emit "$out"
 }
 
+gb_platform() {
+  local uefi=false secure
+  aurade_probe_uefi && uefi=true
+  secure=$(aurade_probe_secure_boot)
+  _gb_emit "{\"ok\":true,\"uefi\":$uefi,\"secure_boot\":$(_gb_str "$secure")}"
+}
+
 # The stage rows the progress view draws, in journal order, with the display
 # rule and the reversibility boundary both taken from the shared libraries
 # rather than restated here.
@@ -612,6 +619,7 @@ _gb_common() {
     visible)   gb_visible ;;
     disks)     gb_disks ;;
     probe)     gb_probe ;;
+    platform)  gb_platform ;;
     network)   gb_network ;;
     stages)    gb_stages ;;
     enum)      gb_enum "$argument" ;;

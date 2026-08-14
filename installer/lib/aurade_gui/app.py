@@ -18,7 +18,13 @@ from __future__ import annotations
 
 from json import loads as _json_loads
 from os import access as _os_access, environ as _os_environ, execv as _os_execv, X_OK as _X_OK
-from os.path import dirname as _os_dirname, exists as _os_exists, join as _os_join, realpath as _os_realpath
+from os.path import (
+    dirname as _os_dirname,
+    exists as _os_exists,
+    getsize as _os_getsize,
+    join as _os_join,
+    realpath as _os_realpath,
+)
 from re import match as _re_match
 from threading import Thread as _Thread
 
@@ -199,6 +205,14 @@ def _clamp(child: Gtk.Widget) -> Adw.Clamp:
     return clamp
 
 
+def _short_text(value: object, limit: int = 180) -> str:
+    """Keep journal detail useful in a row without letting it take over the UI."""
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
 class InstallerWindow(Adw.ApplicationWindow):
     """The whole installer, as one window with a stack of pages."""
 
@@ -213,6 +227,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.secrets_set: set[str] = set()
         self.enum_values: dict[str, list[str]] = {}
         self.probe: dict = {}
+        self.platform: dict = {}
         self.install_status = 0
         self._progress_source = 0
         self._gate_token = ""
@@ -220,6 +235,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._export_notice: tuple[str, bool] | None = None
         self._network_report: dict | None = None
         self._busy: str | None = None
+        self._page_blocked = False
         self._closing = False
         self.rail_steps: dict[str, Gtk.Widget] = {}
         self.rail_step_labels: dict[str, Gtk.Label] = {}
@@ -587,7 +603,16 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["graphics.detail"] = Adw.ActionRow(title="Detected graphics device")
         self.widgets["graphics.driver"] = Adw.ActionRow(title="Kernel driver")
         self.widgets["graphics.memory"] = Adw.ActionRow(title="Available memory")
-        for key in ("graphics.summary", "graphics.detail", "graphics.driver", "graphics.memory"):
+        self.widgets["graphics.uefi"] = Adw.ActionRow(title="Boot mode")
+        self.widgets["graphics.secure"] = Adw.ActionRow(title="Secure Boot")
+        for key in (
+            "graphics.summary",
+            "graphics.detail",
+            "graphics.driver",
+            "graphics.memory",
+            "graphics.uefi",
+            "graphics.secure",
+        ):
             row = self.widgets[key]
             row.set_subtitle("")
             row.set_subtitle_lines(0)
@@ -614,6 +639,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         vm_advice.set_visible(False)
         self.widgets["graphics.vm_advice"] = vm_advice
         box.append(vm_advice)
+
+        firmware_advice = _wrapped("", css="warning")
+        firmware_advice.add_css_class("aurade-callout")
+        firmware_advice.add_css_class("aurade-callout-warning")
+        firmware_advice.set_visible(False)
+        self.widgets["graphics.firmware_advice"] = firmware_advice
+        box.append(firmware_advice)
 
         switch_btn = Gtk.Button(label="Switch to Text Installer")
         switch_btn.add_css_class("suggested-action")
@@ -750,7 +782,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["review.gfx"] = Adw.ActionRow(title="Graphics renderer")
         self.widgets["review.net"] = Adw.ActionRow(title="Network status")
         self.widgets["review.mem"] = Adw.ActionRow(title="System memory")
-        for key in ("review.gfx", "review.net", "review.mem"):
+        self.widgets["review.boot"] = Adw.ActionRow(title="Firmware and boot")
+        for key in ("review.gfx", "review.net", "review.mem", "review.boot"):
             row = self.widgets[key]
             row.set_subtitle("")
             row.set_subtitle_lines(0)
@@ -824,6 +857,9 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_progress(self) -> Gtk.Widget:
         box = _page_box()
         box.append(_wrapped(F.PROGRESS_FOOTER, css="dim-label"))
+        summary = _wrapped("Waiting for the installer…", css="title-3")
+        self.widgets["progress.summary"] = summary
+        box.append(summary)
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         listbox.add_css_class("boxed-list")
@@ -836,6 +872,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         note = _wrapped("", css="dim-label")
         self.widgets["progress.note"] = note
         box.append(note)
+
+        boundary = _wrapped("Nothing has been written yet; stopping is safe.", css="aurade-callout")
+        boundary.add_css_class("aurade-callout")
+        self.widgets["progress.boundary"] = boundary
+        box.append(boundary)
 
         expander = Adw.ExpanderRow(title="Stage details and journal status")
         expander.set_expanded(False)
@@ -1069,6 +1110,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def refresh(self) -> None:
         state = self.flow.state
+        self._page_blocked = False
         self._refresh_rail(state)
         name = f"page:{self.flow.current_page}" if state == "pages" else state
         self.stack.set_visible_child_name(name)
@@ -1105,6 +1147,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.forward_button.set_sensitive(False)
         else:
             self.back_button.set_sensitive(True)
+            if state == "pages" and self._page_blocked:
+                self.forward_button.set_sensitive(False)
         GLib.idle_add(self._focus_first)
 
     def _title_for(self, state: str) -> str:
@@ -1154,6 +1198,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _refresh_graphics(self) -> None:
         self.probe = self.model.probe()
+        self.platform = self.model.platform()
         renderer = self.probe.get("renderer", "")
         driver = self.probe.get("driver", "")
         gl = self.probe.get("gl", "")
@@ -1163,6 +1208,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         is_sw = any(sw in (gl or "").lower() for sw in ("llvmpipe", "softpipe", "swrast"))
         is_virt_gpu = driver in ("vgem", "vkms") or reason == "virtual-gpu-only"
         is_no_gpu = reason == "no-render-node" or renderer != "gui"
+        uefi = bool(self.platform.get("uefi"))
+        secure_boot = self.platform.get("secure_boot", "unknown")
+        firmware_blocked = not uefi or secure_boot not in ("disabled", "not-applicable")
 
         summary = (
             "Hardware accelerated GUI"
@@ -1173,6 +1221,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", "No render node detected"))
         self.widgets["graphics.driver"].set_subtitle(driver or "None / Unidentified")
         self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
+        self.widgets["graphics.uefi"].set_subtitle(
+            "UEFI boot detected" if uefi else "Legacy/unknown boot mode"
+        )
+        secure_text = {
+            "enabled": "Enabled — unsigned AuraDE boot will be refused",
+            "disabled": "Disabled — AuraDE boot path can be checked",
+            "not-applicable": "Not applicable outside UEFI",
+        }.get(secure_boot, "Could not determine firmware state")
+        self.widgets["graphics.secure"].set_subtitle(secure_text)
         self._set_status_badge(
             self.widgets["graphics.summary.badge"],
             "✓" if summary == "Hardware accelerated GUI" else "!",
@@ -1180,6 +1237,17 @@ class InstallerWindow(Adw.ApplicationWindow):
         )
         for key in ("graphics.detail", "graphics.driver", "graphics.memory"):
             self._set_status_badge(self.widgets[f"{key}.badge"], "•", "neutral")
+        self._set_status_badge(
+            self.widgets["graphics.uefi.badge"],
+            "✓" if uefi else "!",
+            "ok" if uefi else "warning",
+        )
+        secure_ok = secure_boot in ("disabled", "not-applicable")
+        self._set_status_badge(
+            self.widgets["graphics.secure.badge"],
+            "✓" if secure_ok else "!",
+            "ok" if secure_ok else "warning",
+        )
 
         advice_text = self.probe.get("advice", "")
         advice = self.widgets["graphics.advice"]
@@ -1196,13 +1264,48 @@ class InstallerWindow(Adw.ApplicationWindow):
         else:
             vm_advice.set_visible(False)
 
+        firmware_advice = self.widgets["graphics.firmware_advice"]
+        if not uefi:
+            firmware_advice.set_text(
+                "AuraDE needs a UEFI boot. Restart this media in UEFI mode; "
+                "continuing in legacy mode would only fail later at the bootloader."
+            )
+            firmware_advice.set_visible(True)
+        elif secure_boot == "enabled":
+            firmware_advice.set_text(
+                "Secure Boot is enabled. This image installs an unsigned "
+                "systemd-boot entry, so disable Secure Boot before installing."
+            )
+            firmware_advice.set_visible(True)
+        elif secure_boot == "unknown":
+            firmware_advice.set_text(
+                "The firmware did not report its Secure Boot state. AuraDE will "
+                "refuse the destructive step until this can be determined."
+            )
+            firmware_advice.set_visible(True)
+        else:
+            firmware_advice.set_visible(False)
+
         switch_btn = self.widgets["graphics.switch_tui"]
-        has_warning = predicts_black or is_sw or is_virt_gpu or is_no_gpu
+        has_warning = predicts_black or is_sw or is_virt_gpu or is_no_gpu or firmware_blocked
         switch_btn.set_visible(has_warning)
+        # A machine with no usable display path must not be allowed through the
+        # GUI's erase flow. The text installer remains available for a
+        # deliberate diagnostic handoff, but the graphical path never turns a
+        # known black first boot into a successful-looking install.
+        self._page_blocked = firmware_blocked or predicts_black
 
         # The black-screen warning is the reason this page exists, and it is
         # shown before the erase gate rather than after it.
-        if predicts_black:
+        if not uefi:
+            self.banner.set_title("Boot this ISO in UEFI mode before installing AuraDE.")
+            self.banner.set_revealed(True)
+        elif secure_boot in ("enabled", "unknown"):
+            self.banner.set_title(
+                "AuraDE cannot safely install while Secure Boot is enabled or unknown."
+            )
+            self.banner.set_revealed(True)
+        elif predicts_black:
             self.banner.set_title(
                 "This computer has no working graphics driver. Installing now "
                 "produces a system that starts but shows no desktop."
@@ -1446,6 +1549,23 @@ class InstallerWindow(Adw.ApplicationWindow):
         mem_row = self.widgets["review.mem"]
         mem_row.set_subtitle(self.probe.get("memory", "Checked"))
         self._set_status_badge(self.widgets["review.mem.badge"], "•", "neutral")
+        boot_row = self.widgets["review.boot"]
+        uefi = bool(self.platform.get("uefi"))
+        secure_boot = self.platform.get("secure_boot", "unknown")
+        boot_ok = uefi and secure_boot == "disabled"
+        boot_row.set_subtitle(
+            "UEFI; Secure Boot disabled"
+            if boot_ok
+            else "UEFI required; Secure Boot must be disabled"
+            if not uefi or secure_boot == "enabled"
+            else "Firmware state could not be determined"
+        )
+        self._set_status_badge(
+            self.widgets["review.boot.badge"],
+            "✓" if boot_ok else "!",
+            "ok" if boot_ok else "warning",
+        )
+        self._page_blocked = bool(self.probe.get("predicts_black_screen")) or not boot_ok
 
     def _refresh_gate(self) -> None:
         info = self.model.target()
@@ -1955,38 +2075,64 @@ class InstallerWindow(Adw.ApplicationWindow):
         active_pct = 0
         active_detail = ""
         expander = self.widgets["progress.expander"]
+        stages = report.get("stages", [])
 
-        for stage in report.get("stages", []):
+        for stage in stages:
             name = stage["stage"]
             row = rows.get(name)
             if row is None:
                 row = Adw.ActionRow(title=stage["label"])
-                icon = Gtk.Image.new_from_icon_name("content-loading-symbolic")
-                row.add_prefix(icon)
-                row.stage_icon = icon
+                status_badge = self._status_badge("•")
+                status_badge.set_width_chars(8)
+                status_badge.add_css_class("aurade-stage-status")
+                row.add_suffix(status_badge)
+                row.stage_status = status_badge
                 listbox.append(row)
                 rows[name] = row
             status = stage.get("status", "pending")
-            row.set_subtitle(stage.get("elapsed") or "")
-            row.stage_icon.set_from_icon_name(
-                {
-                    "ok": "emblem-ok-symbolic",
-                    "running": "media-playback-start-symbolic",
-                    "failed": "dialog-error-symbolic",
-                }.get(status, "content-loading-symbolic")
-            )
+            status_word, symbol, kind = {
+                "ok": ("Done", "✓", "ok"),
+                "running": ("Working", ">", "warning"),
+                "failed": ("Stopped", "!", "warning"),
+            }.get(status, ("Waiting", "•", "neutral"))
+            row.stage_status.set_text(status_word)
             for css in ("success", "error", "dim-label"):
                 row.remove_css_class(css)
             row.add_css_class(
                 {"ok": "success", "failed": "error"}.get(status, "dim-label")
             )
+            self._set_status_badge(row.stage_status, symbol, kind)
+            detail = _short_text(stage.get("detail", ""))
+            elapsed = _short_text(stage.get("elapsed", ""), 40)
+            if status == "running":
+                row.set_subtitle(detail or "Working now")
+            elif status == "ok":
+                row.set_subtitle(f"Finished in {elapsed}" if elapsed else "Finished")
+            elif status == "failed":
+                row.set_subtitle(detail or "Stopped — open the failure details")
+            else:
+                row.set_subtitle("Waiting")
             if status == "running":
                 active_pct = int(stage.get("pct", 0))
-                active_detail = stage.get("detail", "")
+                active_detail = detail
+
+        total = len(stages)
+        complete = sum(stage.get("status") == "ok" for stage in stages)
+        failed = next((stage for stage in stages if stage.get("status") == "failed"), None)
+        active_stage = report.get("active", "")
+        if failed:
+            summary_text = f"Stopped during {failed.get('label', failed.get('stage', 'installation'))}."
+        elif active_stage:
+            summary_text = f"Working on {active_stage.replace('-', ' ')} — {complete} of {total} stages complete."
+        elif total and complete == total:
+            summary_text = "All installation stages complete."
+        else:
+            summary_text = f"{complete} of {total} stages complete." if total else "Preparing the installation…"
+        self.widgets["progress.summary"].set_text(summary_text)
 
         bar = self.widgets["progress.bar"]
         bar.set_fraction(max(0.0, min(1.0, active_pct / 100.0)))
-        bar.set_text(active_detail or report.get("position", ""))
+        bar.set_text(active_detail or report.get("position", "") or summary_text)
         note = self.widgets["progress.note"]
         if not report.get("interruptible", True):
             note.set_text(F.PROGRESS_UNINTERRUPTIBLE)
@@ -1994,10 +2140,20 @@ class InstallerWindow(Adw.ApplicationWindow):
         else:
             note.set_visible(False)
 
+        boundary = self.widgets["progress.boundary"]
+        boundary.remove_css_class("aurade-callout-warning")
+        if not report.get("interruptible", True):
+            boundary.set_text(
+                "The target disk has been changed. Keep this computer powered on; "
+                "if the install stops, use the journal and recovery instructions."
+            )
+            boundary.add_css_class("aurade-callout-warning")
+        else:
+            boundary.set_text("Nothing has been written yet; stopping is safe.")
+
         # Update expander row subtitle
-        active_stage = report.get("active", "")
         if active_stage:
-            expander.set_subtitle(f"Active stage: {active_stage} ({active_detail or 'working'})")
+            expander.set_subtitle(f"Active: {active_stage} ({active_detail or 'working'})")
         elif report.get("position"):
             expander.set_subtitle(report.get("position", ""))
 
@@ -2043,9 +2199,18 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _show_log(self) -> None:
         report = self.model.failure()
         path = report.get("raw_log", "")
+        max_bytes = 128 * 1024
         try:
-            with open(path, "r", errors="replace") as handle:
-                text = handle.read()
+            size = _os_getsize(path)
+            with open(path, "rb") as handle:
+                if size > max_bytes:
+                    handle.seek(-max_bytes, 2)
+                    text = (
+                        "[Earlier log output omitted; showing the last 128 KiB.]\n\n"
+                        + handle.read().decode(errors="replace")
+                    )
+                else:
+                    text = handle.read().decode(errors="replace")
         except OSError as exc:
             self._toast(f"The log could not be opened: {exc}")
             return
@@ -2057,7 +2222,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         scroller.set_child(view)
         scroller.set_size_request(760, 480)
         dialog = Adw.Dialog()
-        dialog.set_title("Installer log")
+        dialog.set_title("Installer log (bounded view)")
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(Adw.HeaderBar())
         toolbar.set_content(scroller)

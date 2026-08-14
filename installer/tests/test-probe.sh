@@ -28,6 +28,14 @@ install -d "$TMP/vm-bin"
 printf '#!/bin/sh\necho vmware\n' >"$TMP/vm-bin/systemd-detect-virt"
 chmod +x "$TMP/vm-bin/systemd-detect-virt"
 
+# Firmware probes use bootctl when available and otherwise read EFI state.
+# These tiny fixtures keep the UI's early warning testable without fabricating
+# firmware variables or touching the host's real efivars.
+install -d "$TMP/boot-disabled" "$TMP/boot-enabled" "$TMP/empty-path" "$TMP/efi"
+printf '#!/bin/sh\nprintf disabled\n' >"$TMP/boot-disabled/bootctl"
+printf '#!/bin/sh\nprintf enabled\n' >"$TMP/boot-enabled/bootctl"
+chmod +x "$TMP/boot-disabled/bootctl" "$TMP/boot-enabled/bootctl"
+
 install -d "$TMP/dri-empty" "$TMP/dri-ok"
 : >"$TMP/dri-ok/renderD128"
 : >"$TMP/dri-ok/card0"
@@ -63,6 +71,19 @@ probe() {
         "$AURADE_PROBE_GRAPHICS"
     '
 }
+
+secure_state() {
+  env AURADE_PROBE_EFI_DIR="$1" PATH="$2" /bin/bash -c '
+    set -Eeuo pipefail
+    . '"$ROOT"'/installer/lib/aurade-probe.sh
+    aurade_probe_secure_boot
+  '
+}
+
+check 'secure boot disabled fixture' "$(secure_state "$TMP/efi" "$TMP/boot-disabled")" disabled
+check 'secure boot enabled fixture' "$(secure_state "$TMP/efi" "$TMP/boot-enabled")" enabled
+check 'secure boot unknown fixture' "$(secure_state "$TMP/efi" "$TMP/empty-path")" unknown
+check 'secure boot not applicable fixture' "$(secure_state "$TMP/absent-efi" "$TMP/empty-path")" not-applicable
 
 # --- no DRM directory at all: no GPU driver loaded --------------------------
 IFS='|' read -r renderer reason black graphics < <(probe "$TMP/absent" "$TMP/meminfo.big")

@@ -138,6 +138,12 @@ def reset_calls() -> None:
 with session() as model:
     check(model.ping(), "the model did not answer a ping")
     manifest = model.manifest()
+    platform = model.platform()
+    check(isinstance(platform.get("uefi"), bool), "platform UEFI state is not boolean")
+    check(
+        platform.get("secure_boot") in {"enabled", "disabled", "unknown", "not-applicable"},
+        "platform Secure Boot state is not bounded",
+    )
 
     shell_ids = shell('printf "%s\\n" "${AURADE_QUESTION_IDS[@]}"').split()
     equal(
