@@ -288,8 +288,234 @@ gb_network() {
   _gb_emit "$out"
 }
 
+# --------------------------------------------------------------------------
+# Wireless
+# --------------------------------------------------------------------------
+#
+# Joining a network is a live-session action, not an installer question. The
+# engine has no flag for it and the manifest deliberately carries nothing the
+# engine cannot consume, so this sits beside `apply_answer` rather than beside
+# the question set: something the user does now, so the rest of the flow can
+# proceed, exactly like loading a keymap.
+#
+# The passphrase never appears in a command line. `nmcli ... password <psk>`
+# would put it in argv where every process on the machine can read it, so the
+# profile is written the way NetworkManager stores one itself: a mode-0600
+# keyfile in its own profile directory, which is where the secret was going to
+# end up regardless.
+
+NMCLI=${AURADE_NMCLI:-nmcli}
+NM_PROFILE_DIR=${AURADE_NM_PROFILE_DIR:-/etc/NetworkManager/system-connections}
+
+_nm_available() { command -v "$NMCLI" >/dev/null 2>&1; }
+
+# nmcli's terse output escapes `:` and `\` inside values. An SSID may contain
+# both, and a half-unescaped SSID is one that cannot be joined.
+_nm_unescape() {
+  local s=$1 out='' i c
+  for (( i = 0; i < ${#s}; i++ )); do
+    c=${s:i:1}
+    if [[ $c == '\' ]]; then
+      i=$(( i + 1 ))
+      out+=${s:i:1}
+    else
+      out+=$c
+    fi
+  done
+  printf '%s' "$out"
+}
+
+# Split a terse nmcli record on unescaped colons.
+_nm_fields() {
+  local line=$1 field='' i c
+  NM_FIELDS=()
+  for (( i = 0; i < ${#line}; i++ )); do
+    c=${line:i:1}
+    if [[ $c == '\' ]]; then
+      field+=$c${line:i+1:1}
+      i=$(( i + 1 ))
+    elif [[ $c == ':' ]]; then
+      NM_FIELDS+=("$(_nm_unescape "$field")")
+      field=''
+    else
+      field+=$c
+    fi
+  done
+  NM_FIELDS+=("$(_nm_unescape "$field")")
+}
+NM_FIELDS=()
+
+gb_net_status() {
+  local out wired=false wifi=false radio=unavailable ssid='' state=''
+  if ! _nm_available; then
+    _gb_emit '{"ok":false,"available":false,"wired":false,"wifi":false,"radio":"unavailable","ssid":"","reason":"NetworkManager is not on this image"}'
+    return 0
+  fi
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    _nm_fields "$line"
+    case ${NM_FIELDS[1]:-} in
+      ethernet) [[ ${NM_FIELDS[2]:-} != connected ]] || wired=true ;;
+      wifi)
+        wifi=true
+        if [[ ${NM_FIELDS[2]:-} == connected ]]; then
+          ssid=${NM_FIELDS[3]:-}
+        fi
+        ;;
+    esac
+  done < <("$NMCLI" -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null || true)
+  radio=$("$NMCLI" -t radio wifi 2>/dev/null || printf 'unavailable')
+  [[ -n $radio ]] || radio=unavailable
+  state=$("$NMCLI" -t -f CONNECTIVITY general status 2>/dev/null | head -1 || true)
+  out='{"ok":true,"available":true,'
+  out+="\"wired\":$wired,\"wifi\":$wifi,"
+  out+="\"radio\":$(_gb_str "$radio"),"
+  out+="\"ssid\":$(_gb_str "$ssid"),"
+  out+="\"connectivity\":$(_gb_str "$state")}"
+  _gb_emit "$out"
+}
+
+gb_wifi_scan() {
+  local out='[' sep='' line ssid signal security active seen=''
+  if ! _nm_available; then
+    _gb_emit '{"ok":false,"error":"NetworkManager is not on this image","networks":[]}'
+    return 0
+  fi
+  "$NMCLI" device wifi rescan >/dev/null 2>&1 || true
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    _nm_fields "$line"
+    ssid=${NM_FIELDS[0]:-}
+    signal=${NM_FIELDS[1]:-0}
+    security=${NM_FIELDS[2]:-}
+    active=${NM_FIELDS[3]:-no}
+    # A hidden network broadcasts an empty SSID and cannot be joined by
+    # picking it from a list, so it is not offered as though it could be.
+    [[ -n $ssid ]] || continue
+    # Access points repeat once per band and per radio. The list is of
+    # networks, not of radios, so the strongest sighting wins.
+    [[ $seen != *"|$ssid|"* ]] || continue
+    seen+="|$ssid|"
+    [[ $signal =~ ^[0-9]+$ ]] || signal=0
+    out+="${sep}{\"ssid\":$(_gb_str "$ssid"),\"signal\":${signal},"
+    out+="\"security\":$(_gb_str "$security"),"
+    out+="\"open\":$(if [[ -z $security || $security == '--' ]]; then printf 'true'; else printf 'false'; fi),"
+    out+="\"active\":$(if [[ $active == yes ]]; then printf 'true'; else printf 'false'; fi),"
+    out+="\"saved\":$(if _wifi_saved "$ssid"; then printf 'true'; else printf 'false'; fi)}"
+    sep=','
+  done < <("$NMCLI" -t -f SSID,SIGNAL,SECURITY,IN-USE device wifi list 2>/dev/null || true)
+  out+=']'
+  _gb_emit "{\"ok\":true,\"networks\":$out}"
+}
+
+_wifi_saved() {
+  local want=$1 line
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    _nm_fields "$line"
+    [[ ${NM_FIELDS[1]:-} == 802-11-wireless ]] || continue
+    [[ ${NM_FIELDS[0]:-} != "$want" ]] || return 0
+  done < <("$NMCLI" -t -f NAME,TYPE connection show 2>/dev/null || true)
+  return 1
+}
+
+# Join a network. The passphrase arrives on the protocol's value line and goes
+# straight into a mode-0600 keyfile; it is never an argument, never logged and
+# never echoed back.
+gb_wifi_connect() {
+  local ssid=$1 psk=$2 uuid profile status=0 output
+  if ! _nm_available; then
+    _gb_err 'NetworkManager is not on this image'
+    return 0
+  fi
+  [[ -n $ssid ]] || { _gb_err 'choose a network first'; return 0; }
+  if [[ -n $psk && ${#psk} -lt 8 ]]; then
+    # WPA rejects anything shorter, and it rejects it after a slow association
+    # attempt. Saying so now is faster and clearer than letting it fail.
+    _gb_err 'A Wi-Fi password is at least 8 characters.'
+    return 0
+  fi
+  if ! install -d -m 0700 -- "$NM_PROFILE_DIR" 2>/dev/null; then
+    _gb_err 'cannot write a network profile on this system'
+    return 0
+  fi
+  uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || printf 'aurade-%s' "$$")
+  profile="$NM_PROFILE_DIR/aurade-${uuid}.nmconnection"
+  (
+    umask 077
+    {
+      printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\n\n' "$ssid" "$uuid"
+      printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$ssid"
+      if [[ -n $psk ]]; then
+        printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$psk"
+      fi
+      printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n'
+    } >"$profile"
+  )
+  chmod 600 "$profile" 2>/dev/null || true
+  "$NMCLI" connection load "$profile" >/dev/null 2>&1 || true
+  output=$("$NMCLI" connection up uuid "$uuid" 2>&1) || status=$?
+  if (( status != 0 )); then
+    # A profile that did not connect is a profile that will be retried on the
+    # installed system for no reason, so it does not outlive the attempt.
+    "$NMCLI" connection delete uuid "$uuid" >/dev/null 2>&1 || true
+    rm -f -- "$profile"
+    _gb_err "$(_wifi_reason "$output" "$psk")"
+    return 0
+  fi
+  _gb_ok "\"ssid\":$(_gb_str "$ssid")"
+}
+
+# Turn nmcli's diagnostic into something a person can act on. The raw text is
+# not shown: it names D-Bus paths and profile UUIDs, and none of that tells
+# anyone what to do next.
+_wifi_reason() {
+  local text=${1,,} had_psk=$2
+  case $text in
+    *"secrets were required"*|*"no secrets"*|*"802.1x supplicant"*)
+      if [[ -n $had_psk ]]; then
+        printf '%s' 'That password was not accepted. Check it and try again.'
+      else
+        printf '%s' 'This network needs a password.'
+      fi
+      ;;
+    *timeout*|*timed\ out*)
+      printf '%s' 'The network did not answer in time. Move closer to the router, or try again.'
+      ;;
+    *"not authorized"*|*"not permitted"*)
+      printf '%s' 'This session is not allowed to change network settings.'
+      ;;
+    *"no network with ssid"*|*"not found"*)
+      printf '%s' 'That network is no longer in range.'
+      ;;
+    *) printf '%s' 'Could not join that network. Check the password, or pick another network.' ;;
+  esac
+}
+
+gb_wifi_forget() {
+  local ssid=$1
+  _nm_available || { _gb_err 'NetworkManager is not on this image'; return 0; }
+  "$NMCLI" connection delete id "$ssid" >/dev/null 2>&1 || true
+  _gb_ok
+}
+
+gb_wifi_radio() {
+  local want=$1
+  _nm_available || { _gb_err 'NetworkManager is not on this image'; return 0; }
+  case $want in
+    on|off) ;;
+    *) _gb_err 'the radio is either on or off'; return 0 ;;
+  esac
+  if "$NMCLI" radio wifi "$want" >/dev/null 2>&1; then
+    _gb_ok
+  else
+    _gb_err "Could not turn the Wi-Fi radio $want."
+  fi
+}
+
 gb_progress() {
   local stage record status out='[' sep='' active='' pct detail elapsed running
+  local reversible can_stop
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
     record=$(journal_last_for_stage "$stage")
@@ -321,7 +547,50 @@ gb_progress() {
   if [[ -n $GB_ENGINE_PID ]] && kill -0 "$GB_ENGINE_PID" 2>/dev/null; then
     running=true
   fi
-  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"interruptible\":$(if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then printf 'false'; else printf 'true'; fi)}"
+  # Two different questions, kept apart because they have different answers.
+  #
+  # `reversible` is about the disk: has anything been written yet. It comes
+  # from `aurade_stage_reversible`, the same boundary the engine and the text
+  # installer use, never from a second opinion held here.
+  #
+  # `can_stop` is about the offer: a Stop control may only appear while the
+  # engine is running AND nothing has been written. The instant the engine
+  # reaches `partition` the offer is gone, because from there the only honest
+  # thing to say is that stopping would leave a half-written disk.
+  reversible=true
+  [[ -z $active ]] || aurade_stage_reversible "$active" || reversible=false
+  can_stop=false
+  [[ $running != true || $reversible != true ]] || can_stop=true
+  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"reversible\":${reversible},\"can_stop\":${can_stop}}"
+}
+
+# Stop a run that has not written anything yet.
+#
+# This is not a new capability and not a new code path. `aurade-install`
+# already traps TERM and already has `handle_cancel`, which writes a
+# `cancelled` journal record, preserves the evidence, and lets its EXIT
+# cleanup unmount, close any LUKS mapping and remove the work directory. All
+# this does is surface that, and only while the shared reversibility boundary
+# says the disk is still untouched.
+gb_stop() {
+  local active record stage
+  [[ -n $GB_ENGINE_PID ]] && kill -0 "$GB_ENGINE_PID" 2>/dev/null || {
+    _gb_err 'nothing is running'
+    return 0
+  }
+  active=''
+  for stage in "${AURADE_STAGES[@]}"; do
+    record=$(journal_last_for_stage "$stage")
+    [[ -n $record ]] || continue
+    [[ $(json_field status "$record") == running ]] || continue
+    active=$stage
+  done
+  if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then
+    _gb_err 'the disk has already been changed; stopping now would leave it half written'
+    return 0
+  fi
+  kill -TERM "$GB_ENGINE_PID" 2>/dev/null || true
+  _gb_ok '"stopping":true'
 }
 
 gb_failure() {
@@ -483,6 +752,11 @@ _gb_common() {
     disks)     gb_disks ;;
     probe)     gb_probe ;;
     network)   gb_network ;;
+    net-status) gb_net_status ;;
+    wifi-scan) gb_wifi_scan ;;
+    wifi-forget) gb_wifi_forget "$argument" ;;
+    wifi-radio) gb_wifi_radio "$argument" ;;
+    wifi-connect) IFS= read -r value || value=''; gb_wifi_connect "$argument" "$value" ;;
     stages)    gb_stages ;;
     enum)      gb_enum "$argument" ;;
     answers)   gb_answers ;;
@@ -510,6 +784,7 @@ _gb_dispatch_full() {
   case $command in
     execute) gb_execute "$argument"; return 0 ;;
     wait)    gb_wait; return 0 ;;
+    stop)    gb_stop; return 0 ;;
   esac
   _gb_common "$command" "$argument" && return 0
   _gb_err "unknown command: $command"

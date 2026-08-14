@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 
 TESTS = os.path.dirname(os.path.realpath(__file__))
@@ -550,6 +551,204 @@ with session(program=BARE_BRIDGE, AURADE_NETWORK_HELPER=None) as model:
         not report["ok"],
         "a network check that could not run was reported as having passed",
     )
+
+# ---------------------------------------------------------------------------
+# Wireless
+# ---------------------------------------------------------------------------
+#
+# Joining a network is a live-session action, so it sits beside the keymap
+# rather than in the question manifest: the engine has no flag for it, and the
+# manifest deliberately carries nothing the engine cannot consume.
+
+WIFI_PASSWORD = "reticulated osprey 88"
+
+
+def nmcli_calls() -> list[str]:
+    path = os.path.join(TMP, "nmcli.calls")
+    if not os.path.exists(path):
+        return []
+    with open(path) as handle:
+        return [line.rstrip("\n") for line in handle]
+
+
+def reset_nmcli() -> None:
+    for name in ("nmcli.calls",):
+        path = os.path.join(TMP, name)
+        if os.path.exists(path):
+            os.unlink(path)
+    profiles = os.path.join(TMP, "nm-profiles")
+    if os.path.isdir(profiles):
+        for entry in os.listdir(profiles):
+            os.unlink(os.path.join(profiles, entry))
+
+
+with session() as model:
+    status = model.call("net-status")
+    check(status["available"], f"NetworkManager was reported absent: {status}")
+    check(not status["wired"], "an unavailable ethernet device was called connected")
+    check(status["wifi"], "the wireless device was not seen")
+    equal(status["radio"], "enabled", "the radio state was misread")
+
+with session(AURADE_STUB_WIFI_STATE="connected", AURADE_STUB_SSID="kestrel-5g") as model:
+    status = model.call("net-status")
+    equal(status["ssid"], "kestrel-5g", "the joined network was not reported")
+
+with session() as model:
+    result = model.call("wifi-scan")
+    check(result["ok"], f"the scan failed: {result}")
+    networks = result["networks"]
+    names = [n["ssid"] for n in networks]
+
+    # An SSID may contain a colon, which nmcli escapes. A half-unescaped SSID
+    # is one that cannot be joined.
+    check("Ferry: Cross" in names, f"an escaped SSID was mangled: {names}")
+
+    # Access points repeat once per band. The list is of networks, not radios.
+    equal(names.count("Ferry: Cross"), 1, "one network was listed twice")
+
+    # A hidden network broadcasts an empty SSID and cannot be joined by
+    # picking it, so it is not offered as though it could be.
+    check("" not in names, f"a hidden network was offered: {names}")
+
+    ferry = next(n for n in networks if n["ssid"] == "Ferry: Cross")
+    equal(ferry["signal"], 82, "the strongest sighting did not win")
+    check(not ferry["open"], "a WPA2 network was called open")
+    guest = next(n for n in networks if n["ssid"] == "Guest Lounge")
+    check(guest["open"], "a network with no security was not called open")
+    kestrel = next(n for n in networks if n["ssid"] == "kestrel-5g")
+    check(kestrel["active"], "the joined network was not marked as such")
+    check(kestrel["saved"], "a saved profile was not recognised")
+    check(not guest["saved"], "an unsaved network was called saved")
+
+# The passphrase never reaches a command line. It goes into a mode-0600
+# keyfile, which is where NetworkManager was going to keep it anyway.
+reset_nmcli()
+with session() as model:
+    result = model.call("wifi-connect", "Ferry: Cross", WIFI_PASSWORD)
+    check(result["ok"], f"joining a network failed: {result}")
+
+profiles_dir = os.path.join(TMP, "nm-profiles")
+profiles = [os.path.join(profiles_dir, e) for e in os.listdir(profiles_dir)]
+equal(len(profiles), 1, "joining did not leave exactly one profile")
+mode = os.stat(profiles[0]).st_mode & 0o777
+equal(mode, 0o600, f"the network profile is mode {mode:o}, not 600")
+profile_text = open(profiles[0]).read()
+check(WIFI_PASSWORD in profile_text, "the profile does not carry the passphrase")
+check("ssid=Ferry: Cross" in profile_text, "the profile has the wrong SSID")
+check("key-mgmt=wpa-psk" in profile_text, "the profile is not a WPA-PSK profile")
+for call in nmcli_calls():
+    check(WIFI_PASSWORD not in call,
+          f"the Wi-Fi passphrase was passed as an argument: {call}")
+
+# An open network gets no security section and no password.
+reset_nmcli()
+with session() as model:
+    check(model.call("wifi-connect", "Guest Lounge", "").get("ok"),
+          "joining an open network failed")
+profiles = os.listdir(profiles_dir)
+text = open(os.path.join(profiles_dir, profiles[0])).read()
+check("wifi-security" not in text, "an open network was given a security section")
+
+# A refused association leaves nothing behind. A profile that did not connect
+# is one the installed system would keep retrying for no reason.
+reset_nmcli()
+with session(AURADE_STUB_NM_FAIL="Error: Secrets were required, but not provided.") as model:
+    result = model.call("wifi-connect", "Ferry: Cross", WIFI_PASSWORD)
+    check(not result["ok"], "a refused association reported success")
+    check("password was not accepted" in result["error"],
+          f"the refusal was not actionable: {result}")
+    # nmcli's own text names D-Bus paths and profile UUIDs, none of which
+    # tells anyone what to do next.
+    check("Error:" not in result["error"], f"raw nmcli output was shown: {result}")
+equal(os.listdir(profiles_dir), [], "a failed association left a profile behind")
+
+with session(AURADE_STUB_NM_FAIL="Error: Connection activation failed: timed out") as model:
+    result = model.call("wifi-connect", "Ferry: Cross", WIFI_PASSWORD)
+    check("did not answer in time" in result["error"],
+          f"a timeout was not explained: {result}")
+
+# WPA rejects anything shorter than eight characters, and it does so after a
+# slow association attempt. Saying so now is faster and clearer.
+reset_nmcli()
+with session() as model:
+    result = model.call("wifi-connect", "Ferry: Cross", "short")
+    check(not result["ok"], "a too-short passphrase was accepted")
+    check("8 characters" in result["error"], f"the length rule was not stated: {result}")
+    equal(nmcli_calls(), [], "a too-short passphrase still reached nmcli")
+
+for haystack in ("\n".join(SEEN), "\n".join(nmcli_calls())):
+    check(WIFI_PASSWORD not in haystack, "the Wi-Fi passphrase leaked")
+
+
+# ---------------------------------------------------------------------------
+# Stopping a run that has not written anything
+# ---------------------------------------------------------------------------
+#
+# Not a new capability: `aurade-install` already traps TERM, already records a
+# `cancelled` stage failure and already cleans up on the way out. What is
+# checked here is that the offer follows the shared reversibility boundary and
+# never outlives it.
+
+
+def wait_for(path: str, timeout: float = 20.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(path):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+lingering = os.path.join(TMP, "lingering")
+
+reset_calls()
+if os.path.exists(lingering):
+    os.unlink(lingering)
+with session(AURADE_STUB_LINGER_AT="acquire") as model:
+    answer_everything(model)
+    check(model.plan().get("ok"), "a valid plan was refused")
+    check(model.execute("ERASE:/dev/sda").get("ok"), "the install did not start")
+    check(wait_for(lingering), "the stub engine never reached the lingering stage")
+    report = model.progress()
+    equal(report["active"], "acquire", f"the wrong stage was active: {report['active']}")
+    check(report["reversible"], "a pre-erase stage was called irreversible")
+    check(report["can_stop"], "stopping was not offered while the disk was untouched")
+
+    result = model.call("stop")
+    check(result["ok"], f"stopping a reversible run was refused: {result}")
+    finished = model.wait()
+    equal(finished["status"], 143, "the engine did not report a cancelled exit")
+
+    failure = model.failure()
+    equal(failure["cause"], "cancelled", "the journal did not record a cancellation")
+    check(failure["reversible"], "a cancellation before the erase gate was called final")
+    check("Nothing was written" in failure["restart_advice"],
+          f"the advice after stopping was wrong: {failure['restart_advice']}")
+
+# Past the boundary the offer is gone, and the command refuses even if a stale
+# button somehow reaches it.
+reset_calls()
+if os.path.exists(lingering):
+    os.unlink(lingering)
+with session(AURADE_STUB_LINGER_AT="format") as model:
+    answer_everything(model)
+    check(model.plan().get("ok"), "a valid plan was refused")
+    check(model.execute("ERASE:/dev/sda").get("ok"), "the install did not start")
+    check(wait_for(lingering), "the stub engine never reached the lingering stage")
+    report = model.progress()
+    equal(report["active"], "format", "the wrong stage was active")
+    check(not report["reversible"], "a post-erase stage was called reversible")
+    check(not report["can_stop"], "stopping was offered after the disk was written")
+
+    result = model.call("stop")
+    check(not result["ok"], "a run past the erase boundary could be stopped")
+    check("already been changed" in result["error"],
+          f"the refusal did not say why: {result}")
+    check(model.progress()["running"], "the engine died despite refusing to stop")
+
+with session() as model:
+    check(not model.call("stop").get("ok"), "stopping worked with nothing running")
+
 
 # ---------------------------------------------------------------------------
 # The graphics probe, as the page reads it

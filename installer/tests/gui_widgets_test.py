@@ -53,7 +53,15 @@ REQUIRED = ("Gtk", "Adw")
 
 #: Receivers that are this project's own objects, not toolkit ones. ``gi`` is
 #: the binding module rather than a namespace it exposes.
-OURS = {"flow", "model", "manifest", "widgets", "enum_values", "probe", "F", "gi"}
+OURS = {
+    # this project's own objects and modules
+    "flow", "model", "manifest", "widgets", "enum_values", "probe",
+    "stage_rows", "group_rows", "names",
+    # module aliases: F=flow, T=tokens, plus brand, locales and stdlib
+    "F", "T", "brand", "locales", "tokens", "os", "path",
+    # the binding module rather than a namespace it exposes
+    "gi",
+}
 
 #: Python's own methods, called on Python's own objects. Listed rather than
 #: inferred, so a name added here is a deliberate statement that it is not

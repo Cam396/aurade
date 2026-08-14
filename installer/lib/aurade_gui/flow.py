@@ -50,10 +50,10 @@ PAGES: tuple[Page, ...] = (
     ),
     Page(
         name="network",
-        title="Checking the network",
+        title="Connect to the internet",
         subtitle=(
-            "Packages are downloaded and verified before anything is written "
-            "to the disk, so the connection is checked first."
+            "AuraDE downloads and verifies every package before it writes "
+            "anything to the disk, so the connection is set up first."
         ),
     ),
     Page(
@@ -127,17 +127,18 @@ PROGRESS = "progress"
 DONE = "done"
 FAILURE = "failure"
 CANCELLED = "cancelled"
+STOPPED = "stopped"
 PLANNED = "planned"
 
 #: States that end the session. None of them offers a way back into the flow.
-TERMINAL: frozenset[str] = frozenset({DONE, FAILURE, CANCELLED, PLANNED})
+TERMINAL: frozenset[str] = frozenset({DONE, FAILURE, CANCELLED, STOPPED, PLANNED})
 
 #: States that must not be reachable when the installer was started with
 #: ``--plan-only``. Asserted by walking the transition graph, not by reading
 #: the source: the property that matters is unreachability, and a flag tested
 #: in the right place today is one edit away from being tested in the wrong
 #: place tomorrow.
-DESTRUCTIVE: frozenset[str] = frozenset({GATE, PROGRESS, DONE})
+DESTRUCTIVE: frozenset[str] = frozenset({GATE, PROGRESS, DONE, STOPPED})
 
 
 @dataclass
@@ -211,7 +212,11 @@ class Flow:
             # returns GATE above, so this branch is unreachable there.
             return (REVIEW, PROGRESS, CANCELLED)
         if state == PROGRESS:
-            return (DONE, FAILURE)
+            # Stopping is only reachable while the shared reversibility
+            # boundary says nothing has been written, and it lands in its own
+            # state rather than in FAILURE, because a run the user ended on
+            # purpose is not a run that broke.
+            return (DONE, FAILURE, STOPPED)
         return ()
 
     def reachable(self, start: str = WELCOME) -> frozenset[str]:
@@ -290,8 +295,29 @@ class Flow:
         self.state = PROGRESS
         return self.state
 
-    def finished(self, status: int) -> str:
-        self.state = DONE if status == 0 else FAILURE
+    def finished(self, status: int, cause: str = "") -> str:
+        if status == 0:
+            self.state = DONE
+        elif cause == "cancelled":
+            self.state = STOPPED
+        else:
+            self.state = FAILURE
+        return self.state
+
+    def jump_to_page(self, name: str) -> str:
+        """Open one page directly, which is what a review row is for.
+
+        Walking back through four screens to fix a typo in a hostname is the
+        kind of thing that makes people accept a wrong answer instead. Every
+        row on the review screen goes straight to the page that set it.
+        """
+        if name not in self._visible_pages:
+            if name == "advanced":
+                self.set_show_advanced(True)
+            if name not in self._visible_pages:
+                return self.state
+        self.state = "pages"
+        self.page_index = self._visible_pages.index(name)
         return self.state
 
     # -- what the buttons say ----------------------------------------------
@@ -365,6 +391,13 @@ DONE_BODY = (
 DONE_ENCRYPTED = (
     "This disk is encrypted. You will be asked for the disk passphrase each "
     "time the computer starts, before the sign-in screen appears."
+)
+
+STOPPED_TITLE = "Stopped"
+STOPPED_BODY = (
+    "You stopped the installation before anything was written. No disk was "
+    "partitioned, formatted or erased, and this computer is exactly as it "
+    "was."
 )
 
 CANCELLED_TITLE = "Cancelled"

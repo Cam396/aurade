@@ -191,6 +191,10 @@ stage_explanation() {
 cause_explanation() {
   case $1 in
     unexpected_exit) printf 'A step ended without reporting why.' ;;
+    # The engine traps INT and TERM and records this itself. Both front ends
+    # can therefore be stopped while the disk is still untouched, and the
+    # resulting screen should say that rather than read as a crash.
+    cancelled) printf 'You stopped the installation.' ;;
     archive-unreachable) printf 'The Arch Linux Archive could not be reached for the pinned snapshot date.' ;;
     signature-invalid) printf 'A package signature did not verify against the expected key.' ;;
     esp-readonly) printf 'The EFI system partition mounted, but the firmware reported it read-only.' ;;

@@ -1,29 +1,43 @@
 """The GTK4/libadwaita widget layer.
 
 The only module here that imports ``gi``. Everything it draws is either a
-string from :mod:`aurade_gui.flow` or an answer from the model process, so
-this file can be read as a layout and nothing in it decides what the
-installer does.
+string from :mod:`aurade_gui.flow`, a colour from :mod:`aurade_gui.tokens` or
+an answer from the model process, so this file can be read as a layout and
+nothing in it decides what the installer does.
 
-Keyboard first, throughout. Every page has a default action bound to Return
-and a back action bound to Escape, both labelled with what they actually do;
-focus is placed on the first control of each page as it appears; the disk
-list, the stage list and every option row are reachable with Tab and operable
-with the arrow keys and Space. A user who never touches a pointing device
-must be able to complete an install, because a graphical installer that
-requires a mouse is a graphical installer that excludes people.
+The visual language is Material 3 applied to the AuraDE mark. The palette is a
+tonal system generated from the ribbon in the logo, surfaces are M3 containers,
+interaction is an M3 state layer rather than a colour swap, and the shape and
+type scales are the published ones. What stops it reading as stock is that the
+accents are the brand's own two hues, the chrome carries the real mark and
+wordmark, and the aurora behind the page is the ring from the logo opened out
+to fill a window.
+
+Two registers of type, throughout. Prose is set in the system sans. Anything
+the user has to match against hardware or type back exactly - a device path, a
+disk serial, the erase token, a stage timing - is set in mono, because a face
+that separates 0 from O is the difference between confirming the right disk
+and confirming a different one.
+
+Keyboard first. Every page has a default action on Return and a back action on
+Escape, both labelled with what they actually do; focus lands on the first
+control of each page as it appears; lists are operable with the arrow keys and
+Space. A graphical installer that requires a pointing device is a graphical
+installer that excludes people.
 """
 
 from __future__ import annotations
+
+import os
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import flow as F  # noqa: E402
+from . import brand, flow as F, locales, tokens as T  # noqa: E402
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
@@ -32,93 +46,317 @@ APP_ID = "org.aurade.Installer"
 #: account of what happened; this is a view of it and keeps no tally.
 PROGRESS_INTERVAL_MS = 400
 
+#: Aurora frame interval. Slow on purpose: this is atmosphere behind text
+#: someone is reading, not an animation anyone should watch.
+AURORA_INTERVAL_MS = 90
 
-def _wrapped(text: str, css: str | None = None, center: bool = False) -> Gtk.Label:
-    label = Gtk.Label(label=text)
-    label.set_wrap(True)
-    label.set_natural_wrap_mode(Gtk.NaturalWrapMode.WORD)
-    label.set_xalign(0.5 if center else 0.0)
-    label.set_justify(Gtk.Justification.CENTER if center else Gtk.Justification.LEFT)
-    label.set_max_width_chars(64)
+THEME_CSS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "theme.css")
+
+
+# --------------------------------------------------------------------------
+# Small builders
+# --------------------------------------------------------------------------
+
+
+def label(text: str, style: str = "m3-body-medium", *, wrap: bool = True,
+          center: bool = False, css: str | None = None) -> Gtk.Label:
+    widget = Gtk.Label(label=text)
+    widget.set_wrap(wrap)
+    if wrap:
+        widget.set_natural_wrap_mode(Gtk.NaturalWrapMode.WORD)
+    widget.set_xalign(0.5 if center else 0.0)
+    widget.set_justify(Gtk.Justification.CENTER if center else Gtk.Justification.LEFT)
+    widget.set_max_width_chars(58)
+    widget.add_css_class(style)
     if css:
-        label.add_css_class(css)
-    return label
+        widget.add_css_class(css)
+    return widget
 
 
-def _page_box() -> Gtk.Box:
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-    box.set_margin_top(24)
-    box.set_margin_bottom(24)
+def column(spacing: int = 16) -> Gtk.Box:
+    return Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+
+
+def row(spacing: int = 12) -> Gtk.Box:
+    return Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=spacing)
+
+
+def pane(child: Gtk.Widget, style: str = "aurade-pane") -> Gtk.Box:
+    holder = column(0)
+    holder.add_css_class(style)
+    child.set_margin_top(16)
+    child.set_margin_bottom(16)
+    child.set_margin_start(16)
+    child.set_margin_end(16)
+    holder.append(child)
+    return holder
+
+
+def page_shell(child: Gtk.Widget) -> Gtk.Widget:
+    box = column(20)
+    box.set_margin_top(26)
+    box.set_margin_bottom(26)
     box.set_margin_start(24)
     box.set_margin_end(24)
-    return box
+    box.append(child)
+    clamp = Adw.Clamp(maximum_size=660, tightening_threshold=560)
+    clamp.set_child(box)
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroller.set_vexpand(True)
+    scroller.set_child(clamp)
+    return scroller
 
 
-def _clamp(child: Gtk.Widget) -> Adw.Clamp:
-    clamp = Adw.Clamp(maximum_size=680, tightening_threshold=560)
-    clamp.set_child(child)
-    clamp.set_vexpand(True)
-    return clamp
+# --------------------------------------------------------------------------
+# Brand chrome
+# --------------------------------------------------------------------------
+
+
+class Aurora(Gtk.DrawingArea):
+    """The backdrop. The mark's ring, opened out to fill the window."""
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.phase = 0.0
+        self.set_draw_func(self._draw)
+        self.set_can_target(False)
+
+    def _draw(self, _area, cr, width: int, height: int) -> None:
+        brand.draw_aurora(cr, width, height, self.window.dark, self.phase)
+
+    def advance(self) -> bool:
+        self.phase += 0.012
+        self.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+
+class RibbonRule(Gtk.DrawingArea):
+    """The gradient across the `A`, reduced to a hairline."""
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.set_content_height(2)
+        self.set_draw_func(
+            lambda _a, cr, w, h: brand.draw_ribbon_rule(cr, w, h, self.window.dark))
+        self.set_can_target(False)
+
+
+class Wordmark(Gtk.DrawingArea):
+    """The real logotype, painted in whichever ink the surface needs."""
+
+    def __init__(self, window: "InstallerWindow", height: int = 18) -> None:
+        super().__init__()
+        self.window = window
+        self._height = height
+        self.set_content_height(height)
+        self.set_content_width(int(height * 4.4))
+        self.set_draw_func(self._draw)
+        self.set_can_target(False)
+        self.set_tooltip_text("AuraDE")
+
+    def _draw(self, _area, cr, _width, height) -> None:
+        colour = T.scheme(self.window.dark)["on_surface"]
+        brand.draw_wordmark(cr, 0, 0, min(height, self._height), colour)
+
+
+class Mark(Gtk.DrawingArea):
+    """The application mark, from the artwork."""
+
+    def __init__(self, size: int = 36) -> None:
+        super().__init__()
+        self.set_content_width(size)
+        self.set_content_height(size)
+        self.set_draw_func(lambda _a, cr, w, h: brand.draw_mark(cr, w, h, min(w, h)))
+        self.set_can_target(False)
+
+
+class SignalArcs(Gtk.DrawingArea):
+    """Four arcs. A column of percentages is not a thing anyone reads."""
+
+    def __init__(self, window: "InstallerWindow", strength: int) -> None:
+        super().__init__()
+        self.window = window
+        self.strength = strength
+        self.set_content_width(22)
+        self.set_content_height(20)
+        self.set_draw_func(self._draw)
+        self.set_can_target(False)
+
+    def _draw(self, _area, cr, width, height) -> None:
+        scheme = T.scheme(self.window.dark)
+        brand.draw_signal(cr, width, height, self.strength,
+                          scheme["primary"], scheme["outline_variant"])
+
+
+# --------------------------------------------------------------------------
+# The window
+# --------------------------------------------------------------------------
 
 
 class InstallerWindow(Adw.ApplicationWindow):
-    """The whole installer, as one window with a stack of pages."""
-
     def __init__(self, application: Adw.Application, model: Bridge, plan_only: bool):
         super().__init__(application=application)
         self.model = model
         self.flow = F.Flow(plan_only=plan_only)
+        self.names = locales.Names()
         self.manifest: dict = {}
-        self.widgets: dict[str, Gtk.Widget] = {}
-        self.group_rows: dict[str, list[Gtk.Widget]] = {}
-        self.stage_rows: dict[str, Adw.ActionRow] = {}
-        self.secrets_set: set[str] = set()
-        self.enum_values: dict[str, list[str]] = {}
+        self.widgets: dict = {}
+        self.group_rows: dict = {}
+        self.stage_rows: dict = {}
+        self.secrets_set: set = set()
+        self.enum_values: dict = {}
         self.probe: dict = {}
         self.install_status = 0
+        self.failure_cause = ""
+        self.dark = False
         self._progress_source = 0
+        self._aurora_source = 0
         self._gate_token = ""
-        self._export_notice: tuple[str, bool] | None = None
+        self._export_notice = None
+        self._wifi_target = ""
 
         self.set_title("AuraDE Installer")
-        self.set_default_size(940, 680)
+        self.set_default_size(980, 720)
+        self.add_css_class("aurade")
 
-        self.toast_overlay = Adw.ToastOverlay()
-        self.set_content(self.toast_overlay)
-
-        toolbar = Adw.ToolbarView()
-        self.toast_overlay.set_child(toolbar)
-
-        self.header = Adw.HeaderBar()
-        self.header.set_show_end_title_buttons(False)
-        self.header.set_show_start_title_buttons(False)
-        self.back_button = Gtk.Button(label="Quit")
-        self.back_button.connect("clicked", lambda *_: self.on_back())
-        self.header.pack_start(self.back_button)
-
-        self.forward_button = Gtk.Button(label="Get started")
-        self.forward_button.add_css_class("suggested-action")
-        self.forward_button.connect("clicked", lambda *_: self.on_forward())
-        self.header.pack_end(self.forward_button)
-
-        self.title_widget = Adw.WindowTitle(title="AuraDE Installer", subtitle="")
-        self.header.set_title_widget(self.title_widget)
-        toolbar.add_top_bar(self.header)
-
-        self.banner = Adw.Banner()
-        self.banner.set_revealed(False)
-        toolbar.add_top_bar(self.banner)
-
-        self.stack = Gtk.Stack()
-        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        self.stack.set_vexpand(True)
-        toolbar.set_content(self.stack)
-
+        self._apply_theme()
+        self._build_chrome()
         self._build_pages()
         self._install_shortcuts()
         self.refresh()
 
-    # -- construction ------------------------------------------------------
+    # -- theme -------------------------------------------------------------
+
+    def _apply_theme(self) -> None:
+        manager = Adw.StyleManager.get_default()
+        self.dark = manager.get_dark()
+        manager.connect("notify::dark", self._on_scheme_changed)
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        provider = Gtk.CssProvider()
+        try:
+            provider.load_from_path(THEME_CSS)
+        except GLib.Error:
+            return
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def _on_scheme_changed(self, manager, _param) -> None:
+        self.dark = manager.get_dark()
+        # Everything drawn reads its colours per frame, so a redraw is the
+        # whole of the update. Everything styled follows the stylesheet.
+        for key in ("aurora", "rule", "wordmark"):
+            widget = self.widgets.get(key)
+            if widget is not None:
+                widget.queue_draw()
+
+    @property
+    def animate(self) -> bool:
+        """Whether motion is wanted here.
+
+        GTK carries the accessibility preference. Nothing decorative runs when
+        it is off, and nothing that runs is needed to understand a page.
+        """
+        settings = Gtk.Settings.get_default()
+        if settings is None:
+            return False
+        return bool(settings.get_property("gtk-enable-animations"))
+
+    # -- chrome ------------------------------------------------------------
+
+    def _build_chrome(self) -> None:
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
+
+        backdrop = Gtk.Overlay()
+        self.toast_overlay.set_child(backdrop)
+        aurora = Aurora(self)
+        self.widgets["aurora"] = aurora
+        backdrop.set_child(aurora)
+
+        frame = column(0)
+        backdrop.add_overlay(frame)
+
+        # Top bar: the mark, the wordmark, and where the user is. No window
+        # controls, because this is the only thing running and a close button
+        # on an installer means something different at every step.
+        top = row(12)
+        top.set_margin_top(14)
+        top.set_margin_bottom(12)
+        top.set_margin_start(20)
+        top.set_margin_end(20)
+        top.append(Mark(32))
+        wordmark = Wordmark(self, 18)
+        wordmark.set_valign(Gtk.Align.CENTER)
+        self.widgets["wordmark"] = wordmark
+        top.append(wordmark)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        top.append(spacer)
+        self.step_label = label("", "m3-label-medium", wrap=False, css="aurade-metric")
+        self.step_label.set_valign(Gtk.Align.CENTER)
+        top.append(self.step_label)
+        frame.append(top)
+
+        rule = RibbonRule(self)
+        self.widgets["rule"] = rule
+        frame.append(rule)
+
+        self.banner = Adw.Banner()
+        self.banner.set_revealed(False)
+        frame.append(self.banner)
+
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.stack.set_transition_duration(240)
+        self.stack.set_vexpand(True)
+        frame.append(self.stack)
+
+        # Bottom action bar. Material 3 puts the committing action on the
+        # right in a filled button and the reversing one on the left with no
+        # container, so visual weight matches consequence.
+        actions = row(12)
+        actions.set_margin_top(10)
+        actions.set_margin_bottom(18)
+        actions.set_margin_start(24)
+        actions.set_margin_end(24)
+        self.back_button = Gtk.Button(label="Quit")
+        self.back_button.add_css_class("flat")
+        self.back_button.add_css_class("m3-label-large")
+        self.back_button.connect("clicked", lambda *_: self.on_back())
+        actions.append(self.back_button)
+        gap = Gtk.Box()
+        gap.set_hexpand(True)
+        actions.append(gap)
+        self.secondary_button = Gtk.Button(label="")
+        self.secondary_button.add_css_class("pill")
+        self.secondary_button.set_visible(False)
+        self.secondary_button.connect("clicked", lambda *_: self.on_secondary())
+        actions.append(self.secondary_button)
+        self.forward_button = Gtk.Button(label="Get started")
+        self.forward_button.add_css_class("suggested-action")
+        self.forward_button.add_css_class("pill")
+        self.forward_button.add_css_class("m3-label-large")
+        self.forward_button.connect("clicked", lambda *_: self.on_forward())
+        actions.append(self.forward_button)
+        frame.append(actions)
+
+    def start_aurora(self) -> None:
+        if self._aurora_source or not self.animate:
+            return
+        self._aurora_source = GLib.timeout_add(
+            AURORA_INTERVAL_MS, self.widgets["aurora"].advance)
+
+    def stop_aurora(self) -> None:
+        if self._aurora_source:
+            GLib.source_remove(self._aurora_source)
+            self._aurora_source = 0
+
+    # -- pages -------------------------------------------------------------
 
     def _build_pages(self) -> None:
         self.manifest = self.model.manifest()
@@ -128,190 +366,583 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stack.add_named(self._build_review(), F.REVIEW)
         self.stack.add_named(self._build_gate(), F.GATE)
         self.stack.add_named(self._build_progress(), F.PROGRESS)
-        self.stack.add_named(self._build_done(), F.DONE)
+        self.stack.add_named(self._build_outcome(
+            F.DONE, F.DONE_TITLE, F.DONE_BODY, "emblem-ok-symbolic"), F.DONE)
         self.stack.add_named(self._build_failure(), F.FAILURE)
-        self.stack.add_named(self._build_cancelled(), F.CANCELLED)
-        self.stack.add_named(self._build_planned(), F.PLANNED)
+        self.stack.add_named(self._build_outcome(
+            F.STOPPED, F.STOPPED_TITLE, F.STOPPED_BODY,
+            "process-stop-symbolic"), F.STOPPED)
+        self.stack.add_named(self._build_outcome(
+            F.CANCELLED, F.CANCELLED_TITLE, F.CANCELLED_BODY,
+            "process-stop-symbolic"), F.CANCELLED)
+        self.stack.add_named(self._build_outcome(
+            F.PLANNED, F.PLANNED_TITLE, F.PLANNED_BODY,
+            "document-properties-symbolic"), F.PLANNED)
 
     def _build_welcome(self) -> Gtk.Widget:
-        status = Adw.StatusPage(title=F.WELCOME_TITLE, description=F.WELCOME_BODY)
-        status.set_icon_name("drive-harddisk-symbolic")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_halign(Gtk.Align.CENTER)
-        assurance = _wrapped(F.WELCOME_ASSURANCE, css="dim-label", center=True)
-        body.append(assurance)
-        status.set_child(body)
-        return status
+        box = column(0)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_vexpand(True)
+        mark = Mark(128)
+        mark.set_halign(Gtk.Align.CENTER)
+        mark.set_margin_bottom(26)
+        box.append(mark)
+        title = label(F.WELCOME_TITLE, "m3-display-small", center=True)
+        title.set_margin_bottom(12)
+        box.append(title)
+        body = label(F.WELCOME_BODY, "m3-body-large", center=True)
+        body.set_margin_bottom(22)
+        box.append(body)
+        assurance = row(8)
+        assurance.set_halign(Gtk.Align.CENTER)
+        assurance.append(Gtk.Image.new_from_icon_name("channel-secure-symbolic"))
+        assurance.append(label(F.WELCOME_ASSURANCE, "m3-label-large", wrap=False))
+        assurance.add_css_class("aurade-stage-done")
+        box.append(assurance)
+        return page_shell(box)
 
     def _build_page(self, page: F.Page) -> Gtk.Widget:
-        box = _page_box()
-        box.append(_wrapped(page.subtitle, css="dim-label"))
+        box = column(20)
+        box.append(label(page.title, "m3-headline-small"))
+        box.append(label(page.subtitle, "m3-body-medium", css="dim-label"))
         if page.name == "graphics":
-            self.widgets["graphics.group"] = self._build_graphics(box)
+            self._build_graphics(box)
         elif page.name == "network":
-            self.widgets["network.group"] = self._build_network(box)
+            self._build_network(box)
         else:
-            # One group per question, with the question's own help as the
-            # group description. libadwaita draws that as a caption above the
-            # row, which is where a person looks for it - and it keeps the
-            # help out of the boxed list, where a plain label would break the
-            # rounded-list styling every other row relies on.
             for question in page.questions:
                 spec = self.manifest["questions"].get(question)
                 if spec is None:
                     continue
                 group = Adw.PreferencesGroup(description=spec["help"])
-                for row in self._build_question_rows(question, spec):
-                    group.add(row)
+                for widget in self._build_question_rows(question, spec):
+                    group.add(widget)
                 self.widgets[f"group.{question}"] = group
                 box.append(group)
             if page.name == "disk":
                 box.append(self._build_disk_list())
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(_clamp(box))
-        return scroller
+            if page.name == "language":
+                box.append(self._build_keymap_test())
+        return page_shell(box)
 
-    def _build_graphics(self, box: Gtk.Box) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Graphics")
-        self.widgets["graphics.summary"] = Adw.ActionRow(title="Renderer")
-        self.widgets["graphics.detail"] = Adw.ActionRow(title="Detected")
-        self.widgets["graphics.memory"] = Adw.ActionRow(title="Memory")
-        for key in ("graphics.summary", "graphics.detail", "graphics.memory"):
-            row = self.widgets[key]
-            row.set_subtitle("")
-            row.set_subtitle_lines(0)
-            group.add(row)
-        box.append(group)
-        advice = _wrapped("")
+    # -- graphics ----------------------------------------------------------
+
+    def _build_graphics(self, box: Gtk.Box) -> None:
+        group = Adw.PreferencesGroup()
+        for key, title in (("renderer", "Installer"), ("detail", "Graphics"),
+                           ("memory", "Memory")):
+            item = Adw.ActionRow(title=title)
+            item.set_subtitle("")
+            item.set_subtitle_lines(0)
+            if key != "renderer":
+                item.add_css_class("aurade-mono")
+            self.widgets[f"graphics.{key}"] = item
+            group.add(item)
+        box.append(pane(group, "aurade-pane-flat"))
+        advice = label("", "m3-body-medium")
         advice.set_visible(False)
         self.widgets["graphics.advice"] = advice
         box.append(advice)
-        return group
 
-    def _build_network(self, box: Gtk.Box) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Network and clock")
-        self.widgets["network.list"] = group
-        box.append(group)
-        note = _wrapped(
-            "The installer downloads and verifies every package before it "
-            "touches the disk. If this check fails, nothing has been lost - "
-            "fix the connection and start again.",
-            css="dim-label",
-        )
-        box.append(note)
-        return group
+    def _refresh_graphics(self) -> None:
+        self.probe = self.model.probe()
+        self.widgets["graphics.renderer"].set_subtitle(
+            "Graphical" if self.probe.get("renderer") == "gui"
+            else "Text mode recommended")
+        self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", ""))
+        self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
+        advice = self.widgets["graphics.advice"]
+        advice.set_label(self.probe.get("advice", ""))
+        advice.set_visible(bool(self.probe.get("advice")))
+        # The black-screen warning is why this page exists, and it arrives
+        # before the erase gate rather than after it.
+        if self.probe.get("predicts_black_screen"):
+            self._warn("This computer has no working graphics driver. Installing "
+                       "now produces a system that starts but shows no desktop.")
+        else:
+            self.banner.set_revealed(False)
 
-    def _build_question_rows(self, question: str, spec: dict) -> list[Gtk.Widget]:
-        """The row or rows one manifest question is asked with."""
+    # -- network -----------------------------------------------------------
+
+    def _build_network(self, box: Gtk.Box) -> None:
+        status = Adw.PreferencesGroup()
+        item = Adw.ActionRow(title="Checking this computer")
+        item.set_subtitle("")
+        item.set_subtitle_lines(0)
+        item.add_prefix(Gtk.Image.new_from_icon_name(
+            "network-wireless-acquiring-symbolic"))
+        self.widgets["net.status"] = item
+        status.add(item)
+        box.append(pane(status, "aurade-pane-flat"))
+
+        header = row(8)
+        header.append(label("Wi-Fi networks", "m3-title-medium", wrap=False))
+        gap = Gtk.Box()
+        gap.set_hexpand(True)
+        header.append(gap)
+        spinner = Gtk.Spinner()
+        spinner.set_valign(Gtk.Align.CENTER)
+        self.widgets["wifi.spinner"] = spinner
+        header.append(spinner)
+        rescan = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
+        rescan.add_css_class("flat")
+        rescan.set_tooltip_text("Scan again")
+        rescan.connect("clicked", lambda *_: self.scan_wifi())
+        self.widgets["wifi.rescan"] = rescan
+        header.append(rescan)
+        box.append(header)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.add_css_class("boxed-list")
+        listbox.connect("row-activated", self._on_wifi_row)
+        self.widgets["wifi.list"] = listbox
+        box.append(listbox)
+
+        empty = label("", "m3-body-medium", css="dim-label")
+        empty.set_visible(False)
+        self.widgets["wifi.empty"] = empty
+        box.append(empty)
+
+        # The password field appears under the chosen network rather than in a
+        # dialog, so the name of the network being joined stays on screen
+        # while the password is typed.
+        prompt = Adw.PreferencesGroup()
+        prompt.set_visible(False)
+        entry = Adw.PasswordEntryRow(title="Wi-Fi password")
+        entry.connect("entry-activated", lambda *_: self.join_wifi())
+        join = Gtk.Button(label="Join")
+        join.add_css_class("suggested-action")
+        join.add_css_class("pill")
+        join.set_valign(Gtk.Align.CENTER)
+        join.connect("clicked", lambda *_: self.join_wifi())
+        entry.add_suffix(join)
+        prompt.add(entry)
+        self.widgets["wifi.prompt"] = prompt
+        self.widgets["wifi.password"] = entry
+        box.append(prompt)
+
+        box.append(label(
+            "Packages are downloaded and verified before anything is written, "
+            "so a connection that fails here costs nothing. Fix it now and "
+            "nothing has been lost.",
+            "m3-body-small", css="dim-label"))
+
+    def _refresh_network(self) -> None:
+        status = self.model.call("net-status")
+        item = self.widgets["net.status"]
+        if not status.get("available"):
+            item.set_title("Network manager unavailable")
+            item.set_subtitle(status.get("reason", ""))
+            self.widgets["wifi.list"].set_visible(False)
+            self.widgets["wifi.empty"].set_label(
+                "Wi-Fi cannot be set up from this image. Connect a cable "
+                "instead.")
+            self.widgets["wifi.empty"].set_visible(True)
+            return
+        if status.get("wired"):
+            item.set_title("Connected by cable")
+            item.set_subtitle("A wired connection is up. Wi-Fi is optional.")
+        elif status.get("ssid"):
+            item.set_title(f"Connected to {status['ssid']}")
+            item.set_subtitle("")
+        elif status.get("radio") == "disabled":
+            item.set_title("Wi-Fi is turned off")
+            item.set_subtitle("Turn the radio on to see networks.")
+        else:
+            item.set_title("Not connected")
+            item.set_subtitle("Choose a network below.")
+        self.scan_wifi()
+
+    def scan_wifi(self) -> None:
+        self.widgets["wifi.spinner"].start()
+        self.widgets["wifi.rescan"].set_sensitive(False)
+        # A scan blocks for a second or two. Yielding to the main loop first
+        # means the spinner is on screen while it happens rather than
+        # appearing and vanishing after the fact.
+        GLib.idle_add(self._do_scan)
+
+    def _do_scan(self) -> bool:
+        try:
+            result = self.model.call("wifi-scan")
+        except BridgeError as exc:
+            self._fatal(str(exc))
+            return GLib.SOURCE_REMOVE
+        self.widgets["wifi.spinner"].stop()
+        self.widgets["wifi.rescan"].set_sensitive(True)
+        listbox = self.widgets["wifi.list"]
+        while (existing := listbox.get_first_child()) is not None:
+            listbox.remove(existing)
+        empty = self.widgets["wifi.empty"]
+        if not result.get("ok"):
+            empty.set_label(result.get("error", "Wi-Fi is not available here."))
+            empty.set_visible(True)
+            listbox.set_visible(False)
+            return GLib.SOURCE_REMOVE
+        networks = result.get("networks", [])
+        listbox.set_visible(bool(networks))
+        if not networks:
+            empty.set_label("No networks in range. Move closer to the router, "
+                            "or connect a cable instead.")
+            empty.set_visible(True)
+            return GLib.SOURCE_REMOVE
+        empty.set_visible(False)
+        for network in sorted(networks, key=lambda n: -n.get("signal", 0)):
+            listbox.append(self._wifi_row(network))
+        return GLib.SOURCE_REMOVE
+
+    def _wifi_row(self, network: dict):
+        item = Adw.ActionRow(title=network["ssid"])
+        item.set_activatable(True)
+        strength = int(network.get("signal", 0))
+        arcs = SignalArcs(self, strength)
+        arcs.set_valign(Gtk.Align.CENTER)
+        arcs.set_tooltip_text(f"{brand.signal_words(strength)} signal")
+        item.add_prefix(arcs)
+        notes = []
+        if network.get("active"):
+            notes.append("Connected")
+        elif network.get("saved"):
+            notes.append("Saved")
+        notes.append("Open network" if network.get("open")
+                     else network.get("security", ""))
+        item.set_subtitle("   ".join(n for n in notes if n))
+        if not network.get("open"):
+            lock = Gtk.Image.new_from_icon_name("channel-secure-symbolic")
+            lock.set_tooltip_text("Password required")
+            item.add_suffix(lock)
+        if network.get("active"):
+            item.add_css_class("aurade-stage-done")
+        item.wifi = network
+        return item
+
+    def _on_wifi_row(self, _listbox, item) -> None:
+        network = getattr(item, "wifi", None)
+        if network is None:
+            return
+        if network.get("active"):
+            self._toast(f"Already connected to {network['ssid']}.")
+            return
+        self._wifi_target = network["ssid"]
+        prompt = self.widgets["wifi.prompt"]
+        entry = self.widgets["wifi.password"]
+        if network.get("open") or network.get("saved"):
+            prompt.set_visible(False)
+            self.join_wifi()
+            return
+        entry.set_title(f"Password for {network['ssid']}")
+        entry.set_text("")
+        prompt.set_visible(True)
+        entry.grab_focus()
+
+    def join_wifi(self) -> None:
+        if not self._wifi_target:
+            return
+        entry = self.widgets["wifi.password"]
+        password = entry.get_text()
+        self.widgets["wifi.spinner"].start()
+        try:
+            result = self.model.call("wifi-connect", self._wifi_target, password)
+        except BridgeError as exc:
+            self._fatal(str(exc))
+            return
+        finally:
+            # The renderer's copy of the passphrase goes now. The model wrote
+            # it into a mode-0600 profile and there is no command that reads
+            # one back.
+            entry.set_text("")
+            self.widgets["wifi.spinner"].stop()
+        if not result.get("ok"):
+            self._toast(result.get("error", "Could not join that network."))
+            entry.grab_focus()
+            return
+        self.widgets["wifi.prompt"].set_visible(False)
+        joined = self._wifi_target
+        self._wifi_target = ""
+        self._toast(f"Connected to {joined}.")
+        self._refresh_network()
+
+    # -- questions ---------------------------------------------------------
+
+    def _build_question_rows(self, question: str, spec: dict) -> list:
         kind = spec["type"]
         if kind == "secret":
-            # Typed twice, because a masked field that was mistyped once is
-            # discovered at the sign-in screen of a machine already installed.
             entry = Adw.PasswordEntryRow(title=spec["label"])
             repeat = Adw.PasswordEntryRow(title="Type it again")
             self.widgets[f"q.{question}"] = entry
             self.widgets[f"q.{question}.repeat"] = repeat
             return [entry, repeat]
         if kind == "bool":
-            row = Adw.SwitchRow(title=spec["label"])
-            row.set_active(spec["default"] == "yes")
-            row.connect("notify::active", self._on_bool_changed, question)
-            self.widgets[f"q.{question}"] = row
-            return [row]
+            item = Adw.SwitchRow(title=spec["label"])
+            item.set_active(spec["default"] == "yes")
+            item.connect("notify::active", self._on_bool_changed, question)
+            self.widgets[f"q.{question}"] = item
+            return [item]
         if kind == "enum":
-            # The candidate list comes from the same directories the validator
-            # reads, so a value that appears here always validates.
-            values = self.model.enum(question)
-            self.enum_values[question] = values
-            row = Adw.ComboRow(
-                title=spec["label"],
-                model=Gtk.StringList.new(values or [spec["default"]]),
-            )
-            row.set_enable_search(True)
-            if spec["default"] in values:
-                row.set_selected(values.index(spec["default"]))
-            self.widgets[f"q.{question}"] = row
-            return [row]
+            return [self._build_enum_row(question, spec)]
         if kind == "disk":
-            row = Adw.ActionRow(title=spec["label"])
-            self.widgets[f"q.{question}"] = row
-            return [row]
-        row = Adw.EntryRow(title=spec["label"])
-        row.set_text(spec["default"])
-        row.set_show_apply_button(False)
-        self.widgets[f"q.{question}"] = row
-        return [row]
+            item = Adw.ActionRow(title=spec["label"])
+            self.widgets[f"q.{question}"] = item
+            return [item]
+        item = Adw.EntryRow(title=spec["label"])
+        item.set_text(spec["default"])
+        item.set_show_apply_button(False)
+        self.widgets[f"q.{question}"] = item
+        return [item]
 
-    def _build_disk_list(self) -> Gtk.Widget:
-        group = Adw.PreferencesGroup(title="Disks in this computer")
+    def _build_enum_row(self, question: str, spec: dict):
+        """A picker whose rows say what the value means.
+
+        The model supplies the candidates and validates the answer. What it
+        does not do, and should not, is decide that `en_US.UTF-8` is a
+        reasonable thing to show someone who is choosing a language.
+        """
+        values = self.model.enum(question)
+        self.enum_values[question] = values
+        titles, details = [], []
+        for value in values:
+            if question == "locale":
+                title, detail = self.names.describe_locale(value)
+            elif question == "keymap":
+                title, detail = locales.describe_keymap(value)
+            elif question == "timezone":
+                title, detail = locales.describe_timezone(value)
+            else:
+                title, detail = value, ""
+            titles.append(title)
+            details.append(detail)
+        self.widgets[f"q.{question}.details"] = details
+
+        item = Adw.ComboRow(title=spec["label"],
+                            model=Gtk.StringList.new(titles or [spec["default"]]))
+        item.set_enable_search(True)
+        if spec["default"] in values:
+            item.set_selected(values.index(spec["default"]))
+        item.connect("notify::selected", self._on_enum_changed, question)
+        self.widgets[f"q.{question}"] = item
+
+        caption = label("", "m3-body-small", css="aurade-metric")
+        caption.set_margin_start(14)
+        self.widgets[f"q.{question}.caption"] = caption
+        holder = column(4)
+        holder.append(item)
+        holder.append(caption)
+        self._sync_enum_caption(question)
+        return holder
+
+    def _sync_enum_caption(self, question: str) -> None:
+        item = self.widgets.get(f"q.{question}")
+        caption = self.widgets.get(f"q.{question}.caption")
+        details = self.widgets.get(f"q.{question}.details") or []
+        if item is None or caption is None:
+            return
+        index = item.get_selected()
+        text = details[index] if 0 <= index < len(details) else ""
+        caption.set_label(text)
+        caption.set_visible(bool(text))
+
+    def _on_enum_changed(self, _row, _param, question: str) -> None:
+        self._sync_enum_caption(question)
+        if question != "keymap":
+            return
+        # Applying the layout as it is chosen is the whole point of the test
+        # field below: what gets typed there has to be what the chosen layout
+        # produces, not what the previous one did.
+        values = self.enum_values.get("keymap", [])
+        index = self.widgets["q.keymap"].get_selected()
+        if 0 <= index < len(values):
+            ok, error = self.model.set("keymap", values[index])
+            if not ok:
+                self._toast(error)
+
+    def _build_keymap_test(self):
+        """Somewhere to try the layout before it is used for a password.
+
+        The manifest's own help for this question tells the user to test the
+        layout in the field below. The text installer has that field. This is
+        that field, and without it the instruction was a lie.
+        """
+        group = Adw.PreferencesGroup(
+            title="Try your keyboard",
+            description=("Type here to check the layout before you set a "
+                         "password. Nothing typed in this box is saved."))
+        entry = Adw.EntryRow(title="Test the keys")
+        entry.set_show_apply_button(False)
+        self.widgets["keymap.test"] = entry
+        group.add(entry)
+        return group
+
+    # -- disks -------------------------------------------------------------
+
+    def _build_disk_list(self):
+        box = column(12)
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         listbox.add_css_class("boxed-list")
         listbox.connect("row-selected", self._on_disk_selected)
         self.widgets["disk.list"] = listbox
-        group.add(listbox)
-        self.widgets["disk.warning"] = _wrapped("", css="warning")
-        self.widgets["disk.warning"].set_visible(False)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.append(group)
-        box.append(self.widgets["disk.warning"])
+        box.append(listbox)
+        warning = label("", "m3-body-small")
+        warning.add_css_class("warning")
+        warning.set_visible(False)
+        self.widgets["disk.warning"] = warning
+        box.append(warning)
         return box
 
-    def _build_review(self) -> Gtk.Widget:
-        box = _page_box()
-        box.append(_wrapped("Check these before continuing.", css="dim-label"))
+    def _refresh_disks(self) -> None:
+        listbox = self.widgets["disk.list"]
+        while (existing := listbox.get_first_child()) is not None:
+            listbox.remove(existing)
+        removable = False
+        for disk in self.model.disks():
+            item = Adw.ActionRow(title=disk["path"])
+            item.add_css_class("aurade-mono")
+            transport = (disk.get("transport") or "").upper()
+            facts = [disk.get("model") or "unknown model", disk.get("size") or ""]
+            if transport:
+                facts.append(transport)
+            subtitle = "   ".join(f for f in facts if f)
+            serial = disk.get("serial") or ""
+            if serial:
+                subtitle += f"\nSerial {serial}"
+            item.set_subtitle(subtitle)
+            item.set_subtitle_lines(0)
+            item.disk_path = disk["path"]
+            item.add_prefix(Gtk.Image.new_from_icon_name(
+                "media-removable-symbolic" if transport == "USB"
+                else "drive-harddisk-symbolic"))
+            if transport == "USB":
+                removable = True
+            listbox.append(item)
+        warning = self.widgets["disk.warning"]
+        warning.set_visible(removable)
+        if removable:
+            warning.set_label("A removable disk is listed. That is probably the "
+                              "drive you started this installer from.")
+        chosen = self.model.get("target")
+        if chosen:
+            for item in self._rows(listbox):
+                if getattr(item, "disk_path", None) == chosen:
+                    listbox.select_row(item)
+                    break
+
+    @staticmethod
+    def _rows(listbox):
+        item = listbox.get_first_child()
+        while item is not None:
+            yield item
+            item = item.get_next_sibling()
+
+    # -- review ------------------------------------------------------------
+
+    def _build_review(self):
+        box = column(20)
+        box.append(label(F.REVIEW_TITLE, "m3-headline-small"))
+        box.append(label("Check these before continuing. Select any line to "
+                         "change it.", "m3-body-medium", css="dim-label"))
         group = Adw.PreferencesGroup()
         self.widgets["review.group"] = group
         box.append(group)
-        assurance = _wrapped(F.REVIEW_ASSURANCE, css="success")
+        assurance = row(8)
+        assurance.append(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
+        assurance.append(label(F.REVIEW_ASSURANCE, "m3-label-large", wrap=False))
+        assurance.add_css_class("aurade-stage-done")
         box.append(assurance)
         advanced = Gtk.Button(label="Advanced options")
+        advanced.add_css_class("flat")
         advanced.set_halign(Gtk.Align.START)
-        advanced.connect("clicked", lambda *_: self.on_advanced())
-        self.widgets["review.advanced"] = advanced
+        advanced.connect("clicked", lambda *_: self._on_review_row(None, "advanced"))
         box.append(advanced)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(_clamp(box))
-        return scroller
+        return page_shell(box)
 
-    def _build_gate(self) -> Gtk.Widget:
-        box = _page_box()
-        headline = _wrapped("", css="error")
-        headline.add_css_class("title-2")
+    def _refresh_review(self) -> None:
+        group = self.widgets["review.group"]
+        self._clear_group("review", group)
+        # Secrets arrive as the word `set`. There is no command that returns
+        # one, so this screen cannot show a password even by mistake.
+        for question, entry in self.model.answers().items():
+            item = Adw.ActionRow(title=entry["short"], subtitle=entry["value"])
+            item.set_subtitle_lines(0)
+            if question in ("target", "snapshot", "repo_url"):
+                item.add_css_class("aurade-mono")
+            page = F.page_for_question(question)
+            if page is not None:
+                item.set_activatable(True)
+                item.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+                item.connect("activated", self._on_review_row, page.name)
+            self._add_row("review", group, item)
+
+    def _on_review_row(self, _row, page_name: str) -> None:
+        self.flow.jump_to_page(page_name)
+        self.refresh()
+
+    def _clear_group(self, key: str, group) -> None:
+        for item in self.group_rows.get(key, []):
+            group.remove(item)
+        self.group_rows[key] = []
+
+    def _add_row(self, key: str, group, item) -> None:
+        group.add(item)
+        self.group_rows.setdefault(key, []).append(item)
+
+    # -- the erase gate ----------------------------------------------------
+
+    def _build_gate(self):
+        box = column(20)
+        headline = label("", "m3-headline-small")
         self.widgets["gate.headline"] = headline
         box.append(headline)
-        group = Adw.PreferencesGroup(title="The disk that will be erased")
-        for key, title in (
-            ("model", "Model"),
-            ("serial", "Serial"),
-            ("size", "Size"),
-            ("transport", "Connection"),
-        ):
-            row = Adw.ActionRow(title=title)
-            row.set_subtitle("")
-            self.widgets[f"gate.{key}"] = row
-            group.add(row)
-        box.append(group)
-        box.append(_wrapped(F.GATE_BODY))
+
+        facts = Adw.PreferencesGroup()
+        for key, title in (("model", "Model"), ("serial", "Serial"),
+                           ("size", "Size"), ("transport", "Connection")):
+            item = Adw.ActionRow(title=title)
+            item.set_subtitle("")
+            item.add_css_class("aurade-mono")
+            self.widgets[f"gate.{key}"] = item
+            facts.add(item)
+        box.append(pane(facts, "aurade-danger-pane"))
+        box.append(label(F.GATE_BODY, "m3-body-medium"))
+
         prompt = Adw.PreferencesGroup()
-        entry = Adw.EntryRow(title="Type the confirmation exactly")
+        entry = Adw.EntryRow(title="Type the confirmation")
+        entry.add_css_class("aurade-token-field")
         entry.connect("changed", lambda *_: self.refresh_gate_button())
         self.widgets["gate.entry"] = entry
         prompt.add(entry)
         box.append(prompt)
-        hint = _wrapped("", css="dim-label")
+        hint = label("", "m3-body-small", css="aurade-mono")
         self.widgets["gate.hint"] = hint
         box.append(hint)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(_clamp(box))
-        return scroller
+        return page_shell(box)
 
-    def _build_progress(self) -> Gtk.Widget:
-        box = _page_box()
-        box.append(_wrapped(F.PROGRESS_FOOTER, css="dim-label"))
+    def _refresh_gate(self) -> None:
+        info = self.model.target()
+        if not info.get("ok"):
+            self._toast(info.get("error", "No disk has been chosen."))
+            self.flow.back()
+            self.refresh()
+            return
+        self._gate_token = info["token"]
+        self.widgets["gate.headline"].set_label(
+            f"This erases {info['path']} completely.")
+        for key in ("model", "serial", "size", "transport"):
+            self.widgets[f"gate.{key}"].set_subtitle(info.get(key) or "unknown")
+        self.widgets["gate.hint"].set_label(f"Type  {self._gate_token}")
+        self.widgets["gate.entry"].set_text("")
+
+    def refresh_gate_button(self) -> None:
+        if self.flow.state != F.GATE:
+            return
+        typed = self.widgets["gate.entry"].get_text()
+        self.forward_button.set_sensitive(typed == self._gate_token)
+
+    # -- progress ----------------------------------------------------------
+
+    def _build_progress(self):
+        box = column(18)
+        box.append(label(F.PROGRESS_TITLE, "m3-headline-small"))
+        box.append(label(F.PROGRESS_FOOTER, "m3-body-medium", css="dim-label"))
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         listbox.add_css_class("boxed-list")
@@ -321,91 +952,255 @@ class InstallerWindow(Adw.ApplicationWindow):
         bar.set_show_text(True)
         self.widgets["progress.bar"] = bar
         box.append(bar)
-        note = _wrapped("", css="dim-label")
-        self.widgets["progress.note"] = note
-        box.append(note)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(_clamp(box))
-        return scroller
+        state = label("", "m3-body-small")
+        self.widgets["progress.state"] = state
+        box.append(state)
+        return page_shell(box)
 
-    def _build_done(self) -> Gtk.Widget:
-        status = Adw.StatusPage(title=F.DONE_TITLE, description=F.DONE_BODY)
-        status.set_icon_name("emblem-ok-symbolic")
-        extra = _wrapped("", css="dim-label", center=True)
+    def _draw_progress(self, report: dict) -> None:
+        listbox = self.widgets["progress.list"]
+        pct, detail = 0, ""
+        for stage in report.get("stages", []):
+            name = stage["stage"]
+            item = self.stage_rows.get(name)
+            if item is None:
+                item = Adw.ActionRow(title=stage["label"])
+                icon = Gtk.Image.new_from_icon_name("content-loading-symbolic")
+                item.add_prefix(icon)
+                item.stage_icon = icon
+                item.add_css_class("aurade-transition")
+                listbox.append(item)
+                self.stage_rows[name] = item
+            status = stage.get("status", "pending")
+            elapsed = stage.get("elapsed") or ""
+            item.set_subtitle(elapsed)
+            if elapsed:
+                item.add_css_class("aurade-mono")
+            item.stage_icon.set_from_icon_name({
+                "ok": "emblem-ok-symbolic",
+                "running": "media-playback-start-symbolic",
+                "failed": "dialog-error-symbolic",
+            }.get(status, "content-loading-symbolic"))
+            for css in ("aurade-stage-done", "aurade-stage-active",
+                        "aurade-stage-failed", "aurade-stage-waiting"):
+                item.remove_css_class(css)
+            item.add_css_class({
+                "ok": "aurade-stage-done",
+                "running": "aurade-stage-active",
+                "failed": "aurade-stage-failed",
+            }.get(status, "aurade-stage-waiting"))
+            if status == "running":
+                pct = int(stage.get("pct", 0))
+                detail = stage.get("detail", "")
+        bar = self.widgets["progress.bar"]
+        bar.set_fraction(max(0.0, min(1.0, pct / 100.0)))
+        bar.set_text(detail or report.get("position", ""))
+
+        # The stop control exists only while the shared reversibility boundary
+        # says nothing has been written, and it is removed rather than
+        # disabled at the boundary: a greyed-out Stop invites the user to keep
+        # pressing it at the exact moment the answer has become no.
+        state = self.widgets["progress.state"]
+        if report.get("can_stop"):
+            self.secondary_button.set_label("Stop")
+            self.secondary_button.set_visible(True)
+            state.set_label("Nothing has been written to the disk yet.")
+            state.remove_css_class("warning")
+            state.add_css_class("aurade-stage-done")
+        else:
+            self.secondary_button.set_visible(False)
+            state.set_label(F.PROGRESS_UNINTERRUPTIBLE if report.get("running") else "")
+            state.remove_css_class("aurade-stage-done")
+            state.add_css_class("warning")
+        state.set_visible(bool(state.get_label()))
+
+    def _poll_progress(self) -> bool:
+        try:
+            report = self.model.progress()
+        except BridgeError as exc:
+            self._fatal(str(exc))
+            return GLib.SOURCE_REMOVE
+        self._draw_progress(report)
+        if report.get("running"):
+            return GLib.SOURCE_CONTINUE
+        self._progress_source = 0
+        try:
+            result = self.model.wait()
+            failure = self.model.failure()
+        except BridgeError as exc:
+            self._fatal(str(exc))
+            return GLib.SOURCE_REMOVE
+        self.install_status = int(result.get("status", 1))
+        self.failure_cause = failure.get("cause", "")
+        self.flow.finished(self.install_status, self.failure_cause)
+        self.refresh()
+        return GLib.SOURCE_REMOVE
+
+    def stop_install(self) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Stop the installation?",
+            body=("Nothing has been written to the disk yet, so stopping now "
+                  "leaves this computer exactly as it was. You can start "
+                  "again from the beginning."))
+        dialog.add_response("keep", "Keep installing")
+        dialog.add_response("stop", "Stop")
+        dialog.set_response_appearance("stop", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("keep")
+        dialog.set_close_response("keep")
+        dialog.connect("response", self._on_stop_response)
+        dialog.present(self)
+
+    def _on_stop_response(self, _dialog, response: str) -> None:
+        if response != "stop":
+            return
+        try:
+            result = self.model.call("stop")
+        except BridgeError as exc:
+            self._fatal(str(exc))
+            return
+        if not result.get("ok"):
+            # The only way here is for the boundary to have been crossed
+            # between the button being drawn and being pressed.
+            self._toast(result.get("error",
+                                   "The installation cannot be stopped now."))
+            self.secondary_button.set_visible(False)
+
+    # -- outcomes ----------------------------------------------------------
+
+    def _build_outcome(self, name: str, title: str, body: str, icon: str):
+        box = column(0)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_vexpand(True)
+        image = Gtk.Image.new_from_icon_name(icon)
+        image.set_pixel_size(56)
+        image.set_margin_bottom(20)
+        if name == F.DONE:
+            image.add_css_class("aurade-stage-done")
+        box.append(image)
+        heading = label(title, "m3-headline-large", center=True)
+        heading.set_margin_bottom(12)
+        box.append(heading)
+        box.append(label(body, "m3-body-large", center=True))
+        extra = label("", "m3-body-medium", center=True, css="dim-label")
+        extra.set_margin_top(16)
         extra.set_visible(False)
-        self.widgets["done.extra"] = extra
-        status.set_child(extra)
-        return status
+        self.widgets[f"{name}.extra"] = extra
+        box.append(extra)
+        return page_shell(box)
 
-    def _build_failure(self) -> Gtk.Widget:
-        box = _page_box()
-        headline = _wrapped("", css="error")
-        headline.add_css_class("title-2")
+    def _build_failure(self):
+        box = column(16)
+        headline = label("", "m3-headline-small")
         self.widgets["failure.headline"] = headline
         box.append(headline)
-        for key in ("cause", "explanation", "detail", "advice"):
-            label = _wrapped("")
-            label.set_visible(False)
+        for key in ("cause", "explanation", "advice"):
+            item = label("", "m3-body-medium")
+            item.set_visible(False)
             if key == "advice":
-                label.add_css_class("warning")
-            if key == "detail":
-                label.add_css_class("monospace")
-                label.add_css_class("dim-label")
-            self.widgets[f"failure.{key}"] = label
-            box.append(label)
-        notice = _wrapped("")
+                item.add_css_class("warning")
+            self.widgets[f"failure.{key}"] = item
+            box.append(item)
+        detail = label("", "m3-body-small", css="aurade-mono")
+        detail.set_visible(False)
+        self.widgets["failure.detail"] = detail
+        box.append(detail)
+        notice = label("", "m3-body-medium")
         notice.set_visible(False)
         self.widgets["failure.notice"] = notice
         box.append(notice)
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        for key, label in F.FAILURE_ACTIONS:
-            button = Gtk.Button(label=label)
+        actions = row(12)
+        for key, text in F.FAILURE_ACTIONS:
+            button = Gtk.Button(label=text)
+            button.add_css_class("pill")
+            if key == "export":
+                button.add_css_class("suggested-action")
             button.connect("clicked", self._on_failure_action, key)
             self.widgets[f"failure.action.{key}"] = button
             actions.append(button)
         box.append(actions)
-        log_hint = _wrapped("", css="dim-label")
-        self.widgets["failure.loghint"] = log_hint
-        box.append(log_hint)
+        hint = label("", "m3-body-small", css="aurade-mono")
+        self.widgets["failure.loghint"] = hint
+        box.append(hint)
+        return page_shell(box)
+
+    def _refresh_failure(self) -> None:
+        report = self.model.failure()
+        stage = report.get("label") or ""
+        self.widgets["failure.headline"].set_label(
+            f"{stage} did not finish." if stage else "The installation stopped.")
+        for key, text in (("cause", report.get("cause_text", "")),
+                          ("explanation", report.get("explanation", "")),
+                          ("advice", report.get("restart_advice", ""))):
+            widget = self.widgets[f"failure.{key}"]
+            widget.set_label(text)
+            widget.set_visible(bool(text))
+        detail = self.widgets["failure.detail"]
+        detail.set_label(report.get("detail", ""))
+        detail.set_visible(bool(report.get("detail")))
+        self.widgets["failure.loghint"].set_label(
+            f"Full log: {report.get('raw_log', '')}")
+        notice = self.widgets["failure.notice"]
+        if self._export_notice is None:
+            notice.set_visible(False)
+        else:
+            text, ok = self._export_notice
+            notice.set_label(text)
+            notice.remove_css_class("error")
+            notice.remove_css_class("aurade-stage-done")
+            notice.add_css_class("aurade-stage-done" if ok else "error")
+            notice.set_visible(True)
+        self.banner.set_revealed(False)
+
+    def _on_failure_action(self, _button, key: str) -> None:
+        if key == "export":
+            try:
+                result = self.model.export(self.install_status)
+            except BridgeError as exc:
+                self._fatal(str(exc))
+                return
+            notice = result.get("notice") or "The report could not be saved."
+            self._export_notice = (notice, bool(result.get("ok")))
+            self._refresh_failure()
+            self._toast(notice)
+        elif key == "log":
+            self._show_log()
+        elif key == "reboot":
+            Gio.Subprocess.new(["systemctl", "reboot"], Gio.SubprocessFlags.NONE)
+
+    def _show_log(self) -> None:
+        path = self.model.failure().get("raw_log", "")
+        try:
+            with open(path, "r", errors="replace") as handle:
+                text = handle.read()
+        except OSError as exc:
+            self._toast(f"The log could not be opened: {exc}")
+            return
+        view = Gtk.TextView()
+        view.set_editable(False)
+        view.set_monospace(True)
+        view.get_buffer().set_text(text)
         scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(_clamp(box))
-        return scroller
-
-    def _build_cancelled(self) -> Gtk.Widget:
-        status = Adw.StatusPage(title=F.CANCELLED_TITLE, description=F.CANCELLED_BODY)
-        status.set_icon_name("process-stop-symbolic")
-        return status
-
-    def _build_planned(self) -> Gtk.Widget:
-        status = Adw.StatusPage(title=F.PLANNED_TITLE, description=F.PLANNED_BODY)
-        status.set_icon_name("document-properties-symbolic")
-        return status
+        scroller.set_child(view)
+        scroller.set_size_request(780, 480)
+        dialog = Adw.Dialog()
+        dialog.set_title("Installer log")
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(Adw.HeaderBar())
+        toolbar.set_content(scroller)
+        dialog.set_child(toolbar)
+        dialog.present(self)
 
     # -- keyboard ----------------------------------------------------------
 
     def _install_shortcuts(self) -> None:
         controller = Gtk.ShortcutController()
         controller.set_scope(Gtk.ShortcutScope.GLOBAL)
-        controller.add_shortcut(
-            Gtk.Shortcut(
-                trigger=Gtk.ShortcutTrigger.parse_string("Escape"),
-                action=Gtk.CallbackAction.new(lambda *_: self.on_back() or True),
-            )
-        )
-        controller.add_shortcut(
-            Gtk.Shortcut(
-                trigger=Gtk.ShortcutTrigger.parse_string("<alt>Right"),
-                action=Gtk.CallbackAction.new(lambda *_: self.on_forward() or True),
-            )
-        )
-        controller.add_shortcut(
-            Gtk.Shortcut(
-                trigger=Gtk.ShortcutTrigger.parse_string("<alt>Left"),
-                action=Gtk.CallbackAction.new(lambda *_: self.on_back() or True),
-            )
-        )
+        for trigger, handler in (("Escape", self.on_back),
+                                 ("<alt>Left", self.on_back),
+                                 ("<alt>Right", self.on_forward)):
+            controller.add_shortcut(Gtk.Shortcut(
+                trigger=Gtk.ShortcutTrigger.parse_string(trigger),
+                action=Gtk.CallbackAction.new(lambda *_a, h=handler: h() or True)))
         self.add_controller(controller)
         self.set_default_widget(self.forward_button)
 
@@ -415,15 +1210,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         state = self.flow.state
         name = f"page:{self.flow.current_page}" if state == "pages" else state
         self.stack.set_visible_child_name(name)
+        self.step_label.set_label(self.flow.step_position())
 
         if state == "pages":
-            page = F.PAGES_BY_NAME[self.flow.current_page]
-            self.title_widget.set_title(page.title)
-            self.title_widget.set_subtitle(self.flow.step_position())
-            self._refresh_page(page)
+            self._refresh_page(F.PAGES_BY_NAME[self.flow.current_page])
         else:
-            self.title_widget.set_title(self._title_for(state))
-            self.title_widget.set_subtitle("")
             self._refresh_state(state)
 
         back = self.flow.back_label()
@@ -432,6 +1223,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         forward = self.flow.forward_label()
         self.forward_button.set_visible(bool(forward))
         self.forward_button.set_label(forward or "")
+        if state != F.PROGRESS:
+            self.secondary_button.set_visible(False)
         if state == F.GATE:
             self.forward_button.add_css_class("destructive-action")
             self.forward_button.remove_css_class("suggested-action")
@@ -440,42 +1233,17 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.forward_button.remove_css_class("destructive-action")
             self.forward_button.add_css_class("suggested-action")
             self.forward_button.set_sensitive(True)
+
+        # The aurora runs on the pages that are about the product and stops on
+        # the ones that are about a decision. Atmosphere behind a disk list is
+        # atmosphere in the way.
+        if state in (F.WELCOME, F.DONE, F.STOPPED, F.CANCELLED, F.PLANNED) or (
+                state == "pages"
+                and self.flow.current_page in ("graphics", "network")):
+            self.start_aurora()
+        else:
+            self.stop_aurora()
         GLib.idle_add(self._focus_first)
-
-    def _title_for(self, state: str) -> str:
-        return {
-            F.WELCOME: F.WELCOME_TITLE,
-            F.REVIEW: F.REVIEW_TITLE,
-            F.GATE: F.GATE_TITLE,
-            F.PROGRESS: F.PROGRESS_TITLE,
-            F.DONE: F.DONE_TITLE,
-            F.FAILURE: F.FAILURE_TITLE,
-            F.CANCELLED: F.CANCELLED_TITLE,
-            F.PLANNED: F.PLANNED_TITLE,
-        }.get(state, "AuraDE Installer")
-
-    def _focus_first(self) -> bool:
-        state = self.flow.state
-        candidate: Gtk.Widget | None = None
-        if state == "pages":
-            page = F.PAGES_BY_NAME[self.flow.current_page]
-            if page.name == "disk":
-                candidate = self.widgets.get("disk.list")
-            else:
-                for question in page.questions:
-                    candidate = self.widgets.get(f"q.{question}")
-                    # is_visible, not get_visible: a row inside a hidden group
-                    # still reports its own visibility as true, and focusing
-                    # one puts the cursor somewhere nothing is drawn.
-                    if candidate is not None and candidate.is_visible():
-                        break
-                    candidate = None
-        elif state == F.GATE:
-            candidate = self.widgets.get("gate.entry")
-        if candidate is None:
-            candidate = self.forward_button
-        candidate.grab_focus()
-        return GLib.SOURCE_REMOVE
 
     def _refresh_page(self, page: F.Page) -> None:
         if page.name == "graphics":
@@ -486,163 +1254,11 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._refresh_disks()
         elif page.name == "encryption":
             self._refresh_encryption()
-
-    def _refresh_graphics(self) -> None:
-        self.probe = self.model.probe()
-        renderer = self.probe.get("renderer", "")
-        summary = (
-            "Graphical installer"
-            if renderer == "gui"
-            else "Text installer recommended"
-        )
-        self.widgets["graphics.summary"].set_subtitle(summary)
-        self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", ""))
-        self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
-        advice = self.widgets["graphics.advice"]
-        advice.set_text(self.probe.get("advice", ""))
-        advice.set_visible(bool(self.probe.get("advice")))
-        # The black-screen warning is the reason this page exists, and it is
-        # shown before the erase gate rather than after it.
-        if self.probe.get("predicts_black_screen"):
-            self.banner.set_title(
-                "This computer has no working graphics driver. Installing now "
-                "produces a system that starts but shows no desktop."
-            )
-            self.banner.set_revealed(True)
         else:
             self.banner.set_revealed(False)
-
-    def _refresh_network(self) -> None:
-        group = self.widgets["network.list"]
-        self._clear_group("network", group)
-        report = self.model.network()
-        if not report.get("available", True):
-            row = Adw.ActionRow(title="The network check is not available")
-            row.set_subtitle(
-                "The installer will still verify every package before writing."
-            )
-            row.set_title_lines(0)
-            self._add_row("network", group, row)
-            return
-        for issue in report.get("issues", []):
-            row = Adw.ActionRow(title=issue)
-            row.set_title_lines(0)
-            row.add_prefix(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
-            self._add_row("network", group, row)
-        for note in report.get("notes", []):
-            row = Adw.ActionRow(title=note)
-            row.set_title_lines(0)
-            row.add_prefix(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
-            self._add_row("network", group, row)
-        if not report.get("ok", True):
-            self.banner.set_title(
-                "The network check found a problem. Fixing it now is much "
-                "cheaper than a download failing later."
-            )
-            self.banner.set_revealed(True)
-        else:
-            self.banner.set_revealed(False)
-
-    def _clear_group(self, key: str, group: Adw.PreferencesGroup) -> None:
-        """Empty a group this window filled, using its own record of what it put
-        there rather than by walking widgets it does not own."""
-        for row in self.group_rows.get(key, []):
-            group.remove(row)
-        self.group_rows[key] = []
-
-    def _add_row(self, key: str, group: Adw.PreferencesGroup, row: Gtk.Widget) -> None:
-        group.add(row)
-        self.group_rows.setdefault(key, []).append(row)
-
-    def _refresh_disks(self) -> None:
-        listbox = self.widgets["disk.list"]
-        while (row := listbox.get_first_child()) is not None:
-            listbox.remove(row)
-        removable = False
-        for disk in self.model.disks():
-            row = Adw.ActionRow(title=disk["path"])
-            subtitle = " - ".join(
-                part
-                for part in (
-                    disk.get("model") or "unknown model",
-                    disk.get("size") or "",
-                    disk.get("transport") or "",
-                )
-                if part
-            )
-            serial = disk.get("serial") or ""
-            if serial:
-                subtitle += f"\nSerial {serial}"
-            row.set_subtitle(subtitle)
-            row.set_subtitle_lines(0)
-            row.disk_path = disk["path"]
-            if (disk.get("transport") or "").lower() == "usb":
-                removable = True
-                row.add_suffix(Gtk.Image.new_from_icon_name("media-removable-symbolic"))
-            listbox.append(row)
-        warning = self.widgets["disk.warning"]
-        warning.set_visible(removable)
-        if removable:
-            warning.set_text(
-                "A removable disk is listed. That is probably the drive you "
-                "started this installer from."
-            )
-        chosen = self.model.get("target")
-        if chosen:
-            for row in self._listbox_rows(listbox):
-                if getattr(row, "disk_path", None) == chosen:
-                    listbox.select_row(row)
-                    break
-
-    @staticmethod
-    def _listbox_rows(listbox: Gtk.ListBox):
-        row = listbox.get_first_child()
-        while row is not None:
-            yield row
-            row = row.get_next_sibling()
-
-    def _refresh_encryption(self) -> None:
-        # The passphrase question exists only when encryption was chosen, and
-        # that rule comes from the model, not from a copy of it kept here.
-        group = self.widgets.get("group.luks_passphrase")
-        if group is not None:
-            group.set_visible("luks_passphrase" in set(self.model.visible()))
-
-    def _refresh_review(self) -> None:
-        group = self.widgets["review.group"]
-        self._clear_group("review", group)
-        # Secrets arrive here as the word `set`. There is no command that
-        # returns one, so this screen cannot show a password even by mistake.
-        for entry in self.model.answers().values():
-            row = Adw.ActionRow(title=entry["short"], subtitle=entry["value"])
-            row.set_subtitle_lines(0)
-            if entry.get("advanced"):
-                row.add_css_class("dim-label")
-            self._add_row("review", group, row)
-
-    def _refresh_gate(self) -> None:
-        info = self.model.target()
-        if not info.get("ok"):
-            self._toast(info.get("error", "No disk has been chosen."))
-            self.flow.back()
-            self.refresh()
-            return
-        self._gate_token = info["token"]
-        self.widgets["gate.headline"].set_text(
-            f"This erases {info['path']} completely."
-        )
-        for key in ("model", "serial", "size", "transport"):
-            self.widgets[f"gate.{key}"].set_subtitle(info.get(key) or "unknown")
-        self.widgets["gate.hint"].set_text(f"Type {self._gate_token} to continue.")
-        self.widgets["gate.entry"].set_text("")
-
-    def refresh_gate_button(self) -> None:
-        if self.flow.state != F.GATE:
-            return
-        typed = self.widgets["gate.entry"].get_text()
-        self.forward_button.set_sensitive(typed == self._gate_token)
 
     def _refresh_state(self, state: str) -> None:
+        self.banner.set_revealed(False)
         if state == F.REVIEW:
             self._refresh_review()
         elif state == F.GATE:
@@ -650,40 +1266,51 @@ class InstallerWindow(Adw.ApplicationWindow):
         elif state == F.DONE:
             encrypted = self.model.get("encrypt") == "yes"
             extra = self.widgets["done.extra"]
-            extra.set_text(F.DONE_ENCRYPTED if encrypted else "")
+            extra.set_label(F.DONE_ENCRYPTED if encrypted else "")
             extra.set_visible(encrypted)
         elif state == F.FAILURE:
             self._refresh_failure()
 
-    def _refresh_failure(self) -> None:
-        report = self.model.failure()
-        label = report.get("label") or ""
-        self.widgets["failure.headline"].set_text(
-            f"{label} did not finish." if label else "The installation stopped."
-        )
-        for key, text in (
-            ("cause", report.get("cause_text", "")),
-            ("explanation", report.get("explanation", "")),
-            ("detail", report.get("detail", "")),
-            ("advice", report.get("restart_advice", "")),
-        ):
-            widget = self.widgets[f"failure.{key}"]
-            widget.set_text(text)
-            widget.set_visible(bool(text))
-        self.widgets["failure.loghint"].set_text(
-            f"The full log is at {report.get('raw_log', '')}."
-        )
-        notice = self.widgets["failure.notice"]
-        if self._export_notice is None:
-            notice.set_visible(False)
-        else:
-            text, ok = self._export_notice
-            notice.set_text(text)
-            notice.remove_css_class("error")
-            notice.remove_css_class("success")
-            notice.add_css_class("success" if ok else "error")
-            notice.set_visible(True)
-        self.banner.set_revealed(False)
+    def _refresh_encryption(self) -> None:
+        group = self.widgets.get("group.luks_passphrase")
+        if group is not None:
+            group.set_visible("luks_passphrase" in set(self.model.visible()))
+
+    def _focus_first(self) -> bool:
+        state = self.flow.state
+        candidate = None
+        if state == "pages":
+            page = F.PAGES_BY_NAME[self.flow.current_page]
+            if page.name == "disk":
+                candidate = self.widgets.get("disk.list")
+            elif page.name == "network":
+                candidate = self.widgets.get("wifi.list")
+            else:
+                for question in page.questions:
+                    candidate = self.widgets.get(f"q.{question}")
+                    # is_visible, not get_visible: a row inside a hidden group
+                    # still reports its own visibility as true, and focusing
+                    # one puts the cursor where nothing is drawn.
+                    if candidate is not None and candidate.is_visible():
+                        break
+                    candidate = None
+        elif state == F.GATE:
+            candidate = self.widgets.get("gate.entry")
+        if candidate is None:
+            candidate = self.forward_button
+        candidate.grab_focus()
+        return GLib.SOURCE_REMOVE
+
+    def _warn(self, text: str) -> None:
+        self.banner.set_title(text)
+        self.banner.set_revealed(True)
+
+    def _toast(self, message: str) -> None:
+        if not message:
+            return
+        toast = Adw.Toast(title=message)
+        toast.set_timeout(6)
+        self.toast_overlay.add_toast(toast)
 
     # -- collecting answers ------------------------------------------------
 
@@ -697,8 +1324,6 @@ class InstallerWindow(Adw.ApplicationWindow):
         for question in page.questions:
             spec = self.manifest["questions"].get(question)
             if spec is None:
-                continue
-            if question in self.manifest.get("advanced", []) and not self.flow.show_advanced:
                 continue
             if spec["secret"]:
                 if question not in visible:
@@ -732,9 +1357,6 @@ class InstallerWindow(Adw.ApplicationWindow):
             entry.grab_focus()
             return False
         ok, error = self.model.secret(question, first)
-        # The renderer's copy goes now. The model holds it in its own memory
-        # until it hashes it, then in a mode-0600 file, and there is no
-        # command that reads either back.
         entry.set_text("")
         repeat.set_text("")
         del first, second
@@ -745,10 +1367,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.secrets_set.add(question)
         group = self.widgets.get(f"group.{question}")
         if group is not None:
-            group.set_description(
-                f"{spec['help']} Leave both fields blank to keep what you "
-                "already entered."
-            )
+            group.set_description(f"{spec['help']} Leave both fields blank to "
+                                  "keep what you already entered.")
         return True
 
     def _value_of(self, question: str, spec: dict) -> str:
@@ -760,9 +1380,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         if spec["type"] == "enum":
             values = self.enum_values.get(question, [])
             index = widget.get_selected()
-            if 0 <= index < len(values):
-                return values[index]
-            return spec["default"]
+            return values[index] if 0 <= index < len(values) else spec["default"]
         if spec["type"] == "disk":
             return self.model.get("target")
         return widget.get_text()
@@ -778,25 +1396,17 @@ class InstallerWindow(Adw.ApplicationWindow):
         else:
             widget.remove_css_class("error")
 
-    def _toast(self, message: str) -> None:
-        if not message:
-            return
-        toast = Adw.Toast(title=message)
-        toast.set_timeout(6)
-        self.toast_overlay.add_toast(toast)
-
     # -- actions -----------------------------------------------------------
 
-    def _on_bool_changed(self, row: Adw.SwitchRow, _param, question: str) -> None:
-        self.model.set(question, "yes" if row.get_active() else "no")
+    def _on_bool_changed(self, item, _param, question: str) -> None:
+        self.model.set(question, "yes" if item.get_active() else "no")
         if question == "encrypt":
             self._refresh_encryption()
 
-    def _on_disk_selected(self, _listbox: Gtk.ListBox, row) -> None:
-        if row is None:
+    def _on_disk_selected(self, _listbox, item) -> None:
+        if item is None:
             return
-        path = getattr(row, "disk_path", "")
-        ok, error = self.model.set("target", path)
+        ok, error = self.model.set("target", getattr(item, "disk_path", ""))
         if not ok:
             self._toast(error or "That disk cannot be installed to.")
 
@@ -804,12 +1414,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         state = self.flow.state
         try:
             if state == "pages":
-                page = F.PAGES_BY_NAME[self.flow.current_page]
-                if not self._collect_page(page):
+                if not self._collect_page(F.PAGES_BY_NAME[self.flow.current_page]):
                     return
-                if self.flow.forward() == F.REVIEW:
-                    self.refresh()
-                    return
+                self.flow.forward()
                 self.refresh()
                 return
             if state == F.REVIEW:
@@ -823,6 +1430,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         except BridgeError as exc:
             self._fatal(str(exc))
 
+    def on_secondary(self) -> None:
+        if self.flow.state == F.PROGRESS:
+            self.stop_install()
+
     def on_back(self) -> None:
         action = self.flow.back_action()
         if action == "quit":
@@ -833,20 +1444,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.flow.back()
         self.refresh()
 
-    def on_advanced(self) -> None:
-        self.flow.set_show_advanced(True)
-        self.flow.state = "pages"
-        self.flow.page_index = self.flow.pages.index("advanced")
-        self.refresh()
-
     def _confirm_quit(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Quit the installer?",
-            body=(
-                "Nothing has been written to any disk. This computer will be "
-                "left exactly as it is now."
-            ),
-        )
+            body=("Nothing has been written to any disk. This computer will "
+                  "be left exactly as it is now."))
         dialog.add_response("stay", "Keep going")
         dialog.add_response("quit", "Quit")
         dialog.set_response_appearance("quit", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -863,7 +1465,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _start_plan(self) -> None:
         self.forward_button.set_sensitive(False)
-        self.title_widget.set_subtitle("Checking the plan")
+        self.forward_button.set_label("Checking")
         try:
             result = self.model.plan()
         except BridgeError as exc:
@@ -873,6 +1475,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.forward_button.set_sensitive(True)
         if not result.get("ok"):
             self.install_status = int(result.get("status", 1))
+            self.failure_cause = ""
             self.flow.plan_failed()
             self.refresh()
             return
@@ -895,126 +1498,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.flow.confirmed()
         self.refresh()
         self._progress_source = GLib.timeout_add(
-            PROGRESS_INTERVAL_MS, self._poll_progress
-        )
-
-    def _poll_progress(self) -> bool:
-        try:
-            report = self.model.progress()
-        except BridgeError as exc:
-            self._fatal(str(exc))
-            return GLib.SOURCE_REMOVE
-        self._draw_progress(report)
-        if report.get("running"):
-            return GLib.SOURCE_CONTINUE
-        self._progress_source = 0
-        try:
-            result = self.model.wait()
-        except BridgeError as exc:
-            self._fatal(str(exc))
-            return GLib.SOURCE_REMOVE
-        self.install_status = int(result.get("status", 1))
-        self.flow.finished(self.install_status)
-        self.refresh()
-        return GLib.SOURCE_REMOVE
-
-    def _draw_progress(self, report: dict) -> None:
-        listbox = self.widgets["progress.list"]
-        rows = self.stage_rows
-        active_pct = 0
-        active_detail = ""
-        for stage in report.get("stages", []):
-            name = stage["stage"]
-            row = rows.get(name)
-            if row is None:
-                row = Adw.ActionRow(title=stage["label"])
-                icon = Gtk.Image.new_from_icon_name("content-loading-symbolic")
-                row.add_prefix(icon)
-                row.stage_icon = icon
-                listbox.append(row)
-                rows[name] = row
-            status = stage.get("status", "pending")
-            row.set_subtitle(stage.get("elapsed") or "")
-            row.stage_icon.set_from_icon_name(
-                {
-                    "ok": "emblem-ok-symbolic",
-                    "running": "media-playback-start-symbolic",
-                    "failed": "dialog-error-symbolic",
-                }.get(status, "content-loading-symbolic")
-            )
-            for css in ("success", "error", "dim-label"):
-                row.remove_css_class(css)
-            row.add_css_class(
-                {"ok": "success", "failed": "error"}.get(status, "dim-label")
-            )
-            if status == "running":
-                active_pct = int(stage.get("pct", 0))
-                active_detail = stage.get("detail", "")
-        bar = self.widgets["progress.bar"]
-        bar.set_fraction(max(0.0, min(1.0, active_pct / 100.0)))
-        bar.set_text(active_detail or report.get("position", ""))
-        note = self.widgets["progress.note"]
-        if not report.get("interruptible", True):
-            note.set_text(F.PROGRESS_UNINTERRUPTIBLE)
-            note.set_visible(True)
-        else:
-            note.set_visible(False)
-        # No cancel control is drawn on this page at all. Offering one after
-        # the erase gate would advertise an exit that does not exist.
-
-    def _on_failure_action(self, _button: Gtk.Button, key: str) -> None:
-        if key == "export":
-            try:
-                result = self.model.export(self.install_status)
-            except BridgeError as exc:
-                self._fatal(str(exc))
-                return
-            notice = result.get("notice") or "The report could not be saved."
-            self._export_notice = (notice, bool(result.get("ok")))
-            self._refresh_failure()
-            self._toast(notice)
-            return
-        if key == "log":
-            self._show_log()
-            return
-        if key == "reboot":
-            Gio.Subprocess.new(
-                ["systemctl", "reboot"], Gio.SubprocessFlags.NONE
-            )
-
-    def _show_log(self) -> None:
-        report = self.model.failure()
-        path = report.get("raw_log", "")
-        try:
-            with open(path, "r", errors="replace") as handle:
-                text = handle.read()
-        except OSError as exc:
-            self._toast(f"The log could not be opened: {exc}")
-            return
-        view = Gtk.TextView()
-        view.set_editable(False)
-        view.set_monospace(True)
-        view.get_buffer().set_text(text)
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_child(view)
-        scroller.set_size_request(760, 480)
-        dialog = Adw.Dialog()
-        dialog.set_title("Installer log")
-        toolbar = Adw.ToolbarView()
-        toolbar.add_top_bar(Adw.HeaderBar())
-        toolbar.set_content(scroller)
-        dialog.set_child(toolbar)
-        dialog.present(self)
+            PROGRESS_INTERVAL_MS, self._poll_progress)
 
     def _fatal(self, message: str) -> None:
         dialog = Adw.AlertDialog(
             heading="The installer stopped responding",
-            body=(
-                f"{message}\n\nNothing further will be written. Restart this "
-                "computer and start the installer again, or use the text "
-                "installer."
-            ),
-        )
+            body=(f"{message}\n\nNothing further will be written. Restart this "
+                  "computer and start the installer again, or use the text "
+                  "installer."))
         dialog.add_response("close", "Close")
         dialog.set_default_response("close")
         dialog.connect("response", lambda *_: self.close())
@@ -1023,12 +1514,11 @@ class InstallerWindow(Adw.ApplicationWindow):
 
 class InstallerApplication(Adw.Application):
     def __init__(self, model: Bridge, plan_only: bool):
-        super().__init__(
-            application_id=APP_ID, flags=Gio.ApplicationFlags.NON_UNIQUE
-        )
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.model = model
         self.plan_only = plan_only
-        self.window: InstallerWindow | None = None
+        self.window = None
 
     def do_activate(self) -> None:  # noqa: N802  (GObject naming)
         if self.window is None:

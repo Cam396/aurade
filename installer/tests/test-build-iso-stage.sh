@@ -83,7 +83,7 @@ grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
 # The graphical installer's whole toolkit, including the compositor. GTK 4 on
 # a bare virtual console has nothing to draw on, so a package list with the
 # toolkit and no compositor ships a front end that can never be displayed.
-for package in gtk4 libadwaita python-gobject cage; do
+for package in gtk4 libadwaita python-gobject cage python-cairo ttf-jetbrains-mono; do
   grep -Fxq "$package" "$ROOT/installer/archiso/packages.x86_64"
 done
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
@@ -107,9 +107,14 @@ grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-start ]]
-for module in __init__ bridge flow app; do
+for module in __init__ bridge flow app brand locales tokens; do
   [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$module.py ]]
 done
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/theme.css ]]
+# The brand artwork has to reach the image, or the installer draws a window
+# with no logo in it and the graphics test cannot see that from source.
+[[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-mark.png ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-wordmark.png ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-questions.sh ]]
@@ -129,7 +134,9 @@ for staged in /usr/local/sbin/aurade-installer-gui \
   /usr/local/sbin/aurade-installer-start \
   /usr/local/lib/aurade/aurade_gui/bridge.py \
   /usr/local/lib/aurade/aurade_gui/flow.py \
-  /usr/local/lib/aurade/aurade_gui/app.py; do
+  /usr/local/lib/aurade/aurade_gui/app.py \
+  /usr/local/lib/aurade/aurade_gui/theme.css \
+  /usr/local/share/aurade/aurade-mark.png; do
   grep -Fq "$staged" "$ROOT/installer/archiso/profiledef.sh"
 done
 grep -Fq 'aurade-installer-start' "$ROOT/installer/archiso/airootfs/etc/motd"

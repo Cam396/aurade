@@ -88,6 +88,40 @@ them with whatever filenames happen to match.
 and exits, which is how the layout is tested and how a support case is
 reproduced. `--list-screens` prints the set.
 
+## Look
+
+The palette is a Material 3 tonal system whose key colours are measured out of
+`assets/aurade-logo.png` by `installer/tools/generate-theme.py`. The mark is a
+periwinkle plate carrying a ribbon `A` that runs lilac on the left to aqua on
+the right; those two ends are the primary and tertiary accents, and the plate
+is the hue the neutrals are tinted with. A palette invented alongside the logo
+rather than out of it is how a product ends up with brand artwork that does
+not match its own interface.
+
+Tones are solved in OKLCh against a CIELAB lightness target. That
+approximates Material 3's HCT rather than reproducing it, and the comment in
+the generator says so; the role mapping, shape scale, state-layer opacities
+and type scale are the published specification. libadwaita's own named
+colours are redefined from the same roles, so stock widgets wear the palette
+instead of being fought with per-widget overrides.
+
+`installer/tests/test-gui-theme.sh` regenerates and compares, so a colour hand
+edited into the stylesheet does not survive. It also measures every
+foreground/background pair in both schemes, requires AAA for body text rather
+than AA, and compares the accent hues back to the artwork, so a redrawn logo
+that nobody propagated fails there instead of shipping.
+
+Two registers of type. Prose is the system sans. Anything the user has to
+match against hardware or type back exactly - a device path, a disk serial,
+the erase token, a stage timing - is mono, because a face that separates `0`
+from `O` is the difference between confirming the right disk and confirming a
+different one. That is why the image carries a mono face at all.
+
+Motion is only ever a state change, a piece of feedback, or the aurora. The
+aurora runs on the pages that are about the product and stops on the pages
+that are about a decision, and all of it stops when GTK reports that
+animations are switched off.
+
 ## Progress is a view, not an account
 
 The progress screen is a function of the journal. It does not keep its own
@@ -127,6 +161,10 @@ untruth as a wrong footer.
 Returning to review re-runs the dry run, so the plan approved at the gate is
 always the plan for the answers currently held.
 
+The graphical review screen goes further: every row opens the page that set
+it. Walking back through four screens to fix one typo is how people talk
+themselves into accepting a wrong answer.
+
 Cancellation is asymmetric, because the disk is.
 
 | Region | Stages | Behaviour |
@@ -137,6 +175,16 @@ Cancellation is asymmetric, because the disk is.
 
 The boundary comes from `aurade_stage_reversible`, not from a second opinion
 held in the renderer.
+
+Inside the reversible region the graphical installer offers Stop, and that is
+not a new capability: `aurade-install` already traps `TERM`, already records a
+`cancelled` stage failure, and already unmounts, closes any LUKS mapping and
+removes its work directory on the way out. The renderer only surfaces it, and
+only while the shared boundary says nothing has been written. At the boundary
+the control is removed rather than disabled, because a greyed-out Stop invites
+the user to keep pressing it at the exact moment the answer has become no. A
+run ended this way reaches a `stopped` screen and not the failure screen: a
+run the user ended on purpose is not a run that broke.
 
 `--plan-only` reaches a terminal `planned` state that has no transition to
 `execute`. It is not a flag checked before a destructive call; it is a state
@@ -151,6 +199,20 @@ from the set reachable from the welcome screen.
 Nothing reaches `--execute` without both a dry run the engine accepted and a
 confirmation token equal, whole, to `ERASE:<target>`. Those are two separate
 gates in the bridge and both are tested by trying to get past them.
+
+## Setting up a network is not a question
+
+The engine has no flag for Wi-Fi, and the manifest carries nothing the engine
+cannot consume, so joining a network sits beside `apply_answer` rather than in
+the question set: something done now so the rest of the flow can proceed,
+exactly like loading a keymap.
+
+The passphrase never appears in a command line. `nmcli ... password <psk>`
+would put it in argv where every process on the machine can read it, so the
+profile is written the way NetworkManager stores one itself, as a mode-0600
+keyfile in its own profile directory. A profile whose association failed is
+deleted rather than left behind, because an installed system should not
+inherit a saved network it was never able to join.
 
 ## Answers that take effect immediately
 

@@ -71,10 +71,24 @@ printf 'stub engine invoked in %s mode\n' "$mode"
 [[ $mode == execute ]] || exit "${AURADE_STUB_DRYRUN_STATUS:-0}"
 
 . "$AURADE_JOURNAL_LIB"
+# The real engine traps TERM, records a `cancelled` stage failure and exits
+# 143. The stop path is only worth testing against a stub that does the same.
+handle_cancel() {
+  trap - INT TERM
+  [[ -z ${_J_ACTIVE_STAGE:-} ]] || aurade_journal_fail "$_J_ACTIVE_STAGE" 143 cancelled \
+    'installer cancelled; inspect the private install log before retrying' \
+    log shell reboot || true
+  exit 143
+}
+trap handle_cancel TERM INT
 aurade_journal_init execute "$target"
 for stage in preflight acquire confirm partition format mount pacstrap \
   configure bootloader snapshot verify-install; do
   aurade_journal_begin "$stage" "starting $stage"
+  if [[ ${AURADE_STUB_LINGER_AT:-} == "$stage" ]]; then
+    : >"$AURADE_STUB_DIR/lingering"
+    for _ in $(seq 1 600); do sleep 0.1; done
+  fi
   if [[ ${AURADE_STUB_FAIL_AT:-} == "$stage" ]]; then
     aurade_journal_fail "$stage" 1 unexpected_exit \
       'a step ended without reporting why' export log reboot
@@ -101,6 +115,45 @@ printf 'aurade-install-failure: the export directory is not writable\n' >&2
 exit 2
 STUB
 
+cat >"$TMP/stub/nmcli" <<'STUB'
+#!/usr/bin/env bash
+# Records every invocation, so the test can prove a Wi-Fi passphrase never
+# reaches a command line.
+printf '%s\n' "$*" >>"$AURADE_STUB_DIR/nmcli.calls"
+args=("$@")
+case "$*" in
+  *"-t radio wifi"*) printf '%s\n' "${AURADE_STUB_RADIO:-enabled}" ;;
+  "radio wifi on"|"radio wifi off") exit 0 ;;
+  *"device status"*)
+    printf '%s\n' 'eno1:ethernet:unavailable:' \
+      "wlan0:wifi:${AURADE_STUB_WIFI_STATE:-disconnected}:${AURADE_STUB_SSID:-}"
+    ;;
+  *"general status"*) printf '%s\n' "${AURADE_STUB_CONNECTIVITY:-full}" ;;
+  *"device wifi rescan"*) exit 0 ;;
+  *"device wifi list"*)
+    # A colon inside an SSID arrives escaped, the same access point is seen
+    # once per band, and one network is open.
+    printf '%s\n' \
+      ':22:WPA2:no' \
+      'Ferry\: Cross:82:WPA2:no' \
+      'Ferry\: Cross:44:WPA2:no' \
+      'kestrel-5g:67:WPA2:yes' \
+      'Guest Lounge:38:--:no'
+    ;;
+  *"connection show"*) printf '%s\n' 'kestrel-5g:802-11-wireless' 'eno1:802-3-ethernet' ;;
+  *"connection load"*) exit 0 ;;
+  *"connection up"*)
+    if [[ -n ${AURADE_STUB_NM_FAIL:-} ]]; then
+      printf '%s\n' "$AURADE_STUB_NM_FAIL" >&2
+      exit 4
+    fi
+    exit 0
+    ;;
+  *"connection delete"*) exit 0 ;;
+esac
+exit 0
+STUB
+
 cat >"$TMP/stub/net-ok" <<'STUB'
 #!/usr/bin/env bash
 printf '  an active network interface is present\n'
@@ -116,7 +169,7 @@ exit 1
 STUB
 
 chmod +x "$TMP/stub-engine" "$TMP/stub/loadkeys" "$TMP/stub/broken-helper" \
-  "$TMP/stub/net-ok" "$TMP/stub/net-bad"
+  "$TMP/stub/net-ok" "$TMP/stub/net-bad" "$TMP/stub/nmcli"
 : >"$TMP/loadkeys.log"
 
 # A search path with everything the bridge needs and no loadkeys, so the
@@ -168,6 +221,8 @@ export AURADE_NETWORK_HELPER="$TMP/stub/net-ok"
 export AURADE_BUNDLE_DIR="$TMP/bundle"
 export AURADE_STUB_CALLS="$TMP/calls"
 export AURADE_STUB_DIR="$TMP"
+export AURADE_NMCLI="$TMP/stub/nmcli"
+export AURADE_NM_PROFILE_DIR="$TMP/nm-profiles"
 export AURADE_TEST_LOADKEYS_LOG="$TMP/loadkeys.log"
 export TMPDIR="$TMP"
 

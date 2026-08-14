@@ -154,14 +154,26 @@ equal(nav.cancel(), F.PROGRESS, "the progress screen could be cancelled")
 # screen that says nothing was written".
 equal(
     set(nav.transitions(F.PROGRESS)),
-    {F.DONE, F.FAILURE},
-    "the progress screen leads somewhere other than finished or failed",
+    {F.DONE, F.FAILURE, F.STOPPED},
+    "the progress screen leads somewhere other than finished, failed or stopped",
 )
 equal(
     nav.reachable(F.PROGRESS),
-    frozenset({F.PROGRESS, F.DONE, F.FAILURE}),
+    frozenset({F.PROGRESS, F.DONE, F.FAILURE, F.STOPPED}),
     "a screen upstream of the erase gate is reachable once installing has begun",
 )
+
+# Stopping is an outcome, not a failure. A run the user ended on purpose gets
+# its own screen, and only when the engine reported that as the cause.
+end = F.Flow(plan_only=False)
+end.state = F.PROGRESS
+equal(end.finished(143, "cancelled"), F.STOPPED, "a stopped run was called a failure")
+end.state = F.PROGRESS
+equal(end.finished(1, "unexpected_exit"), F.FAILURE, "a crash was called a stop")
+end.state = F.PROGRESS
+equal(end.finished(0), F.DONE, "a clean install did not finish")
+end.state = F.PROGRESS
+equal(end.finished(0, "cancelled"), F.DONE, "a clean install was called a stop")
 
 for terminal in sorted(F.TERMINAL):
     end = F.Flow()
@@ -189,6 +201,32 @@ equal(
 adv.page_index = adv.pages.index("advanced")
 adv.set_show_advanced(False)
 check(adv.current_page in adv.pages, "hiding the advanced page left an invalid page")
+
+
+# -- jumping straight to an answer from the review screen --------------------
+#
+# Walking back through four pages to fix one typo is how people talk
+# themselves into accepting a wrong answer, so every review row goes directly
+# to the page that set it.
+
+jump = F.Flow(plan_only=False)
+jump.begin()
+jump.state = F.REVIEW
+equal(jump.jump_to_page("account"), "pages", "a review row did not open a page")
+equal(jump.current_page, "account", "a review row opened the wrong page")
+equal(jump.back_action(), "back", "a jumped-to page offers no way back")
+
+# An advanced row is reachable even though the advanced page is not in the
+# walk until it has been asked for.
+jump.state = F.REVIEW
+jump.set_show_advanced(False)
+check("advanced" not in jump.pages, "the advanced page is shown unasked")
+jump.jump_to_page("advanced")
+equal(jump.current_page, "advanced", "an advanced review row could not be opened")
+check("advanced" in jump.pages, "jumping to advanced did not reveal the page")
+
+jump.state = F.REVIEW
+equal(jump.jump_to_page("nonexistent"), F.REVIEW, "an unknown page was opened")
 
 
 # -- plan-only labels --------------------------------------------------------

@@ -96,9 +96,17 @@ install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin
 install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
 install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ bridge flow app; do
+for _gui_module in __init__ bridge flow app brand locales tokens; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
+done
+install -Dm0644 "$ROOT/lib/aurade_gui/theme.css" \
+  "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/theme.css"
+# The mark and the wordmark are drawn from the real artwork rather than
+# redrawn in code, so the installer and the product carry the same logo.
+for _asset in aurade-mark.png aurade-wordmark.png; do
+  install -Dm0644 "$ROOT/assets/${_asset}" \
+    "$STAGE/airootfs/usr/local/share/aurade/${_asset}"
 done
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
