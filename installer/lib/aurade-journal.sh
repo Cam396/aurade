@@ -50,13 +50,15 @@ aurade_stage_reversible() {
   esac
 }
 
-# Whether re-running the stage on a resumed install is safe. `snapshot` is not:
-# it creates .snapshots/0 and a second run collides with the first.
+# Whether re-running the stage on a resumed install is safe. Only stages before
+# the erase boundary are currently restart-safe: the engine has no entry point
+# that can resume partitioning, formatting, pacstrap, configuration, or
+# bootloader work without risking a second destructive pass. `confirm` is also
+# deliberately non-idempotent because it is the one-shot erase boundary.
 aurade_stage_idempotent() {
   case $1 in
-    snapshot) return 1 ;;
-    confirm|done) return 1 ;;
-    *) return 0 ;;
+    preflight|network|acquire|verify) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -202,6 +204,10 @@ aurade_journal_fail() {
   local remediation='' item resumable=false
   if aurade_stage_idempotent "$stage"; then resumable=true; fi
   for item in "$@"; do
+    # A caller may pass a generic remediation list, but advertising retry for
+    # a non-idempotent stage would contradict the resume contract and invite a
+    # second destructive pass. Keep the record self-consistent at the source.
+    [[ $item == retry && $resumable == false ]] && continue
     remediation+="${remediation:+,}\"$(_json_escape "$item")\""
   done
   [[ -n $remediation ]] || remediation='"log","shell","reboot"'
