@@ -7,6 +7,32 @@ ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# The release orchestrator must not silently construct an unsigned candidate
+# repository. Its development channel remains available for local fixtures.
+if AURADE_RELEASE_CHANNEL=candidate REPO_DIR="$TMP/missing" \
+  "$ROOT/ci/build-release-repo.sh" >"$TMP/candidate-builder.out" 2>&1; then
+  echo 'unsigned candidate repository build unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_RELEASE_CHANNEL=candidate requires GPGKEY' \
+  "$TMP/candidate-builder.out"
+
+if AURADE_RELEASE_CHANNEL=public GPGKEY=fixture REPO_DIR="$TMP/missing" \
+  "$ROOT/ci/build-release-repo.sh" >"$TMP/public-builder.out" 2>&1; then
+  echo 'public repository build without keyring unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_RELEASE_CHANNEL=public requires a readable AURADE_REPO_KEYRING' \
+  "$TMP/public-builder.out"
+
+if AURADE_RELEASE_CHANNEL=not-a-channel REPO_DIR="$TMP/missing" \
+  "$ROOT/ci/build-release-repo.sh" >"$TMP/channel.out" 2>&1; then
+  echo 'invalid release channel unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_RELEASE_CHANNEL must be development, soak, candidate, or public' \
+  "$TMP/channel.out"
+
 if AURADE_REQUIRE_SIGNATURES=1 REPO_DIR="$TMP/missing" \
   "$ROOT/ci/verify-release-repo.sh" >"$TMP/missing-key.out" 2>&1; then
   echo 'signed repository verification unexpectedly accepted missing keyring' >&2
