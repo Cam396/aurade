@@ -88,6 +88,12 @@ install -d -m 0700 "$(dirname "$RAW_LOG")" 2>/dev/null || true
 
 GB_PLANNED=0
 GB_ENGINE_PID=
+GB_PLAN_TARGET_PATH=
+GB_PLAN_TARGET_SIZE=
+GB_PLAN_TARGET_MODEL=
+GB_PLAN_TARGET_TRANSPORT=
+GB_PLAN_TARGET_SERIAL=
+GB_PLAN_TARGET_WWN=
 
 # --------------------------------------------------------------------------
 # JSON output
@@ -106,6 +112,55 @@ _gb_emit() { printf '%s\n' "$1"; }
 _gb_ok() { _gb_emit "{\"ok\":true${1:+,$1}}"; }
 
 _gb_err() { _gb_emit "{\"ok\":false,\"error\":$(_gb_str "$1")}"; }
+
+# --------------------------------------------------------------------------
+# Target and secret safety helpers
+# --------------------------------------------------------------------------
+
+gb_clear_secret() {
+  local file="$SECRET_DIR/$1"
+  [[ -e $file ]] || return 0
+  if command -v shred >/dev/null 2>&1; then
+    shred --force --remove --zero "$file" >/dev/null 2>&1 || rm -f -- "$file"
+  else
+    : >"$file"
+    rm -f -- "$file"
+  fi
+}
+
+# Capture the complete target identity immediately before the dry-run. The
+# graphical gate must not rely on a path alone: removable media and udev
+# re-enumeration can put a different disk at the same /dev name.
+gb_capture_plan_target() {
+  local target=${ANSWERS[target]:-} wwn
+  [[ -n $target ]] || return 1
+  GB_PLAN_TARGET_PATH=$(disk_field "$target" 1)
+  GB_PLAN_TARGET_SIZE=$(disk_field "$target" 2)
+  GB_PLAN_TARGET_MODEL=$(disk_field "$target" 3)
+  GB_PLAN_TARGET_TRANSPORT=$(disk_field "$target" 4)
+  GB_PLAN_TARGET_SERIAL=$(disk_field "$target" 5)
+  wwn=$(lsblk -dnro WWN "$target" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || true)
+  GB_PLAN_TARGET_WWN=$wwn
+  [[ -n $GB_PLAN_TARGET_PATH && -n $GB_PLAN_TARGET_SIZE &&
+     -n $GB_PLAN_TARGET_MODEL && -n $GB_PLAN_TARGET_TRANSPORT ]]
+}
+
+gb_plan_target_matches_current() {
+  local target=${ANSWERS[target]:-} current_path current_size current_model
+  local current_transport current_serial current_wwn
+  [[ -n $target && -n $GB_PLAN_TARGET_PATH ]] || return 1
+  current_path=$(disk_field "$target" 1)
+  current_size=$(disk_field "$target" 2)
+  current_model=$(disk_field "$target" 3)
+  current_transport=$(disk_field "$target" 4)
+  current_serial=$(disk_field "$target" 5)
+  current_wwn=$(lsblk -dnro WWN "$target" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || true)
+  aurade_target_identity_matches \
+    "$GB_PLAN_TARGET_PATH" "$GB_PLAN_TARGET_SIZE" "$GB_PLAN_TARGET_MODEL" \
+    "$GB_PLAN_TARGET_TRANSPORT" "$GB_PLAN_TARGET_SERIAL" "$GB_PLAN_TARGET_WWN" \
+    "$current_path" "$current_size" "$current_model" "$current_transport" \
+    "$current_serial" "$current_wwn"
+}
 
 # --------------------------------------------------------------------------
 # Read-only views
@@ -238,7 +293,10 @@ gb_answers() {
 # installer's gate reads.
 gb_target() {
   local target=${ANSWERS[target]:-} out wwn
-  [[ -n $target ]] || { _gb_err 'no disk has been chosen'; return 0; }
+  [[ -n $target && -n $(disk_field "$target" 1) ]] || {
+    _gb_err 'the selected disk is no longer available'
+    return 0
+  }
   wwn=$(lsblk -dnro WWN "$target" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || true)
   out='{"ok":true,'
   out+="\"path\":$(_gb_str "$target"),"
@@ -367,6 +425,10 @@ gb_set() {
     return 0
   fi
   ANSWERS[$id]=$value
+  if [[ $id == encrypt && $value != yes ]]; then
+    gb_clear_secret luks.passphrase
+    unset 'ANSWERS[luks_passphrase]'
+  fi
   # A plan built from earlier answers is no longer the plan for these.
   GB_PLANNED=0
   _gb_ok
@@ -389,12 +451,17 @@ gb_secret() {
   case $id in
     password)
       if ! hash_password; then
+        unset 'ANSWERS[password]'
         _gb_err 'the account password could not be hashed on this system'
         return 0
       fi
       ;;
     luks_passphrase)
-      write_secret luks.passphrase "$value"
+      if ! write_secret luks.passphrase "$value"; then
+        unset 'ANSWERS[luks_passphrase]'
+        _gb_err 'the disk encryption passphrase could not be stored securely'
+        return 0
+      fi
       ANSWERS[$id]='set'
       ;;
   esac
@@ -429,9 +496,21 @@ gb_plan() {
     return 0
   fi
   if [[ ${ANSWERS[encrypt]:-no} == yes && ${ANSWERS[luks_passphrase]:-} != set ]]; then
-    write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"
+    [[ -n ${ANSWERS[luks_passphrase]:-} ]] || {
+      _gb_err 'the disk encryption passphrase is missing'
+      return 0
+    }
+    if ! write_secret luks.passphrase "${ANSWERS[luks_passphrase]}"; then
+      unset 'ANSWERS[luks_passphrase]'
+      _gb_err 'the disk encryption passphrase could not be stored securely'
+      return 0
+    fi
     ANSWERS[luks_passphrase]='set'
   fi
+  gb_capture_plan_target || {
+    _gb_err 'the selected disk identity could not be recorded safely'
+    return 0
+  }
   build_engine_args
   # `|| status=$?` and not `if ! ...`: inside an `if !` the value of `$?` is the
   # status of the negation, which is always zero when the branch is taken. That
@@ -454,6 +533,11 @@ gb_execute() {
   local token=$1 expected
   (( GB_PLANNED )) || { _gb_err 'no checked plan; the plan step has to succeed first'; return 0; }
   [[ -z $GB_ENGINE_PID ]] || { _gb_err 'the installation is already running'; return 0; }
+  gb_plan_target_matches_current || {
+    GB_PLANNED=0
+    _gb_err 'the selected disk identity changed after the plan; nothing was erased'
+    return 0
+  }
   expected="ERASE:${ANSWERS[target]:-}"
   [[ $token == "$expected" ]] || { _gb_err 'the confirmation did not match the disk'; return 0; }
   "$ENGINE" "${ENGINE_ARGS[@]}" --execute --confirm "$expected" >>"$RAW_LOG" 2>&1 &
