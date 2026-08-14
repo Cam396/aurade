@@ -66,7 +66,12 @@ manifest = {
     "architectures": ["x86_64"],
     "payload": [{"path": path, "sha256": "0" * 64} for path in paths],
     "runtime_packages": ["cage", "gtk4", "libadwaita", "python-gobject"],
-    "public_release_policy": {"gui_in_0_1_0": False},
+    "public_release_policy": {
+        "gui_in_0_1_0": False,
+        "artifact_signature_required": True,
+        "full_profile_build_required": True,
+        "physical_accelerated_runtime_required": True,
+    },
 }
 pathlib.Path(sys.argv[1]).write_text(json.dumps(manifest), encoding="utf-8")
 PY
