@@ -118,6 +118,7 @@ STUB
 chmod +x "$TMP/stub-engine" "$TMP/stub/loadkeys" "$TMP/stub/broken-helper" \
   "$TMP/stub/net-ok" "$TMP/stub/net-bad"
 : >"$TMP/loadkeys.log"
+export PATH="$TMP/stub:$PATH"
 
 # A search path with everything the bridge needs and no loadkeys, so the
 # "a console tool this image does not carry is not a failure" case can be

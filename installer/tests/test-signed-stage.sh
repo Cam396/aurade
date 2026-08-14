@@ -6,6 +6,7 @@ ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 install -d -m 0700 "$TMP/gnupg" "$TMP/repo" "$TMP/package"
+export GNUPGHOME="$TMP/gnupg"
 
 gpg --batch --quiet --homedir "$TMP/gnupg" --passphrase '' \
   --quick-gen-key 'AuraDE test fixture <fixture@example.invalid>' rsa2048 sign 1d \

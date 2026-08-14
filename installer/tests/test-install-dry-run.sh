@@ -26,6 +26,7 @@ make_package chromiumos-ash
 printf '%s\n' "\$6\$audit\$not-a-plaintext-password" >"$TMP/password.hash"
 printf '%s\n' 'audit-passphrase' >"$TMP/luks.passphrase"
 chmod 0600 "$TMP/password.hash" "$TMP/luks.passphrase"
+export AURADE_JOURNAL_PATH="$TMP/journal.jsonl" AURADE_JOURNAL_RAW="$TMP/install.log"
 
 common=(
   --target /dev/aurade-test-disk
