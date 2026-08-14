@@ -101,6 +101,8 @@ grep -Fxq 'LocalFileSigLevel = Optional' \
 grep -Fq 'cow_spacesize=4G' \
   "$ROOT/installer/archiso/efiboot/loader/entries/01-aurade-linux.conf"
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
+grep -Fq 'ConditionPathExists=/run/aurade-live-firstboot-enabled' \
+  "$ROOT/installer/archiso/airootfs/etc/systemd/system/systemd-firstboot.service.d/aurade-live.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
@@ -145,6 +147,9 @@ grep -Fq '/usr/local/sbin/aurade-installer-tui' \
 grep -Fq '/usr/local/sbin/aurade-network-diagnostics' "$ROOT/installer/archiso/profiledef.sh"
 [[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service ]]
 [[ ! -e $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/sshd.service ]]
+[[ -r $TMP/work/profile/airootfs/etc/systemd/system/systemd-firstboot.service.d/aurade-live.conf ]]
+grep -Fq 'ConditionPathExists=/run/aurade-live-firstboot-enabled' \
+  "$TMP/work/profile/airootfs/etc/systemd/system/systemd-firstboot.service.d/aurade-live.conf"
 
 # Repository metadata is authenticated separately from the package lock when a
 # verified release repository supplies SHA256SUMS. A tampered database must
