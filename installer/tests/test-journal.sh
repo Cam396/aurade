@@ -86,7 +86,8 @@ check("partition is NOT reversible", rev.get("partition") is False)
 check("bootloader is NOT reversible", rev.get("bootloader") is False)
 
 idem = {r["stage"]: r["idempotent"] for r in recs}
-check("bootloader is idempotent", idem.get("bootloader") is True)
+check("partition is not idempotent", idem.get("partition") is False)
+check("bootloader is not idempotent", idem.get("bootloader") is False)
 
 f = [r for r in recs if r["status"] == "failed"]
 check("failure record exists", len(f) == 1)
@@ -95,8 +96,8 @@ if f:
     check("failure has bounded cause", r.get("cause") == "esp-readonly")
     check("failure has exit code", r.get("exit") == 1)
     check("failure lists remediation",
-          r.get("remediation") == ["retry", "export", "log", "shell", "reboot"])
-    check("idempotent failure is resumable", r.get("resumable") is True)
+          r.get("remediation") == ["export", "log", "shell", "reboot"])
+    check("post-wipe failure is not resumable", r.get("resumable") is False)
 
 p = [r for r in recs if r.get("pct") is not None]
 check("progress record carries pct", any(r["pct"] == 42 for r in p))
@@ -148,10 +149,10 @@ fi
 if aurade_journal_may_resume bootloader /dev/does-not-exist; then
   fail 'resume must refuse a missing device'
 fi
-# Identity mismatch must refuse even when the stage itself is idempotent.
+# Identity mismatch must refuse even when a stage is otherwise restart-safe.
 _J_TARGET_SERIAL=SOME-OTHER-SERIAL
 _J_TARGET_SIZE=999999999999
-if aurade_journal_may_resume bootloader /dev/null; then
+if aurade_journal_may_resume acquire /dev/null; then
   fail 'resume must refuse when target identity does not match'
 fi
 
