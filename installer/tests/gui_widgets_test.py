@@ -64,7 +64,7 @@ OURS = {
 PYTHON_METHODS = {
     "index", "items", "keys", "values", "join", "split", "strip", "rstrip",
     "lower", "upper", "startswith", "endswith", "replace", "format", "pop",
-    "setdefault", "readline", "flush", "require_version", "discard", "remove",
+    "setdefault", "readline", "flush", "decode", "require_version", "discard", "remove",
     "add",
 }
 

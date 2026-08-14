@@ -158,6 +158,10 @@ class Bridge:
         """Return hardware / renderer probe results and black-screen prediction."""
         return self.call("probe")
 
+    def platform(self) -> dict[str, Any]:
+        """Return firmware facts needed before trusting the boot path."""
+        return self.call("platform")
+
     def network(self) -> dict[str, Any]:
         """Return network connectivity and clock synchronization diagnostics."""
         return self.call("network")
