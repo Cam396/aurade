@@ -128,6 +128,29 @@ gb_clear_secret() {
   fi
 }
 
+# The bridge owns the private secret directory for the whole GUI session.
+# Closing the window, an interrupted process, or a failed model must not leave
+# password hashes or LUKS passphrases behind in the live environment.
+gb_cleanup() {
+  local status=$? file
+  set +e
+  if [[ -d ${SECRET_DIR:-} ]]; then
+    while IFS= read -r -d '' file; do
+      if command -v shred >/dev/null 2>&1; then
+        shred --force --remove --zero "$file" >/dev/null 2>&1 || rm -f -- "$file"
+      else
+        : >"$file"
+        rm -f -- "$file"
+      fi
+    done < <(find "$SECRET_DIR" -type f -print0 2>/dev/null || true)
+    rmdir -- "$SECRET_DIR" 2>/dev/null || rm -rf -- "$SECRET_DIR"
+  fi
+  return "$status"
+}
+trap gb_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # Capture the complete target identity immediately before the dry-run. The
 # graphical gate must not rely on a path alone: removable media and udev
 # re-enumeration can put a different disk at the same /dev name.
