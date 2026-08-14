@@ -65,7 +65,13 @@ if (( FULL )); then
     usr/local/sbin/aurade-installer \
     usr/local/sbin/aurade-install \
     usr/local/sbin/aurade-recovery \
+    usr/local/sbin/aurade-installer-gui \
+    usr/local/sbin/aurade-installer-gui-bridge \
+    usr/local/sbin/aurade-installer-start \
     usr/local/lib/aurade/aurade-journal.sh \
+    usr/local/lib/aurade/aurade_gui/app.py \
+    usr/local/lib/aurade/aurade_gui/bridge.py \
+    usr/local/lib/aurade/aurade_gui/flow.py \
     opt/aurade/repo/packages.lock \
     etc/aurade-installer/snapshot; do
     grep -Fq "squashfs-root/$required" "$contents" || {

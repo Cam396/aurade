@@ -30,10 +30,15 @@ install -d \
   "$TMP/squash/usr/local/sbin" \
   "$TMP/squash/usr/local/lib/aurade" \
   "$TMP/squash/etc/aurade-installer"
-for helper in aurade-installer aurade-install aurade-recovery; do
+for helper in aurade-installer aurade-install aurade-recovery \
+  aurade-installer-gui aurade-installer-gui-bridge aurade-installer-start; do
   printf '%s\n' helper >"$TMP/squash/usr/local/sbin/$helper"
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
+install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
+for module in app bridge flow; do
+  printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
+done
 printf '%s\n' 2026/07/12 >"$TMP/squash/etc/aurade-installer/snapshot"
 install -d "$TMP/package"
 printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
