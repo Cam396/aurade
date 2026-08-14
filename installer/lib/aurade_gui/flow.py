@@ -66,24 +66,21 @@ PAGES: tuple[Page, ...] = (
         name="disk",
         title="Choose a disk",
         subtitle=(
-            "Everything on the disk you choose will be erased. You can still "
-            "go back or cancel after this step."
+            "Choose the destination for AuraDE. The erase warning appears "
+            "before anything can change."
         ),
         questions=("target",),
     ),
     Page(
         name="account",
         title="Create your account",
-        subtitle="This is the account you will sign in to on this computer.",
+        subtitle="Set the computer name and the account you will use to sign in.",
         questions=("hostname", "username", "password"),
     ),
     Page(
         name="encryption",
         title="Disk encryption",
-        subtitle=(
-            "Encryption protects your files if this computer is lost or "
-            "stolen."
-        ),
+        subtitle="Decide how the installed system protects data at rest.",
         questions=("encrypt", "luks_passphrase"),
     ),
     Page(
