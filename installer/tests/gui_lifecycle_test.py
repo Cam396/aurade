@@ -83,4 +83,24 @@ assert any(
     for node in ast.walk(run_async)
 ), "async delivery must inspect the closing marker"
 
+retry = method(window, "_retry_network")
+assert any(
+    isinstance(node, ast.Assign)
+    and any(
+        isinstance(target, ast.Attribute) and target.attr == "_network_report"
+        for target in node.targets
+    )
+    for node in ast.walk(retry)
+), "network retry must clear the previous report"
+assert any(
+    isinstance(call.func, ast.Attribute) and call.func.attr == "refresh"
+    for call in calls(retry, "refresh")
+), "network retry must return through the normal refresh path"
+
+network_builder = method(window, "_build_network")
+assert any(
+    isinstance(node, ast.Constant) and node.value == "network.retry"
+    for node in ast.walk(network_builder)
+), "network page must expose the retry control"
+
 print("installer GUI lifecycle test: PASS")

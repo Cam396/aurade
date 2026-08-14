@@ -277,6 +277,13 @@ class InstallerWindow(Adw.ApplicationWindow):
             css="dim-label",
         )
         box.append(note)
+
+        retry = Gtk.Button(label="Check again")
+        retry.set_halign(Gtk.Align.START)
+        retry.set_visible(False)
+        retry.connect("clicked", lambda *_: self._retry_network())
+        self.widgets["network.retry"] = retry
+        box.append(retry)
         return group
 
     def _build_question_rows(self, question: str, spec: dict) -> list[Gtk.Widget]:
@@ -824,9 +831,21 @@ class InstallerWindow(Adw.ApplicationWindow):
         }
         self.refresh()
 
+    def _retry_network(self) -> None:
+        """Run the read-only network preflight again without leaving the page."""
+        if self._busy is not None:
+            return
+        self._network_report = None
+        self.banner.set_revealed(False)
+        self.refresh()
+
     def _draw_network(self, report: dict) -> None:
         group = self.widgets["network.list"]
         self._clear_group("network", group)
+        retry = self.widgets.get("network.retry")
+        if retry is not None:
+            retry.set_visible(not report.get("ok", True))
+            retry.set_sensitive(self._busy is None)
         if not report.get("available", True):
             row = Adw.ActionRow(title="The network check is not available")
             row.set_subtitle(
