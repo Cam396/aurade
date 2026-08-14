@@ -30,9 +30,15 @@ command -v openssl >/dev/null 2>&1 || {
 }
 
 install -d "$TMP/zoneinfo" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
-  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri"
+  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/stub"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/locales/en_US"
 : >"$TMP/keymaps/i386/qwerty/us.map.gz"; : >"$TMP/dri/renderD128"
+cat >"$TMP/stub/loadkeys" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$TMP/stub/loadkeys"
+export PATH="$TMP/stub:$PATH"
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
