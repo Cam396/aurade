@@ -93,6 +93,8 @@ printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
   >"$TMP/package/.PKGINFO"
 bsdtar -cf "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
   -C "$TMP/package" .PKGINFO
+cp "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
+  "$TMP/valid-package.pkg.tar.zst"
 package_digest=$(sha256sum \
   "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" | awk '{print $1}')
 printf '%s %s aurade 1.0-1 any\n' "$package_digest" \
@@ -154,10 +156,8 @@ cp "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
   "$TMP/squash/opt/aurade/repo/extra-1.0-1-any.pkg.tar.zst"
 # Restore the locked archive and rebuild the tiny squashfs.
 rm -f "$TMP/package/README"
-printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
-  >"$TMP/package/.PKGINFO"
-bsdtar -cf "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
-  -C "$TMP/package" .PKGINFO
+cp "$TMP/valid-package.pkg.tar.zst" \
+  "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst"
 mksquashfs "$TMP/squash" "$TMP/iso-tree/arch/x86_64/airootfs.sfs" \
   -noappend -quiet
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/unlisted-full.iso" .)
