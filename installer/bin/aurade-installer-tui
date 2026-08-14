@@ -138,7 +138,14 @@ cleanup() {
     rmdir -- "$SECRET_DIR" 2>/dev/null || rm -rf -- "$SECRET_DIR"
   fi
 }
-trap cleanup EXIT INT TERM
+# Signals must terminate the front end before cleanup runs.  Trapping INT/TERM
+# directly with the scrubber used to delete the secret directory and then let
+# the interrupted state machine continue; a later execute attempt consequently
+# referenced a password hash that no longer existed.  EXIT remains the single
+# cleanup path, so every exit (including a signal exit) scrubs exactly once.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --------------------------------------------------------------------------
 # Stage vocabulary
