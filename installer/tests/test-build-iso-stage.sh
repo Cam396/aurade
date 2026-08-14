@@ -56,6 +56,35 @@ fi
 grep -Fq 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' "$TMP/invalid_gui.out"
 [[ ! -e $TMP/work_invalid_gui ]]
 
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_RELEASE_CHANNEL=candidate \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_unsigned_candidate" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/unsigned_candidate.out" 2>&1; then
+  echo 'unsigned candidate ISO stage unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_RELEASE_CHANNEL=candidate requires a signed ISO' \
+  "$TMP/unsigned_candidate.out"
+[[ ! -e $TMP/work_unsigned_candidate ]]
+
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=0 \
+  AURADE_RELEASE_CHANNEL=public \
+  AURADE_REQUIRE_ISO_SIGNATURE=0 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_unsigned_public" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/unsigned_public.out" 2>&1; then
+  echo 'public ISO stage without signature requirement unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'AURADE_RELEASE_CHANNEL=public requires AURADE_REQUIRE_ISO_SIGNATURE=1' \
+  "$TMP/unsigned_public.out"
+[[ ! -e $TMP/work_unsigned_public ]]
+
 # A release build must not silently claim provenance when signatures are
 # required.  Stage-only mode still validates this policy before touching the
 # work directory, so this is safe to exercise without mkarchiso or a keyring.
