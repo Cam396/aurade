@@ -38,14 +38,6 @@ APP_ID = "org.aurade.Installer"
 #: account of what happened; this is a view of it and keeps no tally.
 PROGRESS_INTERVAL_MS = 400
 
-RESERVED_USERNAMES = frozenset({
-    "root", "bin", "daemon", "sys", "adm", "sync", "games", "man", "lp",
-    "mail", "news", "uucp", "proxy", "majordomo", "postgres", "mysql",
-    "nobody", "systemd-network", "systemd-resolve", "systemd-timesync",
-    "systemd-coredump", "aurade", "aurade-live",
-})
-
-
 def _wrapped(text: str, css: str | None = None, center: bool = False) -> Gtk.Label:
     label = Gtk.Label(label=text)
     label.set_wrap(True)
@@ -92,7 +84,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.install_status = 0
         self._progress_source = 0
         self._gate_token = ""
+        self._gate_identity: dict[str, str] = {}
         self._export_notice: tuple[str, bool] | None = None
+        self._network_report: dict | None = None
+        self._busy: str | None = None
+        self._closing = False
 
         self.set_title("AuraDE Installer")
         self.set_default_size(940, 680)
@@ -135,15 +131,21 @@ class InstallerWindow(Adw.ApplicationWindow):
     # -- async worker ------------------------------------------------------
 
     def _run_async(self, worker_fn, on_done, on_error=None) -> None:
+        def _deliver(callback, value):
+            if self._closing:
+                return GLib.SOURCE_REMOVE
+            callback(value)
+            return GLib.SOURCE_REMOVE
+
         def _thread_target():
             try:
                 res = worker_fn()
-                GLib.idle_add(on_done, res)
+                GLib.idle_add(_deliver, on_done, res)
             except Exception as exc:
                 if on_error is not None:
-                    GLib.idle_add(on_error, exc)
+                    GLib.idle_add(_deliver, on_error, exc)
                 else:
-                    GLib.idle_add(self._fatal, str(exc))
+                    GLib.idle_add(_deliver, self._fatal, str(exc))
 
         thread = _Thread(target=_thread_target, daemon=True)
         thread.start()
@@ -762,6 +764,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         group = self.widgets["network.list"]
         self._clear_group("network", group)
         report = self.model.network()
+        self._network_report = report
         if not report.get("available", True):
             row = Adw.ActionRow(title="The network check is not available")
             row.set_subtitle(
@@ -875,8 +878,12 @@ class InstallerWindow(Adw.ApplicationWindow):
         gfx_row = self.widgets["review.gfx"]
         gfx_row.set_subtitle(self.probe.get("graphics", "Checked"))
         net_row = self.widgets["review.net"]
-        net_report = self.model.network()
-        net_row.set_subtitle("Connected & time synced" if net_report.get("ok") else "Warning reported")
+        net_report = self._network_report or {}
+        net_row.set_subtitle(
+            "Connected & time synced"
+            if net_report.get("ok")
+            else "Not available yet" if not net_report else "Warning reported"
+        )
         mem_row = self.widgets["review.mem"]
         mem_row.set_subtitle(self.probe.get("memory", "Checked"))
 
@@ -888,6 +895,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.refresh()
             return
         self._gate_token = info["token"]
+        self._gate_identity = {
+            key: str(info.get(key) or "")
+            for key in ("path", "model", "serial", "wwn", "size", "transport")
+        }
         self.widgets["gate.headline"].set_text(
             f"This erases {info['path']} completely."
         )
@@ -1118,22 +1129,17 @@ class InstallerWindow(Adw.ApplicationWindow):
                 for c in ("success", "warning", "dim-label", "error"):
                     feedback.remove_css_class(c)
             return
-        if text.lower() in RESERVED_USERNAMES:
-            entry.add_css_class("error")
-            if feedback is not None:
-                feedback.set_text(f"'{text}' is a reserved system name.")
-                for c in ("success", "warning", "dim-label", "error"):
-                    feedback.remove_css_class(c)
-                feedback.add_css_class("error")
-            return
-        is_valid = bool(_re_match(r"^[a-z_][a-z0-9_-]{0,31}$", text))
+        try:
+            is_valid, error = self.model.set("username", text)
+        except BridgeError as exc:
+            is_valid, error = False, str(exc)
         if not is_valid:
             entry.add_css_class("error")
             if feedback is not None:
-                feedback.set_text("Username must start with a lowercase letter and contain only lowercase letters, digits, and hyphens.")
+                feedback.set_text(error or "That username cannot be used on this system.")
                 for c in ("success", "warning", "dim-label", "error"):
                     feedback.remove_css_class(c)
-                feedback.add_css_class("dim-label")
+                feedback.add_css_class("error")
         else:
             if feedback is not None:
                 feedback.set_text("Valid username")
@@ -1189,8 +1195,18 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.model.set("keymap", keymap_val)
 
     def _on_bool_changed(self, row: Adw.SwitchRow, _param, question: str) -> None:
-        self.model.set(question, "yes" if row.get_active() else "no")
+        value = "yes" if row.get_active() else "no"
+        self.model.set(question, value)
         if question == "encrypt":
+            if value != "yes":
+                self.secrets_set.discard("luks_passphrase")
+                for key in ("q.luks_passphrase", "q.luks_passphrase.repeat"):
+                    widget = self.widgets.get(key)
+                    if widget is not None:
+                        widget.set_text("")
+                feedback = self.widgets.get("feedback.luks_passphrase")
+                if feedback is not None:
+                    feedback.set_text("")
             self._refresh_encryption()
 
     def _on_disk_selected(self, _listbox: Gtk.ListBox, row) -> None:
@@ -1202,6 +1218,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._toast(error or "That disk cannot be installed to.")
 
     def on_forward(self) -> None:
+        if self._busy is not None:
+            return
         state = self.flow.state
         try:
             if state == "pages":
@@ -1225,6 +1243,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._fatal(str(exc))
 
     def on_back(self) -> None:
+        if self._busy is not None:
+            return
         action = self.flow.back_action()
         if action == "quit":
             self._confirm_quit()
@@ -1263,12 +1283,18 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.refresh()
 
     def _start_plan(self) -> None:
+        if self._busy is not None or self.flow.state != F.REVIEW:
+            return
+        self._busy = "plan"
         self.forward_button.set_sensitive(False)
         self.back_button.set_sensitive(False)
         self.title_widget.set_subtitle("Checking the plan…")
         self._run_async(self.model.plan, self._on_plan_done, self._on_plan_error)
 
     def _on_plan_done(self, result: dict) -> None:
+        if self._busy != "plan" or self.flow.state != F.REVIEW:
+            return
+        self._busy = None
         self.forward_button.set_sensitive(True)
         self.back_button.set_sensitive(True)
         if not result.get("ok"):
@@ -1280,20 +1306,45 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.refresh()
 
     def _on_plan_error(self, exc: Exception) -> None:
+        if self._busy != "plan":
+            return
+        self._busy = None
         self.forward_button.set_sensitive(True)
         self.back_button.set_sensitive(True)
         self._fatal(str(exc))
 
     def _start_execute(self) -> None:
+        if self._busy is not None:
+            return
+        current = self.model.target()
+        if not current.get("ok"):
+            self._toast(current.get("error", "The selected disk is no longer available."))
+            self.flow.back()
+            self.refresh()
+            return
+        identity_keys = ("path", "model", "serial", "wwn", "size", "transport")
+        if self._gate_identity and any(
+            str(current.get(key) or "") != self._gate_identity.get(key, "")
+            for key in identity_keys
+        ):
+            self._toast(
+                "The selected disk changed after the plan. Review the disk again; nothing was erased."
+            )
+            self.flow.back()
+            self.refresh()
+            return
         typed = self.widgets["gate.entry"].get_text()
         if typed != self._gate_token:
             self._toast("The confirmation did not match the disk.")
             return
         try:
+            self._busy = "execute"
             result = self.model.execute(typed)
         except BridgeError as exc:
+            self._busy = None
             self._fatal(str(exc))
             return
+        self._busy = None
         if not result.get("ok"):
             self._toast(result.get("error", "The installation could not start."))
             return
@@ -1442,6 +1493,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         Gio.Subprocess.new(["systemctl", "reboot"], Gio.SubprocessFlags.NONE)
 
     def _fatal(self, message: str) -> None:
+        self._busy = None
         if self._progress_source:
             GLib.source_remove(self._progress_source)
             self._progress_source = 0
@@ -1455,7 +1507,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         )
         dialog.add_response("close", "Close")
         dialog.set_default_response("close")
-        dialog.connect("response", lambda *_: self.close())
+        dialog.connect("response", lambda *_: (setattr(self, "_closing", True), self.close()))
         dialog.present(self)
 
 
