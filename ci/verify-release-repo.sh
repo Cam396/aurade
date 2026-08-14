@@ -18,12 +18,10 @@ mapfile -t PACKAGE_DIRS < <(
   exit 1
 }
 
-for command in makepkg pacman bsdtar sha256sum; do
-  command -v "${command}" >/dev/null 2>&1 || {
-    echo "Missing required command: ${command}" >&2
-    exit 2
-  }
-done
+# Validate the signature policy before package-tool prerequisites.  This keeps
+# fail-closed configuration errors actionable on minimal CI runners (where the
+# Arch-only package tools may not be installed), and prevents an unrelated
+# missing makepkg/pacman error from masking a bad keyring or fingerprint.
 if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
   for command in gpg gpgv; do
     command -v "${command}" >/dev/null 2>&1 || {
@@ -55,6 +53,13 @@ if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
     exit 2
   }
 fi
+
+for command in makepkg pacman bsdtar sha256sum; do
+  command -v "${command}" >/dev/null 2>&1 || {
+    echo "Missing required command: ${command}" >&2
+    exit 2
+  }
+done
 
 verify_detached_signature() {
   local signature=$1 payload=$2 label=$3 status signer primary
