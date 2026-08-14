@@ -24,6 +24,22 @@ try:
 except (OSError, json.JSONDecodeError) as exc:
     fail(f"cannot read manifest: {exc}")
 
+expected_top_level = {
+    "schema",
+    "release",
+    "status",
+    "architectures",
+    "source",
+    "payload",
+    "runtime_packages",
+    "public_release_policy",
+}
+if not isinstance(data, dict):
+    fail("manifest root is not an object")
+unknown = sorted(set(data) - expected_top_level)
+missing = sorted(expected_top_level - set(data))
+if unknown or missing:
+    fail(f"manifest keys do not match schema (unknown={unknown}, missing={missing})")
 if data.get("schema") != 1:
     fail("unsupported schema")
 if data.get("release") != "0.2.0":
@@ -33,7 +49,7 @@ if data.get("status") not in {"candidate", "ready-for-maintainer-review"}:
 if data.get("architectures") != ["x86_64"]:
     fail("architecture contract must be exactly x86_64")
 source = data.get("source")
-if not isinstance(source, dict) or source.get("tree") != "installer":
+if not isinstance(source, dict) or set(source) != {"tree", "provenance"} or source.get("tree") != "installer":
     fail("source tree is missing or incorrect")
 if not source.get("provenance"):
     fail("source provenance is missing")
@@ -45,6 +61,8 @@ seen = set()
 for item in payload:
     if not isinstance(item, dict):
         fail("payload entry is not an object")
+    if set(item) != {"path", "sha256"}:
+        fail("payload entry has unknown or missing keys")
     path_text = item.get("path")
     digest = item.get("sha256")
     if not isinstance(path_text, str) or path_text in seen:
@@ -88,7 +106,13 @@ if missing:
     fail(f"runtime packages are absent from the ISO profile: {missing}")
 
 policy = data.get("public_release_policy")
-if not isinstance(policy, dict) or policy.get("gui_in_0_1_0") is not False:
+expected_policy = {
+    "gui_in_0_1_0",
+    "artifact_signature_required",
+    "full_profile_build_required",
+    "physical_accelerated_runtime_required",
+}
+if not isinstance(policy, dict) or set(policy) != expected_policy or policy.get("gui_in_0_1_0") is not False:
     fail("the GUI must remain excluded from public 0.1.0")
 for key in (
     "artifact_signature_required",
