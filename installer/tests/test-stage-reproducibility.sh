@@ -27,15 +27,18 @@ stage() {
 }
 
 manifest() {
-  local root=$1 path rel
+  local root=$1 path rel mode
   while IFS= read -r -d '' path; do
     rel=${path#"$root"/}
-    if [[ -L $path ]]; then
-      printf 'L %s %s\n' "$rel" "$(readlink -- "$path")"
+    mode=$(stat -c '%a' -- "$path")
+    if [[ -d $path ]]; then
+      printf 'D %s %s\n' "$rel" "$mode"
+    elif [[ -L $path ]]; then
+      printf 'L %s %s %s\n' "$rel" "$mode" "$(readlink -- "$path")"
     else
-      printf 'F %s %s\n' "$rel" "$(sha256sum "$path" | awk '{print $1}')"
+      printf 'F %s %s %s\n' "$rel" "$mode" "$(sha256sum "$path" | awk '{print $1}')"
     fi
-  done < <(find "$root" -mindepth 1 \( -type f -o -type l \) -print0 | sort -z)
+  done < <(find "$root" -mindepth 1 \( -type d -o -type f -o -type l \) -print0 | sort -z)
 }
 
 stage "$TMP/one"
