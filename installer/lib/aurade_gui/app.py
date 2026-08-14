@@ -210,6 +210,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             # discovered at the sign-in screen of a machine already installed.
             entry = Adw.PasswordEntryRow(title=spec["label"])
             repeat = Adw.PasswordEntryRow(title="Type it again")
+            entry.connect("changed", self._on_secret_changed, question)
+            repeat.connect("changed", self._on_secret_changed, question)
+            entry.connect("entry-activated", lambda *_: repeat.grab_focus())
+            repeat.connect("entry-activated", lambda *_: self.on_forward())
             self.widgets[f"q.{question}"] = entry
             self.widgets[f"q.{question}.repeat"] = repeat
             return [entry, repeat]
@@ -240,6 +244,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         row = Adw.EntryRow(title=spec["label"])
         row.set_text(spec["default"])
         row.set_show_apply_button(False)
+        row.connect("changed", lambda r: r.remove_css_class("error"))
+        row.connect("entry-activated", lambda *_: self.on_forward())
         self.widgets[f"q.{question}"] = row
         return [row]
 
@@ -298,6 +304,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         prompt = Adw.PreferencesGroup()
         entry = Adw.EntryRow(title="Type the confirmation exactly")
         entry.connect("changed", lambda *_: self.refresh_gate_button())
+        entry.connect("entry-activated", lambda *_: self.on_forward())
         self.widgets["gate.entry"] = entry
         prompt.add(entry)
         box.append(prompt)
@@ -787,6 +794,23 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     # -- actions -----------------------------------------------------------
 
+    def _on_secret_changed(self, _row: Adw.EntryRow, question: str) -> None:
+        entry = self.widgets.get(f"q.{question}")
+        repeat = self.widgets.get(f"q.{question}.repeat")
+        if entry is None or repeat is None:
+            return
+        first = entry.get_text()
+        second = repeat.get_text()
+        if not second:
+            repeat.remove_css_class("error")
+        elif first == second:
+            entry.remove_css_class("error")
+            repeat.remove_css_class("error")
+        elif len(second) >= len(first) or not first.startswith(second):
+            repeat.add_css_class("error")
+        else:
+            repeat.remove_css_class("error")
+
     def _on_bool_changed(self, row: Adw.SwitchRow, _param, question: str) -> None:
         self.model.set(question, "yes" if row.get_active() else "no")
         if question == "encrypt":
@@ -1007,6 +1031,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _fatal(self, message: str) -> None:
+        if self._progress_source:
+            GLib.source_remove(self._progress_source)
+            self._progress_source = 0
         dialog = Adw.AlertDialog(
             heading="The installer stopped responding",
             body=(
