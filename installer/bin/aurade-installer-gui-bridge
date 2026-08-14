@@ -465,6 +465,10 @@ gb_secret() {
       ANSWERS[$id]='set'
       ;;
   esac
+  # Do not leave an extra function-local copy alive after the secret has been
+  # hashed or written. Bash cannot promise memory scrubbing, but shortening
+  # the plaintext lifetime is still safer than retaining the argument.
+  value=
   GB_PLANNED=0
   _gb_ok
 }
