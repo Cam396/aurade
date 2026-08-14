@@ -253,6 +253,6 @@ sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
     printf 'iso_signing_fingerprint=not-set\n'
   fi
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
-  (cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock)
+  printf 'packages_lock_sha256=%s\n' "$(sha256sum "$STAGE/airootfs/opt/aurade/repo/packages.lock" | awk '{print $1}')"
 } >"$iso.build-info"
 printf '%s\n' "$iso"
