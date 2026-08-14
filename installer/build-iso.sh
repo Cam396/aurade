@@ -53,6 +53,14 @@ export SOURCE_DATE_EPOCH
   echo 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' >&2
   exit 2
 }
+if (( GUI_RELEASE )); then
+  command -v python3 >/dev/null || {
+    echo 'build-iso: python3 is required for the 0.2.0 GUI manifest gate' >&2
+    exit 1
+  }
+  python3 "$ROOT/../ci/verify-gui-release-manifest.py" \
+    "$ROOT/gui-release-manifest.json"
+fi
 
 if [[ -n $ISO_SIGNING_KEY || $REQUIRE_ISO_SIGNATURE == 1 ]]; then
   command -v gpg >/dev/null || { echo 'build-iso: gpg is required for ISO signatures' >&2; exit 1; }
@@ -255,9 +263,15 @@ elif (( REQUIRE_ISO_SIGNATURE )); then
   exit 1
 fi
 sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
+if (( GUI_RELEASE )); then
+  gui_manifest_sha256=$(sha256sum "$ROOT/gui-release-manifest.json" | awk '{print $1}')
+else
+  gui_manifest_sha256=not-embedded
+fi
 {
   printf 'arch_snapshot=%s\n' "$AURADE_ARCH_SNAPSHOT"
   printf 'gui_release=%s\n' "$GUI_RELEASE"
+  printf 'gui_manifest_sha256=%s\n' "$gui_manifest_sha256"
   printf 'source_date_epoch=%s\n' "$SOURCE_DATE_EPOCH"
   printf 'repo_url=%s\n' "$REPO_URL"
   printf 'repo_fingerprint=%s\n' "${expected_fingerprint:-unsigned}"

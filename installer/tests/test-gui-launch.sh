@@ -22,7 +22,17 @@ command -v python3 >/dev/null 2>&1 || {
 }
 
 install -d "$TMP/bin" "$TMP/lib" "$TMP/no-gi/gi" "$TMP/fake-gi/gi" \
-  "$TMP/dri" "$TMP/empty-dri" "$TMP/stub"
+  "$TMP/dri" "$TMP/empty-dri" "$TMP/stub" "$TMP/no-cage-bin"
+
+# Keep the missing-compositor case deterministic even when the build host has
+# Cage installed. The launcher and renderer probe only need this small set of
+# host tools; an isolated PATH makes `command -v cage` fail without hiding the
+# utilities needed to reach that branch.
+for tool in dirname pwd awk timeout systemd-detect-virt env bash; do
+  tool_path=$(command -v "$tool" 2>/dev/null || true)
+  [[ -n $tool_path ]] || continue
+  ln -s "$tool_path" "$TMP/no-cage-bin/$tool"
+done
 
 # An image layout with the front ends, the libraries and nothing else.
 install -m 0755 "$ROOT/installer/bin/aurade-installer-gui" \
@@ -231,21 +241,15 @@ grep -q '3D acceleration' <<<"$out" ||
   fail "the launcher did not repeat the graphics advice: $out"
 
 # A usable machine with no compositor on the image is still a text install, and
-# the message says which of the two things was missing. The compositor lives in
-# the stub directory and nowhere else, so leaving that off the search path is
-# what "this image has no compositor" looks like - unless the build host has
-# one of its own, in which case this one case cannot be staged here.
-if command -v cage >/dev/null 2>&1; then
-  echo 'test-gui-launch: NOTE (build host has cage; missing-compositor case not staged)'
-else
+# the message says which of the two things was missing. The isolated PATH keeps
+# this assertion independent of the build host's installed packages.
 launch
-out=$(AURADE_GUI_RELEASE=1 AURADE_PROBE_DRI_DIR="$TMP/dri" \
+out=$(AURADE_GUI_RELEASE=1 PATH="$TMP/no-cage-bin" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" 2>&1) ||
   fail "the launcher failed without a compositor: $out"
 grep -q 'no compositor on this image' <<<"$out" ||
   fail "the missing compositor was not named: $out"
 logged 'tui' || fail 'a missing compositor did not reach the text installer'
-fi
 
 launch
 AURADE_GUI_RELEASE=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
@@ -262,6 +266,7 @@ AURADE_GUI_RELEASE=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   fail 'the launcher failed in plan-only mode'
 grep -q -- '--plan-only' "$TMP/launch.log" ||
   fail 'plan-only was dropped on the way to the graphical installer'
+! logged 'tui' || fail 'a clean graphical exit unexpectedly fell back to text'
 
 # --graphical must reach the GUI with its explicit force override, rather than
 # merely bypassing the shell-side probe and then being rejected by the Python

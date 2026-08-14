@@ -3,13 +3,19 @@
 set -Eeuo pipefail
 
 usage() {
-  printf '%s\n' 'Usage: ci/verify-iso-structure.sh ISO [--full]' >&2
+  printf '%s\n' 'Usage: ci/verify-iso-structure.sh ISO [--full] [--require-gui]' >&2
 }
 ISO=${1:-}
 FULL=0
+REQUIRE_GUI=0
 if [[ $# -gt 1 ]]; then
-  [[ ${2:-} == --full && $# -eq 2 ]] || { usage; exit 2; }
-  FULL=1
+  for option in "${@:2}"; do
+    case $option in
+      --full) FULL=1 ;;
+      --require-gui) REQUIRE_GUI=1; FULL=1 ;;
+      *) usage; exit 2 ;;
+    esac
+  done
 fi
 [[ -n $ISO ]] || { usage; exit 2; }
 [[ $ISO == /* ]] || ISO=$(readlink -f -- "$ISO")
@@ -71,6 +77,7 @@ if (( FULL )); then
     etc/aurade-installer/snapshot
   )
   if grep -Fqx 'squashfs-root/etc/aurade-installer/gui-enabled' "$contents"; then
+    gui_enabled=1
     required_payload+=(
       usr/local/sbin/aurade-installer-gui
       usr/local/sbin/aurade-installer-gui-bridge
@@ -80,6 +87,12 @@ if (( FULL )); then
       usr/local/lib/aurade/aurade_gui/flow.py
       etc/aurade-installer/gui-release-manifest.json
     )
+  else
+    gui_enabled=0
+  fi
+  if (( REQUIRE_GUI && !gui_enabled )); then
+    echo 'verify-iso-structure: requested GUI release but the ISO has no GUI marker' >&2
+    exit 1
   fi
   for required in "${required_payload[@]}"; do
     grep -Fq "squashfs-root/$required" "$contents" || {
@@ -153,10 +166,84 @@ if (( FULL )); then
       exit 1
     }
   done
+
+  if (( REQUIRE_GUI )); then
+    build_info="$ISO.build-info"
+    [[ -r $build_info ]] || {
+      echo 'verify-iso-structure: requested GUI release but build-info is missing' >&2
+      exit 1
+    }
+    gui_release=$(awk -F= '$1 == "gui_release" {print $2}' "$build_info")
+    [[ $gui_release == 1 ]] || {
+      echo 'verify-iso-structure: requested GUI release but build-info is not GUI-enabled' >&2
+      exit 1
+    }
+    expected_manifest_digest=$(awk -F= '$1 == "gui_manifest_sha256" {print $2}' "$build_info")
+    [[ $expected_manifest_digest =~ ^[[:xdigit:]]{64}$ ]] || {
+      echo 'verify-iso-structure: GUI build-info lacks a manifest digest' >&2
+      exit 1
+    }
+    manifest_file="$TMP/gui-release-manifest.json"
+    unsquashfs -cat "$image" etc/aurade-installer/gui-release-manifest.json >"$manifest_file" 2>"$TMP/gui-manifest.err" || {
+      echo 'verify-iso-structure: requested GUI release but its manifest is missing' >&2
+      exit 1
+    }
+    actual_manifest_digest=$(sha256sum "$manifest_file" | awk '{print $1}')
+    [[ $actual_manifest_digest == "$expected_manifest_digest" ]] || {
+      echo 'verify-iso-structure: embedded GUI manifest digest does not match build-info' >&2
+      exit 1
+    }
+    python3 - "$manifest_file" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if not isinstance(manifest, dict):
+    raise SystemExit("verify-iso-structure: embedded GUI manifest is not an object")
+if manifest.get("schema") != 1 or manifest.get("release") != "0.2.0":
+    raise SystemExit("verify-iso-structure: embedded GUI manifest is not a 0.2.0 candidate")
+if manifest.get("status") != "candidate":
+    raise SystemExit("verify-iso-structure: embedded GUI manifest is not marked candidate")
+if "x86_64" not in manifest.get("architectures", []):
+    raise SystemExit("verify-iso-structure: embedded GUI manifest omits x86_64")
+expected_payload = {
+    "installer/bin/aurade-installer-gui",
+    "installer/bin/aurade-installer-gui-bridge",
+    "installer/bin/aurade-installer-start",
+    "installer/lib/aurade-probe.sh",
+    "installer/lib/aurade-questions.sh",
+    "installer/lib/aurade-validate.sh",
+    "installer/lib/aurade-journal.sh",
+    "installer/lib/aurade-tui.sh",
+    "installer/lib/aurade_gui/__init__.py",
+    "installer/lib/aurade_gui/app.py",
+    "installer/lib/aurade_gui/bridge.py",
+    "installer/lib/aurade_gui/flow.py",
+}
+payload = manifest.get("payload")
+if not isinstance(payload, list):
+    raise SystemExit("verify-iso-structure: embedded GUI manifest payload is not a list")
+payload_paths = {entry.get("path") for entry in payload if isinstance(entry, dict)}
+if not expected_payload.issubset(payload_paths):
+    raise SystemExit("verify-iso-structure: embedded GUI manifest omits required source payload")
+if sorted(manifest.get("runtime_packages", [])) != [
+    "cage", "gtk4", "libadwaita", "python-gobject"
+]:
+    raise SystemExit("verify-iso-structure: embedded GUI runtime closure is incomplete")
+policy = manifest.get("public_release_policy")
+if not isinstance(policy, dict) or policy.get("gui_in_0_1_0") is not False:
+    raise SystemExit("verify-iso-structure: embedded GUI manifest does not exclude GUI from 0.1.0")
+PY
+  fi
 fi
 
 if (( FULL )); then
-  printf 'ISO structure verification: PASS (UEFI, boot policy, squashfs payload)\n'
+  if (( REQUIRE_GUI )); then
+    printf 'ISO structure verification: PASS (UEFI, boot policy, squashfs payload, GUI 0.2.0 marker)\n'
+  else
+    printf 'ISO structure verification: PASS (UEFI, boot policy, squashfs payload)\n'
+  fi
 else
   printf 'ISO structure verification: PASS (UEFI and boot policy; use --full for squashfs payload)\n'
 fi
