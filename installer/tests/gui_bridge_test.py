@@ -23,7 +23,7 @@ ROOT = os.path.normpath(os.path.join(TESTS, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "installer", "lib"))
 
 from aurade_gui import flow as F  # noqa: E402
-from aurade_gui.bridge import Bridge  # noqa: E402
+from aurade_gui.bridge import Bridge, BridgeError  # noqa: E402
 
 TMP = sys.argv[1]
 BRIDGE = os.path.join(ROOT, "installer", "bin", "aurade-installer-gui-bridge")
@@ -221,6 +221,40 @@ with session() as model:
     ok, error = model.set("nonexistent", "value")
     check(not ok, "an unknown question was accepted")
     check("unknown question" in error, f"an unknown question gave a poor error: {error}")
+
+# ---------------------------------------------------------------------------
+# Disk enumeration and target identity
+# ---------------------------------------------------------------------------
+
+with session() as model:
+    disks = model.disks()
+    check(len(disks) >= 2, f"expected at least 2 disks from fixture, got {len(disks)}")
+    for d in disks:
+        for field in ("path", "size", "model", "transport", "serial", "wwn"):
+            check(field in d, f"disk object missing {field} field: {d}")
+    equal(disks[0]["path"], "/dev/sda", "first disk path does not match")
+    equal(disks[0]["model"], "WDC WD10EZEX", "first disk model does not match")
+    equal(disks[0]["serial"], "WD-WCC6Y4KP1234", "first disk serial does not match")
+    equal(disks[0]["transport"], "sata", "first disk transport does not match")
+    equal(disks[0]["size"], "931.5G", "first disk size does not match")
+
+    # Target info before selection
+    target_unselected = model.target()
+    check(not target_unselected.get("ok"), "target succeeded before disk chosen")
+
+    # Target info after selection
+    ok, _ = model.set("target", "/dev/sda")
+    check(ok, "setting target to /dev/sda failed")
+    target_info = model.target()
+    check(target_info.get("ok"), f"target failed for /dev/sda: {target_info}")
+    equal(target_info.get("path"), "/dev/sda", "target path mismatch")
+    equal(target_info.get("model"), "WDC WD10EZEX", "target model mismatch")
+    equal(target_info.get("serial"), "WD-WCC6Y4KP1234", "target serial mismatch")
+    check("wwn" in target_info, f"wwn field missing from target info: {target_info}")
+    equal(target_info.get("size"), "931.5G", "target size mismatch")
+    equal(target_info.get("transport"), "sata", "target transport mismatch")
+    equal(target_info.get("token"), "ERASE:/dev/sda", "target token mismatch")
+
 
 # ---------------------------------------------------------------------------
 # Answers that take effect immediately
@@ -623,6 +657,44 @@ with session(
         "3D acceleration" in probe["advice"],
         f"the virtual-device advice was not actionable: {probe['advice']}",
     )
+
+# ---------------------------------------------------------------------------
+# Candidate lists for enum questions
+# ---------------------------------------------------------------------------
+
+with session() as model:
+    for question in ("keymap", "locale", "timezone"):
+        candidates = model.enum(question)
+        check(
+            isinstance(candidates, list) and len(candidates) > 0,
+            f"model.enum({question!r}) did not return a non-empty candidate list: {candidates}",
+        )
+
+# ---------------------------------------------------------------------------
+# Protocol safety: newline injection is rejected with BridgeError
+# ---------------------------------------------------------------------------
+
+with session() as model:
+    try:
+        model.call("ping\n")
+    except BridgeError:
+        pass
+    else:
+        FAILURES.append("model.call() with newline in command did not raise BridgeError")
+
+    try:
+        model.call("get", "hostname\n")
+    except BridgeError:
+        pass
+    else:
+        FAILURES.append("model.call() with newline in argument did not raise BridgeError")
+
+    try:
+        model.call("set", "hostname", "bad\nhostname")
+    except BridgeError:
+        pass
+    else:
+        FAILURES.append("model.call() with newline in value did not raise BridgeError")
 
 
 if FAILURES:
