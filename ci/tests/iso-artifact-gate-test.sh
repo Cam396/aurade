@@ -24,6 +24,8 @@ iso_bytes=$(stat -c '%s' "$ISO")
 package_bytes=$(stat -c '%s' "$TMP/repo/aurade-1.0-1-any.pkg.tar.zst")
 cat >"$ISO.build-info" <<EOF
 arch_snapshot=2026/07/12
+gui_release=0
+gui_manifest_sha256=not-embedded
 source_date_epoch=1783814400
 repo_url=https://packages.example.invalid/aurade
 repo_fingerprint=unsigned
@@ -46,6 +48,24 @@ if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/missing-provenance.out" 2>&1
 fi
 grep -Fq 'build-info is missing repo_url' "$TMP/missing-provenance.out"
 printf '%s\n' 'repo_url=https://packages.example.invalid/aurade' >>"$ISO.build-info"
+
+# New GUI provenance keys are optional for historical artifacts, but when
+# present they must be internally coherent and fail closed on malformed values.
+sed -i 's/^gui_release=.*/gui_release=maybe/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/invalid-gui-release.out" 2>&1; then
+  echo 'artifact with invalid gui_release unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid gui_release' "$TMP/invalid-gui-release.out"
+sed -i 's/^gui_release=.*/gui_release=0/' "$ISO.build-info"
+
+sed -i 's/^gui_release=.*/gui_release=1/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/missing-gui-digest.out" 2>&1; then
+  echo 'GUI artifact without a manifest digest unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'GUI build-info lacks a manifest digest' "$TMP/missing-gui-digest.out"
+sed -i 's/^gui_release=.*/gui_release=0/' "$ISO.build-info"
 
 # Duplicate metadata keys must not allow a later value to override provenance.
 printf '%s\n' 'repo_fingerprint=unsigned' >>"$ISO.build-info"

@@ -101,6 +101,15 @@ if not info.get("repo_url", ""):
 repo_fingerprint = info.get("repo_fingerprint", "")
 if repo_fingerprint != "unsigned" and not re.fullmatch(r"[0-9A-Fa-f]{40,64}", repo_fingerprint):
     raise SystemExit("verify-iso-artifacts: build-info has invalid repo_fingerprint")
+if "gui_release" in info:
+    if info["gui_release"] not in {"0", "1"}:
+        raise SystemExit("verify-iso-artifacts: build-info has invalid gui_release")
+    manifest_digest = info.get("gui_manifest_sha256", "")
+    if info["gui_release"] == "1":
+        if not re.fullmatch(r"[0-9A-Fa-f]{64}", manifest_digest):
+            raise SystemExit("verify-iso-artifacts: GUI build-info lacks a manifest digest")
+    elif manifest_digest != "not-embedded":
+        raise SystemExit("verify-iso-artifacts: text build-info embeds a GUI manifest")
 packages_lock_sha256 = info.get("packages_lock_sha256", "")
 if not re.fullmatch(r"[0-9A-Fa-f]{64}", packages_lock_sha256):
     raise SystemExit("verify-iso-artifacts: build-info has invalid packages_lock_sha256")
