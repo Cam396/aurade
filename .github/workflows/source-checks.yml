@@ -81,6 +81,9 @@ jobs:
       - name: Run ISO artifact sidecar gate
         run: ci/tests/iso-artifact-gate-test.sh
 
+      - name: Run GUI 0.2.0 release metadata gate
+        run: ci/tests/gui-release-metadata-test.sh
+
       - name: Run repository signature policy fixture
         run: ci/tests/release-signature-policy-test.sh
 

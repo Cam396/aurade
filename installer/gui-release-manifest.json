@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "release": "0.2.0",
+  "status": "candidate",
+  "architectures": ["x86_64"],
+  "source": {
+    "tree": "installer",
+    "provenance": "The ISO build records the resolved main commit in .build-info; these source hashes bind the GUI payload before that build."
+  },
+  "payload": [
+    {
+      "path": "installer/bin/aurade-installer-gui",
+      "sha256": "9c314daf0bd95dfb92c1b9058e737c536424f152fedb5eb242ab71e1d420960c"
+    },
+    {
+      "path": "installer/bin/aurade-installer-gui-bridge",
+      "sha256": "321d86e3b4091b1d2206204b368e92092af50c5730839fd0b39577843398f105"
+    },
+    {
+      "path": "installer/bin/aurade-installer-start",
+      "sha256": "6d94d52c0bd0d2826169e9a9d55698ab4648e690c233233936c3c1ec544bbb9d"
+    },
+    {
+      "path": "installer/lib/aurade_gui/__init__.py",
+      "sha256": "5075853fed5ad17917a5ffb59f6f290a37234adb0cd4e9d13829579af07ed454"
+    },
+    {
+      "path": "installer/lib/aurade_gui/bridge.py",
+      "sha256": "5852c9834668a42caf112755c86ba5ce9b30beeee0982862c0f036d0540a2a0a"
+    },
+    {
+      "path": "installer/lib/aurade_gui/flow.py",
+      "sha256": "556efe391e3f0c92f9e26a43c13bd7744ca7e6172905e6dc7454686893c15ef0"
+    },
+    {
+      "path": "installer/lib/aurade_gui/app.py",
+      "sha256": "e394aa574e69bfa2cf2ca8e6903b8fb1409f0c0810a4bd596bf0897bc041ac64"
+    }
+  ],
+  "runtime_packages": ["cage", "gtk4", "libadwaita", "python-gobject"],
+  "public_release_policy": {
+    "gui_in_0_1_0": false,
+    "artifact_signature_required": true,
+    "full_profile_build_required": true,
+    "physical_accelerated_runtime_required": true
+  }
+}
