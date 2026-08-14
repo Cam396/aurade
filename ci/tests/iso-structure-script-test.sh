@@ -109,11 +109,28 @@ printf '%s\n' 'default aurade.conf' 'editor no' >"$TMP/iso-tree/loader/loader.co
 printf '%s\n' 'title AuraDE' 'options cow_spacesize=4G' \
   >"$TMP/iso-tree/loader/entries/01-aurade-linux.conf"
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/full.iso" .)
-printf 'gui_release=1\ngui_manifest_sha256=%s\n' \
+printf 'release_channel=candidate\ngui_release=1\ngui_manifest_sha256=%s\n' \
   "$(sha256sum "$TMP/valid-gui-release-manifest.json" | awk '{print $1}')" \
   >"$TMP/full.iso.build-info"
 "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full
 "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui
+
+# A GUI payload built on the unsigned development channel is not a releasable
+# 0.2.0 candidate, even when its embedded manifest is otherwise valid.
+sed 's/^release_channel=.*/release_channel=development/' \
+  "$TMP/full.iso.build-info" >"$TMP/dev-gui.iso.build-info"
+if mv "$TMP/dev-gui.iso.build-info" "$TMP/full.iso.build-info" && \
+  "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui \
+    >"$TMP/dev-gui.out" 2>&1; then
+  echo 'development-channel GUI ISO unexpectedly passed the release gate' >&2
+  exit 1
+fi
+assert_output_contains 'must use candidate or public build channel' "$TMP/dev-gui.out"
+cp "$TMP/full.iso.build-info" "$TMP/valid-gui.build-info"
+# The mutation above intentionally replaces the sidecar; restore the valid
+# candidate metadata before the later manifest and payload mutations.
+sed 's/^release_channel=.*/release_channel=candidate/' \
+  "$TMP/valid-gui.build-info" >"$TMP/full.iso.build-info"
 
 # A malformed or downgraded embedded GUI manifest must fail the explicit
 # 0.2.0 artifact gate even when all GUI files and the marker are present.
@@ -122,7 +139,7 @@ printf '%s\n' '{"schema":1,"release":"0.1.0"}' \
 mksquashfs "$TMP/squash" "$TMP/iso-tree/arch/x86_64/airootfs.sfs" \
   -noappend -quiet
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/bad-gui-manifest.iso" .)
-printf 'gui_release=1\ngui_manifest_sha256=%s\n' \
+printf 'release_channel=candidate\ngui_release=1\ngui_manifest_sha256=%s\n' \
   "$(sha256sum "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" | awk '{print $1}')" \
   >"$TMP/bad-gui-manifest.iso.build-info"
 if "$ROOT/ci/verify-iso-structure.sh" "$TMP/bad-gui-manifest.iso" \
