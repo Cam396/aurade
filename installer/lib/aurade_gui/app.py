@@ -344,7 +344,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["review.group"] = group
         box.append(group)
 
-        preflight_group = Adw.PreferencesGroup(title="System & hardware preflight")
+        preflight_group = Adw.PreferencesGroup(title="System and hardware preflight")
         self.widgets["review.gfx"] = Adw.ActionRow(title="Graphics renderer")
         self.widgets["review.net"] = Adw.ActionRow(title="Network status")
         self.widgets["review.mem"] = Adw.ActionRow(title="System memory")
@@ -430,7 +430,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["progress.note"] = note
         box.append(note)
 
-        expander = Adw.ExpanderRow(title="Stage details & journal status")
+        expander = Adw.ExpanderRow(title="Stage details and journal status")
         expander.set_expanded(False)
         self.widgets["progress.expander"] = expander
         exp_group = Adw.PreferencesGroup()
@@ -464,7 +464,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             summary_group.add(row)
         box.append(summary_group)
 
-        rec_group = Adw.PreferencesGroup(title="Recovery & Rollback Information")
+        rec_group = Adw.PreferencesGroup(title="Recovery and Rollback Information")
         self.widgets["done.rec_snap"] = Adw.ActionRow(
             title="Factory Snapshot",
             subtitle="@snapshots/0/snapshot — read-only pristine factory state",
@@ -880,7 +880,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         net_row = self.widgets["review.net"]
         net_report = self._network_report or {}
         net_row.set_subtitle(
-            "Connected & time synced"
+            "Connected and time synced"
             if net_report.get("ok")
             else "Not available yet" if not net_report else "Warning reported"
         )
