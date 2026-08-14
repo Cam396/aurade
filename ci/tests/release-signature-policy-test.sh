@@ -57,6 +57,16 @@ fingerprint=$(GNUPGHOME="$GNUPGHOME" gpg --batch --with-colons \
 GNUPGHOME="$GNUPGHOME" gpg --batch --export "$fingerprint" >"$TMP/public.gpg"
 GNUPGHOME="$GNUPGHOME" gpg --batch --export-secret-keys "$fingerprint" >"$TMP/secret.gpg"
 
+if AURADE_RELEASE_CHANNEL=candidate GPGKEY=fixture \
+  AURADE_REPO_KEYRING="$TMP/public.gpg" \
+  AURADE_REPO_FINGERPRINT="$fingerprint" AURADE_SIGN_PACKAGES=0 \
+  REPO_DIR="$TMP/missing" "$ROOT/ci/build-release-repo.sh" \
+  >"$TMP/unsigned-packages.out" 2>&1; then
+  echo 'candidate repository with package signing disabled unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'requires detached package signatures' "$TMP/unsigned-packages.out"
+
 if AURADE_REQUIRE_SIGNATURES=1 AURADE_REPO_KEYRING="$TMP/public.gpg" \
   AURADE_REPO_FINGERPRINT=not-a-fingerprint REPO_DIR="$TMP/missing" \
   "$ROOT/ci/verify-release-repo.sh" >"$TMP/bad-fingerprint.out" 2>&1; then
