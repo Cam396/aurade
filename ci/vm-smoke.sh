@@ -229,6 +229,7 @@ if [[ "${release_package_smoke}" == "1" ]]; then
     echo "Expected package list is empty: ${expected_package_file}" >&2
     exit 1
   }
+  release_package_args="$(printf '%q ' "${release_packages[@]}")"
   for package_dir in "${release_packages[@]}"; do
     pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
       "${REPO_ROOT}/${package_dir}/PKGBUILD")"
@@ -241,7 +242,7 @@ if [[ "${release_package_smoke}" == "1" ]]; then
     fi
   done
   require_remote "AuraDE package ownership and integrity" \
-    "pacman -Qk aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge chromiumos-ash aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full > /tmp/aurade-package-audit && ! grep -Eq ', [1-9][0-9]* missing files' /tmp/aurade-package-audit && pacman -Qo /usr/bin/aurade /usr/bin/aurade-power-status /usr/bin/aurade-hostctl /usr/bin/aurade-session-control /usr/lib/chromiumos-ash/chrome >/dev/null"
+    "pacman -Qk ${release_package_args} > /tmp/aurade-package-audit && ! grep -Eq ', [1-9][0-9]* missing files' /tmp/aurade-package-audit && pacman -Qo /usr/bin/aurade /usr/bin/aurade-power-status /usr/bin/aurade-hostctl /usr/bin/aurade-session-control /usr/lib/chromiumos-ash/chrome >/dev/null"
   removable_media_check="runuser -u '${TEST_USER}' -- udisksctl status >/dev/null && systemctl is-active --quiet udisks2.service && systemctl is-active --quiet aurade-host-bridge.service && test -d /run/media"
   if [[ "${REMOVABLE_AUTOMOUNT}" == "1" ]]; then
     removable_media_check+=" && pacman -Qo /usr/bin/udiskie >/dev/null && pgrep -u '${TEST_USER}' -x udiskie >/dev/null"
