@@ -104,6 +104,23 @@ check 'password' "${ANSWERS[password]}" 'correct horse'
 check 'encrypt'  "${ANSWERS[encrypt]}"  'yes'
 check 'luks'     "${ANSWERS[luks_passphrase]}" 'battery staple'
 
+# --- defaults survive large real-world enum lists --------------------------
+# Arch's keymap and zoneinfo trees contain more than the old display cap.  A
+# capped data set silently dropped the valid defaults (`us` and `UTC`), so an
+# untouched install selected the first alphabetic entry instead.  Rendering
+# still limits the visible window; the backing list must remain complete so a
+# default outside that window can be selected and validated.
+for _i in $(seq -w 0 204); do
+  : >"$TMP/keymaps/i386/qwerty/aa${_i}.map.gz"
+  : >"$TMP/zoneinfo/A${_i}"
+done
+enum_filter keymap ''
+[[ $(enum_index_of us) -ge 200 ]] ||
+  fail 'the keymap list dropped a valid default beyond the display window'
+enum_filter timezone ''
+[[ $(enum_index_of UTC) -ge 200 ]] ||
+  fail 'the timezone list dropped a valid default beyond the display window'
+
 # --- a rejected answer re-asks instead of advancing -------------------------
 reset_state
 {
