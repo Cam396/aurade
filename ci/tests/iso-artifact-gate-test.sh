@@ -33,6 +33,7 @@ iso_bytes=$iso_bytes
 iso_max_bytes=4294967296
 package_count=1
 package_bytes=$package_bytes
+packages_lock_sha256=$(printf '%s\n' 'fixture lock' | sha256sum | awk '{print $1}')
 EOF
 
 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO"
@@ -45,6 +46,16 @@ if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/missing-provenance.out" 2>&1
 fi
 grep -Fq 'build-info is missing repo_url' "$TMP/missing-provenance.out"
 printf '%s\n' 'repo_url=https://packages.example.invalid/aurade' >>"$ISO.build-info"
+
+# The package-lock digest is part of the provenance contract and must be
+# machine-readable rather than a raw ``sha256sum`` line.
+sed -i '/^packages_lock_sha256=/d' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/missing-lock-digest.out" 2>&1; then
+  echo 'artifact with missing package-lock digest unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'invalid packages_lock_sha256' "$TMP/missing-lock-digest.out"
+printf 'packages_lock_sha256=%s\n' "$(printf '%s\n' 'fixture lock' | sha256sum | awk '{print $1}')" >>"$ISO.build-info"
 
 if AURADE_REQUIRE_ISO_SIGNATURE=1 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" \
     >"$TMP/env-unsigned.out" 2>&1; then

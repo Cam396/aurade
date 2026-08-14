@@ -96,6 +96,9 @@ if not info.get("repo_url", ""):
 repo_fingerprint = info.get("repo_fingerprint", "")
 if repo_fingerprint != "unsigned" and not re.fullmatch(r"[0-9A-Fa-f]{40,64}", repo_fingerprint):
     raise SystemExit("verify-iso-artifacts: build-info has invalid repo_fingerprint")
+packages_lock_sha256 = info.get("packages_lock_sha256", "")
+if not re.fullmatch(r"[0-9A-Fa-f]{64}", packages_lock_sha256):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid packages_lock_sha256")
 
 def positive_int(name):
     value = info.get(name, "")
