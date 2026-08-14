@@ -13,6 +13,7 @@ OUTPUT="${AURADE_AUR_OUTPUT:-${WORKDIR}/aur-bundles}"
 RELEASE_TAG="${AURADE_AUR_RELEASE_TAG:-v0.1.0-prealpha}"
 RELEASE_ARCHIVE="${AURADE_AUR_RELEASE_ARCHIVE:-aurade-v0.1.0-prealpha-x86_64-repository.tar.gz}"
 RELEASE_SHA256="${AURADE_AUR_ARCHIVE_SHA256:-}"
+EXPECTED_PACKAGE_FILE="${AURADE_EXPECTED_PACKAGES_FILE:-${REPO_ROOT}/installer/expected-packages.txt}"
 CHROMIUM_VERSION=${AURADE_AUR_CHROMIUM_VERSION:-}
 CHROMIUM_PKGREL=${AURADE_AUR_CHROMIUM_PKGREL:-}
 if [[ -z $CHROMIUM_VERSION ]]; then
@@ -24,23 +25,22 @@ if [[ -z $CHROMIUM_PKGREL ]]; then
     "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
 fi
 
-SOURCE_PACKAGES=(
-  aurade-account-helper
-  aurade-system-helper
-  shill-nm-adapter
-  aurade-power
-  aurade-host-bridge
-  aurade-login
-  aurade-ai
-  aurade-webapp-shortcuts
-  aurade
-  aurade-full
-)
-
 die() {
   printf 'export-aur-bundles: %s\n' "$*" >&2
   exit 1
 }
+
+[[ -r "${EXPECTED_PACKAGE_FILE}" ]] || {
+  printf 'export-aur-bundles: expected package list is unreadable: %s\n' \
+    "${EXPECTED_PACKAGE_FILE}" >&2
+  exit 1
+}
+mapfile -t SOURCE_PACKAGES < <(
+  sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${EXPECTED_PACKAGE_FILE}" \
+    | awk '$0 != "chromiumos-ash"'
+)
+(( ${#SOURCE_PACKAGES[@]} > 0 )) ||
+  die 'expected package list contains no source packages'
 
 generate_srcinfo() {
   local package_dir="$1"

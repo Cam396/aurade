@@ -6,6 +6,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 target_repo="${REPO_DIR:-${REPO_ROOT}/private-repo}"
 REPO_NAME="${REPO_NAME:-aurade}"
+expected_package_file="${AURADE_EXPECTED_PACKAGES_FILE:-${REPO_ROOT}/installer/expected-packages.txt}"
+[[ -r "${expected_package_file}" ]] || {
+  echo "Expected package list is unreadable: ${expected_package_file}" >&2
+  exit 2
+}
+mapfile -t release_packages < <(
+  sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${expected_package_file}" \
+    | awk '$0 != "chromiumos-ash"'
+)
+((${#release_packages[@]} > 0)) || {
+  echo "Expected package list has no source packages: ${expected_package_file}" >&2
+  exit 2
+}
 chromium_pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
   "${REPO_ROOT}/chromiumos-ash/PKGBUILD")"
 chromium_pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' \
@@ -51,7 +64,7 @@ fi
 
 export REPO_DIR="${staging}"
 export REPO_NAME
-export AURADE_PACKAGES="aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full"
+export AURADE_PACKAGES="${release_packages[*]}"
 export AURADE_NODEPS_PACKAGES="${AURADE_PACKAGES}"
 export MAKEPKG_FLAGS="${MAKEPKG_FLAGS:---force --noconfirm --clean --config ${makepkg_config}}"
 if [[ -n "${GPGKEY:-}" ]]; then
