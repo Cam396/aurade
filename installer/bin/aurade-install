@@ -900,7 +900,7 @@ else
 fi
 
 aurade_journal_ok verify-install
-aurade_journal_emit done ok 'installation complete'
+aurade_journal_emit 'done' ok 'installation complete'
 
 log 'installation plan completed'
 if [[ $MODE == dry-run ]]; then

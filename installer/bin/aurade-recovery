@@ -115,7 +115,7 @@ case "$COMMAND" in
     rollback_boot_dir=
     rollback_tmp=
     cleanup_partial_snapshot() {
-      local status=$? path
+      local status=$?
       set +e
       if (( status != 0 && snapshot_created )); then
         if ! btrfs subvolume delete -- "$destination" >/dev/null 2>&1; then
