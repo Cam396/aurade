@@ -435,7 +435,6 @@ enum_filter() {
     if [[ -z $filter || ${candidate,,} == *"${filter,,}"* ]]; then
       ENUM_MATCHES+=("$candidate")
     fi
-    (( ${#ENUM_MATCHES[@]} < 200 )) || break
   done < <(enum_candidates "$id")
 }
 
