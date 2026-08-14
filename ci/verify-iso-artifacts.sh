@@ -75,10 +75,15 @@ if not document.get("documentNamespace", "").endswith(iso_digest):
     raise SystemExit("verify-iso-artifacts: SBOM namespace is not bound to the ISO digest")
 
 info = {}
-for line in pathlib.Path(build_info_path).read_text(encoding="utf-8").splitlines():
-    if "=" in line:
-        key, value = line.split("=", 1)
-        info[key] = value
+for line_number, line in enumerate(pathlib.Path(build_info_path).read_text(encoding="utf-8").splitlines(), 1):
+    if not line:
+        continue
+    if "=" not in line:
+        raise SystemExit(f"verify-iso-artifacts: malformed build-info line {line_number}")
+    key, value = line.split("=", 1)
+    if not key or key in info:
+        raise SystemExit(f"verify-iso-artifacts: duplicate or empty build-info key on line {line_number}")
+    info[key] = value
 if info.get("sbom_file") != pathlib.Path(sbom_path).name:
     raise SystemExit("verify-iso-artifacts: build-info points at a different SBOM")
 sbom_digest = hashlib.sha256(pathlib.Path(sbom_path).read_bytes()).hexdigest()
