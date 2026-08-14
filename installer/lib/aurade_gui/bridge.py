@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+from threading import Lock
 from typing import Any
 
 
@@ -50,6 +51,10 @@ class Bridge:
         self.plan_only = plan_only
         self._env = dict(os.environ if env is None else env)
         self._proc: subprocess.Popen[str] | None = None
+        # The GUI may poll progress while an asynchronous preflight callback
+        # is being delivered. Serialize the line protocol so two callers can
+        # never interleave a command or consume one another's JSON reply.
+        self._io_lock = Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -57,37 +62,39 @@ class Bridge:
         argv = [self.program, "--journal", self.journal, "--raw-log", self.raw_log]
         if self.plan_only:
             argv.append("--plan-only")
-        try:
-            self._proc = subprocess.Popen(
-                argv,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=None,
-                text=True,
-                bufsize=1,
-                env=self._env,
-            )
-        except OSError as exc:
-            raise BridgeError(f"cannot start the installer model: {exc}") from exc
+        with self._io_lock:
+            try:
+                self._proc = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=None,
+                    text=True,
+                    bufsize=1,
+                    env=self._env,
+                )
+            except OSError as exc:
+                raise BridgeError(f"cannot start the installer model: {exc}") from exc
         return self
 
     def close(self) -> int:
-        proc = self._proc
-        if proc is None:
-            return 0
-        self._proc = None
-        try:
-            if proc.stdin is not None and not proc.stdin.closed:
-                proc.stdin.write("quit\n")
-                proc.stdin.flush()
-                proc.stdin.close()
-        except (BrokenPipeError, ValueError, OSError):
-            pass
-        try:
-            return proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            return proc.wait()
+        with self._io_lock:
+            proc = self._proc
+            if proc is None:
+                return 0
+            self._proc = None
+            try:
+                if proc.stdin is not None and not proc.stdin.closed:
+                    proc.stdin.write("quit\n")
+                    proc.stdin.flush()
+                    proc.stdin.close()
+            except (BrokenPipeError, ValueError, OSError):
+                pass
+            try:
+                return proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                return proc.wait()
 
     def __enter__(self) -> "Bridge":
         return self.start()
@@ -100,30 +107,31 @@ class Bridge:
     def call(
         self, command: str, argument: str | None = None, value: str | None = None
     ) -> Any:
-        proc = self._proc
-        if proc is None or proc.stdin is None or proc.stdout is None:
-            raise BridgeError("the installer model is not running")
-        if proc.poll() is not None:
-            raise BridgeError("the installer model exited unexpectedly")
-        line = command if argument is None else f"{command} {argument}"
-        if "\n" in line:
-            raise BridgeError("a command may not contain a newline")
-        if value is not None and "\n" in value:
-            raise BridgeError("an answer may not contain a line break")
-        try:
-            proc.stdin.write(line + "\n")
-            if value is not None:
-                proc.stdin.write(value + "\n")
-            proc.stdin.flush()
-            reply = proc.stdout.readline()
-        except (BrokenPipeError, OSError) as exc:
-            raise BridgeError(f"the installer model stopped responding: {exc}") from exc
-        if not reply:
-            raise BridgeError("the installer model stopped responding")
-        try:
-            return json.loads(reply)
-        except json.JSONDecodeError as exc:
-            raise BridgeError(f"unreadable reply from the installer model: {exc}") from exc
+        with self._io_lock:
+            proc = self._proc
+            if proc is None or proc.stdin is None or proc.stdout is None:
+                raise BridgeError("the installer model is not running")
+            if proc.poll() is not None:
+                raise BridgeError("the installer model exited unexpectedly")
+            line = command if argument is None else f"{command} {argument}"
+            if "\n" in line:
+                raise BridgeError("a command may not contain a newline")
+            if value is not None and "\n" in value:
+                raise BridgeError("an answer may not contain a line break")
+            try:
+                proc.stdin.write(line + "\n")
+                if value is not None:
+                    proc.stdin.write(value + "\n")
+                proc.stdin.flush()
+                reply = proc.stdout.readline()
+            except (BrokenPipeError, OSError) as exc:
+                raise BridgeError(f"the installer model stopped responding: {exc}") from exc
+            if not reply:
+                raise BridgeError("the installer model stopped responding")
+            try:
+                return json.loads(reply)
+            except json.JSONDecodeError as exc:
+                raise BridgeError(f"unreadable reply from the installer model: {exc}") from exc
 
     # -- typed accessors ---------------------------------------------------
     #
