@@ -13,6 +13,7 @@ a disk in it.
 from __future__ import annotations
 
 import json
+import glob
 import os
 import subprocess
 import sys
@@ -82,6 +83,8 @@ def session(plan_only: bool = False, program: str = BRIDGE, **overrides):
         yield model
     finally:
         model.close()
+        stale = glob.glob(os.path.join(TMP, "aurade-installer-gui.*"))
+        check(not stale, f"GUI bridge left secret directories behind: {stale}")
 
 
 def shell(script: str) -> str:
