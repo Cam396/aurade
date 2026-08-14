@@ -61,19 +61,27 @@ if (( FULL )); then
   bsdtar -xOf "$ISO" "$squashfs" >"$image"
   contents="$TMP/airootfs.list"
   unsquashfs -l "$image" >"$contents"
-  for required in \
+  required_payload=(
     usr/local/sbin/aurade-installer \
     usr/local/sbin/aurade-install \
     usr/local/sbin/aurade-recovery \
-    usr/local/sbin/aurade-installer-gui \
-    usr/local/sbin/aurade-installer-gui-bridge \
     usr/local/sbin/aurade-installer-start \
     usr/local/lib/aurade/aurade-journal.sh \
-    usr/local/lib/aurade/aurade_gui/app.py \
-    usr/local/lib/aurade/aurade_gui/bridge.py \
-    usr/local/lib/aurade/aurade_gui/flow.py \
     opt/aurade/repo/packages.lock \
-    etc/aurade-installer/snapshot; do
+    etc/aurade-installer/snapshot
+  )
+  if grep -Fqx 'squashfs-root/etc/aurade-installer/gui-enabled' "$contents"; then
+    required_payload+=(
+      usr/local/sbin/aurade-installer-gui
+      usr/local/sbin/aurade-installer-gui-bridge
+      usr/local/lib/aurade/aurade_gui/__init__.py
+      usr/local/lib/aurade/aurade_gui/app.py
+      usr/local/lib/aurade/aurade_gui/bridge.py
+      usr/local/lib/aurade/aurade_gui/flow.py
+      etc/aurade-installer/gui-release-manifest.json
+    )
+  fi
+  for required in "${required_payload[@]}"; do
     grep -Fq "squashfs-root/$required" "$contents" || {
       echo "verify-iso-structure: missing live payload: $required" >&2
       exit 1

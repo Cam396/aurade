@@ -210,8 +210,19 @@ AURADE_FORCE_TUI=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   fail 'AURADE_FORCE_TUI did not start the text installer'
 logged 'tui' || fail 'AURADE_FORCE_TUI did not reach the text installer'
 
+# A normal launcher from a public 0.1.0-style image is text-only even when a
+# capable render node exists. The GUI release must opt in explicitly.
 launch
-out=$(PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/empty-dri" \
+out=$(PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" 2>&1) ||
+  fail "the default text-only launcher failed: $out"
+grep -q 'image is text-only' <<<"$out" ||
+  fail 'the default launcher did not explain the text-only policy'
+logged 'tui' || fail 'the default launcher did not reach the text installer'
+! logged 'cage' || fail 'the default text-only launcher started a compositor'
+
+launch
+out=$(AURADE_GUI_RELEASE=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/empty-dri" \
   "$TMP/bin/aurade-installer-start" 2>&1) ||
   fail "the launcher failed on a machine with no GPU: $out"
 logged 'tui' || fail 'a machine with no GPU did not reach the text installer'
@@ -228,7 +239,7 @@ if command -v cage >/dev/null 2>&1; then
   echo 'test-gui-launch: NOTE (build host has cage; missing-compositor case not staged)'
 else
 launch
-out=$(AURADE_PROBE_DRI_DIR="$TMP/dri" \
+out=$(AURADE_GUI_RELEASE=1 AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" 2>&1) ||
   fail "the launcher failed without a compositor: $out"
 grep -q 'no compositor on this image' <<<"$out" ||
@@ -237,7 +248,7 @@ logged 'tui' || fail 'a missing compositor did not reach the text installer'
 fi
 
 launch
-PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+AURADE_GUI_RELEASE=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" >/dev/null 2>&1 ||
   fail 'the launcher failed on a usable machine'
 logged 'cage -- ' || fail 'a usable machine did not start the compositor'
@@ -246,7 +257,7 @@ grep -q 'aurade-installer-gui' "$TMP/launch.log" ||
 ! logged 'tui' || fail 'a usable machine started the text installer as well'
 
 launch
-PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+AURADE_GUI_RELEASE=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" --plan-only >/dev/null 2>&1 ||
   fail 'the launcher failed in plan-only mode'
 grep -q -- '--plan-only' "$TMP/launch.log" ||
@@ -266,7 +277,7 @@ grep -q -- '--force' "$TMP/launch.log" ||
 # plane. The launcher must explain that failure and hand the same plan-only
 # intent to the text installer rather than leaving the user at a blank console.
 launch
-out=$(AURADE_CAGE_FAIL=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+out=$(AURADE_GUI_RELEASE=1 AURADE_CAGE_FAIL=1 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" --plan-only 2>&1) ||
   fail "a compositor failure did not fall back to text: $out"
 grep -q 'falling back to the text installer' <<<"$out" ||

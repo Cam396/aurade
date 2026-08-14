@@ -43,6 +43,19 @@ fi
 grep -Fq 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' "$TMP/invalid_max_bytes.out"
 [[ ! -e $TMP/work_invalid ]]
 
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_GUI_RELEASE=maybe \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_invalid_gui" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/invalid_gui.out" 2>&1; then
+  echo 'invalid AURADE_GUI_RELEASE unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' "$TMP/invalid_gui.out"
+[[ ! -e $TMP/work_invalid_gui ]]
+
 # A release build must not silently claim provenance when signatures are
 # required.  Stage-only mode still validates this policy before touching the
 # work directory, so this is safe to exercise without mkarchiso or a keyring.
@@ -60,10 +73,27 @@ grep -Fq 'AURADE_ISO_SIGNING_KEY is required when ISO signatures are required' \
   "$TMP/unsigned_required.out"
 [[ ! -e $TMP/work_unsigned_required ]]
 
+# The default profile is the public text-only 0.1.0 shape. It must not carry
+# the GUI payload, marker, or runtime closure.
 env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
   AURADE_REPO_DIR="$TMP/repo" \
   AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_text" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/text_stage.out"
+text_profile=$TMP/work_text/profile
+[[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
+[[ ! -e $text_profile/airootfs/etc/aurade-installer/gui-enabled ]]
+for package in gtk4 libadwaita python-gobject cage; do
+  ! grep -Fxq "$package" "$text_profile/packages.x86_64"
+done
+
+# A 0.2.0 GUI candidate opts in explicitly and carries the manifest/marker.
+env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_GUI_RELEASE=1 \
   AURADE_INSTALLER_WORK_ROOT="$TMP/work" \
   "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/stage.out"
 
@@ -111,6 +141,11 @@ grep -Fq 'ConditionPathExists=/run/aurade-live-firstboot-enabled' \
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-start ]]
 for module in __init__ bridge flow app; do
   [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$module.py ]]
+done
+[[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-release-manifest.json ]]
+[[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-enabled ]]
+for package in gtk4 libadwaita python-gobject cage; do
+  grep -Fxq "$package" "$TMP/work/profile/packages.x86_64"
 done
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
