@@ -35,5 +35,6 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade_gui/bridge.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/flow.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/app.py"]=0:0:644
-  ["/usr/local/share/aurade/aurade-mark.svg"]=0:0:644
+  ["/usr/local/share/aurade/aurade-mark.png"]=0:0:644
+  ["/usr/local/share/aurade/aurade-logo.png"]=0:0:644
 )

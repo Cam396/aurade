@@ -14,8 +14,13 @@ grep -Fq '.aurade-welcome' "$APP"
 grep -Fq 'Nothing is written until you confirm' "$APP"
 grep -Fq 'AURADE · CHROMEOS-INSPIRED SETUP' "$APP"
 grep -Fq '_build_rail' "$APP"
-grep -Fq 'aurade-mark.svg' "$BUILD"
-grep -Fq '/usr/local/share/aurade/aurade-mark.svg' "$PROFILE"
-[[ -s $ROOT/assets/aurade-mark.svg ]]
+grep -Fq 'aurade-mark.png' "$APP"
+grep -Fq 'aurade-logo.png' "$APP"
+grep -Fq 'aurade-mark.png' "$BUILD"
+grep -Fq 'aurade-logo.png' "$BUILD"
+grep -Fq '/usr/local/share/aurade/aurade-mark.png' "$PROFILE"
+grep -Fq '/usr/local/share/aurade/aurade-logo.png' "$PROFILE"
+[[ -s $ROOT/assets/aurade-mark.png ]]
+[[ -s $ROOT/assets/aurade-logo.png ]]
 
 echo 'installer GUI branding test: PASS'
