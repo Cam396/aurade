@@ -126,6 +126,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         self._build_pages()
         self._install_shortcuts()
+        self.connect("close-request", self._on_close_request)
         self.refresh()
 
     # -- async worker ------------------------------------------------------
@@ -149,6 +150,23 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         thread = _Thread(target=_thread_target, daemon=True)
         thread.start()
+
+    def _mark_closing(self) -> None:
+        """Invalidate UI callbacks before the window or model is torn down."""
+        if self._closing:
+            return
+        self._closing = True
+        self._busy = None
+        if self._progress_source:
+            GLib.source_remove(self._progress_source)
+            self._progress_source = 0
+
+    def _on_close_request(self, *_args) -> bool:
+        # GTK invokes this before the window is destroyed.  The application
+        # shutdown path calls the same idempotent marker, so callbacks queued
+        # by a worker cannot touch widgets after either close route begins.
+        self._mark_closing()
+        return False
 
     # -- construction ------------------------------------------------------
 
@@ -1551,7 +1569,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         )
         dialog.add_response("close", "Close")
         dialog.set_default_response("close")
-        dialog.connect("response", lambda *_: (setattr(self, "_closing", True), self.close()))
+        dialog.connect("response", lambda *_: self.close())
         dialog.present(self)
 
 
@@ -1568,6 +1586,14 @@ class InstallerApplication(Adw.Application):
         if self.window is None:
             self.window = InstallerWindow(self, self.model, self.plan_only)
         self.window.present()
+
+    def do_shutdown(self) -> None:  # noqa: N802  (GObject naming)
+        # Application shutdown can occur without a normal window close
+        # request (for example, session shutdown or an external quit). Mark
+        # the window first; run() closes the Bridge only after GTK returns.
+        if self.window is not None:
+            self.window._mark_closing()
+        super().do_shutdown()
 
 
 def run(model: Bridge, plan_only: bool = False) -> int:
