@@ -32,6 +32,21 @@ set -e
 grep -Fq 'The compositor exited before a usable desktop appeared.' "${workdir}/stderr"
 grep -Fq 'detail=status=134' "${workdir}/state/session-error.txt"
 
+# Caller-supplied diagnostics must not inject report fields or terminal
+# control sequences. The helper keeps the detail on one bounded line.
+unsafe_detail=$'status=7\nINJECTED=1\t\e[2J'
+set +e
+AURADE_ERROR_STATE_DIR="${workdir}/state" \
+  AURADE_ERROR_TTY="${workdir}/tty" \
+  "${error_script}" session-failed "${unsafe_detail}" \
+  >"${workdir}/unsafe-stdout" 2>"${workdir}/unsafe-stderr"
+status=$?
+set -e
+[[ "${status}" == 79 ]]
+grep -Fq 'detail=status=7 INJECTED=1  [2J' "${workdir}/state/session-error.txt"
+! grep -Fq $'\nINJECTED=1' "${workdir}/state/session-error.txt"
+! grep -Fq $'\033' "${workdir}/state/session-error.txt"
+
 # The Ash child must surface a crash-loop as a structured compositor failure
 # instead of silently returning to the greeter. Use disposable stubs; no real
 # browser, D-Bus session, or compositor is started.
