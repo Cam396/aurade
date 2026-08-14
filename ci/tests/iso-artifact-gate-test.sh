@@ -47,6 +47,15 @@ fi
 grep -Fq 'build-info is missing repo_url' "$TMP/missing-provenance.out"
 printf '%s\n' 'repo_url=https://packages.example.invalid/aurade' >>"$ISO.build-info"
 
+# Duplicate metadata keys must not allow a later value to override provenance.
+printf '%s\n' 'repo_fingerprint=unsigned' >>"$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/duplicate-key.out" 2>&1; then
+  echo 'artifact with duplicate build-info key unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'duplicate or empty build-info key' "$TMP/duplicate-key.out"
+sed -i '$d' "$ISO.build-info"
+
 # The package-lock digest is part of the provenance contract and must be
 # machine-readable rather than a raw ``sha256sum`` line.
 sed -i '/^packages_lock_sha256=/d' "$ISO.build-info"
