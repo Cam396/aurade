@@ -141,6 +141,27 @@ AURADE_CSS = """
 .aurade-status-ok { color: #187c69; font-weight: 700; }
 .aurade-status-warning { color: #98630b; font-weight: 700; }
 .aurade-status-danger { color: #b33c54; font-weight: 700; }
+.aurade-status-badge {
+  min-width: 22px;
+  font-size: 16px;
+  font-weight: 800;
+}
+.aurade-status-badge-ok { color: #1a9a82; }
+.aurade-status-badge-warning { color: #c17a12; }
+.aurade-status-badge-neutral { color: #71809b; }
+.aurade-callout {
+  background-color: #eef2fb;
+  border: 1px solid #d7e0f1;
+  border-radius: 13px;
+  color: #52617b;
+  padding: 11px 14px;
+}
+.aurade-callout-warning {
+  background-color: #fff7e7;
+  border-color: #f0d59d;
+  color: #80550e;
+}
+.aurade-disk-row { padding-top: 4px; padding-bottom: 4px; }
 .aurade-mono { font-family: monospace; }
 """
 
@@ -289,6 +310,22 @@ class InstallerWindow(Adw.ApplicationWindow):
                 picture.add_css_class("aurade-logo-image")
                 return picture
         return self._brand_mark(132)
+
+    @staticmethod
+    def _status_badge(symbol: str, kind: str = "neutral") -> Gtk.Label:
+        badge = Gtk.Label(label=symbol)
+        badge.set_xalign(0.5)
+        badge.set_width_chars(2)
+        badge.add_css_class("aurade-status-badge")
+        badge.add_css_class(f"aurade-status-badge-{kind}")
+        return badge
+
+    @staticmethod
+    def _set_status_badge(badge: Gtk.Label, symbol: str, kind: str) -> None:
+        for old_kind in ("ok", "warning", "neutral"):
+            badge.remove_css_class(f"aurade-status-badge-{old_kind}")
+        badge.add_css_class(f"aurade-status-badge-{kind}")
+        badge.set_text(symbol)
 
     def _build_rail(self) -> Gtk.Box:
         rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -554,6 +591,9 @@ class InstallerWindow(Adw.ApplicationWindow):
             row = self.widgets[key]
             row.set_subtitle("")
             row.set_subtitle_lines(0)
+            badge = self._status_badge("•")
+            row.add_prefix(badge)
+            self.widgets[f"{key}.badge"] = badge
             group.add(row)
         box.append(group)
 
@@ -563,16 +603,20 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["graphics.warn_group"] = warn_group
 
         advice = _wrapped("", css="warning")
+        advice.add_css_class("aurade-callout")
+        advice.add_css_class("aurade-callout-warning")
         advice.set_visible(False)
         self.widgets["graphics.advice"] = advice
         box.append(advice)
 
         vm_advice = _wrapped("", css="dim-label")
+        vm_advice.add_css_class("aurade-callout")
         vm_advice.set_visible(False)
         self.widgets["graphics.vm_advice"] = vm_advice
         box.append(vm_advice)
 
         switch_btn = Gtk.Button(label="Switch to Text Installer")
+        switch_btn.add_css_class("suggested-action")
         switch_btn.set_halign(Gtk.Align.START)
         switch_btn.connect("clicked", lambda *_: self._switch_to_tui())
         switch_btn.set_visible(False)
@@ -599,6 +643,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             "fix the connection and start again.",
             css="dim-label",
         )
+        note.add_css_class("aurade-callout")
         box.append(note)
 
         retry = Gtk.Button(label="Check again")
@@ -685,6 +730,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         group.add(listbox)
         self.widgets["disk.warning"] = _wrapped("", css="warning")
         self.widgets["disk.warning"].set_visible(False)
+        self.widgets["disk.warning"].add_css_class("aurade-callout")
+        self.widgets["disk.warning"].add_css_class("aurade-callout-warning")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         box.append(group)
         box.append(self.widgets["disk.warning"])
@@ -707,6 +754,9 @@ class InstallerWindow(Adw.ApplicationWindow):
             row = self.widgets[key]
             row.set_subtitle("")
             row.set_subtitle_lines(0)
+            badge = self._status_badge("•")
+            row.add_prefix(badge)
+            self.widgets[f"{key}.badge"] = badge
             preflight_group.add(row)
         self.widgets["review.preflight"] = preflight_group
         box.append(preflight_group)
@@ -1123,6 +1173,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", "No render node detected"))
         self.widgets["graphics.driver"].set_subtitle(driver or "None / Unidentified")
         self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
+        self._set_status_badge(
+            self.widgets["graphics.summary.badge"],
+            "✓" if summary == "Hardware accelerated GUI" else "!",
+            "ok" if summary == "Hardware accelerated GUI" else "warning",
+        )
+        for key in ("graphics.detail", "graphics.driver", "graphics.memory"):
+            self._set_status_badge(self.widgets[f"{key}.badge"], "•", "neutral")
 
         advice_text = self.probe.get("advice", "")
         advice = self.widgets["graphics.advice"]
@@ -1190,7 +1247,7 @@ class InstallerWindow(Adw.ApplicationWindow):
                 row = Adw.ActionRow(title="Checking network and clock…")
                 row.set_subtitle("The installer is running a read-only preflight.")
                 row.set_title_lines(0)
-                row.add_prefix(Gtk.Image.new_from_icon_name("content-loading-symbolic"))
+                row.add_prefix(self._status_badge("…"))
                 self._add_row("network", self.widgets["network.list"], row)
                 self._run_async(
                     self.model.network,
@@ -1241,17 +1298,18 @@ class InstallerWindow(Adw.ApplicationWindow):
                 "The installer will still verify every package before writing."
             )
             row.set_title_lines(0)
+            row.add_prefix(self._status_badge("!", "warning"))
             self._add_row("network", group, row)
             return
         for issue in report.get("issues", []):
             row = Adw.ActionRow(title=issue)
             row.set_title_lines(0)
-            row.add_prefix(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
+            row.add_prefix(self._status_badge("!", "warning"))
             self._add_row("network", group, row)
         for note in report.get("notes", []):
             row = Adw.ActionRow(title=note)
             row.set_title_lines(0)
-            row.add_prefix(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
+            row.add_prefix(self._status_badge("✓", "ok"))
             self._add_row("network", group, row)
         if not report.get("ok", True):
             self.banner.set_title(
@@ -1279,8 +1337,24 @@ class InstallerWindow(Adw.ApplicationWindow):
             listbox.remove(row)
         removable = False
         disks = self.model.disks()
+        if not disks:
+            row = Adw.ActionRow(title="No installable disks found")
+            row.set_subtitle(
+                "Reconnect the destination drive, then use Check again. "
+                "The installer cannot continue without a discovered disk."
+            )
+            row.set_subtitle_lines(0)
+            row.add_prefix(self._status_badge("!", "warning"))
+            listbox.append(row)
+            warning = self.widgets["disk.warning"]
+            warning.set_text(
+                "No disk is available yet. Nothing can be changed until a valid target is detected."
+            )
+            warning.set_visible(True)
+            return
         for disk in disks:
             row = Adw.ActionRow(title=disk["path"])
+            row.add_css_class("aurade-disk-row")
             parts = [
                 part
                 for part in (
@@ -1303,7 +1377,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             row.set_activatable(True)
             if (disk.get("transport") or "").lower() == "usb":
                 removable = True
-                row.add_suffix(Gtk.Image.new_from_icon_name("media-removable-symbolic"))
+                row.add_prefix(self._status_badge("!", "warning"))
+                row.add_suffix(Gtk.Label(label="Removable"))
             listbox.append(row)
         warning = self.widgets["disk.warning"]
         warning.set_visible(removable)
@@ -1311,6 +1386,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             warning.set_text(
                 "Removable media - verify this is not your installer USB drive."
             )
+            warning.add_css_class("aurade-callout")
+            warning.add_css_class("aurade-callout-warning")
         chosen = self.model.get("target")
         if chosen:
             for row in self._listbox_rows(listbox):
@@ -1346,16 +1423,29 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         # Preflight summary
         gfx_row = self.widgets["review.gfx"]
+        gfx_ok = self.probe.get("renderer") == "gui" and not self.probe.get("predicts_black_screen")
         gfx_row.set_subtitle(self.probe.get("graphics", "Checked"))
+        self._set_status_badge(
+            self.widgets["review.gfx.badge"],
+            "✓" if gfx_ok else "!",
+            "ok" if gfx_ok else "warning",
+        )
         net_row = self.widgets["review.net"]
         net_report = self._network_report or {}
+        net_ok = bool(net_report.get("ok"))
         net_row.set_subtitle(
             "Connected and time synced"
-            if net_report.get("ok")
+            if net_ok
             else "Not available yet" if not net_report else "Warning reported"
+        )
+        self._set_status_badge(
+            self.widgets["review.net.badge"],
+            "✓" if net_ok else "!",
+            "ok" if net_ok else "warning",
         )
         mem_row = self.widgets["review.mem"]
         mem_row.set_subtitle(self.probe.get("memory", "Checked"))
+        self._set_status_badge(self.widgets["review.mem.badge"], "•", "neutral")
 
     def _refresh_gate(self) -> None:
         info = self.model.target()
