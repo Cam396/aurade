@@ -33,6 +33,7 @@ BUILD_WORK=$WORK_ROOT/work
 REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 GUI_RELEASE=${AURADE_GUI_RELEASE:-0}
+RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
@@ -53,6 +54,23 @@ export SOURCE_DATE_EPOCH
   echo 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' >&2
   exit 2
 }
+case $RELEASE_CHANNEL in
+  development|soak|candidate|public) ;;
+  *)
+    echo 'build-iso: AURADE_RELEASE_CHANNEL must be development, soak, candidate, or public' >&2
+    exit 2
+    ;;
+esac
+if [[ $RELEASE_CHANNEL == candidate || $RELEASE_CHANNEL == public ]]; then
+  [[ $ALLOW_UNSIGNED == 0 ]] || {
+    echo "build-iso: AURADE_RELEASE_CHANNEL=${RELEASE_CHANNEL} requires a signed ISO" >&2
+    exit 2
+  }
+  [[ $REQUIRE_ISO_SIGNATURE == 1 ]] || {
+    echo "build-iso: AURADE_RELEASE_CHANNEL=${RELEASE_CHANNEL} requires AURADE_REQUIRE_ISO_SIGNATURE=1" >&2
+    exit 2
+  }
+fi
 if (( GUI_RELEASE )); then
   command -v python3 >/dev/null || {
     echo 'build-iso: python3 is required for the 0.2.0 GUI manifest gate' >&2
