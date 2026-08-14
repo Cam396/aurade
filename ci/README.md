@@ -25,6 +25,12 @@ atomically promotes staging and keeps the previous repository as `.previous`.
 `write-release-checksums.sh` is called before verification during promotion;
 `verify-release-checksums.sh` is also suitable for a read-only check of a
 staged or downloaded repository and rejects altered, missing, or unlisted files.
+Set `AURADE_RELEASE_CHANNEL=development` (the default) for unsigned local
+fixtures. `candidate` and `public` channels fail closed unless `GPGKEY`, an
+isolated public `AURADE_REPO_KEYRING`, a full
+`AURADE_REPO_FINGERPRINT`, and detached package signatures are configured.
+`build-release-candidate.sh` always invokes the repository builder in the
+`candidate` channel; it cannot silently promote an unsigned repository.
 
 `bootstrap-arch-root.sh` creates an Arch validation root on a host with
 `pacstrap`, using the configured `AURADE_WORKDIR` for the root, pacman DB, and

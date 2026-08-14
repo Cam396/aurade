@@ -95,7 +95,7 @@ rm -rf "${arch_output}/aurade" "${arch_output}/aurade.previous"
 
 "${SCRIPT_DIR}/run-in-arch-root.sh" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/bash -lc \
-  "cd /build/aurade && REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") ci/build-release-repo.sh"
+  "cd /build/aurade && AURADE_RELEASE_CHANNEL=candidate REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") ci/build-release-repo.sh"
 
 host_staging="${OUTPUT_REPO}.staging.$$"
 host_previous="${OUTPUT_REPO}.previous"

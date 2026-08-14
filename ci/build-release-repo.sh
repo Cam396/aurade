@@ -7,6 +7,42 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 target_repo="${REPO_DIR:-${REPO_ROOT}/private-repo}"
 REPO_NAME="${REPO_NAME:-aurade}"
 expected_package_file="${AURADE_EXPECTED_PACKAGES_FILE:-${REPO_ROOT}/installer/expected-packages.txt}"
+release_channel="${AURADE_RELEASE_CHANNEL:-development}"
+case "${release_channel}" in
+  development|soak|candidate|public) ;;
+  *)
+    echo "AURADE_RELEASE_CHANNEL must be development, soak, candidate, or public" >&2
+    exit 2
+    ;;
+esac
+
+# A candidate/public repository is a trust boundary, not merely a newer
+# development directory. Refuse to construct one unless the caller supplied
+# the production signing identity, isolated public keyring, and detached
+# package-signature path that the verifier will require later. Development
+# fixtures retain an explicit unsigned channel for local testing.
+if [[ "${release_channel}" == candidate || "${release_channel}" == public ]]; then
+  [[ -n "${GPGKEY:-}" ]] || {
+    echo "AURADE_RELEASE_CHANNEL=${release_channel} requires GPGKEY" >&2
+    exit 2
+  }
+  [[ -r "${AURADE_REPO_KEYRING:-}" ]] || {
+    echo "AURADE_RELEASE_CHANNEL=${release_channel} requires a readable AURADE_REPO_KEYRING" >&2
+    exit 2
+  }
+  normalized_fingerprint="${AURADE_REPO_FINGERPRINT:-}"
+  normalized_fingerprint="${normalized_fingerprint//[[:space:]]/}"
+  normalized_fingerprint="${normalized_fingerprint^^}"
+  [[ "${normalized_fingerprint}" =~ ^[0-9A-F]{40,64}$ ]] || {
+    echo "AURADE_RELEASE_CHANNEL=${release_channel} requires a full AURADE_REPO_FINGERPRINT" >&2
+    exit 2
+  }
+  [[ "${AURADE_SIGN_PACKAGES:-1}" == 1 ]] || {
+    echo "AURADE_RELEASE_CHANNEL=${release_channel} requires detached package signatures" >&2
+    exit 2
+  }
+  export AURADE_REQUIRE_SIGNATURES=1
+fi
 [[ -r "${expected_package_file}" ]] || {
   echo "Expected package list is unreadable: ${expected_package_file}" >&2
   exit 2
