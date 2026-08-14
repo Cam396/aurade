@@ -52,7 +52,27 @@ cleanup() {
     rmdir -- "$secret_dir" 2>/dev/null || rm -rf -- "$secret_dir"
   fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+secure_boot_state() {
+  local state secure_file byte
+  state=$(bootctl is-secure-boot 2>/dev/null || true)
+  case $state in
+    enabled|disabled) printf '%s\n' "$state"; return 0 ;;
+  esac
+  for secure_file in /sys/firmware/efi/efivars/SecureBoot-*; do
+    [[ -e $secure_file ]] || continue
+    byte=$(dd if="$secure_file" bs=1 skip=4 count=1 2>/dev/null |
+      od -An -t u1 2>/dev/null | awk 'NF {print $1; exit}')
+    case $byte in
+      1) printf 'enabled\n'; return 0 ;;
+      0) printf 'disabled\n'; return 0 ;;
+    esac
+  done
+  printf 'unknown\n'
+}
 
 read_secret_file() {
   local prompt=$1 destination=$2 response confirmation
@@ -82,7 +102,7 @@ if [[ -x $NETWORK_DIAGNOSTICS ]]; then
   printf '\n'
 fi
 if command -v bootctl >/dev/null 2>&1; then
-  secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
+  secure_boot_state=$(secure_boot_state)
   case $secure_boot_state in
     enabled)
       printf '%s\n' 'WARNING: Secure Boot is enabled. AuraDE currently installs an unsigned systemd-boot chain; disable Secure Boot before the final confirmation or the engine will refuse the install.' >&2 ;;
