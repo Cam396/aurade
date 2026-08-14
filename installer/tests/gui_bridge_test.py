@@ -217,6 +217,11 @@ with session() as model:
 
     ok, _ = model.set("username", "root")
     check(not ok, "a reserved system name was accepted as a username")
+    for reserved in ("ftp", "http", "dbus", "polkitd", "greeter", "systemd-network"):
+        ok, _ = model.set("username", reserved)
+        check(not ok, f"reserved system name {reserved!r} was accepted as a username")
+    ok, _ = model.set("username", "_test-user1")
+    check(ok, "a valid underscore username was rejected")
 
     ok, error = model.set("nonexistent", "value")
     check(not ok, "an unknown question was accepted")
@@ -303,6 +308,24 @@ with session() as model:
     check(
         "luks_passphrase" in model.visible(),
         "the passphrase is not asked for when encryption is on",
+    )
+
+# Turning encryption off after a passphrase was entered must clear the secret
+# from the bridge and make it impossible for a later plan to reuse it.
+with session() as model:
+    ok, _ = model.set("encrypt", "yes")
+    check(ok, "encryption could not be enabled")
+    ok, _ = model.secret("luks_passphrase", PASSPHRASE)
+    check(ok, "the encryption passphrase could not be stored")
+    ok, _ = model.set("encrypt", "no")
+    check(ok, "encryption could not be disabled")
+    check(
+        "luks_passphrase" not in model.visible(),
+        "the disabled encryption option still exposes a passphrase question",
+    )
+    check(
+        "luks_passphrase" not in model.answers(),
+        "disabling encryption left stale passphrase state in the review",
     )
 
 # ---------------------------------------------------------------------------
@@ -455,6 +478,33 @@ with session() as model:
     )
     for row in progress["stages"]:
         equal(row["status"], "ok", f"the {row['stage']} stage did not complete")
+
+# A changed disk identity at the same path invalidates the previously checked
+# plan. The bridge must refuse before it can spawn the execute path.
+reset_calls()
+with session() as model:
+    answer_everything(model)
+    check(model.plan().get("ok"), "the identity-race plan was refused")
+    with open(os.path.join(TMP, "disks"), "w") as handle:
+        handle.write(
+            "/dev/sda|931.5G|Replacement Disk|sata|NEW-SERIAL\n"
+            "/dev/sdb|28.7G|SanDisk Ultra|usb|4C5300011212\n"
+        )
+    result = model.execute("ERASE:/dev/sda")
+    check(not result.get("ok"), "a changed disk identity reached execute")
+    check(
+        "identity changed" in result.get("error", ""),
+        f"identity change produced an unhelpful error: {result}",
+    )
+    check(
+        not any("--execute" in call for call in calls()),
+        "the identity-race refusal still spawned the execute path",
+    )
+    with open(os.path.join(TMP, "disks"), "w") as handle:
+        handle.write(
+            "/dev/sda|931.5G|WDC WD10EZEX|sata|WD-WCC6Y4KP1234\n"
+            "/dev/sdb|28.7G|SanDisk Ultra|usb|4C5300011212\n"
+        )
 
 # ---------------------------------------------------------------------------
 # --plan-only: execute is not refused, it does not exist
