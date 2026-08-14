@@ -39,9 +39,9 @@ printf '%s\n' \
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"6f2a1c9e","seq":1,"attempt":1,"stage":"preflight","status":"ok","elapsed_ms":3200,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
 {"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"partition","status":"ok","elapsed_ms":2100,"reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"esp-readonly","message":"bootctl could not write to the EFI system partition","resumable":true,"reversible":false,"idempotent":true,"remediation":["retry","export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"partition","status":"ok","elapsed_ms":2100,"reversible":false,"idempotent":false,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":false,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"esp-readonly","message":"bootctl could not write to the EFI system partition","resumable":false,"reversible":false,"idempotent":false,"remediation":["export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
 EOF
 
 export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
