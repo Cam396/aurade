@@ -103,6 +103,16 @@ fi
 grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/plaintext.out"
 ! grep -Fq 'wipefs --all --force' "$TMP/plaintext.out"
 
+# A single malformed crypt-looking line is rejected too; the old prefix-only
+# check would have let this reach chpasswd during a real install.
+printf '%s\n' '$bogus' >"$TMP/password.hash"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/malformed-hash.out" 2>&1; then
+  echo 'malformed password hash unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/malformed-hash.out"
+! grep -Fq 'wipefs --all --force' "$TMP/malformed-hash.out"
+
 printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
 
 # Encryption secrets use the same refusal boundary as account credentials.

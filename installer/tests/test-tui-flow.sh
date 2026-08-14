@@ -268,6 +268,17 @@ grep -q '^\$6\$' "$SECRET_DIR/password.hash" || fail 'the password was not hashe
 [[ ! -e $SECRET_DIR/password ]] || fail 'the plaintext password file survived hashing'
 ! grep -rFq 'correct horse battery staple' "$SECRET_DIR" ||
   fail 'the plaintext password is still recoverable from the secret directory'
+# Verify the exact generated crypt value, including a password containing
+# spaces.  Checking only the $6$ prefix would allow a broken or truncated hash
+# to reach the destructive engine and would not explain a first-boot login
+# failure.
+password_hash=$(<"$SECRET_DIR/password.hash")
+password_salt=${password_hash#\$6\$}
+password_salt=${password_salt%%\$*}
+expected_hash=$(printf '%s' 'correct horse battery staple' |
+  openssl passwd -6 -salt "$password_salt" -stdin)
+[[ $expected_hash == "$password_hash" ]] ||
+  fail 'the generated password hash does not verify against the entered password'
 check 'password answer replaced' "${ANSWERS[password]}" 'set'
 
 # --- the review screen shows answers but never secret values ----------------

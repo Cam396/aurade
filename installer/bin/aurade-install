@@ -480,7 +480,13 @@ fi
 [[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
 [[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'
 if ! awk 'BEGIN { count = 0; valid = 0 }
-  NF { count++; valid = ($0 ~ /^\$[^[:space:]]+$/) }
+  NR == 1 {
+    # Accept the crypt(3) families understood by shadow/chpasswd, including
+    # schemes with extra fields, but require a scheme, salt/parameter field,
+    # and final hash with no whitespace or blank records around it.
+    valid = ($0 ~ /^\$[^[:space:]$]+\$[^[:space:]$]+\$[^[:space:]]+$/)
+  }
+  { count++ }
   END { exit !(count == 1 && valid) }' "$PASSWORD_HASH_FILE"; then
   die 'password hash must be a single crypt(3) hash, not plaintext'
 fi
