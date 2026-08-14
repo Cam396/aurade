@@ -57,6 +57,90 @@ fi
 grep -Fq 'invalid packages_lock_sha256' "$TMP/missing-lock-digest.out"
 printf 'packages_lock_sha256=%s\n' "$(printf '%s\n' 'fixture lock' | sha256sum | awk '{print $1}')" >>"$ISO.build-info"
 
+# A tampered or mismatched SBOM digest recorded in build-info must fail.
+sed -i "s/^sbom_sha256=.*/sbom_sha256=0000000000000000000000000000000000000000000000000000000000000000/" "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/tampered-sbom-digest.out" 2>&1; then
+  echo 'artifact with tampered SBOM digest in build-info unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info SBOM digest mismatch' "$TMP/tampered-sbom-digest.out"
+sed -i "s/^sbom_sha256=.*/sbom_sha256=$sbom_sha/" "$ISO.build-info"
+
+# Tampering the SBOM file payload itself must also trigger a digest mismatch.
+printf ' ' >>"$ISO.sbom.spdx.json"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/tampered-sbom-file.out" 2>&1; then
+  echo 'artifact with tampered SBOM file unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info SBOM digest mismatch' "$TMP/tampered-sbom-file.out"
+SOURCE_DATE_EPOCH=1783814400 python3 "$ROOT/ci/write-iso-sbom.py" \
+  --iso "$ISO" --repo-dir "$TMP/repo" --output "$ISO.sbom.spdx.json"
+
+# Numeric provenance fields must be strictly positive integers.
+sed -i 's/^source_date_epoch=.*/source_date_epoch=invalid/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/invalid-epoch.out" 2>&1; then
+  echo 'artifact with non-numeric source_date_epoch unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid source_date_epoch' "$TMP/invalid-epoch.out"
+sed -i 's/^source_date_epoch=.*/source_date_epoch=0/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/zero-epoch.out" 2>&1; then
+  echo 'artifact with zero source_date_epoch unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid source_date_epoch' "$TMP/zero-epoch.out"
+sed -i 's/^source_date_epoch=.*/source_date_epoch=1783814400/' "$ISO.build-info"
+
+# Invalid or mismatched ISO byte size provenance must fail.
+sed -i 's/^iso_bytes=.*/iso_bytes=not_a_number/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/invalid-iso-bytes.out" 2>&1; then
+  echo 'artifact with non-numeric iso_bytes unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid iso_bytes' "$TMP/invalid-iso-bytes.out"
+
+sed -i "s/^iso_bytes=.*/iso_bytes=$((iso_bytes + 1024))/" "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/mismatched-iso-bytes.out" 2>&1; then
+  echo 'artifact with mismatched iso_bytes unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info ISO size mismatch' "$TMP/mismatched-iso-bytes.out"
+sed -i "s/^iso_bytes=.*/iso_bytes=$iso_bytes/" "$ISO.build-info"
+
+# Invalid or violated ISO size ceiling provenance must fail.
+sed -i 's/^iso_max_bytes=.*/iso_max_bytes=0/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/zero-iso-max-bytes.out" 2>&1; then
+  echo 'artifact with zero iso_max_bytes unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid iso_max_bytes' "$TMP/zero-iso-max-bytes.out"
+
+sed -i "s/^iso_max_bytes=.*/iso_max_bytes=$((iso_bytes - 1))/" "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/exceeded-max-bytes.out" 2>&1; then
+  echo 'artifact exceeding iso_max_bytes ceiling unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'ISO exceeds build-info size ceiling' "$TMP/exceeded-max-bytes.out"
+sed -i 's/^iso_max_bytes=.*/iso_max_bytes=4294967296/' "$ISO.build-info"
+
+# Invalid or zero package count provenance must fail.
+sed -i 's/^package_count=.*/package_count=0/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/zero-package-count.out" 2>&1; then
+  echo 'artifact with zero package_count unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid package_count' "$TMP/zero-package-count.out"
+sed -i 's/^package_count=.*/package_count=1/' "$ISO.build-info"
+
+# Invalid or zero package bytes provenance must fail.
+sed -i 's/^package_bytes=.*/package_bytes=0/' "$ISO.build-info"
+if "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" >"$TMP/zero-package-bytes.out" 2>&1; then
+  echo 'artifact with zero package_bytes unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-info has invalid package_bytes' "$TMP/zero-package-bytes.out"
+sed -i "s/^package_bytes=.*/package_bytes=$package_bytes/" "$ISO.build-info"
+
 if AURADE_REQUIRE_ISO_SIGNATURE=1 "$ROOT/ci/verify-iso-artifacts.sh" "$ISO" \
     >"$TMP/env-unsigned.out" 2>&1; then
   echo 'environment signature policy unexpectedly passed without signatures' >&2
