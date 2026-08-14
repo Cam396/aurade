@@ -9,19 +9,14 @@ REPO_NAME="${REPO_NAME:-aurade}"
 REQUIRE_SIGNATURES="${AURADE_REQUIRE_SIGNATURES:-0}"
 REPO_KEYRING="${AURADE_REPO_KEYRING:-}"
 REPO_FINGERPRINT="${AURADE_REPO_FINGERPRINT:-}"
-PACKAGE_DIRS=(
-  aurade-account-helper
-  aurade-system-helper
-  shill-nm-adapter
-  aurade-power
-  aurade-host-bridge
-  chromiumos-ash
-  aurade-login
-  aurade-ai
-  aurade-webapp-shortcuts
-  aurade
-  aurade-full
+mapfile -t PACKAGE_DIRS < <(
+  sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' \
+    "${REPO_ROOT}/installer/expected-packages.txt"
 )
+(( ${#PACKAGE_DIRS[@]} > 0 )) || {
+  echo "Expected package list is empty: ${REPO_ROOT}/installer/expected-packages.txt" >&2
+  exit 1
+}
 
 for command in makepkg pacman bsdtar sha256sum; do
   command -v "${command}" >/dev/null 2>&1 || {
