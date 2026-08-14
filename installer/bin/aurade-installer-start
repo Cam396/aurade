@@ -88,6 +88,17 @@ run_text() {
   exec "$TUI" "${TEXT_PASSTHROUGH[@]}"
 }
 
+# The public 0.1.0 image is deliberately text-only. A GUI-capable image opts
+# in at build time and leaves this marker in the live root. An explicit
+# --graphical invocation remains a diagnostic override, but the normal MOTD
+# path cannot silently turn a text release into a GUI release on capable
+# hardware.
+GUI_ENABLED_MARKER=${AURADE_GUI_ENABLED_MARKER:-/etc/aurade-installer/gui-enabled}
+if [[ $MODE == auto && ${AURADE_GUI_RELEASE:-0} != 1 && ! -e $GUI_ENABLED_MARKER ]]; then
+  echo 'aurade-installer-start: this image is text-only; using the text installer' >&2
+  run_text
+fi
+
 [[ $MODE != text && ${AURADE_FORCE_TUI:-0} != 1 ]] || run_text
 
 GUI=$(_find aurade-installer-gui) || run_text
