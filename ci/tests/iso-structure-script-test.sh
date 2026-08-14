@@ -5,6 +5,16 @@ set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+assert_output_contains() {
+  local needle=$1 output_file=$2
+  if ! grep -Fq -- "$needle" "$output_file"; then
+    echo "ISO structure fixture: expected output not found: ${needle}" >&2
+    sed -n '1,120p' "$output_file" >&2
+    return 1
+  fi
+}
+
 install -d "$TMP/tree/EFI/BOOT" "$TMP/tree/loader/entries"
 printf '%s\n' boot >"$TMP/tree/EFI/BOOT/BOOTx64.EFI"
 printf '%s\n' 'default aurade.conf' 'editor no' >"$TMP/tree/loader/loader.conf"
@@ -19,7 +29,7 @@ if "$ROOT/ci/verify-iso-structure.sh" "$TMP/bad.iso" >"$TMP/bad.out" 2>&1; then
   echo 'ISO with editable boot loader unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'ISO boot editor is not disabled' "$TMP/bad.out"
+assert_output_contains 'ISO boot editor is not disabled' "$TMP/bad.out"
 
 # Full-mode provenance fixture: the final squashfs must contain exactly the
 # archives named by packages.lock, and their bytes must match the locked
@@ -118,7 +128,7 @@ if "$ROOT/ci/verify-iso-structure.sh" "$TMP/bad-gui-manifest.iso" \
   echo 'ISO with a downgraded GUI manifest unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'embedded GUI manifest is not a 0.2.0 candidate' \
+assert_output_contains 'embedded GUI manifest is not a 0.2.0 candidate' \
   "$TMP/bad-gui-manifest.out"
 
 # Restore the valid manifest before the package-integrity mutations below.
@@ -137,7 +147,7 @@ if "$ROOT/ci/verify-iso-structure.sh" "$TMP/tampered-full.iso" --full \
   echo 'ISO with a changed locked archive unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'package checksum mismatch' "$TMP/tampered-full.out"
+assert_output_contains 'package checksum mismatch' "$TMP/tampered-full.out"
 
 # An unlisted archive must fail even when the listed archive itself is valid.
 cp "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
@@ -156,6 +166,6 @@ if "$ROOT/ci/verify-iso-structure.sh" "$TMP/unlisted-full.iso" --full \
   echo 'ISO with an unlisted archive unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'unlisted package archive' "$TMP/unlisted.out"
+assert_output_contains 'unlisted package archive' "$TMP/unlisted.out"
 
 echo 'ISO structure script test: PASS'
