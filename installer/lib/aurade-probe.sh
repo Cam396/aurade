@@ -200,6 +200,20 @@ aurade_probe_renderer() {
     return 0
   fi
 
+  # VMware's vmwgfx render node is useful evidence that a driver loaded, but
+  # a headless VMware console can still reject the first DRM frame when Cage
+  # tries to take over the VT.  Treat that unproven display path as text mode
+  # by default so `aurade-installer-start` never leaves a user staring at a
+  # blank compositor screen.  An explicit diagnostic override keeps the GUI
+  # testable on a VMware setup with a known-good visible 3D output.
+  if [[ $AURADE_PROBE_VIRT == vmware && $AURADE_PROBE_DRIVER == vmwgfx &&
+        -z ${WAYLAND_DISPLAY:-} && -z ${DISPLAY:-} &&
+        ${AURADE_ALLOW_VMWARE_GUI:-0} != 1 ]]; then
+    AURADE_PROBE_RENDERER=tui
+    AURADE_PROBE_REASON=vmware-kms-uncertain
+    return 0
+  fi
+
   AURADE_PROBE_RENDERER=gui
   AURADE_PROBE_REASON=ok
   return 0
@@ -240,6 +254,9 @@ aurade_probe_advice() {
       ;;
     low-memory)
       printf '%s' 'There is not enough free memory to run the graphical installer from the installation media. The installed system has more memory available than the live image does, so this does not by itself mean the desktop will be unusable.'
+      ;;
+    vmware-kms-uncertain)
+      printf '%s' 'VMware exposed a vmwgfx render node, but this live console could not prove that a visible DRM output is available. Staying in text mode avoids a blank compositor screen. Enable a visible VMware 3D display, or set AURADE_ALLOW_VMWARE_GUI=1 only for diagnostic testing.'
       ;;
     *)
       printf '%s' 'Continuing in text mode.'
