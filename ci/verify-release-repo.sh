@@ -54,6 +54,14 @@ if [[ "${REQUIRE_SIGNATURES}" == 1 ]]; then
   }
 fi
 
+# Check the repository target before package-tool prerequisites so a missing
+# or misconfigured repository is reported directly on minimal CI runners.
+database="${REPO_DIR}/${REPO_NAME}.db.tar.gz"
+[[ -f "${database}" ]] || {
+  echo "Missing repository database: ${database}" >&2
+  exit 1
+}
+
 for command in makepkg pacman bsdtar sha256sum; do
   command -v "${command}" >/dev/null 2>&1 || {
     echo "Missing required command: ${command}" >&2
@@ -77,11 +85,6 @@ verify_detached_signature() {
   }
 }
 
-database="${REPO_DIR}/${REPO_NAME}.db.tar.gz"
-[[ -f "${database}" ]] || {
-  echo "Missing repository database: ${database}" >&2
-  exit 1
-}
 REPO_DIR="${REPO_DIR}" "${SCRIPT_DIR}/verify-release-checksums.sh"
 
 while IFS= read -r -d '' repository_file; do
