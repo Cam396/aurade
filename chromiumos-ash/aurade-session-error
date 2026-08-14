@@ -8,6 +8,16 @@ state_dir="${AURADE_ERROR_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/aur
 report="${state_dir}/session-error.txt"
 tmp_report="${report}.$$"
 
+# Details normally come from bounded status/runtime fields, but this helper is
+# also a public package entry point. Keep untrusted diagnostics on one line and
+# cap their size so a malformed caller cannot inject extra report fields or
+# terminal control sequences into the failure surface.
+detail=${detail//$'\r'/ }
+detail=${detail//$'\n'/ }
+detail=${detail//$'\t'/ }
+detail=${detail//$'\e'/ }
+detail=${detail:0:256}
+
 case "${error_kind}" in
   missing-render)
     title='AuraDE could not start the desktop'
