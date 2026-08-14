@@ -1027,7 +1027,9 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _refresh_done(self) -> None:
         install_id = self._read_install_id()
         self.widgets["done.install_id"].set_subtitle(install_id or "Recorded in journal")
-        self.widgets["done.target"].set_subtitle(self.model.get("target") or "/dev/sda")
+        self.widgets["done.target"].set_subtitle(
+            self.model.get("target") or "Recorded in journal"
+        )
         self.widgets["done.hostname"].set_subtitle(self.model.get("hostname") or "aurade")
         self.widgets["done.username"].set_subtitle(self.model.get("username") or "user")
 

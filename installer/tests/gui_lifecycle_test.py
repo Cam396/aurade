@@ -117,4 +117,10 @@ assert any(
     for node in ast.walk(keymap)
 ), "keymap selection must have an inline feedback target"
 
+done = method(window, "_refresh_done")
+assert not any(
+    isinstance(node, ast.Constant) and node.value == "/dev/sda"
+    for node in ast.walk(done)
+), "completion screen must not invent a target disk"
+
 print("installer GUI lifecycle test: PASS")
