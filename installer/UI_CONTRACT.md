@@ -167,7 +167,8 @@ unanswerable.
 ## Failure
 
 Every stop names the stage, explains what it means for the disk, and offers
-export, log, shell and restart.
+export, log and restart. The live image has no terminal emulator, so neither
+renderer advertises a shell button that it cannot actually open.
 
 Saving a diagnostic report reports whether it worked. The helper's exit status
 cannot be used for this — it exits with the install's own status on success and
