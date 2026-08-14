@@ -129,6 +129,10 @@ equal(nav.current_page, "graphics", "back from the second page did not go back")
 # Walking to the end of the pages reaches review; back from review reopens the
 # last page rather than the first.
 while nav.state == "pages":
+    if nav.page_index + 1 < len(nav.pages):
+        equal(nav.forward_label(), "Next", f"page {nav.current_page} (step {nav.page_index + 1}/{len(nav.pages)}) does not label forward as Next")
+    else:
+        equal(nav.forward_label(), "Review", f"last page {nav.current_page} before review does not label forward as Review")
     nav.forward()
 equal(nav.state, F.REVIEW, "walking the pages did not reach review")
 equal(nav.forward_label(), "Continue", "the review screen's button is mislabelled")
@@ -141,6 +145,16 @@ equal(nav.back_action(), "back", "the erase gate does not offer a way back")
 equal(nav.forward_label(), "Erase and install", "the gate's button is mislabelled")
 nav.back()
 equal(nav.state, F.REVIEW, "back from the erase gate did not return to review")
+
+# Cancel transitions to CANCELLED from any state upstream of the erase gate.
+for state in (F.WELCOME, "pages", F.REVIEW, F.GATE):
+    canceller = F.Flow(plan_only=False)
+    if state == "pages":
+        canceller.begin()
+    else:
+        canceller.state = state
+    equal(canceller.cancel(), F.CANCELLED, f"cancel() from {state} did not return CANCELLED")
+    equal(canceller.state, F.CANCELLED, f"cancel() from {state} did not transition to CANCELLED")
 
 # The progress screen offers nothing, because nothing is read there. A cancel
 # control after the erase gate would advertise an exit that does not exist.
@@ -169,6 +183,22 @@ for terminal in sorted(F.TERMINAL):
     equal(end.back_action(), "", f"the {terminal} screen offers a back control")
     equal(end.transitions(), (), f"the {terminal} screen has an exit")
     equal(end.cancel(), terminal, f"the {terminal} screen could be cancelled")
+
+# Plan failures and install completion outcomes
+pf_flow = F.Flow(plan_only=False)
+pf_flow.state = F.REVIEW
+equal(pf_flow.plan_failed(), F.FAILURE, "plan_failed() did not return FAILURE")
+equal(pf_flow.state, F.FAILURE, "plan_failed() did not transition state to FAILURE")
+
+fin_flow = F.Flow(plan_only=False)
+fin_flow.state = F.PROGRESS
+equal(fin_flow.finished(0), F.DONE, "finished(0) did not return DONE")
+equal(fin_flow.state, F.DONE, "finished(0) did not transition state to DONE")
+
+fin_fail_flow = F.Flow(plan_only=False)
+fin_fail_flow.state = F.PROGRESS
+equal(fin_fail_flow.finished(1), F.FAILURE, "finished(1) did not return FAILURE")
+equal(fin_fail_flow.state, F.FAILURE, "finished(1) did not transition state to FAILURE")
 
 
 # -- the advanced page -------------------------------------------------------
@@ -206,6 +236,27 @@ equal(len(keys), len(set(keys)), "a failure action is listed twice")
 check("retry" not in keys, "the failure screen offers a retry that would erase again")
 check("shell" not in keys, "the failure screen offers a shell the image cannot open")
 check("export" in keys, "the failure screen cannot save a diagnostic report")
+equal(
+    F.FAILURE_ACTIONS,
+    (
+        ("export", "Save a diagnostic report"),
+        ("log", "View the full log"),
+        ("reboot", "Restart the computer"),
+    ),
+    "FAILURE_ACTIONS does not match expected actions and labels",
+)
+
+# -- step position -----------------------------------------------------------
+
+sp_flow = F.Flow(plan_only=False)
+equal(sp_flow.step_position(), "", "step_position is non-empty on welcome screen")
+sp_flow.begin()
+equal(sp_flow.step_position(), f"Step 1 of {len(sp_flow.pages)}", "step_position incorrect for first page")
+sp_flow.forward()
+equal(sp_flow.step_position(), f"Step 2 of {len(sp_flow.pages)}", "step_position incorrect for second page")
+while sp_flow.state == "pages":
+    sp_flow.forward()
+equal(sp_flow.step_position(), "", "step_position is non-empty on review screen")
 
 
 if FAILURES:

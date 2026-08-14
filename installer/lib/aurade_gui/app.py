@@ -16,6 +16,12 @@ requires a mouse is a graphical installer that excludes people.
 
 from __future__ import annotations
 
+from json import loads as _json_loads
+from os import access as _os_access, environ as _os_environ, execv as _os_execv, X_OK as _X_OK
+from os.path import dirname as _os_dirname, exists as _os_exists, realpath as _os_realpath
+from re import match as _re_match
+from threading import Thread as _Thread
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -32,6 +38,13 @@ APP_ID = "org.aurade.Installer"
 #: account of what happened; this is a view of it and keeps no tally.
 PROGRESS_INTERVAL_MS = 400
 
+RESERVED_USERNAMES = frozenset({
+    "root", "bin", "daemon", "sys", "adm", "sync", "games", "man", "lp",
+    "mail", "news", "uucp", "proxy", "majordomo", "postgres", "mysql",
+    "nobody", "systemd-network", "systemd-resolve", "systemd-timesync",
+    "systemd-coredump", "aurade", "aurade-live",
+})
+
 
 def _wrapped(text: str, css: str | None = None, center: bool = False) -> Gtk.Label:
     label = Gtk.Label(label=text)
@@ -41,7 +54,8 @@ def _wrapped(text: str, css: str | None = None, center: bool = False) -> Gtk.Lab
     label.set_justify(Gtk.Justification.CENTER if center else Gtk.Justification.LEFT)
     label.set_max_width_chars(64)
     if css:
-        label.add_css_class(css)
+        for c in css.split():
+            label.add_css_class(c)
     return label
 
 
@@ -118,6 +132,22 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._install_shortcuts()
         self.refresh()
 
+    # -- async worker ------------------------------------------------------
+
+    def _run_async(self, worker_fn, on_done, on_error=None) -> None:
+        def _thread_target():
+            try:
+                res = worker_fn()
+                GLib.idle_add(on_done, res)
+            except Exception as exc:
+                if on_error is not None:
+                    GLib.idle_add(on_error, exc)
+                else:
+                    GLib.idle_add(self._fatal, str(exc))
+
+        thread = _Thread(target=_thread_target, daemon=True)
+        thread.start()
+
     # -- construction ------------------------------------------------------
 
     def _build_pages(self) -> None:
@@ -165,7 +195,9 @@ class InstallerWindow(Adw.ApplicationWindow):
                     group.add(row)
                 self.widgets[f"group.{question}"] = group
                 box.append(group)
-            if page.name == "disk":
+            if page.name == "language":
+                box.append(self._build_keymap_test())
+            elif page.name == "disk":
                 box.append(self._build_disk_list())
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -173,20 +205,45 @@ class InstallerWindow(Adw.ApplicationWindow):
         return scroller
 
     def _build_graphics(self, box: Gtk.Box) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup(title="Graphics")
+        group = Adw.PreferencesGroup(title="Graphics and hardware qualification")
         self.widgets["graphics.summary"] = Adw.ActionRow(title="Renderer")
-        self.widgets["graphics.detail"] = Adw.ActionRow(title="Detected")
-        self.widgets["graphics.memory"] = Adw.ActionRow(title="Memory")
-        for key in ("graphics.summary", "graphics.detail", "graphics.memory"):
+        self.widgets["graphics.detail"] = Adw.ActionRow(title="Detected graphics device")
+        self.widgets["graphics.driver"] = Adw.ActionRow(title="Kernel driver")
+        self.widgets["graphics.memory"] = Adw.ActionRow(title="Available memory")
+        for key in ("graphics.summary", "graphics.detail", "graphics.driver", "graphics.memory"):
             row = self.widgets[key]
             row.set_subtitle("")
             row.set_subtitle_lines(0)
             group.add(row)
         box.append(group)
-        advice = _wrapped("")
+
+        warn_group = Adw.PreferencesGroup(title="Hardware notice")
+        warn_group.set_visible(False)
+        self.widgets["graphics.warn_group"] = warn_group
+
+        advice = _wrapped("", css="warning")
         advice.set_visible(False)
         self.widgets["graphics.advice"] = advice
         box.append(advice)
+
+        vm_advice = _wrapped("", css="dim-label")
+        vm_advice.set_visible(False)
+        self.widgets["graphics.vm_advice"] = vm_advice
+        box.append(vm_advice)
+
+        switch_btn = Gtk.Button(label="Switch to Text Installer")
+        switch_btn.set_halign(Gtk.Align.START)
+        switch_btn.connect("clicked", lambda *_: self._switch_to_tui())
+        switch_btn.set_visible(False)
+        self.widgets["graphics.switch_tui"] = switch_btn
+        box.append(switch_btn)
+
+        return group
+
+    def _build_keymap_test(self) -> Gtk.Widget:
+        group = Adw.PreferencesGroup(title="Keyboard test")
+        test_row = Adw.EntryRow(title="Test keyboard layout: type @, #, $, /, ~, |")
+        group.add(test_row)
         return group
 
     def _build_network(self, box: Gtk.Box) -> Adw.PreferencesGroup:
@@ -216,7 +273,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             repeat.connect("entry-activated", lambda *_: self.on_forward())
             self.widgets[f"q.{question}"] = entry
             self.widgets[f"q.{question}.repeat"] = repeat
-            return [entry, repeat]
+
+            feedback = _wrapped("", css="dim-label")
+            self.widgets[f"feedback.{question}"] = feedback
+            return [entry, repeat, feedback]
         if kind == "bool":
             row = Adw.SwitchRow(title=spec["label"])
             row.set_active(spec["default"] == "yes")
@@ -235,19 +295,30 @@ class InstallerWindow(Adw.ApplicationWindow):
             row.set_enable_search(True)
             if spec["default"] in values:
                 row.set_selected(values.index(spec["default"]))
+            if question == "keymap":
+                row.connect("notify::selected", self._on_keymap_selected)
             self.widgets[f"q.{question}"] = row
             return [row]
         if kind == "disk":
             row = Adw.ActionRow(title=spec["label"])
             self.widgets[f"q.{question}"] = row
             return [row]
+
         row = Adw.EntryRow(title=spec["label"])
         row.set_text(spec["default"])
         row.set_show_apply_button(False)
-        row.connect("changed", lambda r: r.remove_css_class("error"))
+        if question == "hostname":
+            row.connect("changed", self._on_hostname_changed)
+        elif question == "username":
+            row.connect("changed", self._on_username_changed)
+        else:
+            row.connect("changed", lambda r: r.remove_css_class("error"))
         row.connect("entry-activated", lambda *_: self.on_forward())
         self.widgets[f"q.{question}"] = row
-        return [row]
+
+        feedback = _wrapped("", css="dim-label")
+        self.widgets[f"feedback.{question}"] = feedback
+        return [row, feedback]
 
     def _build_disk_list(self) -> Gtk.Widget:
         group = Adw.PreferencesGroup(title="Disks in this computer")
@@ -267,9 +338,22 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_review(self) -> Gtk.Widget:
         box = _page_box()
         box.append(_wrapped("Check these before continuing.", css="dim-label"))
-        group = Adw.PreferencesGroup()
+        group = Adw.PreferencesGroup(title="Configuration summary")
         self.widgets["review.group"] = group
         box.append(group)
+
+        preflight_group = Adw.PreferencesGroup(title="System & hardware preflight")
+        self.widgets["review.gfx"] = Adw.ActionRow(title="Graphics renderer")
+        self.widgets["review.net"] = Adw.ActionRow(title="Network status")
+        self.widgets["review.mem"] = Adw.ActionRow(title="System memory")
+        for key in ("review.gfx", "review.net", "review.mem"):
+            row = self.widgets[key]
+            row.set_subtitle("")
+            row.set_subtitle_lines(0)
+            preflight_group.add(row)
+        self.widgets["review.preflight"] = preflight_group
+        box.append(preflight_group)
+
         assurance = _wrapped(F.REVIEW_ASSURANCE, css="success")
         box.append(assurance)
         advanced = Gtk.Button(label="Advanced options")
@@ -288,21 +372,33 @@ class InstallerWindow(Adw.ApplicationWindow):
         headline.add_css_class("title-2")
         self.widgets["gate.headline"] = headline
         box.append(headline)
-        group = Adw.PreferencesGroup(title="The disk that will be erased")
+
+        warning_card = _wrapped(
+            "WARNING: All partitions, operating systems, and files on this disk "
+            "will be permanently destroyed. This operation cannot be undone.",
+            css="error",
+        )
+        self.widgets["gate.warning"] = warning_card
+        box.append(warning_card)
+
+        group = Adw.PreferencesGroup(title="Target disk identity")
         for key, title in (
+            ("path", "Device path"),
             ("model", "Model"),
-            ("serial", "Serial"),
-            ("size", "Size"),
-            ("transport", "Connection"),
+            ("serial", "Serial number"),
+            ("wwn", "WWN identifier"),
+            ("size", "Capacity"),
+            ("transport", "Bus connection"),
         ):
             row = Adw.ActionRow(title=title)
             row.set_subtitle("")
+            row.set_subtitle_lines(0)
             self.widgets[f"gate.{key}"] = row
             group.add(row)
         box.append(group)
         box.append(_wrapped(F.GATE_BODY))
-        prompt = Adw.PreferencesGroup()
-        entry = Adw.EntryRow(title="Type the confirmation exactly")
+        prompt = Adw.PreferencesGroup(title="Confirmation")
+        entry = Adw.EntryRow(title="Type the confirmation token exactly")
         entry.connect("changed", lambda *_: self.refresh_gate_button())
         entry.connect("entry-activated", lambda *_: self.on_forward())
         self.widgets["gate.entry"] = entry
@@ -331,6 +427,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         note = _wrapped("", css="dim-label")
         self.widgets["progress.note"] = note
         box.append(note)
+
+        expander = Adw.ExpanderRow(title="Stage details & journal status")
+        expander.set_expanded(False)
+        self.widgets["progress.expander"] = expander
+        exp_group = Adw.PreferencesGroup()
+        exp_group.add(expander)
+        box.append(exp_group)
+
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_child(_clamp(box))
@@ -339,10 +443,81 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_done(self) -> Gtk.Widget:
         status = Adw.StatusPage(title=F.DONE_TITLE, description=F.DONE_BODY)
         status.set_icon_name("emblem-ok-symbolic")
+
+        box = _page_box()
+
+        summary_group = Adw.PreferencesGroup(title="Installed System Summary")
+        for key, title in (
+            ("install_id", "Install ID"),
+            ("target", "Target Disk"),
+            ("hostname", "Hostname"),
+            ("username", "User Account"),
+            ("encrypt", "Disk Encryption"),
+            ("snapshot", "Arch Snapshot"),
+        ):
+            row = Adw.ActionRow(title=title)
+            row.set_subtitle("")
+            row.set_subtitle_lines(0)
+            self.widgets[f"done.{key}"] = row
+            summary_group.add(row)
+        box.append(summary_group)
+
+        rec_group = Adw.PreferencesGroup(title="Recovery & Rollback Information")
+        self.widgets["done.rec_snap"] = Adw.ActionRow(
+            title="Factory Snapshot",
+            subtitle="@snapshots/0/snapshot — read-only pristine factory state",
+        )
+        self.widgets["done.rec_tool"] = Adw.ActionRow(
+            title="Recovery Tool",
+            subtitle="Run 'aurade-recovery' from live media to inspect or rollback snapshots",
+        )
+        self.widgets["done.rec_boot"] = Adw.ActionRow(
+            title="Bootloader Rollback",
+            subtitle="Select factory rollback entry in systemd-boot menu if needed",
+        )
+        for key in ("done.rec_snap", "done.rec_tool", "done.rec_boot"):
+            row = self.widgets[key]
+            row.set_subtitle_lines(0)
+            rec_group.add(row)
+        box.append(rec_group)
+
+        logs_group = Adw.PreferencesGroup(title="Installation Logs")
+        self.widgets["done.journal_row"] = Adw.ActionRow(
+            title="Structured Journal",
+            subtitle="/var/log/aurade-install/journal.jsonl",
+        )
+        self.widgets["done.log_row"] = Adw.ActionRow(
+            title="Install Log",
+            subtitle="/var/log/aurade-install/install.log",
+        )
+        for key in ("done.journal_row", "done.log_row"):
+            row = self.widgets[key]
+            row.set_subtitle_lines(0)
+            logs_group.add(row)
+        box.append(logs_group)
+
+        reboot_note = _wrapped(
+            "It is now safe to remove your USB installation media and restart the computer.",
+            css="dim-label",
+            center=True,
+        )
+        box.append(reboot_note)
+
+        restart_btn = Gtk.Button(label="Restart System")
+        restart_btn.add_css_class("suggested-action")
+        restart_btn.set_halign(Gtk.Align.CENTER)
+        restart_btn.connect("clicked", lambda *_: self._restart_system())
+        box.append(restart_btn)
+
         extra = _wrapped("", css="dim-label", center=True)
         extra.set_visible(False)
         self.widgets["done.extra"] = extra
-        status.set_child(extra)
+        box.append(extra)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(_clamp(box))
+        status.set_child(scroller)
         return status
 
     def _build_failure(self) -> Gtk.Widget:
@@ -361,6 +536,15 @@ class InstallerWindow(Adw.ApplicationWindow):
                 label.add_css_class("dim-label")
             self.widgets[f"failure.{key}"] = label
             box.append(label)
+
+        recovery_notice = _wrapped(
+            "Destructive installation stages are linear and cannot be retried mid-way. "
+            "The journal and logs have been preserved. Restart the computer to start a clean install.",
+            css="dim-label",
+        )
+        self.widgets["failure.recovery_notice"] = recovery_notice
+        box.append(recovery_notice)
+
         notice = _wrapped("")
         notice.set_visible(False)
         self.widgets["failure.notice"] = notice
@@ -497,27 +681,82 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _refresh_graphics(self) -> None:
         self.probe = self.model.probe()
         renderer = self.probe.get("renderer", "")
+        driver = self.probe.get("driver", "")
+        gl = self.probe.get("gl", "")
+        virt = self.probe.get("virt", "")
+        reason = self.probe.get("reason", "")
+        predicts_black = bool(self.probe.get("predicts_black_screen"))
+        is_sw = any(sw in (gl or "").lower() for sw in ("llvmpipe", "softpipe", "swrast"))
+        is_virt_gpu = driver in ("vgem", "vkms") or reason == "virtual-gpu-only"
+        is_no_gpu = reason == "no-render-node" or renderer != "gui"
+
         summary = (
-            "Graphical installer"
-            if renderer == "gui"
+            "Hardware accelerated GUI"
+            if renderer == "gui" and not (predicts_black or is_sw or is_virt_gpu)
             else "Text installer recommended"
         )
         self.widgets["graphics.summary"].set_subtitle(summary)
-        self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", ""))
+        self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", "No render node detected"))
+        self.widgets["graphics.driver"].set_subtitle(driver or "None / Unidentified")
         self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
+
+        advice_text = self.probe.get("advice", "")
         advice = self.widgets["graphics.advice"]
-        advice.set_text(self.probe.get("advice", ""))
-        advice.set_visible(bool(self.probe.get("advice")))
+        advice.set_text(advice_text)
+        advice.set_visible(bool(advice_text))
+
+        vm_advice = self.widgets["graphics.vm_advice"]
+        if virt and virt != "none":
+            vm_advice.set_text(
+                f"Virtualization detected ({virt}). For optimal graphics, enable 3D acceleration "
+                "in your hypervisor settings (VirtIO 3D, VMware 3D, or VirtualBox VMSVGA 3D)."
+            )
+            vm_advice.set_visible(True)
+        else:
+            vm_advice.set_visible(False)
+
+        switch_btn = self.widgets["graphics.switch_tui"]
+        has_warning = predicts_black or is_sw or is_virt_gpu or is_no_gpu
+        switch_btn.set_visible(has_warning)
+
         # The black-screen warning is the reason this page exists, and it is
         # shown before the erase gate rather than after it.
-        if self.probe.get("predicts_black_screen"):
+        if predicts_black:
             self.banner.set_title(
                 "This computer has no working graphics driver. Installing now "
                 "produces a system that starts but shows no desktop."
             )
             self.banner.set_revealed(True)
+        elif has_warning:
+            self.banner.set_title(
+                "Graphics acceleration is limited on this computer. You may experience "
+                "performance issues or a black screen after boot."
+            )
+            self.banner.set_revealed(True)
         else:
             self.banner.set_revealed(False)
+
+    def _switch_to_tui(self) -> None:
+        tui = _os_environ.get("AURADE_INSTALLER_TUI")
+        if not tui:
+            self_dir = _os_dirname(_os_realpath(__file__))
+            for candidate in (
+                "/usr/local/sbin/aurade-installer-tui",
+                f"{self_dir}/../../bin/aurade-installer-tui",
+            ):
+                if _os_access(candidate, _X_OK):
+                    tui = candidate
+                    break
+        if tui and _os_access(tui, _X_OK):
+            self.model.close()
+            passthrough = ["--journal", self.model.journal, "--raw-log", self.model.raw_log]
+            if self.flow.plan_only:
+                passthrough.append("--plan-only")
+            try:
+                _os_execv(tui, [tui, *passthrough])
+            except OSError:
+                pass
+        self.close()
 
     def _refresh_network(self) -> None:
         group = self.widgets["network.list"]
@@ -566,9 +805,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         while (row := listbox.get_first_child()) is not None:
             listbox.remove(row)
         removable = False
-        for disk in self.model.disks():
+        disks = self.model.disks()
+        for disk in disks:
             row = Adw.ActionRow(title=disk["path"])
-            subtitle = " - ".join(
+            parts = [
                 part
                 for part in (
                     disk.get("model") or "unknown model",
@@ -576,13 +816,18 @@ class InstallerWindow(Adw.ApplicationWindow):
                     disk.get("transport") or "",
                 )
                 if part
-            )
+            ]
+            subtitle = " - ".join(parts)
             serial = disk.get("serial") or ""
             if serial:
                 subtitle += f"\nSerial {serial}"
+            wwn = disk.get("wwn") or ""
+            if wwn:
+                subtitle += f"\nWWN {wwn}"
             row.set_subtitle(subtitle)
             row.set_subtitle_lines(0)
             row.disk_path = disk["path"]
+            row.set_activatable(True)
             if (disk.get("transport") or "").lower() == "usb":
                 removable = True
                 row.add_suffix(Gtk.Image.new_from_icon_name("media-removable-symbolic"))
@@ -591,8 +836,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         warning.set_visible(removable)
         if removable:
             warning.set_text(
-                "A removable disk is listed. That is probably the drive you "
-                "started this installer from."
+                "Removable media - verify this is not your installer USB drive."
             )
         chosen = self.model.get("target")
         if chosen:
@@ -627,6 +871,15 @@ class InstallerWindow(Adw.ApplicationWindow):
                 row.add_css_class("dim-label")
             self._add_row("review", group, row)
 
+        # Preflight summary
+        gfx_row = self.widgets["review.gfx"]
+        gfx_row.set_subtitle(self.probe.get("graphics", "Checked"))
+        net_row = self.widgets["review.net"]
+        net_report = self.model.network()
+        net_row.set_subtitle("Connected & time synced" if net_report.get("ok") else "Warning reported")
+        mem_row = self.widgets["review.mem"]
+        mem_row.set_subtitle(self.probe.get("memory", "Checked"))
+
     def _refresh_gate(self) -> None:
         info = self.model.target()
         if not info.get("ok"):
@@ -638,10 +891,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["gate.headline"].set_text(
             f"This erases {info['path']} completely."
         )
-        for key in ("model", "serial", "size", "transport"):
-            self.widgets[f"gate.{key}"].set_subtitle(info.get(key) or "unknown")
+        for key in ("path", "model", "serial", "wwn", "size", "transport"):
+            widget = self.widgets.get(f"gate.{key}")
+            if widget is not None:
+                widget.set_subtitle(info.get(key) or "unknown")
         self.widgets["gate.hint"].set_text(f"Type {self._gate_token} to continue.")
         self.widgets["gate.entry"].set_text("")
+        self.refresh_gate_button()
 
     def refresh_gate_button(self) -> None:
         if self.flow.state != F.GATE:
@@ -655,12 +911,40 @@ class InstallerWindow(Adw.ApplicationWindow):
         elif state == F.GATE:
             self._refresh_gate()
         elif state == F.DONE:
-            encrypted = self.model.get("encrypt") == "yes"
-            extra = self.widgets["done.extra"]
-            extra.set_text(F.DONE_ENCRYPTED if encrypted else "")
-            extra.set_visible(encrypted)
+            self._refresh_done()
         elif state == F.FAILURE:
             self._refresh_failure()
+
+    def _read_install_id(self) -> str:
+        try:
+            if _os_exists(self.model.journal):
+                with open(self.model.journal, "r", errors="replace") as handle:
+                    for line in handle:
+                        if line.strip():
+                            record = _json_loads(line)
+                            if record.get("install_id"):
+                                return str(record["install_id"])
+        except Exception:
+            pass
+        return ""
+
+    def _refresh_done(self) -> None:
+        install_id = self._read_install_id()
+        self.widgets["done.install_id"].set_subtitle(install_id or "Recorded in journal")
+        self.widgets["done.target"].set_subtitle(self.model.get("target") or "/dev/sda")
+        self.widgets["done.hostname"].set_subtitle(self.model.get("hostname") or "aurade")
+        self.widgets["done.username"].set_subtitle(self.model.get("username") or "user")
+
+        encrypted = self.model.get("encrypt") == "yes"
+        self.widgets["done.encrypt"].set_subtitle("Enabled (LUKS2 encrypted btrfs)" if encrypted else "Disabled (plaintext)")
+        self.widgets["done.snapshot"].set_subtitle(self.model.get("snapshot") or "Standard")
+
+        self.widgets["done.journal_row"].set_subtitle(self.model.journal)
+        self.widgets["done.log_row"].set_subtitle(self.model.raw_log)
+
+        extra = self.widgets["done.extra"]
+        extra.set_text(F.DONE_ENCRYPTED if encrypted else "")
+        extra.set_visible(encrypted)
 
     def _refresh_failure(self) -> None:
         report = self.model.failure()
@@ -756,6 +1040,11 @@ class InstallerWindow(Adw.ApplicationWindow):
                 f"{spec['help']} Leave both fields blank to keep what you "
                 "already entered."
             )
+        feedback = self.widgets.get(f"feedback.{question}")
+        if feedback is not None:
+            feedback.set_text("")
+            for c in ("success", "warning", "dim-label", "error"):
+                feedback.remove_css_class(c)
         return True
 
     def _value_of(self, question: str, spec: dict) -> str:
@@ -792,24 +1081,112 @@ class InstallerWindow(Adw.ApplicationWindow):
         toast.set_timeout(6)
         self.toast_overlay.add_toast(toast)
 
-    # -- actions -----------------------------------------------------------
+    # -- actions & live feedback -------------------------------------------
+
+    def _on_hostname_changed(self, entry: Adw.EntryRow) -> None:
+        text = entry.get_text()
+        entry.remove_css_class("error")
+        feedback = self.widgets.get("feedback.hostname")
+        if not text:
+            if feedback is not None:
+                feedback.set_text("")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+            return
+        is_valid = bool(_re_match(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$", text))
+        if not is_valid:
+            entry.add_css_class("error")
+            if feedback is not None:
+                feedback.set_text("Hostname must be 1-63 alphanumeric characters or hyphens (cannot start/end with hyphen).")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+                feedback.add_css_class("dim-label")
+        else:
+            if feedback is not None:
+                feedback.set_text("Valid hostname")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+                feedback.add_css_class("success")
+
+    def _on_username_changed(self, entry: Adw.EntryRow) -> None:
+        text = entry.get_text()
+        entry.remove_css_class("error")
+        feedback = self.widgets.get("feedback.username")
+        if not text:
+            if feedback is not None:
+                feedback.set_text("")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+            return
+        if text.lower() in RESERVED_USERNAMES:
+            entry.add_css_class("error")
+            if feedback is not None:
+                feedback.set_text(f"'{text}' is a reserved system name.")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+                feedback.add_css_class("error")
+            return
+        is_valid = bool(_re_match(r"^[a-z_][a-z0-9_-]{0,31}$", text))
+        if not is_valid:
+            entry.add_css_class("error")
+            if feedback is not None:
+                feedback.set_text("Username must start with a lowercase letter and contain only lowercase letters, digits, and hyphens.")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+                feedback.add_css_class("dim-label")
+        else:
+            if feedback is not None:
+                feedback.set_text("Valid username")
+                for c in ("success", "warning", "dim-label", "error"):
+                    feedback.remove_css_class(c)
+                feedback.add_css_class("success")
 
     def _on_secret_changed(self, _row: Adw.EntryRow, question: str) -> None:
         entry = self.widgets.get(f"q.{question}")
         repeat = self.widgets.get(f"q.{question}.repeat")
+        feedback = self.widgets.get(f"feedback.{question}")
         if entry is None or repeat is None:
             return
         first = entry.get_text()
         second = repeat.get_text()
+
+        feedback_msg = ""
+        is_match = False
+
         if not second:
             repeat.remove_css_class("error")
         elif first == second:
             entry.remove_css_class("error")
             repeat.remove_css_class("error")
+            is_match = True
+            feedback_msg = "Passwords match" if question == "password" else "Passphrases match"
         elif len(second) >= len(first) or not first.startswith(second):
             repeat.add_css_class("error")
+            feedback_msg = "Passwords do not match yet" if question == "password" else "Passphrases do not match yet"
         else:
             repeat.remove_css_class("error")
+            feedback_msg = "Passwords do not match yet" if question == "password" else "Passphrases do not match yet"
+
+        if question == "luks_passphrase" and 0 < len(first) < 8:
+            feedback_msg = "Passphrase is short (minimum 8 characters recommended)"
+
+        if feedback is not None:
+            feedback.set_text(feedback_msg)
+            for c in ("success", "warning", "dim-label", "error"):
+                feedback.remove_css_class(c)
+            if is_match and (question != "luks_passphrase" or len(first) >= 8):
+                feedback.add_css_class("success")
+            elif 0 < len(first) < 8 and question == "luks_passphrase":
+                feedback.add_css_class("warning")
+            else:
+                feedback.add_css_class("dim-label")
+
+    def _on_keymap_selected(self, row: Adw.ComboRow, _param) -> None:
+        idx = row.get_selected()
+        values = self.enum_values.get("keymap", [])
+        if 0 <= idx < len(values):
+            keymap_val = values[idx]
+            self.model.set("keymap", keymap_val)
 
     def _on_bool_changed(self, row: Adw.SwitchRow, _param, question: str) -> None:
         self.model.set(question, "yes" if row.get_active() else "no")
@@ -887,14 +1264,13 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _start_plan(self) -> None:
         self.forward_button.set_sensitive(False)
-        self.title_widget.set_subtitle("Checking the plan")
-        try:
-            result = self.model.plan()
-        except BridgeError as exc:
-            self._fatal(str(exc))
-            return
-        finally:
-            self.forward_button.set_sensitive(True)
+        self.back_button.set_sensitive(False)
+        self.title_widget.set_subtitle("Checking the plan…")
+        self._run_async(self.model.plan, self._on_plan_done, self._on_plan_error)
+
+    def _on_plan_done(self, result: dict) -> None:
+        self.forward_button.set_sensitive(True)
+        self.back_button.set_sensitive(True)
         if not result.get("ok"):
             self.install_status = int(result.get("status", 1))
             self.flow.plan_failed()
@@ -902,6 +1278,11 @@ class InstallerWindow(Adw.ApplicationWindow):
             return
         self.flow.forward()
         self.refresh()
+
+    def _on_plan_error(self, exc: Exception) -> None:
+        self.forward_button.set_sensitive(True)
+        self.back_button.set_sensitive(True)
+        self._fatal(str(exc))
 
     def _start_execute(self) -> None:
         typed = self.widgets["gate.entry"].get_text()
@@ -947,6 +1328,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         rows = self.stage_rows
         active_pct = 0
         active_detail = ""
+        expander = self.widgets["progress.expander"]
+
         for stage in report.get("stages", []):
             name = stage["stage"]
             row = rows.get(name)
@@ -974,6 +1357,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             if status == "running":
                 active_pct = int(stage.get("pct", 0))
                 active_detail = stage.get("detail", "")
+
         bar = self.widgets["progress.bar"]
         bar.set_fraction(max(0.0, min(1.0, active_pct / 100.0)))
         bar.set_text(active_detail or report.get("position", ""))
@@ -983,28 +1367,52 @@ class InstallerWindow(Adw.ApplicationWindow):
             note.set_visible(True)
         else:
             note.set_visible(False)
-        # No cancel control is drawn on this page at all. Offering one after
-        # the erase gate would advertise an exit that does not exist.
 
-    def _on_failure_action(self, _button: Gtk.Button, key: str) -> None:
+        # Update expander row subtitle
+        active_stage = report.get("active", "")
+        if active_stage:
+            expander.set_subtitle(f"Active stage: {active_stage} ({active_detail or 'working'})")
+        elif report.get("position"):
+            expander.set_subtitle(report.get("position", ""))
+
+    def _on_failure_action(self, button: Gtk.Button, key: str) -> None:
         if key == "export":
-            try:
-                result = self.model.export(self.install_status)
-            except BridgeError as exc:
-                self._fatal(str(exc))
-                return
-            notice = result.get("notice") or "The report could not be saved."
-            self._export_notice = (notice, bool(result.get("ok")))
-            self._refresh_failure()
-            self._toast(notice)
+            button.set_sensitive(False)
+            self._toast("Saving diagnostic report…")
+            self._run_async(
+                lambda: self.model.export(self.install_status),
+                self._on_export_done,
+                self._on_export_error,
+            )
             return
         if key == "log":
             self._show_log()
             return
         if key == "reboot":
-            Gio.Subprocess.new(
-                ["systemctl", "reboot"], Gio.SubprocessFlags.NONE
+            self._restart_system()
+
+    def _on_export_done(self, result: dict) -> None:
+        self.widgets["failure.action.export"].set_sensitive(True)
+        notice = result.get("notice") or "The report could not be saved."
+        self._export_notice = (notice, bool(result.get("ok")))
+        self._refresh_failure()
+        self._toast(notice)
+        if result.get("ok"):
+            dialog = Adw.AlertDialog(
+                heading="Diagnostic Report Saved",
+                body=(
+                    f"{notice}\n\n"
+                    "The archive contains structured journal records, hardware qualifications, "
+                    "and logs with all secret passwords securely redacted."
+                ),
             )
+            dialog.add_response("ok", "OK")
+            dialog.set_default_response("ok")
+            dialog.present(self)
+
+    def _on_export_error(self, exc: Exception) -> None:
+        self.widgets["failure.action.export"].set_sensitive(True)
+        self._fatal(str(exc))
 
     def _show_log(self) -> None:
         report = self.model.failure()
@@ -1029,6 +1437,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         toolbar.set_content(scroller)
         dialog.set_child(toolbar)
         dialog.present(self)
+
+    def _restart_system(self) -> None:
+        Gio.Subprocess.new(["systemctl", "reboot"], Gio.SubprocessFlags.NONE)
 
     def _fatal(self, message: str) -> None:
         if self._progress_source:
