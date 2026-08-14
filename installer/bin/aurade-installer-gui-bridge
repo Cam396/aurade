@@ -155,12 +155,13 @@ gb_manifest() {
 }
 
 gb_disks() {
-  local out='[' sep='' path size model tran serial
+  local out='[' sep='' path size model tran serial wwn
   while IFS='|' read -r path size model tran serial; do
     [[ -n $path ]] || continue
+    wwn=$(lsblk -dnro WWN "$path" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || true)
     out+="${sep}{\"path\":$(_gb_str "$path"),\"size\":$(_gb_str "$size"),"
     out+="\"model\":$(_gb_str "$model"),\"transport\":$(_gb_str "$tran"),"
-    out+="\"serial\":$(_gb_str "$serial")}"
+    out+="\"serial\":$(_gb_str "$serial"),\"wwn\":$(_gb_str "$wwn")}"
     sep=','
   done < <(disk_table)
   out+=']'
@@ -236,12 +237,14 @@ gb_answers() {
 # The erase gate's identity block, read from the same disk table the text
 # installer's gate reads.
 gb_target() {
-  local target=${ANSWERS[target]:-} out
+  local target=${ANSWERS[target]:-} out wwn
   [[ -n $target ]] || { _gb_err 'no disk has been chosen'; return 0; }
+  wwn=$(lsblk -dnro WWN "$target" 2>/dev/null | head -1 | sed 's/[[:space:]]*$//' || true)
   out='{"ok":true,'
   out+="\"path\":$(_gb_str "$target"),"
   out+="\"model\":$(_gb_str "$(disk_field "$target" 3)"),"
   out+="\"serial\":$(_gb_str "$(disk_serial "$target")"),"
+  out+="\"wwn\":$(_gb_str "$wwn"),"
   out+="\"size\":$(_gb_str "$(disk_field "$target" 2)"),"
   out+="\"transport\":$(_gb_str "$(disk_field "$target" 4)"),"
   out+="\"token\":$(_gb_str "ERASE:$target")}"
