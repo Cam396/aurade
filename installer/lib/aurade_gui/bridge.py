@@ -131,45 +131,59 @@ class Bridge:
     # cleverness here would be the start of a second model.
 
     def ping(self) -> bool:
+        """Check whether the model process is responsive."""
         return bool(self.call("ping").get("ok"))
 
     def manifest(self) -> dict[str, Any]:
+        """Return question definitions, validation rules, defaults, and ordering."""
         return self.call("manifest")
 
     def visible(self) -> list[str]:
+        """Return question ids currently applicable based on existing answers."""
         return self.call("visible")
 
     def disks(self) -> list[dict[str, str]]:
+        """Return available disk targets with path, size, model, transport, serial, and wwn."""
         return self.call("disks")
 
     def probe(self) -> dict[str, Any]:
+        """Return hardware / renderer probe results and black-screen prediction."""
         return self.call("probe")
 
     def network(self) -> dict[str, Any]:
+        """Return network connectivity and clock synchronization diagnostics."""
         return self.call("network")
 
     def stages(self) -> list[dict[str, Any]]:
+        """Return journal stages to be displayed, their labels and reversibility."""
         return self.call("stages")
 
     def enum(self, question: str) -> list[str]:
+        """Return candidate options for enum questions (keymap, timezone, locale)."""
         return self.call("enum", question)
 
     def answers(self) -> dict[str, dict[str, Any]]:
+        """Return current answers for review. Secrets are returned as 'set'."""
         return self.call("answers")
 
     def target(self) -> dict[str, Any]:
+        """Return identity block for chosen target disk (path, model, serial, wwn, size, transport, token)."""
         return self.call("target")
 
     def progress(self) -> dict[str, Any]:
+        """Return current installation progress (stages, active stage, running status, position, interruptible)."""
         return self.call("progress")
 
     def failure(self) -> dict[str, Any]:
+        """Return diagnostic explanation and restart advice for the last failed stage."""
         return self.call("failure")
 
     def get(self, question: str) -> str:
+        """Get the current answer for a question (or 'set' for secrets)."""
         return str(self.call("get", question).get("value", ""))
 
     def set(self, question: str, value: str) -> tuple[bool, str]:
+        """Validate and apply an answer in the model."""
         reply = self.call("set", question, value)
         return bool(reply.get("ok")), str(reply.get("error", ""))
 
@@ -179,16 +193,19 @@ class Bridge:
         return bool(reply.get("ok")), str(reply.get("error", ""))
 
     def plan(self) -> dict[str, Any]:
+        """Assemble engine arguments and verify them with engine --dry-run."""
         return self.call("plan")
 
     def execute(self, token: str) -> dict[str, Any]:
-        """Start the destructive run. Absent entirely in plan-only mode."""
+        """Start the destructive run with confirmation token. Absent entirely in plan-only mode."""
         return self.call("execute", token)
 
     def wait(self) -> dict[str, Any]:
+        """Wait for the running installation engine process to exit."""
         return self.call("wait")
 
     def export(self, status: int) -> dict[str, Any]:
+        """Save a diagnostic report bundle for the session."""
         return self.call("export", str(int(status)))
 
 
