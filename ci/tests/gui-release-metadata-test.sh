@@ -46,4 +46,21 @@ if ROOT="$ROOT" python3 "$VERIFY" "$TMP/bad-digest.json" >"$TMP/bad-digest.out" 
 fi
 grep -Fq 'payload digest mismatch' "$TMP/bad-digest.out"
 
+cp -- "$MANIFEST" "$TMP/unknown-key.json"
+ROOT="$ROOT" python3 - "$TMP/unknown-key.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+data["unreviewed_release_override"] = True
+path.write_text(json.dumps(data), encoding="utf-8")
+PY
+if ROOT="$ROOT" python3 "$VERIFY" "$TMP/unknown-key.json" >"$TMP/unknown-key.out" 2>&1; then
+    echo 'GUI metadata unknown-key mutation unexpectedly passed' >&2
+    exit 1
+fi
+grep -Fq 'manifest keys do not match schema' "$TMP/unknown-key.out"
+
 echo 'GUI release metadata test: PASS'
