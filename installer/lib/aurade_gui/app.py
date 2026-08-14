@@ -34,11 +34,18 @@ from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
 
-# The live image carries the mark beside the installer. The source-tree
-# fallback keeps the same shell pleasant to run during development.
+# The live image carries the canonical PNG artwork used by the public README.
+# Keep the older SVG as a source-tree fallback so an already-staged developer
+# image remains runnable, but never prefer it over the reviewed PNG assets.
 BRAND_MARK_PATHS = (
+    "/usr/local/share/aurade/aurade-mark.png",
+    _os_join(_os_dirname(__file__), "../../../assets/aurade-mark.png"),
     "/usr/local/share/aurade/aurade-mark.svg",
     _os_join(_os_dirname(__file__), "../../../assets/aurade-mark.svg"),
+)
+BRAND_LOGO_PATHS = (
+    "/usr/local/share/aurade/aurade-logo.png",
+    _os_join(_os_dirname(__file__), "../../../assets/aurade-logo.png"),
 )
 
 # AuraDE is deliberately not another stock Adwaita application. These
@@ -52,9 +59,10 @@ AURADE_CSS = """
   padding: 28px 20px 22px 20px;
 }
 .aurade-mark-frame {
-  background-color: #27335f;
+  background-color: #eef0f8;
+  border: 1px solid #cbd2e3;
   border-radius: 18px;
-  padding: 8px;
+  padding: 4px;
 }
 .aurade-mark-fallback {
   color: #f7fbff;
@@ -95,7 +103,13 @@ AURADE_CSS = """
   border-radius: 26px;
   padding: 38px 42px;
 }
-.aurade-hero-mark { background-color: #111a35; border-radius: 26px; padding: 18px; }
+.aurade-hero-mark {
+  background-color: #eef0f8;
+  border: 1px solid #d4dbea;
+  border-radius: 26px;
+  padding: 12px;
+}
+.aurade-logo-image { border-radius: 18px; }
 .aurade-eyebrow {
   color: #5865d9;
   font-size: 11px;
@@ -263,6 +277,18 @@ class InstallerWindow(Adw.ApplicationWindow):
         fallback.set_width_chars(2)
         fallback.set_xalign(0.5)
         return fallback
+
+    def _brand_logo(self) -> Gtk.Widget:
+        """Return the full README lockup, with the mark as a safe fallback."""
+        for path in BRAND_LOGO_PATHS:
+            if _os_exists(path):
+                picture = Gtk.Picture.new_for_filename(path)
+                picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+                picture.set_can_shrink(True)
+                picture.set_size_request(172, 218)
+                picture.add_css_class("aurade-logo-image")
+                return picture
+        return self._brand_mark(132)
 
     def _build_rail(self) -> Gtk.Box:
         rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -437,7 +463,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         mark_card.set_valign(Gtk.Align.CENTER)
         mark_card.set_halign(Gtk.Align.CENTER)
         mark_card.add_css_class("aurade-hero-mark")
-        mark_card.append(self._brand_mark(132))
+        mark_card.append(self._brand_logo())
         mark_caption = Gtk.Label(label="AURADE")
         mark_caption.add_css_class("aurade-kicker")
         mark_caption.set_halign(Gtk.Align.CENTER)
