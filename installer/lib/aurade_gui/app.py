@@ -325,6 +325,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             if question == "keymap":
                 row.connect("notify::selected", self._on_keymap_selected)
             self.widgets[f"q.{question}"] = row
+            if question == "keymap":
+                feedback = _wrapped("", css="dim-label")
+                self.widgets[f"feedback.{question}"] = feedback
+                return [row, feedback]
             return [row]
         if kind == "disk":
             row = Adw.ActionRow(title=spec["label"])
@@ -1273,7 +1277,20 @@ class InstallerWindow(Adw.ApplicationWindow):
         values = self.enum_values.get("keymap", [])
         if 0 <= idx < len(values):
             keymap_val = values[idx]
-            self.model.set("keymap", keymap_val)
+            ok, error = self.model.set("keymap", keymap_val)
+            feedback = self.widgets.get("feedback.keymap")
+            if not ok:
+                self._flag("keymap", error or "That keyboard layout could not be loaded.")
+                if feedback is not None:
+                    feedback.set_text(error or "That keyboard layout could not be loaded on this console.")
+                    feedback.remove_css_class("success")
+                    feedback.add_css_class("error")
+            else:
+                self._flag("keymap", "")
+                if feedback is not None:
+                    feedback.set_text("Keyboard layout applied")
+                    feedback.remove_css_class("error")
+                    feedback.add_css_class("success")
 
     def _on_bool_changed(self, row: Adw.SwitchRow, _param, question: str) -> None:
         value = "yes" if row.get_active() else "no"
