@@ -32,6 +32,7 @@ STAGE=$WORK_ROOT/profile
 BUILD_WORK=$WORK_ROOT/work
 REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
+GUI_RELEASE=${AURADE_GUI_RELEASE:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
@@ -46,6 +47,10 @@ export SOURCE_DATE_EPOCH
 }
 [[ $REQUIRE_ISO_SIGNATURE == 0 || $REQUIRE_ISO_SIGNATURE == 1 ]] || {
   echo 'build-iso: AURADE_REQUIRE_ISO_SIGNATURE must be 0 or 1' >&2
+  exit 2
+}
+[[ $GUI_RELEASE == 0 || $GUI_RELEASE == 1 ]] || {
+  echo 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' >&2
   exit 2
 }
 
@@ -93,13 +98,31 @@ install -Dm0755 "$ROOT/bin/aurade-install-failure" "$STAGE/airootfs/usr/local/sb
 install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-tui"
-install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
-install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ bridge flow app; do
-  install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
-    "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
-done
+if (( GUI_RELEASE )); then
+  install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
+  install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
+  for _gui_module in __init__ bridge flow app; do
+    install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
+      "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
+  done
+  install -Dm0644 "$ROOT/gui-release-manifest.json" \
+    "$STAGE/airootfs/etc/aurade-installer/gui-release-manifest.json"
+  printf '%s\n' enabled >"$STAGE/airootfs/etc/aurade-installer/gui-enabled"
+else
+  # The public 0.1.0 image is text-only. Keep the shared launcher and TUI,
+  # but do not ship the graphical payload or its runtime closure until a
+  # maintainer explicitly builds a 0.2.0 GUI candidate.
+  for _gui_package in cage gtk4 libadwaita python-gobject; do
+    sed -i "/^${_gui_package}$/d" "$STAGE/packages.x86_64"
+  done
+  # The profile's permission map must not name files that this text-only
+  # profile intentionally omits; mkarchiso treats those entries as fatal.
+  sed -i \
+    -e '/aurade-installer-gui/d' \
+    -e '/aurade_gui\//d' \
+    "$STAGE/profiledef.sh"
+fi
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
@@ -234,6 +257,7 @@ fi
 sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
 {
   printf 'arch_snapshot=%s\n' "$AURADE_ARCH_SNAPSHOT"
+  printf 'gui_release=%s\n' "$GUI_RELEASE"
   printf 'source_date_epoch=%s\n' "$SOURCE_DATE_EPOCH"
   printf 'repo_url=%s\n' "$REPO_URL"
   printf 'repo_fingerprint=%s\n' "${expected_fingerprint:-unsigned}"

@@ -36,9 +36,11 @@ for helper in aurade-installer aurade-install aurade-recovery \
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
 install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
-for module in app bridge flow; do
+for module in __init__ app bridge flow; do
   printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
 done
+printf '%s\n' enabled >"$TMP/squash/etc/aurade-installer/gui-enabled"
+printf '%s\n' '{}' >"$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
 printf '%s\n' 2026/07/12 >"$TMP/squash/etc/aurade-installer/snapshot"
 install -d "$TMP/package"
 printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
