@@ -12,6 +12,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-gui-flow.sh"
 "$ROOT/test-gui-bridge.sh"
 "$ROOT/test-gui-launch.sh"
+python3 "$ROOT/gui_lifecycle_test.py"
 "$ROOT/test-gui-widgets.sh"
 "$ROOT/test-network-diagnostics.sh"
 "$ROOT/test-failure-injection.sh"
