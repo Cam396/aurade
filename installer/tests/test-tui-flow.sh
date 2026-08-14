@@ -20,10 +20,17 @@ fail() { echo "test-tui-flow: $*" >&2; exit 1; }
 check() { [[ $2 == "$3" ]] || fail "$1: expected '$3', got '$2'"; }
 
 install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
-  "$TMP/block/nvme0n1" "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri"
+  "$TMP/block/nvme0n1" "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/stub"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
 : >"$TMP/locales/en_US"; : >"$TMP/locales/fr_FR"
 for _keymap in us fr de; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+cat >"$TMP/stub/loadkeys" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >>"${AURADE_TEST_LOADKEYS_LOG:-/dev/null}"
+[[ $1 != "${AURADE_TEST_LOADKEYS_REJECT:-}" ]]
+STUB
+chmod +x "$TMP/stub/loadkeys"
+export PATH="$TMP/stub:$PATH"
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
