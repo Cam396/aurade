@@ -132,6 +132,8 @@ if (( GUI_RELEASE )); then
     install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
       "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
   done
+  install -Dm0644 "$ROOT/../assets/aurade-mark.svg" \
+    "$STAGE/airootfs/usr/local/share/aurade/aurade-mark.svg"
   install -Dm0644 "$ROOT/gui-release-manifest.json" \
     "$STAGE/airootfs/etc/aurade-installer/gui-release-manifest.json"
   printf '%s\n' enabled >"$STAGE/airootfs/etc/aurade-installer/gui-enabled"
@@ -147,6 +149,7 @@ else
   sed -i \
     -e '/aurade-installer-gui/d' \
     -e '/aurade_gui\//d' \
+    -e '/aurade-mark\.svg/d' \
     "$STAGE/profiledef.sh"
 fi
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
