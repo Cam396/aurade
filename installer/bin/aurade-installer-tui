@@ -957,7 +957,7 @@ write_secret() {
 # engine requires `--arch-snapshot`, and a user who never opened the advanced
 # section has still, in effect, accepted the image's snapshot date.
 build_engine_args() {
-  local id flag value
+  local id flag value fingerprint_file fingerprint repo_key
   ENGINE_ARGS=()
   for id in "${AURADE_QUESTION_IDS[@]}"; do
     flag=$(aurade_question_field "$id" flag)
@@ -982,6 +982,23 @@ build_engine_args() {
     ENGINE_ARGS+=("$flag" "$value")
   done
   ENGINE_ARGS+=(--bundle-dir "${AURADE_BUNDLE_DIR:-/opt/aurade/repo}")
+  # Carry the image's repository trust mode into the engine.  The unsigned
+  # development image must say so explicitly; signed images receive the
+  # bundled public key and fingerprint.  The engine repeats the validation
+  # before any destructive stage.
+  fingerprint_file=${AURADE_REPO_FINGERPRINT_FILE:-/etc/aurade-installer/repo-fingerprint}
+  if [[ -r $fingerprint_file ]]; then
+    read -r fingerprint <"$fingerprint_file" || fingerprint=
+    case $fingerprint in
+      development-unsigned|unsigned)
+        ENGINE_ARGS+=(--allow-unsigned) ;;
+      '')
+        : ;;
+      *)
+        repo_key=${AURADE_REPO_KEY_FILE:-${AURADE_BUNDLE_DIR:-/opt/aurade/repo}/aurade-repository.gpg}
+        ENGINE_ARGS+=(--repo-key "$repo_key" --repo-fingerprint "$fingerprint") ;;
+    esac
+  fi
   [[ -z ${AURADE_EXTRA_ENGINE_ARGS:-} ]] || {
     # shellcheck disable=SC2206
     local extra=($AURADE_EXTRA_ENGINE_ARGS)

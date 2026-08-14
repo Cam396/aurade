@@ -30,7 +30,8 @@ command -v openssl >/dev/null 2>&1 || {
 }
 
 install -d "$TMP/zoneinfo" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
-  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/stub"
+  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/stub" \
+  "$TMP/bundle" "$TMP/installer-meta"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/locales/en_US"
 : >"$TMP/keymaps/i386/qwerty/us.map.gz"; : >"$TMP/dri/renderD128"
 cat >"$TMP/stub/loadkeys" <<'STUB'
@@ -94,6 +95,9 @@ export AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
 export AURADE_INSTALL_ENGINE="$TMP/stub-engine"
 export AURADE_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh"
 export TMPDIR="$TMP"
+export AURADE_BUNDLE_DIR="$TMP/bundle"
+printf '%s\n' development-unsigned >"$TMP/installer-meta/repo-fingerprint"
+export AURADE_REPO_FINGERPRINT_FILE="$TMP/installer-meta/repo-fingerprint"
 
 # Answer the default path, then whatever the scenario adds at the gate.
 answers() {
@@ -169,6 +173,8 @@ tail -1 "$calls" | grep -Fq -- '--target /dev/sda' || fail 'the execute call nam
 tail -1 "$calls" | grep -Fq -- '--arch-snapshot 2026/07/12' ||
   fail 'the execute call lost the image snapshot date'
 tail -1 "$calls" | grep -Fq -- '--encrypt' || fail 'encryption was requested but not passed'
+tail -1 "$calls" | grep -Fq -- '--allow-unsigned' ||
+  fail 'the image repository policy was not passed to the engine'
 
 # The finished screen must actually be reached.
 grep -Fq 'AuraDE is installed' "$TMP/out.happy" || fail 'the finished screen was never shown'
