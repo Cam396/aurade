@@ -205,6 +205,20 @@ recovery. The live `root` account has an empty password on the console;
 installed system. The live root console is intentionally separate from the
 installed AuraDE login flow.
 
+The public `0.1.0` profile is text-only. Do not set `AURADE_GUI_RELEASE=1` for
+that image or copy a GUI artifact into its release. The GTK4/libadwaita/Cage
+installer is an explicit `0.2.0` candidate path and requires the GUI manifest,
+full-profile ISO, detached signatures, and accelerated hardware validation
+before publication:
+
+```bash
+export AURADE_GUI_RELEASE=1
+ci/verify-gui-release-manifest.py installer/gui-release-manifest.json
+```
+
+The source and staging gates enforce this split; an unsigned GUI image remains
+development output even when its local tests pass.
+
 The installer performs a pre-destructive acquisition phase: it downloads and
 verifies the complete dated Arch package closure, creates a temporary local
 repository, and only then permits disk erasure. The post-install repository
