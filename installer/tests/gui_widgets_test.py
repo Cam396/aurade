@@ -53,7 +53,10 @@ REQUIRED = ("Gtk", "Adw")
 
 #: Receivers that are this project's own objects, not toolkit ones. ``gi`` is
 #: the binding module rather than a namespace it exposes.
-OURS = {"flow", "model", "manifest", "widgets", "enum_values", "probe", "F", "gi"}
+OURS = {
+    "flow", "model", "manifest", "widgets", "enum_values", "probe", "F", "gi",
+    "secrets_set", "group_rows", "_gate_identity",
+}
 
 #: Python's own methods, called on Python's own objects. Listed rather than
 #: inferred, so a name added here is a deliberate statement that it is not
@@ -61,7 +64,8 @@ OURS = {"flow", "model", "manifest", "widgets", "enum_values", "probe", "F", "gi
 PYTHON_METHODS = {
     "index", "items", "keys", "values", "join", "split", "strip", "rstrip",
     "lower", "upper", "startswith", "endswith", "replace", "format", "pop",
-    "setdefault", "readline", "flush", "require_version", "discard",
+    "setdefault", "readline", "flush", "require_version", "discard", "remove",
+    "add",
 }
 
 FAILURES: list[str] = []
