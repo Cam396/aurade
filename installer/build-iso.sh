@@ -288,6 +288,7 @@ else
 fi
 {
   printf 'arch_snapshot=%s\n' "$AURADE_ARCH_SNAPSHOT"
+  printf 'release_channel=%s\n' "$RELEASE_CHANNEL"
   printf 'gui_release=%s\n' "$GUI_RELEASE"
   printf 'gui_manifest_sha256=%s\n' "$gui_manifest_sha256"
   printf 'source_date_epoch=%s\n' "$SOURCE_DATE_EPOCH"

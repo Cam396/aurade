@@ -173,6 +173,11 @@ if (( FULL )); then
       echo 'verify-iso-structure: requested GUI release but build-info is missing' >&2
       exit 1
     }
+    release_channel=$(awk -F= '$1 == "release_channel" {print $2}' "$build_info")
+    [[ $release_channel == candidate || $release_channel == public ]] || {
+      echo 'verify-iso-structure: requested GUI release must use candidate or public build channel' >&2
+      exit 1
+    }
     gui_release=$(awk -F= '$1 == "gui_release" {print $2}' "$build_info")
     [[ $gui_release == 1 ]] || {
       echo 'verify-iso-structure: requested GUI release but build-info is not GUI-enabled' >&2

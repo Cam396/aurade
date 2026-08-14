@@ -93,6 +93,9 @@ if info.get("sbom_sha256") != sbom_digest:
 snapshot = info.get("arch_snapshot", "")
 if not re.fullmatch(r"\d{4}/\d{2}/\d{2}", snapshot):
     raise SystemExit("verify-iso-artifacts: build-info has invalid arch_snapshot")
+release_channel = info.get("release_channel", "")
+if release_channel not in {"development", "soak", "candidate", "public"}:
+    raise SystemExit("verify-iso-artifacts: build-info has invalid release_channel")
 source_epoch = info.get("source_date_epoch", "")
 if not source_epoch.isdigit() or int(source_epoch) <= 0:
     raise SystemExit("verify-iso-artifacts: build-info has invalid source_date_epoch")
