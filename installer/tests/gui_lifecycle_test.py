@@ -103,4 +103,18 @@ assert any(
     for node in ast.walk(network_builder)
 ), "network page must expose the retry control"
 
+keymap = method(window, "_on_keymap_selected")
+assert any(
+    isinstance(call.func, ast.Attribute) and call.func.attr == "set"
+    for call in calls(keymap, "set")
+), "keymap selection must apply through the shared model"
+assert any(
+    isinstance(call.func, ast.Attribute) and call.func.attr == "_flag"
+    for call in calls(keymap, "_flag")
+), "keymap refusal must be surfaced by the renderer"
+assert any(
+    isinstance(node, ast.Constant) and node.value == "feedback.keymap"
+    for node in ast.walk(keymap)
+), "keymap selection must have an inline feedback target"
+
 print("installer GUI lifecycle test: PASS")
