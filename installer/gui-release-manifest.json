@@ -5,7 +5,7 @@
   "architectures": ["x86_64"],
   "source": {
     "tree": "installer",
-    "provenance": "The ISO build records the resolved main commit in .build-info; these source hashes bind the GUI payload before that build."
+    "provenance": "The ISO build records the resolved main commit in .build-info; these source hashes bind the GUI payload and the shared installer contracts before that build."
   },
   "payload": [
     {
@@ -35,6 +35,26 @@
     {
       "path": "installer/lib/aurade_gui/app.py",
       "sha256": "e394aa574e69bfa2cf2ca8e6903b8fb1409f0c0810a4bd596bf0897bc041ac64"
+    },
+    {
+      "path": "installer/lib/aurade-probe.sh",
+      "sha256": "0d379d5a7a261cd3206cb4c1a0fed5533f7804595f2015241cc3d5ea79798a7e"
+    },
+    {
+      "path": "installer/lib/aurade-questions.sh",
+      "sha256": "571247763eb614fdd9a39d5fc06e6d61ae94864270327662ee706afcc829e032"
+    },
+    {
+      "path": "installer/lib/aurade-validate.sh",
+      "sha256": "ca038d8a0feb5727e11276a6d90d39ecf7573b8e43df22c60b746618c0b4b9b8"
+    },
+    {
+      "path": "installer/lib/aurade-journal.sh",
+      "sha256": "59271bbbe280e7e57a85d9dc846c569a4584c0f3afecdeb8b8afce4347f0ad97"
+    },
+    {
+      "path": "installer/lib/aurade-tui.sh",
+      "sha256": "42a0dcc7437f7682286c3f5ba4190a06559d7dc600817e40bd82016bb893f292"
     }
   ],
   "runtime_packages": ["cage", "gtk4", "libadwaita", "python-gobject"],

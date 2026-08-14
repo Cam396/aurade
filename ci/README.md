@@ -61,7 +61,11 @@ signer fingerprint; add `--require-signature` for a candidate. Its fixture gate
 is `ci/tests/iso-artifact-gate-test.sh`.
 `ci/verify-iso-structure.sh path/to/aurade-1-x86_64.iso --full` additionally
 inspects the UEFI fallback loader, boot-entry policy, and the extracted
-SquashFS payload without booting or touching a disk.
+SquashFS payload without booting or touching a disk. A graphical 0.2.0
+candidate must use `--full --require-gui`; that mode requires the GUI marker,
+the complete GUI/shared-contract payload, an embedded 0.2.0 candidate manifest,
+and a matching `gui_manifest_sha256` recorded in `.build-info`. The default
+check remains suitable for the public text-only 0.1.0 image.
 
 `export-chromium-diff.sh` exports selected tracked and untracked Chromium source
 changes into the AuraDE patch series without hand-copying diffs. It writes temp
