@@ -58,8 +58,10 @@ worktree status, patch-series hashes, and package source hashes. It writes to
 ISO and the package archives staged inside it. `installer/build-iso.sh` emits
 the SBOM as an ISO sidecar and can create/verify detached ISO and SBOM
 signatures with `AURADE_ISO_SIGNING_KEY` and the full primary fingerprint in
-`AURADE_ISO_SIGNING_FINGERPRINT`; set `AURADE_REQUIRE_ISO_SIGNATURE=1` for a
-release candidate. The fixture gate is `ci/tests/iso-sbom-test.sh`. Before
+`AURADE_ISO_SIGNING_FINGERPRINT`; set `AURADE_REQUIRE_ISO_SIGNATURE=1` and
+`AURADE_RELEASE_CHANNEL=candidate` for a release candidate. The builder fails
+closed for candidate/public channels without signed output. The fixture gate
+is `ci/tests/iso-sbom-test.sh`. Before
 uploading an image, run
 `ci/verify-iso-artifacts.sh path/to/aurade-1-x86_64.iso` to verify the checksum,
 SBOM digest/namespace, `.build-info`, and (when signed) the exact detached

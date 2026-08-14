@@ -187,6 +187,9 @@ sudo env \
 
 For a real image, omit `AURADE_ALLOW_UNSIGNED=1` and provide
 `AURADE_REPO_KEY` and `AURADE_REPO_FINGERPRINT` for the signed repository.
+For a candidate image, also set `AURADE_RELEASE_CHANNEL=candidate` and
+`AURADE_REQUIRE_ISO_SIGNATURE=1`; the builder refuses to stage a candidate or
+public image without those signed-output controls.
 The complete image and its sidecar metadata are written under
 `AURADE_ISO_OUTPUT_DIR` or the installer work directory's `output/` folder.
 The builder records ISO size and package-closure count/bytes in `.build-info`
