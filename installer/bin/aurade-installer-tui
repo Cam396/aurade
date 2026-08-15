@@ -999,7 +999,7 @@ write_secret() {
 # engine requires `--arch-snapshot`, and a user who never opened the advanced
 # section has still, in effect, accepted the image's snapshot date.
 build_engine_args() {
-  local id flag value
+  local id flag value bundle_dir repo_key fingerprint_file repo_fingerprint
   ENGINE_ARGS=()
   for id in "${AURADE_QUESTION_IDS[@]}"; do
     flag=$(aurade_question_field "$id" flag)
@@ -1023,7 +1023,30 @@ build_engine_args() {
     [[ -n $value ]] || continue
     ENGINE_ARGS+=("$flag" "$value")
   done
-  ENGINE_ARGS+=(--bundle-dir "${AURADE_BUNDLE_DIR:-/opt/aurade/repo}")
+  bundle_dir=${AURADE_BUNDLE_DIR:-/opt/aurade/repo}
+  ENGINE_ARGS+=(--bundle-dir "$bundle_dir")
+
+  # The prompt-by-prompt wrapper adds repository trust arguments before it
+  # invokes the engine.  The graphical bridge reaches the same engine through
+  # this function, so keep the policy in the shared argument builder instead
+  # of giving the two front ends different security behaviour.
+  #
+  # A signed image carries both a key and a real fingerprint.  The development
+  # image is deliberately unsigned and is marked by the build script; only
+  # that explicit marker permits the engine's hash-only development path.  A
+  # missing key on an otherwise signed image remains a fail-closed error in
+  # aurade-install.
+  repo_key=${AURADE_REPO_KEY_FILE:-$bundle_dir/aurade-repository.gpg}
+  fingerprint_file=${AURADE_REPO_FINGERPRINT_FILE:-/etc/aurade-installer/repo-fingerprint}
+  repo_fingerprint=
+  if [[ -r $fingerprint_file ]]; then
+    IFS= read -r repo_fingerprint <"$fingerprint_file" || :
+  fi
+  if [[ -r $repo_key && -n $repo_fingerprint && $repo_fingerprint != development-unsigned ]]; then
+    ENGINE_ARGS+=(--repo-key "$repo_key" --repo-fingerprint "$repo_fingerprint")
+  elif [[ $repo_fingerprint == development-unsigned && ! -r $repo_key ]]; then
+    ENGINE_ARGS+=(--allow-unsigned)
+  fi
   [[ -z ${AURADE_EXTRA_ENGINE_ARGS:-} ]] || {
     # shellcheck disable=SC2206
     local extra=($AURADE_EXTRA_ENGINE_ARGS)

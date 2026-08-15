@@ -20,7 +20,7 @@ fail() { echo "test-tui-flow: $*" >&2; exit 1; }
 check() { [[ $2 == "$3" ]] || fail "$1: expected '$3', got '$2'"; }
 
 install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
-  "$TMP/block/nvme0n1" "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri"
+  "$TMP/block/nvme0n1" "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/bundle"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
 : >"$TMP/locales/en_US"; : >"$TMP/locales/fr_FR"
 for _keymap in us fr de; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
@@ -36,6 +36,8 @@ export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_BLOCK_DIR="$TMP/block"
 export AURADE_SNAPSHOT_FILE="$TMP/snapshot" AURADE_DISK_TABLE="$TMP/disks"
 export AURADE_PROBE_MEMINFO="$TMP/meminfo" AURADE_PROBE_DRI_DIR="$TMP/dri"
 export AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
+export AURADE_BUNDLE_DIR="$TMP/bundle"
+export AURADE_REPO_FINGERPRINT_FILE="$TMP/repo-fingerprint"
 export AURADE_INSTALLER_TUI_LIB=1
 
 # shellcheck source=../bin/aurade-installer-tui
@@ -224,6 +226,35 @@ done
 # Neither secret value may appear as an argument; only the file holding it.
 [[ $argv != *'correct horse'* && $argv != *'battery staple'* ]] ||
   fail 'a secret was passed to the engine as a command-line argument'
+
+# Repository trust is shared by the text and graphical front ends. A signed
+# image passes its key and fingerprint; the intentionally unsigned development
+# image opts into hash-only verification through its explicit marker. A missing
+# key on a signed image must not silently become an unsigned install.
+printf '%s\n' development-unsigned >"$AURADE_REPO_FINGERPRINT_FILE"
+build_engine_args
+argv=" ${ENGINE_ARGS[*]} "
+[[ $argv == *' --allow-unsigned '* ]] ||
+  fail 'the development image did not opt into its explicit unsigned policy'
+[[ $argv != *'--repo-key'* ]] ||
+  fail 'the unsigned development image unexpectedly received a repository key'
+
+printf '%s\n' 0123456789abcdef0123456789abcdef01234567 >"$AURADE_REPO_FINGERPRINT_FILE"
+printf '%s\n' 'test repository key' >"$AURADE_BUNDLE_DIR/aurade-repository.gpg"
+build_engine_args
+argv=" ${ENGINE_ARGS[*]} "
+[[ $argv == *"--repo-key $AURADE_BUNDLE_DIR/aurade-repository.gpg"* ]] ||
+  fail 'the signed image did not pass its repository key'
+[[ $argv == *'--repo-fingerprint 0123456789abcdef0123456789abcdef01234567'* ]] ||
+  fail 'the signed image did not pass its repository fingerprint'
+[[ $argv != *'--allow-unsigned'* ]] ||
+  fail 'the signed image unexpectedly allowed unsigned packages'
+
+rm -f -- "$AURADE_BUNDLE_DIR/aurade-repository.gpg"
+build_engine_args
+argv=" ${ENGINE_ARGS[*]} "
+[[ $argv != *'--allow-unsigned'* ]] ||
+  fail 'a signed image without its key silently allowed unsigned packages'
 
 # Declining encryption must drop both the flag and the passphrase file.
 ANSWERS[encrypt]=no
