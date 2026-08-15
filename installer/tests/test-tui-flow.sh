@@ -374,4 +374,34 @@ for stage in partition format pacstrap bootloader; do
   ! aurade_stage_reversible "$stage" || fail "$stage must not be reversible"
 done
 
+# --- the picker never offers a filesystem this image cannot make -------------
+# The engine refuses a root filesystem whose mkfs is missing, so offering one
+# is offering a choice with a stopped install at the end of it. Both front ends
+# read this list, which is why it is tested here rather than in either of them.
+install -d "$TMP/fsbin"
+for tool in mkfs.btrfs mkfs.ext4; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/fsbin/$tool"
+  chmod +x "$TMP/fsbin/$tool"
+done
+saved_path=$PATH
+PATH="$TMP/fsbin:$PATH"
+# Shadowing rather than emptying the path: `enum_candidates` only asks whether
+# each mkfs can be found, and everything else in this file still needs a shell.
+printf '#!/usr/bin/env bash\nexit 1\n' >"$TMP/fsbin/mkfs.xfs"
+chmod +x "$TMP/fsbin/mkfs.xfs"
+offered=$(enum_candidates filesystem | tr '\n' ' ')
+offered=${offered% }
+[[ $offered == 'btrfs ext4 xfs' ]] || fail "the filesystem list offered '$offered' on an image that has every mkfs"
+rm -f "$TMP/fsbin/mkfs.xfs"
+# And with the tool out of reach, wherever the host keeps it.
+while xfs_tool=$(command -v mkfs.xfs 2>/dev/null); do
+  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fxv "${xfs_tool%/*}" | tr '\n' ':')
+  PATH=${PATH%:}
+  [[ -n $PATH ]] || break
+done
+offered=$(enum_candidates filesystem | tr '\n' ' ')
+offered=${offered% }
+[[ $offered == 'btrfs ext4' ]] || fail "the filesystem list offered '$offered' on an image with no mkfs.xfs"
+PATH=$saved_path
+
 echo 'installer TUI flow test: PASS'

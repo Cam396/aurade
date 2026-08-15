@@ -120,15 +120,34 @@ def run(window: InstallerWindow) -> None:
     window.flow.jump_to_page("readiness")
     window.refresh()
     pump()
-    flow_box = window.widgets.get("ready.checks")
-    check(flow_box is not None, "the readiness page has no findings container")
-    if flow_box is not None:
-        cards = list(walk(flow_box))
-        titles = [w.get_label() for w in cards
+    group = window.widgets.get("ready.checks")
+    check(group is not None, "the readiness page has no findings container")
+    if group is not None:
+        widgets = list(walk(group))
+        titles = [w.get_label() for w in widgets
                   if isinstance(w, Gtk.Label) and w.get_label()]
         for expected in ("Firmware", "Secure Boot", "Memory", "Storage", "Graphics"):
             check(expected in titles,
                   f"the readiness page does not report {expected}")
+
+        # Every finding carries its own subject icon and its own state mark.
+        # Five identical ticks is what this page looked like before, and the
+        # tick it used was not even in the image's icon theme, so the page
+        # was five blank spaces and five titles.
+        rows = [w for w in walk(group) if isinstance(w, Adw.ActionRow)]
+        check(len(rows) >= 5,
+              f"the readiness page built {len(rows)} rows, not one per check")
+        images = [w for w in walk(group) if isinstance(w, Gtk.Image)]
+        named = [w.get_icon_name() for w in images if w.get_icon_name()]
+        for expected in ("application-x-firmware-symbolic", "channel-secure-symbolic",
+                         "media-flash-symbolic", "drive-harddisk-symbolic",
+                         "video-display-symbolic"):
+            check(expected in named,
+                  f"no finding on the readiness page draws {expected}")
+        tiles = [w for w in walk(group)
+                 if w.has_css_class("aurade-icon-tile")]
+        check(len(tiles) >= 5,
+              f"only {len(tiles)} findings put their icon in a tile")
     headline = window.widgets.get("ready.headline")
     check(headline is not None and bool(headline.get_label()),
           "the readiness page drew no verdict")
@@ -173,6 +192,129 @@ def run(window: InstallerWindow) -> None:
               "the rollback consequence was left folded out of sight")
         window.widgets["q.filesystem"].set_selected(values.index("btrfs"))
         pump()
+
+    # -- a blocked verdict has to actually block ---------------------------
+    #
+    # The readiness page's whole purpose is to move the engine's two hard
+    # refusals - a BIOS boot and an enabled Secure Boot - to before the disk
+    # is chosen. If Next still works, the page is a notice board: the user
+    # answers nine more questions and meets the same refusal at the erase
+    # gate, which is the failure this page was built to prevent. The page did
+    # disable the button, and the refresh that drew it turned it back on two
+    # dozen lines later.
+    window.flow.state = "pages"
+    window.flow.jump_to_page("readiness")
+    real_call = window.model.call
+    window.model.call = lambda command, argument="": {
+        "ok": True, "verdict": "blocked",
+        "checks": [{"id": "secure_boot", "title": "Secure Boot", "state": "blocked",
+                    "finding": "Secure Boot is on.",
+                    "action": "Turn it off in the firmware settings."}],
+    } if command == "readiness" else real_call(command, argument)
+    window.refresh()
+    pump()
+    check(not window.forward_button.get_sensitive(),
+          "a blocked readiness verdict still lets the installer continue")
+    window.model.call = real_call
+    window.refresh()
+    pump()
+    check(window.forward_button.get_sensitive(),
+          "the readiness page left the installer stuck after the block cleared")
+
+    # -- the way in to the advanced page -----------------------------------
+    #
+    # The advanced questions have working defaults, so their page is not in the
+    # flow until it is asked for, and for one release the only thing that asked
+    # for it was a flat button at the end of the review screen. This is the
+    # control that makes it reachable from anywhere, and the assertion is that
+    # it actually changes the flow rather than looking like it might.
+    # Walking every page above reached the advanced one, which is what puts it
+    # in the flow; put it back the way a fresh installer starts.
+    window.flow.set_show_advanced(False)
+    window.flow.state = "pages"
+    window.flow.jump_to_page("readiness")
+    window.refresh()
+    pump()
+    advanced = window.widgets.get("chrome.advanced")
+    check(isinstance(advanced, Gtk.ToggleButton),
+          "there is no way to reach the advanced options from the chrome")
+    if isinstance(advanced, Gtk.ToggleButton):
+        before = len(window.flow.pages)
+        advanced.set_active(True)
+        pump()
+        check("advanced" in window.flow.pages,
+              "the advanced toggle did not put the advanced page in the flow")
+        check(len(window.flow.pages) == before + 1,
+              "the advanced toggle changed the flow by more than one page")
+        check(window.flow.current_page == "advanced",
+              f"the advanced toggle left the installer on "
+              f"{window.flow.current_page!r}")
+        advanced.set_active(False)
+        pump()
+        check("advanced" not in window.flow.pages,
+              "turning the advanced toggle off left the page in the flow")
+        window.flow.jump_to_page("readiness")
+        window.refresh()
+        pump()
+
+    # -- the motion actually runs ------------------------------------------
+    #
+    # Two animations, both driven by libadwaita rather than by a timer here.
+    # An API name that does not exist raises on the machine being installed
+    # and nowhere else, so both are played for real against the toolkit.
+    #
+    # Animations have to be turned on to test them: this harness draws with
+    # cairo, which is exactly the condition under which the installer switches
+    # motion off, so leaving it alone would take both paths straight to the
+    # branch that does nothing and prove neither call exists.
+    settings = Gtk.Settings.get_default()
+    motion_was = settings.get_property("gtk-enable-animations")
+    settings.set_property("gtk-enable-animations", True)
+    check(window.animate, "the window will not animate even with motion on")
+    try:
+        window.fade_in()
+    except Exception as exc:  # noqa: BLE001 - any failure is the finding
+        FAILURES.append(f"the window's fade-in raised: {exc!r}")
+
+    window.flow.state = F.PROGRESS
+    window.refresh()
+    try:
+        window._draw_progress({
+            "running": True, "can_stop": True, "position": "2 of 7",
+            "stages": [{"stage": "acquire", "label": "Downloading packages",
+                        "status": "running", "pct": 60, "detail": "60%"}],
+        })
+    except Exception as exc:  # noqa: BLE001
+        FAILURES.append(f"drawing progress raised: {exc!r}")
+    else:
+        bar = window.widgets["progress.bar"]
+        animation = getattr(window, "_progress_fade", None)
+        check(animation is not None,
+              "the progress bar was not animated with motion turned on")
+        if animation is not None:
+            # Run it to its end rather than waiting for frames. A headless
+            # compositor's frame clock is not a thing to build an assertion
+            # on, and the question here is whether the animation reaches the
+            # value it was given - which is the half that breaks when a
+            # property name is wrong.
+            animation.skip()
+            pump(4)
+            check(abs(bar.get_fraction() - 0.6) < 1e-6,
+                  f"the progress animation ended at {bar.get_fraction()}, not 0.6")
+
+    # And with motion off - the machines this installer usually runs on - the
+    # same call still has to land on the value rather than easing to it in a
+    # step nobody scheduled.
+    settings.set_property("gtk-enable-animations", False)
+    window.widgets["progress.bar"].set_fraction(0.0)
+    window._draw_progress({
+        "running": True, "can_stop": False, "position": "3 of 7",
+        "stages": [{"stage": "pacstrap", "label": "Installing packages",
+                    "status": "running", "pct": 40, "detail": ""}],
+    })
+    check(abs(window.widgets["progress.bar"].get_fraction() - 0.4) < 1e-6,
+          "with motion off the progress bar did not go straight to its value")
+    settings.set_property("gtk-enable-animations", motion_was)
 
     # -- the scheme toggle -------------------------------------------------
     toggles = [w for w in walk(window)

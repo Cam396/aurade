@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Start what the boot menu asked for.
+#
+# The boot menu is the first screen anyone sees, and it used to offer one entry
+# that dropped to a root shell with instructions in the message of the day.
+# Reading a paragraph and typing a command is a reasonable thing to ask of
+# someone recovering a system and an unreasonable thing to ask of someone
+# installing one, so the menu now has an entry per front end and this is what
+# turns that choice into a running installer.
+#
+# The choice arrives on the kernel command line, because that is the only
+# channel that exists between a boot menu entry and a booted system, and it is
+# read here rather than in the launcher so that `aurade-installer-start` stays
+# a command anyone can run with arguments.
+#
+# Nothing here can install anything. It chooses a front end; both front ends
+# ask the same questions and neither writes to a disk until the disk has been
+# confirmed by name.
+set -Eeuo pipefail
+
+CMDLINE_FILE=${AURADE_CMDLINE_FILE:-/proc/cmdline}
+START=${AURADE_INSTALLER_START:-/usr/local/sbin/aurade-installer-start}
+# Once per boot. The console this runs on is an autologin getty: when the
+# installer exits, the login shell ends, agetty starts another one, and this
+# would run again - an installer nobody can quit. The stamp lives on a tmpfs,
+# so a restart of the machine is a clean slate and a restart of the shell is
+# not.
+STAMP=${AURADE_AUTOSTART_STAMP:-/run/aurade-installer-autostarted}
+
+# The last occurrence wins, the way the kernel treats a repeated parameter.
+aurade_requested_front_end() {
+  local word choice=none
+  [[ -r $CMDLINE_FILE ]] || { printf 'none'; return 0; }
+  for word in $(<"$CMDLINE_FILE"); do
+    case $word in
+      aurade.installer=*) choice=${word#aurade.installer=} ;;
+    esac
+  done
+  case $choice in
+    gui|text|safe|none) printf '%s' "$choice" ;;
+    # An unknown value is a typo in a boot entry, not an instruction. Say so
+    # and leave the console alone rather than guessing which was meant.
+    *) printf 'unknown:%s' "$choice" ;;
+  esac
+}
+
+main() {
+  local choice status=0
+  choice=$(aurade_requested_front_end)
+  case $choice in
+    none) return 0 ;;
+    unknown:*)
+      printf 'aurade-installer-autostart: %s is not a front end; leaving you at the console\n' \
+        "${choice#unknown:}" >&2
+      return 0
+      ;;
+  esac
+
+  [[ -x $START ]] || {
+    printf 'aurade-installer-autostart: %s is missing; leaving you at the console\n' \
+      "$START" >&2
+    return 0
+  }
+
+  if [[ -e $STAMP ]]; then
+    printf 'aurade-installer-autostart: the installer has already run on this console.\n' >&2
+    printf 'Run `aurade-installer-start` to start it again.\n' >&2
+    return 0
+  fi
+  : >"$STAMP" 2>/dev/null || true
+
+  # Run it rather than replace this shell with it. Quitting the installer then
+  # leaves a console with a prompt on it, which is what someone who quit an
+  # installer is looking for.
+  case $choice in
+    gui)  "$START" --graphical || status=$? ;;
+    safe) "$START" --graphical --safe-graphics || status=$? ;;
+    text) "$START" --text || status=$? ;;
+  esac
+
+  printf '\naurade-installer-autostart: the installer exited (status %s).\n' "$status" >&2
+  printf 'Run `aurade-installer-start` to start it again, or `aurade-recovery --help`.\n' >&2
+  return 0
+}
+
+main "$@"

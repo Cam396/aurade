@@ -43,6 +43,38 @@ or absent graphical renderer cannot affect the fallback. Every way the
 graphical path can fail - no toolkit, no compositor, no display, a probe that
 says no - ends in the text installer, with the reason printed.
 
+## The boot menu is part of the interface
+
+Four entries, one per way in, in `installer/archiso/efiboot/loader/entries/`.
+Each names a front end on the kernel command line as `aurade.installer=`, and
+`aurade-installer-autostart` reads that on tty1 and starts it. An entry that
+names a front end nothing acts on is a boot menu that lies, so the staging test
+checks both halves against each other.
+
+| entry | command line | what starts |
+| --- | --- | --- |
+| AuraDE installer | `aurade.installer=gui` | `aurade-installer-start --graphical` |
+| AuraDE installer, text mode | `aurade.installer=text` | `aurade-installer-start --text` |
+| AuraDE installer, safe graphics | `aurade.installer=safe` | the same, with every accelerated path skipped |
+| AuraDE recovery console | `aurade.installer=none` | nothing; a root shell |
+
+The autostart runs the installer rather than replacing the login shell with it,
+and marks a stamp on tmpfs so it happens once per boot. The console is an
+autologin getty: without both of those, quitting the installer ends the login,
+agetty starts another, and the installer comes back - an installer with no way
+out of it.
+
+## Icons are pinned to the image, not to the build host
+
+Every icon name the front end asks for is checked by `test-gui-icons.sh`
+against `installer/tests/fixtures/image-symbolic-icons.txt`, which is the set
+the image's icon theme actually installs. An unresolvable icon name is not an
+error in GTK: the widget draws nothing, sizes itself as though nothing were
+there, and the page looks like it was designed without an icon. It cannot be
+seen in a headless render either, because the build host's icon theme is a
+different version with different names in it - which is exactly how five state
+ticks and a verdict badge shipped invisible.
+
 ## Getting something onto the screen
 
 Two independent things have to work before anyone sees a window, and they fail
@@ -336,6 +368,7 @@ evidence alone and the wording claims no more than that.
 | `test-gui-widgets.sh` | every toolkit name against GTK's introspection data; skips when the toolkit is absent |
 | `test-gui-runtime.sh` | the window built on a headless compositor: containment, storage and scheme controls, and the stage the front end reports after drawing |
 | `test-renderer-chain.sh` | the order graphics candidates are tried in, and the launcher's rule for what each outcome means |
+| `test-gui-icons.sh` | every icon name the front end asks for, against the set the image carries |
 
 The render and flow tests exist because this project has already shipped a
 prompt that hung at its own keyboard validation while `bash -n` and a

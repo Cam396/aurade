@@ -47,11 +47,14 @@ installer when it cannot. Both ask the same questions and run the same engine.
 Options:
   --text             Use the text installer regardless of what the probe finds
   --graphical        Try the graphical installer even if the probe advises text
+  --safe-graphics    Graphical, with every acceleration path skipped
   --plan-only        Ask the questions and check the plan; never offer to erase
   -h, --help         This message
 
 Environment:
   AURADE_FORCE_TUI=1 Same as --text
+  AURADE_SAFE_GRAPHICS=1
+                     Same as --safe-graphics
 EOF
 }
 
@@ -91,6 +94,11 @@ while (($#)); do
     # `cage` that probe can reach a different answer to the one the user just
     # overruled. Asking for the graphical installer has to mean it.
     --graphical) MODE=graphical; GUI_EXTRA+=(--force); shift ;;
+    # Safe graphics is a graphical install by definition: the point of it is
+    # the window, and the only question is how hard the machine is allowed to
+    # try to draw one.
+    --safe-graphics)
+      MODE=graphical; GUI_EXTRA+=(--force); export AURADE_SAFE_GRAPHICS=1; shift ;;
     --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;

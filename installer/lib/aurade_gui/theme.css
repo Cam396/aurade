@@ -210,21 +210,52 @@ window.aurade { font-family: "Adwaita Sans", "Cantarell", sans-serif; }
   color: @m3_on_error_container;
 }
 
-/* One finding. Deliberately quieter than the verdict above it - five cards
-   competing at the verdict's volume is five things shouting and nothing
-   read. The state shows in the glyph and in a single edge, not in a fill. */
-.aurade-check {
-  background: @m3_surface_container_low;
-  border-radius: 16px;
-  border: 1px solid @m3_outline_variant;
-  padding: 14px 16px;
+/* The verdict's own glyph, in a disc of its container's ink. Material 3 puts
+   a leading icon in a shape rather than loose beside the text, and at this
+   size - the first thing on the first page - the difference is between a
+   decoration and a verdict. */
+.aurade-verdict-badge {
+  border-radius: 999px;
+  padding: 13px;
 }
 
-.aurade-check-ok { border-left: 3px solid @m3_tertiary; }
-.aurade-check-warn { border-left: 3px solid @m3_secondary; }
-.aurade-check-blocked {
-  border-left: 3px solid @m3_error;
-  background: @m3_surface_container;
+.aurade-verdict-ok .aurade-verdict-badge {
+  background: alpha(@m3_on_tertiary_container, 0.12);
+}
+
+.aurade-verdict-attention .aurade-verdict-badge {
+  background: alpha(@m3_on_secondary_container, 0.12);
+}
+
+.aurade-verdict-blocked .aurade-verdict-badge {
+  background: alpha(@m3_on_error_container, 0.12);
+}
+
+/* One finding's subject, in the same shape one size down. Five identical
+   ticks in a column tell you five things passed and nothing about what they
+   were; the tile is what makes the page scannable without reading it. The
+   state is carried by the tile's colour and by the mark at the other end of
+   the row, so a finding that needs attention is visible from across a desk. */
+.aurade-icon-tile {
+  border-radius: 999px;
+  padding: 9px;
+  background: @m3_surface_container_high;
+  color: @m3_on_surface_variant;
+}
+
+.aurade-tile-ok {
+  background: @m3_tertiary_container;
+  color: @m3_on_tertiary_container;
+}
+
+.aurade-tile-warn {
+  background: @m3_secondary_container;
+  color: @m3_on_secondary_container;
+}
+
+.aurade-tile-blocked {
+  background: @m3_error_container;
+  color: @m3_on_error_container;
 }
 
 /* What to do about it. Only ever present on a card that needs an answer. */
@@ -262,7 +293,8 @@ window.aurade { font-family: "Adwaita Sans", "Cantarell", sans-serif; }
 
 /* ---- scheme toggle ---------------------------------------------------- */
 
-.aurade-scheme-button {
+.aurade-scheme-button,
+.aurade-chrome-button {
   border-radius: 999px;
   padding: 4px;
   min-width: 30px;

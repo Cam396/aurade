@@ -231,4 +231,82 @@ PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
 grep -q -- '--plan-only' "$TMP/launch.log" ||
   fail 'plan-only was dropped on the way to the graphical installer'
 
+# --- the boot menu choice reaches a front end --------------------------------
+#
+# Four boot entries, one per front end, and a kernel command line is the only
+# channel between the menu and the booted system. What the entry asks for and
+# what starts have to be the same thing, and neither half is visible from the
+# other, so this checks the mapping directly.
+AUTOSTART=$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart
+cat >"$TMP/bin/start-recorder" <<'STUB'
+#!/usr/bin/env bash
+printf 'start %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+exit 0
+STUB
+chmod +x "$TMP/bin/start-recorder"
+
+# `logged` is a substring match and the autostart's own messages contain the
+# word; this asks whether the recorder ran at all.
+started() { grep -q '^start ' "$TMP/launch.log"; }
+
+autostart() {
+  launch
+  rm -f "$TMP/autostart-stamp"
+  printf '%s\n' "$1" >"$TMP/cmdline"
+  AURADE_CMDLINE_FILE="$TMP/cmdline" AURADE_INSTALLER_START="$TMP/bin/start-recorder" \
+    AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
+    "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
+}
+
+# The same call again, without clearing the stamp: this is what the next login
+# on the same console looks like.
+autostart_again() {
+  launch
+  AURADE_CMDLINE_FILE="$TMP/cmdline" AURADE_INSTALLER_START="$TMP/bin/start-recorder" \
+    AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
+    "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
+}
+
+autostart 'root=live quiet aurade.installer=gui' || fail 'the graphical entry failed'
+logged 'start --graphical' || fail 'the graphical boot entry did not start the graphical installer'
+
+autostart 'root=live aurade.installer=text quiet' || fail 'the text entry failed'
+logged 'start --text' || fail 'the text boot entry did not start the text installer'
+
+autostart 'aurade.installer=safe' || fail 'the safe graphics entry failed'
+logged 'start --graphical --safe-graphics' ||
+  fail 'the safe graphics boot entry did not skip acceleration'
+
+# The recovery console is the entry that starts nothing. Someone who chose it
+# is here to run commands, and an installer on top of that is in the way.
+autostart 'aurade.installer=none' || fail 'the recovery console entry failed'
+! started || fail 'the recovery console entry started an installer anyway'
+
+# No parameter at all - a hand-typed boot, or an older entry - is the console
+# too. Guessing at an installer for someone who did not ask for one is the
+# same mistake in the other direction.
+autostart 'root=live quiet' || fail 'a command line with no request failed'
+! started || fail 'a command line with no request started an installer'
+
+# A typo in a boot entry is a typo, not an instruction.
+autostart 'aurade.installer=graphical' || fail 'an unknown front end failed instead of saying so'
+! started || fail 'an unknown front end name started something anyway'
+grep -q 'is not a front end' "$TMP/launch.log" ||
+  fail 'an unknown front end name was not reported'
+
+# Quitting the installer must not start it again. The console is an autologin
+# getty: the login shell ends when the installer exits, agetty starts another
+# one, and an installer that starts itself on every login is an installer with
+# no way out of it.
+autostart 'aurade.installer=gui' || fail 'the graphical entry failed'
+logged 'start --graphical' || fail 'the first login did not start the installer'
+autostart_again || fail 'the second login failed'
+! started || fail 'quitting the installer started it again on the next login'
+grep -q 'already run on this console' "$TMP/launch.log" ||
+  fail 'the second login did not say why it started nothing'
+
+# The kernel takes the last occurrence of a repeated parameter; so does this.
+autostart 'aurade.installer=gui aurade.installer=text' || fail 'a repeated request failed'
+logged 'start --text' || fail 'a repeated request did not resolve the way the kernel resolves it'
+
 echo 'installer GUI launch test: PASS'

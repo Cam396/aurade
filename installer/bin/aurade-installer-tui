@@ -431,10 +431,26 @@ enum_candidates() {
     # happens to have"; they are the values aurade-install accepts, and the
     # engine rejects anything else, so listing them here is the whole list.
     layout)     printf '%s\n' wipe alongside ;;
-    filesystem) printf '%s\n' btrfs ext4 xfs ;;
+    # The one exception, and it is not a taste question: a root filesystem
+    # this image cannot make is not an option, it is a failure with a delay
+    # on it. The engine refuses `--filesystem xfs` without mkfs.xfs, so an
+    # installer that offers xfs on an image without xfsprogs is offering a
+    # choice whose only outcome is a stopped install.
+    filesystem)
+      local fs
+      for fs in btrfs ext4 xfs; do
+        command -v "mkfs.$fs" >/dev/null 2>&1 || continue
+        printf '%s\n' "$fs"
+      done
+      ;;
     swap)       printf '%s\n' none file zram ;;
     swap_size)  printf '%s\n' auto hibernate 2G 4G 8G 16G 32G ;;
   esac
+  # An empty list is an answer, not a failure. Both callers run under
+  # `set -e` with `pipefail`, so a `grep` that matched nothing or a `command
+  # -v` that found nothing would otherwise take the whole front end down
+  # while looking like a question with no candidates.
+  return 0
 }
 
 ENUM_MATCHES=()

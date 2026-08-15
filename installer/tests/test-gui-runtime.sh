@@ -79,6 +79,10 @@ unset DBUS_SESSION_BUS_ADDRESS DISPLAY
 weston --backend=headless --width=1280 --height=860 --shell=kiosk-shell.so \
   --socket=wl-aurade-test --idle-time=0 >"$TMP/weston.log" 2>&1 &
 WESTON_PID=$!
+# Out of the job table. The compositor crashes on its way out of a kill, and
+# the shell would otherwise report that in the middle of the test results as
+# though the test had segfaulted.
+disown "$WESTON_PID" 2>/dev/null || true
 for _ in $(seq 1 40); do
   [[ -S $XDG_RUNTIME_DIR/wl-aurade-test ]] && break
   sleep 0.25

@@ -98,8 +98,59 @@ grep -Fxq 'LocalFileSigLevel = Optional' \
   "$TMP/work/profile/pacman.conf"
 grep -Fxq 'LocalFileSigLevel = Optional' \
   "$TMP/work/profile/airootfs/etc/pacman.conf"
-grep -Fq 'cow_spacesize=4G' \
-  "$ROOT/installer/archiso/efiboot/loader/entries/01-aurade-linux.conf"
+# A filesystem the picker offers has to be one the image can make. The engine
+# refuses `--filesystem xfs` without mkfs.xfs, and the front ends hide what the
+# image cannot make - so dropping xfsprogs does not break anything visibly, it
+# just silently removes a choice this installer says it supports.
+grep -Fxq 'xfsprogs' "$ROOT/installer/archiso/packages.x86_64" || {
+  echo 'test-build-iso-stage: the image cannot make an xfs root, so the installer cannot offer one' >&2
+  exit 1
+}
+
+# The boot menu, which is the first screen anyone sees.
+#
+# One entry per front end, each naming itself on the kernel command line, and
+# the default one selected in loader.conf by a filename that exists. A boot
+# menu whose default points at a missing entry is a machine that boots to a
+# firmware screen, which is the one failure nobody can debug from the console.
+entries=$ROOT/installer/archiso/efiboot/loader/entries
+for entry in gui text safe none; do
+  grep -lq "aurade.installer=$entry" "$entries"/*.conf || {
+    echo "test-build-iso-stage: no boot entry asks for the $entry front end" >&2
+    exit 1
+  }
+done
+for entry in "$entries"/*.conf; do
+  grep -Fq 'cow_spacesize=4G' "$entry" || {
+    echo "test-build-iso-stage: ${entry##*/} does not give the live overlay room to prefetch" >&2
+    exit 1
+  }
+  grep -Fq 'archisosearchuuid=%ARCHISO_UUID%' "$entry" || {
+    echo "test-build-iso-stage: ${entry##*/} would not find its own image" >&2
+    exit 1
+  }
+done
+default_entry=$(awk '$1 == "default" {print $2; exit}' \
+  "$ROOT/installer/archiso/efiboot/loader/loader.conf")
+[[ -r $entries/$default_entry ]] || {
+  echo "test-build-iso-stage: the default boot entry $default_entry does not exist" >&2
+  exit 1
+}
+grep -Fq 'aurade.installer=gui' "$entries/$default_entry" || {
+  echo 'test-build-iso-stage: the default boot entry does not start the graphical installer' >&2
+  exit 1
+}
+
+# And the half that reads it back. An entry that names a front end nothing acts
+# on is a boot menu that lies.
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-autostart ]] || {
+  echo 'test-build-iso-stage: the boot menu choice is never read on the image' >&2
+  exit 1
+}
+[[ -r $TMP/work/profile/airootfs/root/.bash_profile ]] || {
+  echo 'test-build-iso-stage: nothing runs the autostart on the live console' >&2
+  exit 1
+}
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]

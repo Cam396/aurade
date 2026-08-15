@@ -659,6 +659,30 @@ case $FILESYSTEM in
 esac
 [[ $SWAP != zram ]] || BASE_PACKAGES+=(zram-generator)
 
+# The tools this shape needs, checked in both modes.
+#
+# This used to run only on the destructive path, immediately before the first
+# write. That is early enough to keep a disk intact, and far too late to be
+# useful: the image ships mkfs.btrfs and mkfs.ext4 and not every other one, so
+# choosing a root filesystem the image cannot make produced an installer that
+# asked every question, accepted the erase token, and then refused - after the
+# user had committed to erasing the disk.
+#
+# The dry run is the answer to "will this work". So the same check runs there,
+# where it is a plan that says no rather than an installation that stops.
+require_shape_tools() {
+  case $FILESYSTEM in
+    ext4) command -v mkfs.ext4 >/dev/null || die 'required command not found: mkfs.ext4' ;;
+    xfs)  command -v mkfs.xfs >/dev/null || die 'required command not found: mkfs.xfs' ;;
+  esac
+  if [[ $SWAP == file ]]; then
+    command -v mkswap >/dev/null || die 'required command not found: mkswap'
+    [[ $FILESYSTEM != ext4 ]] || command -v fallocate >/dev/null || \
+      die 'required command not found: fallocate'
+  fi
+}
+require_shape_tools
+
 ESP_PART=$(partition_path "$TARGET" 1)
 ROOT_PART=$(partition_path "$TARGET" 2)
 # The token says what is about to happen. `alongside` does not erase anything,
@@ -734,16 +758,10 @@ if [[ $MODE == execute ]]; then
   done
   # Same rule as cryptsetup below: anything the chosen shape will need is
   # checked here, before the first destructive command, so a missing binary
-  # cannot leave a half-partitioned disk.
-  case $FILESYSTEM in
-    ext4) command -v mkfs.ext4 >/dev/null || die 'required command not found: mkfs.ext4' ;;
-    xfs)  command -v mkfs.xfs >/dev/null || die 'required command not found: mkfs.xfs' ;;
-  esac
-  if [[ $SWAP == file ]]; then
-    command -v mkswap >/dev/null || die 'required command not found: mkswap'
-    [[ $FILESYSTEM != ext4 ]] || command -v fallocate >/dev/null || \
-      die 'required command not found: fallocate'
-  fi
+  # cannot leave a half-partitioned disk. The plan ran this too, which is
+  # where it should first have been noticed; this is the copy that guarantees
+  # it, because a plan can be minutes old by the time anyone confirms it.
+  require_shape_tools
   # The encrypted path invokes cryptsetup after partitioning.  Check it with
   # the other pre-erase dependencies so a missing binary cannot leave a
   # partially partitioned target.

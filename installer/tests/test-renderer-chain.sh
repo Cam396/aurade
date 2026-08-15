@@ -62,6 +62,24 @@ printf '%s\n' "${plan[@]}" | grep -q 'WLR_RENDERER=vulkan' && \
 
 printf '%s\n' "${plan[@]}" | tail -1 | grep -q 'WLR_RENDERER=pixman' || \
   fail 'the software floor is not the last thing tried'
+
+# The pointer. A hardware cursor plane draws nothing at all on several virtual
+# GPUs - the pointer moves, clicks land, and the screen never shows it - and
+# an unset theme name resolves through an alias a live image need not have.
+# Every candidate carries both, because the one that ends up working is not
+# known in advance and an installer nobody can point at is not usable.
+while IFS= read -r line; do
+  [[ -n $line ]] || continue
+  [[ $line == *WLR_NO_HARDWARE_CURSORS=1* ]] || \
+    fail "a graphics candidate would draw its pointer in hardware: $line"
+  [[ $line == *XCURSOR_THEME=Adwaita* ]] || \
+    fail "a graphics candidate does not name a cursor theme: $line"
+done < <(printf '%s\n' "${plan[@]}")
+while IFS= read -r line; do
+  [[ -n $line ]] || continue
+  [[ $line == *XCURSOR_THEME=Adwaita* ]] || \
+    fail "a client candidate does not name a cursor theme: $line"
+done < <(aurade_renderer_client_plan)
 printf '%s\n' "${plan[@]}" | grep -q 'LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe' || \
   fail 'software OpenGL is not tried before giving up on GL entirely'
 
@@ -82,6 +100,21 @@ vulkan_at=$(printf '%s\n' "${plan[@]}" | grep -n 'WLR_RENDERER=vulkan' | head -1
 gles_at=$(printf '%s\n' "${plan[@]}" | grep -n 'WLR_RENDERER=gles2' | head -1 | cut -d: -f1)
 [[ -n $vulkan_at ]] || fail 'vulkan is not offered even with an ICD installed'
 (( vulkan_at < gles_at )) || fail 'OpenGL is tried before Vulkan'
+
+# Safe graphics is the boot entry for a machine whose graphics stack reports
+# success and then draws nothing. Negotiation cannot see that failure, so this
+# path does not negotiate: one compositor candidate, one client candidate, both
+# software, and no accelerated path offered at all.
+safe_plan=$(AURADE_SAFE_GRAPHICS=1 bash -c ". '$ROOT/installer/lib/aurade-renderers.sh'; aurade_renderer_plan")
+safe_clients=$(AURADE_SAFE_GRAPHICS=1 bash -c ". '$ROOT/installer/lib/aurade-renderers.sh'; aurade_renderer_client_plan")
+(( $(printf '%s\n' "$safe_plan" | grep -c .) == 1 )) || \
+  fail "safe graphics offered more than one compositor: $safe_plan"
+(( $(printf '%s\n' "$safe_clients" | grep -c .) == 1 )) || \
+  fail "safe graphics offered more than one drawing path: $safe_clients"
+[[ $safe_plan == *WLR_RENDERER=pixman* ]] || \
+  fail "safe graphics is not the software floor: $safe_plan"
+[[ $safe_clients == *GSK_RENDERER=cairo* ]] || \
+  fail "safe graphics still lets GTK reach for a GPU: $safe_clients"
 
 # -- the launcher -----------------------------------------------------------
 #

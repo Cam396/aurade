@@ -44,30 +44,34 @@ PAGES: tuple[Page, ...] = (
         name="readiness",
         title="Let's check this computer",
         subtitle=(
-            "Everything here is checked before anything is written, so a "
-            "problem found now costs you nothing."
+            "A few quick checks, before anything is written. A problem found "
+            "here costs you nothing to fix."
         ),
     ),
     Page(
         name="network",
-        title="Connect to the internet",
+        title="Get this computer online",
         subtitle=(
-            "AuraDE downloads and verifies every package before it writes "
-            "anything to the disk, so the connection is set up first."
+            "AuraDE downloads and checks every package before it touches a "
+            "disk, so the connection comes first."
         ),
     ),
     Page(
         name="language",
         title="Language and keyboard",
-        subtitle="These take effect immediately, before you type a password.",
+        subtitle=(
+            "These take effect straight away, so the password you set later "
+            "is typed on the layout you chose."
+        ),
         questions=("locale", "keymap", "timezone"),
     ),
     Page(
         name="disk",
         title="Choose a disk",
         subtitle=(
-            "Everything on the disk you choose will be erased. You can still "
-            "go back or cancel after this step."
+            "Everything on the disk you pick will be erased. You can still go "
+            "back or cancel after this step - nothing happens until you "
+            "confirm the disk by name."
         ),
         # The four after `target` are the advanced storage controls. They are
         # on this page rather than on the advanced page at the end because
@@ -78,7 +82,7 @@ PAGES: tuple[Page, ...] = (
     ),
     Page(
         name="account",
-        title="Create your account",
+        title="Make yourself an account",
         subtitle="This is the account you will sign in to on this computer.",
         questions=("hostname", "username", "password"),
     ),
@@ -86,8 +90,8 @@ PAGES: tuple[Page, ...] = (
         name="encryption",
         title="Disk encryption",
         subtitle=(
-            "Encryption protects your files if this computer is lost or "
-            "stolen."
+            "Encryption keeps your files unreadable to anyone who ends up "
+            "with this computer and not with your passphrase."
         ),
         questions=("encrypt", "luks_passphrase"),
     ),
@@ -95,8 +99,8 @@ PAGES: tuple[Page, ...] = (
         name="advanced",
         title="Advanced options",
         subtitle=(
-            "Defaults that work. Change these only if you know why you are "
-            "changing them."
+            "Everything here already has an answer that works. Change one "
+            "only if you know why you want to."
         ),
         questions=("snapshot", "repo_url"),
         optional=True,
@@ -377,8 +381,9 @@ class Flow:
 
 WELCOME_TITLE = "Install AuraDE"
 WELCOME_BODY = (
-    "This installs AuraDE on this computer. You will choose a disk, create "
-    "an account, and confirm before anything is erased."
+    "A few questions, a disk to choose, and an account to make. You will see "
+    "exactly what is going to happen, and be asked to confirm it, before "
+    "anything is erased."
 )
 WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 
@@ -393,13 +398,13 @@ READINESS_VERDICTS: dict[str, tuple[str, str]] = {
     ),
     "attention": (
         "Worth knowing before you start",
-        "AuraDE will install. One or two things will work better if you fix "
-        "them first.",
+        "AuraDE will install here. One or two things below will work better "
+        "if you sort them out first.",
     ),
     "blocked": (
-        "This needs fixing first",
-        "AuraDE cannot install on this computer as it is set up right now. "
-        "Each problem below says how to fix it.",
+        "One thing to fix first",
+        "AuraDE cannot install with this computer set up the way it is right "
+        "now. Each item below says what to change.",
     ),
 }
 
@@ -408,13 +413,13 @@ READINESS_DETAILS = "Technical details"
 #: Shown when the model cannot be reached for a readiness report at all. The
 #: page still has to say something, and "no findings" would read as "all clear".
 READINESS_UNKNOWN = (
-    "This computer could not be checked. The installation will still stop "
-    "before erasing anything if it finds a problem later."
+    "These checks could not be run. The installation still stops before "
+    "erasing anything if it runs into a problem later on."
 )
 
 STORAGE_TITLE = "Advanced storage options"
 STORAGE_SUBTITLE = (
-    "The defaults install AuraDE the way it is designed to run. Everything "
+    "The defaults install AuraDE the way it is meant to run. Everything in "
     "here changes the shape of the disk."
 )
 
@@ -441,14 +446,14 @@ STORAGE_NOTES: dict[str, str] = {
     ),
 }
 
-REVIEW_TITLE = "Review"
+REVIEW_TITLE = "Everything you have chosen"
 REVIEW_ASSURANCE = "Nothing has been written to any disk yet."
 
 GATE_TITLE = "Confirm erase"
 GATE_BODY = (
-    "Everything before this point can be undone. Nothing after it can. The "
-    "packages are already downloaded and verified, so the installation will "
-    "not need the network again."
+    "Everything up to here can be undone. Nothing after it can. The packages "
+    "are already downloaded and verified, so the installation will not need "
+    "the network again."
 )
 
 PROGRESS_TITLE = "Installing"
@@ -457,12 +462,12 @@ PROGRESS_UNINTERRUPTIBLE = "This part cannot be interrupted safely."
 
 DONE_TITLE = "AuraDE is installed"
 DONE_BODY = (
-    "Remove the installation media and restart. Sign in with the username "
-    "and password you chose."
+    "Take out the installation media and restart. Sign in with the username "
+    "and password you chose, and AuraDE is yours."
 )
 DONE_ENCRYPTED = (
-    "This disk is encrypted. You will be asked for the disk passphrase each "
-    "time the computer starts, before the sign-in screen appears."
+    "This disk is encrypted. Every time the computer starts it will ask for "
+    "the disk passphrase first, before the sign-in screen appears."
 )
 
 STOPPED_TITLE = "Stopped"
@@ -480,8 +485,9 @@ CANCELLED_BODY = (
 
 PLANNED_TITLE = "Plan checked"
 PLANNED_BODY = (
-    "The installer checked this plan against the engine and did not run it. "
-    "This session was started in plan-only mode and cannot erase a disk."
+    "The plan was checked against the engine and not run. This session was "
+    "started in plan-only mode, so it cannot erase a disk however far you "
+    "take it."
 )
 
 FAILURE_TITLE = "Install stopped"

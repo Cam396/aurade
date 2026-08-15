@@ -195,8 +195,32 @@ grep -Fq -- 'mkfs.ext4' "$TMP/ext4.out"
 grep -Fq -- 'boot options: root=UUID=<root-filesystem-uuid> rw quiet' "$TMP/ext4.out"
 grep -Fq -- 'no factory snapshot and no rollback boot entry' "$TMP/ext4.out"
 
+# xfs, on a machine that can make one. The build host frequently cannot, and
+# that is the point of the second half: a plan for a shape whose mkfs is
+# missing has to fail here, in the plan, rather than after the erase token has
+# been typed. The image ships xfsprogs so that this shape is real.
+install -d "$TMP/fsbin"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/fsbin/mkfs.xfs"
+chmod +x "$TMP/fsbin/mkfs.xfs"
+saved_path=$PATH
+PATH="$TMP/fsbin:$saved_path"
 plan xfs --filesystem xfs
 grep -Fq -- 'mkfs.xfs' "$TMP/xfs.out"
+
+# The same shape on an image without the tool. This is the failure a real
+# image produced: every question answered, the disk confirmed by name, and
+# then a stopped install. Whatever the host has, take it out of reach first,
+# so this asserts on every build machine rather than only on the ones that
+# happen to lack xfsprogs.
+PATH=$saved_path
+while xfs_tool=$(command -v mkfs.xfs 2>/dev/null); do
+  xfs_dir=${xfs_tool%/*}
+  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fxv "$xfs_dir" | paste -sd:)
+  [[ -n $PATH ]] || break
+done
+command -v mkfs.xfs >/dev/null 2>&1 && { echo 'could not stage a host without mkfs.xfs' >&2; exit 1; }
+refuses 'required command not found: mkfs.xfs' --filesystem xfs
+PATH=$saved_path
 
 # Installing alongside must not wipe, must not zap, and must not reformat the
 # EFI system partition it was asked to share.

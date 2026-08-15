@@ -181,8 +181,9 @@ for role in ("m3_surface", "m3_on_surface", "m3_surface_container_low"):
 
 # Every component rule is in both sheets, or a card styled in one scheme is an
 # unstyled box in the other.
-for style in ("aurade-verdict", "aurade-check", "aurade-disclosure",
-              "aurade-scheme-button", "aurade-mono"):
+for style in ("aurade-verdict", "aurade-verdict-badge", "aurade-icon-tile",
+              "aurade-tile-ok", "aurade-disclosure", "aurade-scheme-button",
+              "aurade-mono"):
     check(f".{style}" in dark_css,
           f".{style} is missing from the dark stylesheet")
 

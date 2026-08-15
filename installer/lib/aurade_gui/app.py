@@ -50,6 +50,22 @@ PROGRESS_INTERVAL_MS = 400
 #: someone is reading, not an animation anyone should watch.
 AURORA_INTERVAL_MS = 90
 
+#: Environment that means "this machine is drawing without a GPU". The
+#: launcher sets these when it walks down to a software path, and they are the
+#: only honest signal available: asking GTK which renderer it ended up with
+#: says nothing about the compositor underneath it.
+SOFTWARE_MARKERS = (
+    ("AURADE_SAFE_GRAPHICS", "1"),
+    ("GSK_RENDERER", "cairo"),
+    ("LIBGL_ALWAYS_SOFTWARE", "1"),
+    ("WLR_RENDERER", "pixman"),
+)
+
+
+def software_drawing() -> bool:
+    return any(os.environ.get(name) == value for name, value in SOFTWARE_MARKERS)
+
+
 _LIB = os.path.dirname(os.path.realpath(__file__))
 THEME_CSS = os.path.join(_LIB, "theme.css")
 THEME_DARK_CSS = os.path.join(_LIB, "theme-dark.css")
@@ -117,8 +133,59 @@ def page_shell(child: Gtk.Widget, width: int = PROSE_WIDTH) -> Gtk.Widget:
     scroller = Gtk.ScrolledWindow()
     scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroller.set_vexpand(True)
+    # A scrollbar that takes up space rather than one that fades in when
+    # touched. This installer runs on screens as short as 768 pixels, where a
+    # disk list and an open disclosure do not fit, and an overlay scrollbar on
+    # a page nobody is scrolling yet is a page that looks complete and is not.
+    scroller.set_overlay_scrolling(False)
     scroller.set_child(clamp)
     return scroller
+
+
+def icon_tile(name: str, state: str = "", size: int = 18) -> Gtk.Widget:
+    """One icon, in a disc of its own colour.
+
+    Material 3's leading icon in a shape, and the reason it is worth the two
+    extra widgets is that it makes a list of rows scannable without reading
+    it: a column of identical ticks says five things passed, a column of
+    subjects says which five.
+    """
+    tile = Gtk.Box()
+    tile.add_css_class("aurade-icon-tile")
+    if state:
+        tile.add_css_class(f"aurade-tile-{state}")
+    tile.set_valign(Gtk.Align.CENTER)
+    image = Gtk.Image.new_from_icon_name(name)
+    image.set_pixel_size(size)
+    tile.append(image)
+    return tile
+
+
+def reveal(widget: Gtk.Widget) -> None:
+    """Scroll whatever page `widget` is on until all of it is visible.
+
+    Opening a disclosure adds rows below the fold on a short screen, which
+    looks exactly like a disclosure with nothing in it. GTK will not scroll to
+    content that appeared as a result of the click that revealed it, so this
+    does, once the new rows have been given a size.
+    """
+    scroller = widget.get_ancestor(Gtk.ScrolledWindow)
+    if scroller is None:
+        return
+
+    def settle() -> bool:
+        child = scroller.get_child()
+        found, bounds = widget.compute_bounds(child)
+        if not found:
+            return GLib.SOURCE_REMOVE
+        adjustment = scroller.get_vadjustment()
+        bottom = bounds.origin.y + bounds.size.height
+        if bottom > adjustment.get_value() + adjustment.get_page_size():
+            adjustment.set_value(min(bottom - adjustment.get_page_size(),
+                                     adjustment.get_upper() - adjustment.get_page_size()))
+        return GLib.SOURCE_REMOVE
+
+    GLib.idle_add(settle, priority=GLib.PRIORITY_LOW)
 
 
 # --------------------------------------------------------------------------
@@ -217,12 +284,18 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.names = locales.Names()
         self.manifest: dict = {}
         self.widgets: dict = {}
+        #: The readiness rows currently in the list, so a refresh can take out
+        #: exactly what it put in. AdwPreferencesGroup has no "empty me".
+        self.readiness_rows: list = []
         self.group_rows: dict = {}
         self.stage_rows: dict = {}
         self.secrets_set: set = set()
         self.enum_values: dict = {}
         self.probe: dict = {}
         self.install_status = 0
+        #: Set by a page that will not let the flow past it. Read once, in
+        #: `refresh`, after the page has drawn.
+        self.forward_blocked = False
         self.failure_cause = ""
         self.dark = False
         self._progress_source = 0
@@ -260,6 +333,26 @@ class InstallerWindow(Adw.ApplicationWindow):
         display = Gdk.Display.get_default()
         if display is None:
             return
+
+        # Ask for the icon theme this front end was drawn against, rather than
+        # whatever the machine happens to prefer. Every icon name here is
+        # checked against the set the image installs, and an icon that is not
+        # in the theme GTK ends up using does not fall back to a similar one:
+        # it draws a "missing image" glyph, or nothing at all, in a page that
+        # otherwise looks finished. On the image this is already the default;
+        # on a developer's desktop it very often is not.
+        settings = Gtk.Settings.get_for_display(display)
+        if settings is not None:
+            settings.set_property("gtk-icon-theme-name", "Adwaita")
+            # Motion is a luxury paid for by the graphics stack, and on the
+            # machines this installer most often runs on there is no graphics
+            # stack: the launcher walks down to a compositor that composites
+            # in software and a GTK that draws with cairo, and every frame of
+            # a transition is then a full-window redraw on the CPU. Turning
+            # motion off there is not a downgrade - it is the difference
+            # between a page that appears and a page that crawls into place.
+            if software_drawing():
+                settings.set_property("gtk-enable-animations", False)
         self._provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
             display, self._provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -321,6 +414,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         backdrop.set_child(aurora)
 
         frame = column(0)
+        self.widgets["frame"] = frame
         backdrop.add_overlay(frame)
 
         # Top bar: the mark, the wordmark, and where the user is. No window
@@ -339,6 +433,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         top.append(spacer)
+        top.append(self._build_advanced_toggle())
         top.append(self._build_scheme_toggle())
         self.step_label = label("", "m3-label-medium", wrap=False, css="aurade-metric")
         self.step_label.set_valign(Gtk.Align.CENTER)
@@ -388,6 +483,49 @@ class InstallerWindow(Adw.ApplicationWindow):
         actions.append(self.forward_button)
         frame.append(actions)
 
+    def _build_advanced_toggle(self) -> Gtk.Widget:
+        """A way in to the advanced page that does not require finding it.
+
+        The advanced questions have working defaults, so the page is not in
+        the flow by default and the step count stays honest. But the only way
+        to reach it was a flat button on the review screen, at the end, next
+        to the answers - which is to say that anyone looking for a package
+        snapshot or a mirror while answering questions did not find one, and
+        reasonably concluded the graphical installer did not have them.
+
+        A toggle in the chrome is visible from every page, says which state it
+        is in, and is reversible: turning it off takes the page back out of
+        the flow rather than leaving an extra step behind for the rest of the
+        session.
+        """
+        button = Gtk.ToggleButton()
+        button.set_child(Gtk.Image.new_from_icon_name("document-properties-symbolic"))
+        button.set_tooltip_text("Advanced options")
+        button.update_property([Gtk.AccessibleProperty.LABEL], ["Advanced options"])
+        button.add_css_class("flat")
+        # Its own class, styled the same. The scheme buttons are a set of three
+        # and things that count them - the runtime test among them - should not
+        # have to know that a fourth button borrowed their look.
+        button.add_css_class("aurade-chrome-button")
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_margin_end(6)
+        self._advanced_handler = button.connect("toggled", self._on_advanced_toggled)
+        self.widgets["chrome.advanced"] = button
+        return button
+
+    def _on_advanced_toggled(self, button: Gtk.ToggleButton) -> None:
+        if button.get_active():
+            # Opening it goes there. A toggle that adds a step somewhere else
+            # in the flow and leaves you where you were is a toggle that looks
+            # like it did nothing.
+            if self.flow.state == "pages":
+                self.flow.jump_to_page("advanced")
+            else:
+                self.flow.set_show_advanced(True)
+        else:
+            self.flow.set_show_advanced(False)
+        self.refresh()
+
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.
 
@@ -431,6 +569,26 @@ class InstallerWindow(Adw.ApplicationWindow):
             return
         Adw.StyleManager.get_default().set_color_scheme(scheme)
 
+    def fade_in(self) -> None:
+        """The window arriving, rather than appearing.
+
+        An installer that snaps into existence on a machine that has just
+        booted from a stick reads as something that failed and restarted. Four
+        hundred milliseconds of opacity is the whole effect: no logo screen, no
+        progress bar for work that is not happening, nothing that delays the
+        first question. It is skipped entirely when motion is off, which is
+        also when it would cost the most.
+        """
+        frame = self.widgets.get("frame")
+        if frame is None or not self.animate:
+            return
+        target = Adw.PropertyAnimationTarget.new(frame, "opacity")
+        animation = Adw.TimedAnimation.new(frame, 0.0, 1.0, 420, target)
+        animation.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+        # Held on the window: an animation that goes out of scope stops.
+        self._fade = animation
+        animation.play()
+
     def start_aurora(self) -> None:
         if self._aurora_source or not self.animate:
             return
@@ -453,7 +611,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stack.add_named(self._build_gate(), F.GATE)
         self.stack.add_named(self._build_progress(), F.PROGRESS)
         self.stack.add_named(self._build_outcome(
-            F.DONE, F.DONE_TITLE, F.DONE_BODY, "emblem-ok-symbolic"), F.DONE)
+            F.DONE, F.DONE_TITLE, F.DONE_BODY, "object-select-symbolic"), F.DONE)
         self.stack.add_named(self._build_failure(), F.FAILURE)
         self.stack.add_named(self._build_outcome(
             F.STOPPED, F.STOPPED_TITLE, F.STOPPED_BODY,
@@ -525,7 +683,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup()
         expander = Adw.ExpanderRow(title=F.STORAGE_TITLE,
                                    subtitle=F.STORAGE_SUBTITLE)
-        expander.add_prefix(Gtk.Image.new_from_icon_name("drive-harddisk-symbolic"))
+        expander.add_prefix(icon_tile("drive-harddisk-symbolic"))
         for question in page.questions:
             spec = self.manifest["questions"].get(question)
             if spec is None or spec["type"] == "disk":
@@ -543,6 +701,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["storage.warning"] = warning
         expander.add_row(warning)
         group.add(expander)
+        expander.connect(
+            "notify::expanded",
+            lambda item, _p: reveal(item) if item.get_expanded() else None)
         self.widgets["storage.expander"] = expander
         return group
 
@@ -598,23 +759,53 @@ class InstallerWindow(Adw.ApplicationWindow):
     # been answered. Both need a restart to fix. Asking them first is the
     # entire reason this page exists.
 
+    #: What each check is about, so a page of five findings reads as five
+    #: subjects rather than five identical ticks. Every name here is in the
+    #: icon set the image installs, which `gui_icon_test.py` is what proves:
+    #: a name the theme does not carry draws nothing at all, silently, and
+    #: this page shipped that way once already.
+    READINESS_ICONS = {
+        "firmware": "application-x-firmware-symbolic",
+        "secure_boot": "channel-secure-symbolic",
+        "memory": "media-flash-symbolic",
+        "disk": "drive-harddisk-symbolic",
+        "graphics": "video-display-symbolic",
+    }
+
+    #: Secure Boot is the one check whose subject has two faces, and showing
+    #: the open padlock when it is on says more than any wording can.
+    READINESS_ICONS_BAD = {
+        "secure_boot": "channel-insecure-symbolic",
+    }
+
     READINESS_GLYPHS = {
-        "ok": "emblem-ok-symbolic",
+        "ok": "object-select-symbolic",
         "warn": "dialog-warning-symbolic",
         "blocked": "dialog-error-symbolic",
     }
 
+    #: Verdict to check-state, for the badge at the top.
+    VERDICT_GLYPHS = {"ok": "ok", "attention": "warn", "blocked": "blocked"}
+
     def _build_readiness(self, box: Gtk.Box) -> None:
-        verdict = row(18)
+        verdict = row(20)
         verdict.add_css_class("aurade-verdict")
         verdict.add_css_class("aurade-transition")
-        glyph = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
-        glyph.set_pixel_size(38)
-        glyph.set_valign(Gtk.Align.START)
+        # The glyph sits in a tonal disc rather than floating beside the text.
+        # It is the first thing on the first page after the welcome screen, and
+        # a bare 38-pixel icon on a coloured field reads as a decoration; a
+        # badge reads as a verdict.
+        badge = Gtk.Box()
+        badge.add_css_class("aurade-verdict-badge")
+        badge.set_valign(Gtk.Align.CENTER)
+        glyph = Gtk.Image.new_from_icon_name("object-select-symbolic")
+        glyph.set_pixel_size(30)
+        badge.append(glyph)
         self.widgets["ready.glyph"] = glyph
-        verdict.append(glyph)
-        text = column(4)
+        verdict.append(badge)
+        text = column(3)
         text.set_hexpand(True)
+        text.set_valign(Gtk.Align.CENTER)
         headline = label("", "m3-headline-small")
         self.widgets["ready.headline"] = headline
         text.append(headline)
@@ -625,66 +816,65 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["ready.verdict"] = verdict
         box.append(verdict)
 
-        # A flow box rather than a column: two findings side by side at this
-        # width, one when the window is narrow, and no reflow logic here to
-        # get wrong.
-        checks = Gtk.FlowBox()
-        checks.set_selection_mode(Gtk.SelectionMode.NONE)
-        checks.set_max_children_per_line(2)
-        checks.set_min_children_per_line(2)
-        checks.set_homogeneous(True)
-        checks.set_row_spacing(12)
-        checks.set_column_spacing(12)
-        self.widgets["ready.checks"] = checks
-        box.append(checks)
+        # One card of rows, not a board of cards.
+        #
+        # Five findings in a two-column grid leaves the fifth one alone on a
+        # row of its own, and five bordered boxes at three different widths is
+        # what the page looked like. A list has none of that: it reads top to
+        # bottom in one measure, each line carries its own subject icon, and it
+        # is the same list box every other page in this installer uses, so the
+        # rows are contained the way libadwaita expects rather than by hand.
+        group = Adw.PreferencesGroup()
+        self.widgets["ready.checks"] = group
+        self.readiness_rows = []
+        box.append(group)
 
-        # AdwExpanderRow rather than GtkExpander: it keeps its contents in a
-        # real list box, which is the containment every other row in this
-        # installer relies on, and it wears the same card as the rest of the
-        # page instead of being a bare triangle with a label next to it.
         group = Adw.PreferencesGroup()
         details = Adw.ExpanderRow(title=F.READINESS_DETAILS)
+        details.add_prefix(icon_tile("document-properties-symbolic"))
         detail_row = Adw.ActionRow()
         detail_row.set_subtitle_lines(0)
         detail_row.add_css_class("aurade-mono")
         self.widgets["ready.details"] = detail_row
         details.add_row(detail_row)
+        details.connect(
+            "notify::expanded",
+            lambda item, _p: reveal(item) if item.get_expanded() else None)
         group.add(details)
         box.append(group)
 
-    def _check_card(self, check: dict) -> Gtk.Widget:
+    def _check_row(self, check: dict) -> Adw.ActionRow:
         state = check.get("state", "ok")
-        card = row(12)
-        card.add_css_class("aurade-check")
-        card.add_css_class(f"aurade-check-{state}")
-        card.add_css_class("aurade-transition")
-        glyph = Gtk.Image.new_from_icon_name(
-            self.READINESS_GLYPHS.get(state, "emblem-ok-symbolic"))
-        glyph.set_valign(Gtk.Align.START)
-        glyph.add_css_class(f"aurade-glyph-{state}")
-        card.append(glyph)
-        body = column(4)
-        body.set_hexpand(True)
-        title = label(check.get("title", ""), "m3-title-small", wrap=False)
-        body.append(title)
-        finding = label(check.get("finding", ""), "m3-body-small", css="dim-label")
-        # A card is half the board wide, so it gets half a measure. Left at the
-        # prose default every card asks for the full width and the grid becomes
-        # a column.
-        finding.set_max_width_chars(34)
-        body.append(finding)
+        check_id = check.get("id", "")
+        item = Adw.ActionRow(title=check.get("title", ""))
+        item.set_subtitle_lines(0)
+        item.set_title_lines(0)
+        item.add_css_class("aurade-transition")
+
+        subject = self.READINESS_ICONS.get(check_id, "dialog-information-symbolic")
+        if state != "ok":
+            subject = self.READINESS_ICONS_BAD.get(check_id, subject)
+        item.add_prefix(icon_tile(subject, state))
+
+        # The finding, and what to do about it when there is something to do.
+        # Two sentences on one line reads as one thought; the action belongs
+        # under the finding it answers.
+        finding = check.get("finding", "")
         action = check.get("action") or ""
-        if action:
-            what = label(action, "m3-label-medium", css="aurade-action")
-            what.set_max_width_chars(34)
-            what.set_margin_top(4)
-            body.append(what)
-        card.append(body)
-        # The card is a finding, not a control. Saying so keeps it out of the
-        # tab order, where five unfocusable stops sit between the page and the
-        # button that leaves it.
-        card.set_can_focus(False)
-        return card
+        item.set_subtitle(f"{finding}\n{action}" if action else finding)
+
+        mark = Gtk.Image.new_from_icon_name(
+            self.READINESS_GLYPHS.get(state, "object-select-symbolic"))
+        mark.add_css_class(f"aurade-glyph-{state}")
+        mark.set_valign(Gtk.Align.CENTER)
+        item.add_suffix(mark)
+
+        # A finding is not a control. Rows in a list box take focus by default,
+        # which puts five unactionable stops between the page and the button
+        # that leaves it.
+        item.set_activatable(False)
+        item.set_focusable(False)
+        return item
 
     def _refresh_readiness(self) -> None:
         self.probe = self.model.probe()
@@ -704,14 +894,16 @@ class InstallerWindow(Adw.ApplicationWindow):
             holder.remove_css_class(f"aurade-verdict-{name}")
         holder.add_css_class(f"aurade-verdict-{verdict or 'attention'}")
         self.widgets["ready.glyph"].set_from_icon_name(self.READINESS_GLYPHS.get(
-            {"ok": "ok", "attention": "warn", "blocked": "blocked"}.get(
-                verdict, "warn"), "dialog-warning-symbolic"))
+            self.VERDICT_GLYPHS.get(verdict, "warn"), "dialog-warning-symbolic"))
 
-        flow = self.widgets["ready.checks"]
-        while (existing := flow.get_first_child()) is not None:
-            flow.remove(existing)
+        group = self.widgets["ready.checks"]
+        for existing in self.readiness_rows:
+            group.remove(existing)
+        self.readiness_rows = []
         for check in checks:
-            flow.append(self._check_card(check))
+            item = self._check_row(check)
+            group.add(item)
+            self.readiness_rows.append(item)
 
         detail_lines = [
             f"{check.get('title', '')}: {check.get('detail')}"
@@ -726,7 +918,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         # A blocked verdict is the one case where the page cannot be walked
         # past. The engine would refuse later anyway; refusing here saves the
         # user answering nine questions first.
-        self.forward_button.set_sensitive(verdict != "blocked")
+        self.forward_blocked = verdict == "blocked"
         self.banner.set_revealed(False)
 
     # -- network -----------------------------------------------------------
@@ -1085,9 +1277,12 @@ class InstallerWindow(Adw.ApplicationWindow):
             item.set_subtitle(subtitle)
             item.set_subtitle_lines(0)
             item.disk_path = disk["path"]
-            item.add_prefix(Gtk.Image.new_from_icon_name(
-                "media-removable-symbolic" if transport == "USB"
-                else "drive-harddisk-symbolic"))
+            # A removable disk gets the caution tile as well as the sentence
+            # under the list, because the one being warned about is one row in
+            # a list of otherwise identical-looking disks.
+            item.add_prefix(
+                icon_tile("media-removable-symbolic", "warn") if transport == "USB"
+                else icon_tile("drive-harddisk-symbolic"))
             if transport == "USB":
                 removable = True
             listbox.append(item)
@@ -1115,21 +1310,28 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_review(self):
         box = column(20)
         box.append(label(F.REVIEW_TITLE, "m3-headline-small"))
-        box.append(label("Check these before continuing. Select any line to "
+        box.append(label("Nothing here is fixed. Pick any line to go back and "
                          "change it.", "m3-body-medium", css="dim-label"))
         group = Adw.PreferencesGroup()
         self.widgets["review.group"] = group
         box.append(group)
         assurance = row(8)
-        assurance.append(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
+        assurance.append(Gtk.Image.new_from_icon_name("object-select-symbolic"))
         assurance.append(label(F.REVIEW_ASSURANCE, "m3-label-large", wrap=False))
         assurance.add_css_class("aurade-stage-done")
         box.append(assurance)
-        advanced = Gtk.Button(label="Advanced options")
-        advanced.add_css_class("flat")
-        advanced.set_halign(Gtk.Align.START)
-        advanced.connect("clicked", lambda *_: self._on_review_row(None, "advanced"))
-        box.append(advanced)
+        # The way through to the advanced page from here. It is a row rather
+        # than a bare button because a line of bold text under a card reads as
+        # a heading for something missing, which is what it looked like.
+        more = Adw.PreferencesGroup()
+        entry = Adw.ActionRow(title="Advanced options")
+        entry.set_subtitle("Package snapshot and where updates come from")
+        entry.add_prefix(icon_tile("document-properties-symbolic"))
+        entry.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        entry.set_activatable(True)
+        entry.connect("activated", lambda *_: self._on_review_row(None, "advanced"))
+        more.add(entry)
+        box.append(more)
         return page_shell(box)
 
     def _refresh_review(self) -> None:
@@ -1254,7 +1456,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             if elapsed:
                 item.add_css_class("aurade-mono")
             item.stage_icon.set_from_icon_name({
-                "ok": "emblem-ok-symbolic",
+                "ok": "object-select-symbolic",
                 "running": "media-playback-start-symbolic",
                 "failed": "dialog-error-symbolic",
             }.get(status, "content-loading-symbolic"))
@@ -1270,7 +1472,21 @@ class InstallerWindow(Adw.ApplicationWindow):
                 pct = int(stage.get("pct", 0))
                 detail = stage.get("detail", "")
         bar = self.widgets["progress.bar"]
-        bar.set_fraction(max(0.0, min(1.0, pct / 100.0)))
+        wanted = max(0.0, min(1.0, pct / 100.0))
+        # Stages complete in uneven jumps - a package set arrives all at once -
+        # and a bar that teleports forward reads as a bar that is guessing.
+        # Easing to the new value takes the same time either way and makes the
+        # jump legible as progress. Never backwards: the only thing that moves
+        # a bar left is a mistake, and it should look like one.
+        current = bar.get_fraction()
+        if self.animate and wanted > current:
+            target = Adw.PropertyAnimationTarget.new(bar, "fraction")
+            animation = Adw.TimedAnimation.new(bar, current, wanted, 260, target)
+            animation.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+            self._progress_fade = animation
+            animation.play()
+        else:
+            bar.set_fraction(wanted)
         bar.set_text(detail or report.get("position", ""))
 
         # The stop control exists only while the shared reversibility boundary
@@ -1489,10 +1705,30 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stack.set_visible_child_name(name)
         self.step_label.set_label(self.flow.step_position())
 
+        # A page may refuse to be left. Cleared before the page is drawn and
+        # set by the page itself, because the alternative - the page disabling
+        # the button directly - is a decision that the button block below then
+        # quietly reverses, which is exactly what a blocked readiness verdict
+        # used to do: the refusal was computed, applied, and undone two dozen
+        # lines later, on every refresh.
+        self.forward_blocked = False
+
         if state == "pages":
             self._refresh_page(F.PAGES_BY_NAME[self.flow.current_page])
         else:
             self._refresh_state(state)
+
+        # The chrome's advanced toggle reflects the flow rather than owning
+        # it: the review screen can open the same page, and a toggle that says
+        # off while the page is in the flow is worse than no toggle.
+        advanced = self.widgets.get("chrome.advanced")
+        if advanced is not None:
+            if advanced.get_active() != self.flow.show_advanced:
+                advanced.handler_block(self._advanced_handler)
+                advanced.set_active(self.flow.show_advanced)
+                advanced.handler_unblock(self._advanced_handler)
+            # Nothing about the flow is negotiable once it is running.
+            advanced.set_sensitive(state in ("pages", F.WELCOME, F.REVIEW))
 
         back = self.flow.back_label()
         self.back_button.set_visible(bool(back))
@@ -1509,7 +1745,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         else:
             self.forward_button.remove_css_class("destructive-action")
             self.forward_button.add_css_class("suggested-action")
-            self.forward_button.set_sensitive(True)
+            self.forward_button.set_sensitive(not self.forward_blocked)
 
         # The aurora runs on the pages that are about the product and stops on
         # the ones that are about a decision. Atmosphere behind a disk list is
@@ -1809,9 +2045,10 @@ class InstallerApplication(Adw.Application):
         self.window.present()
 
     @staticmethod
-    def _on_first_map(_window: Gtk.Widget) -> None:
+    def _on_first_map(window: Gtk.Widget) -> None:
         """A window reached the screen: this renderer works."""
         S.report(S.MAPPED)
+        window.fade_in()
 
 
 def run(model: Bridge, plan_only: bool = False) -> int:
