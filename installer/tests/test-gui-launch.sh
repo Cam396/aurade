@@ -58,6 +58,11 @@ STUB
 cat >"$TMP/stub/cage" <<'STUB'
 #!/usr/bin/env bash
 printf 'cage %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+printf 'runtime=%s mode=%s\n' "${XDG_RUNTIME_DIR:-unset}" \
+  "$(stat -c '%a' -- "${XDG_RUNTIME_DIR:-/missing}" 2>/dev/null || printf 'missing')" \
+  >>"$AURADE_LAUNCH_LOG"
+[[ -n ${XDG_RUNTIME_DIR:-} && -d $XDG_RUNTIME_DIR && \
+   $(stat -c '%a' -- "$XDG_RUNTIME_DIR" 2>/dev/null) == 700 ]] || exit 1
 [[ -z ${AURADE_GUI_READY_FILE:-} ]] || printf 'mapped\n' >"$AURADE_GUI_READY_FILE"
 exit 0
 STUB
@@ -87,7 +92,8 @@ export AURADE_PROBE_DRM_DIR="$TMP/drm"
 export AURADE_LAUNCH_LOG="$TMP/launch.log"
 export AURADE_REAL_TUI="$ROOT/installer/bin/aurade-installer-tui"
 export TMPDIR="$TMP"
-unset WAYLAND_DISPLAY DISPLAY || true
+export AURADE_RUNTIME_BASE="$TMP"
+unset WAYLAND_DISPLAY DISPLAY XDG_RUNTIME_DIR || true
 
 launch() { : >"$TMP/launch.log"; }
 logged() { grep -Fq -- "$1" "$TMP/launch.log"; }
@@ -193,6 +199,9 @@ logged 'cage -- ' || fail 'a usable machine did not start the compositor'
 grep -q 'aurade-installer-gui' "$TMP/launch.log" ||
   fail 'the compositor was not given the graphical installer'
 ! logged 'tui' || fail 'a usable machine started the text installer as well'
+runtime=$(awk -F= '$1 == "runtime" {print $2; exit}' "$TMP/launch.log")
+[[ -n $runtime ]] || fail 'the launcher did not provide a Wayland runtime directory'
+[[ ! -e $runtime ]] || fail 'the private Wayland runtime directory was not cleaned up'
 
 launch
 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \

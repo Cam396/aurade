@@ -57,6 +57,30 @@ EOF
 
 MODE=auto
 PASSTHROUGH=()
+
+# A live console often has no login-manager-created runtime directory. Cage
+# needs one to create its Wayland socket, even when its DRM and GL setup are
+# otherwise completely healthy. Keep the directory we create private to this
+# invocation and remove it on both normal exit and the text-installer handoff.
+READY_DIR=
+RUNTIME_DIR=
+RUNTIME_DIR_CREATED=0
+
+cleanup_runtime() {
+  if (( RUNTIME_DIR_CREATED )) && [[ -n $RUNTIME_DIR ]]; then
+    rm -rf -- "$RUNTIME_DIR"
+    RUNTIME_DIR=
+    RUNTIME_DIR_CREATED=0
+  fi
+}
+
+cleanup() {
+  cleanup_runtime
+  [[ -z $READY_DIR ]] || rm -rf -- "$READY_DIR"
+}
+
+trap cleanup EXIT
+
 while (($#)); do
   case $1 in
     --text)      MODE=text; shift ;;
@@ -73,6 +97,7 @@ TUI=$(_find aurade-installer-tui) || {
 }
 
 run_text() {
+  cleanup
   exec "$TUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
 }
 
@@ -104,6 +129,44 @@ command -v cage >/dev/null 2>&1 || {
   run_text
 }
 
+runtime_dir_usable() {
+  local candidate=${XDG_RUNTIME_DIR:-} owner mode uid
+  [[ -n $candidate && -d $candidate && -w $candidate ]] || return 1
+  uid=${EUID:-$(id -u)}
+  owner=$(stat -c '%u' -- "$candidate" 2>/dev/null) || return 1
+  mode=$(stat -c '%a' -- "$candidate" 2>/dev/null) || return 1
+  [[ $owner == "$uid" && $mode == 700 ]]
+}
+
+prepare_runtime_dir() {
+  runtime_dir_usable && return 0
+
+  local base=${AURADE_RUNTIME_BASE:-}
+  if [[ -z $base ]]; then
+    if [[ -d /run && -w /run ]]; then
+      base=/run
+    else
+      base=${TMPDIR:-/tmp}
+    fi
+  fi
+  RUNTIME_DIR=$(mktemp -d -- "$base/aurade-runtime.XXXXXX") || {
+    printf '%s\n' \
+      'aurade-installer-start: could not create a private Wayland runtime directory; using the text installer' >&2
+    return 1
+  }
+  RUNTIME_DIR_CREATED=1
+  chmod 700 -- "$RUNTIME_DIR" || {
+    printf '%s\n' \
+      'aurade-installer-start: could not secure the Wayland runtime directory; using the text installer' >&2
+    return 1
+  }
+  export XDG_RUNTIME_DIR=$RUNTIME_DIR
+  printf 'aurade-installer-start: using private Wayland runtime directory %s\n' \
+    "$RUNTIME_DIR" >&2
+}
+
+prepare_runtime_dir || run_text
+
 renderer_lib=$(_find_lib aurade-renderers.sh) || {
   echo 'aurade-installer-start: the renderer list is missing from this image' >&2
   run_text
@@ -128,7 +191,6 @@ renderer_lib=$(_find_lib aurade-renderers.sh) || {
 # the black screen. Neither is acceptable, and the readiness file is what
 # separates them.
 READY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aurade-installer.XXXXXX")
-trap 'rm -rf -- "$READY_DIR"' EXIT
 export AURADE_GUI_READY_FILE="$READY_DIR/drawn"
 
 status=0
