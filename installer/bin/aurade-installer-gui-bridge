@@ -187,11 +187,12 @@ gb_probe() {
 # Whether this computer can run AuraDE, as a list of findings.
 #
 # Every check here is one the engine already enforces, moved forward. The
-# engine refuses a legacy BIOS boot and refuses an enabled Secure Boot, but it
-# does so at `--execute`, which is after the user has chosen a disk, created an
-# account and typed two passwords. Both are firmware settings that need a
-# restart to change, so learning about them at the erase gate means throwing
-# the whole session away. They are answerable in the first ten seconds instead.
+# engine refuses a legacy BIOS boot and refuses an enabled Secure Boot without
+# a trusted signing path, but it used to do so at `--execute`, after the user
+# had chosen a disk, created an account and typed two passwords. Firmware setup
+# mode is now a supported path: the engine signs the chain and leaves a native
+# systemd-boot enrollment entry. User-mode Secure Boot requires a supplied,
+# already-enrolled key pair.
 #
 # The states are `ok`, `warn` and `blocked`, and they mean exactly one thing
 # each: it is fine, it will work but worse, and this will not install.
@@ -202,6 +203,16 @@ _gb_check() {
   printf '{"id":%s,"title":%s,"state":%s,"finding":%s,"action":%s,"detail":%s}' \
     "$(_gb_str "$id")" "$(_gb_str "$title")" "$(_gb_str "$state")" \
     "$(_gb_str "$finding")" "$(_gb_str "$action")" "$(_gb_str "$detail")"
+}
+
+_gb_efi_boolean() {
+  local name=$1 variable
+  for variable in "${AURADE_EFIVARS_DIR:-/sys/firmware/efi/efivars}/${name}-"*; do
+    [[ -r $variable ]] || continue
+    od -An -j4 -N1 -tu1 "$variable" 2>/dev/null | tr -d '[:space:]'
+    return 0
+  done
+  return 1
 }
 
 # Compare two lsblk size strings ("931.5G", "476.9G", "1.8T"). Bigger wins.
@@ -270,10 +281,24 @@ gb_readiness() {
     disabled)
       out+="${sep}$(_gb_check secure_boot 'Secure Boot' ok 'Secure Boot is off, which is what AuraDE needs.')" ;;
     enabled)
-      verdict=blocked
-      out+="${sep}$(_gb_check secure_boot 'Secure Boot' blocked \
-        'Secure Boot is on. AuraDE'"'"'s boot entry is not signed, so this computer would refuse to start it.' \
-        'Turn Secure Boot off in the firmware settings, then start the installer again.')" ;;
+      setup_mode=$(_gb_efi_boolean SetupMode 2>/dev/null || true)
+      if [[ $setup_mode == 1 ]]; then
+        [[ $verdict == blocked ]] || verdict=attention
+        out+="${sep}$(_gb_check secure_boot 'Secure Boot' warn \
+          'Secure Boot is on, but firmware is in setup mode. AuraDE will sign the boot chain and offer key enrollment on first boot.' \
+          'Keep setup mode enabled until the installed system shows the AuraDE enrollment entry, then enable Secure Boot.')"
+      elif [[ $setup_mode == 0 && -r ${AURADE_SECURE_BOOT_KEY:-/dev/null} && \
+          -r ${AURADE_SECURE_BOOT_CERT:-/dev/null} && \
+          -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
+        out+="${sep}$(_gb_check secure_boot 'Secure Boot' ok \
+          'Secure Boot is on and a pre-enrolled AuraDE signing key was supplied.' '' \
+          'The installer will sign systemd-boot and the kernel with the supplied key.')"
+      else
+        verdict=blocked
+        out+="${sep}$(_gb_check secure_boot 'Secure Boot' blocked \
+          'Secure Boot is on, but no trusted AuraDE signing path is available.' \
+          'Put firmware into setup mode for automatic enrollment, or restart with a pre-enrolled AuraDE key pair.')"
+      fi ;;
     *)
       [[ $verdict == blocked ]] || verdict=attention
       out+="${sep}$(_gb_check secure_boot 'Secure Boot' warn \

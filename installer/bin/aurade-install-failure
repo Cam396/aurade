@@ -88,7 +88,7 @@ report() {
     keyring_error) advice='Verify the ISO keyring, package signatures, system clock, and network before retrying.' ;;
     capacity_error) advice='Choose a writable disk-backed staging directory with enough free space, then retry.' ;;
     network_error) advice='Check the interface, route, DNS, clock, and pinned Arch snapshot before retrying.' ;;
-    secure_boot_error) advice='Disable Secure Boot or provide a signed boot chain before retrying.' ;;
+    secure_boot_error) advice='Put firmware into Secure Boot setup mode for AuraDE enrollment, or provide a pre-enrolled signing key and certificate before retrying.' ;;
     target_error) advice='Recheck the selected disk identity and ensure it is not mounted or in use.' ;;
     storage_error) advice='Inspect the raw log for the mount/filesystem failure and verify disk health.' ;;
     *) advice='Review the private log and hardware bundle before retrying.' ;;

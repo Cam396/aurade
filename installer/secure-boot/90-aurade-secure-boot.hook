@@ -1,0 +1,11 @@
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = linux
+Target = systemd
+
+[Action]
+Description = Re-signing the AuraDE Secure Boot chain
+When = PostTransaction
+Exec = /usr/local/libexec/aurade-secure-boot-sign

@@ -754,10 +754,10 @@ class InstallerWindow(Adw.ApplicationWindow):
     # What they are asking is whether this will work. So the page answers that
     # in one line, lists the five things that decide it, and puts the driver
     # strings behind a disclosure for the person who wants them. Two of the
-    # five - the firmware mode and Secure Boot - are hard refusals in the
-    # engine that used to surface at the erase gate, after every question had
-    # been answered. Both need a restart to fix. Asking them first is the
-    # entire reason this page exists.
+    # five - the firmware mode and Secure Boot - are answered before the disk
+    # is chosen. Secure Boot is a supported signed-chain path in setup mode;
+    # user-mode firmware still needs a pre-enrolled key. Asking it first keeps
+    # an impossible boot configuration from appearing after the erase gate.
 
     #: What each check is about, so a page of five findings reads as five
     #: subjects rather than five identical ticks. Every name here is in the

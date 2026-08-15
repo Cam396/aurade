@@ -198,7 +198,7 @@ cause_explanation() {
     archive-unreachable) printf 'The Arch Linux Archive could not be reached for the pinned snapshot date.' ;;
     signature-invalid) printf 'A package signature did not verify against the expected key.' ;;
     esp-readonly) printf 'The EFI system partition mounted, but the firmware reported it read-only.' ;;
-    secure-boot) printf 'Secure Boot is enabled, and AuraDE installs an unsigned boot chain.' ;;
+    secure-boot) printf 'Secure Boot is enabled, but no trusted AuraDE signing path was available.' ;;
     disk-too-small) printf 'The selected disk is smaller than the installation needs.' ;;
     '') printf '' ;;
     *) printf '%s' "$1" ;;
@@ -1046,6 +1046,13 @@ build_engine_args() {
     ENGINE_ARGS+=(--repo-key "$repo_key" --repo-fingerprint "$repo_fingerprint")
   elif [[ $repo_fingerprint == development-unsigned && ! -r $repo_key ]]; then
     ENGINE_ARGS+=(--allow-unsigned)
+  fi
+  if [[ -n ${AURADE_SECURE_BOOT_KEY:-} || -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
+    [[ -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]] || {
+      echo 'aurade-installer-tui: Secure Boot requires both AURADE_SECURE_BOOT_KEY and AURADE_SECURE_BOOT_CERT' >&2
+      return 1
+    }
+    ENGINE_ARGS+=(--secure-boot-key "$AURADE_SECURE_BOOT_KEY" --secure-boot-cert "$AURADE_SECURE_BOOT_CERT")
   fi
   [[ -z ${AURADE_EXTRA_ENGINE_ARGS:-} ]] || {
     # shellcheck disable=SC2206

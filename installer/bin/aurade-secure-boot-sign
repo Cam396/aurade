@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Re-sign the installed AuraDE boot chain after a kernel or systemd update.
+# The installer writes the key pair only when the user explicitly opted into
+# Secure Boot. The private key is root-only and never enters the journal.
+set -Eeuo pipefail
+
+ROOT=${AURADE_SECURE_BOOT_ROOT:-}
+KEY=${ROOT}/etc/kernel/secure-boot-private-key.pem
+CERT=${ROOT}/etc/kernel/secure-boot-certificate.pem
+[[ -r $KEY && -r $CERT ]] || {
+  printf '%s\n' 'aurade-secure-boot-sign: signing material is missing' >&2
+  exit 1
+}
+command -v sbsign >/dev/null || {
+  printf '%s\n' 'aurade-secure-boot-sign: sbsign is not installed' >&2
+  exit 1
+}
+command -v sbverify >/dev/null || {
+  printf '%s\n' 'aurade-secure-boot-sign: sbverify is not installed' >&2
+  exit 1
+}
+
+sign_in_place() {
+  local input=$1 temporary
+  [[ -r $input ]] || {
+    printf 'aurade-secure-boot-sign: missing boot artifact: %s\n' "$input" >&2
+    return 1
+  }
+  sbverify --cert "$CERT" "$input" >/dev/null 2>&1 && return 0
+  temporary=$(mktemp "${input}.signed.XXXXXX")
+  if ! sbsign --key "$KEY" --cert "$CERT" --output "$temporary" "$input" >/dev/null 2>&1; then
+    rm -f -- "$temporary"
+    printf 'aurade-secure-boot-sign: could not sign %s\n' "$input" >&2
+    return 1
+  fi
+  if ! sbverify --cert "$CERT" "$temporary" >/dev/null 2>&1; then
+    rm -f -- "$temporary"
+    printf 'aurade-secure-boot-sign: signature verification failed for %s\n' "$input" >&2
+    return 1
+  fi
+  install -m 0644 "$temporary" "$input"
+  rm -f -- "$temporary"
+}
+
+# systemd-boot prefers the .efi.signed sibling during bootctl install/update.
+sign_loader() {
+  local source=${ROOT}/usr/lib/systemd/boot/efi/systemd-bootx64.efi
+  local output=${source}.signed
+  [[ -r $source ]] || return 0
+  local temporary
+  temporary=$(mktemp "${output}.XXXXXX")
+  sbsign --key "$KEY" --cert "$CERT" --output "$temporary" "$source" >/dev/null 2>&1
+  sbverify --cert "$CERT" "$temporary" >/dev/null 2>&1
+  install -m 0644 "$temporary" "$output"
+  rm -f -- "$temporary"
+}
+
+sign_loader
+sign_in_place "${ROOT}/boot/vmlinuz-linux"

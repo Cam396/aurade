@@ -26,6 +26,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-stage-reproducibility.sh"
 "$ROOT/test-journal.sh"
 "$ROOT/test-install-dry-run.sh"
+"$ROOT/test-secure-boot.sh"
 "$ROOT/test-build-iso-stage.sh"
 "$ROOT/test-execute-path-contract.sh"
 "$ROOT/test-execute-path-gate.sh"

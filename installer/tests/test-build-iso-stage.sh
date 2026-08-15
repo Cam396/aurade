@@ -154,6 +154,8 @@ grep -Fq 'aurade.installer=gui' "$entries/$default_entry" || {
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-secure-boot-sign ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/90-aurade-secure-boot.hook ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]

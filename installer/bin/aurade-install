@@ -44,9 +44,14 @@ FILESYSTEM=btrfs
 SWAP=none
 SWAP_SIZE=auto
 LAYOUT=wipe
+SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
+SECURE_BOOT_CERT_FILE=${AURADE_SECURE_BOOT_CERT:-}
+SECURE_BOOT_SIGN=0
+SECURE_BOOT_SETUP_MODE=0
+SECURE_BOOT_ENROLL=${AURADE_SECURE_BOOT_ENROLL:-manual}
 BASE_PACKAGES=(
   base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs seatd dosfstools cryptsetup
-  gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
+  gptfdisk efibootmgr sbsigntools networkmanager sudo pipewire pipewire-alsa
   pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
   xdg-utils polkit openssh bluez bluez-utils vim
 )
@@ -99,6 +104,9 @@ Storage and identity:
   --swap POLICY                none (default), file or zram
   --swap-size SIZE             auto (default), hibernate, or a size like 8G
   --layout MODE                wipe (default) or alongside
+  --secure-boot-key FILE       PEM private key for an already-enrolled Secure Boot db key
+  --secure-boot-cert FILE      PEM certificate matching --secure-boot-key
+  --secure-boot-enroll MODE    manual (default) or if-safe for setup-mode enrollment
   --mountpoint DIR             Temporary target mountpoint
   --hostname NAME
   --timezone ZONE
@@ -162,6 +170,93 @@ check_workspace_capacity() {
     die "installer staging filesystem has ${available_bytes} bytes free; need at least ${minimum} bytes for the package cache (choose a disk-backed AURADE_INSTALL_WORK_DIR)"
   fi
   log "installer staging filesystem has ${available_bytes} bytes free (minimum ${minimum})"
+}
+
+# EFI variables have four bytes of attributes before their payload. Keep this
+# tiny reader local rather than trusting a human-readable firmware command: it
+# works in the live image before sbctl is installed and is easy to fixture in
+# tests. A missing variable is deliberately different from a zero value.
+efi_boolean() {
+  local name=$1 variable
+  for variable in "${AURADE_EFIVARS_DIR:-/sys/firmware/efi/efivars}/${name}-"*; do
+    [[ -r $variable ]] || continue
+    od -An -j4 -N1 -tu1 "$variable" 2>/dev/null | tr -d '[:space:]'
+    return 0
+  done
+  return 1
+}
+
+secure_boot_validate_material() {
+  [[ -n $SECURE_BOOT_KEY_FILE && -n $SECURE_BOOT_CERT_FILE ]] || {
+    die 'Secure Boot signing requires both a private key and certificate'
+  }
+  [[ -r $SECURE_BOOT_KEY_FILE ]] || die "Secure Boot private key is not readable: $SECURE_BOOT_KEY_FILE"
+  [[ -r $SECURE_BOOT_CERT_FILE ]] || die "Secure Boot certificate is not readable: $SECURE_BOOT_CERT_FILE"
+  [[ -z $(find "$SECURE_BOOT_KEY_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || \
+    die 'Secure Boot private key must not be group/world accessible'
+  command -v openssl >/dev/null || die 'openssl is required for Secure Boot key validation'
+  local key_public cert_public
+  key_public=$(openssl pkey -in "$SECURE_BOOT_KEY_FILE" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}') || \
+    die 'Secure Boot private key is not a readable PEM key'
+  cert_public=$(openssl x509 -in "$SECURE_BOOT_CERT_FILE" -pubkey -noout 2>/dev/null | \
+    openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}') || \
+    die 'Secure Boot certificate is not a readable PEM X.509 certificate'
+  [[ -n $key_public && $key_public == "$cert_public" ]] || \
+    die 'Secure Boot private key and certificate do not contain the same public key'
+}
+
+secure_boot_generate_material() {
+  [[ -n ${WORK_DIR:-} ]] || die 'Secure Boot key generation requires an installer workspace'
+  command -v openssl >/dev/null || die 'openssl is required to generate Secure Boot keys'
+  SECURE_BOOT_KEY_FILE=$WORK_DIR/secure-boot-private-key.pem
+  SECURE_BOOT_CERT_FILE=$WORK_DIR/secure-boot-certificate.pem
+  umask 077
+  openssl req -new -x509 -newkey rsa:2048 -nodes \
+    -subj '/CN=AuraDE Secure Boot/' -days 3650 \
+    -keyout "$SECURE_BOOT_KEY_FILE" -out "$SECURE_BOOT_CERT_FILE" \
+    >/dev/null 2>&1 || die 'could not generate the temporary AuraDE Secure Boot key'
+  chmod 0600 "$SECURE_BOOT_KEY_FILE" "$SECURE_BOOT_CERT_FILE"
+  log 'generated a per-install Secure Boot key; the firmware enrollment entry will be offered on first boot'
+}
+
+secure_boot_sign_in_place() {
+  local input=$1 temporary
+  [[ -r $input ]] || die "Secure Boot kernel artifact is missing: ${input##*/}"
+  [[ $MODE == dry-run ]] && {
+    printf ' + sbsign --key %q --cert %q --output %q %q\n' \
+      "$SECURE_BOOT_KEY_FILE" "$SECURE_BOOT_CERT_FILE" "${input}.signed" "$input"
+    return 0
+  }
+  temporary=$(mktemp "$WORK_DIR/secure-boot-sign.XXXXXX")
+  if ! sbsign --key "$SECURE_BOOT_KEY_FILE" --cert "$SECURE_BOOT_CERT_FILE" \
+      --output "$temporary" "$input" >/dev/null 2>&1; then
+    rm -f -- "$temporary"
+    die "could not sign Secure Boot kernel: ${input##*/}"
+  fi
+  sbverify --cert "$SECURE_BOOT_CERT_FILE" "$temporary" >/dev/null 2>&1 || {
+    rm -f -- "$temporary"
+    die "Secure Boot signature verification failed: ${input##*/}"
+  }
+  install -m 0644 "$temporary" "$input"
+  rm -f -- "$temporary"
+}
+
+secure_boot_sign_loader() {
+  (( SECURE_BOOT_SIGN )) || return 0
+  local source="$MOUNTPOINT/usr/lib/systemd/boot/efi/systemd-bootx64.efi"
+  local output="${source}.signed"
+  if [[ $MODE == dry-run ]]; then
+    printf ' + sbsign --key %q --cert %q --output %q %q\n' \
+      "$SECURE_BOOT_KEY_FILE" "$SECURE_BOOT_CERT_FILE" "$output" "$source"
+    return 0
+  fi
+  [[ -r $source ]] || die 'Secure Boot signing source is missing: systemd-bootx64.efi'
+  sbsign --key "$SECURE_BOOT_KEY_FILE" --cert "$SECURE_BOOT_CERT_FILE" \
+    --output "$output" "$source" >/dev/null 2>&1 || \
+    die 'could not sign the systemd-boot loader for Secure Boot'
+  sbverify --cert "$SECURE_BOOT_CERT_FILE" "$output" >/dev/null 2>&1 || \
+    die 'Secure Boot signature verification failed for systemd-boot'
+  chmod 0644 "$output"
 }
 
 print_command() {
@@ -496,6 +591,9 @@ while (($#)); do
     --swap) SWAP=${2:?}; shift 2 ;;
     --swap-size) SWAP_SIZE=${2:?}; shift 2 ;;
     --layout) LAYOUT=${2:?}; shift 2 ;;
+    --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
+    --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
+    --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
     --encrypt) LUKS=1; shift ;;
     --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
     --allow-loop) ALLOW_LOOP=1; shift ;;
@@ -544,6 +642,15 @@ case $LAYOUT in
   wipe|alongside) ;;
   *) die '--layout must be wipe or alongside' ;;
 esac
+case $SECURE_BOOT_ENROLL in
+  manual|if-safe) ;;
+  *) die '--secure-boot-enroll must be manual or if-safe' ;;
+esac
+[[ -z $SECURE_BOOT_KEY_FILE && -z $SECURE_BOOT_CERT_FILE ]] || {
+  [[ -n $SECURE_BOOT_KEY_FILE && -n $SECURE_BOOT_CERT_FILE ]] || \
+    die '--secure-boot-key and --secure-boot-cert must be provided together'
+  secure_boot_validate_material
+}
 [[ $SWAP != zram || $SWAP_SIZE != hibernate ]] || \
   die 'zram swap cannot support hibernation; it lives in RAM'
 [[ $FILESYSTEM != xfs || $SWAP_SIZE != hibernate ]] || \
@@ -771,11 +878,35 @@ if [[ $MODE == execute ]]; then
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
   case $secure_boot_state in
     enabled)
-      die 'Secure Boot is enabled, but AuraDE installs an unsigned systemd-boot entry; disable Secure Boot before installing or provide a signed boot chain' ;;
-    disabled) ;;
+      setup_mode=$(efi_boolean SetupMode 2>/dev/null || true)
+      case $setup_mode in
+        1)
+          SECURE_BOOT_SETUP_MODE=1
+          SECURE_BOOT_SIGN=1
+          log 'Secure Boot is enabled in firmware setup mode; AuraDE will prepare a signed boot chain and first-boot key enrollment' ;;
+        0)
+          if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
+            SECURE_BOOT_SIGN=1
+            log 'Secure Boot is enabled with existing firmware keys; using the supplied pre-enrolled signing certificate'
+          else
+            die 'Secure Boot is enabled in firmware user mode, but no pre-enrolled AuraDE signing key was supplied; enter firmware setup mode once or pass --secure-boot-key and --secure-boot-cert'
+          fi ;;
+        *)
+          die 'Secure Boot is enabled, but firmware setup mode could not be read; enter firmware setup mode or provide a pre-enrolled signing key before installing' ;;
+      esac ;;
+    disabled)
+      [[ -z $SECURE_BOOT_KEY_FILE ]] || SECURE_BOOT_SIGN=1 ;;
     *)
       die 'could not determine Secure Boot state; refuse the destructive install until firmware state is known (bootctl is-secure-boot)' ;;
   esac
+  if (( SECURE_BOOT_SIGN )); then
+    for command in sbsign sbverify; do
+      command -v "$command" >/dev/null || die "required command not found for Secure Boot signing: $command"
+    done
+    if (( SECURE_BOOT_SETUP_MODE )) && ! bootctl --help 2>&1 | grep -Fq -- '--secure-boot-auto-enroll'; then
+      die 'the installed bootctl is too old for Secure Boot auto-enrollment; use a newer AuraDE image'
+    fi
+  fi
 fi
 
 log "mode=$MODE target=$TARGET encrypted=$LUKS snapshot=$ARCH_SNAPSHOT"
@@ -811,6 +942,11 @@ if [[ -z $WORK_PARENT ]]; then
 fi
 chmod 700 "$WORK_DIR"
 check_workspace_capacity "$WORKSPACE_FS_PATH"
+if (( SECURE_BOOT_SIGN )) && [[ -z $SECURE_BOOT_KEY_FILE ]]; then
+  secure_boot_generate_material
+else
+  [[ $SECURE_BOOT_SIGN == 0 ]] || secure_boot_validate_material
+fi
 ARCH_PACMAN_CONF=$WORK_DIR/pacman.conf
 ARCH_LOCAL_PACMAN_CONF=$WORK_DIR/local-pacman.conf
 ARCH_CACHE=$WORK_DIR/arch-cache
@@ -1080,10 +1216,34 @@ elif [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
   fi
 fi
 run arch-chroot "$MOUNTPOINT" mkinitcpio -P
+if (( SECURE_BOOT_SIGN )); then
+  # Keep the signing key on the installed system for the pacman hook, but
+  # never put it in a command line, journal, or diagnostic bundle.
+  run install -Dm0600 "$SECURE_BOOT_KEY_FILE" \
+    "$MOUNTPOINT/etc/kernel/secure-boot-private-key.pem"
+  run install -Dm0644 "$SECURE_BOOT_CERT_FILE" \
+    "$MOUNTPOINT/etc/kernel/secure-boot-certificate.pem"
+  run install -Dm0755 "$SELF_DIR/aurade-secure-boot-sign" \
+    "$MOUNTPOINT/usr/local/libexec/aurade-secure-boot-sign"
+  secure_boot_hook=${AURADE_SECURE_BOOT_HOOK:-$SELF_DIR/../share/aurade/90-aurade-secure-boot.hook}
+  [[ -r $secure_boot_hook ]] || secure_boot_hook="$SELF_DIR/../secure-boot/90-aurade-secure-boot.hook"
+  run install -Dm0644 "$secure_boot_hook" \
+    "$MOUNTPOINT/usr/share/libalpm/hooks/90-aurade-secure-boot.hook"
+  secure_boot_sign_in_place "$MOUNTPOINT/boot/vmlinuz-linux"
+fi
 aurade_journal_ok configure
 
 aurade_journal_begin bootloader 'installing the bootloader'
-run bootctl --root="$MOUNTPOINT" --esp-path=/boot --no-variables install
+secure_boot_sign_loader
+BOOTCTL_INSTALL=(bootctl --root="$MOUNTPOINT" --esp-path=/boot --no-variables)
+if (( SECURE_BOOT_SETUP_MODE )); then
+  BOOTCTL_INSTALL+=(
+    --secure-boot-auto-enroll yes
+    --private-key "$SECURE_BOOT_KEY_FILE"
+    --certificate "$SECURE_BOOT_CERT_FILE"
+  )
+fi
+run "${BOOTCTL_INSTALL[@]}" install
 
 if [[ $MODE == execute ]]; then
   ROOT_UUID=$(blkid -s UUID -o value "$ROOT_DEVICE")
@@ -1127,7 +1287,10 @@ if [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
   fi
 fi
 
-write_target_file /boot/loader/loader.conf 0644 'default aurade.conf\ntimeout 4\nconsole-mode max\neditor no\n'
+LOADER_SECURE_BOOT=''
+(( SECURE_BOOT_SETUP_MODE )) && LOADER_SECURE_BOOT="secure-boot-enroll ${SECURE_BOOT_ENROLL}\\n"
+write_target_file /boot/loader/loader.conf 0644 \
+  "default aurade.conf\ntimeout 4\nconsole-mode max\neditor no\n${LOADER_SECURE_BOOT}"
 if [[ $MODE == execute ]]; then
   cpu_vendor=$(awk -F: '$1 ~ /^[[:space:]]*vendor_id[[:space:]]*$/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' /proc/cpuinfo)
   case "$cpu_vendor" in
@@ -1187,7 +1350,7 @@ else
   ROOT_SUBVOLUME=none
   FACTORY_SNAPSHOT=none
 fi
-write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nfilesystem=${FILESYSTEM}\nlayout=${LAYOUT}\nswap_policy=${SWAP_POLICY}\nhibernation=${HIBERNATION}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=${ROOT_SUBVOLUME}\nfactory_snapshot=${FACTORY_SNAPSHOT}\n"
+write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nfilesystem=${FILESYSTEM}\nlayout=${LAYOUT}\nswap_policy=${SWAP_POLICY}\nhibernation=${HIBERNATION}\nsecure_boot=${SECURE_BOOT_SIGN}\nsecure_boot_enrollment=$([[ $SECURE_BOOT_SETUP_MODE == 1 ]] && printf 'pending' || printf 'pre-enrolled-or-disabled')\nroot_uuid=${ROOT_UUID}\nroot_subvolume=${ROOT_SUBVOLUME}\nfactory_snapshot=${FACTORY_SNAPSHOT}\n"
 if [[ $FILESYSTEM == btrfs ]]; then
   run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
 fi
@@ -1238,7 +1401,7 @@ else
 fi
 
 aurade_journal_ok verify-install
-aurade_journal_emit done ok 'installation complete'
+aurade_journal_emit 'done' ok 'installation complete'
 
 log 'installation plan completed'
 if [[ $MODE == dry-run ]]; then

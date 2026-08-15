@@ -85,7 +85,19 @@ if command -v bootctl >/dev/null 2>&1; then
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
   case $secure_boot_state in
     enabled)
-      printf '%s\n' 'WARNING: Secure Boot is enabled. AuraDE currently installs an unsigned systemd-boot chain; disable Secure Boot before the final confirmation or the engine will refuse the install.' >&2 ;;
+      setup_mode=
+      for _efivar in "${AURADE_EFIVARS_DIR:-/sys/firmware/efi/efivars}/SetupMode-"*; do
+        [[ -r $_efivar ]] || continue
+        setup_mode=$(od -An -j4 -N1 -tu1 "$_efivar" 2>/dev/null | tr -d '[:space:]')
+        break
+      done
+      if [[ $setup_mode == 1 ]]; then
+        printf '%s\n' 'NOTICE: Secure Boot is enabled in firmware setup mode. AuraDE will sign the boot chain and offer key enrollment on first boot.' >&2
+      elif [[ -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
+        printf '%s\n' 'NOTICE: Secure Boot is enabled. AuraDE will sign the boot chain with the supplied pre-enrolled key.' >&2
+      else
+        printf '%s\n' 'WARNING: Secure Boot is enabled without a trusted AuraDE signing path. Put firmware into setup mode or provide a pre-enrolled key pair before the final confirmation.' >&2
+      fi ;;
     disabled) ;;
     *)
       printf '%s\n' 'WARNING: Secure Boot state could not be determined. The destructive engine will refuse the install until firmware reports a known state.' >&2 ;;
@@ -241,6 +253,13 @@ fi
 
 if [[ $encrypt_answer =~ ^[Yy]$ ]]; then
   common_args+=(--encrypt --luks-passphrase-file "$secret_dir/luks.passphrase")
+fi
+if [[ -n ${AURADE_SECURE_BOOT_KEY:-} || -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
+  [[ -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]] || {
+    printf '%s\n' 'Secure Boot requires both AURADE_SECURE_BOOT_KEY and AURADE_SECURE_BOOT_CERT.' >&2
+    exit 1
+  }
+  common_args+=(--secure-boot-key "$AURADE_SECURE_BOOT_KEY" --secure-boot-cert "$AURADE_SECURE_BOOT_CERT")
 fi
 
 run_engine() {
