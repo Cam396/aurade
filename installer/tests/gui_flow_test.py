@@ -115,7 +115,8 @@ equal(nav.back_label(), "Quit", "the welcome screen's back label is not Quit")
 
 nav.forward()
 equal(nav.state, "pages", "the welcome screen did not lead to the pages")
-equal(nav.current_page, "graphics", "the first page is not the graphics check")
+equal(nav.current_page, "readiness",
+      "the first page is not the readiness check")
 equal(nav.back_action(), "quit", "the first page offers back with nowhere to go")
 equal(nav.back_label(), "Quit", "the first page's back label is not Quit")
 
@@ -124,7 +125,8 @@ equal(nav.current_page, "network", "the second page is not the network check")
 equal(nav.back_action(), "back", "a later page does not offer back")
 equal(nav.back_label(), "Back", "a later page's back label is not Back")
 nav.back()
-equal(nav.current_page, "graphics", "back from the second page did not go back")
+equal(nav.current_page, "readiness",
+      "back from the second page did not go back")
 
 # Walking to the end of the pages reaches review; back from review reopens the
 # last page rather than the first.

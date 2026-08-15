@@ -427,6 +427,13 @@ enum_candidates() {
       find "$AURADE_LOCALE_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null |
         grep -E '^[a-z]{2,3}(_[A-Z]{2})?$' | sed 's/$/.UTF-8/' | LC_ALL=C sort -u
       ;;
+    # Closed sets rather than discovered ones. These are not "what this machine
+    # happens to have"; they are the values aurade-install accepts, and the
+    # engine rejects anything else, so listing them here is the whole list.
+    layout)     printf '%s\n' wipe alongside ;;
+    filesystem) printf '%s\n' btrfs ext4 xfs ;;
+    swap)       printf '%s\n' none file zram ;;
+    swap_size)  printf '%s\n' auto hibernate 2G 4G 8G 16G 32G ;;
   esac
 }
 
@@ -502,13 +509,19 @@ screen_review() {
 }
 
 screen_gate() {
-  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran
+  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran token layout
+  layout=${ANSWERS[layout]:-$(aurade_question_default layout)}
+  token=$(aurade_confirmation_token "$target" "$layout")
   size=$(disk_field "$target" 2)
   model=$(disk_field "$target" 3)
   serial=$(disk_serial "$target")
   tran=$(disk_field "$target" 4)
   tui_clear
-  tui_header 'Confirm erase'
+  if [[ $layout == alongside ]]; then
+    tui_header 'Confirm install'
+  else
+    tui_header 'Confirm erase'
+  fi
   tui_blank
   tui_wrap "This erases $target completely." danger
   tui_blank
@@ -517,12 +530,20 @@ screen_gate() {
   tui_field 'Size' "${size:-unknown}" ink
   tui_field 'Transport' "${tran:-unknown}" ink
   tui_blank
-  tui_wrap 'Everything before this point can be undone. Nothing after it can. The packages are already downloaded and verified, so the installation will not need the network again.' ink
+  if [[ $layout == alongside ]]; then
+    tui_wrap 'The existing partitions and the existing EFI system partition are kept. AuraDE is written into unallocated space only, and nothing already on this disk is moved, resized or erased.' ink
+  else
+    tui_wrap 'Everything before this point can be undone. Nothing after it can. The packages are already downloaded and verified, so the installation will not need the network again.' ink
+  fi
   tui_blank
-  tui_wrap "Type ERASE:$target to continue" dim
+  tui_wrap "Type $token to continue" dim
   tui_line "$(printf '  > %s_' "$typed")" cyan
   tui_blank
-  tui_footer 'enter  erase and install' 'esc  go back'
+  if [[ $layout == alongside ]]; then
+    tui_footer 'enter  install alongside' 'esc  go back'
+  else
+    tui_footer 'enter  erase and install' 'esc  go back'
+  fi
 }
 
 disk_field() {
@@ -1128,7 +1149,8 @@ run_review() {
 # here cannot by itself cause an erase.
 run_gate() {
   local target=${ANSWERS[target]} token typed='' key
-  token="ERASE:$target"
+  token=$(aurade_confirmation_token "$target" \
+    "${ANSWERS[layout]:-$(aurade_question_default layout)}")
   while true; do
     screen_gate "$typed"
     key=$(read_key) || return 1
@@ -1313,7 +1335,8 @@ main_flow() {
       execute)
         status=0
         run_engine_with_progress "${ENGINE_ARGS[@]}" --execute \
-          --confirm "ERASE:${ANSWERS[target]}" || status=$?
+          --confirm "$(aurade_confirmation_token "${ANSWERS[target]}" \
+            "${ANSWERS[layout]:-$(aurade_question_default layout)}")" || status=$?
         if (( status != 0 )); then
           run_failure "$status" || status=$?
           return "$status"
@@ -1389,7 +1412,8 @@ if [[ -n $RENDER_ONLY ]]; then
     welcome)   screen_welcome ;;
     fallback)  screen_fallback ;;
     review)    screen_review ;;
-    gate)      screen_gate "${AURADE_RENDER_TYPED:-ERASE:${ANSWERS[target]}}" ;;
+    gate)      screen_gate "${AURADE_RENDER_TYPED:-$(aurade_confirmation_token \
+                 "${ANSWERS[target]}" "${ANSWERS[layout]:-wipe}")}" ;;
     progress)  screen_progress ;;
     failure)   build_failure_options; screen_failure 0 ;;
     done)      screen_done ;;

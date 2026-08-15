@@ -168,6 +168,46 @@ def describe_timezone(zone: str) -> tuple[str, str]:
     return (city.replace("_", " "), region.replace("_", " "))
 
 
+#: The storage answers, in the words a person would use, with the consequence
+#: as the second line. The engine's vocabulary (`wipe`, `btrfs`, `zram`) is
+#: correct and stays the value that travels; it is not what a chooser reads.
+#:
+#: Every second line here is a fact the engine enforces, not a caution. "No
+#: rollback" is what ext4 actually gets, and it is the single thing worth
+#: knowing before choosing it.
+STORAGE_NAMES: dict[str, dict[str, tuple[str, str]]] = {
+    "layout": {
+        "wipe": ("Erase the whole disk",
+                 "Everything currently on it is destroyed"),
+        "alongside": ("Install alongside what is there",
+                      "Uses free space only; nothing existing is moved"),
+    },
+    "filesystem": {
+        "btrfs": ("Btrfs", "Snapshots, and a rollback entry in the boot menu"),
+        "ext4": ("ext4", "Long established; no snapshots and no rollback"),
+        "xfs": ("XFS", "Fast with large files; no snapshots and no rollback"),
+    },
+    "swap": {
+        "none": ("None", "No swap; the system relies on physical memory alone"),
+        "file": ("Swap file", "Inside the root filesystem, so encrypted with it"),
+        "zram": ("Compressed in memory", "Nothing is written to the disk"),
+    },
+    "swap_size": {
+        "auto": ("Automatic", "Matches memory, up to 8 GB"),
+        "hibernate": ("Enough to hibernate", "As large as memory, plus headroom"),
+    },
+}
+
+
+def describe_storage(question: str, value: str) -> tuple[str, str]:
+    known = STORAGE_NAMES.get(question, {})
+    if value in known:
+        return known[value]
+    if question == "swap_size":
+        return (value.replace("G", " GB").replace("M", " MB"), "")
+    return (value, "")
+
+
 def timezone_regions(zones: list[str]) -> list[str]:
     seen: list[str] = []
     for zone in zones:

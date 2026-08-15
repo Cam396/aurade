@@ -41,11 +41,11 @@ class Page:
 
 PAGES: tuple[Page, ...] = (
     Page(
-        name="graphics",
-        title="Checking this computer",
+        name="readiness",
+        title="Let's check this computer",
         subtitle=(
-            "AuraDE's desktop needs working graphics. This check runs now, "
-            "while the disk is still untouched."
+            "Everything here is checked before anything is written, so a "
+            "problem found now costs you nothing."
         ),
     ),
     Page(
@@ -69,7 +69,12 @@ PAGES: tuple[Page, ...] = (
             "Everything on the disk you choose will be erased. You can still "
             "go back or cancel after this step."
         ),
-        questions=("target",),
+        # The four after `target` are the advanced storage controls. They are
+        # on this page rather than on the advanced page at the end because
+        # they are all answers about the disk in front of you, and a layout
+        # choice made four screens after the disk was picked is a choice made
+        # about a disk you have stopped looking at.
+        questions=("target", "layout", "filesystem", "swap", "swap_size"),
     ),
     Page(
         name="account",
@@ -99,6 +104,14 @@ PAGES: tuple[Page, ...] = (
 )
 
 PAGES_BY_NAME: dict[str, Page] = {page.name: page for page in PAGES}
+
+#: Pages whose content is a board of cards or rows rather than prose, and which
+#: therefore get the wider measure. Everything not named here stays narrow.
+PAGE_WIDTHS: dict[str, int] = {
+    "readiness": 940,
+    "network": 820,
+    "disk": 820,
+}
 
 #: Page names in the order the flow walks them.
 PAGE_ORDER: tuple[str, ...] = tuple(page.name for page in PAGES)
@@ -368,6 +381,65 @@ WELCOME_BODY = (
     "an account, and confirm before anything is erased."
 )
 WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
+
+#: The readiness page's verdict line, keyed by the model's verdict. It is the
+#: first sentence of the installer that is about *this* computer rather than
+#: about the product, so it says what happens next rather than restating the
+#: findings listed under it.
+READINESS_VERDICTS: dict[str, tuple[str, str]] = {
+    "ok": (
+        "This computer is ready",
+        "Everything AuraDE needs is here. Nothing has been written yet.",
+    ),
+    "attention": (
+        "Worth knowing before you start",
+        "AuraDE will install. One or two things will work better if you fix "
+        "them first.",
+    ),
+    "blocked": (
+        "This needs fixing first",
+        "AuraDE cannot install on this computer as it is set up right now. "
+        "Each problem below says how to fix it.",
+    ),
+}
+
+READINESS_DETAILS = "Technical details"
+
+#: Shown when the model cannot be reached for a readiness report at all. The
+#: page still has to say something, and "no findings" would read as "all clear".
+READINESS_UNKNOWN = (
+    "This computer could not be checked. The installation will still stop "
+    "before erasing anything if it finds a problem later."
+)
+
+STORAGE_TITLE = "Advanced storage options"
+STORAGE_SUBTITLE = (
+    "The defaults install AuraDE the way it is designed to run. Everything "
+    "here changes the shape of the disk."
+)
+
+#: Consequences the engine actually enforces, restated where the choice is
+#: made. Each one is a fact about what the installed system will and will not
+#: have, not a warning about being careful.
+STORAGE_NOTES: dict[str, str] = {
+    "filesystem": (
+        "Only Btrfs gets the factory snapshot and the rollback entry in the "
+        "boot menu. On ext4 or xfs there is nothing to roll back to."
+    ),
+    "layout": (
+        "Installing alongside never resizes or moves an existing partition. "
+        "It needs free space that is already unallocated, and it keeps the "
+        "EFI partition the other system boots from."
+    ),
+    "swap": (
+        "A swap file sits inside the root filesystem, so encrypting the disk "
+        "encrypts the swap too."
+    ),
+    "swap_size": (
+        "Hibernating writes everything in memory to disk, so the swap file "
+        "has to be at least that big."
+    ),
+}
 
 REVIEW_TITLE = "Review"
 REVIEW_ASSURANCE = "Nothing has been written to any disk yet."

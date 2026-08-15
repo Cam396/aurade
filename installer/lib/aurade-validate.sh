@@ -89,6 +89,29 @@ aurade_valid_hostname() {
   return 0
 }
 
+# The storage shape. Each of these is a closed set, and each set is the same
+# one aurade-install accepts - the engine re-checks every value, and these
+# exist so a front end can refuse a bad answer at the prompt rather than after
+# every other question has been asked.
+aurade_valid_filesystem() {
+  case $1 in btrfs|ext4|xfs) return 0 ;; *) return 1 ;; esac
+}
+
+aurade_valid_swap() {
+  case $1 in none|file|zram) return 0 ;; *) return 1 ;; esac
+}
+
+aurade_valid_swap_size() {
+  case $1 in
+    auto|hibernate) return 0 ;;
+    *) [[ $1 =~ ^[0-9]+[GM]$ ]] ;;
+  esac
+}
+
+aurade_valid_layout() {
+  case $1 in wipe|alongside) return 0 ;; *) return 1 ;; esac
+}
+
 aurade_valid_arch_snapshot() {
   local snapshot=$1 normalized
   [[ $snapshot =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || return 1

@@ -25,11 +25,10 @@
 #   one until an install fails at argument parsing, after the user has typed
 #   everything in.
 #
-# Questions the engine cannot consume are not listed. The spec sketched
-# `fslayout` and `swap` controls, but aurade-install has no flag for either and
-# adding one is a change to the destructive path. A prompt that collects an
-# answer nothing acts on is worse than no prompt, so they are out until the
-# engine supports them.
+# Questions the engine cannot consume are not listed. That rule is what kept
+# `fslayout` and `swap` out of this file until the engine grew `--filesystem`,
+# `--swap`, `--swap-size` and `--layout`; they are here now because those flags
+# exist and are tested, not because the screen looked empty without them.
 
 # shellcheck disable=SC2034  # read by the front ends that source this file
 declare -gA AURADE_Q=()
@@ -166,6 +165,54 @@ _q locale \
   flag --locale \
   secret no
 
+_q layout \
+  label 'How should the disk be used?' \
+  short 'Disk layout' \
+  help 'Erasing gives AuraDE the whole disk. Installing alongside keeps what is already there and uses free space that is already unallocated; it never shrinks an existing partition to make room.' \
+  type enum \
+  default wipe \
+  validator aurade_valid_layout \
+  error 'Choose wipe or alongside.' \
+  advanced yes \
+  flag --layout \
+  secret no
+
+_q filesystem \
+  label 'Root filesystem' \
+  short 'Filesystem' \
+  help 'Btrfs is the default and the only one that gets the factory snapshot and the rollback entry in the boot menu. ext4 and xfs install a system that boots and updates, with nothing to roll back to.' \
+  type enum \
+  default btrfs \
+  validator aurade_valid_filesystem \
+  error 'Choose btrfs, ext4 or xfs.' \
+  advanced yes \
+  flag --filesystem \
+  secret no
+
+_q swap \
+  label 'Swap' \
+  short 'Swap' \
+  help 'A swap file lives inside the root filesystem, so an encrypted disk encrypts the swap with it. zram compresses pages in memory instead and never touches the disk.' \
+  type enum \
+  default none \
+  validator aurade_valid_swap \
+  error 'Choose none, file or zram.' \
+  advanced yes \
+  flag --swap \
+  secret no
+
+_q swap_size \
+  label 'Swap size' \
+  short 'Swap size' \
+  help 'Auto keeps a desktop responsive under memory pressure. Hibernate makes the swap file large enough to hold everything in memory, which is what suspending to disk needs.' \
+  type enum \
+  default auto \
+  validator aurade_valid_swap_size \
+  error 'Choose auto, hibernate, or a size such as 8G.' \
+  advanced yes \
+  flag --swap-size \
+  secret no
+
 _q snapshot \
   label 'Arch package snapshot' \
   short 'Package snapshot' \
@@ -235,6 +282,23 @@ aurade_question_default() {
 
 aurade_question_exists() {
   [[ -n ${AURADE_Q[$1.label]-} ]]
+}
+
+# The word the user has to type at the gate, derived from the answers rather
+# than from a literal in a renderer.
+#
+# It lives here because two front ends and the engine all have to agree on it,
+# and because the word has to be true: `alongside` does not erase anything, and
+# a gate that demands ERASE for an install that erases nothing teaches people
+# to type ERASE without reading it. That habit is the failure this gate exists
+# to prevent, so the token names the operation.
+aurade_confirmation_token() {
+  local target=$1 layout=${2:-wipe}
+  if [[ $layout == alongside ]]; then
+    printf 'INSTALL:%s' "$target"
+  else
+    printf 'ERASE:%s' "$target"
+  fi
 }
 
 aurade_question_is_advanced() {

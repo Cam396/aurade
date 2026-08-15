@@ -31,6 +31,7 @@ install -m 0755 "$ROOT/installer/bin/aurade-installer-gui" \
 install -m 0644 "$ROOT/installer/lib/aurade-validate.sh" \
   "$ROOT/installer/lib/aurade-questions.sh" "$ROOT/installer/lib/aurade-tui.sh" \
   "$ROOT/installer/lib/aurade-probe.sh" "$ROOT/installer/lib/aurade-journal.sh" \
+  "$ROOT/installer/lib/aurade-renderers.sh" \
   "$TMP/lib/"
 install -d "$TMP/lib/aurade_gui"
 install -m 0644 "$ROOT"/installer/lib/aurade_gui/*.py "$TMP/lib/aurade_gui/"
@@ -50,9 +51,14 @@ fi
 printf 'tui %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
 exit 0
 STUB
+# A compositor that starts and whose client draws. The readiness file is how
+# the launcher tells "a renderer worked" from "cage exited"; a stub that omits
+# it is a stub for a machine where nothing ever appeared, which is a different
+# test - test-renderer-chain.sh covers that side.
 cat >"$TMP/stub/cage" <<'STUB'
 #!/usr/bin/env bash
 printf 'cage %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+[[ -z ${AURADE_GUI_READY_FILE:-} ]] || printf 'mapped\n' >"$AURADE_GUI_READY_FILE"
 exit 0
 STUB
 chmod +x "$TMP/bin/aurade-installer-tui" "$TMP/stub/cage"

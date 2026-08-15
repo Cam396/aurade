@@ -133,12 +133,16 @@ check(max(r, g, b) - min(r, g, b) >= 3,
 
 # -- the stylesheet actually defines what the widgets ask for ----------------
 
-css = open(os.path.join(ROOT, "installer", "lib", "aurade_gui", "theme.css")).read()
-app = open(os.path.join(ROOT, "installer", "lib", "aurade_gui", "app.py")).read()
+LIB = os.path.join(ROOT, "installer", "lib", "aurade_gui")
+css = open(os.path.join(LIB, "theme.css")).read()
+dark_css = open(os.path.join(LIB, "theme-dark.css")).read()
+app = open(os.path.join(LIB, "app.py")).read()
 
 for role in ("m3_surface", "m3_on_surface", "m3_primary", "m3_error",
              "m3_outline_variant", "m3_tertiary"):
     check(f"@define-color {role} " in css, f"{role} is not defined in the stylesheet")
+    check(f"@define-color {role} " in dark_css,
+          f"{role} is not defined in the dark stylesheet")
 
 # libadwaita's own names are redefined, so stock widgets wear this palette
 # instead of being fought with per-widget overrides.
@@ -146,6 +150,45 @@ for adw in ("window_bg_color", "accent_bg_color", "card_bg_color",
             "destructive_bg_color", "headerbar_bg_color"):
     check(f"@define-color {adw} " in css,
           f"libadwaita's {adw} is not mapped onto a role")
+
+# Two sheets, and they must actually differ.
+#
+# GTK's `@define-color` is global: a named colour has one value per loaded
+# sheet and no selector can give it a second one. So the dark scheme is a
+# second file that the widget layer swaps in, and the failure this guards
+# against is the one that shipped - a dark window drawing light-scheme cards
+# with unreadable text on them, because only libadwaita's own names switched
+# and none of the custom ones did.
+import re  # noqa: E402
+
+
+def defined(sheet: str) -> dict[str, str]:
+    return dict(re.findall(r"@define-color\s+([A-Za-z0-9_]+)\s+([^;]+);", sheet))
+
+
+light_roles, dark_roles = defined(css), defined(dark_css)
+check(set(light_roles) == set(dark_roles),
+      "the two stylesheets define different names: "
+      f"{sorted(set(light_roles) ^ set(dark_roles))}")
+differing = sum(1 for name in light_roles
+                if light_roles[name] != dark_roles.get(name))
+check(differing > 20,
+      f"only {differing} colours differ between the schemes; the dark sheet is "
+      "not a dark sheet")
+for role in ("m3_surface", "m3_on_surface", "m3_surface_container_low"):
+    check(light_roles.get(role) != dark_roles.get(role),
+          f"{role} is the same colour in both schemes ({light_roles.get(role)})")
+
+# Every component rule is in both sheets, or a card styled in one scheme is an
+# unstyled box in the other.
+for style in ("aurade-verdict", "aurade-check", "aurade-disclosure",
+              "aurade-scheme-button", "aurade-mono"):
+    check(f".{style}" in dark_css,
+          f".{style} is missing from the dark stylesheet")
+
+# And the widget layer has to actually load the second one.
+check("THEME_DARK_CSS" in app and "_load_stylesheet" in app,
+      "the widget layer never loads the dark stylesheet")
 
 # Every style class the widget layer asks for has to exist, or it silently
 # does nothing and the page renders unstyled.
@@ -158,6 +201,7 @@ stock = {
     # provided by GTK or libadwaita, not by this stylesheet
     "flat", "suggested-action", "destructive-action", "pill", "boxed-list",
     "dim-label", "error", "warning", "success", "card", "monospace", "aurade",
+    "linked",
 }
 for style in sorted(used - stock):
     check(f".{style}" in css, f"the widget layer uses .{style}, which the "

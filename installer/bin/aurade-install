@@ -35,6 +35,15 @@ ALLOW_LOOP=0
 TIMEZONE=UTC
 LOCALE=en_US.UTF-8
 KEYMAP=us
+# Storage shape. The defaults are the only combination this product has ever
+# shipped, and they stay the defaults: a wiped disk, one Btrfs root with
+# subvolumes, and no swap. Everything below is additive - choosing something
+# other than the default is what turns a branch on, so an install that passes
+# none of these new flags runs exactly the sequence it ran before.
+FILESYSTEM=btrfs
+SWAP=none
+SWAP_SIZE=auto
+LAYOUT=wipe
 BASE_PACKAGES=(
   base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs seatd dosfstools cryptsetup
   gptfdisk efibootmgr networkmanager sudo pipewire pipewire-alsa
@@ -44,6 +53,9 @@ BASE_PACKAGES=(
 
 ROOT_PART=
 ESP_PART=
+ALONGSIDE_ESP=
+SWAP_FILE=
+SWAP_SIZE_MIB=0
 CRYPT_NAME=aurade-root
 CRYPT_OPENED=0
 TARGET_MOUNTED=0
@@ -83,6 +95,10 @@ Repository integrity:
 Storage and identity:
   --encrypt                    Format the root partition as LUKS2
   --luks-passphrase-file FILE  Root-readable LUKS passphrase file
+  --filesystem FS              btrfs (default), ext4 or xfs
+  --swap POLICY                none (default), file or zram
+  --swap-size SIZE             auto (default), hibernate, or a size like 8G
+  --layout MODE                wipe (default) or alongside
   --mountpoint DIR             Temporary target mountpoint
   --hostname NAME
   --timezone ZONE
@@ -90,10 +106,18 @@ Storage and identity:
   --keymap KEYMAP
   --allow-loop                 Permit /dev/loop* as an execution target
 
+Only Btrfs carries the factory snapshot and the rollback boot entry. ext4 and
+xfs install a system that boots and updates, with no rollback to return to.
+
+--layout alongside keeps the existing partitions and the existing EFI system
+partition, and installs into free space that is already unallocated. It never
+moves or resizes anything, so the free space has to exist first.
+
 Safety:
   --dry-run                    Print the complete plan (default)
   --execute                    Permit execution after every safety check passes
-  --confirm TOKEN              Must exactly equal ERASE:<canonical target>
+  --confirm TOKEN              ERASE:<target> when wiping, INSTALL:<target>
+                               when installing alongside
 
 Optional failure evidence:
   AURADE_FAILURE_JOURNAL_DIR  Disk-backed directory for a secret-free copy of
@@ -355,6 +379,55 @@ partition_path() {
   esac
 }
 
+#: GPT type GUID of an EFI System Partition. Used to find the partition an
+#: existing operating system already boots from, so `alongside` can add an
+#: entry to it instead of creating a second ESP the firmware may ignore.
+ESP_TYPE_GUID=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+
+existing_esp() {
+  local device parttype
+  while read -r device parttype; do
+    [[ ${parttype^^} == "$ESP_TYPE_GUID" ]] || continue
+    printf '%s' "$device"
+    return 0
+  done < <(lsblk -lnpo NAME,PARTTYPE "$1" 2>/dev/null)
+  return 1
+}
+
+# Bytes in the largest run of unallocated sectors. sgdisk answers this
+# directly, which is worth using: parsing its human-readable table would break
+# the first time it changes a column.
+largest_free_bytes() {
+  local disk=$1 first last sector
+  first=$(sgdisk --first-in-largest "$disk" 2>/dev/null | tr -dc '0-9')
+  last=$(sgdisk --end-of-largest "$disk" 2>/dev/null | tr -dc '0-9')
+  sector=$(blockdev --getss "$disk" 2>/dev/null)
+  [[ $first =~ ^[0-9]+$ && $last =~ ^[0-9]+$ && $sector =~ ^[0-9]+$ ]] || { printf '0'; return 0; }
+  (( last >= first )) || { printf '0'; return 0; }
+  printf '%s' "$(( (last - first + 1) * sector ))"
+}
+
+# The swap file's size in MiB, or 0 for no swap file. `hibernate` needs room
+# for every page of RAM plus headroom; `auto` is the usual compromise that
+# keeps a desktop responsive under pressure without eating the disk.
+swap_mib() {
+  local total_kib total_mib
+  [[ $SWAP == file ]] || { printf '0'; return 0; }
+  case $SWAP_SIZE in
+    *M) printf '%s' "${SWAP_SIZE%M}"; return 0 ;;
+    *G) printf '%s' "$(( ${SWAP_SIZE%G} * 1024 ))"; return 0 ;;
+  esac
+  total_kib=$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo 2>/dev/null || true)
+  [[ $total_kib =~ ^[0-9]+$ ]] || total_kib=$(( 4 * 1024 * 1024 ))
+  total_mib=$(( total_kib / 1024 ))
+  if [[ $SWAP_SIZE == hibernate ]]; then
+    printf '%s' "$(( total_mib + 2048 ))"
+    return 0
+  fi
+  (( total_mib < 8192 )) || { printf '8192'; return 0; }
+  printf '%s' "$total_mib"
+}
+
 cleanup() {
   local status=$?
   set +e
@@ -419,6 +492,10 @@ while (($#)); do
     --locale) LOCALE=${2:?}; shift 2 ;;
     --keymap) KEYMAP=${2:?}; shift 2 ;;
     --luks-passphrase-file) LUKS_PASSPHRASE_FILE=${2:?}; shift 2 ;;
+    --filesystem) FILESYSTEM=${2:?}; shift 2 ;;
+    --swap) SWAP=${2:?}; shift 2 ;;
+    --swap-size) SWAP_SIZE=${2:?}; shift 2 ;;
+    --layout) LAYOUT=${2:?}; shift 2 ;;
     --encrypt) LUKS=1; shift ;;
     --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
     --allow-loop) ALLOW_LOOP=1; shift ;;
@@ -444,6 +521,33 @@ TARGET=$(canonical_device "$TARGET")
 [[ $TIMEZONE =~ ^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$ && $TIMEZONE != *..* ]] || die 'invalid timezone'
 [[ $LOCALE =~ ^[A-Za-z0-9_.@-]+$ ]] || die 'invalid locale'
 [[ $KEYMAP =~ ^[A-Za-z0-9_.@+-]+$ ]] || die 'invalid keymap'
+case $FILESYSTEM in
+  btrfs|ext4|xfs) ;;
+  *) die '--filesystem must be btrfs, ext4 or xfs' ;;
+esac
+case $SWAP in
+  none|file|zram) ;;
+  # A swap partition is deliberately absent. On the encrypted path it would
+  # need either its own passphrase prompt at boot or a random key that makes
+  # hibernation impossible, and on the unencrypted path it would be the one
+  # part of the disk not covered by LUKS. A swap file lives inside the root
+  # filesystem, so it inherits the encryption and needs no second answer.
+  *) die '--swap must be none, file or zram' ;;
+esac
+case $SWAP_SIZE in
+  auto|hibernate) ;;
+  *[0-9]G|*[0-9]M)
+    [[ $SWAP_SIZE =~ ^[0-9]+[GM]$ ]] || die '--swap-size must be auto, hibernate, or a size like 8G' ;;
+  *) die '--swap-size must be auto, hibernate, or a size like 8G' ;;
+esac
+case $LAYOUT in
+  wipe|alongside) ;;
+  *) die '--layout must be wipe or alongside' ;;
+esac
+[[ $SWAP != zram || $SWAP_SIZE != hibernate ]] || \
+  die 'zram swap cannot support hibernation; it lives in RAM'
+[[ $FILESYSTEM != xfs || $SWAP_SIZE != hibernate ]] || \
+  die 'hibernation needs a swap file with a stable physical offset, which xfs does not provide'
 [[ $ARCH_SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || \
   die '--arch-snapshot must be YYYY/MM/DD'
 normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
@@ -545,9 +649,26 @@ if (( ! ALLOW_UNSIGNED )); then
   done
 fi
 
+# The filesystem tools for a root that is not Btrfs, and the generator that
+# turns `--swap zram` into a running swap device. btrfs-progs is already in the
+# list unconditionally because the rollback tooling uses it whatever the root
+# filesystem is.
+case $FILESYSTEM in
+  ext4) BASE_PACKAGES+=(e2fsprogs) ;;
+  xfs)  BASE_PACKAGES+=(xfsprogs) ;;
+esac
+[[ $SWAP != zram ]] || BASE_PACKAGES+=(zram-generator)
+
 ESP_PART=$(partition_path "$TARGET" 1)
 ROOT_PART=$(partition_path "$TARGET" 2)
-ERASE_TOKEN="ERASE:$TARGET"
+# The token says what is about to happen. `alongside` does not erase anything,
+# so demanding the word ERASE there would train people to type it when it is
+# not true, which is the one habit this gate exists to prevent.
+if [[ $LAYOUT == alongside ]]; then
+  ERASE_TOKEN="INSTALL:$TARGET"
+else
+  ERASE_TOKEN="ERASE:$TARGET"
+fi
 
 if [[ $MODE == execute ]]; then
   (( EUID == 0 )) || die '--execute requires root'
@@ -582,7 +703,21 @@ if [[ $MODE == execute ]]; then
   done < <(swapon --show=NAME --noheadings 2>/dev/null || true)
   target_bytes=$(blockdev --getsize64 "$TARGET")
   min_target_bytes=${AURADE_MIN_DISK_BYTES:-17179869184}
-  (( target_bytes >= min_target_bytes )) || die 'target is too small (need at least 16 GiB)'
+  if [[ $LAYOUT == alongside ]]; then
+    # Nothing is moved, shrunk or deleted here. The free space has to be there
+    # already, and the partition table has to be the GPT the existing system
+    # boots from - installing a second ESP beside an MBR disk produces a
+    # machine whose firmware boots one operating system and cannot see the
+    # other, which is a worse outcome than refusing.
+    ALONGSIDE_ESP=$(existing_esp "$TARGET") || \
+      die 'no EFI system partition found on the target; --layout alongside adds AuraDE to a disk that already boots in UEFI mode, and this disk does not'
+    free_bytes=$(largest_free_bytes "$TARGET")
+    (( free_bytes >= min_target_bytes )) || \
+      die "the largest unallocated region on the target is ${free_bytes} bytes; --layout alongside needs at least ${min_target_bytes} and never resizes an existing partition to make room"
+    log "alongside: reusing ESP ${ALONGSIDE_ESP}, ${free_bytes} bytes of free space available"
+  else
+    (( target_bytes >= min_target_bytes )) || die 'target is too small (need at least 16 GiB)'
+  fi
   target_model=$(lsblk -dnro MODEL "$TARGET" | sed 's/[[:space:]]*$//' || true)
   target_serial=$(lsblk -dnro SERIAL "$TARGET" | sed 's/[[:space:]]*$//' || true)
   target_transport=$(lsblk -dnro TRAN "$TARGET" | sed 's/[[:space:]]*$//' || true)
@@ -597,6 +732,18 @@ if [[ $MODE == execute ]]; then
   for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg gpgv; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
+  # Same rule as cryptsetup below: anything the chosen shape will need is
+  # checked here, before the first destructive command, so a missing binary
+  # cannot leave a half-partitioned disk.
+  case $FILESYSTEM in
+    ext4) command -v mkfs.ext4 >/dev/null || die 'required command not found: mkfs.ext4' ;;
+    xfs)  command -v mkfs.xfs >/dev/null || die 'required command not found: mkfs.xfs' ;;
+  esac
+  if [[ $SWAP == file ]]; then
+    command -v mkswap >/dev/null || die 'required command not found: mkswap'
+    [[ $FILESYSTEM != ext4 ]] || command -v fallocate >/dev/null || \
+      die 'required command not found: fallocate'
+  fi
   # The encrypted path invokes cryptsetup after partitioning.  Check it with
   # the other pre-erase dependencies so a missing binary cannot leave a
   # partially partitioned target.
@@ -689,18 +836,44 @@ aurade_journal_begin confirm 'erase token accepted'
 aurade_journal_ok confirm
 
 aurade_journal_begin partition 'partitioning the disk'
-run wipefs --all --force "$TARGET"
-run sgdisk --zap-all "$TARGET"
 ROOT_PARTITION_TYPE=8300
 (( LUKS )) && ROOT_PARTITION_TYPE=8309
-run sgdisk --clear --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:AURADE_ESP \
-  --new=2:0:0 --typecode="2:${ROOT_PARTITION_TYPE}" --change-name=2:AURADE_ROOT "$TARGET"
-run partprobe "$TARGET"
-run udevadm settle
+if [[ $LAYOUT == alongside ]]; then
+  # No wipefs and no --zap-all: every existing partition, and the partition
+  # table itself, is left exactly as it was. sgdisk fills the largest free
+  # block and numbers the result itself.
+  run sgdisk --largest-new=0 --typecode="0:${ROOT_PARTITION_TYPE}" \
+    --change-name=0:AURADE_ROOT "$TARGET"
+  run partprobe "$TARGET"
+  run udevadm settle
+  if [[ $MODE == execute ]]; then
+    ESP_PART=$ALONGSIDE_ESP
+    ROOT_PART=$(lsblk -lnpo NAME,PARTLABEL "$TARGET" |
+      awk '$2 == "AURADE_ROOT" { print $1; exit }')
+    [[ -b $ROOT_PART ]] || die 'the new partition did not appear after partitioning the target'
+  else
+    ESP_PART='<existing-efi-system-partition>'
+    ROOT_PART='<new-partition-in-free-space>'
+  fi
+else
+  run wipefs --all --force "$TARGET"
+  run sgdisk --zap-all "$TARGET"
+  run sgdisk --clear --new=1:1MiB:+1GiB --typecode=1:ef00 --change-name=1:AURADE_ESP \
+    --new=2:0:0 --typecode="2:${ROOT_PARTITION_TYPE}" --change-name=2:AURADE_ROOT "$TARGET"
+  run partprobe "$TARGET"
+  run udevadm settle
+fi
 aurade_journal_ok partition
 
 aurade_journal_begin format 'creating filesystems'
-run mkfs.fat -F 32 -n AURADE_ESP "$ESP_PART"
+if [[ $LAYOUT == alongside ]]; then
+  # Formatting the ESP here would destroy the boot entries of whatever is
+  # already installed, which is the single most damaging thing this mode could
+  # do. It is mounted and written into, never made.
+  log "alongside: keeping the existing EFI system partition $ESP_PART as it is"
+else
+  run mkfs.fat -F 32 -n AURADE_ESP "$ESP_PART"
+fi
 
 ROOT_DEVICE=$ROOT_PART
 if (( LUKS )); then
@@ -711,26 +884,73 @@ if (( LUKS )); then
   fi
   ROOT_DEVICE=/dev/mapper/$CRYPT_NAME
 fi
-run mkfs.btrfs -f -L AURADE_ROOT "$ROOT_DEVICE"
+case $FILESYSTEM in
+  btrfs) run mkfs.btrfs -f -L AURADE_ROOT "$ROOT_DEVICE" ;;
+  ext4)  run mkfs.ext4 -F -L AURADE_ROOT "$ROOT_DEVICE" ;;
+  xfs)   run mkfs.xfs -f -L AURADE_ROOT "$ROOT_DEVICE" ;;
+esac
 aurade_journal_ok format
 
 aurade_journal_begin mount 'creating subvolumes and mounting'
 run install -d -m 0755 "$MOUNTPOINT"
-run mount "$ROOT_DEVICE" "$MOUNTPOINT"
-if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
-for subvolume in @ @home @var_log @snapshots; do
-  run btrfs subvolume create "$MOUNTPOINT/$subvolume"
-done
-run umount "$MOUNTPOINT"
-if [[ $MODE == execute ]]; then TARGET_MOUNTED=0; fi
-run mount -o noatime,compress=zstd:3,subvol=@ "$ROOT_DEVICE" "$MOUNTPOINT"
-if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
-run install -d -m 0755 "$MOUNTPOINT/boot" "$MOUNTPOINT/home" "$MOUNTPOINT/var/log" "$MOUNTPOINT/.snapshots" "$MOUNTPOINT/var/cache/aurade/repo"
-run mount "$ESP_PART" "$MOUNTPOINT/boot"
-run mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_DEVICE" "$MOUNTPOINT/home"
-run mount -o noatime,compress=zstd:3,subvol=@var_log "$ROOT_DEVICE" "$MOUNTPOINT/var/log"
-run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOINT/.snapshots"
+if [[ $FILESYSTEM == btrfs ]]; then
+  run mount "$ROOT_DEVICE" "$MOUNTPOINT"
+  if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
+  for subvolume in @ @home @var_log @snapshots; do
+    run btrfs subvolume create "$MOUNTPOINT/$subvolume"
+  done
+  run umount "$MOUNTPOINT"
+  if [[ $MODE == execute ]]; then TARGET_MOUNTED=0; fi
+  run mount -o noatime,compress=zstd:3,subvol=@ "$ROOT_DEVICE" "$MOUNTPOINT"
+  if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
+  run install -d -m 0755 "$MOUNTPOINT/boot" "$MOUNTPOINT/home" "$MOUNTPOINT/var/log" "$MOUNTPOINT/.snapshots" "$MOUNTPOINT/var/cache/aurade/repo"
+  run mount "$ESP_PART" "$MOUNTPOINT/boot"
+  run mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_DEVICE" "$MOUNTPOINT/home"
+  run mount -o noatime,compress=zstd:3,subvol=@var_log "$ROOT_DEVICE" "$MOUNTPOINT/var/log"
+  run mount -o noatime,compress=zstd:3,subvol=@snapshots "$ROOT_DEVICE" "$MOUNTPOINT/.snapshots"
+else
+  # One filesystem, no subvolumes, and therefore no snapshot to roll back to.
+  # That consequence is carried all the way through: the snapshot stage skips,
+  # the rollback boot entry is not written, and the installed manifest records
+  # it, so nothing on the installed system claims a rollback exists.
+  run mount -o noatime "$ROOT_DEVICE" "$MOUNTPOINT"
+  if [[ $MODE == execute ]]; then TARGET_MOUNTED=1; fi
+  run install -d -m 0755 "$MOUNTPOINT/boot" "$MOUNTPOINT/var/cache/aurade/repo"
+  run mount "$ESP_PART" "$MOUNTPOINT/boot"
+fi
 aurade_journal_ok mount
+
+# Swap, before pacstrap so the file is part of the filesystem the rest of the
+# install measures itself against, and before genfstab so the entry is written
+# by the same pass that writes every other mount.
+SWAP_FILE=
+SWAP_SIZE_MIB=$(swap_mib)
+if [[ $SWAP == file ]] && (( SWAP_SIZE_MIB > 0 )); then
+  SWAP_FILE=/swap/swapfile
+  run install -d -m 0755 "$MOUNTPOINT/swap"
+  case $FILESYSTEM in
+    btrfs)
+      # A Btrfs swap file must not be copy-on-write and must not be
+      # compressed; `mkswapfile` sets both, which is why it is used rather
+      # than fallocate plus chattr.
+      run btrfs filesystem mkswapfile --size "${SWAP_SIZE_MIB}m" \
+        --uuid clear "$MOUNTPOINT$SWAP_FILE"
+      ;;
+    ext4)
+      run fallocate -l "${SWAP_SIZE_MIB}M" "$MOUNTPOINT$SWAP_FILE"
+      run chmod 600 "$MOUNTPOINT$SWAP_FILE"
+      run mkswap "$MOUNTPOINT$SWAP_FILE"
+      ;;
+    xfs)
+      # xfs will not take a hole-punched file for swap, so it is written out.
+      run dd if=/dev/zero "of=$MOUNTPOINT$SWAP_FILE" bs=1M \
+        "count=$SWAP_SIZE_MIB" status=none
+      run chmod 600 "$MOUNTPOINT$SWAP_FILE"
+      run mkswap "$MOUNTPOINT$SWAP_FILE"
+      ;;
+  esac
+  log "swap: ${SWAP_SIZE_MIB} MiB swap file at $SWAP_FILE"
+fi
 
 aurade_journal_begin pacstrap 'installing the base system'
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
@@ -776,6 +996,24 @@ if [[ $MODE == execute ]]; then
 else
   printf ' + genfstab -U %q > %q\n' "$MOUNTPOINT" "$MOUNTPOINT/etc/fstab"
 fi
+# genfstab records mounted filesystems. A swap file has never been swapped on
+# here - activating it inside the installer would put the target's swap under
+# the live system - so its entry is written directly.
+if [[ -n $SWAP_FILE ]]; then
+  if [[ $MODE == execute ]]; then
+    printf '%s none swap defaults 0 0\n' "$SWAP_FILE" >>"$MOUNTPOINT/etc/fstab"
+  else
+    # %s rather than %q for the line itself: this is a fixed fstab entry, and
+    # the point of the dry run is that a person can read the plan.
+    printf ' + append "%s" to %q\n' "$SWAP_FILE none swap defaults 0 0" "$MOUNTPOINT/etc/fstab"
+  fi
+fi
+if [[ $SWAP == zram ]]; then
+  # Compressed swap in RAM. Nothing is written to the disk, so there is no
+  # hibernation and no wear, which is the trade this option exists to make.
+  write_target_file /etc/systemd/zram-generator.conf 0644 \
+    "[zram0]\nzram-size = min(ram / 2, 8192)\ncompression-algorithm = zstd\n"
+fi
 run arch-chroot "$MOUNTPOINT" ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 run arch-chroot "$MOUNTPOINT" hwclock --systohc
 write_target_file /etc/hostname 0644 "$HOSTNAME\n"
@@ -813,6 +1051,15 @@ if (( LUKS )); then
   else
     printf ' + configure mkinitcpio sd-encrypt hook\n'
   fi
+elif [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
+  # The systemd-based hook set the encrypted path uses already resumes from
+  # hibernation. The default busybox set does not, and needs the `resume` hook
+  # after `block` so the swap file is reachable before the root is mounted.
+  if [[ $MODE == execute ]]; then
+    sed -i -E 's|^(HOOKS=\(.*)\bfilesystems\b|\1resume filesystems|' "$MOUNTPOINT/etc/mkinitcpio.conf"
+  else
+    printf ' + add the mkinitcpio resume hook for hibernation\n'
+  fi
 fi
 run arch-chroot "$MOUNTPOINT" mkinitcpio -P
 aurade_journal_ok configure
@@ -834,6 +1081,34 @@ else
   (( LUKS )) && ROOT_OPTIONS='rd.luks.name=<luks-uuid>=aurade-root root=/dev/mapper/aurade-root rw'
 fi
 
+# Hibernation needs the kernel to be told which filesystem holds the swap file
+# and how far into the device the file physically starts. Both are read back
+# from the file that was just created rather than assumed, and if either cannot
+# be read the option is dropped: a resume= pointing at the wrong offset is a
+# corrupted resume, so no hibernation is the only safe fallback.
+HIBERNATION=unsupported
+if [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
+  if [[ $MODE == execute ]]; then
+    resume_offset=
+    case $FILESYSTEM in
+      btrfs)
+        resume_offset=$(btrfs inspect-internal map-swapfile -r "$MOUNTPOINT$SWAP_FILE" 2>/dev/null | tr -dc '0-9') ;;
+      ext4)
+        resume_offset=$(filefrag -v "$MOUNTPOINT$SWAP_FILE" 2>/dev/null |
+          awk 'NR > 3 && $1 == "0:" { gsub(/\.\./, " ", $4); print $4; exit }' | tr -dc '0-9') ;;
+    esac
+    if [[ $resume_offset =~ ^[0-9]+$ ]]; then
+      ROOT_OPTIONS="$ROOT_OPTIONS resume=UUID=${ROOT_UUID} resume_offset=${resume_offset}"
+      HIBERNATION=supported
+    else
+      log 'could not read the swap file physical offset; hibernation will not be configured'
+    fi
+  else
+    ROOT_OPTIONS="$ROOT_OPTIONS resume=UUID=<root-filesystem-uuid> resume_offset=<swapfile-offset>"
+    HIBERNATION=supported
+  fi
+fi
+
 write_target_file /boot/loader/loader.conf 0644 'default aurade.conf\ntimeout 4\nconsole-mode max\neditor no\n'
 if [[ $MODE == execute ]]; then
   cpu_vendor=$(awk -F: '$1 ~ /^[[:space:]]*vendor_id[[:space:]]*$/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' /proc/cpuinfo)
@@ -851,17 +1126,32 @@ if [[ -n $MICROCODE_IMAGE ]]; then
   normal_entry+="initrd /${MICROCODE_IMAGE}\n"
   rollback_entry+="initrd /aurade-rollback/factory/${MICROCODE_IMAGE}\n"
 fi
-normal_entry+="initrd /initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@ quiet\n"
+ROOT_FLAGS=
+[[ $FILESYSTEM != btrfs ]] || ROOT_FLAGS=' rootflags=subvol=@'
+# The kernel command line, in the log. It is the single line that decides
+# whether the installed system finds its root, unlocks its disk and resumes
+# from hibernation, and until now the only way to see it was to boot the
+# result and read it off the running system.
+log "boot options: ${ROOT_OPTIONS}${ROOT_FLAGS} quiet"
+normal_entry+="initrd /initramfs-linux.img\noptions ${ROOT_OPTIONS}${ROOT_FLAGS} quiet\n"
 rollback_entry+="initrd /aurade-rollback/factory/initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@snapshots/0/snapshot systemd.unit=multi-user.target\n"
 write_target_file /boot/loader/entries/aurade.conf 0644 "$normal_entry"
-run install -d -m 0755 "$MOUNTPOINT/boot/aurade-rollback/factory"
 BOOT_ARTIFACTS=(vmlinuz-linux initramfs-linux.img)
 [[ -z $MICROCODE_IMAGE ]] || BOOT_ARTIFACTS=(vmlinuz-linux "$MICROCODE_IMAGE" initramfs-linux.img)
-for artifact in "${BOOT_ARTIFACTS[@]}"; do
-  run install -m 0644 "$MOUNTPOINT/boot/$artifact" \
-    "$MOUNTPOINT/boot/aurade-rollback/factory/$artifact"
-done
-write_target_file /boot/loader/entries/aurade-rollback.conf 0644 "$rollback_entry"
+# The rollback entry is written only when there is something to roll back to.
+# A menu entry that boots `subvol=@snapshots/0/snapshot` on a filesystem with
+# no subvolumes is an entry that drops the user at an initramfs prompt on the
+# day they most need it to work.
+if [[ $FILESYSTEM == btrfs ]]; then
+  run install -d -m 0755 "$MOUNTPOINT/boot/aurade-rollback/factory"
+  for artifact in "${BOOT_ARTIFACTS[@]}"; do
+    run install -m 0644 "$MOUNTPOINT/boot/$artifact" \
+      "$MOUNTPOINT/boot/aurade-rollback/factory/$artifact"
+  done
+  write_target_file /boot/loader/entries/aurade-rollback.conf 0644 "$rollback_entry"
+else
+  log "filesystem is ${FILESYSTEM}: no factory snapshot and no rollback boot entry"
+fi
 
 run install -d -m 0750 "$MOUNTPOINT/etc/aurade-install" "$MOUNTPOINT/.snapshots/0"
 run cp "$PACKAGE_LOCK" "$MOUNTPOINT/etc/aurade-install/packages.lock"
@@ -870,8 +1160,19 @@ run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/s
 aurade_journal_ok bootloader
 
 aurade_journal_begin snapshot 'creating the factory snapshot'
-write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nswap_policy=none\nhibernation=unsupported\nroot_uuid=${ROOT_UUID}\nroot_subvolume=@\nfactory_snapshot=@snapshots/0/snapshot\n"
-run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
+SWAP_POLICY=$SWAP
+[[ $SWAP != file ]] || SWAP_POLICY="file:${SWAP_SIZE_MIB}M"
+if [[ $FILESYSTEM == btrfs ]]; then
+  ROOT_SUBVOLUME=@
+  FACTORY_SNAPSHOT=@snapshots/0/snapshot
+else
+  ROOT_SUBVOLUME=none
+  FACTORY_SNAPSHOT=none
+fi
+write_target_file /etc/aurade-install/manifest 0644 "installer_version=1\ninstalled_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)\narch_snapshot=${ARCH_SNAPSHOT}\nrepo_name=${REPO_NAME}\nrepo_url=${REPO_URL}\nrepo_fingerprint=${REPO_FINGERPRINT:-unsigned}\nencrypted=${LUKS}\nfilesystem=${FILESYSTEM}\nlayout=${LAYOUT}\nswap_policy=${SWAP_POLICY}\nhibernation=${HIBERNATION}\nroot_uuid=${ROOT_UUID}\nroot_subvolume=${ROOT_SUBVOLUME}\nfactory_snapshot=${FACTORY_SNAPSHOT}\n"
+if [[ $FILESYSTEM == btrfs ]]; then
+  run btrfs subvolume snapshot -r "$MOUNTPOINT" "$MOUNTPOINT/.snapshots/0/snapshot"
+fi
 run sync
 aurade_journal_ok snapshot
 
@@ -880,12 +1181,31 @@ if [[ $MODE == dry-run ]]; then
   printf ' + verify installed package set, fstab/UUIDs, boot artifacts, enabled units, locked root, and repository URL\n'
 else
   [[ -s $MOUNTPOINT/etc/fstab ]] || die 'post-install verification failed: fstab is empty'
-  [[ -r $MOUNTPOINT/boot/loader/entries/aurade.conf && -r $MOUNTPOINT/boot/loader/entries/aurade-rollback.conf ]] || \
-    die 'post-install verification failed: systemd-boot entries are missing'
+  [[ -r $MOUNTPOINT/boot/loader/entries/aurade.conf ]] || \
+    die 'post-install verification failed: the systemd-boot entry is missing'
   for artifact in "${BOOT_ARTIFACTS[@]}"; do
-    [[ -r $MOUNTPOINT/boot/$artifact && -r $MOUNTPOINT/boot/aurade-rollback/factory/$artifact ]] || \
+    [[ -r $MOUNTPOINT/boot/$artifact ]] || \
       die "post-install verification failed: boot artifact is missing: $artifact"
   done
+  if [[ $FILESYSTEM == btrfs ]]; then
+    [[ -r $MOUNTPOINT/boot/loader/entries/aurade-rollback.conf ]] || \
+      die 'post-install verification failed: the rollback boot entry is missing'
+    for artifact in "${BOOT_ARTIFACTS[@]}"; do
+      [[ -r $MOUNTPOINT/boot/aurade-rollback/factory/$artifact ]] || \
+        die "post-install verification failed: rollback boot artifact is missing: $artifact"
+    done
+  else
+    # The rollback path is absent by choice on this filesystem, so verify that
+    # it is absent rather than leaving a half-written one behind.
+    [[ ! -e $MOUNTPOINT/boot/loader/entries/aurade-rollback.conf ]] || \
+      die 'post-install verification failed: a rollback entry exists on a filesystem with no factory snapshot'
+  fi
+  if [[ -n $SWAP_FILE ]]; then
+    [[ -r $MOUNTPOINT$SWAP_FILE ]] || \
+      die 'post-install verification failed: the swap file is missing'
+    grep -Fq -- "$SWAP_FILE" "$MOUNTPOINT/etc/fstab" || \
+      die 'post-install verification failed: the swap file is not in fstab'
+  fi
   arch-chroot "$MOUNTPOINT" pacman -Q aurade chromiumos-ash >/dev/null || \
     die 'post-install verification failed: expected AuraDE packages are not installed'
   arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service seatd.service aurade-greetd.service >/dev/null || \

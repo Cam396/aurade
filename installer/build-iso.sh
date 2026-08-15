@@ -100,8 +100,12 @@ for _gui_module in __init__ bridge flow app brand locales tokens; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
 done
-install -Dm0644 "$ROOT/lib/aurade_gui/theme.css" \
-  "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/theme.css"
+# Both stylesheets. GTK's @define-color is global, so the dark scheme is a
+# second sheet the front end swaps in rather than a section of the first.
+for _sheet in theme.css theme-dark.css; do
+  install -Dm0644 "$ROOT/lib/aurade_gui/${_sheet}" \
+    "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_sheet}"
+done
 # The mark and the wordmark are drawn from the real artwork rather than
 # redrawn in code, so the installer and the product carry the same logo.
 for _asset in aurade-mark.png aurade-wordmark.png; do
@@ -113,6 +117,7 @@ install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aur
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
 install -Dm0644 "$ROOT/lib/aurade-tui.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tui.sh"
 install -Dm0644 "$ROOT/lib/aurade-probe.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-probe.sh"
+install -Dm0644 "$ROOT/lib/aurade-renderers.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-renderers.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"
 "$ROOT/tools/generate-package-lock.sh" "$AURADE_REPO_DIR" "$STAGE/airootfs/opt/aurade/repo/packages.lock" "$ROOT/expected-packages.txt"
 while read -r _digest filename _pkgname _pkgver _arch; do

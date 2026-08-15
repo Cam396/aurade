@@ -104,15 +104,56 @@ command -v cage >/dev/null 2>&1 || {
   run_text
 }
 
-# `cage` exits with its client's status. A compositor that cannot start at all
-# exits before the installer draws anything, and that is indistinguishable here
-# from an installer the user quit - so the text installer is offered rather
-# than assumed, and the user is told which happened.
+renderer_lib=$(_find_lib aurade-renderers.sh) || {
+  echo 'aurade-installer-start: the renderer list is missing from this image' >&2
+  run_text
+}
+# shellcheck source=../lib/aurade-renderers.sh
+. "$renderer_lib"
+
+# Try each renderer for real, best first, and stop at the first one that puts
+# a window on the screen.
+#
+# `cage` exits with its client's status, so its exit code alone cannot tell a
+# compositor that failed to start from an installer the user quit - and the
+# difference decides whether to try the next renderer or stop. So the question
+# is asked of the installer instead: it creates this file the moment its window
+# is first mapped. The file existing means a renderer worked and this session
+# is over, whatever the exit status says. The file missing means nothing was
+# ever drawn, and the next renderer is worth trying.
+#
+# That asymmetry matters. Restarting the installer under a different renderer
+# after the user has already answered five questions would throw the answers
+# away; refusing to try a second renderer when the first never drew a pixel is
+# the black screen. Neither is acceptable, and the readiness file is what
+# separates them.
+READY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aurade-installer.XXXXXX")
+trap 'rm -rf -- "$READY_DIR"' EXIT
+export AURADE_GUI_READY_FILE="$READY_DIR/drawn"
+
 status=0
-cage -- "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} || status=$?
-if (( status != 0 )); then
-  printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
-    "$status" >&2
-  printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
-fi
-exit "$status"
+attempted=0
+while IFS=$'\t' read -r label settings; do
+  [[ -n $label ]] || continue
+  attempted=$(( attempted + 1 ))
+  rm -f -- "$AURADE_GUI_READY_FILE"
+  printf 'aurade-installer-start: trying %s\n' "$label" >&2
+  status=0
+  # `env` rather than exporting: each attempt gets exactly the settings for
+  # that renderer, and nothing carried over from the attempt before it.
+  # shellcheck disable=SC2086  # settings is a deliberate list of KEY=VALUE
+  env $settings cage -- "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} || status=$?
+  if [[ -e $AURADE_GUI_READY_FILE ]]; then
+    if (( status != 0 )); then
+      printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
+        "$status" >&2
+      printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+    fi
+    exit "$status"
+  fi
+  printf 'aurade-installer-start: %s did not produce a display\n' "$label" >&2
+done < <(aurade_renderer_plan)
+
+printf 'aurade-installer-start: no renderer produced a display after %s attempts\n' \
+  "$attempted" >&2
+run_text

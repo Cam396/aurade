@@ -50,7 +50,9 @@ PROGRESS_INTERVAL_MS = 400
 #: someone is reading, not an animation anyone should watch.
 AURORA_INTERVAL_MS = 90
 
-THEME_CSS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "theme.css")
+_LIB = os.path.dirname(os.path.realpath(__file__))
+THEME_CSS = os.path.join(_LIB, "theme.css")
+THEME_DARK_CSS = os.path.join(_LIB, "theme-dark.css")
 
 
 # --------------------------------------------------------------------------
@@ -92,14 +94,25 @@ def pane(child: Gtk.Widget, style: str = "aurade-pane") -> Gtk.Box:
     return holder
 
 
-def page_shell(child: Gtk.Widget) -> Gtk.Widget:
+#: How wide a page's content is allowed to get.
+#:
+#: Prose has a comfortable measure and 660px is about right for it. Cards,
+#: disk rows and network lists are not prose: clamping a five-card grid to a
+#: reading measure in a 1440px window produces one column down the middle and
+#: two thirds of the screen left empty, which is what this installer looked
+#: like before. Pages say which they are.
+PROSE_WIDTH = 660
+BOARD_WIDTH = 940
+
+
+def page_shell(child: Gtk.Widget, width: int = PROSE_WIDTH) -> Gtk.Widget:
     box = column(20)
     box.set_margin_top(26)
     box.set_margin_bottom(26)
     box.set_margin_start(24)
     box.set_margin_end(24)
     box.append(child)
-    clamp = Adw.Clamp(maximum_size=660, tightening_threshold=560)
+    clamp = Adw.Clamp(maximum_size=width, tightening_threshold=int(width * 0.85))
     clamp.set_child(box)
     scroller = Gtk.ScrolledWindow()
     scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -214,6 +227,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.dark = False
         self._progress_source = 0
         self._aurora_source = 0
+        self._provider = None
         self._gate_token = ""
         self._export_notice = None
         self._wifi_target = ""
@@ -231,28 +245,56 @@ class InstallerWindow(Adw.ApplicationWindow):
     # -- theme -------------------------------------------------------------
 
     def _apply_theme(self) -> None:
+        """Load the stylesheet for the current scheme, and keep it current.
+
+        Two sheets, one provider, reloaded on change. GTK's `@define-color` is
+        global: a named colour has exactly one value per loaded sheet, and no
+        selector or media query can give it a second one for the dark scheme.
+        A single stylesheet therefore pins every custom surface to whichever
+        scheme generated it, which is how this installer ended up drawing
+        light-coloured cards, on a dark window, in text that could not be read.
+        """
         manager = Adw.StyleManager.get_default()
         self.dark = manager.get_dark()
         manager.connect("notify::dark", self._on_scheme_changed)
         display = Gdk.Display.get_default()
         if display is None:
             return
-        provider = Gtk.CssProvider()
-        try:
-            provider.load_from_path(THEME_CSS)
-        except GLib.Error:
-            return
+        self._provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
-            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            display, self._provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self._load_stylesheet()
+
+    def _load_stylesheet(self) -> None:
+        provider = getattr(self, "_provider", None)
+        if provider is None:
+            return
+        try:
+            provider.load_from_path(THEME_DARK_CSS if self.dark else THEME_CSS)
+        except GLib.Error:
+            # An unstyled installer is still an installer. Refusing to start
+            # because a stylesheet is missing would trade a cosmetic failure
+            # for the text-mode fallback.
+            pass
 
     def _on_scheme_changed(self, manager, _param) -> None:
         self.dark = manager.get_dark()
+        self._load_stylesheet()
         # Everything drawn reads its colours per frame, so a redraw is the
         # whole of the update. Everything styled follows the stylesheet.
-        for key in ("aurora", "rule", "wordmark"):
-            widget = self.widgets.get(key)
-            if widget is not None:
-                widget.queue_draw()
+        #
+        # Every drawing area, not a list of three: the signal arcs on the
+        # network page are drawn too, and a hand-maintained list is a list that
+        # goes stale the next time something is drawn.
+        self._redraw_all(self)
+
+    def _redraw_all(self, widget: Gtk.Widget) -> None:
+        if isinstance(widget, Gtk.DrawingArea):
+            widget.queue_draw()
+        child = widget.get_first_child()
+        while child is not None:
+            self._redraw_all(child)
+            child = child.get_next_sibling()
 
     @property
     def animate(self) -> bool:
@@ -297,6 +339,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         top.append(spacer)
+        top.append(self._build_scheme_toggle())
         self.step_label = label("", "m3-label-medium", wrap=False, css="aurade-metric")
         self.step_label.set_valign(Gtk.Align.CENTER)
         top.append(self.step_label)
@@ -344,6 +387,49 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.forward_button.connect("clicked", lambda *_: self.on_forward())
         actions.append(self.forward_button)
         frame.append(actions)
+
+    def _build_scheme_toggle(self) -> Gtk.Widget:
+        """Light, dark, or whatever the system says.
+
+        An installer runs before the system it is installing has any
+        preference, and it runs in every kind of room - a bright office, a
+        dark server rack at two in the morning. libadwaita will follow a
+        desktop setting, but on the installation image there is no desktop and
+        no setting, so the choice has to be here or it does not exist.
+
+        Three states rather than a switch, because "follow the system" is a
+        real answer and a two-position switch cannot express it.
+        """
+        box = row(0)
+        box.add_css_class("linked")
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_end(14)
+        first = None
+        for scheme, icon, tip in (
+            (Adw.ColorScheme.DEFAULT, "display-brightness-symbolic", "Match the system"),
+            (Adw.ColorScheme.FORCE_LIGHT, "weather-clear-symbolic", "Light"),
+            (Adw.ColorScheme.FORCE_DARK, "weather-clear-night-symbolic", "Dark"),
+        ):
+            button = Gtk.ToggleButton()
+            button.set_child(Gtk.Image.new_from_icon_name(icon))
+            button.set_tooltip_text(tip)
+            button.add_css_class("flat")
+            button.add_css_class("aurade-scheme-button")
+            button.get_accessible_role()
+            button.update_property([Gtk.AccessibleProperty.LABEL], [tip])
+            if first is None:
+                first = button
+                button.set_active(True)
+            else:
+                button.set_group(first)
+            button.connect("toggled", self._on_scheme_button, scheme)
+            box.append(button)
+        return box
+
+    def _on_scheme_button(self, button: Gtk.ToggleButton, scheme) -> None:
+        if not button.get_active():
+            return
+        Adw.StyleManager.get_default().set_color_scheme(scheme)
 
     def start_aurora(self) -> None:
         if self._aurora_source or not self.animate:
@@ -405,10 +491,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         box = column(20)
         box.append(label(page.title, "m3-headline-small"))
         box.append(label(page.subtitle, "m3-body-medium", css="dim-label"))
-        if page.name == "graphics":
-            self._build_graphics(box)
+        if page.name == "readiness":
+            self._build_readiness(box)
         elif page.name == "network":
             self._build_network(box)
+        elif page.name == "disk":
+            box.append(self._build_disk_list())
+            box.append(self._build_storage_options(page))
         else:
             for question in page.questions:
                 spec = self.manifest["questions"].get(question)
@@ -419,48 +508,226 @@ class InstallerWindow(Adw.ApplicationWindow):
                     group.add(widget)
                 self.widgets[f"group.{question}"] = group
                 box.append(group)
-            if page.name == "disk":
-                box.append(self._build_disk_list())
             if page.name == "language":
                 box.append(self._build_keymap_test())
-        return page_shell(box)
+        return page_shell(box, F.PAGE_WIDTHS.get(page.name, PROSE_WIDTH))
 
-    # -- graphics ----------------------------------------------------------
+    def _build_storage_options(self, page: F.Page) -> Gtk.Widget:
+        """Layout, filesystem and swap, folded away until asked for.
 
-    def _build_graphics(self, box: Gtk.Box) -> None:
+        These are on the disk page and not on the advanced page at the end
+        because every one of them is a statement about the disk that is
+        selected directly above them. They are folded because the defaults are
+        the shape this product is designed around, and an installer that opens
+        with six storage decisions reads as an installer that needs six
+        storage decisions.
+        """
         group = Adw.PreferencesGroup()
-        for key, title in (("renderer", "Installer"), ("detail", "Graphics"),
-                           ("memory", "Memory")):
-            item = Adw.ActionRow(title=title)
-            item.set_subtitle("")
-            item.set_subtitle_lines(0)
-            if key != "renderer":
-                item.add_css_class("aurade-mono")
-            self.widgets[f"graphics.{key}"] = item
-            group.add(item)
-        box.append(pane(group, "aurade-pane-flat"))
-        advice = label("", "m3-body-medium")
-        advice.set_visible(False)
-        self.widgets["graphics.advice"] = advice
-        box.append(advice)
+        expander = Adw.ExpanderRow(title=F.STORAGE_TITLE,
+                                   subtitle=F.STORAGE_SUBTITLE)
+        expander.add_prefix(Gtk.Image.new_from_icon_name("drive-harddisk-symbolic"))
+        for question in page.questions:
+            spec = self.manifest["questions"].get(question)
+            if spec is None or spec["type"] == "disk":
+                continue
+            expander.add_row(self._build_enum_row(question, spec))
+            self.widgets[f"group.{question}"] = group
 
-    def _refresh_graphics(self) -> None:
+        # The consequence line, last, inside the same disclosure. It is a row
+        # rather than a loose label so it sits in the list box with everything
+        # it is talking about.
+        warning = Adw.ActionRow()
+        warning.set_subtitle_lines(0)
+        warning.add_prefix(Gtk.Image.new_from_icon_name("emblem-important-symbolic"))
+        warning.set_visible(False)
+        self.widgets["storage.warning"] = warning
+        expander.add_row(warning)
+        group.add(expander)
+        self.widgets["storage.expander"] = expander
+        return group
+
+    def _refresh_storage(self) -> None:
+        """Say what the current storage answers cost, while they can be changed.
+
+        The rollback entry is the thing people lose without noticing: it is
+        absent rather than broken, so nothing complains, and the first time it
+        matters is the first time they need it.
+        """
+        chosen = {}
+        for question in ("filesystem", "layout", "swap"):
+            widget = self.widgets.get(f"q.{question}")
+            values = self.enum_values.get(question, [])
+            if widget is None or not values:
+                continue
+            index = widget.get_selected()
+            if 0 <= index < len(values):
+                chosen[question] = values[index]
+
+        notes = []
+        if chosen.get("filesystem", "btrfs") != "btrfs":
+            notes.append(f"{chosen['filesystem']} has no factory snapshot, so "
+                         "this install will have no rollback entry in the boot "
+                         "menu.")
+        if chosen.get("layout") == "alongside":
+            notes.append("Installing alongside needs free space that is already "
+                         "unallocated. The installer stops before writing "
+                         "anything if there is not enough.")
+        widget = self.widgets.get("storage.warning")
+        if widget is None:
+            return
+        widget.set_title("Worth knowing" if notes else "")
+        widget.set_subtitle(" ".join(notes))
+        widget.set_visible(bool(notes))
+        expander = self.widgets.get("storage.expander")
+        # A consequence folded out of sight is a consequence nobody read.
+        if notes and expander is not None and not expander.get_expanded():
+            expander.set_expanded(True)
+
+    # -- readiness ---------------------------------------------------------
+    #
+    # The first page after the welcome screen. It used to print the renderer
+    # decision, a DRM node path and a paragraph about whether 3D acceleration
+    # could be proven, which is an answer to a question nobody standing in
+    # front of a new computer is asking.
+    #
+    # What they are asking is whether this will work. So the page answers that
+    # in one line, lists the five things that decide it, and puts the driver
+    # strings behind a disclosure for the person who wants them. Two of the
+    # five - the firmware mode and Secure Boot - are hard refusals in the
+    # engine that used to surface at the erase gate, after every question had
+    # been answered. Both need a restart to fix. Asking them first is the
+    # entire reason this page exists.
+
+    READINESS_GLYPHS = {
+        "ok": "emblem-ok-symbolic",
+        "warn": "dialog-warning-symbolic",
+        "blocked": "dialog-error-symbolic",
+    }
+
+    def _build_readiness(self, box: Gtk.Box) -> None:
+        verdict = row(18)
+        verdict.add_css_class("aurade-verdict")
+        verdict.add_css_class("aurade-transition")
+        glyph = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
+        glyph.set_pixel_size(38)
+        glyph.set_valign(Gtk.Align.START)
+        self.widgets["ready.glyph"] = glyph
+        verdict.append(glyph)
+        text = column(4)
+        text.set_hexpand(True)
+        headline = label("", "m3-headline-small")
+        self.widgets["ready.headline"] = headline
+        text.append(headline)
+        body = label("", "m3-body-medium")
+        self.widgets["ready.body"] = body
+        text.append(body)
+        verdict.append(text)
+        self.widgets["ready.verdict"] = verdict
+        box.append(verdict)
+
+        # A flow box rather than a column: two findings side by side at this
+        # width, one when the window is narrow, and no reflow logic here to
+        # get wrong.
+        checks = Gtk.FlowBox()
+        checks.set_selection_mode(Gtk.SelectionMode.NONE)
+        checks.set_max_children_per_line(2)
+        checks.set_min_children_per_line(2)
+        checks.set_homogeneous(True)
+        checks.set_row_spacing(12)
+        checks.set_column_spacing(12)
+        self.widgets["ready.checks"] = checks
+        box.append(checks)
+
+        # AdwExpanderRow rather than GtkExpander: it keeps its contents in a
+        # real list box, which is the containment every other row in this
+        # installer relies on, and it wears the same card as the rest of the
+        # page instead of being a bare triangle with a label next to it.
+        group = Adw.PreferencesGroup()
+        details = Adw.ExpanderRow(title=F.READINESS_DETAILS)
+        detail_row = Adw.ActionRow()
+        detail_row.set_subtitle_lines(0)
+        detail_row.add_css_class("aurade-mono")
+        self.widgets["ready.details"] = detail_row
+        details.add_row(detail_row)
+        group.add(details)
+        box.append(group)
+
+    def _check_card(self, check: dict) -> Gtk.Widget:
+        state = check.get("state", "ok")
+        card = row(12)
+        card.add_css_class("aurade-check")
+        card.add_css_class(f"aurade-check-{state}")
+        card.add_css_class("aurade-transition")
+        glyph = Gtk.Image.new_from_icon_name(
+            self.READINESS_GLYPHS.get(state, "emblem-ok-symbolic"))
+        glyph.set_valign(Gtk.Align.START)
+        glyph.add_css_class(f"aurade-glyph-{state}")
+        card.append(glyph)
+        body = column(4)
+        body.set_hexpand(True)
+        title = label(check.get("title", ""), "m3-title-small", wrap=False)
+        body.append(title)
+        finding = label(check.get("finding", ""), "m3-body-small", css="dim-label")
+        # A card is half the board wide, so it gets half a measure. Left at the
+        # prose default every card asks for the full width and the grid becomes
+        # a column.
+        finding.set_max_width_chars(34)
+        body.append(finding)
+        action = check.get("action") or ""
+        if action:
+            what = label(action, "m3-label-medium", css="aurade-action")
+            what.set_max_width_chars(34)
+            what.set_margin_top(4)
+            body.append(what)
+        card.append(body)
+        # The card is a finding, not a control. Saying so keeps it out of the
+        # tab order, where five unfocusable stops sit between the page and the
+        # button that leaves it.
+        card.set_can_focus(False)
+        return card
+
+    def _refresh_readiness(self) -> None:
         self.probe = self.model.probe()
-        self.widgets["graphics.renderer"].set_subtitle(
-            "Graphical" if self.probe.get("renderer") == "gui"
-            else "Text mode recommended")
-        self.widgets["graphics.detail"].set_subtitle(self.probe.get("graphics", ""))
-        self.widgets["graphics.memory"].set_subtitle(self.probe.get("memory", ""))
-        advice = self.widgets["graphics.advice"]
-        advice.set_label(self.probe.get("advice", ""))
-        advice.set_visible(bool(self.probe.get("advice")))
-        # The black-screen warning is why this page exists, and it arrives
-        # before the erase gate rather than after it.
-        if self.probe.get("predicts_black_screen"):
-            self._warn("This computer has no working graphics driver. Installing "
-                       "now produces a system that starts but shows no desktop.")
-        else:
-            self.banner.set_revealed(False)
+        try:
+            report = self.model.call("readiness")
+        except BridgeError:
+            report = {}
+        verdict = report.get("verdict", "")
+        checks = report.get("checks", [])
+
+        headline, body = F.READINESS_VERDICTS.get(
+            verdict, ("This computer could not be checked", F.READINESS_UNKNOWN))
+        self.widgets["ready.headline"].set_label(headline)
+        self.widgets["ready.body"].set_label(body)
+        holder = self.widgets["ready.verdict"]
+        for name in ("ok", "attention", "blocked"):
+            holder.remove_css_class(f"aurade-verdict-{name}")
+        holder.add_css_class(f"aurade-verdict-{verdict or 'attention'}")
+        self.widgets["ready.glyph"].set_from_icon_name(self.READINESS_GLYPHS.get(
+            {"ok": "ok", "attention": "warn", "blocked": "blocked"}.get(
+                verdict, "warn"), "dialog-warning-symbolic"))
+
+        flow = self.widgets["ready.checks"]
+        while (existing := flow.get_first_child()) is not None:
+            flow.remove(existing)
+        for check in checks:
+            flow.append(self._check_card(check))
+
+        detail_lines = [
+            f"{check.get('title', '')}: {check.get('detail')}"
+            for check in checks if check.get("detail")
+        ]
+        detail_lines.append(f"Installer: {self.probe.get('renderer', 'unknown')}"
+                            f" ({self.probe.get('reason', '')})")
+        if self.probe.get("advice"):
+            detail_lines.append(self.probe["advice"])
+        self.widgets["ready.details"].set_subtitle("\n".join(detail_lines))
+
+        # A blocked verdict is the one case where the page cannot be walked
+        # past. The engine would refuse later anyway; refusing here saves the
+        # user answering nine questions first.
+        self.forward_button.set_sensitive(verdict != "blocked")
+        self.banner.set_revealed(False)
 
     # -- network -----------------------------------------------------------
 
@@ -681,9 +948,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         if kind == "enum":
             return [self._build_enum_row(question, spec)]
         if kind == "disk":
-            item = Adw.ActionRow(title=spec["label"])
-            self.widgets[f"q.{question}"] = item
-            return [item]
+            # The disk list is the control for this question. A row here would
+            # be a second, empty one sitting above it.
+            return []
         item = Adw.EntryRow(title=spec["label"])
         item.set_text(spec["default"])
         item.set_show_apply_button(False)
@@ -696,6 +963,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         The model supplies the candidates and validates the answer. What it
         does not do, and should not, is decide that `en_US.UTF-8` is a
         reasonable thing to show someone who is choosing a language.
+
+        The row is returned bare, and that is load-bearing rather than tidy.
+        ``AdwPreferencesGroup.add`` puts an ``AdwPreferencesRow`` into its
+        internal ``GtkListBox`` and puts anything else into a plain box beside
+        it. An ``AdwComboRow`` is a ``GtkListBoxRow``, and a ``GtkListBoxRow``
+        with no ``GtkListBox`` above it never receives activation - so wrapping
+        this row in a box to carry a caption under it produced a picker that
+        drew correctly, took focus badly, and did not open when clicked. The
+        caption is the row's own subtitle instead.
         """
         values = self.model.enum(question)
         self.enum_values[question] = values
@@ -708,41 +984,42 @@ class InstallerWindow(Adw.ApplicationWindow):
             elif question == "timezone":
                 title, detail = locales.describe_timezone(value)
             else:
-                title, detail = value, ""
+                title, detail = locales.describe_storage(question, value)
             titles.append(title)
             details.append(detail)
         self.widgets[f"q.{question}.details"] = details
 
         item = Adw.ComboRow(title=spec["label"],
                             model=Gtk.StringList.new(titles or [spec["default"]]))
-        item.set_enable_search(True)
+        # Search needs an expression to search *on*; without one libadwaita has
+        # nothing to compare a query against. Only offered where the list is
+        # long enough to be worth searching - a search field over three
+        # filesystems is a search field in the way.
+        if len(values) > 12:
+            item.set_expression(Gtk.PropertyExpression.new(
+                Gtk.StringObject, None, "string"))
+            item.set_enable_search(True)
         if spec["default"] in values:
             item.set_selected(values.index(spec["default"]))
         item.connect("notify::selected", self._on_enum_changed, question)
         self.widgets[f"q.{question}"] = item
-
-        caption = label("", "m3-body-small", css="aurade-metric")
-        caption.set_margin_start(14)
-        self.widgets[f"q.{question}.caption"] = caption
-        holder = column(4)
-        holder.append(item)
-        holder.append(caption)
         self._sync_enum_caption(question)
-        return holder
+        return item
 
     def _sync_enum_caption(self, question: str) -> None:
         item = self.widgets.get(f"q.{question}")
-        caption = self.widgets.get(f"q.{question}.caption")
         details = self.widgets.get(f"q.{question}.details") or []
-        if item is None or caption is None:
+        if item is None:
             return
         index = item.get_selected()
         text = details[index] if 0 <= index < len(details) else ""
-        caption.set_label(text)
-        caption.set_visible(bool(text))
+        item.set_subtitle(text)
 
     def _on_enum_changed(self, _row, _param, question: str) -> None:
         self._sync_enum_caption(question)
+        if question in ("filesystem", "layout", "swap", "swap_size"):
+            self._refresh_storage()
+            return
         if question != "keymap":
             return
         # Applying the layout as it is chosen is the whole point of the test
@@ -1239,19 +1516,20 @@ class InstallerWindow(Adw.ApplicationWindow):
         # atmosphere in the way.
         if state in (F.WELCOME, F.DONE, F.STOPPED, F.CANCELLED, F.PLANNED) or (
                 state == "pages"
-                and self.flow.current_page in ("graphics", "network")):
+                and self.flow.current_page in ("readiness", "network")):
             self.start_aurora()
         else:
             self.stop_aurora()
         GLib.idle_add(self._focus_first)
 
     def _refresh_page(self, page: F.Page) -> None:
-        if page.name == "graphics":
-            self._refresh_graphics()
+        if page.name == "readiness":
+            self._refresh_readiness()
         elif page.name == "network":
             self._refresh_network()
         elif page.name == "disk":
             self._refresh_disks()
+            self._refresh_storage()
         elif page.name == "encryption":
             self._refresh_encryption()
         else:
@@ -1372,6 +1650,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         return True
 
     def _value_of(self, question: str, spec: dict) -> str:
+        if spec["type"] == "disk":
+            return self.model.get("target")
         widget = self.widgets.get(f"q.{question}")
         if widget is None:
             return spec["default"]
@@ -1381,8 +1661,6 @@ class InstallerWindow(Adw.ApplicationWindow):
             values = self.enum_values.get(question, [])
             index = widget.get_selected()
             return values[index] if 0 <= index < len(values) else spec["default"]
-        if spec["type"] == "disk":
-            return self.model.get("target")
         return widget.get_text()
 
     def _flag(self, question: str, message: str) -> None:
@@ -1523,7 +1801,32 @@ class InstallerApplication(Adw.Application):
     def do_activate(self) -> None:  # noqa: N802  (GObject naming)
         if self.window is None:
             self.window = InstallerWindow(self, self.model, self.plan_only)
+            self.window.connect("map", self._on_first_map)
         self.window.present()
+
+    @staticmethod
+    def _on_first_map(window: Gtk.Widget) -> None:
+        """Tell the launcher a renderer worked.
+
+        The launcher walks a list of renderers and needs to know whether each
+        attempt reached the screen. `cage` exits with this process's status,
+        which cannot distinguish "the compositor never started" from "the user
+        quit", and getting that distinction wrong either throws away a
+        half-answered installation or leaves a black screen. A window that has
+        been mapped is the unambiguous answer, and this is the moment it
+        happens.
+        """
+        path = os.environ.get("AURADE_GUI_READY_FILE")
+        if not path:
+            return
+        try:
+            with open(path, "w") as handle:
+                handle.write("mapped\n")
+        except OSError:
+            # Not being able to say so is not a reason to fail to start. The
+            # launcher treats a missing file as "try the next renderer", which
+            # at worst costs one extra attempt.
+            pass
 
 
 def run(model: Bridge, plan_only: bool = False) -> int:
