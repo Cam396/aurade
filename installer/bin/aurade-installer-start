@@ -57,6 +57,9 @@ EOF
 
 MODE=auto
 PASSTHROUGH=()
+# Arguments for the graphical front end only. The text installer never sees
+# these, and `run_text` passes only what both understand.
+GUI_EXTRA=()
 
 # A live console often has no login-manager-created runtime directory. Cage
 # needs one to create its Wayland socket, even when its DRM and GL setup are
@@ -84,7 +87,10 @@ trap cleanup EXIT
 while (($#)); do
   case $1 in
     --text)      MODE=text; shift ;;
-    --graphical) MODE=graphical; shift ;;
+    # `--force` because the front end runs its own probe as well, and inside
+    # `cage` that probe can reach a different answer to the one the user just
+    # overruled. Asking for the graphical installer has to mean it.
+    --graphical) MODE=graphical; GUI_EXTRA+=(--force); shift ;;
     --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -121,7 +127,8 @@ fi
 
 # Already inside a session with a display: run the front end directly.
 if [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]]; then
-  exec "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
+  exec "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} \
+    ${GUI_EXTRA[@]+"${GUI_EXTRA[@]}"}
 fi
 
 command -v cage >/dev/null 2>&1 || {
@@ -175,47 +182,119 @@ renderer_lib=$(_find_lib aurade-renderers.sh) || {
 . "$renderer_lib"
 
 # Try each renderer for real, best first, and stop at the first one that puts
-# a window on the screen.
+# a window on the screen and keeps it there.
 #
-# `cage` exits with its client's status, so its exit code alone cannot tell a
-# compositor that failed to start from an installer the user quit - and the
-# difference decides whether to try the next renderer or stop. So the question
-# is asked of the installer instead: it creates this file the moment its window
-# is first mapped. The file existing means a renderer worked and this session
-# is over, whatever the exit status says. The file missing means nothing was
-# ever drawn, and the next renderer is worth trying.
+# There are two independent things that can fail, and telling them apart is
+# what this loop exists to do. `cage` has to start on this machine's graphics
+# device, and GTK has to be able to draw into the compositor `cage` started.
+# Either one failing produces the same symptom - no installer - and the same
+# exit status, because cage exits with its client's status. Changing the
+# compositor's renderer cannot fix a client that cannot draw, and changing
+# GTK's drawing path cannot fix a compositor that never came up, so guessing
+# wrong here means walking the whole list and fixing nothing.
 #
-# That asymmetry matters. Restarting the installer under a different renderer
-# after the user has already answered five questions would throw the answers
-# away; refusing to try a second renderer when the first never drew a pixel is
-# the black screen. Neither is acceptable, and the readiness file is what
-# separates them.
+# The installer answers the question itself by recording how far it got:
+#
+#   nothing written   nothing was ever on the screen; the compositor failed,
+#                     so move to the next graphics candidate.
+#   `mapped`          a window appeared. The compositor works. If the process
+#                     then died, that is GTK's drawing path, so try the next
+#                     client candidate under this same compositor.
+#   `engaged`         the user pressed Continue. There are answers on the
+#                     screen now, and restarting under a different renderer
+#                     would throw them away. Stop, whatever happened next.
+#   `declined`        the front end refused to draw at all - no toolkit, no
+#                     model, or a probe that says no. Every other candidate
+#                     would reach the same answer, so the chain ends here.
+#
+# A clean exit at `mapped` is someone who quit at the first screen. That is
+# also a stop: the installer worked, and they chose to leave.
 READY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aurade-installer.XXXXXX")
 export AURADE_GUI_READY_FILE="$READY_DIR/drawn"
+ATTEMPT_LOG="$READY_DIR/attempts.log"
 
-status=0
+# Every attempt's output is kept as well as shown. When the whole chain fails
+# the last thing on a 25-line console is a wall of EGL extension names, and
+# the line that says why is long gone; this is where it can still be read.
+attempt_stage() {
+  [[ -r $AURADE_GUI_READY_FILE ]] || { printf 'none'; return; }
+  local stage
+  read -r stage <"$AURADE_GUI_READY_FILE" 2>/dev/null || stage=
+  printf '%s' "${stage:-none}"
+}
+
 attempted=0
+mapfile -t CLIENTS < <(aurade_renderer_client_plan)
+
 while IFS=$'\t' read -r label settings; do
   [[ -n $label ]] || continue
-  attempted=$(( attempted + 1 ))
-  rm -f -- "$AURADE_GUI_READY_FILE"
-  printf 'aurade-installer-start: trying %s\n' "$label" >&2
-  status=0
-  # `env` rather than exporting: each attempt gets exactly the settings for
-  # that renderer, and nothing carried over from the attempt before it.
-  # shellcheck disable=SC2086  # settings is a deliberate list of KEY=VALUE
-  env $settings cage -- "$GUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} || status=$?
-  if [[ -e $AURADE_GUI_READY_FILE ]]; then
-    if (( status != 0 )); then
-      printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
-        "$status" >&2
-      printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+
+  client_index=0
+  for client in "${CLIENTS[@]}"; do
+    client_label=${client%%$'\t'*}
+    client_settings=${client#*$'\t'}
+    attempted=$(( attempted + 1 ))
+    client_index=$(( client_index + 1 ))
+    rm -f -- "$AURADE_GUI_READY_FILE"
+
+    if (( client_index == 1 )); then
+      printf 'aurade-installer-start: trying %s\n' "$label" >&2
+    else
+      printf 'aurade-installer-start: trying %s with %s\n' "$label" \
+        "$client_label" >&2
     fi
-    exit "$status"
-  fi
-  printf 'aurade-installer-start: %s did not produce a display\n' "$label" >&2
+
+    printf '\n=== %s / %s (%s %s)\n' "$label" "$client_label" "$settings" \
+      "$client_settings" >>"$ATTEMPT_LOG"
+
+    # `env` rather than exporting: each attempt gets exactly the settings for
+    # that combination and nothing carried over from the attempt before it.
+    set +e
+    # shellcheck disable=SC2086  # both are deliberate lists of KEY=VALUE
+    env $settings $client_settings cage -- "$GUI" \
+      ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} \
+      ${GUI_EXTRA[@]+"${GUI_EXTRA[@]}"} 2>&1 | tee -a "$ATTEMPT_LOG"
+    status=${PIPESTATUS[0]}
+    set -e
+
+    stage=$(attempt_stage)
+    case $stage in
+      engaged)
+        (( status == 0 )) || {
+          printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
+            "$status" >&2
+          printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+        }
+        exit "$status"
+        ;;
+      declined)
+        # The front end itself said no: no model, no toolkit, or a probe that
+        # says this machine cannot display one. Every remaining candidate
+        # would reach the same conclusion at the same cost.
+        printf 'aurade-installer-start: the graphical installer cannot run on this machine\n' >&2
+        run_text
+        ;;
+      mapped)
+        (( status != 0 )) || exit 0   # a window, then a clean exit: they quit
+        printf 'aurade-installer-start: %s drew a window and then stopped (status %s)\n' \
+          "$label" "$status" >&2
+        ;;
+      *)
+        # The compositor never drew. Nothing on the client side can change
+        # that, so the rest of the client list is not worth the wait.
+        printf 'aurade-installer-start: %s did not produce a display\n' "$label" >&2
+        break
+        ;;
+    esac
+  done
 done < <(aurade_renderer_plan)
 
 printf 'aurade-installer-start: no renderer produced a display after %s attempts\n' \
   "$attempted" >&2
+if [[ -s $ATTEMPT_LOG ]]; then
+  SAVED_LOG=$(mktemp "${TMPDIR:-/tmp}/aurade-installer-graphics.XXXXXX.log")
+  cp -- "$ATTEMPT_LOG" "$SAVED_LOG"
+  printf 'aurade-installer-start: what each attempt printed is in %s\n' \
+    "$SAVED_LOG" >&2
+fi
 run_text

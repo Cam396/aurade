@@ -103,14 +103,21 @@ exit 0
 STUB
 cat >"$TMP/stub/cage" <<'STUB'
 #!/usr/bin/env bash
-printf 'cage renderer=%s devices=%s\n' "${WLR_RENDERER:-unset}" \
-  "${WLR_DRM_DEVICES:-none}" >>"$AURADE_TEST_LOG"
-if [[ ${WLR_RENDERER:-} == "${AURADE_TEST_WORKING_RENDERER:-never}" ]]; then
-  # This is what the real front end does the moment its window is mapped.
-  printf 'mapped\n' >"$AURADE_GUI_READY_FILE"
-  exit "${AURADE_TEST_GUI_STATUS:-0}"
+printf 'cage renderer=%s devices=%s gsk=%s disable=%s\n' \
+  "${WLR_RENDERER:-unset}" "${WLR_DRM_DEVICES:-none}" \
+  "${GSK_RENDERER:-default}" "${GDK_DISABLE:-none}" >>"$AURADE_TEST_LOG"
+if [[ ${WLR_RENDERER:-} != "${AURADE_TEST_WORKING_RENDERER:-never}" ]]; then
+  exit 1     # the compositor never started: nothing is drawn
 fi
-exit 1
+# The compositor drew. This is what the real front end writes on first map.
+printf 'mapped\n' >"$AURADE_GUI_READY_FILE"
+if [[ -n ${AURADE_TEST_WORKING_GSK:-} \
+      && ${GSK_RENDERER:-default} != "$AURADE_TEST_WORKING_GSK" ]]; then
+  exit 1     # a window, then GTK dies on it: the client side, not the renderer
+fi
+[[ -z ${AURADE_TEST_STAGE:-} ]] || printf '%s\n' "$AURADE_TEST_STAGE" \
+  >"$AURADE_GUI_READY_FILE"
+exit "${AURADE_TEST_GUI_STATUS:-0}"
 STUB
 chmod +x "$TMP/bin/aurade-installer-gui" "$TMP/bin/aurade-installer-tui" "$TMP/stub/cage"
 
@@ -121,19 +128,28 @@ run_launcher() {
   # end directly and never starts a compositor. The build host has an X display
   # and the installation image does not, so without this the whole chain is
   # skipped and every assertion below passes on an empty log.
-  env -u DISPLAY -u WAYLAND_DISPLAY \
+  env -u DISPLAY -u WAYLAND_DISPLAY -u WLR_RENDERER -u GSK_RENDERER \
     AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
     AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
     AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
     AURADE_RENDERER_VULKAN_DIR="$AURADE_RENDERER_VULKAN_DIR" \
     ${AURADE_TEST_WORKING_RENDERER:+AURADE_TEST_WORKING_RENDERER="$AURADE_TEST_WORKING_RENDERER"} \
+    ${AURADE_TEST_WORKING_GSK:+AURADE_TEST_WORKING_GSK="$AURADE_TEST_WORKING_GSK"} \
+    ${AURADE_TEST_STAGE:+AURADE_TEST_STAGE="$AURADE_TEST_STAGE"} \
     ${AURADE_TEST_GUI_STATUS:+AURADE_TEST_GUI_STATUS="$AURADE_TEST_GUI_STATUS"} \
     "$TMP/bin/aurade-installer-start" --graphical >>"$TMP/log" 2>&1 || true
 }
 
+reset_case() {
+  AURADE_TEST_WORKING_RENDERER=never
+  AURADE_TEST_WORKING_GSK=
+  AURADE_TEST_STAGE=
+  AURADE_TEST_GUI_STATUS=
+}
+
 # Nothing but pixman works: every earlier renderer is attempted, in order, and
 # the installer still ends up on the screen.
-AURADE_TEST_WORKING_RENDERER=pixman; AURADE_TEST_GUI_STATUS=
+reset_case; AURADE_TEST_WORKING_RENDERER=pixman
 run_launcher
 grep -q 'renderer=vulkan devices=.*card0' "$TMP/log" || \
   fail 'the launcher did not try Vulkan on the connected card first'
@@ -143,27 +159,97 @@ grep -q 'renderer=pixman' "$TMP/log" || fail 'the launcher never reached pixman'
 grep -q 'text installer ran' "$TMP/log" && \
   fail 'the launcher fell back to text even though a renderer worked'
 
+# A compositor that never drew is not worth a second drawing path: no client
+# setting can rescue a compositor that failed to start, and trying anyway
+# makes the walk to a renderer that works several times longer.
+(( $(grep -c 'renderer=vulkan devices=.*card0' "$TMP/log") == 1 )) || \
+  fail 'a compositor that never drew was retried with other client settings'
+
 # The first renderer works: nothing after it is attempted. Restarting a
 # working installer to try a "better" renderer would be the worst outcome here.
-AURADE_TEST_WORKING_RENDERER=vulkan; AURADE_TEST_GUI_STATUS=
+reset_case; AURADE_TEST_WORKING_RENDERER=vulkan
 run_launcher
 grep -q 'renderer=pixman' "$TMP/log" && \
   fail 'the launcher kept trying renderers after one had drawn'
 
-# The installer drew and then exited non-zero, which is a user who quit or an
-# installation that failed. Neither is a renderer problem, so the launcher must
-# not restart it under a different renderer or hand over to the text installer.
-AURADE_TEST_WORKING_RENDERER=vulkan; AURADE_TEST_GUI_STATUS=1
+# The compositor comes up on the first try and the window appears - and then
+# GTK dies on it, which is the virtual-GPU failure this chain exists for. The
+# renderer is not the problem, so the launcher must stay on this compositor
+# and work down the client drawing paths instead of walking away from a
+# graphics device that demonstrably works.
+reset_case
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_WORKING_GSK=cairo
+run_launcher
+grep -q 'renderer=vulkan .*gsk=cairo' "$TMP/log" || \
+  fail 'the launcher never tried a software client drawing path'
+grep -q 'renderer=pixman' "$TMP/log" && \
+  fail 'the launcher changed the compositor renderer to fix a client failure'
+grep -q 'text installer ran' "$TMP/log" && \
+  fail 'the launcher fell back to text with a client path left untried'
+first_retry=$(grep '^cage ' "$TMP/log" | sed -n 2p)
+[[ $first_retry == *disable=*dmabuf* ]] || \
+  fail "the retry after a mapped window did not drop buffer sharing: $first_retry"
+
+# The window appeared and the process exited cleanly without the user ever
+# pressing Continue: that is someone who looked at the first screen and quit.
+# The installer worked. Trying another renderer would put it back on screen
+# after they closed it.
+reset_case; AURADE_TEST_WORKING_RENDERER=vulkan
 run_launcher
 (( $(grep -c '^cage ' "$TMP/log") == 1 )) || \
-  fail 'a non-zero exit after drawing was treated as a renderer failure'
+  fail 'a clean exit at the first screen was treated as a renderer failure'
 grep -q 'text installer ran' "$TMP/log" && \
-  fail 'the launcher fell back to text after the installer had already drawn'
+  fail 'the launcher fell back to text after a clean exit'
+
+# The user got as far as answering something and the installer then failed.
+# Whatever went wrong, it is not the renderer, and a restart would throw away
+# the answers already on the screen.
+reset_case
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_STAGE=engaged
+AURADE_TEST_GUI_STATUS=1
+run_launcher
+(( $(grep -c '^cage ' "$TMP/log") == 1 )) || \
+  fail 'a failure after the user had answered was retried under another renderer'
+grep -q 'text installer ran' "$TMP/log" && \
+  fail 'the launcher fell back to text after the user had already answered'
 
 # Nothing works at all. The text installer is the guarantee, and it runs.
-AURADE_TEST_WORKING_RENDERER=never; AURADE_TEST_GUI_STATUS=
+reset_case
 run_launcher
 grep -q 'text installer ran' "$TMP/log" || \
   fail 'no renderer worked and the text installer was not started'
+grep -q 'what each attempt printed is in' "$TMP/log" || \
+  fail 'the chain failed without saying where the attempt output was kept'
+
+# The front end itself says the graphical installer cannot run here - no
+# toolkit, or a probe that predicts a black screen. That is not a renderer
+# finding, and walking the rest of the list only delays the text installer.
+reset_case
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_STAGE=declined
+AURADE_TEST_GUI_STATUS=1
+run_launcher
+(( $(grep -c '^cage ' "$TMP/log") == 1 )) || \
+  fail 'a front end that declined to draw was retried under other renderers'
+grep -q 'text installer ran' "$TMP/log" || \
+  fail 'a front end that declined to draw did not reach the text installer'
+
+# An explicit choice is honoured rather than overridden. This is the command
+# the user had to type before any of this existed, and it must still mean what
+# it says.
+: >"$TMP/log"
+env -u DISPLAY -u WAYLAND_DISPLAY WLR_RENDERER=pixman \
+  AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
+  AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
+  AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
+  AURADE_RENDERER_VULKAN_DIR="$AURADE_RENDERER_VULKAN_DIR" \
+  AURADE_TEST_WORKING_RENDERER=pixman \
+  "$TMP/bin/aurade-installer-start" --graphical >>"$TMP/log" 2>&1 || true
+[[ $(grep -c '^cage ' "$TMP/log") == 1 ]] || \
+  fail 'an explicit WLR_RENDERER was not tried first'
+grep -q '^cage renderer=pixman' "$TMP/log" || \
+  fail 'an explicit WLR_RENDERER was overridden by the chain'
 
 echo 'installer renderer chain test: PASS'

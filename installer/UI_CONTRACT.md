@@ -43,6 +43,38 @@ or absent graphical renderer cannot affect the fallback. Every way the
 graphical path can fail - no toolkit, no compositor, no display, a probe that
 says no - ends in the text installer, with the reason printed.
 
+## Getting something onto the screen
+
+Two independent things have to work before anyone sees a window, and they fail
+identically. `cage` has to start on this machine's graphics device, and GTK has
+to be able to draw into the compositor that started. Neither can be predicted
+from anything readable: the only proof a graphics path works is a window on it.
+
+So `aurade-installer-start` tries, in order, and reads the outcome rather than
+inferring it. `installer/lib/aurade-renderers.sh` supplies both axes -
+compositor candidates best first, displays-attached before display-less cards,
+software last; then client drawing paths under whichever compositor came up.
+An explicit `WLR_RENDERER` or `GSK_RENDERER` in the environment is tried first
+and never overridden.
+
+The launcher cannot read the outcome from an exit status, because `cage` exits
+with its client's status: a compositor that never started, a window that
+appeared and died, and a user who quit all arrive as the same number. So the
+front end records how far it got, through `installer/lib/aurade_gui/stage.py`,
+and that file is the contract:
+
+| stage | meaning | what the launcher does |
+| --- | --- | --- |
+| *(no file)* | nothing was ever drawn | next compositor candidate; no client setting can rescue a compositor that did not start |
+| `mapped` | a window reached the screen | a clean exit is a user who quit, and stops; a failure is the client's drawing path, so the next client candidate under the same compositor |
+| `engaged` | the user pressed Continue | stop. There are answers on screen that a restart would discard |
+| `declined` | the front end refused to draw | stop, and run the text installer. Every other candidate reaches the same answer |
+
+`declined` also inverts the usual fallback. Inside a compositor the launcher
+started there is no terminal behind the front end, so a text installer started
+there draws where nobody can type; the launcher still owns the real console
+and does the handover on it.
+
 Python is the graphical renderer's language because `python-gobject` is how
 GTK 4 is scripted and Python is already on the image. The split inside
 `installer/lib/aurade_gui/` follows one line: `bridge.py` and `flow.py` import
@@ -302,6 +334,8 @@ evidence alone and the wording claims no more than that.
 | `test-gui-bridge.sh` | the whole protocol against a recording stub engine, including secrets, refusals, progress and export |
 | `test-gui-launch.sh` | which renderer starts, and the fallback when the graphical one cannot |
 | `test-gui-widgets.sh` | every toolkit name against GTK's introspection data; skips when the toolkit is absent |
+| `test-gui-runtime.sh` | the window built on a headless compositor: containment, storage and scheme controls, and the stage the front end reports after drawing |
+| `test-renderer-chain.sh` | the order graphics candidates are tried in, and the launcher's rule for what each outcome means |
 
 The render and flow tests exist because this project has already shipped a
 prompt that hung at its own keyboard validation while `bash -n` and a

@@ -107,8 +107,20 @@ grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-start ]]
-for module in __init__ bridge flow app brand locales tokens; do
-  [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$module.py ]]
+# Every module in the source package, not a list written out here. A module
+# that exists and is not staged is an installer that raises ImportError on the
+# image and nowhere else, and a hand-maintained list is exactly how that ships.
+for module in "$ROOT"/installer/lib/aurade_gui/*.py; do
+  module=${module##*/}
+  [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$module ]] || {
+    echo "test-build-iso-stage: aurade_gui/$module is not staged onto the image" >&2
+    exit 1
+  }
+  grep -Fq "\"/usr/local/lib/aurade/aurade_gui/$module\"" \
+    "$ROOT/installer/archiso/profiledef.sh" || {
+    echo "test-build-iso-stage: aurade_gui/$module has no ownership entry in profiledef.sh" >&2
+    exit 1
+  }
 done
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/theme.css ]]
 # The brand artwork has to reach the image, or the installer draws a window

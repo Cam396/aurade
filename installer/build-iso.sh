@@ -96,7 +96,7 @@ install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin
 install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
 install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ bridge flow app brand locales tokens; do
+for _gui_module in __init__ bridge flow app brand locales stage tokens; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
 done

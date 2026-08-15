@@ -135,6 +135,27 @@ PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   fail 'plan-only failed to fall back'
 logged '--plan-only' || fail 'plan-only was dropped on the way to the text installer'
 
+# Inside a compositor the launcher started, the fallback works the other way
+# round. There is no terminal behind this process, so a text installer started
+# here draws onto a surface with no keyboard in front of it; the launcher still
+# owns the real console. So the front end reports that it declined and exits,
+# and the handover happens out there.
+launch
+status=0
+out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  AURADE_GUI_READY_FILE="$TMP/stage" \
+  "$TMP/bin/aurade-installer-gui" --journal "$TMP/j" --raw-log "$TMP/r" 2>&1) ||
+  status=$?
+(( status == 1 )) ||
+  fail "a launcher-managed front end did not report a failure (status $status)"
+! logged 'tui ' ||
+  fail 'the text installer was started inside a compositor nobody can type into'
+[[ $(cat "$TMP/stage" 2>/dev/null) == declined ]] ||
+  fail "the front end did not tell the launcher it had declined: $(cat "$TMP/stage" 2>/dev/null)"
+grep -q 'PyGObject is not installed' <<<"$out" ||
+  fail "the launcher-managed fallback did not say why: $out"
+rm -f "$TMP/stage"
+
 # --- self-check reports rather than guesses ----------------------------------
 
 out=$(PYTHONPATH="$TMP/fake-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \

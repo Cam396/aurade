@@ -38,6 +38,7 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade_gui/app.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/brand.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/locales.py"]=0:0:644
+  ["/usr/local/lib/aurade/aurade_gui/stage.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/tokens.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/theme.css"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/theme-dark.css"]=0:0:644

@@ -27,6 +27,7 @@ for _lib in ("/usr/local/lib/aurade", os.path.join(SELF_DIR, "..", "lib")):
         sys.path.insert(0, _lib)
 
 try:
+    from aurade_gui import stage as S
     from aurade_gui.bridge import Bridge, BridgeError, find_bridge
 except ImportError as exc:  # pragma: no cover - packaging failure
     print(f"aurade-installer-gui: cannot load the installer model: {exc}", file=sys.stderr)
@@ -48,8 +49,19 @@ def find_tui() -> str | None:
 
 def fall_back(reason: str, argv: list[str]) -> int:
     """Hand over to the text installer, saying why on the way out."""
-    tui = find_tui()
     print(f"aurade-installer-gui: {reason}", file=sys.stderr)
+
+    # Inside a compositor the launcher started, there is no terminal behind
+    # this process: a text installer started here draws onto a surface nobody
+    # can reach and takes the console with it. The launcher still has the real
+    # console, so tell it the graphical path is over and let it hand over
+    # there. Saying so also stops it walking the rest of the renderer list,
+    # none of which can fix a missing toolkit or a probe that said no.
+    if S.launcher_managed():
+        S.report(S.DECLINED)
+        return 1
+
+    tui = find_tui()
     if tui is None:
         print(
             "aurade-installer-gui: the text installer is missing from this image",

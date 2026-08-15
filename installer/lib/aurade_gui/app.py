@@ -37,7 +37,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import brand, flow as F, locales, tokens as T  # noqa: E402
+from . import brand, flow as F, locales, stage as S, tokens as T  # noqa: E402
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
@@ -1689,6 +1689,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._toast(error or "That disk cannot be installed to.")
 
     def on_forward(self) -> None:
+        # The first Continue is the point of no return for the renderer chain:
+        # after it there are answers on screen that a restart under a different
+        # renderer would silently discard.
+        S.report(S.ENGAGED)
         state = self.flow.state
         try:
             if state == "pages":
@@ -1805,28 +1809,9 @@ class InstallerApplication(Adw.Application):
         self.window.present()
 
     @staticmethod
-    def _on_first_map(window: Gtk.Widget) -> None:
-        """Tell the launcher a renderer worked.
-
-        The launcher walks a list of renderers and needs to know whether each
-        attempt reached the screen. `cage` exits with this process's status,
-        which cannot distinguish "the compositor never started" from "the user
-        quit", and getting that distinction wrong either throws away a
-        half-answered installation or leaves a black screen. A window that has
-        been mapped is the unambiguous answer, and this is the moment it
-        happens.
-        """
-        path = os.environ.get("AURADE_GUI_READY_FILE")
-        if not path:
-            return
-        try:
-            with open(path, "w") as handle:
-                handle.write("mapped\n")
-        except OSError:
-            # Not being able to say so is not a reason to fail to start. The
-            # launcher treats a missing file as "try the next renderer", which
-            # at worst costs one extra attempt.
-            pass
+    def _on_first_map(_window: Gtk.Widget) -> None:
+        """A window reached the screen: this renderer works."""
+        S.report(S.MAPPED)
 
 
 def run(model: Bridge, plan_only: bool = False) -> int:

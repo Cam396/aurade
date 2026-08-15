@@ -88,4 +88,35 @@ export WAYLAND_DISPLAY=wl-aurade-test
 
 status=0
 python3 "$ROOT/installer/tests/gui_runtime_test.py" || status=$?
-exit "$status"
+(( status == 0 )) || exit "$status"
+
+# The signal the launcher's whole renderer chain rests on, taken from the real
+# front end against a real compositor rather than from a stub.
+#
+# The launcher decides whether to try another graphics candidate by reading
+# how far the installer got, and it reads it from a file the installer writes
+# when its window is mapped. If that write ever stops happening the chain
+# either abandons a working machine or restarts an installer that is already
+# on screen, and every stub in the test suite would still pass. So it is
+# checked here, where there is a compositor to map a window into.
+export AURADE_GUI_READY_FILE="$TMP/stage"
+"$ROOT/installer/bin/aurade-installer-gui" --plan-only --force \
+  --journal "$TMP/run/journal2.jsonl" --raw-log "$TMP/run/install2.log" \
+  >"$TMP/frontend.log" 2>&1 &
+FRONTEND_PID=$!
+for _ in $(seq 1 60); do
+  [[ -s $AURADE_GUI_READY_FILE ]] && break
+  kill -0 "$FRONTEND_PID" 2>/dev/null || break
+  sleep 0.25
+done
+kill "$FRONTEND_PID" 2>/dev/null || true
+wait "$FRONTEND_PID" 2>/dev/null || true
+reached=$(cat "$AURADE_GUI_READY_FILE" 2>/dev/null || printf 'nothing')
+if [[ $reached != mapped ]]; then
+  echo "test-gui-runtime: the front end reported '$reached' after drawing a window," \
+       "so the launcher would have walked away from a renderer that works" >&2
+  sed -n '1,40p' "$TMP/frontend.log" >&2
+  exit 1
+fi
+echo 'installer GUI front end reports drawing: PASS'
+exit 0
