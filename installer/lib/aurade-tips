@@ -40,7 +40,7 @@ tip	Swap is where memory goes when there is not enough. A swap file can be added
 tip	Hibernating writes all of memory out to disk, which is why a hibernation swap file has to be at least that large.
 tip	This installer never resizes a partition. It only uses free space, which is why it can say what it will do beforehand.
 tip	The installer writes a journal as it goes. That file is what the progress list on this screen is drawn from.
-tip	If Secure Boot is on, AuraDE signs its own boot files and offers to enrol its key. Nothing unsigned is written.
+tip	If Secure Boot is on, AuraDE signs its boot files when a signing key is available. Without one, the install continues with a warning and firmware must be disabled or enrolled before first boot.
 tip	The EFI partition is the part of the disk the firmware reads. It is small, plain FAT, and any computer can mount it.
 tip	Everything here is true of the text installer too. They ask the same questions and run the same engine.
 tip	Your account is created during this step, with the name and password you chose. The live session has neither.
