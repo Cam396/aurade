@@ -163,7 +163,7 @@ tail -1 "$calls" | grep -Fq -- '--encrypt' || fail 'encryption was requested but
 # The finished screen must actually be reached.
 grep -Fq 'AuraDE is installed' "$TMP/out.happy" || fail 'the finished screen was never shown'
 # And the journal the engine wrote must have driven a progress render.
-grep -Fq 'Install the base system' "$TMP/out.happy" || fail 'no progress screen was rendered'
+grep -Fq 'Installing the base system' "$TMP/out.happy" || fail 'no progress screen was rendered'
 
 # --- no secret leaves the process ------------------------------------------
 ! grep -Fq "$PASSWORD" "$calls" || fail 'the password was passed to the engine as an argument'
@@ -214,11 +214,15 @@ AURADE_STUB_DRYRUN_STATUS=3 run_flow dryfail && fail 'a failing dry run reported
 # --- a mid-install failure lands on the failure screen ----------------------
 { answers; typed_token 'ERASE:/dev/sda'; echo enter; echo esc; } >"$TMP/keys.bootfail"
 AURADE_STUB_FAIL_AT=bootloader run_flow bootfail && fail 'a failed install reported success'
-grep -Fq 'Install the bootloader did not finish' "$TMP/out.bootfail" ||
+grep -Fq 'Making it bootable did not finish' "$TMP/out.bootfail" ||
   fail 'the failure screen did not name the failed stage'
 grep -Fq 'cannot yet continue from where it stopped' "$TMP/out.bootfail" ||
   fail 'the failure screen did not admit that it cannot resume'
-! grep -Fq 'Try ' "$TMP/out.bootfail" ||
+# Scoped to the failure screen. This file captures the whole session, and a
+# question's own help text earlier in the run is not the failure screen
+# offering to retry anything.
+sed -n '/Making it bootable did not finish/,$p' "$TMP/out.bootfail" >"$TMP/failscreen.bootfail"
+! grep -Fq 'Try ' "$TMP/failscreen.bootfail" ||
   fail 'the failure screen offered a retry the engine cannot honour'
 grep -Fq '"stage":"bootloader","status":"failed"' "$TMP/journal.bootfail.jsonl" ||
   fail 'the journal did not record the failure'

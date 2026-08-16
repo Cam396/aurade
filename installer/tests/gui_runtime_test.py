@@ -121,31 +121,35 @@ def run(window: InstallerWindow) -> None:
     window.refresh()
     pump()
     group = window.widgets.get("ready.checks")
-    check(group is not None, "the readiness page has no findings container")
-    if group is not None:
-        widgets = list(walk(group))
+    details = window.widgets.get("ready.detail.group")
+    check(group is not None and details is not None,
+          "the readiness page has no findings container")
+    if group is not None and details is not None:
+        # Everything passes against these fixtures, so the page itself has to
+        # be empty of findings and all five have to be inside the details.
+        # A page that reports five green ticks every time is a page with
+        # nothing to read and nothing to do, which is what this one was.
+        check(not [w for w in walk(group) if isinstance(w, Adw.ActionRow)],
+              "a passing check is still on the page instead of in the details")
+
+        widgets = list(walk(details))
         titles = [w.get_label() for w in widgets
                   if isinstance(w, Gtk.Label) and w.get_label()]
         for expected in ("Firmware", "Secure Boot", "Memory", "Storage", "Graphics"):
             check(expected in titles,
-                  f"the readiness page does not report {expected}")
+                  f"the readiness details do not report {expected}")
 
-        # Every finding carries its own subject icon and its own state mark.
-        # Five identical ticks is what this page looked like before, and the
-        # tick it used was not even in the image's icon theme, so the page
-        # was five blank spaces and five titles.
-        rows = [w for w in walk(group) if isinstance(w, Adw.ActionRow)]
-        check(len(rows) >= 5,
-              f"the readiness page built {len(rows)} rows, not one per check")
-        images = [w for w in walk(group) if isinstance(w, Gtk.Image)]
-        named = [w.get_icon_name() for w in images if w.get_icon_name()]
+        # Every finding carries its own subject icon. Five identical ticks is
+        # what this page used to be, and the tick it used was not in the
+        # image's icon theme, so it was five blank spaces and five titles.
+        named = [w.get_icon_name() for w in widgets
+                 if isinstance(w, Gtk.Image) and w.get_icon_name()]
         for expected in ("application-x-firmware-symbolic", "channel-secure-symbolic",
                          "media-flash-symbolic", "drive-harddisk-symbolic",
                          "video-display-symbolic"):
             check(expected in named,
                   f"no finding on the readiness page draws {expected}")
-        tiles = [w for w in walk(group)
-                 if w.has_css_class("aurade-icon-tile")]
+        tiles = [w for w in widgets if w.has_css_class("aurade-icon-tile")]
         check(len(tiles) >= 5,
               f"only {len(tiles)} findings put their icon in a tile")
     headline = window.widgets.get("ready.headline")
@@ -215,6 +219,10 @@ def run(window: InstallerWindow) -> None:
     pump()
     check(not window.forward_button.get_sensitive(),
           "a blocked readiness verdict still lets the installer continue")
+    promoted = [w for w in walk(window.widgets["ready.checks"])
+                if isinstance(w, Adw.ActionRow)]
+    check(len(promoted) == 1,
+          f"the blocking check was not the only thing on the page ({len(promoted)} rows)")
     window.model.call = real_call
     window.refresh()
     pump()

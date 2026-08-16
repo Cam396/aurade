@@ -123,7 +123,11 @@ BOARD_WIDTH = 940
 
 def page_shell(child: Gtk.Widget, width: int = PROSE_WIDTH) -> Gtk.Widget:
     box = column(20)
-    box.set_margin_top(26)
+    # Top aligned, deliberately. Centring the content of every page makes a
+    # short page look balanced and makes the title jump vertically on every
+    # step, because the pages are not the same height. A heading that moves
+    # when you press Continue is worse than a page with room underneath it.
+    box.set_margin_top(44)
     box.set_margin_bottom(26)
     box.set_margin_start(24)
     box.set_margin_end(24)
@@ -212,6 +216,29 @@ class Aurora(Gtk.DrawingArea):
         return GLib.SOURCE_CONTINUE
 
 
+class Swoop(Gtk.DrawingArea):
+    """The mark being made, over the whole window, once per session.
+
+    It plays on the way out of the welcome screen, which is the only moment in
+    an installer where a second of ceremony costs nothing: the question after
+    it is already built and waiting underneath.
+    """
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.phase = 0.0
+        self.set_draw_func(self._draw)
+        # Never in the way. It covers the page it is revealing, and a pointer
+        # that lands on it instead of on the button underneath would be a
+        # second of decoration eating a click.
+        self.set_can_target(False)
+        self.set_visible(False)
+
+    def _draw(self, _area, cr, width: int, height: int) -> None:
+        brand.draw_swoop(cr, width, height, self.window.dark, self.phase)
+
+
 class RibbonRule(Gtk.DrawingArea):
     """The gradient across the `A`, reduced to a hairline."""
 
@@ -287,6 +314,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         #: The readiness rows currently in the list, so a refresh can take out
         #: exactly what it put in. AdwPreferencesGroup has no "empty me".
         self.readiness_rows: list = []
+        #: The passing checks, which live inside the details disclosure.
+        self.detail_rows: list = []
         self.group_rows: dict = {}
         self.stage_rows: dict = {}
         self.secrets_set: set = set()
@@ -300,6 +329,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.dark = False
         self._progress_source = 0
         self._aurora_source = 0
+        #: The mark animation plays once. Coming back to the welcome screen
+        #: and leaving it again is not a new arrival.
+        self._swooped = False
         self._provider = None
         self._gate_token = ""
         self._export_notice = None
@@ -344,6 +376,21 @@ class InstallerWindow(Adw.ApplicationWindow):
         settings = Gtk.Settings.get_for_display(display)
         if settings is not None:
             settings.set_property("gtk-icon-theme-name", "Adwaita")
+            # The face, named rather than inherited. GTK's built-in default is
+            # Cantarell, which the image does not install, so anything drawn
+            # outside this stylesheet's reach would be whatever fontconfig
+            # substitutes. Adwaita Sans is on the image because the toolkit
+            # depends on it, and it is the face the type scale was set in.
+            settings.set_property("gtk-font-name", "Adwaita Sans 11")
+            # Light hinting, grayscale antialiasing: stems keep the shape the
+            # face was drawn with instead of being snapped to the pixel grid.
+            # A live image has no font configuration of its own, so leaving
+            # these unset means the installer looks different depending on
+            # what the distribution happened to default to that month.
+            settings.set_property("gtk-xft-antialias", 1)
+            settings.set_property("gtk-xft-hinting", 1)
+            settings.set_property("gtk-xft-hintstyle", "hintslight")
+            settings.set_property("gtk-xft-rgba", "none")
             # Motion is a luxury paid for by the graphics stack, and on the
             # machines this installer most often runs on there is no graphics
             # stack: the launcher walks down to a compositor that composites
@@ -416,6 +463,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         frame = column(0)
         self.widgets["frame"] = frame
         backdrop.add_overlay(frame)
+
+        swoop = Swoop(self)
+        self.widgets["swoop"] = swoop
+        backdrop.add_overlay(swoop)
 
         # Top bar: the mark, the wordmark, and where the user is. No window
         # controls, because this is the only thing running and a close button
@@ -589,6 +640,38 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._fade = animation
         animation.play()
 
+    def play_swoop(self) -> None:
+        """Draw the mark over the page, once, and then get out of the way."""
+        swoop = self.widgets.get("swoop")
+        if swoop is None or self._swooped or not self.animate:
+            return
+        self._swooped = True
+
+        def frame(value: float) -> None:
+            swoop.phase = value
+            swoop.queue_draw()
+            if value >= 1.0:
+                swoop.set_visible(False)
+
+        swoop.phase = 0.0
+        swoop.set_visible(True)
+        target = Adw.CallbackAnimationTarget.new(frame)
+        animation = Adw.TimedAnimation.new(swoop, 0.0, 1.0, 900, target)
+        # Linear here on purpose: the easing is inside the drawing, where the
+        # sweep and the ring need different curves from each other.
+        animation.set_easing(Adw.Easing.LINEAR)
+        self._swoop_animation = animation
+        animation.play()
+
+    def skip_swoop(self) -> None:
+        """Anything the user does outranks the animation."""
+        animation = getattr(self, "_swoop_animation", None)
+        if animation is not None:
+            animation.skip()
+        swoop = self.widgets.get("swoop")
+        if swoop is not None:
+            swoop.set_visible(False)
+
     def start_aurora(self) -> None:
         if self._aurora_source or not self.animate:
             return
@@ -648,7 +731,10 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_page(self, page: F.Page) -> Gtk.Widget:
         box = column(20)
         box.append(label(page.title, "m3-headline-small"))
-        box.append(label(page.subtitle, "m3-body-medium", css="dim-label"))
+        if page.subtitle:
+            # An empty label still takes its line, and a page that has nothing
+            # more to say should not leave a gap where the sentence would be.
+            box.append(label(page.subtitle, "m3-body-medium", css="dim-label"))
         if page.name == "readiness":
             self._build_readiness(box)
         elif page.name == "network":
@@ -816,14 +902,17 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["ready.verdict"] = verdict
         box.append(verdict)
 
-        # One card of rows, not a board of cards.
+        # Only what needs an answer.
         #
-        # Five findings in a two-column grid leaves the fifth one alone on a
-        # row of its own, and five bordered boxes at three different widths is
-        # what the page looked like. A list has none of that: it reads top to
-        # bottom in one measure, each line carries its own subject icon, and it
-        # is the same list box every other page in this installer uses, so the
-        # rows are contained the way libadwaita expects rather than by hand.
+        # This page listed all five checks, every time, each with its finding
+        # and a tick. Five green rows is a page reporting its own work: there
+        # is nothing on it to read and nothing on it to do, and the sentences
+        # that fill it are all justifications, which is most of why this
+        # installer read like a status report. So a check that passes says
+        # nothing here. It is in the details, where anyone who wants it can
+        # find it, and the page above stays one sentence long.
+        #
+        # A check that does not pass gets the page to itself.
         group = Adw.PreferencesGroup()
         self.widgets["ready.checks"] = group
         self.readiness_rows = []
@@ -832,6 +921,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup()
         details = Adw.ExpanderRow(title=F.READINESS_DETAILS)
         details.add_prefix(icon_tile("document-properties-symbolic"))
+        self.widgets["ready.detail.group"] = details
+        self.detail_rows = []
         detail_row = Adw.ActionRow()
         detail_row.set_subtitle_lines(0)
         detail_row.add_css_class("aurade-mono")
@@ -900,10 +991,28 @@ class InstallerWindow(Adw.ApplicationWindow):
         for existing in self.readiness_rows:
             group.remove(existing)
         self.readiness_rows = []
+        details = self.widgets["ready.detail.group"]
+        for existing in self.detail_rows:
+            details.remove(existing)
+        self.detail_rows = []
         for check in checks:
             item = self._check_row(check)
-            group.add(item)
-            self.readiness_rows.append(item)
+            if check.get("state", "ok") == "ok":
+                # AdwExpanderRow takes rows, not children: `add` is the
+                # AdwPreferencesGroup call and does not exist here.
+                details.add_row(item)
+                self.detail_rows.append(item)
+            else:
+                group.add(item)
+                self.readiness_rows.append(item)
+
+        # The raw strings go under the findings they belong to, not above
+        # them. Rows are appended in the order they are added, and the mono
+        # block was built first because it is part of the page rather than
+        # part of a check.
+        raw = self.widgets["ready.details"]
+        details.remove(raw)
+        details.add_row(raw)
 
         detail_lines = [
             f"{check.get('title', '')}: {check.get('detail')}"
@@ -925,7 +1034,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _build_network(self, box: Gtk.Box) -> None:
         status = Adw.PreferencesGroup()
-        item = Adw.ActionRow(title="Checking this computer")
+        item = Adw.ActionRow(title="Checking the connection")
         item.set_subtitle("")
         item.set_subtitle_lines(0)
         item.add_prefix(Gtk.Image.new_from_icon_name(
@@ -982,9 +1091,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(prompt)
 
         box.append(label(
-            "Packages are downloaded and verified before anything is written, "
-            "so a connection that fails here costs nothing. Fix it now and "
-            "nothing has been lost.",
+            "Everything is downloaded and checked before any disk is touched, "
+            "so a connection that fails here costs you nothing.",
             "m3-body-small", css="dim-label"))
 
     def _refresh_network(self) -> None:
@@ -995,8 +1103,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             item.set_subtitle(status.get("reason", ""))
             self.widgets["wifi.list"].set_visible(False)
             self.widgets["wifi.empty"].set_label(
-                "Wi-Fi cannot be set up from this image. Connect a cable "
-                "instead.")
+                "Wi-Fi cannot be set up from this image. Use a cable.")
             self.widgets["wifi.empty"].set_visible(True)
             return
         if status.get("wired"):
@@ -1041,8 +1148,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         networks = result.get("networks", [])
         listbox.set_visible(bool(networks))
         if not networks:
-            empty.set_label("No networks in range. Move closer to the router, "
-                            "or connect a cable instead.")
+            empty.set_label("Nothing in range. Move closer to the router, or "
+                            "use a cable.")
             empty.set_visible(True)
             return GLib.SOURCE_REMOVE
         empty.set_visible(False)
@@ -1233,8 +1340,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         """
         group = Adw.PreferencesGroup(
             title="Try your keyboard",
-            description=("Type here to check the layout before you set a "
-                         "password. Nothing typed in this box is saved."))
+            description=("Try the layout here before you set a password. "
+                         "Nothing typed in this box is saved."))
         entry = Adw.EntryRow(title="Test the keys")
         entry.set_show_apply_button(False)
         self.widgets["keymap.test"] = entry
@@ -1289,7 +1396,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         warning = self.widgets["disk.warning"]
         warning.set_visible(removable)
         if removable:
-            warning.set_label("A removable disk is listed. That is probably the "
+            warning.set_label("One of these is removable. That is probably the "
                               "drive you started this installer from.")
         chosen = self.model.get("target")
         if chosen:
@@ -1310,8 +1417,8 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _build_review(self):
         box = column(20)
         box.append(label(F.REVIEW_TITLE, "m3-headline-small"))
-        box.append(label("Nothing here is fixed. Pick any line to go back and "
-                         "change it.", "m3-body-medium", css="dim-label"))
+        box.append(label("Pick any line to change it.",
+                         "m3-body-medium", css="dim-label"))
         group = Adw.PreferencesGroup()
         self.widgets["review.group"] = group
         box.append(group)
@@ -1325,7 +1432,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         # a heading for something missing, which is what it looked like.
         more = Adw.PreferencesGroup()
         entry = Adw.ActionRow(title="Advanced options")
-        entry.set_subtitle("Package snapshot and where updates come from")
+        entry.set_subtitle("Package snapshot, and where updates come from")
         entry.add_prefix(icon_tile("document-properties-symbolic"))
         entry.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
         entry.set_activatable(True)
@@ -1532,9 +1639,9 @@ class InstallerWindow(Adw.ApplicationWindow):
     def stop_install(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Stop the installation?",
-            body=("Nothing has been written to the disk yet, so stopping now "
-                  "leaves this computer exactly as it was. You can start "
-                  "again from the beginning."))
+            body=("Nothing has been written yet, so stopping leaves this "
+                  "computer exactly as it was. You can start again from the "
+                  "beginning."))
         dialog.add_response("keep", "Keep installing")
         dialog.add_response("stop", "Stop")
         dialog.set_response_appearance("stop", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -1586,6 +1693,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         headline = label("", "m3-headline-small")
         self.widgets["failure.headline"] = headline
         box.append(headline)
+        stage_line = label("", "m3-body-large")
+        self.widgets["failure.stage"] = stage_line
+        box.append(stage_line)
         for key in ("cause", "explanation", "advice"):
             item = label("", "m3-body-medium")
             item.set_visible(False)
@@ -1618,8 +1728,16 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def _refresh_failure(self) -> None:
         report = self.model.failure()
+        # The disk first. After a failed install the only question anyone
+        # has is whether their machine still has its old system on it, and
+        # the answer is the shared reversibility boundary, not a guess made
+        # here. The stage that stopped is the second line, because it is the
+        # answer to a question they have not asked yet.
         stage = report.get("label") or ""
         self.widgets["failure.headline"].set_label(
+            "Nothing was written to any disk" if report.get("reversible")
+            else "This disk has been changed")
+        self.widgets["failure.stage"].set_label(
             f"{stage} did not finish." if stage else "The installation stopped.")
         for key, text in (("cause", report.get("cause_text", "")),
                           ("explanation", report.get("explanation", "")),
@@ -1930,6 +2048,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         # renderer would silently discard.
         S.report(S.ENGAGED)
         state = self.flow.state
+        if state == F.WELCOME:
+            self.play_swoop()
         try:
             if state == "pages":
                 if not self._collect_page(F.PAGES_BY_NAME[self.flow.current_page]):
@@ -1953,6 +2073,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.stop_install()
 
     def on_back(self) -> None:
+        self.skip_swoop()
         action = self.flow.back_action()
         if action == "quit":
             self._confirm_quit()

@@ -75,6 +75,54 @@ seen in a headless render either, because the build host's icon theme is a
 different version with different names in it - which is exactly how five state
 ticks and a verdict badge shipped invisible.
 
+## The voice
+
+Apple, with a touch of Hilton at the two ends. Calm and short in the middle,
+warm on arrival and departure. Six rules, and `test-voice.sh` enforces the two
+that a machine can see.
+
+1. **One idea per sentence.** If a sentence needs a comma to carry a second
+   clause, it usually wants to be two sentences. Vary the length. Short ones
+   are allowed to be very short.
+2. **State the outcome, not the mechanism.** "15.2 GB free" and not "15.2 GB
+   free, which is enough". The justification is the tell: nobody says it out
+   loud, and reading it makes the reader feel audited.
+3. **Show less.** The strongest fix for copy that reads like a status report
+   is deleting the report. The readiness page kept five green ticks and five
+   explanations of why each one was fine; the version that reads like a
+   product says one sentence and puts the rest behind Details.
+4. **No dashes.** No em dash, no en dash, anywhere the user can see. A dash is
+   the joint a sentence uses when it has two ideas and has not decided which
+   one it is about.
+5. **Nothing from the memo.** "in order to", "utilise", "prior to", "please
+   note". Read it aloud. If it sounds like a department, rewrite it.
+6. **The destructive path is exempt.** The gate, the token, the refusals and
+   every claim about what has and has not been written stay literal and
+   exact. The contrast is deliberate: everything is calm and human, and then
+   at the erase gate it is suddenly plain, which is the signal.
+
+Copy lives in four places and all four are held to this: `flow.py` for the
+graphical pages and states, `aurade-questions.sh` for the questions both front
+ends ask, `stage_label` and `stage_explanation` in the text installer for the
+progress and failure vocabulary both renderers share, and `gb_readiness` for
+the findings.
+
+## Type
+
+The scale in `generate-theme.py` began as the Material 3 table and is no
+longer it. Tracking is zero or negative rather than M3's positive tracking on
+body sizes, headings carry weight rather than expressing hierarchy through
+size alone, body text is a size larger than the spec, and every role emits a
+line height, which the generator previously carried in its table and never
+wrote out.
+
+The face is named rather than inherited. GTK's built-in default is Cantarell,
+which the image does not install, so anything drawn outside this stylesheet's
+reach would render in whatever fontconfig substituted. `Adwaita Sans` is on
+the image because the toolkit depends on it. Renders taken on a build host are
+not evidence about type unless that host's fonts have been replaced with the
+image's, which is the same trap the icons set.
+
 ## Getting something onto the screen
 
 Two independent things have to work before anyone sees a window, and they fail
@@ -369,6 +417,7 @@ evidence alone and the wording claims no more than that.
 | `test-gui-runtime.sh` | the window built on a headless compositor: containment, storage and scheme controls, and the stage the front end reports after drawing |
 | `test-renderer-chain.sh` | the order graphics candidates are tried in, and the launcher's rule for what each outcome means |
 | `test-gui-icons.sh` | every icon name the front end asks for, against the set the image carries |
+| `test-voice.sh` | no dashes and nothing from the memo, across every user-facing string |
 
 The render and flow tests exist because this project has already shipped a
 prompt that hung at its own keyboard validation while `bash -n` and a

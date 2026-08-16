@@ -95,7 +95,7 @@ DARK = {
 
 SHAPE = {'none': 0, 'xs': 4, 'sm': 8, 'md': 12, 'lg': 16, 'xl': 28, 'full': 999}
 STATE = {'hover': 0.08, 'focus': 0.1, 'pressed': 0.1, 'dragged': 0.16, 'disabled_content': 0.38, 'disabled_container': 0.12}
-TYPE = {'display_large': (57, 400, -0.25, 64), 'display_medium': (45, 400, 0.0, 52), 'display_small': (36, 400, 0.0, 44), 'headline_large': (32, 400, 0.0, 40), 'headline_medium': (28, 400, 0.0, 36), 'headline_small': (24, 400, 0.0, 32), 'title_large': (22, 400, 0.0, 28), 'title_medium': (16, 500, 0.15, 24), 'title_small': (14, 500, 0.1, 20), 'body_large': (16, 400, 0.5, 24), 'body_medium': (14, 400, 0.25, 20), 'body_small': (12, 400, 0.4, 16), 'label_large': (14, 500, 0.1, 20), 'label_medium': (12, 500, 0.5, 16), 'label_small': (11, 500, 0.5, 16)}
+TYPE = {'display_large': (57, 500, -1.6, 1.08), 'display_medium': (45, 500, -1.1, 1.12), 'display_small': (36, 600, -0.7, 1.16), 'headline_large': (32, 600, -0.6, 1.2), 'headline_medium': (28, 600, -0.5, 1.22), 'headline_small': (24, 600, -0.4, 1.26), 'title_large': (22, 600, -0.2, 1.32), 'title_medium': (16, 600, 0.0, 1.4), 'title_small': (15, 600, 0.0, 1.4), 'body_large': (17, 400, 0.0, 1.55), 'body_medium': (15, 400, 0.0, 1.55), 'body_small': (13, 400, 0.0, 1.5), 'label_large': (14, 500, 0.0, 1.32), 'label_medium': (12, 500, 0.0, 1.32), 'label_small': (11, 500, 0.2, 1.32)}
 
 
 def scheme(dark: bool) -> dict[str, str]:

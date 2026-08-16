@@ -16,6 +16,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-gui-launch.sh"
 "$ROOT/test-gui-widgets.sh"
 "$ROOT/test-gui-icons.sh"
+"$ROOT/test-voice.sh"
 "$ROOT/test-gui-runtime.sh"
 "$ROOT/test-network-diagnostics.sh"
 "$ROOT/test-failure-injection.sh"

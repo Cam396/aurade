@@ -244,8 +244,8 @@ _gb_readiness_disk() {
     fi
   done < <(disk_table)
   if (( count == 0 )); then
-    _gb_check disk 'Storage' blocked 'No disk was found to install to.' \
-      'Check that the drive is connected and visible in firmware settings.'
+    _gb_check disk 'Storage' blocked 'No disk to install to.' \
+      'Check the drive is connected and that firmware can see it.'
     return 0
   fi
   if (( count == 1 )); then
@@ -254,7 +254,7 @@ _gb_readiness_disk() {
       "$(disk_table | tr '|' ' ' | tr '\n' ';')"
   else
     _gb_check disk 'Storage' ok \
-      "$(printf '%s disks found. The largest is %s at %s.' "$count" "$biggest" "$biggest_size")" '' \
+      "$(printf '%s disks. The largest is %s, %s.' "$count" "$biggest" "$biggest_size")" '' \
       "$(disk_table | tr '|' ' ' | tr '\n' ';')"
   fi
 }
@@ -265,12 +265,12 @@ gb_readiness() {
 
   # Firmware mode. `aurade-install` refuses outright without it.
   if [[ -d $AURADE_EFI_DIR ]]; then
-    out+="${sep}$(_gb_check firmware 'Firmware' ok 'This computer started in UEFI mode.')"
+    out+="${sep}$(_gb_check firmware 'Firmware' ok 'Booted in UEFI mode.')"
   else
     verdict=blocked
     out+="${sep}$(_gb_check firmware 'Firmware' blocked \
-      'This computer started in legacy BIOS mode, and AuraDE only installs in UEFI mode.' \
-      'Restart, open the firmware settings, turn off legacy or CSM boot, and start the installer again.')"
+      'This computer booted in legacy BIOS mode. AuraDE only installs in UEFI mode.' \
+      'Restart, open the firmware settings, turn off legacy or CSM boot, then start the installer again.')"
   fi
   sep=','
 
@@ -279,31 +279,31 @@ gb_readiness() {
   secure=$(bootctl is-secure-boot 2>/dev/null || printf 'unknown')
   case $secure in
     disabled)
-      out+="${sep}$(_gb_check secure_boot 'Secure Boot' ok 'Secure Boot is off, which is what AuraDE needs.')" ;;
+      out+="${sep}$(_gb_check secure_boot 'Secure Boot' ok 'Off, which is what AuraDE needs.')" ;;
     enabled)
       setup_mode=$(_gb_efi_boolean SetupMode 2>/dev/null || true)
       if [[ $setup_mode == 1 ]]; then
         [[ $verdict == blocked ]] || verdict=attention
         out+="${sep}$(_gb_check secure_boot 'Secure Boot' warn \
-          'Secure Boot is on, but firmware is in setup mode. AuraDE will sign the boot chain and offer key enrollment on first boot.' \
-          'Keep setup mode enabled until the installed system shows the AuraDE enrollment entry, then enable Secure Boot.')"
+          'On, with firmware in setup mode. AuraDE will sign the boot chain and offer to enroll its key on first boot.' \
+          'Leave setup mode on until the installed system offers the AuraDE enrollment entry, then turn Secure Boot back on.')"
       elif [[ $setup_mode == 0 && -r ${AURADE_SECURE_BOOT_KEY:-/dev/null} && \
           -r ${AURADE_SECURE_BOOT_CERT:-/dev/null} && \
           -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
         out+="${sep}$(_gb_check secure_boot 'Secure Boot' ok \
-          'Secure Boot is on and a pre-enrolled AuraDE signing key was supplied.' '' \
+          'On, with a pre-enrolled AuraDE signing key.' '' \
           'The installer will sign systemd-boot and the kernel with the supplied key.')"
       else
         verdict=blocked
         out+="${sep}$(_gb_check secure_boot 'Secure Boot' blocked \
-          'Secure Boot is on, but no trusted AuraDE signing path is available.' \
-          'Put firmware into setup mode for automatic enrollment, or restart with a pre-enrolled AuraDE key pair.')"
+          'On, and there is no signing key AuraDE can use.' \
+          'Put firmware into setup mode to enroll one, or restart with a pre-enrolled AuraDE key pair.')"
       fi ;;
     *)
       [[ $verdict == blocked ]] || verdict=attention
       out+="${sep}$(_gb_check secure_boot 'Secure Boot' warn \
-        'Whether Secure Boot is on could not be determined.' \
-        'The installation will stop before erasing anything if it turns out to be on.' \
+        'Could not tell whether Secure Boot is on.' \
+        'The install stops before erasing anything if it turns out to be on.' \
         "bootctl is-secure-boot: ${secure}")" ;;
   esac
 
@@ -314,12 +314,12 @@ gb_readiness() {
     "$(( (AURADE_PROBE_MEM_MIB % 1024) * 10 / 1024 ))")
   if (( AURADE_PROBE_MEM_MIB >= AURADE_PROBE_MIN_GUI_MIB )); then
     out+="${sep}$(_gb_check memory 'Memory' ok \
-      "$(printf '%s GB free, which is enough.' "$free_gb")" '' \
+      "$(printf '%s GB free.' "$free_gb")" '' \
       "$AURADE_PROBE_MEMORY")"
   else
     [[ $verdict == blocked ]] || verdict=attention
     out+="${sep}$(_gb_check memory 'Memory' warn \
-      "$(printf '%s GB free. The installed system will have more to work with than this live image does.' "$free_gb")" \
+      "$(printf '%s GB free. The installed system gets more to work with than this live image does.' "$free_gb")" \
       '' "$AURADE_PROBE_MEMORY")"
   fi
 
@@ -331,16 +331,16 @@ gb_readiness() {
   if aurade_probe_predicts_black_screen; then
     verdict=blocked
     state=blocked
-    finding='No working graphics driver was found, so the desktop would not appear after installing.'
-    action='On a virtual machine, turn on 3D acceleration in its display settings. On a real computer, this usually means the graphics card is not supported.'
+    finding='No working graphics driver, so the desktop would not appear after installing.'
+    action='On a virtual machine, turn on 3D acceleration in its display settings. On a real one, the graphics card is probably not supported.'
   elif [[ $AURADE_PROBE_REASON == software-rendering ]]; then
     [[ $verdict == blocked ]] || verdict=attention
     state=warn
-    finding='Graphics are being drawn by the processor rather than a graphics card. The desktop will work, slowly.'
-    action='On a virtual machine, turning on 3D acceleration usually fixes this.'
+    finding='Drawn by the processor rather than a graphics card. The desktop will work, slowly.'
+    action='On a virtual machine, turning on 3D acceleration usually fixes it.'
   else
     state=ok
-    finding='A graphics driver is loaded and the desktop should start.'
+    finding='Driver loaded. The desktop should come up fine.'
     action=''
   fi
   out+="${sep}$(_gb_check graphics 'Graphics' "$state" "$finding" "$action" \

@@ -85,25 +85,29 @@
 @define-color m3_focus rgba(109, 78, 161, 0.1);
 @define-color m3_pressed rgba(26, 27, 32, 0.1);
 
-/* ---- type scale, from the Material 3 spec ---- */
+/* ---- type scale ---- */
 
-window.aurade { font-family: "Adwaita Sans", "Cantarell", sans-serif; }
+window.aurade {
+  font-family: "Adwaita Sans", "Cantarell", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
 
-.m3-display-large { font-size: 57px; font-weight: 400; letter-spacing: -0.25px; }
-.m3-display-medium { font-size: 45px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-display-small { font-size: 36px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-headline-large { font-size: 32px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-headline-medium { font-size: 28px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-headline-small { font-size: 24px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-title-large { font-size: 22px; font-weight: 400; letter-spacing: 0.0px; }
-.m3-title-medium { font-size: 16px; font-weight: 500; letter-spacing: 0.15px; }
-.m3-title-small { font-size: 14px; font-weight: 500; letter-spacing: 0.1px; }
-.m3-body-large { font-size: 16px; font-weight: 400; letter-spacing: 0.5px; }
-.m3-body-medium { font-size: 14px; font-weight: 400; letter-spacing: 0.25px; }
-.m3-body-small { font-size: 12px; font-weight: 400; letter-spacing: 0.4px; }
-.m3-label-large { font-size: 14px; font-weight: 500; letter-spacing: 0.1px; }
-.m3-label-medium { font-size: 12px; font-weight: 500; letter-spacing: 0.5px; }
-.m3-label-small { font-size: 11px; font-weight: 500; letter-spacing: 0.5px; }
+.m3-display-large { font-size: 57px; font-weight: 500; letter-spacing: -1.6px; line-height: 1.08; }
+.m3-display-medium { font-size: 45px; font-weight: 500; letter-spacing: -1.1px; line-height: 1.12; }
+.m3-display-small { font-size: 36px; font-weight: 600; letter-spacing: -0.7px; line-height: 1.16; }
+.m3-headline-large { font-size: 32px; font-weight: 600; letter-spacing: -0.6px; line-height: 1.2; }
+.m3-headline-medium { font-size: 28px; font-weight: 600; letter-spacing: -0.5px; line-height: 1.22; }
+.m3-headline-small { font-size: 24px; font-weight: 600; letter-spacing: -0.4px; line-height: 1.26; }
+.m3-title-large { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; line-height: 1.32; }
+.m3-title-medium { font-size: 16px; font-weight: 600; letter-spacing: 0.0px; line-height: 1.4; }
+.m3-title-small { font-size: 15px; font-weight: 600; letter-spacing: 0.0px; line-height: 1.4; }
+.m3-body-large { font-size: 17px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.55; }
+.m3-body-medium { font-size: 15px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.55; }
+.m3-body-small { font-size: 13px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.5; }
+.m3-label-large { font-size: 14px; font-weight: 500; letter-spacing: 0.0px; line-height: 1.32; }
+.m3-label-medium { font-size: 12px; font-weight: 500; letter-spacing: 0.0px; line-height: 1.32; }
+.m3-label-small { font-size: 11px; font-weight: 500; letter-spacing: 0.2px; line-height: 1.32; }
 
 /* The machine voice. Everything the user has to match against hardware or
    type back exactly is set here, never in the prose face. */

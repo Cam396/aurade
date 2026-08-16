@@ -174,13 +174,13 @@ grep -Fq '612/1041 packages' "$TMP/progress" || fail 'progress does not render j
 grep -Fq 'cannot be interrupted safely' "$TMP/progress" ||
   fail 'progress does not state that the irreversible region cannot be cancelled'
 # Stages the engine never emits must not sit on screen as permanently pending.
-! grep -Fq 'Connect to the network' "$TMP/progress" ||
+! grep -Fq 'Connecting' "$TMP/progress" ||
   fail 'progress lists a stage the engine never emits'
-! grep -Fq 'Verify packages' "$TMP/progress" ||
+! grep -Fq 'Checking the downloads' "$TMP/progress" ||
   fail 'progress lists a stage the engine never emits'
 
 render failure none ascii >"$TMP/failure"
-grep -Fq 'Install the bootloader' "$TMP/failure" || fail 'failure does not name the failed stage'
+grep -Fq 'Making it bootable' "$TMP/failure" || fail 'failure does not name the failed stage'
 grep -Fq 'read-only' "$TMP/failure" || fail 'failure does not explain the cause'
 grep -Fq 'Save a diagnostic report' "$TMP/failure" || fail 'failure does not offer a diagnostic report'
 grep -Fq 'Open a shell' "$TMP/failure" || fail 'failure does not offer a shell'
@@ -295,7 +295,7 @@ env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   --journal "$TMP/nonresumable.jsonl" >"$TMP/nonresumable.out"
 ! grep -Fq 'Try ' "$TMP/nonresumable.out" ||
   fail 'a retry was offered for a stage the journal says cannot be retried'
-grep -Fq 'Create the recovery snapshot' "$TMP/nonresumable.out" ||
+grep -Fq 'Saving a snapshot to roll back to' "$TMP/nonresumable.out" ||
   fail 'the failure screen did not name the non-resumable stage'
 grep -Fq 'cannot yet continue' "$TMP/nonresumable.out" ||
   fail 'the failure screen does not say it cannot resume'
@@ -306,7 +306,7 @@ cat >"$TMP/hostile.jsonl" <<'EOF'
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   --journal "$TMP/hostile.jsonl" >"$TMP/hostile.out"
-grep -Fq 'Configure the system' "$TMP/hostile.out" ||
+grep -Fq 'Setting things up' "$TMP/hostile.out" ||
   fail 'the real stage was lost when a message contained a quoted field'
 ! grep -Fq 'Install the bootloader did not finish' "$TMP/hostile.out" ||
   fail 'a message impersonated the stage field'

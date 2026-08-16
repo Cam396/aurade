@@ -60,7 +60,7 @@ _q() {
 _q target \
   label 'Where should AuraDE be installed?' \
   short 'Disk' \
-  help 'Everything on the disk you choose will be erased. You can still go back or cancel after this step.' \
+  help 'Everything on the disk you pick is erased. You can still go back.' \
   type disk \
   default '' \
   validator aurade_valid_target \
@@ -72,7 +72,7 @@ _q target \
 _q hostname \
   label 'What should this computer be called?' \
   short 'Computer name' \
-  help 'Other devices on your network see this name. Letters, digits and hyphens.' \
+  help 'This is the name other devices see. Letters, digits and hyphens.' \
   type text \
   default aurade \
   validator aurade_valid_hostname \
@@ -82,9 +82,9 @@ _q hostname \
   secret no
 
 _q username \
-  label 'Choose your username' \
+  label 'Pick a username' \
   short 'Username' \
-  help 'This is your account on this computer. It cannot be changed later without recreating the account.' \
+  help 'This is your account. It cannot be changed later without making a new one.' \
   type text \
   default '' \
   validator aurade_valid_username \
@@ -94,9 +94,9 @@ _q username \
   secret no
 
 _q password \
-  label 'Set your password' \
+  label 'Set a password' \
   short 'Password' \
-  help 'You will type this to sign in. It is hashed immediately and never written anywhere in readable form.' \
+  help 'You will type this to sign in. It is hashed straight away and never stored in readable form.' \
   type secret \
   default '' \
   validator '' \
@@ -108,7 +108,7 @@ _q password \
 _q encrypt \
   label 'Encrypt this disk?' \
   short 'Encryption' \
-  help 'Encryption protects your files if the computer is lost or stolen. You will type a passphrase each time it starts.' \
+  help 'Your files stay unreadable to anyone without the passphrase. You will type it every time this computer starts.' \
   type bool \
   default yes \
   validator '' \
@@ -118,9 +118,9 @@ _q encrypt \
   secret no
 
 _q luks_passphrase \
-  label 'Set your disk encryption passphrase' \
+  label 'Set a disk passphrase' \
   short 'Disk passphrase' \
-  help 'This unlocks the disk at startup. It is separate from your password, and it cannot be recovered if forgotten.' \
+  help 'This unlocks the disk at startup. It is not your account password, and it cannot be recovered if you forget it.' \
   type secret \
   default '' \
   validator '' \
@@ -132,7 +132,7 @@ _q luks_passphrase \
 _q keymap \
   label 'Keyboard layout' \
   short 'Keyboard' \
-  help 'Pick the layout printed on your keyboard. Test it in the field below before continuing.' \
+  help 'Pick the layout printed on your keyboard. Try it in the box below.' \
   type enum \
   default us \
   validator aurade_valid_keymap \
@@ -144,7 +144,7 @@ _q keymap \
 _q timezone \
   label 'Time zone' \
   short 'Time zone' \
-  help 'Used for the clock and for scheduled tasks.' \
+  help 'Sets the clock.' \
   type enum \
   default UTC \
   validator aurade_valid_timezone \
@@ -156,7 +156,7 @@ _q timezone \
 _q locale \
   label 'Language and region' \
   short 'Language' \
-  help 'Sets the language, and how dates, numbers and currency are shown.' \
+  help 'Sets the language, and how dates and numbers look.' \
   type enum \
   default en_US.UTF-8 \
   validator aurade_valid_locale \
@@ -168,7 +168,7 @@ _q locale \
 _q layout \
   label 'How should the disk be used?' \
   short 'Disk layout' \
-  help 'Erasing gives AuraDE the whole disk. Installing alongside keeps what is already there and uses free space that is already unallocated; it never shrinks an existing partition to make room.' \
+  help 'Erase gives AuraDE the whole disk. Alongside keeps what is there and uses free space that is already unallocated. It never shrinks a partition to make room.' \
   type enum \
   default wipe \
   validator aurade_valid_layout \
@@ -180,7 +180,7 @@ _q layout \
 _q filesystem \
   label 'Root filesystem' \
   short 'Filesystem' \
-  help 'Btrfs is the default and the only one that gets the factory snapshot and the rollback entry in the boot menu. ext4 and xfs install a system that boots and updates, with nothing to roll back to.' \
+  help 'Btrfs is the default and the only one with a snapshot to roll back to, which is what the rollback entry in the boot menu uses. ext4 and xfs install a system that boots and updates, with nothing to roll back to.' \
   type enum \
   default btrfs \
   validator aurade_valid_filesystem \
@@ -192,7 +192,7 @@ _q filesystem \
 _q swap \
   label 'Swap' \
   short 'Swap' \
-  help 'A swap file lives inside the root filesystem, so an encrypted disk encrypts the swap with it. zram compresses pages in memory instead and never touches the disk.' \
+  help 'A swap file lives inside the root filesystem, so encrypting the disk encrypts the swap with it. zram compresses pages in memory and never touches the disk.' \
   type enum \
   default none \
   validator aurade_valid_swap \
@@ -204,7 +204,7 @@ _q swap \
 _q swap_size \
   label 'Swap size' \
   short 'Swap size' \
-  help 'Auto keeps a desktop responsive under memory pressure. Hibernate makes the swap file large enough to hold everything in memory, which is what suspending to disk needs.' \
+  help 'Auto keeps a desktop responsive under memory pressure. Hibernate makes the file big enough to hold everything in memory, which is what suspending to disk needs.' \
   type enum \
   default auto \
   validator aurade_valid_swap_size \
@@ -216,7 +216,7 @@ _q swap_size \
 _q snapshot \
   label 'Arch package snapshot' \
   short 'Package snapshot' \
-  help 'AuraDE installs from a pinned day in the Arch Linux Archive, so two installs from the same image match. Change this only if you know why.' \
+  help 'AuraDE installs from a pinned day in the Arch archive, so two installs from the same image match.' \
   type date \
   default '' \
   validator aurade_valid_arch_snapshot \

@@ -42,36 +42,29 @@ class Page:
 PAGES: tuple[Page, ...] = (
     Page(
         name="readiness",
-        title="Let's check this computer",
-        subtitle=(
-            "A few quick checks, before anything is written. A problem found "
-            "here costs you nothing to fix."
-        ),
+        title="A quick look at this computer",
+        # No subtitle. The verdict under it is the answer, and a page that
+        # says the same thing twice before saying anything is a page nobody
+        # finishes reading.
+        subtitle="",
     ),
     Page(
         name="network",
-        title="Get this computer online",
-        subtitle=(
-            "AuraDE downloads and checks every package before it touches a "
-            "disk, so the connection comes first."
-        ),
+        title="Get online",
+        subtitle="Everything is downloaded and checked before any disk is touched.",
     ),
     Page(
         name="language",
         title="Language and keyboard",
-        subtitle=(
-            "These take effect straight away, so the password you set later "
-            "is typed on the layout you chose."
-        ),
+        subtitle="Both take effect now, so your password is typed on the right layout.",
         questions=("locale", "keymap", "timezone"),
     ),
     Page(
         name="disk",
         title="Choose a disk",
         subtitle=(
-            "Everything on the disk you pick will be erased. You can still go "
-            "back or cancel after this step - nothing happens until you "
-            "confirm the disk by name."
+            "Everything on the disk you pick is erased. Nothing happens until "
+            "you confirm it by name."
         ),
         # The four after `target` are the advanced storage controls. They are
         # on this page rather than on the advanced page at the end because
@@ -83,25 +76,19 @@ PAGES: tuple[Page, ...] = (
     Page(
         name="account",
         title="Make yourself an account",
-        subtitle="This is the account you will sign in to on this computer.",
+        subtitle="This is who you will sign in as.",
         questions=("hostname", "username", "password"),
     ),
     Page(
         name="encryption",
         title="Disk encryption",
-        subtitle=(
-            "Encryption keeps your files unreadable to anyone who ends up "
-            "with this computer and not with your passphrase."
-        ),
+        subtitle="Your files stay unreadable to anyone without the passphrase.",
         questions=("encrypt", "luks_passphrase"),
     ),
     Page(
         name="advanced",
         title="Advanced options",
-        subtitle=(
-            "Everything here already has an answer that works. Change one "
-            "only if you know why you want to."
-        ),
+        subtitle="These already have answers that work.",
         questions=("snapshot", "repo_url"),
         optional=True,
     ),
@@ -379,12 +366,8 @@ class Flow:
 # Wording that has to be exactly right
 # --------------------------------------------------------------------------
 
-WELCOME_TITLE = "Install AuraDE"
-WELCOME_BODY = (
-    "A few questions, a disk to choose, and an account to make. You will see "
-    "exactly what is going to happen, and be asked to confirm it, before "
-    "anything is erased."
-)
+WELCOME_TITLE = "Let's set up AuraDE"
+WELCOME_BODY = "A few questions, then AuraDE takes it from here."
 WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 
 #: The readiness page's verdict line, keyed by the model's verdict. It is the
@@ -393,101 +376,94 @@ WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 #: findings listed under it.
 READINESS_VERDICTS: dict[str, tuple[str, str]] = {
     "ok": (
-        "This computer is ready",
-        "Everything AuraDE needs is here. Nothing has been written yet.",
+        "Ready when you are",
+        "Nothing on this computer has been touched.",
     ),
     "attention": (
-        "Worth knowing before you start",
-        "AuraDE will install here. One or two things below will work better "
-        "if you sort them out first.",
+        "Almost ready",
+        "This will install. What is below is worth sorting out first.",
     ),
     "blocked": (
         "One thing to fix first",
-        "AuraDE cannot install with this computer set up the way it is right "
-        "now. Each item below says what to change.",
+        "AuraDE cannot install until this changes.",
     ),
 }
 
-READINESS_DETAILS = "Technical details"
+READINESS_DETAILS = "Details"
 
 #: Shown when the model cannot be reached for a readiness report at all. The
 #: page still has to say something, and "no findings" would read as "all clear".
 READINESS_UNKNOWN = (
-    "These checks could not be run. The installation still stops before "
-    "erasing anything if it runs into a problem later on."
+    "These checks could not run. The install still stops before erasing "
+    "anything if it hits a problem later."
 )
 
-STORAGE_TITLE = "Advanced storage options"
-STORAGE_SUBTITLE = (
-    "The defaults install AuraDE the way it is meant to run. Everything in "
-    "here changes the shape of the disk."
-)
+STORAGE_TITLE = "Storage options"
+STORAGE_SUBTITLE = "The defaults are what AuraDE is built for."
 
 #: Consequences the engine actually enforces, restated where the choice is
 #: made. Each one is a fact about what the installed system will and will not
 #: have, not a warning about being careful.
 STORAGE_NOTES: dict[str, str] = {
     "filesystem": (
-        "Only Btrfs gets the factory snapshot and the rollback entry in the "
-        "boot menu. On ext4 or xfs there is nothing to roll back to."
+        "Only Btrfs gets a snapshot to roll back to. On ext4 or xfs there is "
+        "nothing to roll back to."
     ),
     "layout": (
-        "Installing alongside never resizes or moves an existing partition. "
-        "It needs free space that is already unallocated, and it keeps the "
-        "EFI partition the other system boots from."
+        "Alongside never resizes or moves a partition. It needs free space "
+        "that is already there, and it keeps the other system's EFI partition."
     ),
     "swap": (
         "A swap file sits inside the root filesystem, so encrypting the disk "
-        "encrypts the swap too."
+        "encrypts the swap with it."
     ),
     "swap_size": (
-        "Hibernating writes everything in memory to disk, so the swap file "
-        "has to be at least that big."
+        "Hibernating writes everything in memory to disk, so the file has to "
+        "be at least that big."
     ),
 }
 
-REVIEW_TITLE = "Everything you have chosen"
+REVIEW_TITLE = "Here is what will happen"
 REVIEW_ASSURANCE = "Nothing has been written to any disk yet."
 
 GATE_TITLE = "Confirm erase"
 GATE_BODY = (
-    "Everything up to here can be undone. Nothing after it can. The packages "
-    "are already downloaded and verified, so the installation will not need "
+    "Everything up to here can be undone. Nothing after it can.\n\n"
+    "The packages are already downloaded and verified, so this will not need "
     "the network again."
 )
 
-PROGRESS_TITLE = "Installing"
+PROGRESS_TITLE = "Making this computer yours"
 PROGRESS_FOOTER = "Do not turn off this computer."
 PROGRESS_UNINTERRUPTIBLE = "This part cannot be interrupted safely."
 
-DONE_TITLE = "AuraDE is installed"
+DONE_TITLE = "You are all set"
 DONE_BODY = (
-    "Take out the installation media and restart. Sign in with the username "
-    "and password you chose, and AuraDE is yours."
+    "Take out the installation media and restart. Sign in with the name and "
+    "password you picked."
 )
 DONE_ENCRYPTED = (
-    "This disk is encrypted. Every time the computer starts it will ask for "
-    "the disk passphrase first, before the sign-in screen appears."
+    "Your disk is encrypted, so it asks for the disk passphrase before the "
+    "sign-in screen every time it starts. That is the one you set here, not "
+    "your account password."
 )
 
-STOPPED_TITLE = "Stopped"
+STOPPED_TITLE = "Stopped, and nothing was written"
 STOPPED_BODY = (
-    "You stopped the installation before anything was written. No disk was "
-    "partitioned, formatted or erased, and this computer is exactly as it "
-    "was."
+    "No disk was partitioned, formatted or erased. This computer is exactly "
+    "as it was."
 )
 
 CANCELLED_TITLE = "Cancelled"
 CANCELLED_BODY = (
     "No disk was partitioned, formatted or written to. This computer is "
-    "exactly as it was before the installer started."
+    "exactly as it was."
 )
 
-PLANNED_TITLE = "Plan checked"
+PLANNED_TITLE = "The plan checks out"
 PLANNED_BODY = (
-    "The plan was checked against the engine and not run. This session was "
-    "started in plan-only mode, so it cannot erase a disk however far you "
-    "take it."
+    "It was checked against the engine and not run. This session started in "
+    "plan-only mode, so it cannot erase a disk however far you take it."
 )
 
 FAILURE_TITLE = "Install stopped"
@@ -499,9 +475,9 @@ FAILURE_TITLE = "Install stopped"
 #: carries no terminal emulator, and a button that does nothing on the screen
 #: where the user is already stuck is worse than its absence.
 FAILURE_ACTIONS: tuple[tuple[str, str], ...] = (
-    ("export", "Save a diagnostic report"),
-    ("log", "View the full log"),
-    ("reboot", "Restart the computer"),
+    ("export", "Save a report"),
+    ("log", "See the full log"),
+    ("reboot", "Restart"),
 )
 
 

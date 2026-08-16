@@ -148,20 +148,20 @@ trap cleanup EXIT INT TERM
 # journal keeps the real name so a support case and a screenshot still line up.
 stage_label() {
   case $1 in
-    preflight)      printf 'Check this computer' ;;
-    network)        printf 'Connect to the network' ;;
-    acquire)        printf 'Download packages' ;;
-    verify)         printf 'Verify packages' ;;
-    confirm)        printf 'Confirm the disk' ;;
-    partition)      printf 'Partition the disk' ;;
-    format)         printf 'Create filesystems' ;;
-    mount)          printf 'Mount filesystems' ;;
-    pacstrap)       printf 'Install the base system' ;;
-    configure)      printf 'Configure the system' ;;
-    bootloader)     printf 'Install the bootloader' ;;
-    snapshot)       printf 'Create the recovery snapshot' ;;
-    verify-install) printf 'Verify the installation' ;;
-    done)           printf 'Finish' ;;
+    preflight)      printf 'Checking this computer' ;;
+    network)        printf 'Connecting' ;;
+    acquire)        printf 'Downloading packages' ;;
+    verify)         printf 'Checking the downloads' ;;
+    confirm)        printf 'Confirming the disk' ;;
+    partition)      printf 'Partitioning the disk' ;;
+    format)         printf 'Formatting' ;;
+    mount)          printf 'Mounting' ;;
+    pacstrap)       printf 'Installing the base system' ;;
+    configure)      printf 'Setting things up' ;;
+    bootloader)     printf 'Making it bootable' ;;
+    snapshot)       printf 'Saving a snapshot to roll back to' ;;
+    verify-install) printf 'Checking everything landed' ;;
+    done)           printf 'Finishing up' ;;
     *)              printf '%s' "$1" ;;
   esac
 }
@@ -171,18 +171,18 @@ stage_label() {
 # present, and refined by cause where a specific one is known.
 stage_explanation() {
   case $1 in
-    preflight)  printf 'This computer did not meet one of the requirements. Nothing has been changed.' ;;
-    network)    printf 'The installer could not reach the package archive. Nothing has been changed.' ;;
-    acquire)    printf 'One or more packages could not be downloaded. Nothing has been changed, and no disk was touched.' ;;
-    verify)     printf 'A downloaded package did not match its expected signature or checksum. The installation stopped rather than install it. Nothing has been changed.' ;;
-    confirm)    printf 'The confirmation did not match the disk. Nothing has been changed.' ;;
-    partition)  printf 'The disk could not be partitioned. Its previous contents are already gone.' ;;
-    format)     printf 'The filesystems could not be created. The disk is partitioned but has no usable filesystem on it yet.' ;;
-    mount)      printf 'The new filesystems could not be mounted. The disk is partitioned and formatted.' ;;
-    pacstrap)   printf 'The base system could not be installed. The disk is partitioned and formatted, and every package is already downloaded and verified, so a fresh attempt will not need the network.' ;;
-    configure)  printf 'The system files are all in place but could not be configured.' ;;
-    bootloader) printf 'The system is installed but cannot start yet, because the bootloader was not written.' ;;
-    snapshot)   printf 'The system is installed and can start, but the factory recovery snapshot was not created, so rolling back to a clean state is not available on it.' ;;
+    preflight)  printf 'Nothing has been changed. This computer did not meet one of the requirements.' ;;
+    network)    printf 'Nothing has been changed. The package archive could not be reached.' ;;
+    acquire)    printf 'Nothing has been changed and no disk was touched. A package could not be downloaded.' ;;
+    verify)     printf 'Nothing has been changed. A download did not match its signature, so it was not installed.' ;;
+    confirm)    printf 'Nothing has been changed. The confirmation did not match the disk.' ;;
+    partition)  printf 'What was on this disk is already gone. It could not be partitioned.' ;;
+    format)     printf 'The disk is partitioned and has no filesystem on it yet. Formatting did not finish.' ;;
+    mount)      printf 'The disk is partitioned and formatted. The new filesystems could not be mounted.' ;;
+    pacstrap)   printf 'The disk is partitioned and formatted. The base system did not finish installing. Every package is already downloaded and verified, so starting again will not need the network.' ;;
+    configure)  printf 'Every file is in place. Setting the system up did not finish.' ;;
+    bootloader) printf 'The system is installed but cannot start yet. The bootloader was not written.' ;;
+    snapshot)   printf 'The system is installed and will start. There is no snapshot to roll back to.' ;;
     verify-install) printf 'The installation finished but did not pass its own final check.' ;;
     *)          printf 'The installation stopped. The journal below records exactly where.' ;;
   esac

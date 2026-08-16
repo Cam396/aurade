@@ -183,6 +183,105 @@ def draw_mark(cr, width: int, height: int, size: float) -> None:
     cr.restore()
 
 
+SWOOP_REVEAL = 0.55   #: the ribbon has closed its circle by here
+SWOOP_HOLD = 0.72     #: the ring has left the mark by here
+
+
+def swoop_ease(t: float) -> float:
+    """Emphasised deceleration. Fast out of the gate, long settle."""
+    t = max(0.0, min(1.0, t))
+    return 1.0 - pow(1.0 - t, 3)
+
+
+def draw_swoop(cr, width: int, height: int, dark: bool, phase: float) -> None:
+    """The mark being made, over a veil, once.
+
+    The artwork is a bitmap rather than a path, so the mark cannot literally
+    stroke itself, and revealing it through a wipe slices the tile into wedges
+    that read as a broken image rather than a drawn one. So the thing that is
+    drawn is the ribbon: an arc sweeps a full circle around the centre with a
+    bright pen at its leading edge, and the mark fades up inside the circle as
+    it closes.
+
+    Then the ribbon leaves the mark and opens outwards, and the veil under it
+    fades. What it opens into is the aurora, which is this same ring at window
+    scale and is already sitting behind every page. The mark does not appear
+    on top of the product. It becomes the room the product is in.
+    """
+    import cairo  # noqa: PLC0415
+
+    scheme = T.scheme(dark)
+    phase = max(0.0, min(1.0, phase))
+    cx, cy = width / 2, height / 2
+    size = min(width, height) * 0.26
+    span = max(width, height)
+
+    # The veil. Opaque while the mark is drawn, gone by the end, so the page
+    # underneath arrives already laid out rather than assembling in view.
+    veil = 1.0 if phase < SWOOP_HOLD else 1.0 - swoop_ease(
+        (phase - SWOOP_HOLD) / (1.0 - SWOOP_HOLD))
+    if veil <= 0.0:
+        return
+    r, g, b = T.rgb(scheme["surface"])
+    cr.set_source_rgba(r, g, b, veil)
+    cr.paint()
+
+    sweep = swoop_ease(min(1.0, phase / SWOOP_REVEAL))
+    ring = size * 0.86
+    pr, pg, pb = T.rgb(scheme["primary"])
+    tr, tg, tb = T.rgb(scheme["tertiary"])
+    start = -math.pi / 2
+
+    # The mark, fading up inside the circle as it closes.
+    surface = _png("aurade-mark.png")
+    native = surface.get_width() if surface is not None else 0
+    if native > 0:
+        drawn = size * (0.92 + 0.08 * sweep)
+        cr.save()
+        cr.translate(cx - drawn / 2, cy - drawn / 2)
+        cr.scale(drawn / native, drawn / native)
+        cr.set_source_surface(surface, 0, 0)
+        cr.paint_with_alpha(veil * min(1.0, sweep * 1.35))
+        cr.restore()
+
+    # The ribbon, drawn rather than revealed. One stroke under a lilac to
+    # aqua gradient, which is the same gradient as the hairline under the
+    # chrome and the same one that runs across the `A`. Drawn as one path
+    # rather than as segments with falling alpha: overlapping translucent
+    # segments bead at every join, and beads read as a loading spinner.
+    cr.new_path()
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    gradient = cairo.LinearGradient(cx - ring, cy - ring, cx + ring, cy + ring)
+    gradient.add_color_stop_rgba(0.0, pr, pg, pb, veil)
+    gradient.add_color_stop_rgba(1.0, tr, tg, tb, veil)
+    cr.set_source(gradient)
+    cr.set_line_width(size * 0.07)
+    if sweep >= 1.0:
+        cr.arc(cx, cy, ring, 0, 2 * math.pi)
+    else:
+        cr.arc(cx, cy, ring, start, start + sweep * 2 * math.pi)
+    cr.stroke()
+
+    # The pen: a short bright head on the leading edge, which is what makes it
+    # read as being drawn rather than as a bar filling up.
+    if 0.0 < sweep < 1.0:
+        angle = start + sweep * 2 * math.pi
+        cr.new_path()
+        cr.set_source_rgba(tr, tg, tb, veil)
+        cr.set_line_width(size * 0.09)
+        cr.arc(cx, cy, ring, max(start, angle - 0.30), angle)
+        cr.stroke()
+
+    # And then it opens out, into the backdrop it was always going to become.
+    if phase > SWOOP_REVEAL:
+        out = swoop_ease((phase - SWOOP_REVEAL) / (1.0 - SWOOP_REVEAL))
+        cr.new_path()
+        cr.set_source_rgba(pr, pg, pb, 0.5 * (1.0 - out) * veil)
+        cr.set_line_width(max(1.0, size * 0.09 * (1.0 - out)))
+        cr.arc(cx, cy, ring + out * span * 0.8, 0, 2 * math.pi)
+        cr.stroke()
+
+
 def draw_wordmark(cr, x: float, y: float, height: float, colour: str) -> float:
     """Paint the logotype in one colour. Returns the width it occupied.
 

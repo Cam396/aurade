@@ -467,7 +467,7 @@ with session(AURADE_STUB_FAIL_AT="pacstrap") as model:
     equal(report["stage"], "pacstrap", "the failure was attributed to the wrong stage")
     equal(
         report["label"],
-        "Install the base system",
+        "Installing the base system",
         "the failure screen used the journal's engineering name",
     )
     check(bool(report["explanation"]), "the failure screen explained nothing")

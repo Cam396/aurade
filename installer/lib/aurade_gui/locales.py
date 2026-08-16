@@ -177,18 +177,17 @@ def describe_timezone(zone: str) -> tuple[str, str]:
 #: knowing before choosing it.
 STORAGE_NAMES: dict[str, dict[str, tuple[str, str]]] = {
     "layout": {
-        "wipe": ("Erase the whole disk",
-                 "Everything currently on it is destroyed"),
-        "alongside": ("Install alongside what is there",
-                      "Uses free space only; nothing existing is moved"),
+        "wipe": ("Erase the whole disk", "Everything on it is destroyed"),
+        "alongside": ("Alongside what is there",
+                      "Free space only. Nothing existing is moved"),
     },
     "filesystem": {
         "btrfs": ("Btrfs", "Snapshots, and a rollback entry in the boot menu"),
-        "ext4": ("ext4", "Long established; no snapshots and no rollback"),
-        "xfs": ("XFS", "Fast with large files; no snapshots and no rollback"),
+        "ext4": ("ext4", "Long established. No snapshots, no rollback"),
+        "xfs": ("XFS", "Fast with large files. No snapshots, no rollback"),
     },
     "swap": {
-        "none": ("None", "No swap; the system relies on physical memory alone"),
+        "none": ("None", "Memory only"),
         "file": ("Swap file", "Inside the root filesystem, so encrypted with it"),
         "zram": ("Compressed in memory", "Nothing is written to the disk"),
     },

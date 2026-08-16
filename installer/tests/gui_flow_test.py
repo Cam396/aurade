@@ -45,7 +45,12 @@ def equal(got: object, want: object, message: str) -> None:
 seen: dict[str, str] = {}
 for page in F.PAGES:
     check(bool(page.title), f"page {page.name} has no title")
-    check(bool(page.subtitle), f"page {page.name} has no subtitle")
+    # A subtitle is optional and an empty one is a decision, not an omission:
+    # the readiness page's verdict says the same sentence louder, one line
+    # further down, and saying it twice before saying anything is how a page
+    # stops being read. What is not optional is that a page says something.
+    check(page.subtitle != page.title,
+          f"page {page.name} repeats its title as its subtitle")
     for question in page.questions:
         check(
             question not in seen,

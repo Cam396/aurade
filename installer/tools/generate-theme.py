@@ -316,21 +316,42 @@ STATE = {"hover": 0.08, "focus": 0.10, "pressed": 0.10, "dragged": 0.16,
 #: separates 0 from O and 1 from l is the difference between confirming the
 #: right disk and confirming a different one.
 TYPE = {
-    "display_large": (57, 400, -0.25, 64),
-    "display_medium": (45, 400, 0.0, 52),
-    "display_small": (36, 400, 0.0, 44),
-    "headline_large": (32, 400, 0.0, 40),
-    "headline_medium": (28, 400, 0.0, 36),
-    "headline_small": (24, 400, 0.0, 32),
-    "title_large": (22, 400, 0.0, 28),
-    "title_medium": (16, 500, 0.15, 24),
-    "title_small": (14, 500, 0.1, 20),
-    "body_large": (16, 400, 0.5, 24),
-    "body_medium": (14, 400, 0.25, 20),
-    "body_small": (12, 400, 0.4, 16),
-    "label_large": (14, 500, 0.1, 20),
-    "label_medium": (12, 500, 0.5, 16),
-    "label_small": (11, 500, 0.5, 16),
+    # size, weight, tracking (px), line height (multiple of size)
+    #
+    # This began as the Material 3 spec table and is no longer it, in three
+    # ways that are the whole difference between a page that reads as a
+    # settings screen and one that reads as a product.
+    #
+    # Tracking is zero or negative. M3 sets positive tracking on body and
+    # label sizes, which is a convention built around Roboto and is the single
+    # loudest tell that a page was laid out from someone else's spec. Large
+    # text gets negative tracking here, the way large text has always wanted
+    # it: the bigger the type, the more air there already is between letters.
+    #
+    # Headings carry weight. Everything in the M3 table above title size is
+    # regular, and a 24px regular heading over 14px regular body is a
+    # hierarchy expressed in size alone. The image ships Adwaita Sans as a
+    # variable font, so 600 costs nothing and is the difference between a
+    # heading and a big sentence.
+    #
+    # Body text is a size larger than the spec and set with real leading. This
+    # is read from a desk chair, once, by someone deciding whether to erase a
+    # disk.
+    "display_large": (57, 500, -1.6, 1.08),
+    "display_medium": (45, 500, -1.1, 1.12),
+    "display_small": (36, 600, -0.7, 1.16),
+    "headline_large": (32, 600, -0.6, 1.20),
+    "headline_medium": (28, 600, -0.5, 1.22),
+    "headline_small": (24, 600, -0.4, 1.26),
+    "title_large": (22, 600, -0.2, 1.32),
+    "title_medium": (16, 600, 0.0, 1.40),
+    "title_small": (15, 600, 0.0, 1.40),
+    "body_large": (17, 400, 0.0, 1.55),
+    "body_medium": (15, 400, 0.0, 1.55),
+    "body_small": (13, 400, 0.0, 1.50),
+    "label_large": (14, 500, 0.0, 1.32),
+    "label_medium": (12, 500, 0.0, 1.32),
+    "label_small": (11, 500, 0.2, 1.32),
 }
 
 
@@ -434,14 +455,18 @@ def _type_scale() -> str:
     for and the stylesheet does not carry is not an error anywhere: the label
     simply renders at the default size and the hierarchy quietly collapses.
     """
-    lines = ['/* ---- type scale, from the Material 3 spec ---- */', '',
-             'window.aurade { font-family: "Adwaita Sans", "Cantarell", sans-serif; }',
+    lines = ['/* ---- type scale ---- */', '',
+             'window.aurade {',
+             '  font-family: "Adwaita Sans", "Cantarell", sans-serif;',
+             '  font-size: 15px;',
+             '  line-height: 1.5;',
+             '}',
              '']
     for name, (size, weight, tracking, line) in TYPE.items():
         selector = ".m3-" + name.replace("_", "-")
         lines.append(
             f"{selector} {{ font-size: {size}px; font-weight: {weight}; "
-            f"letter-spacing: {tracking}px; }}"
+            f"letter-spacing: {tracking}px; line-height: {line}; }}"
         )
     return "\n".join(lines)
 
