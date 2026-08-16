@@ -214,6 +214,8 @@ install -d -m 0755 "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants"
 ln -s /usr/lib/systemd/system/NetworkManager.service "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
 ln -s /usr/lib/systemd/system/aurade-refresh-mirrors.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service"
+ln -s /etc/systemd/system/aurade-installer-autostart.service \
+  "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-autostart.service"
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 
 if (( STAGE_ONLY )); then

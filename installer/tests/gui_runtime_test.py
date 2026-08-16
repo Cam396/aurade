@@ -197,32 +197,29 @@ def run(window: InstallerWindow) -> None:
         window.widgets["q.filesystem"].set_selected(values.index("btrfs"))
         pump()
 
-    # -- a blocked verdict has to actually block ---------------------------
+    # -- a Secure Boot warning remains actionable -------------------------
     #
-    # The readiness page's whole purpose is to move the engine's two hard
-    # refusals - a BIOS boot and an enabled Secure Boot - to before the disk
-    # is chosen. If Next still works, the page is a notice board: the user
-    # answers nine more questions and meets the same refusal at the erase
-    # gate, which is the failure this page was built to prevent. The page did
-    # disable the button, and the refresh that drew it turned it back on two
-    # dozen lines later.
+    # Secure Boot without an AuraDE key is not a reason to make the user fill
+    # the form twice. The engine continues and completion guidance covers
+    # disabling firmware or enrolling a key before first boot. Legacy BIOS is
+    # still a genuine block and remains covered by the readiness contract.
     window.flow.state = "pages"
     window.flow.jump_to_page("readiness")
     real_call = window.model.call
     window.model.call = lambda command, argument="": {
-        "ok": True, "verdict": "blocked",
-        "checks": [{"id": "secure_boot", "title": "Secure Boot", "state": "blocked",
-                    "finding": "Secure Boot is on.",
-                    "action": "Turn it off in the firmware settings."}],
+        "ok": True, "verdict": "attention",
+        "checks": [{"id": "secure_boot", "title": "Secure Boot", "state": "warn",
+                    "finding": "Secure Boot is on, but no AuraDE signing key is available.",
+                    "action": "Disable it before the first boot, or enroll an AuraDE key after installation."}],
     } if command == "readiness" else real_call(command, argument)
     window.refresh()
     pump()
-    check(not window.forward_button.get_sensitive(),
-          "a blocked readiness verdict still lets the installer continue")
+    check(window.forward_button.get_sensitive(),
+          "a Secure Boot warning incorrectly blocks the installer")
     promoted = [w for w in walk(window.widgets["ready.checks"])
                 if isinstance(w, Adw.ActionRow)]
     check(len(promoted) == 1,
-          f"the blocking check was not the only thing on the page ({len(promoted)} rows)")
+          f"the Secure Boot warning was not the only promoted check ({len(promoted)} rows)")
     window.model.call = real_call
     window.refresh()
     pump()

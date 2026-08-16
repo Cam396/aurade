@@ -24,6 +24,7 @@ file_permissions=(
   ["/usr/local/sbin/aurade-installer-gui-bridge"]=0:0:755
   ["/usr/local/sbin/aurade-installer-start"]=0:0:755
   ["/usr/local/sbin/aurade-installer-autostart"]=0:0:755
+  ["/etc/systemd/system/aurade-installer-autostart.service"]=0:0:644
   ["/root/.bash_profile"]=0:0:644
   ["/usr/local/sbin/aurade-recovery"]=0:0:755
   ["/usr/local/sbin/aurade-hardware-qualify"]=0:0:755

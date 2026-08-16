@@ -77,9 +77,9 @@ check_cause 'did not match their signatures'                  keyring_error
 check_cause 'missing the Arch signing keyring'                 keyring_error
 check_cause 'could not all be downloaded from the archive'     network_error
 check_cause 'no EFI system partition'                          target_error
-check_cause 'trusts no key that can start AuraDE'              secure_boot_error
-check_cause 'whether the firmware is in setup mode'            secure_boot_error
-check_cause 'will not erase a disk without knowing'            secure_boot_error
+check_cause 'Secure Boot signing requires both a private key'   secure_boot_error
+check_cause 'Secure Boot private key must not be group/world accessible' secure_boot_error
+check_cause 'openssl is required for Secure Boot key validation' secure_boot_error
 check_cause 'too old to enrol Secure Boot keys'                secure_boot_error
 
 # --- and the codes still line up with the copy ------------------------------

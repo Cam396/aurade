@@ -123,7 +123,7 @@ cause_explanation() {
     keyring_error)      printf 'A package did not match its signature, so it was not installed.' ;;
     capacity_error)     printf 'There was not enough room to hold the downloaded packages.' ;;
     network_error)      printf 'The package archive could not be reached.' ;;
-    secure_boot_error)  printf 'Secure Boot is on, and this computer does not yet trust a key that can start AuraDE.' ;;
+    secure_boot_error)  printf 'Secure Boot signing could not be completed.' ;;
     target_error)       printf 'The disk could not be prepared.' ;;
     storage_error)      printf 'A filesystem could not be created or mounted.' ;;
     # The engine's catch-all. It means the classifier did not recognise the
@@ -148,7 +148,7 @@ cause_next_step() {
     keyring_error)      printf "Check that this computer's date and time are right, then start again." ;;
     capacity_error)     printf 'Free up space on the disk holding the download, then start again.' ;;
     network_error)      printf 'Check the network connection, then start again.' ;;
-    secure_boot_error)  printf "Put Secure Boot into setup mode in this computer's firmware, then start again." ;;
+    secure_boot_error)  printf "Disable Secure Boot for the first boot, or verify the AuraDE signing key and certificate before trying again." ;;
     target_error)       printf 'Choose a different disk, or check that this one is not in use, then start again.' ;;
     storage_error)      printf 'Check the disk for faults, then start again.' ;;
     unexpected_exit)    printf 'Save a report, then start again.' ;;

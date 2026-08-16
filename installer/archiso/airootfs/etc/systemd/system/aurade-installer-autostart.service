@@ -1,0 +1,20 @@
+[Unit]
+Description=Start the AuraDE installer selected by the boot menu
+After=systemd-vconsole-setup.service systemd-user-sessions.service dev-tty1.device
+Before=getty@tty1.service
+Wants=dev-tty1.device
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aurade-installer-autostart
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

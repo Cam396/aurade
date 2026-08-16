@@ -148,9 +148,33 @@ grep -Fq 'aurade.installer=gui' "$entries/$default_entry" || {
   exit 1
 }
 [[ -r $TMP/work/profile/airootfs/root/.bash_profile ]] || {
-  echo 'test-build-iso-stage: nothing runs the autostart on the live console' >&2
+  echo 'test-build-iso-stage: live console profile is missing' >&2
   exit 1
 }
+[[ -r $TMP/work/profile/airootfs/etc/systemd/system/aurade-installer-autostart.service ]] || {
+  echo 'test-build-iso-stage: the boot-selected installer service is missing' >&2
+  exit 1
+}
+[[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-autostart.service ]] || {
+  echo 'test-build-iso-stage: the boot-selected installer service is not enabled' >&2
+  exit 1
+}
+grep -Fq 'ExecStart=/usr/local/sbin/aurade-installer-autostart' \
+  "$TMP/work/profile/airootfs/etc/systemd/system/aurade-installer-autostart.service"
+grep -Fq 'Before=getty@tty1.service' \
+  "$TMP/work/profile/airootfs/etc/systemd/system/aurade-installer-autostart.service"
+! grep -Eq '^[[:space:]]*/usr/local/sbin/aurade-installer-autostart([[:space:]]|$)' \
+  "$TMP/work/profile/airootfs/root/.bash_profile" || {
+  echo 'test-build-iso-stage: login shell still launches a second installer' >&2
+  exit 1
+}
+grep -Fq -- '--noissue' "$ROOT/installer/archiso/airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+for entry in "$entries"/*.conf; do
+  grep -Eq '(^|[[:space:]])quiet([[:space:]]|$)' "$entry" || {
+    echo "test-build-iso-stage: ${entry##*/} leaves boot chatter visible" >&2
+    exit 1
+  }
+done
 grep -Fxq 'editor no' "$ROOT/installer/archiso/efiboot/loader/loader.conf"
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-refresh-mirrors ]]
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-install-failure ]]

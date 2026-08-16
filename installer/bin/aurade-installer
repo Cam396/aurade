@@ -96,11 +96,11 @@ if command -v bootctl >/dev/null 2>&1; then
       elif [[ -n ${AURADE_SECURE_BOOT_KEY:-} && -n ${AURADE_SECURE_BOOT_CERT:-} ]]; then
         printf '%s\n' 'Secure Boot is on. AuraDE will sign the boot chain with the key you supplied.' >&2
       else
-        printf '%s\n' 'Secure Boot is on and this computer trusts no key that can start AuraDE. Put the firmware into Secure Boot setup mode before you confirm.' >&2
+        printf '%s\n' 'Secure Boot is on. The install will continue without signing. Disable it or enroll an AuraDE key before the first boot.' >&2
       fi ;;
     disabled) ;;
     *)
-      printf '%s\n' 'Whether Secure Boot is on could not be read. This install will not erase a disk without knowing.' >&2 ;;
+      printf '%s\n' 'Secure Boot state could not be read. The install will continue without signing. Disable it or enroll an AuraDE key before the first boot if firmware has it enabled.' >&2 ;;
   esac
 fi
 lsblk -d -o NAME,PATH,SIZE,MODEL,TRAN,TYPE

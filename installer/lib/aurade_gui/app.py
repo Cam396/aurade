@@ -924,8 +924,8 @@ class InstallerWindow(Adw.ApplicationWindow):
     # strings behind a disclosure for the person who wants them. Two of the
     # five - the firmware mode and Secure Boot - are answered before the disk
     # is chosen. Secure Boot is a supported signed-chain path in setup mode;
-    # user-mode firmware still needs a pre-enrolled key. Asking it first keeps
-    # an impossible boot configuration from appearing after the erase gate.
+    # when no key is available it remains a warning, because the user can
+    # finish the install and handle firmware before the first boot.
 
     #: What each check is about, so a page of five findings reads as five
     #: subjects rather than five identical ticks. Every name here is in the

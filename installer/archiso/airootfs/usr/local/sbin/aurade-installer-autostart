@@ -20,11 +20,9 @@ set -Eeuo pipefail
 
 CMDLINE_FILE=${AURADE_CMDLINE_FILE:-/proc/cmdline}
 START=${AURADE_INSTALLER_START:-/usr/local/sbin/aurade-installer-start}
-# Once per boot. The console this runs on is an autologin getty: when the
-# installer exits, the login shell ends, agetty starts another one, and this
-# would run again - an installer nobody can quit. The stamp lives on a tmpfs,
-# so a restart of the machine is a clean slate and a restart of the shell is
-# not.
+# Once per boot. The service owns tty1 until the installer exits, and the stamp
+# protects against a manual second invocation on the same live session. The
+# stamp lives on a tmpfs, so a restart of the machine is a clean slate.
 STAMP=${AURADE_AUTOSTART_STAMP:-/run/aurade-installer-autostarted}
 
 # The last occurrence wins, the way the kernel treats a repeated parameter.
@@ -70,9 +68,8 @@ main() {
   fi
   : >"$STAMP" 2>/dev/null || true
 
-  # Run it rather than replace this shell with it. Quitting the installer then
-  # leaves a console with a prompt on it, which is what someone who quit an
-  # installer is looking for.
+  # The system service owns tty1 while this runs. The recovery-console entry
+  # gets the ordinary login shell only after the selected installer exits.
   case $choice in
     gui)  "$START" --graphical || status=$? ;;
     safe) "$START" --graphical --safe-graphics || status=$? ;;

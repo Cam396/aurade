@@ -896,15 +896,28 @@ if [[ $MODE == execute ]]; then
             SECURE_BOOT_SIGN=1
             log 'Secure Boot is enabled with existing firmware keys; using the supplied pre-enrolled signing certificate'
           else
-            die 'Secure Boot is on and this computer trusts no key that can start AuraDE. Put the firmware into Secure Boot setup mode once'
+            SECURE_BOOT_SIGN=0
+            log 'WARNING: Secure Boot is enabled but no trusted AuraDE signing key was supplied; continuing without signing. Disable Secure Boot or enroll an AuraDE key before the first boot'
           fi ;;
         *)
-          die 'Secure Boot is on, and whether the firmware is in setup mode could not be read' ;;
+          if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
+            SECURE_BOOT_SIGN=1
+            log 'WARNING: Secure Boot setup mode could not be read; using the supplied signing certificate and continuing'
+          else
+            SECURE_BOOT_SIGN=0
+            log 'WARNING: Secure Boot is enabled and firmware setup mode could not be read; continuing without signing. Disable Secure Boot or enroll an AuraDE key before the first boot'
+          fi ;;
       esac ;;
     disabled)
       [[ -z $SECURE_BOOT_KEY_FILE ]] || SECURE_BOOT_SIGN=1 ;;
     *)
-      die 'whether Secure Boot is on could not be read, and this install will not erase a disk without knowing' ;;
+      if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
+        SECURE_BOOT_SIGN=1
+        log 'WARNING: Secure Boot state could not be read; using the supplied signing certificate and continuing'
+      else
+        SECURE_BOOT_SIGN=0
+        log 'WARNING: Secure Boot state could not be read; continuing without signing. If firmware has Secure Boot enabled, disable it or enroll an AuraDE key before the first boot'
+      fi ;;
   esac
   if (( SECURE_BOOT_SIGN )); then
     for command in sbsign sbverify; do
@@ -921,7 +934,10 @@ log "safety token: $ERASE_TOKEN"
 
 # Preflight is complete by this point: arguments are validated, the target is
 # resolved and proven not to back the running root, and the required commands
-# and Secure Boot state have been checked.
+# and Secure Boot state have been checked. Secure Boot is deliberately a
+# warning-only condition when no signing path is available. The installer can
+# still write a useful system, and the first-boot message tells the user that
+# firmware must be disabled or enrolled before that system can start.
 aurade_journal_init "$MODE" "$TARGET" || {
   die 'the install journal could not be started, and nothing runs without one'
 }

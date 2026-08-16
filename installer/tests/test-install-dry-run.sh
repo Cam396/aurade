@@ -91,8 +91,9 @@ grep -Fq -- 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$ROOT/installer/bin/
 # than on the sentence, because the sentences have been rewritten once already.
 grep -Fq -- 'Secure Boot is on' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Secure Boot is in setup mode' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Whether Secure Boot is on could not be read' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'whether Secure Boot is on could not be read' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'continuing without signing' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '--secure-boot-auto-enroll yes' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'firmware setup mode' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pre-enrolled signing certificate' "$ROOT/installer/bin/aurade-install"
