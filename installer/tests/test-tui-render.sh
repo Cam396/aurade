@@ -41,13 +41,20 @@ cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
 {"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"partition","status":"ok","elapsed_ms":2100,"reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
 {"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"esp-readonly","message":"bootctl could not write to the EFI system partition","resumable":true,"reversible":false,"idempotent":true,"remediation":["retry","export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"storage_error","message":"bootctl could not write to the EFI system partition","resumable":true,"reversible":false,"idempotent":true,"remediation":["retry","export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
 EOF
 
 export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
 export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_SNAPSHOT_FILE="$TMP/snapshot"
 export AURADE_DISK_TABLE="$TMP/disks" AURADE_PROBE_MEMINFO="$TMP/meminfo"
 export AURADE_PROBE_DRI_DIR="$TMP/dri"
+
+# The progress screen spends whatever rows the console has, so the height is
+# pinned here. Unpinned, the same screen renders one way on a build machine
+# with a tall terminal and another way in CI, and every layout assertion below
+# becomes a coin toss.
+AURADE_TUI_HEIGHT=34
+export AURADE_TUI_HEIGHT
 
 render() {
   local screen=$1 color=$2 frame=$3
@@ -181,9 +188,17 @@ grep -Fq 'cannot be interrupted safely' "$TMP/progress" ||
 
 render failure none ascii >"$TMP/failure"
 grep -Fq 'Making it bootable' "$TMP/failure" || fail 'failure does not name the failed stage'
-grep -Fq 'read-only' "$TMP/failure" || fail 'failure does not explain the cause'
-grep -Fq 'Save a diagnostic report' "$TMP/failure" || fail 'failure does not offer a diagnostic report'
-grep -Fq 'Open a shell' "$TMP/failure" || fail 'failure does not offer a shell'
+# The cause codes in these fixtures are the ones `aurade-install` actually
+# writes. They used to be invented ones, which is how seven of the engine's
+# nine real codes reached the screen as raw tokens with the suite green.
+grep -Fq 'A filesystem could not be created or mounted.' "$TMP/failure" ||
+  fail 'failure does not explain the cause'
+! grep -Fq 'storage_error' "$TMP/failure" ||
+  fail 'failure printed the raw cause code'
+grep -Fq 'Check the disk for faults, then start again.' "$TMP/failure" ||
+  fail 'failure does not name one next step'
+grep -Fq 'Save a report' "$TMP/failure" || fail 'failure does not offer a report'
+grep -Fq 'Open a terminal' "$TMP/failure" || fail 'failure does not offer a terminal'
 grep -Fq 'stage 9 of 11' "$TMP/failure" || fail 'failure does not say where in the sequence it stopped'
 # The engine cannot be told to start at a stage, so a retry would re-run
 # wipefs. The screen must not offer one, and must say what starting over costs.
@@ -196,12 +211,22 @@ grep -Fq 'Starting again erases it' "$TMP/failure" ||
 
 # A failure before the erase gate has a different, non-destructive message.
 cat >"$TMP/reversible.jsonl" <<'EOF'
-{"v":1,"stage":"acquire","status":"failed","exit":1,"cause":"archive-unreachable","message":"the pinned snapshot could not be reached","resumable":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"stage":"acquire","status":"failed","exit":1,"cause":"network_error","message":"the pinned snapshot could not be reached","resumable":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   --journal "$TMP/reversible.jsonl" >"$TMP/reversible.out"
-grep -Fq 'Nothing was written to the disk' "$TMP/reversible.out" ||
+grep -Fq 'Nothing has been changed and no disk was touched.' "$TMP/reversible.out" ||
   fail 'a pre-gate failure did not say the disk is untouched'
+grep -Fq 'Check the network connection, then start again.' "$TMP/reversible.out" ||
+  fail 'a pre-gate failure did not name one next step'
+# Before the boundary there is no cost to starting again, so the warning about
+# what starting again destroys must not appear. It says the opposite of the
+# line above it and turns an untouched disk into a scare.
+! grep -Fq 'Starting again erases it' "$TMP/reversible.out" ||
+  fail 'a pre-gate failure warned about a destructive restart'
+# ...and after the boundary it must.
+grep -Fq 'Starting again erases it' "$TMP/failure" ||
+  fail 'a post-gate failure did not say what starting again costs'
 ! grep -Fq 'Starting again erases it' "$TMP/reversible.out" ||
   fail 'a pre-gate failure warned about erasing a disk that was never touched'
 
@@ -266,11 +291,28 @@ grep -Eq '^\|    Disk passphrase +set' "$TMP/review.layout" ||
 grep -Fq 'the EFI system partition' "$TMP/failure" ||
   fail 'the failure detail was truncated instead of wrapped'
 # A field value too long for one line continues in the value column.
-long_dri=$TMP/'dri-with-a-very-long-name-that-will-not-fit-on-one-line-at-all'
-env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_PROBE_DRI_DIR="$long_dri" \
+#
+# The value is injected rather than provoked out of the graphics probe. It used
+# to arrive by giving the probe a very long directory path to fail on, which
+# worked only for as long as the probe echoed that path back at the user, and
+# it no longer does: that field holds a value now and the sentence lives in the
+# advice. Injecting keeps this test about `tui_field` wrapping, which is what
+# it was always for.
+long_value='a-graphics-adapter-with-a-very-long-name-that-will-not-fit-on-one-line-at-all'
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  AURADE_PROBE_FORCE_GRAPHICS="$long_value" \
   "$TUI" --render fallback >"$TMP/longfield.out"
-grep -Fq 'dri-with-a-very-long-name' "$TMP/longfield.out" ||
+grep -Fq 'a-graphics-adapter-with-a-very-long-name' "$TMP/longfield.out" ||
   fail 'a long field value did not appear at all'
+# The same value with spaces in it wraps at the spaces rather than mid word.
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  AURADE_PROBE_FORCE_GRAPHICS='a graphics adapter with a very long name that will not fit on one line at all' \
+  "$TUI" --render fallback >"$TMP/longwords.out"
+grep -Fq 'a graphics adapter with a very long name' "$TMP/longwords.out" ||
+  fail 'a long spaced field value did not appear'
+measure "$TMP/longwords.out" || fail 'a long spaced field value broke the frame'
+grep -q 'name-$' "$TMP/longwords.out" && fail 'a spaced value was cut mid word'
+
 python3 - "$TMP/longfield.out" <<'PY' || fail 'a long field value did not wrap into its own column'
 import sys
 lines = open(sys.argv[1], encoding='utf-8').read().split('\n')

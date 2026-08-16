@@ -81,6 +81,8 @@ export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_BLOCK_DIR="$TMP/block"
 export AURADE_SNAPSHOT_FILE="$TMP/snapshot" AURADE_DISK_TABLE="$TMP/disks"
 export AURADE_PROBE_MEMINFO="$TMP/meminfo" AURADE_PROBE_DRI_DIR="$TMP/dri"
 export AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
+# Pinned so the progress screen picks the same layout everywhere.
+export AURADE_TUI_HEIGHT=34
 export AURADE_INSTALL_ENGINE="$TMP/stub-engine"
 export AURADE_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh"
 export TMPDIR="$TMP"
@@ -309,9 +311,9 @@ grep -Fq 'Could not save a report' "$TMP/exportfail.flat" ||
 [[ ! -e /proc/aurade-cannot-write ]] ||
   fail 'the export wrote somewhere it should not have'
 # The menu is redrawn after the failed attempt, so the user still has options.
-(( $(grep -c 'View the full log' "$TMP/out.exportfail") >= 2 )) ||
+(( $(grep -c 'See the full log' "$TMP/out.exportfail") >= 2 )) ||
   fail 'the failure menu did not survive a failed export'
-grep -Fq 'Open a shell' "$TMP/out.exportfail" ||
+grep -Fq 'Open a terminal' "$TMP/out.exportfail" ||
   fail 'the failure menu lost its options after a failed export'
 
 # --- raw command output stays out of the structured journal -----------------

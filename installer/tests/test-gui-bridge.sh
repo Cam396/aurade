@@ -201,7 +201,9 @@ install -m 0755 "$ROOT/installer/bin/aurade-installer-tui" \
 install -m 0644 "$ROOT/installer/lib/aurade-validate.sh" \
   "$ROOT/installer/lib/aurade-questions.sh" "$ROOT/installer/lib/aurade-tui.sh" \
   "$ROOT/installer/lib/aurade-probe.sh" "$ROOT/installer/lib/aurade-journal.sh" \
+  "$ROOT/installer/lib/aurade-copy.sh" "$ROOT/installer/lib/aurade-wait.sh" \
   "$TMP/image/lib/"
+install -m 0644 "$ROOT/installer/lib/aurade-tips" "$TMP/image/lib/"
 [[ ! -e $TMP/image/sbin/aurade-install-failure ]] || {
   echo 'test-gui-bridge: the bare image copy carries a diagnostic helper' >&2
   exit 1

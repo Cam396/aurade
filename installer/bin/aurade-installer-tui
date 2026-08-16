@@ -43,7 +43,12 @@ _find_lib() {
   return 1
 }
 
-for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh aurade-journal.sh; do
+# Captured before the libraries apply their defaults, so `--render` can tell
+# "the caller asked for this" from "nobody said".
+_TIP_RARITY_SET=${AURADE_TIP_RARITY+set}
+
+for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh \
+            aurade-journal.sh aurade-copy.sh aurade-wait.sh; do
   if ! _path=$(_find_lib "$_lib"); then
     echo "aurade-installer-tui: cannot find $_lib" >&2
     exit 1
@@ -63,6 +68,15 @@ if [[ -z $ENGINE ]]; then
 fi
 FAILURE_HELPER=${AURADE_FAILURE_HELPER:-/usr/local/sbin/aurade-install-failure}
 [[ -x $FAILURE_HELPER ]] || FAILURE_HELPER="$SELF_DIR/aurade-install-failure"
+
+#: Redraws one tip stays on screen for. At roughly eight frames a second this
+#: is about nine seconds: long enough to read two lines without hurrying, short
+#: enough that the screen never looks like it has stopped.
+AURADE_TIP_FRAMES=${AURADE_TIP_FRAMES:-72}
+
+#: Seconds between redraws while the engine runs. Also the window standard
+#: input is polled for, so it is the game's frame rate as well as the ribbon's.
+AURADE_PROGRESS_TICK=${AURADE_PROGRESS_TICK:-0.12}
 
 RENDER_ONLY=
 JOURNAL_FILE=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
@@ -144,66 +158,11 @@ trap cleanup EXIT INT TERM
 # Stage vocabulary
 # --------------------------------------------------------------------------
 
-# Journal stage names are engineering terms. These are what the user sees; the
-# journal keeps the real name so a support case and a screenshot still line up.
-stage_label() {
-  case $1 in
-    preflight)      printf 'Checking this computer' ;;
-    network)        printf 'Connecting' ;;
-    acquire)        printf 'Downloading packages' ;;
-    verify)         printf 'Checking the downloads' ;;
-    confirm)        printf 'Confirming the disk' ;;
-    partition)      printf 'Partitioning the disk' ;;
-    format)         printf 'Formatting' ;;
-    mount)          printf 'Mounting' ;;
-    pacstrap)       printf 'Installing the base system' ;;
-    configure)      printf 'Setting things up' ;;
-    bootloader)     printf 'Making it bootable' ;;
-    snapshot)       printf 'Saving a snapshot to roll back to' ;;
-    verify-install) printf 'Checking everything landed' ;;
-    done)           printf 'Finishing up' ;;
-    *)              printf '%s' "$1" ;;
-  esac
-}
-
-# What a failure at this stage means for the disk. The engine currently reports
-# one cause code, so the explanation is anchored on the stage, which is always
-# present, and refined by cause where a specific one is known.
-stage_explanation() {
-  case $1 in
-    preflight)  printf 'Nothing has been changed. This computer did not meet one of the requirements.' ;;
-    network)    printf 'Nothing has been changed. The package archive could not be reached.' ;;
-    acquire)    printf 'Nothing has been changed and no disk was touched. A package could not be downloaded.' ;;
-    verify)     printf 'Nothing has been changed. A download did not match its signature, so it was not installed.' ;;
-    confirm)    printf 'Nothing has been changed. The confirmation did not match the disk.' ;;
-    partition)  printf 'What was on this disk is already gone. It could not be partitioned.' ;;
-    format)     printf 'The disk is partitioned and has no filesystem on it yet. Formatting did not finish.' ;;
-    mount)      printf 'The disk is partitioned and formatted. The new filesystems could not be mounted.' ;;
-    pacstrap)   printf 'The disk is partitioned and formatted. The base system did not finish installing. Every package is already downloaded and verified, so starting again will not need the network.' ;;
-    configure)  printf 'Every file is in place. Setting the system up did not finish.' ;;
-    bootloader) printf 'The system is installed but cannot start yet. The bootloader was not written.' ;;
-    snapshot)   printf 'The system is installed and will start. There is no snapshot to roll back to.' ;;
-    verify-install) printf 'The installation finished but did not pass its own final check.' ;;
-    *)          printf 'The installation stopped. The journal below records exactly where.' ;;
-  esac
-}
-
-cause_explanation() {
-  case $1 in
-    unexpected_exit) printf 'A step ended without reporting why.' ;;
-    # The engine traps INT and TERM and records this itself. Both front ends
-    # can therefore be stopped while the disk is still untouched, and the
-    # resulting screen should say that rather than read as a crash.
-    cancelled) printf 'You stopped the installation.' ;;
-    archive-unreachable) printf 'The Arch Linux Archive could not be reached for the pinned snapshot date.' ;;
-    signature-invalid) printf 'A package signature did not verify against the expected key.' ;;
-    esp-readonly) printf 'The EFI system partition mounted, but the firmware reported it read-only.' ;;
-    secure-boot) printf 'Secure Boot is enabled, but no trusted AuraDE signing path was available.' ;;
-    disk-too-small) printf 'The selected disk is smaller than the installation needs.' ;;
-    '') printf '' ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
+# `stage_label`, `stage_pacing`, `stage_explanation`, `cause_explanation`,
+# `cause_next_step` and `restart_advice` come from lib/aurade-copy.sh, which
+# this file sources and the graphical bridge inherits by sourcing this file.
+# They used to live here, and the failure helper carried a second set that
+# had drifted out of agreement with the engine's cause codes.
 
 # --------------------------------------------------------------------------
 # Journal reading
@@ -487,7 +446,7 @@ widget_enum() {
     shown=$(( shown + 1 ))
   done
   if (( ${#ENUM_MATCHES[@]} > window )); then
-    tui_line "$(printf '     %d of %d shown; type to narrow' "$shown" "${#ENUM_MATCHES[@]}")" dim
+    tui_line "$(printf '     %d of %d shown. Type to narrow.' "$shown" "${#ENUM_MATCHES[@]}")" dim
   fi
 }
 
@@ -589,13 +548,69 @@ stage_displayed() {
   esac
 }
 
+# The progress screen has more it would like to draw than a virtual console
+# always has room for, and a virtual console is whatever the firmware left it
+# as. So the layout is chosen rather than assumed, and it gives things up in a
+# deliberate order rather than running off the bottom of the frame.
+#
+# What it gives up, in order, and why that order:
+#
+#   1. Nothing. The ribbon, every stage, the pacing line and a tip.
+#   2. The finished stages collapse to one row. Eight ticks in a column are
+#      reassuring the first time and scenery by the third minute; the count
+#      says the same thing in one line.
+#   3. The ribbon. It is the most decorative thing here and the first to go.
+#   4. The stages still to come collapse to one row as well.
+#   5. The tip. Last, because on the screen somebody stares at for ten
+#      minutes, something to read is worth more than a checklist.
+#
+# On a 24 row console this lands at step 2, which keeps the ribbon and the tip.
+
+# Cost every layout and take the first one that fits, rather than buying rows
+# back one at a time. The incremental version got a 24 row console wrong: it
+# folded more than it needed to and then had no room left for the thing it had
+# folded in order to keep.
+#
+# Fixed cost is twelve rows. Three for the header, three for the footer, three
+# for the pacing block, which wraps to two lines and can carry the
+# uninterruptible warning under it, one for the bar, and the blank above and
+# below the list.
+progress_layout() {
+  local stages=$1 done_count=$2 pending_count=$3
+  local candidate fold_done fold_pending aurora tip cost list
+  for candidate in '0 0 1 1' '1 0 1 1' '1 1 1 1' '1 1 0 1' '1 1 0 0'; do
+    read -r fold_done fold_pending aurora tip <<<"$candidate"
+    list=$stages
+    (( ! fold_done || done_count < 2 )) ||
+      list=$(( list - done_count + 1 ))
+    (( ! fold_pending || pending_count < 2 )) ||
+      list=$(( list - pending_count + 1 ))
+    cost=$(( 12 + list + aurora * 3 + tip * 3 ))
+    (( cost <= AURADE_TUI_HEIGHT )) || continue
+    PROGRESS_FOLD_DONE=$fold_done
+    PROGRESS_FOLD_PENDING=$fold_pending
+    PROGRESS_AURORA=$aurora
+    PROGRESS_TIP=$tip
+    return 0
+  done
+  # Shorter than any layout. Draw the smallest one and let the terminal
+  # scroll, which is still better than drawing a frame that does not close.
+  PROGRESS_FOLD_DONE=1
+  PROGRESS_FOLD_PENDING=1
+  PROGRESS_AURORA=0
+  PROGRESS_TIP=0
+  return 0
+}
+
 screen_progress() {
+  local frame=${1:-0}
   local stage status label mark token elapsed pct detail record active=''
-  tui_clear
-  tui_header 'Installing'
-  tui_blank
+  local tip row shown=0 done_count=0 pending_count=0 done_ms=0
+  local -a done_rows=() live_rows=() pending_rows=()
+
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
+    shown=$(( shown + 1 ))
     record=$(journal_last_for_stage "$stage")
     status=pending
     [[ -z $record ]] || status=$(json_field status "$record")
@@ -604,27 +619,136 @@ screen_progress() {
     case $status in
       ok)      mark=' + '; token=ok
                elapsed=$(json_field elapsed_ms "$record")
-               [[ -z $elapsed ]] || elapsed=$(format_elapsed "$elapsed") ;;
-      running) mark=' > '; token=cyan; active=$stage ;;
-      failed)  mark=' ! '; token=danger ;;
-      *)       mark='   '; token=dim ;;
+               if [[ $elapsed =~ ^[0-9]+$ ]]; then
+                 done_ms=$(( done_ms + elapsed ))
+                 elapsed=$(format_elapsed "$elapsed")
+               else
+                 elapsed=''
+               fi
+               done_count=$(( done_count + 1 ))
+               done_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")") ;;
+      running) mark=' > '; token=cyan; active=$stage
+               live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")")
+               pct=$(json_field pct "$record")
+               detail=$(json_field message "$record")
+               [[ $pct =~ ^[0-9]+$ ]] || pct=0
+               PROGRESS_PCT=$pct
+               PROGRESS_DETAIL=$detail ;;
+      failed)  mark=' ! '; token=danger
+               live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
+      *)       mark='   '; token=dim
+               pending_count=$(( pending_count + 1 ))
+               pending_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
     esac
-    tui_line "$(printf ' %s %-50s %8s' "$mark" "$label" "$elapsed")" "$token"
-    if [[ $status == running ]]; then
-      pct=$(json_field pct "$record")
-      detail=$(json_field message "$record")
-      [[ $pct =~ ^[0-9]+$ ]] || pct=0
-      tui_bar "$pct" "$detail"
-    fi
   done
+
+  progress_layout "$shown" "$done_count" "$pending_count"
+
+  tui_clear
+  tui_header 'Installing'
+  if (( PROGRESS_AURORA )); then
+    while IFS= read -r row; do
+      tui_line "$(printf '  %s' "$row")" cyan
+    done < <(aurade_aurora "$frame" "$(( AURADE_TUI_INNER - 4 ))" 3)
+  fi
   tui_blank
+
+  if (( PROGRESS_FOLD_DONE && done_count > 0 )); then
+    tui_line "$(printf ' %s %-50s %8s' ' + ' \
+      "$(progress_plural "$done_count" 'step done' 'steps done')" \
+      "$(format_elapsed "$done_ms")")" ok
+  else
+    progress_emit_rows "${done_rows[@]+"${done_rows[@]}"}"
+  fi
+  progress_emit_rows "${live_rows[@]+"${live_rows[@]}"}"
+  [[ -z $active ]] || tui_bar "${PROGRESS_PCT:-0}" "${PROGRESS_DETAIL:-}"
+  if (( PROGRESS_FOLD_PENDING && pending_count > 0 )); then
+    tui_line "$(printf ' %s %-50s' '   ' \
+      "$(progress_plural "$pending_count" 'step to go' 'steps to go')")" dim
+  else
+    progress_emit_rows "${pending_rows[@]+"${pending_rows[@]}"}"
+  fi
+  tui_blank
+
+  if [[ -n $active ]]; then
+    tui_wrap "$(progress_pacing "$active")" ink
+  fi
   if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then
     tui_wrap 'This part cannot be interrupted safely.' dim
   fi
-  # No key is read while the engine runs, so no key is offered. A footer that
-  # advertises `l view log` or `esc cancel` here would be inviting the user to
-  # press something that does nothing at the least recoverable moment.
-  tui_footer 'do not turn off this computer' "$(stage_position "$active")"
+
+  if (( PROGRESS_TIP )); then
+    tip=$(aurade_tip_for "$(( frame / AURADE_TIP_FRAMES ))")
+    if [[ -n $tip ]]; then
+      tui_blank
+      tui_wrap "$tip" dim
+    fi
+  fi
+
+  # The only key offered is the one that cannot touch the install. Everything
+  # else stays unoffered for the same reason it always did: this is the least
+  # recoverable moment in the product, and a footer that invites a keypress
+  # here is inviting the wrong one.
+  tui_footer 'do not turn off this computer    g  game' \
+    "$(stage_position "$active")"
+}
+
+# Each row carries its colour token after a tab, because the rows are built
+# before the layout is decided and printed after.
+progress_emit_rows() {
+  local entry text token
+  for entry in "$@"; do
+    text=${entry%$'\t'*}
+    token=${entry##*$'\t'}
+    tui_line "$text" "$token"
+  done
+}
+
+progress_plural() {
+  local count=$1 one=$2 many=$3
+  if (( count == 1 )); then
+    printf '%d %s' "$count" "$one"
+  else
+    printf '%d %s' "$count" "$many"
+  fi
+}
+
+# "Installing the base system. Usually five to ten minutes. 4 minutes so far."
+#
+# The elapsed half is measured and the pacing half is not, which is the right
+# way round: the number that is real is the one about the past.
+progress_pacing() {
+  local stage=$1 pacing elapsed sentence
+  sentence="$(stage_label "$stage")."
+  pacing=$(stage_pacing "$stage")
+  [[ -z $pacing ]] || sentence+=" Usually $pacing."
+  elapsed=$(progress_total_elapsed)
+  [[ -z $elapsed ]] || sentence+=" $elapsed so far."
+  printf '%s' "$sentence"
+}
+
+# Total time across every stage the journal has finished, plus the one running.
+# Read from the journal rather than from a clock this screen starts, so that a
+# progress screen redrawn from a saved journal shows the same number it showed
+# at the time.
+progress_total_elapsed() {
+  local total minutes
+  [[ -r $JOURNAL_FILE ]] || { printf ''; return 0; }
+  total=$(awk '
+    match($0, /"elapsed_ms":[0-9]+/) {
+      value = substr($0, RSTART + 13, RLENGTH - 13) + 0
+      sum += value
+    }
+    END { printf "%d", sum / 1000 }
+  ' "$JOURNAL_FILE" 2>/dev/null || printf '0')
+  [[ $total =~ ^[0-9]+$ ]] || { printf ''; return 0; }
+  (( total >= 60 )) || { printf ''; return 0; }
+  minutes=$(( total / 60 ))
+  if (( minutes == 1 )); then
+    printf '1 minute'
+  else
+    printf '%d minutes' "$minutes"
+  fi
 }
 
 format_elapsed() {
@@ -635,7 +759,7 @@ format_elapsed() {
 }
 
 screen_failure() {
-  local cursor=${1:-0} record stage cause message index=0 option
+  local cursor=${1:-0} record stage cause message index=0 option explanation
   record=$(journal_last_failed)
   stage=$(json_field stage "$record")
   cause=$(json_field cause "$record")
@@ -650,20 +774,33 @@ screen_failure() {
     tui_wrap 'The installation stopped.' accent
   fi
   tui_blank
-  if [[ -n $cause ]]; then
-    tui_wrap "$(cause_explanation "$cause")" ink
-    tui_blank
-  fi
+  # The disk first, then why. Somebody reading this screen has exactly one
+  # question, and it is not which subsystem reported the error.
   if [[ -n $stage ]]; then
     tui_wrap "$(stage_explanation "$stage")" ink
+    tui_blank
+  fi
+  explanation=$(cause_explanation "$cause")
+  if [[ -n $explanation ]]; then
+    tui_wrap "$explanation" ink
+    tui_blank
+  fi
+  # One next step, in the accent colour, because it is the only line on this
+  # screen that asks the reader to do something.
+  tui_wrap "$(cause_next_step "$cause")" accent
+  tui_blank
+  # What starting over costs, and only when it costs something. Before the
+  # reversibility boundary the stage explanation has already said that nothing
+  # was written, and repeating it in a warning colour makes an untouched disk
+  # look like a problem.
+  if [[ -n $stage ]] && ! aurade_stage_reversible "$stage"; then
+    tui_wrap "$(restart_advice "$stage")" warn
     tui_blank
   fi
   if [[ -n $message ]]; then
     tui_note 'Detail:' "$message" dim
     tui_blank
   fi
-  tui_wrap "$(restart_advice "$stage")" warn
-  tui_blank
   if [[ -n ${EXPORT_NOTICE:-} ]]; then
     tui_note '!' "$EXPORT_NOTICE" "${EXPORT_NOTICE_KIND:-ok}"
     tui_blank
@@ -678,17 +815,6 @@ screen_failure() {
   done
   tui_blank
   tui_footer 'up/down  select    enter  choose' "$(stage_position "$stage")"
-}
-
-# What starting over actually costs, decided by the reversibility boundary the
-# journal library defines rather than by a second opinion held here.
-restart_advice() {
-  local stage=${1:-}
-  if [[ -z $stage ]] || aurade_stage_reversible "$stage"; then
-    printf '%s' 'Nothing was written to the disk. You can start the installer again, or save a report first if you want to send it on.'
-  else
-    printf '%s' 'This installer cannot yet continue from where it stopped, and the disk has already been changed. Starting again erases it and begins from the beginning. Save a report first if you want a record of what happened.'
-  fi
 }
 
 # Position among the stages the progress screen shows, not among the journal's
@@ -719,11 +845,15 @@ stage_position() {
 # *and* the disk present is still the disk the journal describes.
 FAILURE_OPTIONS=()
 build_failure_options() {
+  # The same four words the graphical failure page uses, in the same order.
+  # Two front ends offering "Save a diagnostic report" and "Save a report" for
+  # the identical action is the kind of seam that makes a product feel assembled
+  # rather than made.
   FAILURE_OPTIONS=(
-    'Save a diagnostic report'
-    'View the full log'
-    'Open a shell'
-    'Restart the computer'
+    'Save a report'
+    'See the full log'
+    'Open a terminal'
+    'Restart'
   )
 }
 
@@ -1083,16 +1213,121 @@ hash_password() {
   ANSWERS[password]='set'
 }
 
+# Something to do, for the ten minutes in the middle.
+#
+# The arena is sized to whatever the console has left after the frame and the
+# small progress readout that stays on screen. Leaving the install out of sight
+# would be the wrong trade: this is a way to pass the time, not a way to stop
+# watching.
+screen_game() {
+  local frame=${1:-0} row stage record pct detail label
+  local arena_w arena_h pad border
+  arena_w=$(( AURADE_TUI_INNER - 10 ))
+  (( arena_w <= 56 )) || arena_w=56
+  # frame 3, footer 3, two blanks, the arena border, the score line and the bar.
+  arena_h=$(( AURADE_TUI_HEIGHT - 3 - 3 - 2 - 2 - 2 ))
+  (( arena_h <= 12 )) || arena_h=12
+  (( arena_h >= 4 )) || arena_h=4
+
+  if (( AURADE_SNAKE_W != arena_w || AURADE_SNAKE_H != arena_h )); then
+    aurade_snake_new "$arena_w" "$arena_h"
+  fi
+
+  stage=$(journal_running_stage)
+  tui_clear
+  tui_header 'Installing'
+  tui_blank
+  # Centred, so the arena sits under the middle of the frame rather than
+  # leaving a strip of dead space down one side of it.
+  pad=$(( (AURADE_TUI_INNER - arena_w - 2) / 2 ))
+  (( pad >= 0 )) || pad=0
+  border=$(printf -- '-%.0s' $(seq 1 "$arena_w"))
+  tui_line "$(printf '%*s+%s+' "$pad" '' "$border")" dim
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s|%s|' "$pad" '' "$row")" cyan
+  done < <(aurade_snake_rows)
+  tui_line "$(printf '%*s+%s+' "$pad" '' "$border")" dim
+  tui_blank
+  if (( AURADE_SNAKE_DEAD )); then
+    tui_pair "Score $AURADE_SNAKE_SCORE" 'any key to start again' warn
+  else
+    tui_pair "Score $AURADE_SNAKE_SCORE" \
+      "${stage:+$(stage_label "$stage")}" dim
+  fi
+  if [[ -n $stage ]]; then
+    record=$(journal_last_for_stage "$stage")
+    pct=$(json_field pct "$record")
+    detail=$(json_field message "$record")
+    [[ $pct =~ ^[0-9]+$ ]] || pct=0
+    tui_bar "$pct" "$detail"
+  fi
+  tui_footer 'arrows or wasd  move    g  back to the install' \
+    "$(stage_position "$stage")"
+}
+
+journal_running_stage() {
+  local stage record
+  for stage in "${AURADE_STAGES[@]}"; do
+    record=$(journal_last_for_stage "$stage")
+    [[ -n $record ]] || continue
+    [[ $(json_field status "$record") == running ]] || continue
+    printf '%s' "$stage"
+    return 0
+  done
+  printf ''
+}
+
+# Drive the progress screen while the engine runs.
+#
+# Two things changed here and they are the same change. The screen redraws on a
+# frame counter so the ribbon and the tips can move, and standard input is read
+# on every frame instead of being ignored for the length of the install.
+#
+# Nothing a key does here can reach the engine. `g` swaps which screen is being
+# drawn and the movement keys steer a snake, and that is the whole set. The
+# reason the rest stay unbound has not changed: this is the least recoverable
+# moment in the product, and the right number of ways to interrupt it from the
+# keyboard is none.
 run_engine_with_progress() {
-  local status=0 pid
+  local status=0 pid key frame=0 mode=progress
   "$ENGINE" "$@" >>"$RAW_LOG" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    screen_progress
-    sleep 0.3
+    if [[ $mode == game ]]; then
+      screen_game "$frame"
+      # The snake moves on its own clock, slower than the redraw, so that the
+      # game is playable rather than frantic.
+      (( frame % 2 )) || aurade_snake_step || true
+    else
+      screen_progress "$frame"
+    fi
+    # `AURADE_TUI_KEYS` is the seam the flow tests drive the state machine
+    # through. Those keys are queued for the screens after this one, so this
+    # loop must not be the thing that consumes them.
+    if [[ -n ${AURADE_TUI_KEYS:-} ]]; then
+      sleep "$AURADE_PROGRESS_TICK"
+    elif key=$(tui_poll_key "$AURADE_PROGRESS_TICK"); then
+      case $mode in
+        progress)
+          [[ $key != g && $key != G ]] || mode=game ;;
+        game)
+          case $key in
+            g|G|q|Q|esc) mode=progress ;;
+            up|w|W)      aurade_snake_turn up ;;
+            down|s|S)    aurade_snake_turn down ;;
+            left|a|A)    aurade_snake_turn left ;;
+            right|d|D)   aurade_snake_turn right ;;
+            *) (( ! AURADE_SNAKE_DEAD )) ||
+                 aurade_snake_new "$AURADE_SNAKE_W" "$AURADE_SNAKE_H" ;;
+          esac
+          ;;
+      esac
+    fi
+    frame=$(( frame + 1 ))
   done
   wait "$pid" || status=$?
-  screen_progress
+  # Always end on the install, whatever was on screen a moment ago.
+  screen_progress "$frame"
   return "$status"
 }
 
@@ -1268,18 +1503,21 @@ run_failure() {
       up)   (( cursor > 0 )) && cursor=$(( cursor - 1 )) || cursor=0 ;;
       down) (( cursor + 1 < ${#FAILURE_OPTIONS[@]} )) && cursor=$(( cursor + 1 )) || true ;;
       enter)
-        case ${FAILURE_OPTIONS[cursor]} in
-          'Save a diagnostic report')
+        # Dispatch on position, not on the label. Rewording a menu item should
+        # never be able to disconnect it from what it does, and it silently
+        # could while this matched the visible string.
+        case $cursor in
+          0)
             # Whether it worked or not, the outcome is shown on the next draw
             # of this screen and the menu stays exactly where it was.
             export_report "$status" || true ;;
-          'View the full log')
+          1)
             ${PAGER:-less} "$RAW_LOG" 2>/dev/null || true ;;
-          'Open a shell')
+          2)
             tui_clear
-            printf 'Type exit to return to the installer.\n'
+            printf 'Type exit to come back to the installer.\n'
             bash || true ;;
-          'Restart the computer')
+          3)
             systemctl reboot || true
             return "$status" ;;
         esac
@@ -1417,7 +1655,13 @@ if [[ -n ${AURADE_INSTALLER_TUI_LIB:-} ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-RENDERABLE=(welcome fallback review gate progress failure 'done' cancelled
+# `--render` exists for review and for tests, and a screen that comes out
+# different on the fortieth call is no use to either. The rare tip lane is the
+# only random thing on any of these screens, so it is off here unless the
+# caller turned it on deliberately.
+[[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
+
+RENDERABLE=(welcome fallback review gate progress game failure 'done' cancelled
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -1460,7 +1704,11 @@ if [[ -n $RENDER_ONLY ]]; then
     review)    screen_review ;;
     gate)      screen_gate "${AURADE_RENDER_TYPED:-$(aurade_confirmation_token \
                  "${ANSWERS[target]}" "${ANSWERS[layout]:-wipe}")}" ;;
-    progress)  screen_progress ;;
+    progress)  screen_progress "${AURADE_RENDER_FRAME:-0}" ;;
+    # Rendered from a fixed seed so the arena is the same picture every time
+    # it is reviewed. The game itself seeds from the shell as usual.
+    game)      RANDOM=${AURADE_SNAKE_SEED:-11}
+               screen_game "${AURADE_RENDER_FRAME:-0}" ;;
     failure)   build_failure_options; screen_failure 0 ;;
     done)      screen_done ;;
     cancelled) screen_cancelled ;;

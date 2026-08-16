@@ -99,7 +99,7 @@ install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin
 install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
 install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ bridge flow app brand locales stage tokens; do
+for _gui_module in __init__ bridge flow app brand locales stage tokens wait; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
 done
@@ -119,6 +119,9 @@ install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/au
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
 install -Dm0644 "$ROOT/lib/aurade-tui.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tui.sh"
+install -Dm0644 "$ROOT/lib/aurade-copy.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-copy.sh"
+install -Dm0644 "$ROOT/lib/aurade-wait.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-wait.sh"
+install -Dm0644 "$ROOT/lib/aurade-tips" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tips"
 install -Dm0644 "$ROOT/lib/aurade-probe.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-probe.sh"
 install -Dm0644 "$ROOT/lib/aurade-renderers.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-renderers.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"

@@ -176,23 +176,28 @@ for module in "$ROOT"/installer/lib/aurade_gui/*.py; do
   }
 done
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/theme.css ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-tips ]]
+grep -Fq '/usr/local/lib/aurade/aurade-tips' "$ROOT/installer/archiso/profiledef.sh"
 # The brand artwork has to reach the image, or the installer draws a window
 # with no logo in it and the graphics test cannot see that from source.
 [[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-mark.png ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-wordmark.png ]]
-[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-validate.sh ]]
-[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-journal.sh ]]
-[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-questions.sh ]]
-[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-tui.sh ]]
-[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-probe.sh ]]
+# Every shell library in the source tree, not a list typed here. Both front
+# ends source these by name and exit if one is missing, so a library added to
+# the tree and forgotten in build-iso.sh is a text installer that will not
+# start on the image and starts fine on the machine that built it. That has
+# already happened once, to a GUI module, which is why the loop above derives
+# its list the same way.
+for _lib in "$ROOT"/installer/lib/aurade-*.sh; do
+  _name=$(basename "$_lib")
+  [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/$_name ]] ||
+    { echo "build-iso.sh does not stage lib/$_name" >&2; exit 1; }
+  grep -Fq "/usr/local/lib/aurade/$_name" "$ROOT/installer/archiso/profiledef.sh" ||
+    { echo "profiledef.sh has no permissions entry for lib/$_name" >&2; exit 1; }
+done
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
-grep -Fq -- 'empty root password' "$ROOT/installer/archiso/airootfs/etc/motd"
-grep -Fq -- 'untrusted network or physical access' "$ROOT/installer/archiso/airootfs/etc/motd"
-grep -Fq '/usr/local/lib/aurade/aurade-validate.sh' "$ROOT/installer/archiso/profiledef.sh"
-grep -Fq '/usr/local/lib/aurade/aurade-journal.sh' "$ROOT/installer/archiso/profiledef.sh"
-grep -Fq '/usr/local/lib/aurade/aurade-questions.sh' "$ROOT/installer/archiso/profiledef.sh"
-grep -Fq '/usr/local/lib/aurade/aurade-tui.sh' "$ROOT/installer/archiso/profiledef.sh"
-grep -Fq '/usr/local/lib/aurade/aurade-probe.sh' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq -- 'root with no password' "$ROOT/installer/archiso/airootfs/etc/motd"
+grep -Fq -- 'not copied to the installed system' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq '/usr/local/sbin/aurade-installer-tui' "$ROOT/installer/archiso/profiledef.sh"
 for staged in /usr/local/sbin/aurade-installer-gui \
   /usr/local/sbin/aurade-installer-gui-bridge \

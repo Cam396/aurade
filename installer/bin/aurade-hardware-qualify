@@ -90,9 +90,9 @@ Generated UTC: $timestamp
 Since selector: $SINCE
 Collector UID: $(id -u)
 
-This bundle can contain usernames, device serials, IP addresses, application
-names, and crash stacks. Common secret patterns are redacted, but a human must
-review the archive before public upload.
+This archive can contain your username, device serial numbers, IP addresses,
+the names of programs you ran, and crash reports. Passwords and keys that
+match known patterns are removed. Read it before you send it to anyone.
 EOF
 
 if command -v aurade-hardware-report >/dev/null 2>&1; then

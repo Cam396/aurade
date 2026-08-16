@@ -37,7 +37,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import brand, flow as F, locales, stage as S, tokens as T  # noqa: E402
+from . import (brand, flow as F, locales, stage as S, tokens as T,  # noqa: E402
+               wait as W)
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
@@ -49,6 +50,21 @@ PROGRESS_INTERVAL_MS = 400
 #: Aurora frame interval. Slow on purpose: this is atmosphere behind text
 #: someone is reading, not an animation anyone should watch.
 AURORA_INTERVAL_MS = 90
+
+#: The arena on the progress page, in cells and pixels. Sized so the card is
+#: the same height whichever face it is showing, which is why the tip lane is
+#: two lines and this is nine rows.
+SNAKE_COLUMNS = 28
+SNAKE_ROWS = 9
+SNAKE_CELL = 16
+
+#: How often the snake moves. Slower than a redraw, so the game is playable
+#: rather than frantic.
+SNAKE_INTERVAL_MS = 150
+
+#: The score at which the snake stops being two colours and starts being the
+#: brand gradient. Nobody gets here by accident.
+SNAKE_GRADIENT_AT = 10
 
 #: Environment that means "this machine is drawing without a GPU". The
 #: launcher sets these when it walks down to a software path, and they are the
@@ -328,10 +344,19 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.failure_cause = ""
         self.dark = False
         self._progress_source = 0
+        # The waiting card. `tips` is read once, from the same file the text
+        # installer reads; `snake` is created the first time somebody asks for
+        # it and never before, because most installs will not.
+        self.tips = W.Tips()
+        self.tip_index = 0
+        self._tip_source = 0
+        self.snake: W.Snake | None = None
+        self._snake_source = 0
         self._aurora_source = 0
         #: The mark animation plays once. Coming back to the welcome screen
         #: and leaving it again is not a new arrival.
         self._swooped = False
+        self._secret = ""
         self._provider = None
         self._gate_token = ""
         self._export_notice = None
@@ -1541,7 +1566,189 @@ class InstallerWindow(Adw.ApplicationWindow):
         state = label("", "m3-body-small")
         self.widgets["progress.state"] = state
         box.append(state)
+        box.append(self._build_waiting())
         return page_shell(box)
+
+    # -- the ten minutes in the middle -------------------------------------
+    #
+    # Every other page in this installer is measured in seconds. This one is
+    # measured in ten minutes, and it held a title, a list and a bar: the
+    # longest page in the product was the least designed one.
+    #
+    # What goes in the space is one card with two faces. By default it says
+    # roughly how long the current step takes and then rotates something worth
+    # knowing about the system being written. Ask, and the same card becomes a
+    # game instead. One card rather than a panel of widgets, because the
+    # install is still the subject of the page and this is what is underneath
+    # it.
+    #
+    # Nothing on this card can reach the engine. It reads two strings the
+    # bridge already sends and a text file, and its keys go to a snake.
+
+    def _build_waiting(self):
+        card = column(12)
+        card.add_css_class("card")
+        card.add_css_class("aurade-waiting")
+        card.set_margin_top(8)
+
+        pacing = label("", "m3-body-medium")
+        self.widgets["progress.pacing"] = pacing
+        card.append(pacing)
+
+        # A stack of two labels rather than one label and an opacity
+        # animation: the crossfade is then GTK's, it is correct at any frame
+        # rate, and it costs one widget.
+        tips = Gtk.Stack()
+        tips.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        tips.set_transition_duration(W.TIP_FADE_MS)
+        tips.set_vhomogeneous(False)
+        for name in ("a", "b"):
+            face = label("", "m3-body-medium", css="dim-label")
+            face.set_valign(Gtk.Align.START)
+            tips.add_named(face, name)
+            self.widgets[f"progress.tip.{name}"] = face
+        self.widgets["progress.tips"] = tips
+
+        arena = Gtk.DrawingArea()
+        arena.set_content_height(SNAKE_CELL * SNAKE_ROWS)
+        arena.set_draw_func(self._draw_snake)
+        arena.set_can_focus(True)
+        arena.set_focusable(True)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_snake_key)
+        arena.add_controller(keys)
+        self.widgets["progress.arena"] = arena
+
+        # Tips and game are two faces of one card, so the page does not change
+        # height when somebody switches between them.
+        faces = Gtk.Stack()
+        faces.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        faces.set_transition_duration(240)
+        faces.add_named(tips, "tips")
+        faces.add_named(arena, "game")
+        self.widgets["progress.faces"] = faces
+        card.append(faces)
+
+        footer = row(12)
+        score = label("", "m3-body-small", css="dim-label")
+        score.set_hexpand(True)
+        self.widgets["progress.score"] = score
+        footer.append(score)
+        toggle = Gtk.Button(label=F.WAIT_PLAY)
+        toggle.add_css_class("flat")
+        toggle.connect("clicked", self._on_waiting_toggled)
+        self.widgets["progress.play"] = toggle
+        footer.append(toggle)
+        card.append(footer)
+        return card
+
+    def _on_waiting_toggled(self, _button) -> None:
+        faces = self.widgets["progress.faces"]
+        playing = faces.get_visible_child_name() != "game"
+        faces.set_visible_child_name("game" if playing else "tips")
+        self.widgets["progress.play"].set_label(
+            F.WAIT_STOP if playing else F.WAIT_PLAY)
+        if playing:
+            if self.snake is None:
+                self.snake = W.Snake(SNAKE_COLUMNS, SNAKE_ROWS)
+            self.widgets["progress.arena"].grab_focus()
+            if not self._snake_source:
+                self._snake_source = GLib.timeout_add(
+                    SNAKE_INTERVAL_MS, self._snake_tick)
+        else:
+            self._stop_snake()
+        self._refresh_score()
+
+    def _stop_snake(self) -> None:
+        if self._snake_source:
+            GLib.source_remove(self._snake_source)
+            self._snake_source = 0
+
+    def _snake_tick(self) -> bool:
+        if self.snake is None:
+            self._snake_source = 0
+            return GLib.SOURCE_REMOVE
+        self.snake.step()
+        self.widgets["progress.arena"].queue_draw()
+        self._refresh_score()
+        return GLib.SOURCE_CONTINUE
+
+    def _refresh_score(self) -> None:
+        if self.snake is None or \
+                self.widgets["progress.faces"].get_visible_child_name() != "game":
+            self.widgets["progress.score"].set_label("")
+            return
+        if self.snake.dead:
+            self.widgets["progress.score"].set_label(
+                F.WAIT_SCORE_OVER % self.snake.score)
+        else:
+            self.widgets["progress.score"].set_label(
+                F.WAIT_SCORE % self.snake.score)
+
+    #: Which keys steer. Arrows and the usual four letters, and nothing else,
+    #: so that no key on this page can do anything to the install.
+    SNAKE_KEYS = {
+        Gdk.KEY_Up: (0, -1), Gdk.KEY_w: (0, -1), Gdk.KEY_W: (0, -1),
+        Gdk.KEY_Down: (0, 1), Gdk.KEY_s: (0, 1), Gdk.KEY_S: (0, 1),
+        Gdk.KEY_Left: (-1, 0), Gdk.KEY_a: (-1, 0), Gdk.KEY_A: (-1, 0),
+        Gdk.KEY_Right: (1, 0), Gdk.KEY_d: (1, 0), Gdk.KEY_D: (1, 0),
+    }
+
+    def _on_snake_key(self, _controller, keyval, _code, _state) -> bool:
+        if self.snake is None:
+            return False
+        if keyval in self.SNAKE_KEYS:
+            self.snake.turn(self.SNAKE_KEYS[keyval])
+            return True
+        if self.snake.dead:
+            self.snake.reset()
+            self.widgets["progress.arena"].queue_draw()
+            self._refresh_score()
+            return True
+        return False
+
+    def _draw_snake(self, area, cr, width, height) -> None:
+        dark = self.dark
+        cell = min(SNAKE_CELL, max(4, width // SNAKE_COLUMNS))
+        board_w = cell * SNAKE_COLUMNS
+        left = (width - board_w) / 2
+        top = (height - cell * SNAKE_ROWS) / 2
+        scheme = T.scheme(dark)
+        cr.set_source_rgb(*T.rgb(scheme["surface_container_low"]))
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+        if self.snake is None:
+            return
+        if self.snake.food is not None:
+            cr.set_source_rgb(*T.rgb(scheme["tertiary"]))
+            fx, fy = self.snake.food
+            cr.arc(left + (fx + 0.5) * cell, top + (fy + 0.5) * cell,
+                   cell * 0.3, 0, 6.2832)
+            cr.fill()
+        # The head in the primary accent and the body a step back from it, so
+        # the direction of travel is readable without watching it move.
+        #
+        # Past ten, the body runs the brand gradient from head to tail instead.
+        # Ten is far enough in that nobody arrives there by accident and near
+        # enough that somebody who decides to try will get there before the
+        # install finishes.
+        earned = self.snake.score >= SNAKE_GRADIENT_AT
+        head_rgb = T.rgb(scheme["primary"])
+        tail_rgb = T.rgb(scheme["tertiary"])
+        length = max(1, len(self.snake.body) - 1)
+        for index, (x, y) in enumerate(self.snake.body):
+            if index == 0:
+                cr.set_source_rgb(*head_rgb)
+            elif earned:
+                blend = (index - 1) / length
+                cr.set_source_rgb(*(
+                    head + (tail - head) * blend
+                    for head, tail in zip(head_rgb, tail_rgb)))
+            else:
+                cr.set_source_rgb(*T.rgb(scheme["primary_container"]))
+            cr.rectangle(left + x * cell + 1, top + y * cell + 1,
+                         cell - 2, cell - 2)
+            cr.fill()
 
     def _draw_progress(self, report: dict) -> None:
         listbox = self.widgets["progress.list"]
@@ -1600,6 +1807,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         # says nothing has been written, and it is removed rather than
         # disabled at the boundary: a greyed-out Stop invites the user to keep
         # pressing it at the exact moment the answer has become no.
+        # What is happening and roughly how long it takes. The pacing half is
+        # a range from the shared copy library and the elapsed half is measured
+        # from the journal, which is the right way round: the number that is
+        # real is the one about the past. There is deliberately no countdown.
+        # An estimate that turns out wrong is remembered longer than the
+        # install it was wrong about, and there is no honest per-machine number
+        # until the engine reports package by package.
+        self.widgets["progress.pacing"].set_label(self._pacing_text(report))
+
         state = self.widgets["progress.state"]
         if report.get("can_stop"):
             self.secondary_button.set_label("Stop")
@@ -1613,6 +1829,50 @@ class InstallerWindow(Adw.ApplicationWindow):
             state.remove_css_class("aurade-stage-done")
             state.add_css_class("warning")
         state.set_visible(bool(state.get_label()))
+
+    def _pacing_text(self, report: dict) -> str:
+        active = report.get("active", "")
+        running = None
+        for stage in report.get("stages", []):
+            if stage.get("stage") == active:
+                running = stage
+                break
+        if running is None:
+            return ""
+        parts = [f"{running.get('label', '')}."]
+        pacing = running.get("pacing", "")
+        if pacing:
+            parts.append(F.PROGRESS_PACING % pacing)
+        elapsed = self._elapsed_text(report.get("elapsed_ms", 0))
+        if elapsed:
+            parts.append(elapsed)
+        return " ".join(part for part in parts if part.strip(". "))
+
+    @staticmethod
+    def _elapsed_text(elapsed_ms) -> str:
+        try:
+            minutes = int(elapsed_ms) // 60000
+        except (TypeError, ValueError):
+            return ""
+        if minutes < 1:
+            return ""
+        if minutes == 1:
+            return F.PROGRESS_ELAPSED_ONE
+        return F.PROGRESS_ELAPSED % minutes
+
+    def _rotate_tip(self) -> bool:
+        """Fade the next tip in, if anyone is looking at the tips."""
+        if not self.tips:
+            self._tip_source = 0
+            return GLib.SOURCE_REMOVE
+        stack = self.widgets["progress.tips"]
+        showing = stack.get_visible_child_name()
+        other = "b" if showing == "a" else "a"
+        self.widgets[f"progress.tip.{other}"].set_label(
+            self.tips.at(self.tip_index))
+        self.tip_index += 1
+        stack.set_visible_child_name(other)
+        return GLib.SOURCE_CONTINUE
 
     def _poll_progress(self) -> bool:
         try:
@@ -1814,6 +2074,41 @@ class InstallerWindow(Adw.ApplicationWindow):
                 action=Gtk.CallbackAction.new(lambda *_a, h=handler: h() or True)))
         self.add_controller(controller)
         self.set_default_widget(self.forward_button)
+
+        # And one more listener, which does nothing at all to the installer.
+        #
+        # The swoop plays once, on the first press of Continue, and then never
+        # again in that session. It is the best thing this front end draws and
+        # almost nobody will see it twice. So: type the word on the welcome
+        # page and it plays again.
+        #
+        # Deliberately not written down anywhere a user would look. The rare
+        # tips on the progress page mention that there is a game and say
+        # nothing about this, which is the point of the difference between the
+        # two: one is quiet, this one is hidden.
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_secret_key)
+        self.add_controller(keys)
+
+    #: Six letters, typed in order, on the one page where no control wants
+    #: them. Any other page, any other key, and the buffer empties.
+    SECRET_WORD = "aurora"
+
+    def _on_secret_key(self, _controller, keyval, _code, _state) -> bool:
+        if self.flow.state != F.WELCOME:
+            self._secret = ""
+            return False
+        letter = chr(keyval) if 32 <= keyval < 127 else ""
+        if not letter:
+            self._secret = ""
+            return False
+        self._secret = (self._secret + letter.lower())[-len(self.SECRET_WORD):]
+        if self._secret != self.SECRET_WORD:
+            return False
+        self._secret = ""
+        self._swooped = False
+        self.play_swoop()
+        return True
 
     # -- rendering ---------------------------------------------------------
 
@@ -2138,6 +2433,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.refresh()
         self._progress_source = GLib.timeout_add(
             PROGRESS_INTERVAL_MS, self._poll_progress)
+        if self.tips and not self._tip_source:
+            # The first tip goes up immediately rather than after the first
+            # interval, so the card is never blank on the page somebody has
+            # just arrived at.
+            self._rotate_tip()
+            if self.animate:
+                self._tip_source = GLib.timeout_add(
+                    W.TIP_INTERVAL_MS, self._rotate_tip)
 
     def _fatal(self, message: str) -> None:
         dialog = Adw.AlertDialog(

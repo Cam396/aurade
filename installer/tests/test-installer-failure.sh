@@ -18,11 +18,19 @@ set +e
 status=$?
 set -e
 [[ $status -eq 7 ]]
-grep -Fq 'stage: acquire' "$TMP/report.out"
-grep -Fq 'cause: network_error' "$TMP/report.out"
-grep -Fq 'detail: archive unavailable' "$TMP/report.out"
-grep -Fq 'next: Check the interface, route, DNS, clock' "$TMP/report.out"
+# The report is built from lib/aurade-copy.sh, so these assertions are also
+# what pins the failure helper and the two front ends to the same sentences.
+grep -Fq 'The install stopped while downloading packages.' "$TMP/report.out"
+# Disk state leads, before any reason for it.
+grep -Fq 'Nothing has been changed and no disk was touched.' "$TMP/report.out"
+grep -Fq 'The package archive could not be reached.' "$TMP/report.out"
+# Exactly one next action, and it is the one for this cause.
+grep -Fq 'Check the network connection, then start again.' "$TMP/report.out"
+[[ $(grep -c 'then start again\.' "$TMP/report.out") -eq 1 ]]
+grep -Fq 'Detail: archive unavailable' "$TMP/report.out"
 ! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"
+# No engine cause code reaches the screen.
+! grep -Fq 'network_error' "$TMP/report.out"
 
 cat >"$TMP/escaped-journal.jsonl" <<'EOF'
 {"stage":"configure","status":"failed","message":"quoted \"stage\":\"fake\" text","cause":"config\\path"}
@@ -34,8 +42,14 @@ set +e
 status=$?
 set -e
 [[ $status -eq 9 ]]
-grep -Fq 'stage: configure' "$TMP/escaped.out"
-grep -Fq 'cause: config\\path' "$TMP/escaped.out"
+grep -Fq 'The install stopped while setting things up.' "$TMP/escaped.out"
+# An unrecognised cause code is silence plus the stage explanation, never the
+# token itself. Printing `keyring_error` at somebody whose install just died is
+# the regression this asserts against.
+! grep -Fq 'config' "$TMP/escaped.out"
+grep -Fq 'Every file is in place.' "$TMP/escaped.out"
+grep -Fq 'Save a report, then start again.' "$TMP/escaped.out"
+# A message that contains a quoted field must not impersonate one.
 ! grep -Fq 'fake' "$TMP/escaped.out"
 
 set +e
@@ -47,14 +61,14 @@ set -e
 [[ $status -eq 7 ]]
 [[ $(stat -c '%a' "$TMP/export/journal.jsonl") == 600 ]]
 [[ $(stat -c '%a' "$TMP/export/install.log") == 600 ]]
-grep -Fq 'Diagnostic logs exported' "$TMP/export.out"
+grep -Fq 'Report saved to' "$TMP/export.out"
 
 if "$ROOT/installer/bin/aurade-install-failure" --status 7 --journal "$TMP/missing-journal" \
   --raw-log "$TMP/missing-log" --export "$TMP/missing-export" >"$TMP/missing.out" 2>&1; then
   echo 'empty diagnostic export unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'no readable journal or raw log' "$TMP/missing.out"
+grep -Fq 'there is nothing to save yet' "$TMP/missing.out"
 
 if "$ROOT/installer/bin/aurade-install-failure" --status >"$TMP/missing-arg.out" 2>&1; then
   echo 'missing status argument unexpectedly passed' >&2

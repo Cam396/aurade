@@ -1,7 +1,7 @@
 """The voice, checked where it can be.
 
-Most of what makes copy good cannot be tested. Two things can, and both are
-rules this product has already drifted away from once.
+Most of what makes copy good cannot be tested. Three things can, and each is
+a rule this product has already drifted away from once.
 
 The first is punctuation. No em dashes, no en dashes, anywhere a user can see
 them. A dash is the joint a sentence uses when it has two ideas and has not
@@ -14,9 +14,18 @@ the register of a release note. They are not banned because they are wrong.
 They are banned because reaching for one is the moment the copy stops sounding
 like a person and starts sounding like a department.
 
-The strings this reads are the ones the user sees: the page and state copy, the
-shared question manifest, the stage vocabulary and the readiness findings. Code
-comments are exempt, and so is anything inside a path, a URL or a command.
+The third is the semicolon, which in this codebase was almost never a
+semicolon. It was a way to bolt a reassurance onto the back of a diagnosis:
+"could not acquire the package set; the target disk was not modified". The
+half the reader needs is on the wrong side of it. Every one of these wanted to
+be two sentences with the disk first, and a mark that only ever appeared as a
+symptom is worth failing the build over.
+
+The strings this reads are the ones the user sees, across every program that
+speaks: the two front ends, the shared copy library and question manifest, the
+engine, the launcher, the boot menu, and the screens that only appear when
+something has gone wrong. Code comments are exempt, and so is anything inside
+a path, a URL or a command.
 """
 
 from __future__ import annotations
@@ -30,12 +39,28 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__))
 
 #: Files whose user-facing strings are checked, and how to find them.
 SOURCES = [
+    # The screens people see when it works.
     ("installer/lib/aurade_gui/flow.py", "python"),
     ("installer/lib/aurade_gui/locales.py", "python"),
     ("installer/lib/aurade_gui/app.py", "python"),
     ("installer/lib/aurade-questions.sh", "shell"),
     ("installer/bin/aurade-installer-tui", "shell"),
     ("installer/bin/aurade-installer-gui-bridge", "shell"),
+    # The words every program shares.
+    ("installer/lib/aurade-copy.sh", "shell"),
+    ("installer/lib/aurade-tips", "tips"),
+    # The screens people see when it does not work, which went unchecked for
+    # a pass and turned out to be where the worst of it had settled.
+    ("installer/bin/aurade-install-failure", "shell"),
+    ("installer/bin/aurade-installer-start", "shell"),
+    ("installer/bin/aurade-installer", "shell"),
+    ("installer/lib/aurade-probe.sh", "shell"),
+    ("installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart", "shell"),
+    # The first words the product says, and the last place anyone reads.
+    ("installer/archiso/efiboot/loader/entries/01-aurade-gui.conf", "boot"),
+    ("installer/archiso/efiboot/loader/entries/02-aurade-tui.conf", "boot"),
+    ("installer/archiso/efiboot/loader/entries/03-aurade-safe.conf", "boot"),
+    ("installer/archiso/efiboot/loader/entries/04-aurade-shell.conf", "boot"),
     ("installer/archiso/airootfs/etc/motd", "plain"),
 ]
 
@@ -46,11 +71,27 @@ STUFFY = (
     "utilise", "utilize", "in order to", "prior to", "subsequent to",
     "please note", "kindly", "at this time", "is able to", "has the ability",
     "facilitate", "leverage", "commence", "terminate the",
+    # Memo headers. A line that has to announce its own severity is a line
+    # that did not manage to convey it.
+    "warning:", "notice:", "note:", "error:", "attention:", "important:",
 )
+
+#: The semicolon, which was never used here as a semicolon. Allowed inside a
+#: command or a code fragment, where it is punctuation for a shell rather than
+#: for a reader; the exemptions below carry those.
+SEMICOLON = ";"
 
 #: Strings that are quotes from somewhere else, or a name, and are not this
 #: product's voice to fix.
 EXEMPT = re.compile(r"^(https?://|/|-|\.|[A-Z_]+=)")
+
+#: Fragments that are shell, awk, sed or C rather than English. A semicolon in
+#: any of these is a statement separator and nothing to do with the voice.
+CODE = re.compile(
+    r"(\$\{|\$\(|&&|\|\||>&2|<<|=~|\bawk\b|\bsed\b|\bprintf\b|\bgrep\b"
+    r"|\bfor \w+ in\b|\bdone\b|\bfi\b|\besac\b|::|;;|\bIFS=|\belse\b"
+    r"|\{[^}]*\bprint\b|\w\+?=\s*$)"
+)
 
 
 def strings(path: str, kind: str) -> list[tuple[int, str]]:
@@ -59,6 +100,17 @@ def strings(path: str, kind: str) -> list[tuple[int, str]]:
         for number, line in enumerate(handle, 1):
             if kind == "plain":
                 found.append((number, line.rstrip("\n")))
+                continue
+            if kind == "tips":
+                # lane, tab, text.
+                if "\t" in line:
+                    found.append((number, line.split("\t", 1)[1].rstrip("\n")))
+                continue
+            if kind == "boot":
+                # Only the title. The rest of a loader entry is kernel
+                # arguments and paths, which no one reads as prose.
+                if line.startswith("title"):
+                    found.append((number, line.split(None, 1)[1].strip()))
                 continue
             stripped = line.lstrip()
             if stripped.startswith("#"):
@@ -90,13 +142,16 @@ def main() -> int:
                 if word in lowered:
                     problems.append(
                         f"{path}:{number}: {word!r} in {text.strip()!r}")
+            if SEMICOLON in text and not CODE.search(text):
+                problems.append(
+                    f"{path}:{number}: semicolon in {text.strip()!r}")
 
     for problem in problems:
         print(f"test-voice: {problem}", file=sys.stderr)
     if problems:
         return 1
     print(f"installer voice test: PASS ({checked} strings, no dashes, "
-          "nothing from the memo)")
+          "no semicolons, nothing from the memo)")
     return 0
 
 

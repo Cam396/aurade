@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# The screen people spend ten minutes on.
+#
+# Three things are new on it and each one can fail in a way nobody would notice
+# until they were watching it happen: the tips, the ribbon, and the snake. So
+# the tips are checked for the rotation actually rotating, the ribbon for
+# staying inside the frame and for moving, and the snake for being a game
+# rather than a drawing.
+#
+# The layout gets the most attention, because it is the part that can break the
+# frame. The progress screen now spends whatever rows the console has, and a
+# console is whatever the firmware left it as, so every height from a short one
+# to a tall one is rendered and measured.
+set -Eeuo pipefail
+
+ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
+TUI=$ROOT/installer/bin/aurade-installer-tui
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+failures=0
+fail() { printf 'test-progress-wait: %s\n' "$*" >&2; failures=$(( failures + 1 )); }
+
+cat >"$TMP/journal.jsonl" <<'EOF'
+{"v":1,"stage":"preflight","status":"ok","elapsed_ms":3200}
+{"v":1,"stage":"acquire","status":"ok","elapsed_ms":161000}
+{"v":1,"stage":"confirm","status":"ok","elapsed_ms":900}
+{"v":1,"stage":"partition","status":"ok","elapsed_ms":2100}
+{"v":1,"stage":"format","status":"ok","elapsed_ms":18000}
+{"v":1,"stage":"mount","status":"ok","elapsed_ms":700}
+{"v":1,"stage":"pacstrap","status":"running","pct":58,"message":"612/1041 packages"}
+EOF
+
+render_at() {
+  local height=$1 screen=${2:-progress}
+  env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT="$height" \
+    "$TUI" --render "$screen" --journal "$TMP/journal.jsonl"
+}
+
+# --------------------------------------------------------------------------
+# Tips
+# --------------------------------------------------------------------------
+
+# shellcheck source=../lib/aurade-wait.sh
+. "$ROOT/installer/lib/aurade-wait.sh"
+AURADE_TIPS_FILE=$ROOT/installer/lib/aurade-tips
+aurade_tips_load
+
+(( ${#AURADE_TIPS[@]} >= 10 )) ||
+  fail "only ${#AURADE_TIPS[@]} tips, which is not enough for a ten minute screen"
+(( ${#AURADE_TIPS_NEXT[@]} >= 3 )) || fail 'the next lane is nearly empty'
+(( ${#AURADE_TIPS_RARE[@]} >= 3 )) || fail 'the rare lane is nearly empty'
+
+# Every tip has to fit in two lines of the frame, because a third line pushes
+# the layout budget over and the screen starts giving up the ribbon for prose.
+for _tip in "${AURADE_TIPS[@]}" "${AURADE_TIPS_NEXT[@]}" "${AURADE_TIPS_RARE[@]}"; do
+  (( ${#_tip} <= 130 )) || fail "tip is ${#_tip} characters, over the two line budget: ${_tip:0:50}..."
+done
+
+# The rotation must not repeat itself back to back. A repeat on a screen
+# somebody is staring at reads as a screen that has stopped.
+previous=
+for i in $(seq 0 25); do
+  current=$(AURADE_TIP_RARITY=0 aurade_tip_for "$i")
+  [[ -n $current ]] || fail "rotation $i produced no tip"
+  [[ $current != "$previous" ]] || fail "rotation $i repeated the tip before it"
+  previous=$current
+done
+
+# ...and it must come back around rather than running out.
+first=$(AURADE_TIP_RARITY=0 aurade_tip_for 0)
+cycle=$(( ${#AURADE_TIPS[@]} * 4 ))
+[[ $(AURADE_TIP_RARITY=0 aurade_tip_for "$cycle") == "$first" ]] ||
+  fail 'the tip rotation does not return to where it started'
+
+# The next lane is interleaved, so what to do after the restart keeps coming
+# back without crowding out everything else.
+found_next=0
+for i in 3 7 11; do
+  for _entry in "${AURADE_TIPS_NEXT[@]}"; do
+    [[ $(AURADE_TIP_RARITY=0 aurade_tip_for "$i") != "$_entry" ]] || found_next=1
+  done
+done
+(( found_next )) || fail 'the next lane never comes up in the rotation'
+
+# Rarity 0 turns the rare lane off completely, which is what makes `--render`
+# deterministic. Rarity 1 turns it on every time, which is how it gets tested
+# at all.
+for i in $(seq 0 60); do
+  for _entry in "${AURADE_TIPS_RARE[@]}"; do
+    [[ $(AURADE_TIP_RARITY=0 aurade_tip_for "$i") != "$_entry" ]] ||
+      fail 'a rare tip appeared with the rare lane switched off'
+  done
+done
+rare_seen=0
+for _entry in "${AURADE_TIPS_RARE[@]}"; do
+  [[ $(AURADE_TIP_RARITY=1 aurade_tip_for 0) != "$_entry" ]] || rare_seen=1
+done
+(( rare_seen )) || fail 'the rare lane never produces a rare tip'
+
+# --------------------------------------------------------------------------
+# The aurora
+# --------------------------------------------------------------------------
+
+mapfile -t rows < <(aurade_aurora 0 60 3)
+(( ${#rows[@]} == 3 )) || fail "the aurora drew ${#rows[@]} rows, expected 3"
+for row in "${rows[@]}"; do
+  (( ${#row} <= 60 )) || fail "an aurora row is ${#row} columns, over the 60 asked for"
+  [[ $row =~ ^[\ .:=+*#-]*$ ]] ||
+    fail "the aurora drew something outside its ramp: $row"
+done
+# It has to move, or it is wallpaper.
+[[ $(aurade_aurora 0 60 3) != "$(aurade_aurora 9 60 3)" ]] ||
+  fail 'the aurora is identical nine frames apart'
+# And it has to be the same picture for the same frame, or the screen flickers.
+[[ $(aurade_aurora 4 60 3) == "$(aurade_aurora 4 60 3)" ]] ||
+  fail 'the aurora is not the same twice for the same frame'
+
+# --------------------------------------------------------------------------
+# Snake
+# --------------------------------------------------------------------------
+
+RANDOM=3
+aurade_snake_new 20 8
+(( AURADE_SNAKE_SCORE == 0 )) || fail 'a new game did not start at zero'
+(( AURADE_SNAKE_DEAD == 0 )) || fail 'a new game started dead'
+(( ${#AURADE_SNAKE_BODY[@]} == 3 )) || fail 'a new snake is the wrong length'
+
+head_before=${AURADE_SNAKE_BODY[0]}
+aurade_snake_step
+[[ ${AURADE_SNAKE_BODY[0]} != "$head_before" ]] || fail 'the snake did not move'
+(( ${#AURADE_SNAKE_BODY[@]} == 3 )) ||
+  fail 'the snake changed length without eating'
+
+# Turning back on itself is ignored, because it is always a mistake.
+aurade_snake_turn left
+[[ $AURADE_SNAKE_DIR == right ]] || fail 'the snake reversed into itself'
+aurade_snake_turn up
+[[ $AURADE_SNAKE_DIR == up ]] || fail 'the snake refused a legal turn'
+
+# A wall is a wall.
+aurade_snake_new 20 8
+aurade_snake_turn up
+for _i in $(seq 1 12); do aurade_snake_step || break; done
+(( AURADE_SNAKE_DEAD == 1 )) || fail 'the snake walked through the top wall'
+
+# Eating grows it, and the food moves.
+aurade_snake_new 20 8
+head=${AURADE_SNAKE_BODY[0]}
+AURADE_SNAKE_FOOD="$(( ${head%,*} + 1 )),${head#*,}"
+food_before=$AURADE_SNAKE_FOOD
+aurade_snake_step
+(( AURADE_SNAKE_SCORE == 1 )) || fail 'eating did not score'
+(( ${#AURADE_SNAKE_BODY[@]} == 4 )) || fail 'eating did not grow the snake'
+[[ $AURADE_SNAKE_FOOD != "$food_before" ]] || fail 'the food stayed where it was eaten'
+
+# Food never lands on the snake.
+for _i in $(seq 1 40); do
+  aurade_snake_place_food
+  for _cell in "${AURADE_SNAKE_BODY[@]}"; do
+    [[ $AURADE_SNAKE_FOOD != "$_cell" ]] || fail 'food was placed inside the snake'
+  done
+done
+
+# The arena is exactly the size it was asked for.
+aurade_snake_new 20 8
+mapfile -t arena < <(aurade_snake_rows)
+(( ${#arena[@]} == 8 )) || fail "the arena drew ${#arena[@]} rows, expected 8"
+for row in "${arena[@]}"; do
+  (( ${#row} == 20 )) || fail "an arena row is ${#row} columns, expected 20"
+done
+
+# --------------------------------------------------------------------------
+# The layout, at every height a console might be
+# --------------------------------------------------------------------------
+
+measure() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+path, height = sys.argv[1], int(sys.argv[2])
+lines = [line for line in open(path, encoding="utf-8").read().split("\n") if line]
+problems = []
+if len(lines) > height:
+    problems.append(f"drew {len(lines)} lines into a {height} row console")
+width = len(lines[0])
+for n, line in enumerate(lines, 1):
+    if len(line) != width:
+        problems.append(f"line {n} is {len(line)} columns, frame is {width}")
+    if not (line[0] in "+|" and line[-1] in "+|"):
+        problems.append(f"line {n} does not close the frame: {line[:20]!r}")
+for problem in problems[:4]:
+    print(problem)
+sys.exit(1 if problems else 0)
+PY
+}
+
+for height in 16 18 20 22 24 26 29 34 44; do
+  render_at "$height" progress >"$TMP/p.$height"
+  measure "$TMP/p.$height" "$height" ||
+    fail "the progress screen does not fit a $height row console"
+  render_at "$height" game >"$TMP/g.$height"
+  measure "$TMP/g.$height" "$height" ||
+    fail "the game screen does not fit a $height row console"
+done
+
+# The running stage is never the thing that gets folded away. Whatever else
+# comes off a short screen, the answer to "what is it doing" stays.
+for height in 16 24 34; do
+  grep -Fq 'Installing the base system' "$TMP/p.$height" ||
+    fail "a $height row console lost the running stage"
+  grep -Fq '612/1041 packages' "$TMP/p.$height" ||
+    fail "a $height row console lost the progress detail"
+done
+
+# A tall console shows every stage by name; a short one folds the finished ones
+# into a count rather than dropping them silently.
+grep -Fq 'Checking this computer' "$TMP/p.34" ||
+  fail 'a tall console did not list the finished stages'
+grep -Fq '6 steps done' "$TMP/p.24" ||
+  fail 'a 24 row console did not fold the finished stages into a count'
+grep -Fq 'Checking this computer' "$TMP/p.24" &&
+  fail 'a 24 row console listed the finished stages and folded them'
+
+# The ribbon and something to read survive the standard console, because they
+# are the reason any of this exists.
+grep -q '[*#=+]' "$TMP/p.24" || fail 'a 24 row console lost the ribbon'
+grep -Fq 'Btrfs' "$TMP/p.24" || fail 'a 24 row console lost the tip'
+
+# Pacing is a range and never a countdown. A screen that promises four minutes
+# and takes eleven is remembered longer than the install it was wrong about.
+grep -Fq 'Usually five to ten minutes' "$TMP/p.34" ||
+  fail 'the progress screen does not say roughly how long this takes'
+grep -Fq 'so far' "$TMP/p.34" || fail 'the progress screen does not say how long it has been'
+for word in remaining 'time left' 'estimated'; do
+  ! grep -Fqi "$word" "$TMP/p.34" ||
+    fail "the progress screen promises a countdown it cannot keep: $word"
+done
+
+# Rendering the same screen twice gives the same picture, which is the whole
+# reason the rare tip lane is off under --render.
+render_at 34 progress >"$TMP/again"
+cmp -s "$TMP/p.34" "$TMP/again" || fail 'the progress screen is not deterministic'
+
+# And the game is reachable from it, said once, in the footer.
+grep -Fq 'g  game' "$TMP/p.24" || fail 'the progress screen does not offer the game'
+# Nothing else is offered. The rest of the keyboard stays unbound here for the
+# same reason it always did.
+for offer in 'esc' 'cancel' 'l  ' 'enter' 'q  ' 'stop'; do
+  ! grep -Fq "$offer" "$(printf '%s' "$TMP/p.24")" ||
+    fail "the progress screen offers '$offer' at the least recoverable moment"
+done
+
+(( failures == 0 )) || exit 1
+printf 'installer progress screen test: PASS (%s tips, %s heights)\n' \
+  "$(( ${#AURADE_TIPS[@]} + ${#AURADE_TIPS_NEXT[@]} + ${#AURADE_TIPS_RARE[@]} ))" 9

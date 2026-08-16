@@ -1,0 +1,61 @@
+# Things to read while the install runs.
+#
+# One file, both front ends. The graphical installer fades between these in a
+# card under the progress list and the text installer rotates them on a line
+# under the bar, and neither owns the words, because two installers telling a
+# person different things about the same system is how a product starts to
+# feel like several products.
+#
+# Format is lane, tab, text. Lanes:
+#
+#   tip    something true about the system being installed right now
+#   next   something to have ready for after the restart
+#   rare   shown roughly one rotation in forty
+#
+# Rules for writing one. It has to be true of this install, not of operating
+# systems in general, because a fact the reader can check is worth ten that
+# sound nice. It has to fit on two lines of the text installer, which is 120
+# characters, and tests/test-progress-wait.sh will say so if it does not. It is read by somebody with nothing to do for ten minutes,
+# so it can be interesting, and it is read by somebody who is nervous about
+# their disk, so it is never cute about that. No exclamation marks.
+#
+# The `rare` lane is not a joke lane. It is the one that is allowed to be warm
+# about the fact that a person is sitting there waiting, and it shows up seldom
+# enough that finding one feels like finding something.
+#
+# These strings go through tests/test-voice.sh with everything else.
+
+tip	Your files will live on Btrfs, which can take a snapshot of the whole system in about a second.
+tip	A snapshot does not copy anything. It records what changes after it, so it costs nothing until something does.
+tip	A recovery snapshot is saved before the first restart. It is a way back to exactly how the system leaves here.
+tip	The boot menu will have a rollback entry. It starts the system from that snapshot and changes nothing on the way.
+tip	Rolling back is a boot menu choice, not a repair. Nothing is rewritten, so a rollback that does not help can be undone.
+tip	Every package was downloaded and checked before the disk was touched. This install no longer needs the network.
+tip	Packages come from one pinned day of the Arch archive, not from whatever is newest, so two machines get the same system.
+tip	AuraDE starts with systemd-boot rather than GRUB. Its boot entries are plain text files you can fix with an editor.
+tip	If you turned on encryption, the disk is protected with LUKS2 and unreadable to anything without the passphrase.
+tip	Encryption covers the whole system, not a folder inside it. No unencrypted copy of anything is left behind.
+tip	The disk passphrase is checked by the bootloader, before the system starts. That is why it is asked for so early.
+tip	Swap is where memory goes when there is not enough. A swap file can be added later, so it need not be decided now.
+tip	Hibernating writes all of memory out to disk, which is why a hibernation swap file has to be at least that large.
+tip	This installer never resizes a partition. It only uses free space, which is why it can say what it will do beforehand.
+tip	The installer writes a journal as it goes. That file is what the progress list on this screen is drawn from.
+tip	If Secure Boot is on, AuraDE signs its own boot files and offers to enrol its key. Nothing unsigned is written.
+tip	The EFI partition is the part of the disk the firmware reads. It is small, plain FAT, and any computer can mount it.
+tip	Everything here is true of the text installer too. They ask the same questions and run the same engine.
+tip	Your account is created during this step, with the name and password you chose. The live session has neither.
+tip	The time zone you picked sets the clock and nothing else. It can be changed later without reinstalling.
+tip	Your keyboard layout is written into both the system and the boot loader, so the passphrase prompt uses the same keys.
+
+next	Take out the installation media before restarting. Some computers will boot straight back into this installer.
+next	Sign in with the name and password you typed a few screens ago. They are not the disk passphrase.
+next	If you turned on encryption, the disk passphrase is asked for first, before the sign in screen.
+next	The first start takes a little longer than the ones after it. Nothing is wrong.
+next	The rollback entry in the boot menu points at the snapshot being saved today.
+next	Nothing needs downloading after the restart. The system that starts is the one written here.
+
+rare	Somebody chose the colour of this bar on purpose. Thank you for waiting long enough to notice.
+rare	This screen was built by people who have watched a lot of installers and been bored by all of them.
+rare	Ten minutes is about four songs, or the time it takes tea to go cold. The install does not mind which.
+rare	If you are reading every one of these, the install is going fine and you have excellent patience.
+rare	There is a small game on this screen. It is not hidden very well.

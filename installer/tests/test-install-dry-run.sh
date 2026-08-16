@@ -72,12 +72,27 @@ grep -Fq -- 'trap '\''handle_cancel 130'\'' INT' "$ROOT/installer/bin/aurade-ins
 grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
-grep -Fq -- 'package downloads were stopped instead of being retried' "$ROOT/installer/bin/aurade-install"
+# A keyring failure stops rather than retries. This used to be asserted by
+# grepping for a phrase inside the error message, which pinned the wording of
+# a sentence in place of the behaviour it described. The behaviour is that
+# `pacman_keyring_failure` short circuits into a `die`, and the wording is
+# free to improve.
+grep -Fq -- 'pacman_keyring_failure' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'die_keyring_failure() {' "$ROOT/installer/bin/aurade-install"
+awk '/^die_keyring_failure\(\) \{/,/^\}/' "$ROOT/installer/bin/aurade-install" |
+  grep -Fq -- 'die ' ||
+  { echo 'die_keyring_failure no longer dies' >&2; exit 1; }
+# ...and the message it dies with still classifies as a keyring failure, which
+# is what tests/test-die-cause.sh pins by name.
 grep -Fq -- 'installer staging filesystem has ' "$TMP/plain.out"
 grep -Fq -- 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$ROOT/installer/bin/aurade-install"
-grep -Fq -- 'Secure Boot is enabled' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Secure Boot state could not be determined' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'could not determine Secure Boot state' "$ROOT/installer/bin/aurade-install"
+# The three Secure Boot states each get told to the user before the erase gate:
+# on and trusted, on and untrusted, and unreadable. Matched on the state rather
+# than on the sentence, because the sentences have been rewritten once already.
+grep -Fq -- 'Secure Boot is on' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Secure Boot is in setup mode' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Whether Secure Boot is on could not be read' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'whether Secure Boot is on could not be read' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '--secure-boot-auto-enroll yes' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'firmware setup mode' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pre-enrolled signing certificate' "$ROOT/installer/bin/aurade-install"
@@ -101,15 +116,16 @@ grep -Fq -- 'confirmation=$(aurade_normalize_confirmation "$confirmation")' "$RO
 grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'USB/removable disk' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'This is a removable disk' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'smartctl -H "$target"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'smartctl is unavailable' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'SMART reported a failing health status' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'SMART health: passed' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'does not replace a backup' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'LUKS2 encryption and Btrfs recovery snapshots consume additional space' \
-  "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'no swap or hibernation setup is created by default' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Disk health could not be read on this image' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'This disk reports that it is failing' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'Disk health looks fine' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'not a substitute for a backup' "$ROOT/installer/bin/aurade-installer"
+# The two things said before the disk question: AuraDE takes the whole disk,
+# and there is no swap unless you add one.
+grep -Fq -- 'AuraDE takes the whole disk' "$ROOT/installer/bin/aurade-installer"
+grep -Fq -- 'There is no swap by default' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'read_secret_file' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'openssl passwd -6 -stdin <"$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'secure_remove "$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
@@ -243,7 +259,7 @@ refuses '--filesystem must be btrfs, ext4 or xfs' --filesystem zfs
 refuses '--swap must be none, file or zram' --swap partition
 refuses '--swap-size must be auto, hibernate, or a size like 8G' --swap-size huge
 refuses '--layout must be wipe or alongside' --layout resize
-refuses 'zram swap cannot support hibernation' --swap zram --swap-size hibernate
+refuses 'zram swap lives in memory' --swap zram --swap-size hibernate
 refuses 'which xfs does not provide' --filesystem xfs --swap file --swap-size hibernate
 
 echo 'installer dry-run test: PASS'

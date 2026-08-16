@@ -136,8 +136,15 @@ EOF
 die() {
   local message=$* cause=installer_error journal_message
   # Keep fatal-stage records machine-readable and bounded. The full diagnostic
-  # still goes to stderr/raw logs; the structured journal gets only a short
-  # caller-authored message and a stable cause code for front ends.
+  # still goes to stderr and the raw log. The structured journal gets only a
+  # short caller-authored message and a stable cause code for front ends.
+  #
+  # The cause is chosen by matching the message, which means the words in a
+  # `die` call are load bearing: rewriting one can silently move a failure into
+  # a different explanation and a different suggested next step. Every message
+  # that reaches this classifier is pinned by name in tests/test-die-cause.sh,
+  # so a reworded sentence that lands in the wrong bucket fails there rather
+  # than in front of a user.
   if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
     case $message in
       *keyring*|*signature*) cause=keyring_error ;;
@@ -291,7 +298,7 @@ pacman_keyring_failure() {
 }
 
 die_keyring_failure() {
-  die 'pacman keyring/signature setup failed; package downloads were stopped instead of being retried. Check that the ISO contains archlinux-keyring, that the system clock is correct, and that the network is reachable'
+  die 'the package signing keyring could not be set up. The most common reason is a wrong date on this computer'
 }
 
 verify_arch_package_signatures() {
@@ -327,7 +334,7 @@ prepare_arch_keyring() {
     pacman-key --gpgdir "$ARCH_GPG_DIR" --init || die_keyring_failure
   fi
   [[ -r /usr/share/pacman/keyrings/archlinux.gpg ]] || \
-    die 'the ISO is missing /usr/share/pacman/keyrings/archlinux.gpg; include the archlinux-keyring package'
+    die 'this image is missing the Arch signing keyring'
   pacman-key --gpgdir "$ARCH_GPG_DIR" --populate archlinux || die_keyring_failure
   [[ -r $ARCH_GPG_DIR/pubring.gpg && -r $ARCH_GPG_DIR/trustdb.gpg && -w $ARCH_GPG_DIR ]] || \
     die_keyring_failure
@@ -422,9 +429,9 @@ acquire_arch_packages() {
   done
   if (( ! acquired )); then
     if (( signature_failure_seen )); then
-      die 'could not verify the complete pinned Arch package set after three attempts; the target disk was not modified'
+      die 'the downloaded packages did not match their signatures, after three attempts'
     fi
-    die 'could not acquire the complete pinned Arch package set; the target disk was not modified'
+    die 'the packages could not all be downloaded from the archive'
   fi
 
   repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" "${ARCH_PACKAGE_FILES[@]}" >/dev/null || \
@@ -652,7 +659,7 @@ esac
   secure_boot_validate_material
 }
 [[ $SWAP != zram || $SWAP_SIZE != hibernate ]] || \
-  die 'zram swap cannot support hibernation; it lives in RAM'
+  die 'zram swap lives in memory, so it cannot be used for hibernation'
 [[ $FILESYSTEM != xfs || $SWAP_SIZE != hibernate ]] || \
   die 'hibernation needs a swap file with a stable physical offset, which xfs does not provide'
 [[ $ARCH_SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || \
@@ -841,7 +848,7 @@ if [[ $MODE == execute ]]; then
     # machine whose firmware boots one operating system and cannot see the
     # other, which is a worse outcome than refusing.
     ALONGSIDE_ESP=$(existing_esp "$TARGET") || \
-      die 'no EFI system partition found on the target; --layout alongside adds AuraDE to a disk that already boots in UEFI mode, and this disk does not'
+      die 'this disk has no EFI system partition, so AuraDE cannot be added alongside what is already on it'
     free_bytes=$(largest_free_bytes "$TARGET")
     (( free_bytes >= min_target_bytes )) || \
       die "the largest unallocated region on the target is ${free_bytes} bytes; --layout alongside needs at least ${min_target_bytes} and never resizes an existing partition to make room"
@@ -889,22 +896,22 @@ if [[ $MODE == execute ]]; then
             SECURE_BOOT_SIGN=1
             log 'Secure Boot is enabled with existing firmware keys; using the supplied pre-enrolled signing certificate'
           else
-            die 'Secure Boot is enabled in firmware user mode, but no pre-enrolled AuraDE signing key was supplied; enter firmware setup mode once or pass --secure-boot-key and --secure-boot-cert'
+            die 'Secure Boot is on and this computer trusts no key that can start AuraDE. Put the firmware into Secure Boot setup mode once'
           fi ;;
         *)
-          die 'Secure Boot is enabled, but firmware setup mode could not be read; enter firmware setup mode or provide a pre-enrolled signing key before installing' ;;
+          die 'Secure Boot is on, and whether the firmware is in setup mode could not be read' ;;
       esac ;;
     disabled)
       [[ -z $SECURE_BOOT_KEY_FILE ]] || SECURE_BOOT_SIGN=1 ;;
     *)
-      die 'could not determine Secure Boot state; refuse the destructive install until firmware state is known (bootctl is-secure-boot)' ;;
+      die 'whether Secure Boot is on could not be read, and this install will not erase a disk without knowing' ;;
   esac
   if (( SECURE_BOOT_SIGN )); then
     for command in sbsign sbverify; do
       command -v "$command" >/dev/null || die "required command not found for Secure Boot signing: $command"
     done
     if (( SECURE_BOOT_SETUP_MODE )) && ! bootctl --help 2>&1 | grep -Fq -- '--secure-boot-auto-enroll'; then
-      die 'the installed bootctl is too old for Secure Boot auto-enrollment; use a newer AuraDE image'
+      die 'this image is too old to enrol Secure Boot keys automatically'
     fi
   fi
 fi
@@ -916,7 +923,7 @@ log "safety token: $ERASE_TOKEN"
 # resolved and proven not to back the running root, and the required commands
 # and Secure Boot state have been checked.
 aurade_journal_init "$MODE" "$TARGET" || {
-  die 'cannot initialize the install journal; refusing to continue'
+  die 'the install journal could not be started, and nothing runs without one'
 }
 aurade_journal_begin preflight 'validating target and environment'
 aurade_journal_ok preflight

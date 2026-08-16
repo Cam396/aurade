@@ -50,20 +50,21 @@ main() {
   case $choice in
     none) return 0 ;;
     unknown:*)
-      printf 'aurade-installer-autostart: %s is not a front end; leaving you at the console\n' \
+      printf 'The boot menu asked for "%s", which is not one of the installers.\n' \
         "${choice#unknown:}" >&2
+      printf 'Run `aurade-installer-start` to start it yourself.\n' >&2
       return 0
       ;;
   esac
 
   [[ -x $START ]] || {
-    printf 'aurade-installer-autostart: %s is missing; leaving you at the console\n' \
-      "$START" >&2
+    printf 'The installer is missing from this image.\n' >&2
+    printf 'aurade-installer-autostart: %s does not exist\n' "$START" >&2
     return 0
   }
 
   if [[ -e $STAMP ]]; then
-    printf 'aurade-installer-autostart: the installer has already run on this console.\n' >&2
+    printf 'The installer has already run on this console.\n' >&2
     printf 'Run `aurade-installer-start` to start it again.\n' >&2
     return 0
   fi
@@ -78,8 +79,10 @@ main() {
     text) "$START" --text || status=$? ;;
   esac
 
-  printf '\naurade-installer-autostart: the installer exited (status %s).\n' "$status" >&2
-  printf 'Run `aurade-installer-start` to start it again, or `aurade-recovery --help`.\n' >&2
+  printf '\nThe installer closed.\n' >&2
+  printf 'Run `aurade-installer-start` to start it again.\n' >&2
+  (( status == 0 )) ||
+    printf 'aurade-installer-autostart: exit status %s\n' "$status" >&2
   return 0
 }
 

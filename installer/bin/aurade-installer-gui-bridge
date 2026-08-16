@@ -706,6 +706,9 @@ gb_progress() {
     out+="\"label\":$(_gb_str "$(stage_label "$stage")"),"
     out+="\"status\":$(_gb_str "$status"),\"pct\":${pct:-0},"
     out+="\"detail\":$(_gb_str "$detail"),"
+    # Roughly how long this one takes, from lib/aurade-copy.sh, so the two
+    # front ends give the same answer to "is it stuck".
+    out+="\"pacing\":$(_gb_str "$(stage_pacing "$stage")"),"
     out+="\"elapsed\":$(_gb_str "$(format_elapsed "${elapsed:-}")")}"
     sep=','
   done
@@ -728,7 +731,20 @@ gb_progress() {
   [[ -z $active ]] || aurade_stage_reversible "$active" || reversible=false
   can_stop=false
   [[ $running != true || $reversible != true ]] || can_stop=true
-  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"reversible\":${reversible},\"can_stop\":${can_stop}}"
+  # Total time so far, summed from the journal rather than from a clock this
+  # process started, so that a screen redrawn from a saved journal shows the
+  # same number it showed at the time.
+  local total_ms=0
+  if [[ -r $JOURNAL_FILE ]]; then
+    total_ms=$(awk '
+      match($0, /"elapsed_ms":[0-9]+/) {
+        sum += substr($0, RSTART + 13, RLENGTH - 13) + 0
+      }
+      END { printf "%d", sum }
+    ' "$JOURNAL_FILE" 2>/dev/null || printf '0')
+    [[ $total_ms =~ ^[0-9]+$ ]] || total_ms=0
+  fi
+  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"elapsed_ms\":${total_ms},\"reversible\":${reversible},\"can_stop\":${can_stop}}"
 }
 
 # Stop a run that has not written anything yet.
@@ -753,7 +769,7 @@ gb_stop() {
     active=$stage
   done
   if [[ -n $active ]] && ! aurade_stage_reversible "$active"; then
-    _gb_err 'the disk has already been changed; stopping now would leave it half written'
+    _gb_err 'the disk has already been changed. Stopping now would leave it half written'
     return 0
   fi
   kill -TERM "$GB_ENGINE_PID" 2>/dev/null || true
@@ -772,6 +788,7 @@ gb_failure() {
   out+="\"cause\":$(_gb_str "$cause"),"
   out+="\"cause_text\":$(_gb_str "${cause:+$(cause_explanation "$cause")}"),"
   out+="\"explanation\":$(_gb_str "${stage:+$(stage_explanation "$stage")}"),"
+  out+="\"next_step\":$(_gb_str "$(cause_next_step "$cause")"),"
   out+="\"detail\":$(_gb_str "$message"),"
   out+="\"restart_advice\":$(_gb_str "$(restart_advice "$stage")"),"
   out+="\"position\":$(_gb_str "$(stage_position "$stage")"),"
@@ -869,7 +886,7 @@ gb_plan() {
 # renderer bug here cannot by itself cause an erase.
 gb_execute() {
   local token=$1 expected
-  (( GB_PLANNED )) || { _gb_err 'no checked plan; the plan step has to succeed first'; return 0; }
+  (( GB_PLANNED )) || { _gb_err 'no checked plan. The plan step has to succeed first'; return 0; }
   [[ -z $GB_ENGINE_PID ]] || { _gb_err 'the installation is already running'; return 0; }
   expected=$(aurade_confirmation_token "${ANSWERS[target]:-}" \
     "${ANSWERS[layout]:-$(aurade_question_default layout)}")

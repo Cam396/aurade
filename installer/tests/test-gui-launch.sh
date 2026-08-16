@@ -31,6 +31,7 @@ install -m 0755 "$ROOT/installer/bin/aurade-installer-gui" \
 install -m 0644 "$ROOT/installer/lib/aurade-validate.sh" \
   "$ROOT/installer/lib/aurade-questions.sh" "$ROOT/installer/lib/aurade-tui.sh" \
   "$ROOT/installer/lib/aurade-probe.sh" "$ROOT/installer/lib/aurade-journal.sh" \
+  "$ROOT/installer/lib/aurade-copy.sh" \
   "$ROOT/installer/lib/aurade-renderers.sh" \
   "$TMP/lib/"
 install -d "$TMP/lib/aurade_gui"
@@ -291,8 +292,13 @@ autostart 'root=live quiet' || fail 'a command line with no request failed'
 # A typo in a boot entry is a typo, not an instruction.
 autostart 'aurade.installer=graphical' || fail 'an unknown front end failed instead of saying so'
 ! started || fail 'an unknown front end name started something anyway'
-grep -q 'is not a front end' "$TMP/launch.log" ||
+grep -q 'not one of the installers' "$TMP/launch.log" ||
   fail 'an unknown front end name was not reported'
+grep -q 'graphical' "$TMP/launch.log" ||
+  fail 'the unknown name itself was not quoted back'
+# A dead end is not a dead end if it says how to get out of it.
+grep -q 'aurade-installer-start' "$TMP/launch.log" ||
+  fail 'an unknown front end name left the console with no way forward'
 
 # Quitting the installer must not start it again. The console is an autologin
 # getty: the login shell ends when the installer exits, agetty starts another

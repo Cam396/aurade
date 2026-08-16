@@ -68,7 +68,15 @@ IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-empty" "$TMP/
 check 'no render node renderer' "$renderer" tui
 check 'no render node reason' "$reason" no-render-node
 check 'no render node predicts black screen' "$black" yes
-[[ $graphics == *renderD* ]] || fail 'the graphics detail does not name what was missing'
+# The graphics field is a value, not an explanation. It is rendered as the
+# right-hand side of a labelled row in both front ends, and it used to hold a
+# sentence about sysfs. What is missing, and what to do about it, is the
+# advice's job; the reason code keeps the detail for whoever is debugging.
+check 'no render node graphics field' "$graphics" 'none found'
+for _jargon in renderD /sys/ GPU driver kernel; do
+  [[ $graphics != *"$_jargon"* ]] ||
+    fail "the graphics field says '$_jargon', which belongs in the advice"
+done
 
 # --- render node present, but not enough memory for the live graphical path -
 IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/meminfo.small")
@@ -151,8 +159,12 @@ check 'software rendering reason' "$reason" software-rendering
 check 'software rendering is not a black screen' "$black" no
 [[ $graphics == *llvmpipe* ]] || fail 'the software renderer was not reported'
 soft_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real" "$TMP/gl-soft:$PATH")
-[[ $soft_advice == *'drawn in software'* ]] ||
+[[ $soft_advice == *'by the processor rather than by a graphics card'* ]] ||
   fail 'the software-rendering advice does not explain itself'
+# Naming the software renderer is a fact about the machine, so it stays on the
+# field. Saying "llvmpipe" to somebody deciding whether to install is not.
+[[ $soft_advice != *llvmpipe* ]] ||
+  fail 'the software-rendering advice names the renderer instead of the effect'
 [[ $soft_advice != *'will not start'* ]] ||
   fail 'software rendering was described as a machine that cannot run the desktop'
 
@@ -161,7 +173,7 @@ IFS='|' read -r renderer reason black graphics < \
 check 'hardware rendering renderer' "$renderer" gui
 check 'hardware rendering reason' "$reason" ok
 hard_advice=$(advice_for "$TMP/dri-ok" "$TMP/drm-real" "$TMP/gl-hard:$PATH")
-[[ $hard_advice == *'Hardware rendering is available'* ]] ||
+[[ $hard_advice == *'Graphics are being drawn by'* ]] ||
   fail 'a real renderer was not reported as hardware rendering'
 
 # A broken or absent eglinfo must leave the sysfs result exactly as it was.
@@ -241,7 +253,7 @@ grep -Fq 'no working 3D acceleration' "$TMP/fallback.out" ||
   fail 'the fallback screen does not explain why the graphical installer did not start'
 grep -Fq 'vmware' "$TMP/fallback.out" ||
   fail 'the fallback screen does not pass the virtual machine advice through'
-grep -Fq 'enable 3D' "$TMP/fallback.out" ||
+grep -Fq 'display settings' "$TMP/fallback.out" ||
   fail 'the fallback screen does not tell the user what to change'
 
 # Low memory is a different message: it must not claim the desktop is broken.

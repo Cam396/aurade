@@ -437,6 +437,20 @@ PROGRESS_TITLE = "Making this computer yours"
 PROGRESS_FOOTER = "Do not turn off this computer."
 PROGRESS_UNINTERRUPTIBLE = "This part cannot be interrupted safely."
 
+#: The pacing line, assembled from three pieces so that the two front ends can
+#: build the same sentence out of the same parts. Deliberately a range and not
+#: a countdown: an estimate that turns out wrong is remembered longer than the
+#: install it was wrong about.
+PROGRESS_PACING = "Usually %s."
+PROGRESS_ELAPSED_ONE = "1 minute so far."
+PROGRESS_ELAPSED = "%d minutes so far."
+
+#: The card underneath, which is either something to read or something to do.
+WAIT_PLAY = "Play something"
+WAIT_STOP = "Back to the tips"
+WAIT_SCORE = "Score %d"
+WAIT_SCORE_OVER = "Score %d. Any key to start again."
+
 DONE_TITLE = "You are all set"
 DONE_BODY = (
     "Take out the installation media and restart. Sign in with the name and "

@@ -58,6 +58,22 @@ Environment:
 EOF
 }
 
+# Two kinds of output leave this program and they are not for the same reader.
+#
+# `say` is addressed to whoever is sitting in front of the computer watching a
+# console because the installer has not appeared yet. It is a plain sentence
+# with no program name in front of it, and there are deliberately very few.
+#
+# `note` is addressed to whoever is reading this back afterwards. It keeps the
+# program name, because in a boot log the name is the point.
+#
+# The renderer negotiation used to speak entirely in the second voice, so a
+# machine that needed four attempts greeted its owner with four lines of
+# `aurade-installer-start: trying GLES on card0`. Every one of those attempts
+# is still recorded, in the attempt log, where it is useful.
+say()  { printf '%s\n' "$*" >&2; }
+note() { printf 'aurade-installer-start: %s\n' "$*" >&2; }
+
 MODE=auto
 PASSTHROUGH=()
 # Arguments for the graphical front end only. The text installer never sees
@@ -128,7 +144,7 @@ if [[ $MODE == auto ]]; then
     # The probe's advice is worth printing even on the way to the text
     # installer: on a virtual machine it is usually a setting the user can
     # change, and it is the same finding the graphics screen will repeat.
-    printf 'aurade-installer-start: %s\n' "$(aurade_probe_advice)" >&2
+    say "$(aurade_probe_advice)"
     run_text
   fi
 fi
@@ -140,7 +156,8 @@ if [[ -n ${WAYLAND_DISPLAY:-} || -n ${DISPLAY:-} ]]; then
 fi
 
 command -v cage >/dev/null 2>&1 || {
-  echo 'aurade-installer-start: no compositor on this image; using the text installer' >&2
+  say 'This image cannot show the graphical installer. Starting the text installer, which installs exactly the same system.'
+  note 'no compositor on this image'
   run_text
 }
 
@@ -165,25 +182,25 @@ prepare_runtime_dir() {
     fi
   fi
   RUNTIME_DIR=$(mktemp -d -- "$base/aurade-runtime.XXXXXX") || {
-    printf '%s\n' \
-      'aurade-installer-start: could not create a private Wayland runtime directory; using the text installer' >&2
+    say 'The graphical installer has nowhere to run. Starting the text installer, which installs exactly the same system.'
+    note 'could not create a private Wayland runtime directory'
     return 1
   }
   RUNTIME_DIR_CREATED=1
   chmod 700 -- "$RUNTIME_DIR" || {
-    printf '%s\n' \
-      'aurade-installer-start: could not secure the Wayland runtime directory; using the text installer' >&2
+    say 'The graphical installer has nowhere private to run. Starting the text installer, which installs exactly the same system.'
+    note 'could not secure the Wayland runtime directory'
     return 1
   }
   export XDG_RUNTIME_DIR=$RUNTIME_DIR
-  printf 'aurade-installer-start: using private Wayland runtime directory %s\n' \
-    "$RUNTIME_DIR" >&2
+  note "using private Wayland runtime directory $RUNTIME_DIR"
 }
 
 prepare_runtime_dir || run_text
 
 renderer_lib=$(_find_lib aurade-renderers.sh) || {
-  echo 'aurade-installer-start: the renderer list is missing from this image' >&2
+  say 'Starting the text installer, which installs exactly the same system.'
+  note 'the renderer list is missing from this image'
   run_text
 }
 # shellcheck source=../lib/aurade-renderers.sh
@@ -245,11 +262,13 @@ while IFS=$'\t' read -r label settings; do
     client_index=$(( client_index + 1 ))
     rm -f -- "$AURADE_GUI_READY_FILE"
 
-    if (( client_index == 1 )); then
-      printf 'aurade-installer-start: trying %s\n' "$label" >&2
+    # The label and the client name go to the attempt log two lines below.
+    # Here, the person is told what is happening, not which of nine
+    # combinations of environment variables is being tried on their behalf.
+    if (( attempted == 1 )); then
+      say 'Starting the installer.'
     else
-      printf 'aurade-installer-start: trying %s with %s\n' "$label" \
-        "$client_label" >&2
+      say 'Trying another way to draw the screen.'
     fi
 
     printf '\n=== %s / %s (%s %s)\n' "$label" "$client_label" "$settings" \
@@ -269,9 +288,11 @@ while IFS=$'\t' read -r label settings; do
     case $stage in
       engaged)
         (( status == 0 )) || {
-          printf 'aurade-installer-start: the graphical installer exited with status %s\n' \
-            "$status" >&2
-          printf 'aurade-installer-start: run `aurade-installer-tui` to install from text\n' >&2
+          # Past the first screen there are answers on the record, so this
+          # cannot quietly restart into something else. It says so and stops.
+          say 'The graphical installer stopped.'
+          say 'Run `aurade-installer-tui` to carry on in text.'
+          note "graphical installer exit status $status"
         }
         exit "$status"
         ;;
@@ -279,30 +300,28 @@ while IFS=$'\t' read -r label settings; do
         # The front end itself said no: no model, no toolkit, or a probe that
         # says this machine cannot display one. Every remaining candidate
         # would reach the same conclusion at the same cost.
-        printf 'aurade-installer-start: the graphical installer cannot run on this machine\n' >&2
+        say 'This computer cannot show the graphical installer. Starting the text installer, which installs exactly the same system.'
         run_text
         ;;
       mapped)
         (( status != 0 )) || exit 0   # a window, then a clean exit: they quit
-        printf 'aurade-installer-start: %s drew a window and then stopped (status %s)\n' \
-          "$label" "$status" >&2
+        note "$label drew a window and then stopped (status $status)"
         ;;
       *)
         # The compositor never drew. Nothing on the client side can change
         # that, so the rest of the client list is not worth the wait.
-        printf 'aurade-installer-start: %s did not produce a display\n' "$label" >&2
+        note "$label did not produce a display"
         break
         ;;
     esac
   done
 done < <(aurade_renderer_plan)
 
-printf 'aurade-installer-start: no renderer produced a display after %s attempts\n' \
-  "$attempted" >&2
+say 'The graphical installer will not start on this computer. Starting the text installer, which installs exactly the same system.'
+note "no renderer produced a display after $attempted attempts"
 if [[ -s $ATTEMPT_LOG ]]; then
   SAVED_LOG=$(mktemp "${TMPDIR:-/tmp}/aurade-installer-graphics.XXXXXX.log")
   cp -- "$ATTEMPT_LOG" "$SAVED_LOG"
-  printf 'aurade-installer-start: what each attempt printed is in %s\n' \
-    "$SAVED_LOG" >&2
+  note "what each attempt printed is in $SAVED_LOG"
 fi
 run_text

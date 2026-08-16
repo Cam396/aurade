@@ -144,23 +144,26 @@ _probe_virt() {
 # probe that exits non-zero for the ordinary "no graphics here" case would
 # abort the installer rather than fall back to it, which is precisely the
 # failure mode this file exists to prevent.
-aurade_probe_renderer() {
+_aurade_probe_renderer() {
   local selection=0
   AURADE_PROBE_VIRT=$(_probe_virt)
   AURADE_PROBE_MEM_MIB=$(_probe_mem_mib)
-  AURADE_PROBE_MEMORY="$(( AURADE_PROBE_MEM_MIB / 1024 )).$(( (AURADE_PROBE_MEM_MIB % 1024) * 10 / 1024 ))G available, graphical mode needs $(( AURADE_PROBE_MIN_GUI_MIB / 1024 ))G"
+  # A field value, not a sentence. It used to carry the threshold with it, so
+  # a healthy machine showed its own requirement back to itself on a row that
+  # had already passed. When it has not passed, the advice says the number.
+  AURADE_PROBE_MEMORY="$(( AURADE_PROBE_MEM_MIB / 1024 )).$(( (AURADE_PROBE_MEM_MIB % 1024) * 10 / 1024 )) GB"
 
   if [[ ${AURADE_FORCE_TUI:-0} == 1 ]]; then
     AURADE_PROBE_RENDERER=tui
     AURADE_PROBE_REASON=forced
-    AURADE_PROBE_GRAPHICS='text installer selected explicitly'
+    AURADE_PROBE_GRAPHICS='not checked'
     return 0
   fi
 
   if ! [[ -d $AURADE_PROBE_DRI_DIR ]]; then
     AURADE_PROBE_RENDERER=tui
     AURADE_PROBE_REASON=no-dri-dir
-    AURADE_PROBE_GRAPHICS="no $AURADE_PROBE_DRI_DIR directory; the kernel found no supported GPU"
+    AURADE_PROBE_GRAPHICS='none found'
     return 0
   fi
 
@@ -170,13 +173,13 @@ aurade_probe_renderer() {
     1)
       AURADE_PROBE_RENDERER=tui
       AURADE_PROBE_REASON=no-render-node
-      AURADE_PROBE_GRAPHICS="no $AURADE_PROBE_DRI_DIR/renderD* device found"
+      AURADE_PROBE_GRAPHICS='none found'
       return 0
       ;;
     2)
       AURADE_PROBE_RENDERER=tui
       AURADE_PROBE_REASON=virtual-gpu-only
-      AURADE_PROBE_GRAPHICS="only the $AURADE_PROBE_DRIVER virtual device was found, which is not a GPU"
+      AURADE_PROBE_GRAPHICS="$AURADE_PROBE_DRIVER, a virtual device"
       return 0
       ;;
   esac
@@ -186,7 +189,7 @@ aurade_probe_renderer() {
   # on the sysfs evidence and the wording claims no more than that.
   AURADE_PROBE_GL=$(_probe_gl_renderer || true)
   if [[ -n $AURADE_PROBE_GL ]]; then
-    AURADE_PROBE_GRAPHICS="$AURADE_PROBE_GRAPHICS; renderer $AURADE_PROBE_GL"
+    AURADE_PROBE_GRAPHICS="$AURADE_PROBE_GRAPHICS, renderer $AURADE_PROBE_GL"
     if _probe_is_software_renderer "$AURADE_PROBE_GL"; then
       AURADE_PROBE_RENDERER=tui
       AURADE_PROBE_REASON=software-rendering
@@ -205,6 +208,17 @@ aurade_probe_renderer() {
   return 0
 }
 
+# A seam for rendering tests that need a graphics field of a chosen length.
+# It replaces what is displayed and never what was decided, so a test cannot
+# use it to talk the probe into a verdict it did not reach.
+aurade_probe_renderer() {
+  local status=0
+  _aurade_probe_renderer "$@" || status=$?
+  [[ -z ${AURADE_PROBE_FORCE_GRAPHICS:-} ]] ||
+    AURADE_PROBE_GRAPHICS=$AURADE_PROBE_FORCE_GRAPHICS
+  return "$status"
+}
+
 # The sentence that turns a reason code into something a person can act on.
 # Bounded set: adding a reason means writing its advice, which is the point.
 aurade_probe_advice() {
@@ -215,31 +229,31 @@ aurade_probe_advice() {
       # the latter is how a user ends up trusting this screen and then meeting
       # a black desktop.
       if [[ -n $AURADE_PROBE_GL ]]; then
-        printf '%s' "Hardware rendering is available through $AURADE_PROBE_GL."
+        printf '%s' "Graphics are being drawn by $AURADE_PROBE_GL."
       elif [[ -n $AURADE_PROBE_DRIVER ]]; then
-        printf '%s' "The $AURADE_PROBE_DRIVER driver is loaded and provides a render node. That is as far as this check goes; whether 3D acceleration works is only proven once the desktop starts."
+        printf '%s' "The $AURADE_PROBE_DRIVER driver is loaded. Whether 3D acceleration really works is only proven once the desktop starts."
       else
-        printf '%s' 'A render node is present, but the driver behind it could not be identified. That is as far as this check goes; whether 3D acceleration works is only proven once the desktop starts.'
+        printf '%s' 'A graphics device is here, but its driver could not be identified. Whether 3D acceleration really works is only proven once the desktop starts.'
       fi
       ;;
     virtual-gpu-only)
-      printf '%s' "The only graphics device found is $AURADE_PROBE_DRIVER, a virtual device with no display output. AuraDE's desktop will not start on it. If this is a virtual machine, give it a real graphics adapter with 3D acceleration enabled."
+      printf '%s' "The only graphics device here is $AURADE_PROBE_DRIVER, which has no display output. Give this machine a real graphics adapter with 3D acceleration, or the desktop will not start."
       ;;
     software-rendering)
-      printf '%s' "Graphics are being drawn in software by $AURADE_PROBE_GL rather than by a GPU. The desktop will start, but it will be slow enough to be unpleasant. On a virtual machine, enabling 3D acceleration usually fixes this."
+      printf '%s' "Graphics are being drawn by the processor rather than by a graphics card. The desktop will start, and it will be slow. On a virtual machine, turning on 3D acceleration usually fixes it."
       ;;
     forced)
       printf '%s' 'The text installer does exactly the same thing as the graphical one.'
       ;;
     no-dri-dir|no-render-node)
       if [[ $AURADE_PROBE_VIRT != none ]]; then
-        printf '%s' "AuraDE's desktop needs 3D acceleration. This is a $AURADE_PROBE_VIRT virtual machine; enable 3D acceleration in its display settings before installing, or the desktop will not start after installation."
+        printf '%s' "AuraDE's desktop needs 3D acceleration, and this $AURADE_PROBE_VIRT machine has none. Turn it on in the machine's display settings before installing."
       else
-        printf '%s' "AuraDE's desktop needs 3D acceleration, and this computer has no working graphics driver. Installing now will produce a system that starts but shows no desktop."
+        printf '%s' "This computer has no working graphics driver, and AuraDE's desktop needs one. It will install, and it will start to a blank screen."
       fi
       ;;
     low-memory)
-      printf '%s' 'There is not enough free memory to run the graphical installer from the installation media. The installed system has more memory available than the live image does, so this does not by itself mean the desktop will be unusable.'
+      printf '%s' "There is not enough free memory to run the graphical installer from this media, which needs $(( AURADE_PROBE_MIN_GUI_MIB / 1024 )) GB. The installed system will have more to work with, so the desktop itself is not affected."
       ;;
     *)
       printf '%s' 'Continuing in text mode.'
