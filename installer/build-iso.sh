@@ -211,6 +211,11 @@ sed -i \
   "$STAGE/pacman.conf" "$STAGE/airootfs/etc/pacman.d/mirrorlist"
 
 install -d -m 0755 "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants"
+# The Arch system package enables systemd-firstboot from sysinit.target when
+# the live root has no first-boot state. That prompt belongs on an installed
+# system, not in front of AuraDE's own language and timezone page. Mask it in
+# the image so no boot entry can reach the generic Arch setup screen.
+ln -s /dev/null "$STAGE/airootfs/etc/systemd/system/systemd-firstboot.service"
 ln -s /usr/lib/systemd/system/NetworkManager.service "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
 ln -s /usr/lib/systemd/system/aurade-refresh-mirrors.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service"

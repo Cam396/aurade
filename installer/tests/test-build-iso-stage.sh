@@ -159,6 +159,14 @@ grep -Fq 'aurade.installer=gui' "$entries/$default_entry" || {
   echo 'test-build-iso-stage: the boot-selected installer service is not enabled' >&2
   exit 1
 }
+[[ -L $TMP/work/profile/airootfs/etc/systemd/system/systemd-firstboot.service ]] || {
+  echo 'test-build-iso-stage: generic Arch first-boot prompt is not masked' >&2
+  exit 1
+}
+[[ $(readlink "$TMP/work/profile/airootfs/etc/systemd/system/systemd-firstboot.service") == /dev/null ]] || {
+  echo 'test-build-iso-stage: first-boot mask does not point to /dev/null' >&2
+  exit 1
+}
 grep -Fq 'ExecStart=/usr/local/sbin/aurade-installer-autostart' \
   "$TMP/work/profile/airootfs/etc/systemd/system/aurade-installer-autostart.service"
 grep -Fq 'Before=getty@tty1.service' \
