@@ -89,7 +89,41 @@ def expand_all(widget: Gtk.Widget) -> None:
         child = child.get_next_sibling()
 
 
-def goto(window: InstallerWindow, name: str) -> None:
+#: A believable mid install, for the one page that draws nothing until the
+#: engine has said something. Without this the progress page previews as a
+#: title, an empty list and a bar at zero, which is not the page anybody sees.
+PROGRESS_REPORT = {
+    "running": True, "can_stop": False, "position": "7 of 11",
+    "active": "pacstrap", "elapsed_ms": 194000, "reversible": False,
+    "stages": [
+        {"stage": "preflight", "label": "Checking this computer",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "0:03"},
+        {"stage": "acquire", "label": "Downloading packages",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "2:41"},
+        {"stage": "confirm", "label": "Confirming the disk",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "0:00"},
+        {"stage": "partition", "label": "Partitioning the disk",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "0:02"},
+        {"stage": "format", "label": "Formatting",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "0:18"},
+        {"stage": "mount", "label": "Mounting",
+         "status": "ok", "pct": 100, "detail": "", "elapsed": "0:00"},
+        {"stage": "pacstrap", "label": "Installing the base system",
+         "status": "running", "pct": 58, "detail": "612 of 1041 packages",
+         "pacing": "five to ten minutes", "elapsed": ""},
+        {"stage": "configure", "label": "Setting things up",
+         "status": "pending", "pct": 0, "detail": "", "elapsed": ""},
+        {"stage": "bootloader", "label": "Making it bootable",
+         "status": "pending", "pct": 0, "detail": "", "elapsed": ""},
+        {"stage": "snapshot", "label": "Saving a snapshot to roll back to",
+         "status": "pending", "pct": 0, "detail": "", "elapsed": ""},
+        {"stage": "verify-install", "label": "Checking everything landed",
+         "status": "pending", "pct": 0, "detail": "", "elapsed": ""},
+    ],
+}
+
+
+def goto(window: InstallerWindow, name: str, playing: bool = False) -> None:
     """Put the window on one page or state, through the flow's own methods."""
     if name in F.PAGES_BY_NAME:
         window.flow.state = "pages"
@@ -97,6 +131,27 @@ def goto(window: InstallerWindow, name: str) -> None:
     else:
         window.flow.state = name
     window.refresh()
+    if name != F.PROGRESS:
+        return
+    # The progress page is a view of a journal that is not being written here,
+    # so it is handed one. This is the only page in the tool that needs it, and
+    # it goes through `_draw_progress`, the same call the poll makes.
+    window._draw_progress(PROGRESS_REPORT)
+    window.tip_index = 0
+    window._rotate_tip()
+    if playing:
+        window._on_waiting_toggled(window.widgets["progress.play"])
+        # Play it a little, and steer, so the render shows a game in progress
+        # rather than a snake that walked into the right wall unattended.
+        from gi.repository import Gdk  # noqa: PLC0415
+        window.widgets["progress.arena"].queue_draw()
+        pump(2)
+        for turn, steps in ((Gdk.KEY_Down, 3), (Gdk.KEY_Right, 5),
+                            (Gdk.KEY_Up, 2), (Gdk.KEY_Right, 4)):
+            window._on_snake_key(None, turn, 0, 0)
+            for _ in range(steps):
+                window._snake_tick()
+        window.snake.score = 4
 
 
 def main() -> int:
@@ -109,6 +164,9 @@ def main() -> int:
                         help="render in the dark scheme")
     parser.add_argument("--size", default="1440x900",
                         help="window size, when the compositor allows one")
+    parser.add_argument("--playing", action="store_true",
+                        help="on the progress page, show the game rather than "
+                             "the tips")
     parser.add_argument("--expand", action="store_true",
                         help="open every disclosure before drawing, so folded "
                              "content can be reviewed too")
@@ -158,7 +216,7 @@ def main() -> int:
         suffix = "-dark" if args.dark else ""
         for name in names:
             try:
-                goto(window, name)
+                goto(window, name, args.playing)
             except Exception as exc:  # noqa: BLE001 - a tool, not the product
                 print(f"preview-gui: {name}: {exc}", file=sys.stderr)
                 continue

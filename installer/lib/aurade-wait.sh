@@ -102,14 +102,22 @@ AURADE_AURORA_RAMP=' .:-=+*#'
 # Two waves of different wavelength and opposite drift, summed. One wave is a
 # ripple; two that disagree is a thing that never quite repeats, which is what
 # makes it worth looking at for ten minutes.
+#: While this is above zero the ribbon swings harder and the wave is faster.
+#: It is set by typing a word at the progress screen, counted down a frame at
+#: a time, and it does nothing else.
+AURADE_AURORA_BLOOM=0
+
 aurade_aurora() {
   local frame=${1:-0} width=${2:-56} rows=${3:-3}
-  awk -v frame="$frame" -v width="$width" -v rows="$rows" \
+  local bloom=0
+  (( AURADE_AURORA_BLOOM <= 0 )) || bloom=1
+  awk -v frame="$frame" -v width="$width" -v rows="$rows" -v bloom="$bloom" \
       -v ramp="$AURADE_AURORA_RAMP" '
     BEGIN {
       steps = length(ramp)
       middle = (rows - 1) / 2
-      thickness = 1.35
+      thickness = bloom ? 2.1 : 1.35
+      swing = bloom ? 1.7 : 1.0
       for (y = 0; y < rows; y++) {
         line = ""
         for (x = 0; x < width; x++) {
@@ -117,8 +125,8 @@ aurade_aurora() {
           # a level that fills from the bottom: filling upward reads as a
           # progress bar, and there is already a progress bar on this screen.
           centre = middle \
-            + 0.85 * sin(x * 0.17 + frame * 0.09) \
-            + 0.45 * sin(x * 0.061 - frame * 0.052)
+            + 0.85 * swing * sin(x * 0.17 + frame * 0.09 * swing) \
+            + 0.45 * swing * sin(x * 0.061 - frame * 0.052 * swing)
           level = 1 - (centre > y ? centre - y : y - centre) / thickness
           if (level < 0) level = 0
           if (level > 1) level = 1

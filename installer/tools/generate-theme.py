@@ -226,6 +226,12 @@ def build_palettes() -> dict[str, dict[int, str]]:
         "neutral": ramp(plate_h, 0.010),
         "neutral_variant": ramp(plate_h, 0.022),
         "error": ramp(27.0, 0.170),
+        # Amber, and its own ramp rather than an alias. `warning` used to point
+        # at `secondary`, which is the plate hue at chroma 0.045: a slate grey.
+        # A caution drawn in the same colour as ordinary chrome is not a
+        # caution. Warm enough to read as one, and far enough from `error` at
+        # hue 27 that the two are never confused.
+        "warning": ramp(78.0, 0.140),
     }
 
 
@@ -235,9 +241,9 @@ def ramp(hue: float, chroma: float) -> dict[int, str]:
 
 def roles(p: dict[str, dict[int, str]], dark: bool) -> dict[str, str]:
     """The Material 3 colour roles, light and dark, as published."""
-    P, S, T, N, NV, E = (
+    P, S, T, N, NV, E, W = (
         p["primary"], p["secondary"], p["tertiary"],
-        p["neutral"], p["neutral_variant"], p["error"],
+        p["neutral"], p["neutral_variant"], p["error"], p["warning"],
     )
     if not dark:
         return {
@@ -249,6 +255,8 @@ def roles(p: dict[str, dict[int, str]], dark: bool) -> dict[str, str]:
             "tertiary_container": T[90], "on_tertiary_container": T[10],
             "error": E[40], "on_error": E[100],
             "error_container": E[90], "on_error_container": E[10],
+            "warning": W[40], "on_warning": W[100],
+            "warning_container": W[90], "on_warning_container": W[10],
             "surface": N[98], "on_surface": N[10],
             "surface_dim": N[87], "surface_bright": N[98],
             "surface_container_lowest": N[100], "surface_container_low": N[96],
@@ -269,6 +277,8 @@ def roles(p: dict[str, dict[int, str]], dark: bool) -> dict[str, str]:
         "tertiary_container": T[30], "on_tertiary_container": T[90],
         "error": E[80], "on_error": E[20],
         "error_container": E[30], "on_error_container": E[90],
+        "warning": W[80], "on_warning": W[20],
+        "warning_container": W[30], "on_warning_container": W[90],
         "surface": N[6], "on_surface": N[90],
         "surface_dim": N[6], "surface_bright": N[24],
         "surface_container_lowest": N[4], "surface_container_low": N[10],
@@ -344,8 +354,8 @@ TYPE = {
     "headline_medium": (28, 600, -0.5, 1.22),
     "headline_small": (24, 600, -0.4, 1.26),
     "title_large": (22, 600, -0.2, 1.32),
-    "title_medium": (16, 600, 0.0, 1.40),
-    "title_small": (15, 600, 0.0, 1.40),
+    "title_medium": (18, 600, -0.1, 1.36),
+    "title_small": (15, 500, 0.0, 1.40),
     "body_large": (17, 400, 0.0, 1.55),
     "body_medium": (15, 400, 0.0, 1.55),
     "body_small": (13, 400, 0.0, 1.50),
@@ -437,9 +447,9 @@ def _adw_map(s: dict[str, str]) -> str:
         ("success_bg_color", "tertiary"),
         ("success_fg_color", "on_tertiary"),
         ("success_color", "tertiary"),
-        ("warning_bg_color", "secondary"),
-        ("warning_fg_color", "on_secondary"),
-        ("warning_color", "secondary"),
+        ("warning_bg_color", "warning_container"),
+        ("warning_fg_color", "on_warning_container"),
+        ("warning_color", "warning"),
     ]
     return "\n".join(f"@define-color {name} {s[role]};" for name, role in pairs)
 
@@ -576,6 +586,30 @@ COMPONENT_CSS = r"""
 .aurade-verdict-blocked {
   background: @m3_error_container;
   color: @m3_on_error_container;
+}
+
+/* The one step that is happening, and the card it happens in.
+
+   Roomier than the other cards on purpose. It holds four things - the step,
+   the ribbon, the count under it and the pacing - and it is the only thing on
+   this page that anybody is looking at, so it gets the padding of something
+   that matters rather than the padding of a list row. */
+.card,
+.aurade-live-step {
+  border-radius: 16px;
+}
+
+.aurade-live-step {
+  padding: 24px;
+  background: @m3_surface_container_low;
+}
+
+/* And the card underneath, which is deliberately quieter: it holds the thing
+   to read or the thing to play, and it must not compete with the install. */
+.aurade-waiting {
+  padding: 20px;
+  background: @m3_surface_container;
+  border-radius: 16px;
 }
 
 /* The verdict's own glyph, in a disc of its container's ink. Material 3 puts

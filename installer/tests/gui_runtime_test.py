@@ -32,7 +32,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from aurade_gui import flow as F  # noqa: E402
 from aurade_gui.app import InstallerWindow  # noqa: E402
@@ -323,6 +323,139 @@ def run(window: InstallerWindow) -> None:
     check(abs(window.widgets["progress.bar"].get_fraction() - 0.4) < 1e-6,
           "with motion off the progress bar did not go straight to its value")
     settings.set_property("gtk-enable-animations", motion_was)
+
+    # -- the ten minutes in the middle -------------------------------------
+    #
+    # The waiting card is the reason this page was rebuilt, and it is made of
+    # exactly the things a source-level test cannot see: two stacks that have
+    # to swap, a drawing area that has to draw, and a key controller that must
+    # steer a snake and nothing else.
+    window._draw_progress({
+        "running": True, "can_stop": False, "position": "7 of 11",
+        "elapsed_ms": 194000, "active": "pacstrap",
+        "stages": (
+            [{"stage": f"done{n}", "label": f"Step {n}", "status": "ok",
+              "pct": 100, "detail": "", "elapsed": "0:04"} for n in range(6)]
+            + [{"stage": "pacstrap", "label": "Installing the base system",
+                "status": "running", "pct": 58,
+                "pacing": "five to ten minutes",
+                "detail": "612/1041 packages"}]
+            + [{"stage": f"todo{n}", "label": f"Later {n}", "status": "pending",
+                "pct": 0, "detail": "", "elapsed": ""} for n in range(4)]
+        ),
+    })
+    # The running step is the heading of its own card, and the pacing line
+    # underneath must not repeat it. A card that says "Installing the base
+    # system" twice reads as a card that was assembled rather than written.
+    check(window.widgets["progress.step"].get_label() == "Installing the base system",
+          "the live card does not name the running step")
+    pacing = window.widgets["progress.pacing"].get_label()
+    check("Installing the base system" not in pacing,
+          f"the pacing line repeats the heading above it: {pacing!r}")
+    check("Usually five to ten minutes." in pacing,
+          f"the pacing line does not say roughly how long: {pacing!r}")
+    check("3 minutes so far." in pacing,
+          f"the pacing line does not say how long it has been: {pacing!r}")
+    # The count, which is also the disclosure the full list lives behind.
+    check(window.widgets["progress.steps"].get_title() == "6 done, 4 to go",
+          "the step count is wrong: "
+          f"{window.widgets['progress.steps'].get_title()!r}")
+    # A range, never a countdown. An estimate that turns out wrong is
+    # remembered longer than the install it was wrong about.
+    for promise in ("remaining", "time left", "estimated"):
+        check(promise not in pacing.lower(),
+              f"the pacing line promises a countdown it cannot keep: {promise}")
+
+    # A stage with no pacing in the table must not leave the word "Usually"
+    # hanging on its own.
+    window._draw_progress({
+        "running": True, "can_stop": False, "position": "1 of 11",
+        "elapsed_ms": 0, "active": "mystery",
+        "stages": [{"stage": "mystery", "label": "Doing something new",
+                    "status": "running", "pct": 5, "pacing": "", "detail": ""}],
+    })
+    bare = window.widgets["progress.pacing"].get_label()
+    check("Usually" not in bare, f"a stage with no pacing said 'Usually': {bare!r}")
+    check(bare.strip() == "",
+          f"a stage with no pacing and no elapsed time drew {bare!r}")
+    check(window.widgets["progress.step"].get_label() == "Doing something new",
+          "a stage with no pacing lost its name as well")
+
+    # The tips come from the same file the text installer reads.
+    check(bool(window.tips), "the graphical front end found no tips to show")
+    window.tip_index = 0
+    window._rotate_tip()
+    first_face = window.widgets["progress.tips"].get_visible_child_name()
+    first_text = window.widgets[f"progress.tip.{first_face}"].get_label()
+    check(len(first_text) > 20, f"the first tip is not a tip: {first_text!r}")
+    window._rotate_tip()
+    second_face = window.widgets["progress.tips"].get_visible_child_name()
+    check(second_face != first_face,
+          "rotating a tip did not swap the crossfade stack, so nothing fades")
+    second_text = window.widgets[f"progress.tip.{second_face}"].get_label()
+    check(second_text != first_text, "the tip rotation repeated itself")
+
+    # The game. It has to actually start, actually move, and actually be
+    # steerable, and none of that is visible from the source.
+    faces = window.widgets["progress.faces"]
+    check(faces.get_visible_child_name() == "tips",
+          "the waiting card started on the game rather than the tips")
+    window._on_waiting_toggled(window.widgets["progress.play"])
+    pump(2)
+    check(faces.get_visible_child_name() == "game",
+          "asking to play did not show the game")
+    check(window.snake is not None, "asking to play did not start a game")
+    check(window.widgets["progress.play"].get_label() != F.WAIT_PLAY,
+          "the play button still offers to play while the game is up")
+    before = list(window.snake.body)
+    window._snake_tick()
+    check(list(window.snake.body) != before, "a tick did not move the snake")
+    check("Score" in window.widgets["progress.score"].get_label(),
+          "the game is up and the score is not")
+
+    # Arrow keys steer. Everything else is refused, which is what keeps the
+    # least recoverable screen in the product free of bound keys.
+    window.snake.direction = (1, 0)
+    handled = window._on_snake_key(None, Gdk.KEY_Up, 0, 0)
+    check(handled, "the up arrow was not accepted by the game")
+    check(window.snake.pending == (0, -1), "the up arrow did not turn the snake")
+    check(not window._on_snake_key(None, Gdk.KEY_Return, 0, 0),
+          "the game swallowed Return, which belongs to the page")
+
+    # The drawing area draws, including once the snake has earned its gradient.
+    arena = window.widgets["progress.arena"]
+    for score in (0, 12):
+        window.snake.score = score
+        try:
+            snapshot = Gtk.Snapshot()
+            arena.do_snapshot(arena, snapshot)
+        except Exception as exc:  # noqa: BLE001
+            FAILURES.append(f"drawing the arena at score {score} raised: {exc!r}")
+
+    window._on_waiting_toggled(window.widgets["progress.play"])
+    pump(2)
+    check(faces.get_visible_child_name() == "tips",
+          "leaving the game did not go back to the tips")
+    check(window._snake_source == 0,
+          "the game kept ticking after it was put away")
+
+    # -- the word ----------------------------------------------------------
+    #
+    # Typed on the welcome page, it replays the swoop. Typed anywhere else it
+    # is six ordinary keystrokes that do nothing.
+    window.flow.state = F.WELCOME
+    window._swooped = True
+    window._secret = ""
+    for letter in "aurora":
+        window._on_secret_key(None, ord(letter), 0, 0)
+    check(not window._swooped or getattr(window, "_swoop_animation", None) is not None,
+          "the word on the welcome page did not replay the swoop")
+    window.flow.state = F.PROGRESS
+    window._secret = ""
+    for letter in "aurora":
+        check(not window._on_secret_key(None, ord(letter), 0, 0),
+              "the word did something on a page that is not the welcome page")
+    window.flow.state = F.PROGRESS
 
     # -- the scheme toggle -------------------------------------------------
     toggles = [w for w in walk(window)

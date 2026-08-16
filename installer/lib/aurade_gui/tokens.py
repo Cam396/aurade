@@ -17,6 +17,7 @@ PALETTES = {
     'neutral': {0: '#000000', 4: '#0d0e13', 6: '#121318', 10: '#1a1b20', 12: '#1e1f25', 17: '#282a2f', 20: '#2f3036', 22: '#33353a', 24: '#37393f', 30: '#45474c', 40: '#5c5e64', 50: '#75777d', 60: '#8f9097', 70: '#a9abb2', 80: '#c4c6cd', 87: '#d8dae1', 90: '#e0e2e9', 92: '#e6e8ef', 94: '#eceef5', 95: '#eff0f8', 96: '#f1f3fb', 98: '#f8f9ff', 99: '#fbfcff', 100: '#ffffff'},
     'neutral_variant': {0: '#000000', 4: '#0b0e18', 6: '#10131d', 10: '#181b26', 12: '#1c1f2a', 17: '#272935', 20: '#2d303c', 22: '#313440', 24: '#363945', 30: '#434653', 40: '#5a5e6b', 50: '#737785', 60: '#8c909f', 70: '#a7abba', 80: '#c2c6d5', 87: '#d5dae9', 90: '#dee2f2', 92: '#e4e8f8', 94: '#e9edfd', 95: '#ecf0ff', 96: '#f0f3ff', 98: '#f8f9ff', 99: '#fbfcff', 100: '#ffffff'},
     'error': {0: '#000000', 4: '#270001', 6: '#310001', 10: '#410002', 12: '#480103', 17: '#5c0004', 20: '#680106', 22: '#710107', 24: '#790209', 30: '#93000c', 40: '#b12c28', 50: '#cf4942', 60: '#ed655b', 70: '#ff8a7e', 80: '#feb4ab', 87: '#fecfc9', 90: '#fedbd6', 92: '#fee2de', 94: '#ffe9e6', 95: '#ffedea', 96: '#fff0ee', 98: '#fef8f7', 99: '#fefcfb', 100: '#ffffff'},
+    'warning': {0: '#000000', 4: '#160c00', 6: '#1d1101', 10: '#281901', 12: '#2d1c00', 17: '#3a2602', 20: '#422c01', 22: '#483001', 24: '#4e3401', 30: '#5f4102', 40: '#7e5704', 50: '#9e6e05', 60: '#bf8608', 70: '#dda030', 80: '#fabc52', 87: '#ffd390', 90: '#ffdeac', 92: '#fee5be', 94: '#ffebce', 95: '#ffefd7', 96: '#fef2df', 98: '#fff9ef', 99: '#fffcf8', 100: '#ffffff'},
 }
 
 LIGHT = {
@@ -36,6 +37,10 @@ LIGHT = {
     'on_error': '#ffffff',
     'error_container': '#fedbd6',
     'on_error_container': '#410002',
+    'warning': '#7e5704',
+    'on_warning': '#ffffff',
+    'warning_container': '#ffdeac',
+    'on_warning_container': '#281901',
     'surface': '#f8f9ff',
     'on_surface': '#1a1b20',
     'surface_dim': '#d8dae1',
@@ -73,6 +78,10 @@ DARK = {
     'on_error': '#680106',
     'error_container': '#93000c',
     'on_error_container': '#fedbd6',
+    'warning': '#fabc52',
+    'on_warning': '#422c01',
+    'warning_container': '#5f4102',
+    'on_warning_container': '#ffdeac',
     'surface': '#121318',
     'on_surface': '#e0e2e9',
     'surface_dim': '#121318',
@@ -95,7 +104,7 @@ DARK = {
 
 SHAPE = {'none': 0, 'xs': 4, 'sm': 8, 'md': 12, 'lg': 16, 'xl': 28, 'full': 999}
 STATE = {'hover': 0.08, 'focus': 0.1, 'pressed': 0.1, 'dragged': 0.16, 'disabled_content': 0.38, 'disabled_container': 0.12}
-TYPE = {'display_large': (57, 500, -1.6, 1.08), 'display_medium': (45, 500, -1.1, 1.12), 'display_small': (36, 600, -0.7, 1.16), 'headline_large': (32, 600, -0.6, 1.2), 'headline_medium': (28, 600, -0.5, 1.22), 'headline_small': (24, 600, -0.4, 1.26), 'title_large': (22, 600, -0.2, 1.32), 'title_medium': (16, 600, 0.0, 1.4), 'title_small': (15, 600, 0.0, 1.4), 'body_large': (17, 400, 0.0, 1.55), 'body_medium': (15, 400, 0.0, 1.55), 'body_small': (13, 400, 0.0, 1.5), 'label_large': (14, 500, 0.0, 1.32), 'label_medium': (12, 500, 0.0, 1.32), 'label_small': (11, 500, 0.2, 1.32)}
+TYPE = {'display_large': (57, 500, -1.6, 1.08), 'display_medium': (45, 500, -1.1, 1.12), 'display_small': (36, 600, -0.7, 1.16), 'headline_large': (32, 600, -0.6, 1.2), 'headline_medium': (28, 600, -0.5, 1.22), 'headline_small': (24, 600, -0.4, 1.26), 'title_large': (22, 600, -0.2, 1.32), 'title_medium': (18, 600, -0.1, 1.36), 'title_small': (15, 500, 0.0, 1.4), 'body_large': (17, 400, 0.0, 1.55), 'body_medium': (15, 400, 0.0, 1.55), 'body_small': (13, 400, 0.0, 1.5), 'label_large': (14, 500, 0.0, 1.32), 'label_medium': (12, 500, 0.0, 1.32), 'label_small': (11, 500, 0.2, 1.32)}
 
 
 def scheme(dark: bool) -> dict[str, str]:

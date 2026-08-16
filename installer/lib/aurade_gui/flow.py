@@ -445,6 +445,29 @@ PROGRESS_PACING = "Usually %s."
 PROGRESS_ELAPSED_ONE = "1 minute so far."
 PROGRESS_ELAPSED = "%d minutes so far."
 
+#: The step count, which is also the disclosure that opens into the full list.
+PROGRESS_STEPS = "Steps"
+PROGRESS_STEP_IDLE = "Getting ready"
+
+
+def progress_steps(done: int, pending: int) -> str:
+    """"6 done, 4 to go", and the singular cases, and the ends.
+
+    Written out rather than assembled from fragments because "1 steps done" is
+    the kind of thing that survives review and then sits on the screen for the
+    length of an install.
+    """
+    if not done and not pending:
+        return PROGRESS_STEPS
+    if not pending:
+        return "All steps done"
+    if not done:
+        return "1 step to go" if pending == 1 else f"{pending} steps to go"
+    finished = "1 done" if done == 1 else f"{done} done"
+    left = "1 to go" if pending == 1 else f"{pending} to go"
+    return f"{finished}, {left}"
+
+
 #: The card underneath, which is either something to read or something to do.
 WAIT_PLAY = "Play something"
 WAIT_STOP = "Back to the tips"

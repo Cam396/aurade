@@ -42,6 +42,9 @@ render_at() {
 
 # shellcheck source=../lib/aurade-wait.sh
 . "$ROOT/installer/lib/aurade-wait.sh"
+# Read by aurade_tips_load in the library sourced above, which shellcheck
+# cannot see across.
+# shellcheck disable=SC2034
 AURADE_TIPS_FILE=$ROOT/installer/lib/aurade-tips
 aurade_tips_load
 
@@ -53,7 +56,7 @@ aurade_tips_load
 # Every tip has to fit in two lines of the frame, because a third line pushes
 # the layout budget over and the screen starts giving up the ribbon for prose.
 for _tip in "${AURADE_TIPS[@]}" "${AURADE_TIPS_NEXT[@]}" "${AURADE_TIPS_RARE[@]}"; do
-  (( ${#_tip} <= 130 )) || fail "tip is ${#_tip} characters, over the two line budget: ${_tip:0:50}..."
+  (( ${#_tip} <= 120 )) || fail "tip is ${#_tip} characters, over the two line budget: ${_tip:0:50}..."
 done
 
 # The rotation must not repeat itself back to back. A repeat on a screen
@@ -91,11 +94,16 @@ for i in $(seq 0 60); do
       fail 'a rare tip appeared with the rare lane switched off'
   done
 done
+# One draw, checked for membership. Comparing each draw against one entry in
+# turn looked equivalent and was not: with five rare tips it asks whether five
+# independent draws each happened to land on their own index, which is
+# (4/5)^5 and fails a third of the time.
+rare_drawn=$(AURADE_TIP_RARITY=1 aurade_tip_for 0)
 rare_seen=0
 for _entry in "${AURADE_TIPS_RARE[@]}"; do
-  [[ $(AURADE_TIP_RARITY=1 aurade_tip_for 0) != "$_entry" ]] || rare_seen=1
+  [[ $rare_drawn != "$_entry" ]] || rare_seen=1
 done
-(( rare_seen )) || fail 'the rare lane never produces a rare tip'
+(( rare_seen )) || fail "the rare lane produced something else: $rare_drawn"
 
 # --------------------------------------------------------------------------
 # The aurora

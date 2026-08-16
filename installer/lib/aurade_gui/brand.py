@@ -78,7 +78,11 @@ def aurora_fields(dark: bool) -> list[tuple[str, float, float, float, float]]:
     foreground to shout is a backdrop that failed.
     """
     scheme = T.scheme(dark)
-    strong = 0.42 if dark else 0.30
+    # Measured rather than chosen. At 0.30 the light aurora blended to 2.35 L*
+    # against the surface behind it, which on an ordinary panel is not a
+    # backdrop, it is nothing. 0.42 puts it at about 3.3 L*, and body text over
+    # it still measures 15.5:1, so there is no contrast cost to pay for it.
+    strong = 0.42 if dark else 0.42
     return [
         (scheme["primary_container"], 0.18, 0.12, 0.62, strong),
         (scheme["tertiary_container"], 0.86, 0.30, 0.55, strong * 0.9),
@@ -167,6 +171,94 @@ def draw_ribbon_rule(cr, width: int, height: int, dark: bool) -> None:
     cr.fill()
 
 
+def draw_progress_ribbon(cr, width: int, height: int, dark: bool,
+                        fraction: float, phase: float = 0.0) -> None:
+    """The install, drawn as the mark's own stroke rather than as a bar.
+
+    A stock progress bar is the one place a carefully drawn interface reverts
+    to the toolkit, and it is on the screen people look at for ten minutes. So
+    this is the ribbon: the same lilac to aqua run as the hairline and the
+    mark, laid into a rounded track and stopped where the install has got to.
+
+    Three things make it read as a thing being made rather than a rectangle
+    being filled. The fill runs the whole lilac to aqua gradient across the
+    part that is filled, so the ribbon is complete at every moment and simply
+    gets longer; laid across the whole track instead, an install at half way
+    shows only the lilac half and the thing reads as a flat purple bar. The
+    leading edge carries a brighter cap, which is the same pen that draws the
+    swoop. And a slow highlight travels the filled length, because a bar that
+    is completely still during a five minute step is indistinguishable from a
+    bar that has hung.
+    """
+    import cairo  # noqa: PLC0415
+
+    scheme = T.scheme(dark)
+    fraction = max(0.0, min(1.0, fraction))
+    radius = height / 2
+    if width <= height:
+        return
+
+    def track(x: float, w: float) -> None:
+        # A rounded rectangle, drawn as two caps and a middle, because the
+        # filled part has to keep the track's left cap and grow its own right
+        # one rather than being a clipped rectangle with square ends.
+        cr.new_path()
+        if w <= 0:
+            return
+        if w <= height:
+            cr.arc(x + radius, radius, radius, 0, 6.283185)
+            return
+        cr.arc(x + radius, radius, radius, 1.570796, 4.712389)
+        cr.arc(x + w - radius, radius, radius, 4.712389, 1.570796)
+        cr.close_path()
+
+    # The track. Low contrast on purpose: it is the space the ribbon has left
+    # to cross, not a second bar.
+    cr.set_source_rgba(*T.rgb(scheme["surface_container_highest"]), 1.0)
+    track(0, width)
+    cr.fill()
+
+    filled = width * fraction
+    if filled < 1:
+        return
+
+    gradient = cairo.LinearGradient(0, 0, filled, 0)
+    gradient.add_color_stop_rgb(0.0, *T.rgb(scheme["primary"]))
+    gradient.add_color_stop_rgb(0.55, *T.rgb(scheme["secondary"]))
+    gradient.add_color_stop_rgb(1.0, *T.rgb(scheme["tertiary"]))
+    cr.set_source(gradient)
+    track(0, filled)
+    cr.fill()
+
+    # The highlight, travelling the filled length on a slow loop. Clipped to
+    # the fill so it never appears in the empty part of the track and promise
+    # progress that has not happened.
+    if filled > height * 2:
+        cr.save()
+        track(0, filled)
+        cr.clip()
+        centre = (phase % 1.0) * (filled + height * 4) - height * 2
+        sheen = cairo.LinearGradient(centre - height * 2, 0,
+                                     centre + height * 2, 0)
+        white = T.rgb(scheme["on_primary"])
+        sheen.add_color_stop_rgba(0.0, *white, 0.0)
+        sheen.add_color_stop_rgba(0.5, *white, 0.22)
+        sheen.add_color_stop_rgba(1.0, *white, 0.0)
+        cr.set_source(sheen)
+        cr.rectangle(0, 0, filled, height)
+        cr.fill()
+        cr.restore()
+
+    # The pen at the leading edge, the same one that draws the swoop. Only
+    # once there is room for it to sit inside the fill rather than on top of
+    # the left cap.
+    if filled > height * 1.5:
+        cr.set_source_rgba(*T.rgb(PEN), 0.95)
+        cr.new_path()
+        cr.arc(filled - radius, radius, radius * 0.42, 0, 6.283185)
+        cr.fill()
+
+
 def draw_mark(cr, width: int, height: int, size: float) -> None:
     surface = _png("aurade-mark.png")
     if surface is None:
@@ -182,6 +274,17 @@ def draw_mark(cr, width: int, height: int, size: float) -> None:
     cr.paint()
     cr.restore()
 
+
+#: The pen: the bright head that rides the leading edge of anything the ribbon
+#: draws, in the swoop and on the progress page both.
+#:
+#: A fixed tone rather than a role, and that is the point. Picking it by role
+#: gave the two drawings different colours in the same scheme, and then picking
+#: the same role for both gave the progress ribbon an aqua pen sitting on the
+#: aqua end of its own gradient, which is invisible. A pen is a highlight; it
+#: has to be lighter than whatever it is riding on, and the aqua ramp's tone 90
+#: is lighter than every part of the ribbon in either scheme.
+PEN = T.PALETTES["tertiary"][90]
 
 SWOOP_REVEAL = 0.55   #: the ribbon has closed its circle by here
 SWOOP_HOLD = 0.72     #: the ring has left the mark by here
@@ -253,6 +356,7 @@ def draw_swoop(cr, width: int, height: int, dark: bool, phase: float) -> None:
     cr.set_line_cap(cairo.LINE_CAP_ROUND)
     gradient = cairo.LinearGradient(cx - ring, cy - ring, cx + ring, cy + ring)
     gradient.add_color_stop_rgba(0.0, pr, pg, pb, veil)
+    gradient.add_color_stop_rgba(0.5, *T.rgb(scheme["secondary"]), veil)
     gradient.add_color_stop_rgba(1.0, tr, tg, tb, veil)
     cr.set_source(gradient)
     cr.set_line_width(size * 0.07)
@@ -267,7 +371,7 @@ def draw_swoop(cr, width: int, height: int, dark: bool, phase: float) -> None:
     if 0.0 < sweep < 1.0:
         angle = start + sweep * 2 * math.pi
         cr.new_path()
-        cr.set_source_rgba(tr, tg, tb, veil)
+        cr.set_source_rgba(*T.rgb(PEN), veil)
         cr.set_line_width(size * 0.09)
         cr.arc(cx, cy, ring, max(start, angle - 0.30), angle)
         cr.stroke()
@@ -309,10 +413,12 @@ def draw_wordmark(cr, x: float, y: float, height: float, colour: str) -> float:
 def draw_signal(cr, width: int, height: int, strength: int, colour: str,
                 dim: str) -> None:
     """Four arcs around a common origin, lit from the inside out."""
+    import cairo  # noqa: PLC0415
+
     lit = signal_arcs(strength)
     cx, cy = width / 2.0, height * 0.86
     cr.set_line_width(max(1.6, height * 0.075))
-    cr.set_line_cap(1)  # cairo.LINE_CAP_ROUND, without importing for a constant
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
     for index in range(4):
         radius = height * (0.18 + index * 0.21)
         cr.set_source_rgb(*T.rgb(colour if index < lit else dim))

@@ -27,6 +27,10 @@
 @define-color m3_on_error #ffffff;
 @define-color m3_error_container #fedbd6;
 @define-color m3_on_error_container #410002;
+@define-color m3_warning #7e5704;
+@define-color m3_on_warning #ffffff;
+@define-color m3_warning_container #ffdeac;
+@define-color m3_on_warning_container #281901;
 @define-color m3_surface #f8f9ff;
 @define-color m3_on_surface #1a1b20;
 @define-color m3_surface_dim #d8dae1;
@@ -76,9 +80,9 @@
 @define-color success_bg_color #156682;
 @define-color success_fg_color #ffffff;
 @define-color success_color #156682;
-@define-color warning_bg_color #575d79;
-@define-color warning_fg_color #ffffff;
-@define-color warning_color #575d79;
+@define-color warning_bg_color #ffdeac;
+@define-color warning_fg_color #281901;
+@define-color warning_color #7e5704;
 
 /* ---- state layers ---- */
 @define-color m3_hover rgba(26, 27, 32, 0.08);
@@ -100,8 +104,8 @@ window.aurade {
 .m3-headline-medium { font-size: 28px; font-weight: 600; letter-spacing: -0.5px; line-height: 1.22; }
 .m3-headline-small { font-size: 24px; font-weight: 600; letter-spacing: -0.4px; line-height: 1.26; }
 .m3-title-large { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; line-height: 1.32; }
-.m3-title-medium { font-size: 16px; font-weight: 600; letter-spacing: 0.0px; line-height: 1.4; }
-.m3-title-small { font-size: 15px; font-weight: 600; letter-spacing: 0.0px; line-height: 1.4; }
+.m3-title-medium { font-size: 18px; font-weight: 600; letter-spacing: -0.1px; line-height: 1.36; }
+.m3-title-small { font-size: 15px; font-weight: 500; letter-spacing: 0.0px; line-height: 1.4; }
 .m3-body-large { font-size: 17px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.55; }
 .m3-body-medium { font-size: 15px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.55; }
 .m3-body-small { font-size: 13px; font-weight: 400; letter-spacing: 0.0px; line-height: 1.5; }
@@ -212,6 +216,30 @@ window.aurade {
 .aurade-verdict-blocked {
   background: @m3_error_container;
   color: @m3_on_error_container;
+}
+
+/* The one step that is happening, and the card it happens in.
+
+   Roomier than the other cards on purpose. It holds four things - the step,
+   the ribbon, the count under it and the pacing - and it is the only thing on
+   this page that anybody is looking at, so it gets the padding of something
+   that matters rather than the padding of a list row. */
+.card,
+.aurade-live-step {
+  border-radius: 16px;
+}
+
+.aurade-live-step {
+  padding: 24px;
+  background: @m3_surface_container_low;
+}
+
+/* And the card underneath, which is deliberately quieter: it holds the thing
+   to read or the thing to play, and it must not compete with the install. */
+.aurade-waiting {
+  padding: 20px;
+  background: @m3_surface_container;
+  border-radius: 16px;
 }
 
 /* The verdict's own glyph, in a disc of its container's ink. Material 3 puts

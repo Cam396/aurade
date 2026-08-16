@@ -1265,6 +1265,25 @@ screen_game() {
     "$(stage_position "$stage")"
 }
 
+#: Typed in order, at the progress screen, on the one screen in this installer
+#: where no key is bound to anything. Any other key empties the buffer.
+PROGRESS_SECRET_WORD=aurora
+PROGRESS_SECRET_BUFFER=
+
+progress_secret() {
+  local key=$1
+  # Single printable letters only. An arrow key or an escape is somebody
+  # reaching for something else, and it clears the buffer.
+  [[ $key == [A-Za-z] ]] || { PROGRESS_SECRET_BUFFER=; return 0; }
+  PROGRESS_SECRET_BUFFER+=${key,}
+  PROGRESS_SECRET_BUFFER=${PROGRESS_SECRET_BUFFER: -${#PROGRESS_SECRET_WORD}}
+  [[ $PROGRESS_SECRET_BUFFER == "$PROGRESS_SECRET_WORD" ]] || return 0
+  PROGRESS_SECRET_BUFFER=
+  # About five seconds at the usual tick.
+  AURADE_AURORA_BLOOM=40
+  return 0
+}
+
 journal_running_stage() {
   local stage record
   for stage in "${AURADE_STAGES[@]}"; do
@@ -1309,7 +1328,16 @@ run_engine_with_progress() {
     elif key=$(tui_poll_key "$AURADE_PROGRESS_TICK"); then
       case $mode in
         progress)
-          [[ $key != g && $key != G ]] || mode=game ;;
+          if [[ $key == g || $key == G ]]; then
+            mode=game
+          else
+            # Nothing else on this screen is bound, so the keyboard is free,
+            # and one word in it does something. It is not written down
+            # anywhere and it cannot touch the install: it widens the ribbon
+            # for a few seconds and then stops.
+            progress_secret "$key"
+          fi
+          ;;
         game)
           case $key in
             g|G|q|Q|esc) mode=progress ;;
@@ -1323,6 +1351,8 @@ run_engine_with_progress() {
           ;;
       esac
     fi
+    (( AURADE_AURORA_BLOOM <= 0 )) ||
+      AURADE_AURORA_BLOOM=$(( AURADE_AURORA_BLOOM - 1 ))
     frame=$(( frame + 1 ))
   done
   wait "$pid" || status=$?

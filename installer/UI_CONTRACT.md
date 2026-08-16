@@ -83,7 +83,11 @@ that a machine can see.
 
 1. **One idea per sentence.** If a sentence needs a comma to carry a second
    clause, it usually wants to be two sentences. Vary the length. Short ones
-   are allowed to be very short.
+   are allowed to be very short. **No semicolons**, which in this codebase
+   were never semicolons: they were a way to bolt a reassurance onto the back
+   of a diagnosis, as in "could not acquire the package set; the target disk
+   was not modified", where the half the reader needs is on the wrong side of
+   the mark. `test-voice.sh` fails on one.
 2. **State the outcome, not the mechanism.** "15.2 GB free" and not "15.2 GB
    free, which is enough". The justification is the tell: nobody says it out
    loud, and reading it makes the reader feel audited.
@@ -95,17 +99,93 @@ that a machine can see.
    the joint a sentence uses when it has two ideas and has not decided which
    one it is about.
 5. **Nothing from the memo.** "in order to", "utilise", "prior to", "please
-   note". Read it aloud. If it sounds like a department, rewrite it.
-6. **The destructive path is exempt.** The gate, the token, the refusals and
+   note", and any line that announces its own severity with `WARNING:` or
+   `NOTICE:` in front of it. A line that has to label itself a warning is a
+   line that did not manage to sound like one. Read it aloud. If it sounds
+   like a department, rewrite it.
+6. **Lead with the disk.** Wherever a disk is involved, its state is the first
+   thing on the screen. "Nothing has been changed" comes before any account of
+   what went wrong, because it is the only question the reader actually has.
+7. **The destructive path is exempt.** The gate, the token, the refusals and
    every claim about what has and has not been written stay literal and
    exact. The contrast is deliberate: everything is calm and human, and then
    at the erase gate it is suddenly plain, which is the signal.
 
-Copy lives in four places and all four are held to this: `flow.py` for the
-graphical pages and states, `aurade-questions.sh` for the questions both front
-ends ask, `stage_label` and `stage_explanation` in the text installer for the
-progress and failure vocabulary both renderers share, and `gb_readiness` for
-the findings.
+`test-voice.sh` reads every file listed in its `SOURCES`, which is every
+program that speaks: both front ends, the shared copy library and question
+manifest, the engine's launcher, the failure helper, the boot menu titles, the
+tips and the message of the day. Adding a program that says something to a
+person means adding it there.
+
+### One vocabulary, one file
+
+`lib/aurade-copy.sh` holds every sentence about a stage or a cause:
+`stage_label`, `stage_pacing`, `stage_explanation`, `cause_explanation`,
+`cause_next_step`, `restart_advice`. The text installer sources it, the
+graphical bridge inherits it by sourcing the text installer, and the failure
+helper sources it directly.
+
+It exists because the drift was not theoretical. The failure helper carried
+its own remediation table keyed on one set of cause codes and the text
+installer carried another, and only one of the two matched what the engine
+actually emits, so seven of the engine's nine real codes reached the screen as
+the literal token `keyring_error` with the whole suite green. The fixtures had
+been written against invented codes.
+
+Two rules follow. **The engine owns the codes and this file owns the
+sentences.** And **an unrecognised code is silence**, never itself: the stage
+explanation is always true and a token means nothing to the person reading it,
+so the fallback shows the stage and leaves the code in the journal.
+
+The engine picks a code by pattern-matching its own `die` message, which makes
+the words in a `die` call load bearing. `tests/test-die-cause.sh` pins every
+reachable message to the code it must produce, so rewording one into a
+different bucket fails there instead of in front of a user.
+
+### One next step
+
+A failure screen names exactly one thing to do. Not five. Where several things
+could be wrong it names the one that is wrong most often, which for a
+signature failure is the clock, every time: an image with a broken keyring
+does not get built, and a computer with the wrong date is ordinary.
+
+## The drawn layer
+
+Three rules, each of which was broken somewhere before it was written down.
+
+**The gradient is lilac, plate, aqua.** All three stops, everywhere the ribbon
+is drawn: the hairline under the chrome, the progress ribbon, and the swoop.
+The swoop was interpolating straight from lilac to aqua and skipping the
+middle, so the one place the mark is drawn at full size was the one place it
+was not the mark's own gradient.
+
+**The pen is one fixed tone, not a role.** `brand.PEN` is the aqua ramp at
+tone 90 and it is the same colour in both schemes and in both drawings. Picked
+by role, it came out as two different colours in the same scheme; picked as
+the same role in both, the progress ribbon ended up with an aqua pen sitting
+on the aqua end of its own gradient, which is invisible. A pen is a highlight,
+so it has to be lighter than whatever it rides on.
+
+**Tone 40 is not a mistake.** A review recommended moving the light scheme's
+accents to tone 50 or 60 to keep the mark's luminance. Measured, primary at
+tone 50 is 4.28:1 against the light surface and tone 60 is 3.02:1, against
+tone 40's 6.14:1, so both fail 4.5:1 and `test-gui-theme.sh` would fail with
+them. The accent ink on a light surface has to be dark. The brand's luminance
+in light mode lives in the tone 90 containers and in the aurora, not in the
+ink.
+
+**The aurora is measured, not chosen.** At alpha 0.30 the light aurora blended
+to 2.35 L\* against the surface behind it, which is not a backdrop, it is
+nothing. It is 0.42 now, about 3.3 L\*, and body text over it still measures
+15.5:1.
+
+**A caution is a caution colour.** `warning` has its own amber ramp at hue 78.
+It used to alias `secondary`, which is the plate hue at chroma 0.045: a slate
+grey. Four live states used it and all four drew caution in ordinary chrome.
+
+**One radius for a card.** 16px, on `.card` and on everything named
+`aurade-*-pane` or `aurade-live-step`. There were three: libadwaita's 12px
+default, the panes at 16, and two new cards at 20.
 
 ## Type
 
@@ -240,6 +320,79 @@ The progress screen is a function of the journal. It does not keep its own
 record of what happened, and it does not display stages the engine never
 emits: `network` and `verify` are folded into `preflight` and `acquire`, and a
 row that stays grey while the rows below it complete reads as a hung step.
+
+### Ten minutes is a design problem
+
+Every other screen in this installer is measured in seconds. This one is
+measured in ten minutes, and it held a title, a list and a bar: the longest
+screen in the product was the least designed one.
+
+**Pacing is a range and never a countdown.** `stage_pacing` gives "usually
+five to ten minutes"; the elapsed half is measured from the journal. That is
+the right way round, because the number that is real is the one about the
+past. An estimate that turns out wrong is remembered longer than the install
+it was wrong about, and there is no honest per-machine number until the engine
+reports package by package. The tests fail on the words "remaining", "time
+left" and "estimated".
+
+**Something to read.** `lib/aurade-tips` is one file both front ends parse:
+lane, tab, text. `tip` is something true about the system being written,
+`next` is something to have ready after the restart and is interleaved every
+fourth turn, `rare` shows up about one turn in forty. The rotation walks in
+order rather than picking at random, because random repeats and a repeat on a
+screen somebody is staring at reads as a screen that has frozen. Every line
+goes through `test-voice.sh` and has to fit two lines of the text frame, which
+is 120 characters.
+
+**Something to do.** A snake, on the same card, behind one quiet control. The
+rules are in `lib/aurade-wait.sh` and `aurade_gui/wait.py`, as state machines
+with no drawing in them, so a test can play a whole game without a terminal or
+a window and neither file has any way to reach the engine.
+
+In the text installer this also fixed something that was quietly wrong: for
+the whole of a ten minute install, nothing read standard input. Anything typed
+in that time sat in the terminal buffer and was delivered to whichever screen
+came next, so a few bored presses of return during `pacstrap` could arrive at
+the failure menu and choose something. Draining input is the point, and the
+game is what the drained input is spent on.
+
+### The screen fits the console it is on
+
+The text frame is a fixed 68 columns, because a frame that changes shape
+between screens reads as two programs. The height is not something the
+installer gets to choose, so the progress screen costs every layout and takes
+the first that fits, giving things up in a deliberate order: the finished
+stages fold to a count, then the ribbon goes, then the stages still to come
+fold as well, and the tip is last because on the screen somebody stares at for
+ten minutes, something to read is worth more than a checklist. Whatever else
+comes off, the running stage and its detail stay. A 24 row console lands on
+the second step and keeps both the ribbon and the tip.
+
+`AURADE_TUI_HEIGHT` is pinned in the tests. Unpinned, the same screen renders
+one way on a build machine with a tall terminal and another way in CI, and
+every layout assertion becomes a coin toss.
+
+### Nothing on this screen is bound to the install
+
+The progress screen is the least recoverable moment in the product, and the
+right number of ways to interrupt it from the keyboard is none. The footer
+offers one key, `g`, which changes which picture is being drawn. The movement
+keys steer a snake. That is the whole set, and the graphical page is the same:
+its key controller takes the arrows and four letters and refuses everything
+else, so Return still belongs to the page.
+
+### Three things are hidden
+
+Deliberately, and none of them touches the install.
+
+The `rare` tip lane, at about one turn in forty. Typing `aurora` on the
+welcome page of the graphical installer replays the swoop, which otherwise
+plays once per session and is the best thing this front end draws. Typing it
+at the text installer's progress screen widens the ribbon for five seconds.
+And the snake changes colour past ten.
+
+They are not documented anywhere a user reads, and `--render` turns the rare
+lane off so that a rendered screen is the same picture every time.
 
 ## Navigation and cancellation
 

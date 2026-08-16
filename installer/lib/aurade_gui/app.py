@@ -35,7 +35,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (brand, flow as F, locales, stage as S, tokens as T,  # noqa: E402
                wait as W)
@@ -65,6 +65,14 @@ SNAKE_INTERVAL_MS = 150
 #: The score at which the snake stops being two colours and starts being the
 #: brand gradient. Nobody gets here by accident.
 SNAKE_GRADIENT_AT = 10
+
+#: The drawn progress ribbon. Thicker than a stock bar, because it carries a
+#: gradient and a leading cap and both need room to be visible at a glance.
+PROGRESS_RIBBON_HEIGHT = 12
+
+#: How far the highlight travels per second, in ribbon lengths. Slow: this is
+#: a sign of life on a five minute step, not something to watch.
+PROGRESS_SHEEN_PER_SECOND = 0.22
 
 #: Environment that means "this machine is drawing without a GPU". The
 #: launcher sets these when it walks down to a software path, and they are the
@@ -265,6 +273,42 @@ class RibbonRule(Gtk.DrawingArea):
         self.set_draw_func(
             lambda _a, cr, w, h: brand.draw_ribbon_rule(cr, w, h, self.window.dark))
         self.set_can_target(False)
+
+
+class ProgressRibbon(Gtk.DrawingArea):
+    """The install, drawn as the mark's stroke instead of as a stock bar.
+
+    ``fraction`` is a real GObject property, which is the whole reason this is
+    a class rather than a draw function: it lets the same
+    ``Adw.PropertyAnimationTarget`` that used to ease a ``Gtk.ProgressBar``
+    ease this instead, so the easing behaviour and its test survive the change
+    of what is on the screen.
+
+    ``get_fraction`` and ``set_fraction`` are kept because that is the shape
+    the rest of the page already speaks.
+    """
+
+    fraction = GObject.Property(type=float, default=0.0,
+                                minimum=0.0, maximum=1.0)
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.phase = 0.0
+        self.set_content_height(PROGRESS_RIBBON_HEIGHT)
+        self.set_can_target(False)
+        self.set_draw_func(self._draw)
+        self.connect("notify::fraction", lambda *_a: self.queue_draw())
+
+    def _draw(self, _area, cr, width, height) -> None:
+        brand.draw_progress_ribbon(cr, width, height, self.window.dark,
+                                   self.fraction, self.phase)
+
+    def get_fraction(self) -> float:
+        return self.fraction
+
+    def set_fraction(self, value: float) -> None:
+        self.fraction = max(0.0, min(1.0, value))
 
 
 class Wordmark(Gtk.DrawingArea):
@@ -700,8 +744,21 @@ class InstallerWindow(Adw.ApplicationWindow):
     def start_aurora(self) -> None:
         if self._aurora_source or not self.animate:
             return
-        self._aurora_source = GLib.timeout_add(
-            AURORA_INTERVAL_MS, self.widgets["aurora"].advance)
+        self._aurora_source = GLib.timeout_add(AURORA_INTERVAL_MS, self._tick)
+
+    def _tick(self) -> bool:
+        """One clock for everything that drifts.
+
+        The aurora and the ribbon's highlight both move slowly and forever, and
+        giving each its own timer would mean two wakeups a frame on a machine
+        that is busy installing an operating system.
+        """
+        self.widgets["aurora"].advance()
+        ribbon = self.widgets.get("progress.bar")
+        if ribbon is not None and ribbon.get_mapped():
+            ribbon.phase += PROGRESS_SHEEN_PER_SECOND * AURORA_INTERVAL_MS / 1000
+            ribbon.queue_draw()
+        return GLib.SOURCE_CONTINUE
 
     def stop_aurora(self) -> None:
         if self._aurora_source:
@@ -1551,21 +1608,59 @@ class InstallerWindow(Adw.ApplicationWindow):
     # -- progress ----------------------------------------------------------
 
     def _build_progress(self):
+        """One step is happening. Show that, and put the rest behind a count.
+
+        This page used to be eleven equally weighted rows with a timing under
+        each, and it filled the window: the bar, the pacing and everything
+        underneath were below the fold on a 1440 by 900 screen. It was the
+        readiness page's mistake in a different shape. A list of everything the
+        machine has done is a log, and the answer to "what is happening" was
+        the seventh row down, styled exactly like the six above it.
+
+        So the running step gets the top of the page to itself, at heading
+        size, with the ribbon under it. The finished ones become a count, and
+        the count is the disclosure: open it and the full list with its timings
+        is still there, which is what somebody diagnosing a slow install wants
+        and nobody else ever needs.
+        """
         box = column(18)
         box.append(label(F.PROGRESS_TITLE, "m3-headline-small"))
         box.append(label(F.PROGRESS_FOOTER, "m3-body-medium", css="dim-label"))
-        listbox = Gtk.ListBox()
-        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        listbox.add_css_class("boxed-list")
-        self.widgets["progress.list"] = listbox
-        box.append(listbox)
-        bar = Gtk.ProgressBar()
-        bar.set_show_text(True)
+
+        live = column(10)
+        live.add_css_class("card")
+        live.add_css_class("aurade-live-step")
+        step = label("", "m3-title-medium")
+        self.widgets["progress.step"] = step
+        live.append(step)
+        bar = ProgressRibbon(self)
         self.widgets["progress.bar"] = bar
-        box.append(bar)
+        live.append(bar)
+        # The detail used to be painted inside the bar by GTK, in whatever the
+        # toolkit chose. On its own label it is set in the interface's type
+        # and it can wrap, which "612 of 1041 packages" could not.
+        detail = label("", "m3-body-small", css="dim-label")
+        self.widgets["progress.detail"] = detail
+        live.append(detail)
+        pacing = label("", "m3-body-medium", css="dim-label")
+        self.widgets["progress.pacing"] = pacing
+        live.append(pacing)
+        # Whether stopping is still possible is a fact about this step, so it
+        # lives in this step's card. It used to float between two other cards,
+        # belonging to neither.
         state = label("", "m3-body-small")
         self.widgets["progress.state"] = state
-        box.append(state)
+        live.append(state)
+        box.append(live)
+
+        # The rest, as a count that opens into the log it used to be.
+        group = Adw.PreferencesGroup()
+        steps = Adw.ExpanderRow(title=F.PROGRESS_STEPS)
+        steps.add_prefix(icon_tile("view-list-symbolic"))
+        self.widgets["progress.steps"] = steps
+        group.add(steps)
+        box.append(group)
+
         box.append(self._build_waiting())
         return page_shell(box)
 
@@ -1589,11 +1684,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         card = column(12)
         card.add_css_class("card")
         card.add_css_class("aurade-waiting")
-        card.set_margin_top(8)
 
-        pacing = label("", "m3-body-medium")
-        self.widgets["progress.pacing"] = pacing
-        card.append(pacing)
+        # The pacing line moved up to the live step, where it belongs: it is
+        # about the install, and this card is about everything that is not.
 
         # A stack of two labels rather than one label and an opacity
         # animation: the crossfade is then GTK's, it is correct at any frame
@@ -1604,7 +1697,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         tips.set_vhomogeneous(False)
         for name in ("a", "b"):
             face = label("", "m3-body-medium", css="dim-label")
-            face.set_valign(Gtk.Align.START)
+            face.set_valign(Gtk.Align.CENTER)
             tips.add_named(face, name)
             self.widgets[f"progress.tip.{name}"] = face
         self.widgets["progress.tips"] = tips
@@ -1623,7 +1716,12 @@ class InstallerWindow(Adw.ApplicationWindow):
         # height when somebody switches between them.
         faces = Gtk.Stack()
         faces.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        faces.set_transition_duration(240)
+        faces.set_transition_duration(W.TIP_FADE_MS)
+        # Exactly the arena's height, whichever face is showing, so pressing
+        # Play does not move everything above it. `vexpand` was wrong here: it
+        # propagates out through the card and takes the rest of the page with
+        # it, which is how a two line tip ended up centred in 380 pixels.
+        faces.set_size_request(-1, SNAKE_ROWS * SNAKE_CELL)
         faces.add_named(tips, "tips")
         faces.add_named(arena, "game")
         self.widgets["progress.faces"] = faces
@@ -1708,22 +1806,55 @@ class InstallerWindow(Adw.ApplicationWindow):
         return False
 
     def _draw_snake(self, area, cr, width, height) -> None:
+        """The arena, sized to the card it is in.
+
+        The cell is fixed and the column count comes from the width, rather
+        than the other way round. Fixing the columns left a 448 pixel board
+        floating in a 570 pixel card with no edge drawn round it, so the only
+        thing visible was a few loose squares and it did not read as a game at
+        all.
+        """
         dark = self.dark
-        cell = min(SNAKE_CELL, max(4, width // SNAKE_COLUMNS))
-        board_w = cell * SNAKE_COLUMNS
-        left = (width - board_w) / 2
-        top = (height - cell * SNAKE_ROWS) / 2
         scheme = T.scheme(dark)
-        cr.set_source_rgb(*T.rgb(scheme["surface_container_low"]))
-        cr.rectangle(0, 0, width, height)
-        cr.fill()
+        cell = SNAKE_CELL
+        columns = max(10, int(width // cell))
+        board_w = cell * columns
+        board_h = cell * SNAKE_ROWS
+        left = (width - board_w) / 2
+        top = (height - board_h) / 2
+
+        # The playfield, as an object with an edge. Without it the pieces are
+        # loose on the card and there is nothing to tell you where the walls
+        # are, which matters in a game whose only rule is that walls are walls.
+        radius = 10
+        cr.new_path()
+        cr.arc(left + radius, top + radius, radius, 3.141593, 4.712389)
+        cr.arc(left + board_w - radius, top + radius, radius, 4.712389, 0)
+        cr.arc(left + board_w - radius, top + board_h - radius, radius,
+               0, 1.570796)
+        cr.arc(left + radius, top + board_h - radius, radius,
+               1.570796, 3.141593)
+        cr.close_path()
+        cr.set_source_rgb(*T.rgb(scheme["surface_container_lowest" if not dark
+                                        else "surface_container_high"]))
+        cr.fill_preserve()
+        # A hairline, so the playfield has an edge rather than being a lighter
+        # patch. The walls are the only rule in this game.
+        cr.set_source_rgba(*T.rgb(scheme["outline_variant"]), 0.9)
+        cr.set_line_width(1)
+        cr.stroke()
+
         if self.snake is None:
             return
+        # The arena follows the card. A window that is resized mid game starts
+        # a new one rather than leaving the snake outside its own walls.
+        if self.snake.width != columns:
+            self.snake = W.Snake(columns, SNAKE_ROWS)
         if self.snake.food is not None:
             cr.set_source_rgb(*T.rgb(scheme["tertiary"]))
             fx, fy = self.snake.food
             cr.arc(left + (fx + 0.5) * cell, top + (fy + 0.5) * cell,
-                   cell * 0.3, 0, 6.2832)
+                   cell * 0.32, 0, 6.2832)
             cr.fill()
         # The head in the primary accent and the body a step back from it, so
         # the direction of travel is readable without watching it move.
@@ -1738,21 +1869,26 @@ class InstallerWindow(Adw.ApplicationWindow):
         length = max(1, len(self.snake.body) - 1)
         for index, (x, y) in enumerate(self.snake.body):
             if index == 0:
-                cr.set_source_rgb(*head_rgb)
+                cr.set_source_rgba(*head_rgb, 1.0)
             elif earned:
                 blend = (index - 1) / length
-                cr.set_source_rgb(*(
+                cr.set_source_rgba(*(
                     head + (tail - head) * blend
-                    for head, tail in zip(head_rgb, tail_rgb)))
+                    for head, tail in zip(head_rgb, tail_rgb)), 1.0)
             else:
-                cr.set_source_rgb(*T.rgb(scheme["primary_container"]))
+                # The accent, fading along the length. The container tone was
+                # nearly white on a white playfield, so the snake was a head
+                # with nothing behind it.
+                cr.set_source_rgba(*head_rgb,
+                                   0.85 - 0.45 * ((index - 1) / length))
             cr.rectangle(left + x * cell + 1, top + y * cell + 1,
                          cell - 2, cell - 2)
             cr.fill()
 
     def _draw_progress(self, report: dict) -> None:
-        listbox = self.widgets["progress.list"]
-        pct, detail = 0, ""
+        steps = self.widgets["progress.steps"]
+        pct, detail, running_label = 0, "", ""
+        done = pending = 0
         for stage in report.get("stages", []):
             name = stage["stage"]
             item = self.stage_rows.get(name)
@@ -1762,7 +1898,11 @@ class InstallerWindow(Adw.ApplicationWindow):
                 item.add_prefix(icon)
                 item.stage_icon = icon
                 item.add_css_class("aurade-transition")
-                listbox.append(item)
+                # `add_row`, not `add`. An AdwExpanderRow's `add` is the
+                # PreferencesGroup method it does not have, and getting this
+                # wrong once already cost a release of enum pickers that
+                # assembled from correct calls and showed nothing.
+                steps.add_row(item)
                 self.stage_rows[name] = item
             status = stage.get("status", "pending")
             elapsed = stage.get("elapsed") or ""
@@ -1785,6 +1925,17 @@ class InstallerWindow(Adw.ApplicationWindow):
             if status == "running":
                 pct = int(stage.get("pct", 0))
                 detail = stage.get("detail", "")
+                running_label = stage.get("label", "")
+            elif status == "ok":
+                done += 1
+            elif status != "failed":
+                pending += 1
+
+        # The one line that answers "what is happening", at heading size,
+        # because it is the only question this page exists to answer.
+        self.widgets["progress.step"].set_label(
+            running_label or F.PROGRESS_STEP_IDLE)
+        steps.set_title(F.progress_steps(done, pending))
         bar = self.widgets["progress.bar"]
         wanted = max(0.0, min(1.0, pct / 100.0))
         # Stages complete in uneven jumps - a package set arrives all at once -
@@ -1801,7 +1952,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             animation.play()
         else:
             bar.set_fraction(wanted)
-        bar.set_text(detail or report.get("position", ""))
+        self.widgets["progress.detail"].set_label(
+            detail or report.get("position", ""))
 
         # The stop control exists only while the shared reversibility boundary
         # says nothing has been written, and it is removed rather than
@@ -1839,7 +1991,10 @@ class InstallerWindow(Adw.ApplicationWindow):
                 break
         if running is None:
             return ""
-        parts = [f"{running.get('label', '')}."]
+        # Not the label. It is the heading directly above this line now, and
+        # a card that says "Installing the base system" twice reads as a card
+        # that was assembled rather than written.
+        parts: list[str] = []
         pacing = running.get("pacing", "")
         if pacing:
             parts.append(F.PROGRESS_PACING % pacing)

@@ -33,7 +33,7 @@ RARITY = 40
 TIP_INTERVAL_MS = 9000
 
 #: Milliseconds of crossfade between one tip and the next.
-TIP_FADE_MS = 320
+TIP_FADE_MS = 280
 
 
 def _read(path: str) -> dict[str, list[str]]:
