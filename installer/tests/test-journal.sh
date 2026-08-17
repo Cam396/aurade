@@ -185,7 +185,32 @@ if (
 ) >"$TMP/blocked.out" 2>&1; then
   fail 'journal initialization unexpectedly succeeded under a file parent'
 fi
-grep -Fq 'cannot create structured journal' "$TMP/blocked.out"
+# The directory, not the file. `aurade_journal_init` makes its directories
+# before it makes anything in them, so a regular file in the parent path is
+# refused one step earlier than this used to expect. The old expectation named
+# the later message, which meant this assertion looked for a string that this
+# case has not produced since the directory creation was added, and it failed
+# silently: a bare `grep -Fq` under errexit ends the run with an exit code and
+# no word about which line gave up.
+grep -Fq 'cannot create journal directories' "$TMP/blocked.out" ||
+  fail "a file in the journal's parent path was refused with '$(head -1 "$TMP/blocked.out")'"
+
+# And the later message, which is still reachable and was left untested by the
+# above naming it for the wrong case. `: >path` fails on a directory for root
+# as well, which is what this suite runs as, so this is the case that proves a
+# failed journal creation is reported rather than swallowed.
+occupied_dir="$TMP/journal-is-a-directory"
+install -d -m 0700 -- "$occupied_dir/journal.jsonl"
+if (
+  export AURADE_JOURNAL_PATH="$occupied_dir/journal.jsonl"
+  export AURADE_JOURNAL_RAW="$TMP/occupied.log"
+  . "$ROOT/installer/lib/aurade-journal.sh"
+  aurade_journal_init dry-run
+) >"$TMP/occupied.out" 2>&1; then
+  fail 'journal initialization unexpectedly succeeded onto a directory'
+fi
+grep -Fq 'cannot create structured journal' "$TMP/occupied.out" ||
+  fail "a journal path that is a directory was refused with '$(head -1 "$TMP/occupied.out")'"
 
 # ---- permissions -------------------------------------------------------------
 perms=$(stat -c '%a' "$AURADE_JOURNAL_PATH")
