@@ -34,6 +34,18 @@
 declare -gA AURADE_Q=()
 declare -ga AURADE_QUESTION_IDS=()
 
+# The answers so far, which belong to whichever front end is asking. Declared
+# here, without an initialiser, so that this file can read one when resolving a
+# default without requiring every caller to have set it up first.
+#
+# The initialiser is the part that has to be left off: `declare -gA ANSWERS`
+# on a name that already holds answers keeps them, and `declare -gA ANSWERS=()`
+# would quietly empty the array of whoever sourced this second. Without the
+# declaration entirely, `${ANSWERS[locale]:-}` is not an empty string under
+# `set -u`, it is an error, because bash reads the subscript of an undeclared
+# array as arithmetic and `locale` is then an unbound variable.
+declare -gA ANSWERS
+
 # _q ID key value [key value ...]
 _q() {
   local id=$1
@@ -256,6 +268,102 @@ aurade_question_field() {
 # Where the image records the snapshot it was built against.
 AURADE_SNAPSHOT_FILE=${AURADE_SNAPSHOT_FILE:-/etc/aurade-installer/snapshot}
 
+# The keyboard layout that usually goes with a locale.
+#
+# Somebody who has just chosen French is about to be shown a list of a hundred
+# and forty layouts with `us` selected, and the answer they want is two
+# hundred entries down it. Guessing costs nothing and is overridden by moving
+# the cursor, which is the same gesture they were going to make anyway.
+#
+# The territory, not the language: fr_CA and fr_FR are the same language and
+# different keyboards, and that distinction is the entire reason this reads
+# the half after the underscore.
+#
+# Deliberately short. These are the territories where the guess is unambiguous
+# and where getting it right saves the most scrolling. Anywhere not on it
+# keeps `us`, which is the honest answer for a list this program cannot narrow
+# down rather than a preference.
+aurade_keymap_for_locale() {
+  local locale=${1:-} territory
+  territory=${locale%%.*}
+  territory=${territory#*_}
+  case $territory in
+    GB) printf 'uk' ;;
+    FR) printf 'fr' ;;
+    DE|AT) printf 'de' ;;
+    ES) printf 'es' ;;
+    IT) printf 'it' ;;
+    PT) printf 'pt-latin1' ;;
+    BR) printf 'br-abnt2' ;;
+    RU) printf 'ru' ;;
+    JP) printf 'jp106' ;;
+    SE) printf 'sv-latin1' ;;
+    NO) printf 'no' ;;
+    DK) printf 'dk' ;;
+    FI) printf 'fi' ;;
+    NL) printf 'nl' ;;
+    PL) printf 'pl' ;;
+    CZ) printf 'cz' ;;
+    HU) printf 'hu' ;;
+    TR) printf 'trq' ;;
+    GR) printf 'gr' ;;
+    UA) printf 'ua' ;;
+    BE) printf 'be-latin1' ;;
+    CH) printf 'sg' ;;
+    *) printf '' ;;
+  esac
+}
+
+# The time zone that goes with a locale, where there is exactly one.
+#
+# The obvious way to guess a time zone is to ask the network where the machine
+# is, and this deliberately does not: an installer that makes an outbound
+# request to a location service, before anybody has agreed to anything, is a
+# thing to be asked for rather than assumed. The locale is already on the
+# screen and was already given willingly.
+#
+# So this only answers where the answer is not a guess. France has one zone
+# and the United States has six, and a wrong time zone confidently filled in
+# is worse than UTC, because UTC is obviously a placeholder and Europe/Paris
+# is not. Territories with more than one zone are left alone.
+aurade_timezone_for_locale() {
+  local locale=${1:-} territory
+  territory=${locale%%.*}
+  territory=${territory#*_}
+  case $territory in
+    GB|IE) printf 'Europe/London' ;;
+    FR) printf 'Europe/Paris' ;;
+    DE) printf 'Europe/Berlin' ;;
+    AT) printf 'Europe/Vienna' ;;
+    CH) printf 'Europe/Zurich' ;;
+    NL) printf 'Europe/Amsterdam' ;;
+    BE) printf 'Europe/Brussels' ;;
+    IT) printf 'Europe/Rome' ;;
+    SE) printf 'Europe/Stockholm' ;;
+    NO) printf 'Europe/Oslo' ;;
+    DK) printf 'Europe/Copenhagen' ;;
+    FI) printf 'Europe/Helsinki' ;;
+    PL) printf 'Europe/Warsaw' ;;
+    CZ) printf 'Europe/Prague' ;;
+    HU) printf 'Europe/Budapest' ;;
+    GR) printf 'Europe/Athens' ;;
+    TR) printf 'Europe/Istanbul' ;;
+    UA) printf 'Europe/Kyiv' ;;
+    JP) printf 'Asia/Tokyo' ;;
+    KR) printf 'Asia/Seoul' ;;
+    IN) printf 'Asia/Kolkata' ;;
+    IL) printf 'Asia/Jerusalem' ;;
+    SG) printf 'Asia/Singapore' ;;
+    NZ) printf 'Pacific/Auckland' ;;
+    ZA) printf 'Africa/Johannesburg' ;;
+    # Spain and Portugal each have an island exception and the mainland is
+    # where nearly everyone is. Named rather than skipped for that reason.
+    ES) printf 'Europe/Madrid' ;;
+    PT) printf 'Europe/Lisbon' ;;
+    *) printf '' ;;
+  esac
+}
+
 # The default answer, resolved.
 #
 # Most defaults are literals. The snapshot date cannot be, because the right
@@ -265,8 +373,25 @@ AURADE_SNAPSHOT_FILE=${AURADE_SNAPSHOT_FILE:-/etc/aurade-installer/snapshot}
 # required by the engine, so a blank default would mean anyone who never opened
 # advanced options answered every question and then failed at argument parsing.
 aurade_question_default() {
-  local id=$1 value
+  local id=$1 value guess
   value=$(aurade_question_field "$id" default)
+  case $id in
+    keymap)
+      # Only ever a starting position. The list still opens on it, the user
+      # still moves through it, and a guess this image cannot actually load
+      # is not offered at all.
+      guess=$(aurade_keymap_for_locale "${ANSWERS[locale]:-}")
+      if [[ -n $guess ]] && aurade_valid_keymap "$guess"; then
+        value=$guess
+      fi
+      ;;
+    timezone)
+      guess=$(aurade_timezone_for_locale "${ANSWERS[locale]:-}")
+      if [[ -n $guess ]] && aurade_valid_timezone "$guess"; then
+        value=$guess
+      fi
+      ;;
+  esac
   if [[ -z $value ]]; then
     case $id in
       snapshot)

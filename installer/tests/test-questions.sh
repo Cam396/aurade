@@ -163,4 +163,54 @@ aurade_question_validate hostname aurade || fail 'valid hostname rejected'
 ! aurade_question_validate repo_url '' || fail 'empty answer accepted for an unvalidated question'
 aurade_question_validate repo_url 'file:///var/cache/aurade/repo' || fail 'unvalidated question rejected a non-empty answer'
 
+# --- the two answers that can be guessed from one already given -------------
+#
+# Somebody who has just chosen French is about to meet a list of a hundred and
+# forty keyboard layouts with `us` selected and the one they want two hundred
+# entries down. The locale is already on the screen and was given willingly,
+# so it is used, and the guess is only ever a starting position: the list still
+# opens on it and one arrow key overrides it.
+#
+# The time zone is guessed the same way and deliberately not from the network.
+# An installer that makes an outbound request to a location service, before
+# anybody has agreed to anything, is a thing to be asked for rather than
+# assumed.
+install -d "$TMP/zoneinfo/Europe" "$TMP/zoneinfo/Asia"
+: >"$TMP/zoneinfo/Europe/Paris"
+: >"$TMP/zoneinfo/Europe/London"
+: >"$TMP/keymaps/i386/qwerty/fr.map.gz"
+: >"$TMP/keymaps/i386/qwerty/uk.map.gz"
+declare -A ANSWERS=()
+
+ANSWERS[locale]=fr_FR.UTF-8
+[[ $(aurade_question_default keymap) == fr ]] ||
+  fail "a French locale did not suggest the French layout"
+[[ $(aurade_question_default timezone) == Europe/Paris ]] ||
+  fail 'a French locale did not suggest the French time zone'
+
+ANSWERS[locale]=en_GB.UTF-8
+[[ $(aurade_question_default keymap) == uk ]] ||
+  fail 'a British locale did not suggest the British layout'
+
+# Where the territory has more than one time zone, the guess is not made. A
+# wrong zone confidently filled in is worse than UTC, because UTC is obviously
+# a placeholder and America/New_York is not.
+ANSWERS[locale]=en_US.UTF-8
+[[ $(aurade_question_default timezone) == UTC ]] ||
+  fail 'a territory with six time zones was given one anyway'
+
+# A guess this image cannot actually load is not offered. The keymap list is
+# built from what is on the image, and a default that is not in it is a prompt
+# nobody can accept with enter.
+ANSWERS[locale]=ja_JP.UTF-8
+[[ $(aurade_question_default keymap) == us ]] ||
+  fail 'a layout missing from the image was suggested anyway'
+
+# And with nothing chosen at all, the manifest's own defaults stand.
+ANSWERS=()
+[[ $(aurade_question_default keymap) == us ]] ||
+  fail 'the keymap default changed with no locale answered'
+[[ $(aurade_question_default timezone) == UTC ]] ||
+  fail 'the time zone default changed with no locale answered'
+
 echo 'installer question schema test: PASS'
