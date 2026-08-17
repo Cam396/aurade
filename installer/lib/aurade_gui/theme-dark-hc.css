@@ -10,42 +10,42 @@
  */
 
 
-/* ---- Material 3 roles, dark ---- */
-@define-color m3_primary #d1bcff;
-@define-color m3_on_primary #3f1d6c;
-@define-color m3_primary_container #553586;
+/* ---- Material 3 roles, dark high contrast ---- */
+@define-color m3_primary #e7deff;
+@define-color m3_on_primary #000000;
+@define-color m3_primary_container #3f1d6c;
 @define-color m3_on_primary_container #e7deff;
-@define-color m3_secondary #bec5e5;
-@define-color m3_on_secondary #2a2f48;
-@define-color m3_secondary_container #404660;
+@define-color m3_secondary #dae2fe;
+@define-color m3_on_secondary #000000;
+@define-color m3_secondary_container #2a2f48;
 @define-color m3_on_secondary_container #dae2fe;
-@define-color m3_tertiary #87d0ef;
-@define-color m3_on_tertiary #033545;
-@define-color m3_tertiary_container #014d64;
+@define-color m3_tertiary #baeaff;
+@define-color m3_on_tertiary #000000;
+@define-color m3_tertiary_container #033545;
 @define-color m3_on_tertiary_container #baeaff;
-@define-color m3_error #feb4ab;
-@define-color m3_on_error #680106;
-@define-color m3_error_container #93000c;
+@define-color m3_error #fedbd6;
+@define-color m3_on_error #000000;
+@define-color m3_error_container #680106;
 @define-color m3_on_error_container #fedbd6;
-@define-color m3_danger_surface #480103;
+@define-color m3_danger_surface #410002;
 @define-color m3_on_danger_surface #fedbd6;
-@define-color m3_warning #fabc52;
-@define-color m3_on_warning #422c01;
-@define-color m3_warning_container #5f4102;
+@define-color m3_warning #ffdeac;
+@define-color m3_on_warning #000000;
+@define-color m3_warning_container #422c01;
 @define-color m3_on_warning_container #ffdeac;
-@define-color m3_surface #121318;
-@define-color m3_on_surface #e0e2e9;
-@define-color m3_surface_dim #121318;
-@define-color m3_surface_bright #37393f;
-@define-color m3_surface_container_lowest #0d0e13;
-@define-color m3_surface_container_low #1a1b20;
-@define-color m3_surface_container #1e1f25;
-@define-color m3_surface_container_high #282a2f;
-@define-color m3_surface_container_highest #33353a;
-@define-color m3_surface_variant #434653;
-@define-color m3_on_surface_variant #c2c6d5;
-@define-color m3_outline #8c909f;
-@define-color m3_outline_variant #434653;
+@define-color m3_surface #000000;
+@define-color m3_on_surface #ffffff;
+@define-color m3_surface_dim #000000;
+@define-color m3_surface_bright #1e1f25;
+@define-color m3_surface_container_lowest #000000;
+@define-color m3_surface_container_low #0d0e13;
+@define-color m3_surface_container #121318;
+@define-color m3_surface_container_high #1a1b20;
+@define-color m3_surface_container_highest #1e1f25;
+@define-color m3_surface_variant #10131d;
+@define-color m3_on_surface_variant #ffffff;
+@define-color m3_outline #ffffff;
+@define-color m3_outline_variant #c2c6d5;
 @define-color m3_inverse_surface #e0e2e9;
 @define-color m3_inverse_on_surface #2f3036;
 @define-color m3_inverse_primary #6d4ea1;
@@ -53,43 +53,43 @@
 @define-color m3_shadow #000000;
 
 /* ---- libadwaita, mapped onto the roles ---- */
-@define-color window_bg_color #121318;
-@define-color window_fg_color #e0e2e9;
-@define-color view_bg_color #0d0e13;
-@define-color view_fg_color #e0e2e9;
-@define-color headerbar_bg_color #1e1f25;
-@define-color headerbar_fg_color #e0e2e9;
-@define-color headerbar_border_color #434653;
-@define-color headerbar_backdrop_color #121318;
-@define-color headerbar_shade_color #434653;
-@define-color card_bg_color #1a1b20;
-@define-color card_fg_color #e0e2e9;
-@define-color dialog_bg_color #282a2f;
-@define-color dialog_fg_color #e0e2e9;
-@define-color popover_bg_color #282a2f;
-@define-color popover_fg_color #e0e2e9;
-@define-color sidebar_bg_color #1a1b20;
-@define-color sidebar_fg_color #e0e2e9;
-@define-color accent_bg_color #d1bcff;
-@define-color accent_fg_color #3f1d6c;
-@define-color accent_color #d1bcff;
-@define-color destructive_bg_color #feb4ab;
-@define-color destructive_fg_color #680106;
-@define-color destructive_color #feb4ab;
-@define-color error_bg_color #feb4ab;
-@define-color error_fg_color #680106;
-@define-color error_color #feb4ab;
-@define-color success_bg_color #87d0ef;
-@define-color success_fg_color #033545;
-@define-color success_color #87d0ef;
-@define-color warning_bg_color #5f4102;
+@define-color window_bg_color #000000;
+@define-color window_fg_color #ffffff;
+@define-color view_bg_color #000000;
+@define-color view_fg_color #ffffff;
+@define-color headerbar_bg_color #121318;
+@define-color headerbar_fg_color #ffffff;
+@define-color headerbar_border_color #c2c6d5;
+@define-color headerbar_backdrop_color #000000;
+@define-color headerbar_shade_color #c2c6d5;
+@define-color card_bg_color #0d0e13;
+@define-color card_fg_color #ffffff;
+@define-color dialog_bg_color #1a1b20;
+@define-color dialog_fg_color #ffffff;
+@define-color popover_bg_color #1a1b20;
+@define-color popover_fg_color #ffffff;
+@define-color sidebar_bg_color #0d0e13;
+@define-color sidebar_fg_color #ffffff;
+@define-color accent_bg_color #e7deff;
+@define-color accent_fg_color #000000;
+@define-color accent_color #e7deff;
+@define-color destructive_bg_color #fedbd6;
+@define-color destructive_fg_color #000000;
+@define-color destructive_color #fedbd6;
+@define-color error_bg_color #fedbd6;
+@define-color error_fg_color #000000;
+@define-color error_color #fedbd6;
+@define-color success_bg_color #baeaff;
+@define-color success_fg_color #000000;
+@define-color success_color #baeaff;
+@define-color warning_bg_color #422c01;
 @define-color warning_fg_color #ffdeac;
-@define-color warning_color #fabc52;
+@define-color warning_color #ffdeac;
 
 /* ---- state layers ---- */
-@define-color m3_hover rgba(224, 226, 233, 0.08);
-@define-color m3_focus rgba(209, 188, 255, 0.1);
-@define-color m3_pressed rgba(224, 226, 233, 0.1);
+@define-color m3_hover rgba(255, 255, 255, 0.08);
+@define-color m3_focus rgba(231, 222, 255, 0.1);
+@define-color m3_pressed rgba(255, 255, 255, 0.1);
 
 /* ---- type scale ---- */
 
@@ -378,4 +378,37 @@ window.aurade {
 .aurade-scheme-button:checked {
   background: @m3_secondary_container;
   color: @m3_on_secondary_container;
+}
+
+
+/* ---- high contrast: every container gets an edge --------------------- */
+
+.aurade-pane,
+.aurade-pane-flat,
+.aurade-hero,
+.card,
+.aurade-live-step,
+.aurade-waiting,
+row.activatable,
+list.boxed-list {
+  border: 2px solid @m3_outline;
+}
+
+/* The gate keeps its own edge and gets it thicker, because it is the one
+   surface that must not look like the others. */
+.aurade-danger-pane {
+  border: 3px solid @m3_error;
+}
+
+/* A focus ring somebody can actually see, which is the clearest case of a
+   change that helps everybody and is noticed by nobody. */
+*:focus-visible {
+  outline: 3px solid @m3_primary;
+  outline-offset: 2px;
+}
+
+/* The icon tile stops being a coloured disc, because a coloured disc at high
+   contrast is a grey disc. */
+.aurade-icon-tile {
+  border: 2px solid @m3_outline;
 }

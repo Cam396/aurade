@@ -51,12 +51,28 @@ Each names a front end on the kernel command line as `aurade.installer=`, and
 names a front end nothing acts on is a boot menu that lies, so the staging test
 checks both halves against each other.
 
+The titles below are quoted exactly as the entries carry them. Paraphrasing
+one here reads as drift the next time somebody audits the copy, and the last
+audit duly reported it.
+
 | entry | command line | what starts |
 | --- | --- | --- |
-| AuraDE installer | `aurade.installer=gui` | `aurade-installer-start --graphical` |
-| AuraDE installer, text mode | `aurade.installer=text` | `aurade-installer-start --text` |
-| AuraDE installer, safe graphics | `aurade.installer=safe` | the same, with every accelerated path skipped |
-| AuraDE recovery console | `aurade.installer=none` | nothing; a root shell |
+| `Install AuraDE` | `aurade.installer=gui` | `aurade-installer-start --graphical` |
+| `Install AuraDE with speech` | `aurade.installer=speech` | espeakup, then `--text` in plain mode |
+| `Install AuraDE (text only)` | `aurade.installer=text` | `aurade-installer-start --text` |
+| `Install AuraDE (safe graphics)` | `aurade.installer=safe` | the same, with every accelerated path skipped |
+| `Recovery console` | `aurade.installer=none` | nothing, just a root shell |
+
+**The speech entry is second, and its position is part of the feature.**
+Nobody who needs it can read the menu to find it, so it has to be reachable by
+counting rather than by looking: boot the image, press Down once, press Enter.
+First place is the default and belongs to the common case. Second is the
+closest place to it that can be described in six words over a phone.
+
+It starts the text installer rather than the graphical one, and that is not a
+downgrade. espeakup reads the console directly, before any toolkit loads, so
+the text installer speaks in situations where the graphical one cannot start
+at all. For somebody using speech it is the better front end, not the fallback.
 
 The autostart runs the installer rather than replacing the login shell with it,
 and marks a stamp on tmpfs so it happens once per boot. The console is an
@@ -141,6 +157,60 @@ The engine picks a code by pattern-matching its own `die` message, which makes
 the words in a `die` call load bearing. `tests/test-die-cause.sh` pins every
 reachable message to the code it must produce, so rewording one into a
 different bucket fails there instead of in front of a user.
+
+### The words that have to match
+
+Both front ends describe the same events, and where they used different words
+for one of them they were describing two different products. These are the
+ones that had already drifted, so they are written down rather than remembered:
+
+| the thing | the words | not |
+| --- | --- | --- |
+| the account | **username and password** | name and password |
+| leaving with the media | **take out** ... **restart** | remove, reboot |
+| an untouched disk | **nothing has been written to any disk** | to the disk, nothing has been written |
+| what a disk escaped | **partitioned, formatted or written to** | or erased |
+| the loader | **bootloader** | boot loader |
+| the first screen after a restart | **sign-in screen** | sign in screen |
+| firmware keys | **enroll**, **enrollment** | enrol, enrolment |
+| the last screen | **You are all set** | Finished |
+
+Spelling is British otherwise, because that is what the prose in this tree
+already is: `colour`, `recognise`, `behaviour`. `enroll` is the one deliberate
+exception, and it is deliberate because it is the word firmware documentation
+uses for the thing the firmware does.
+
+Anything read aloud in one front end and not the other is a bug in whichever
+one is quieter. `tests/voice_test.py` reads every string in both, plus the
+engine, the launcher, the boot menu and the network check, and it reads both
+single and double quoted shell strings: reading only the single quoted ones
+hid every message with a value interpolated into it, which is most of the
+messages worth reading.
+
+### Nothing says anything in colour alone, and nothing flashes
+
+Every state carries a mark or a word as well as its colour. The stage list
+does this already: `+` finished, `>` running, `!` stopped. It is easy to agree
+with and easy to break, because breaking it does not look like breaking
+anything. A red row reads perfectly on the screen of the person who added it,
+and is invisible to the roughly one man in twelve with red-green colour
+blindness, on a monochrome console, and through a projector.
+
+`tests/test-greyscale.sh` renders with the colour removed and asserts the marks
+and the words survive. It is deliberately not a pixel comparison: the states
+are carried by characters, so checking the characters is both cheaper and
+stricter than sampling an image.
+
+Whitespace is not a mark. The plain rendering strips indentation, so a state
+whose mark is three spaces becomes no mark at all: that is how "waiting" came
+to look identical to "finished" for anybody reading with braille or speech,
+and it is why the four states say themselves in words there.
+
+**And nothing flashes.** Nothing does today, and the sheen and the aurora are
+both slow and continuous rather than blinking. The rule is written down because
+it is a rule about what may be added later: anything that alternates faster
+than about three times a second can trigger a seizure, and the person it
+happens to has no way to have prevented it.
 
 ### One next step
 

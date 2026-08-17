@@ -27,6 +27,8 @@
 @define-color m3_on_error #ffffff;
 @define-color m3_error_container #fedbd6;
 @define-color m3_on_error_container #410002;
+@define-color m3_danger_surface #fff0ee;
+@define-color m3_on_danger_surface #410002;
 @define-color m3_warning #7e5704;
 @define-color m3_on_warning #ffffff;
 @define-color m3_warning_container #ffdeac;
@@ -138,16 +140,37 @@ window.aurade {
   background: @m3_surface;
 }
 
-/* ---- the erase gate: the one surface that must not look inviting ------ */
+/* ---- the erase gate: serious, and legible ------------------------------
+   This was `background: @m3_error_container` on a pane whose own padding is
+   16px, with a boxed list inside it painting its own surface on top. The fill
+   therefore only ever showed as a 16px ring of #93000c, which reads as a
+   certificate error rather than as a warning, and it framed the four facts
+   somebody is meant to be checking against the sticker on their drive. Alarm
+   around the thing you need to read carefully is the wrong way round.
+
+   Still the one surface in the installer with an error edge and an error
+   ground, so it is still nothing else on any other page. It just no longer
+   shouts over its own contents. The list inside goes transparent so the
+   ground is one surface rather than a border. */
 
 .aurade-danger-pane {
-  background: @m3_error_container;
-  color: @m3_on_error_container;
+  background: @m3_danger_surface;
+  color: @m3_on_danger_surface;
   border-radius: 16px;
   border: 1px solid @m3_error;
 }
 
-.aurade-token-field {
+.aurade-danger-pane list,
+.aurade-danger-pane listview,
+.aurade-danger-pane row {
+  background: transparent;
+  color: inherit;
+}
+
+/* Scoped to the editable text. Applied to the whole row, the 17px and the
+   letter spacing landed on the floating title too, which is how "Type the
+   confirmation" came out as "Type the confirmatio..." above the field. */
+.aurade-token-field text {
   font-family: "JetBrains Mono", "Adwaita Mono", monospace;
   font-size: 17px;
   letter-spacing: 1.2px;
@@ -178,6 +201,25 @@ window.aurade {
 .aurade-selectable:focus-visible {
   outline: 2px solid @m3_primary;
   outline-offset: -2px;
+}
+
+/* ---- focus, on everything --------------------------------------------- */
+/*
+   This used to be on the disk and network rows only, which are the two places
+   somebody is obviously choosing between things. Everything else fell back to
+   whatever GTK draws by default, and on a dark surface a default focus ring is
+   easy to lose track of.
+
+   It is the clearest case of the rule this whole pass keeps arriving at: a
+   change that costs nothing, is invisible to anybody using a pointer, and is
+   the difference between usable and not for anybody who is not.
+
+   `:focus-visible` rather than `:focus`, so it appears for the keyboard and
+   stays out of the way of the mouse.
+*/
+*:focus-visible {
+  outline: 2px solid @m3_primary;
+  outline-offset: 2px;
 }
 
 /* ---- motion ----------------------------------------------------------- */
