@@ -324,6 +324,21 @@ gb_readiness() {
 
   out+="${sep}$(_gb_readiness_disk)"
 
+  # Power, and only when there is something to say. A laptop that loses power
+  # part way through writing a filesystem is left with a disk that is neither
+  # the old system nor the new one, and nothing later in this program can warn
+  # about that because there is no later.
+  #
+  # `battery_low` is the text installer's, sourced above rather than written
+  # again here, so the two front ends cannot come to disagree about what
+  # counts as low.
+  if battery_low; then
+    [[ $verdict == blocked ]] || verdict=attention
+    out+="${sep}$(_gb_check power 'Power' warn \
+      "$(printf 'Running on battery at %s percent.' "$BATTERY_PERCENT")" \
+      'Plug this computer in before starting. Installing takes about ten minutes.')"
+  fi
+
   # Graphics, in one sentence. The driver strings and node paths are real
   # evidence and they stay available, but they belong behind the details
   # control rather than in the middle of the first screen someone reads.

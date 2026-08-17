@@ -75,8 +75,9 @@ reset_state
 {
   # locale: default en_US.UTF-8 is preselected, enter accepts it
   echo enter
-  # keymap: filter to fr, take it
+  # keymap: filter to fr, take it, then clear the check field
   typed 'fr'; echo enter
+  echo enter                       # keyboard check
   # timezone: default UTC preselected
   echo enter
   # disk: move down once to /dev/sda
@@ -111,6 +112,7 @@ reset_state
 {
   echo enter                       # locale
   echo enter                       # keymap
+  echo enter                       # keyboard check
   echo enter                       # timezone
   echo enter                       # disk
   typed '-illegal-'; echo enter    # hostname: rejected
@@ -145,6 +147,7 @@ reset_state
 {
   echo enter                       # locale
   echo enter                       # keymap
+  echo enter                       # keyboard check
   echo enter                       # timezone
   echo enter                       # disk -> /dev/nvme0n1
   echo esc                         # back to disk
@@ -159,10 +162,51 @@ run_questions >/dev/null || fail 'going back broke the flow'
 release
 check 'target after going back' "${ANSWERS[target]}" '/dev/sdb'
 
+# --- the keyboard check, and where esc goes from it -------------------------
+#
+# Straight after the layout is chosen there is a field to type into, because
+# the layout is already loaded and the next two questions are typed blind. A
+# disk passphrase set through a layout whose punctuation is somewhere else is
+# a disk nobody opens again, and it is the only answer in this installer that
+# cannot be fixed afterwards.
+#
+# `esc` from the check reopens the layout list rather than stepping back to
+# the question before it. That is the whole reason the check is worth having:
+# somebody who has just discovered the keys are in the wrong place wants a
+# different layout, and sending them to the locale question instead would make
+# them navigate forward again to reach the one screen they were asking for.
+reset_state
+{
+  echo enter                       # locale
+  typed 'fr'; echo enter           # keymap fr
+  typed '@#|'                      # type into the check field
+  echo esc                         # and reject it
+  typed 'de'; echo enter           # back on the layout list, not the locale
+  echo enter                       # the check again, accepted this time
+  echo enter                       # timezone
+  echo enter                       # disk
+  echo enter                       # hostname
+  typed 'alex'; echo enter
+  typed 'pw'; echo enter; typed 'pw'; echo enter
+  echo n
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_questions >/dev/null || fail 'the keyboard check broke the flow'
+release
+check 'keymap after rejecting the check' "${ANSWERS[keymap]}" 'de'
+check 'locale untouched by the check'    "${ANSWERS[locale]}" 'en_US.UTF-8'
+# Nothing typed into the check is kept. It is a field with no answer, which is
+# unusual enough in this flow to be worth stating rather than assuming.
+for id in "${!ANSWERS[@]}"; do
+  [[ ${ANSWERS[$id]} != *'@#|'* ]] ||
+    fail "what was typed into the keyboard check was recorded as '$id'"
+done
+
 # --- a mismatched password is refused and re-asked --------------------------
 reset_state
 {
-  echo enter; echo enter; echo enter; echo enter; echo enter
+  # locale, keymap, the keyboard check, timezone, disk, hostname
+  echo enter; echo enter; echo enter; echo enter; echo enter; echo enter
   typed 'alex'; echo enter
   typed 'first'; echo enter; typed 'second'; echo enter   # mismatch
   typed 'agreed'; echo enter; typed 'agreed'; echo enter  # match
@@ -183,7 +227,8 @@ release
 reset_state
 {
   echo esc; echo x                 # decline the quit, stay in the flow
-  echo enter; echo enter; echo enter; echo enter; echo enter
+  # locale, keymap, the keyboard check, timezone, disk, hostname
+  echo enter; echo enter; echo enter; echo enter; echo enter; echo enter
   typed 'alex'; echo enter
   typed 'pw'; echo enter; typed 'pw'; echo enter
   echo n
@@ -339,6 +384,7 @@ reset_state
   typed 'de'; echo enter           # keymap de -> loadkeys refuses
   echo backspace; echo backspace
   typed 'fr'; echo enter           # keymap fr -> accepted
+  echo enter                       # keyboard check
   echo enter                       # timezone
   echo enter                       # disk
   echo enter                       # hostname

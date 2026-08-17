@@ -500,4 +500,46 @@ grep -Fq '[[ ${TERM:-} == linux ]] || return 0' "$ROOT/installer/lib/aurade-tui.
 grep -Fq 'tui_palette_reset' "$TUI" ||
   fail 'the installer never puts the console palette back'
 
+# --- the battery warning, and the three times it stays quiet ----------------
+#
+# Losing power part way through writing a filesystem leaves a disk that is
+# neither the old system nor the new one, so the last screen before the point
+# of no return says something when the machine is running on a low battery.
+#
+# The silence is the harder half and gets three cases. A warning that also
+# fires on a desktop, or while plugged in, or at 90 percent, is a warning
+# people learn to read past, and then it is not there on the laptop at 12
+# percent that this exists for.
+power_fixture() {
+  local dir=$TMP/power
+  rm -rf "$dir"
+  install -d "$dir/BAT0" "$dir/AC"
+  printf 'Battery\n' >"$dir/BAT0/type"
+  printf '%s\n' "$1" >"$dir/BAT0/capacity"
+  printf '%s\n' "$2" >"$dir/BAT0/status"
+  printf 'Mains\n' >"$dir/AC/type"
+  printf '%s\n' "$3" >"$dir/AC/online"
+  printf '%s' "$dir"
+}
+
+battery_says() {
+  env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=40 \
+    AURADE_POWER_DIR="$1" "$TUI" --render review 2>/dev/null |
+    grep -c 'on battery at' || true
+}
+
+said=$(battery_says "$(power_fixture 17 Discharging 0)")
+(( said >= 1 )) || fail 'a laptop on battery at 17 percent was told nothing before the gate'
+
+said=$(battery_says "$(power_fixture 17 Discharging 1)")
+(( said == 0 )) || fail 'a machine that is plugged in was warned about its battery'
+
+said=$(battery_says "$(power_fixture 90 Discharging 0)")
+(( said == 0 )) || fail 'a battery at 90 percent was treated as low'
+
+rm -rf "$TMP/power"
+install -d "$TMP/power"
+said=$(battery_says "$TMP/power")
+(( said == 0 )) || fail 'a machine with no battery at all was warned about one'
+
 echo 'installer TUI render test: PASS'

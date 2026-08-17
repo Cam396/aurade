@@ -132,7 +132,7 @@ _q luks_passphrase \
 _q keymap \
   label 'Keyboard layout' \
   short 'Keyboard' \
-  help 'Pick the layout printed on your keyboard. Try it in the box below.' \
+  help 'Pick the layout printed on your keyboard. There is a place to try it before you set a password.' \
   type enum \
   default us \
   validator aurade_valid_keymap \

@@ -246,6 +246,61 @@ disk_table() {
     }'
 }
 
+# --------------------------------------------------------------------------
+# Power
+# --------------------------------------------------------------------------
+
+#: Where the kernel reports power supplies. Injectable, so the warning can be
+#: tested on a machine that has no battery and on one that is plugged in.
+AURADE_POWER_DIR=${AURADE_POWER_DIR:-/sys/class/power_supply}
+
+#: How low is low. A ten minute install is not a risk at 80 percent and is a
+#: real one at 15, and 40 is the round number between them that leaves enough
+#: margin for a laptop whose battery is older than its owner thinks.
+AURADE_BATTERY_FLOOR=${AURADE_BATTERY_FLOOR:-40}
+
+# True when this machine is running on a battery that is low.
+#
+# Losing power part way through writing a filesystem leaves a disk that is
+# neither the old system nor the new one, and the installer cannot warn about
+# that afterwards because there is no afterwards. Fifteen lines here.
+#
+# Everything that is not clearly "on battery, and low" says nothing at all: no
+# battery, plugged in, still charging, or a kernel reporting none of it. A
+# warning that fires on a desktop is a warning people learn to click past, and
+# then it is not there on the laptop.
+BATTERY_PERCENT=
+battery_low() {
+  local supply kind value mains='' percent='' status=''
+  BATTERY_PERCENT=
+  [[ -d $AURADE_POWER_DIR ]] || return 1
+  for supply in "$AURADE_POWER_DIR"/*; do
+    [[ -r $supply/type ]] || continue
+    read -r kind <"$supply/type" 2>/dev/null || continue
+    case $kind in
+      Mains|USB)
+        if [[ -r $supply/online ]] && read -r value <"$supply/online" 2>/dev/null; then
+          [[ $value != 1 ]] || mains=yes
+        fi
+        ;;
+      Battery)
+        [[ -r $supply/capacity ]] || continue
+        read -r value <"$supply/capacity" 2>/dev/null || continue
+        [[ $value =~ ^[0-9]+$ ]] || continue
+        percent=$value
+        status=''
+        [[ ! -r $supply/status ]] || read -r status <"$supply/status" 2>/dev/null || true
+        ;;
+    esac
+  done
+  [[ -n $percent ]] || return 1
+  [[ $mains != yes ]] || return 1
+  [[ $status != Charging && $status != Full ]] || return 1
+  (( percent < AURADE_BATTERY_FLOOR )) || return 1
+  BATTERY_PERCENT=$percent
+  return 0
+}
+
 cleanup() {
   local file
   # The console palette outlives this process, so a console left with a lilac
@@ -437,6 +492,36 @@ screen_question() {
     *)
       tui_footer 'type your answer    enter  continue' "$back" ;;
   esac
+}
+
+# Type something and see whether it comes out the way you expect.
+#
+# The layout is loaded onto the console the moment it is accepted, so this
+# field is typed with the layout it is checking. That is the whole point: it
+# is not a preview of a layout, it is the layout.
+#
+# It earns its screen because of what comes next. The following two questions
+# are a password and a disk passphrase, both typed blind, and a passphrase set
+# through a layout whose punctuation is somewhere else is a disk nobody can
+# open again. Every other wrong answer in this installer can be fixed later.
+screen_keycheck() {
+  local step=$1 total=$2 buffer=${3:-} layout=${ANSWERS[keymap]:-}
+  tui_clear
+  tui_header "Step $step of $total   $(tui_steps "$step" "$total")"
+  tui_blank
+  tui_wrap 'Check the keyboard' accent
+  tui_blank
+  tui_wrap "The ${layout:-chosen} layout is loaded now. Type anything here and make sure it comes out the way you expect." dim
+  tui_blank
+  widget_text "$buffer"
+  tui_blank
+  # The characters worth checking are the ones that move: letters mostly stay
+  # put between layouts and punctuation does not, and punctuation is what a
+  # good passphrase is full of.
+  tui_wrap 'These move around between layouts:  @  #  "  |  \  /  y  z' dim
+  tui_blank
+  tui_wrap 'Nothing typed here is kept.' ok
+  tui_footer 'type anything    enter  continue' 'esc  back'
 }
 
 widget_text() {
@@ -634,6 +719,13 @@ review_list() {
   fi
   tui_blank
   tui_wrap 'Nothing has been written to any disk yet.' ok
+  # The last screen before the point of no return is the right place to
+  # mention the one hardware fact that can turn a working machine into a
+  # half written disk.
+  if battery_low; then
+    tui_blank
+    tui_note '!' "This computer is on battery at $BATTERY_PERCENT percent. Installing takes about ten minutes, and losing power part way through leaves a disk that is neither the old system nor the new one. Plug it in first." warn
+  fi
   tui_blank
 }
 
@@ -1559,18 +1651,52 @@ apply_answer() {
   return 0
 }
 
+# The check field itself. Accepts anything, keeps nothing, validates nothing.
+# There is no right answer to compare against: the only judge of whether the
+# keys are where they should be is the person pressing them.
+keyboard_check() {
+  local step=$1 total=$2 buffer='' key
+  while true; do
+    screen_keycheck "$step" "$total" "$buffer"
+    key=$(read_key) || return 2
+    case $key in
+      enter) return 0 ;;
+      esc) return 1 ;;
+      backspace) buffer=${buffer%?} ;;
+      space) buffer+=' ' ;;
+      up|down|left|right|tab) ;;
+      *) [[ ${#key} -ne 1 ]] || buffer+=$key ;;
+    esac
+  done
+}
+
 PROMPT_RESULT=
 ask() {
-  local id=$1 step=$2 total=$3 type
+  local id=$1 step=$2 total=$3 type rc
   type=$(aurade_question_field "$id" type)
   PROMPT_RESULT=
-  case $type in
-    disk)   prompt_disk "$id" "$step" "$total" ;;
-    bool)   prompt_bool "$id" "$step" "$total" ;;
-    enum)   prompt_enum "$id" "$step" "$total" ;;
-    secret) prompt_secret "$id" "$step" "$total" ;;
-    *)      prompt_text "$id" "$step" "$total" "${ANSWERS[$id]:-}" ;;
-  esac
+  while true; do
+    rc=0
+    case $type in
+      disk)   prompt_disk "$id" "$step" "$total" || rc=$? ;;
+      bool)   prompt_bool "$id" "$step" "$total" || rc=$? ;;
+      enum)   prompt_enum "$id" "$step" "$total" || rc=$? ;;
+      secret) prompt_secret "$id" "$step" "$total" || rc=$? ;;
+      *)      prompt_text "$id" "$step" "$total" "${ANSWERS[$id]:-}" || rc=$? ;;
+    esac
+    (( rc == 0 )) || return "$rc"
+    [[ $id == keymap ]] || return 0
+    # Recorded before the check rather than after, so that the field below is
+    # typed with this layout and so that going back reopens the list on it.
+    ANSWERS[$id]=$PROMPT_RESULT
+    rc=0
+    keyboard_check "$step" "$total" || rc=$?
+    (( rc != 0 )) || return 0
+    (( rc == 1 )) || return "$rc"
+    # `esc` from the check reopens the layout list rather than the question
+    # before it. Somebody who has just found the keys in the wrong place is
+    # looking for a different layout, and that is the screen they came from.
+  done
 }
 
 # --------------------------------------------------------------------------
@@ -2296,7 +2422,7 @@ fi
 [[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access
+  access keycheck
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -2340,6 +2466,7 @@ if [[ -n $RENDER_ONLY ]]; then
   case $RENDER_ONLY in
     welcome)   screen_welcome ;;
     access)    screen_access "${AURADE_RENDER_ACCESS_ROW:-0}" ;;
+    keycheck)  screen_keycheck 2 9 "${AURADE_RENDER_TYPED:-}" ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.

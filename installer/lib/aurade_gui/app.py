@@ -1237,12 +1237,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         "memory": "media-flash-symbolic",
         "disk": "drive-harddisk-symbolic",
         "graphics": "video-display-symbolic",
+        "power": "battery-good-symbolic",
     }
 
-    #: Secure Boot is the one check whose subject has two faces, and showing
-    #: the open padlock when it is on says more than any wording can.
+    #: Two checks have a subject with two faces. Showing the open padlock when
+    #: Secure Boot is on says more than any wording can, and a battery drawn
+    #: nearly empty is read before the sentence beside it is.
     READINESS_ICONS_BAD = {
         "secure_boot": "channel-insecure-symbolic",
+        "power": "battery-caution-symbolic",
     }
 
     READINESS_GLYPHS = {

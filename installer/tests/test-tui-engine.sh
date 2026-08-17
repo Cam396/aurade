@@ -100,6 +100,7 @@ answers() {
   echo enter                       # welcome
   echo enter                       # locale (default)
   echo enter                       # keymap (default)
+  echo enter                       # keyboard check
   echo enter                       # timezone (default)
   echo enter                       # disk -> /dev/sda
   echo enter                       # hostname (default)
