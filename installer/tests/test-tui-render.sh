@@ -519,6 +519,46 @@ grep -Fq '[[ ${TERM:-} == linux ]] || return 0' "$ROOT/installer/lib/aurade-tui.
 grep -Fq 'tui_palette_reset' "$TUI" ||
   fail 'the installer never puts the console palette back'
 
+# --- the frame runs lilac to aqua where a terminal can draw it --------------
+#
+# The same two colours the mark's stroke runs between and the same two the
+# graphical front end draws its hairline with, so the two installers are one
+# product rather than two that share a name.
+#
+# Only at the truecolor tier. In 256 colours the ramp between these tones is
+# four or five steps, which reads as banding, and banding looks like a fault.
+top_rule() {
+  # `sed -n 1p` rather than `head -1`, which closes the pipe after one line
+  # and takes the renderer down with a broken pipe under `pipefail`.
+  env AURADE_TUI_COLOR="$1" AURADE_TUI_FRAME=unicode AURADE_TUI_HEIGHT=24 \
+    "$TUI" --render welcome 2>/dev/null | sed -n '1p'
+}
+
+colours=$(top_rule true | grep -o '38;2;[0-9;]*' || true)
+[[ $(head -1 <<<"$colours") == '38;2;209;188;255' ]] ||
+  fail "the frame does not start at the mark's lilac"
+[[ $(tail -1 <<<"$colours") == '38;2;135;208;239' ]] ||
+  fail "the frame does not end at the mark's aqua"
+# A gradient, not two ends and a flat middle.
+steps=$(sort -u <<<"$colours" | wc -l)
+(( steps > 20 )) || fail "the frame changes colour $steps times, which is banding not a gradient"
+
+# The other tiers keep the flat border they had. A flat hairline is what the
+# design was before this and it looked deliberate.
+for tier in 256 16; do
+  steps=$(top_rule "$tier" | grep -o '38;5;[0-9]*\|\[9[0-9]m' | sort -u | wc -l)
+  (( steps <= 1 )) ||
+    fail "the $tier colour tier drew $steps colours along one rule"
+done
+
+# And the frame is the same width in every tier, because the colour is not
+# part of the measurement and a per-character escape sequence is the easiest
+# way to accidentally make it part of the measurement.
+for tier in true 256 16 none; do
+  width=$(top_rule "$tier" | sed 's/\x1b\[[0-9;]*m//g' | awk '{ print length($0) }')
+  (( width == 68 )) || fail "at the $tier tier the frame measured $width columns"
+done
+
 # --- the braille bar, and the console it must not appear on -----------------
 #
 # A braille cell is two columns of four dots, so filling one left to right
