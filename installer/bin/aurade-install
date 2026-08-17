@@ -181,8 +181,25 @@ die() {
   exit 1
 }
 
+#: When this run started, for the relative timestamps below. Set once, on the
+#: first line logged, rather than at startup, so that a log read back later
+#: starts at zero rather than at however long argument parsing took.
+_LOG_STARTED=0
+
+# One line of the log, stamped with how long the install has been going.
+#
+# Relative rather than wall clock, and that is the whole point. Nobody reading
+# an install log cares that something happened at 14:52:07. They care that it
+# happened two minutes in and the next thing took six, because the question
+# they are answering is "where did the time go" or "where did it stop". A wall
+# clock makes the reader do the subtraction, on every line, in their head.
 log() {
-  printf '[aurade-install] %s\n' "$*" >&2
+  local now elapsed
+  now=${EPOCHSECONDS:-0}
+  (( _LOG_STARTED )) || _LOG_STARTED=$now
+  elapsed=$(( now - _LOG_STARTED ))
+  printf '[aurade-install +%dm %02ds] %s\n' \
+    "$(( elapsed / 60 ))" "$(( elapsed % 60 ))" "$*" >&2
 }
 
 check_workspace_capacity() {

@@ -257,11 +257,12 @@ cmp -s "$TMP/p.34" "$TMP/again" || fail 'the progress screen is not deterministi
 
 # And there is something to do, reachable from it, said once in the footer.
 #
-# Worded as "something to do" rather than "game" because the key now cycles
-# through the tips, 2048 and snake, and the first of those three is not a game.
-# Somebody who finds a game on a screen they are anxious about stressful should
-# not have to press a key labelled `game` to get back to reading.
-grep -Fq 'g  something to do' "$TMP/p.24" ||
+# Worded as "watch or play" rather than "game" because the key cycles through
+# the tips, the log, 2048 and snake, and only two of those four are games. The
+# log comes first, for somebody who does not want a game at all and would find
+# one on a screen they are anxious about actively stressful. They should not
+# have to press a key labelled `game` to get to it.
+grep -Fq 'g  watch or play' "$TMP/p.24" ||
   fail 'the progress screen does not offer anything to do'
 # Nothing else is offered. The rest of the keyboard stays unbound here for the
 # same reason it always did.
@@ -391,6 +392,40 @@ bridge=$(printf 'progress\nquit\n' |
 # The text bar is quantised to its 34 cells, so they agree to within a cell.
 (( bridge >= half - 4 && bridge <= half + 4 )) ||
   fail "the two front ends disagree: text $half, graphical $bridge"
+
+# --- watching it work, for the people that calms ----------------------------
+#
+# Some people are calmed by a bar and some by seeing the thing work, and this
+# installer only offered the first. It is the same log the report saves,
+# tailed, with nothing interpreted: no filtering and no highlighting, because
+# a view that quietly hides a line is a view somebody cannot trust at the
+# moment they most need it.
+printf '%s\n' \
+  '[aurade-install +0m 03s] preparing the disk' \
+  '[aurade-install +2m 14s] installing package 312 of 1041' >"$TMP/raw.log"
+watch_screen=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  AURADE_TUI_HEIGHT=24 "$TUI" --render watch --journal "$TMP/journal.jsonl" \
+  --raw-log "$TMP/raw.log" 2>/dev/null)
+grep -Fq 'installing package 312 of 1041' <<<"$watch_screen" ||
+  fail 'the watch screen does not show the most recent line of the log'
+grep -Fq '+2m 14s' <<<"$watch_screen" ||
+  fail 'the log timestamps are not relative to the start of the install'
+
+# --- and none of the waiting screens offers a key that does nothing ---------
+#
+# These screens poll for a key rather than reading one, so `?` never reaches
+# the help handler. The footer is built by a shared helper that offers the
+# key wherever it fits, which is exactly how a screen ends up naming one that
+# does nothing. It is also how the footer runs one column past the frame.
+for screen in progress game 2048 watch; do
+  footer=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=30 \
+    "$TUI" --render "$screen" --journal "$TMP/journal.jsonl" \
+    --raw-log "$TMP/raw.log" 2>/dev/null | tail -2 | head -1)
+  ! grep -Fq '?  help' <<<"$footer" ||
+    fail "the $screen screen offers a help key that does nothing there"
+  (( ${#footer} == 68 )) ||
+    fail "the $screen footer is ${#footer} columns wide in a 68 column frame"
+done
 
 (( failures == 0 )) || exit 1
 printf 'installer progress screen test: PASS (%s tips, %s heights)\n' \

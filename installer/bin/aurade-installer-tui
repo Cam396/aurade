@@ -1483,7 +1483,9 @@ screen_progress() {
   if (( AURADE_TUI_PLAIN )); then
     tui_footer "$warn" "$(stage_position "$active")"
   else
-    tui_footer "$warn    g  something to do" "$(stage_position "$active")"
+    # `watch or play` rather than `something to do`, because the key now
+    # reaches the log first and a log is not something to do.
+    tui_footer "$warn    g  watch or play" "$(stage_position "$active")"
   fi
 }
 
@@ -2480,6 +2482,8 @@ declare -A WAIT_MODE_LABEL=(
 # can track. Six columns holds 131072, which nobody will reach on a screen that
 # lasts ten minutes, and the alignment costs nothing until they do.
 screen_2048() {
+  # Polled rather than read, so `?` does nothing here. See screen_progress_log.
+  local HELP_KEY=0
   local pad row col index value cell line
   (( ${#AURADE_2048_BOARD[@]} == 16 )) || aurade_2048_new
 
@@ -2518,7 +2522,54 @@ screen_2048() {
     "$(stage_position "$(journal_running_stage)")"
 }
 
+# The install, watched rather than waited out.
+#
+# Some people are calmed by a bar and some are calmed by seeing the thing
+# work, and until now this installer only offered the first. It is the same
+# log the report saves, tailed, with nothing interpreted: no filtering, no
+# highlighting, no attempt to decide which lines matter. A view that quietly
+# hides a line is a view somebody cannot trust when they most need to.
+#
+# Off unless asked for, because a wall of package names is the opposite of
+# calming for the person it is not for.
+screen_progress_log() {
+  # The waiting screens poll for a key rather than going through `read_key`,
+  # so `?` does nothing on them and the footer must not offer it. A footer
+  # that names a key which does nothing is worse than a shorter footer.
+  local HELP_KEY=0
+  local stage lines row shown=0 room
+  stage=$(journal_running_stage)
+  # Frame, header, footer, the stage line and two blanks.
+  room=$(( AURADE_TUI_HEIGHT - 3 - 3 - 3 ))
+  (( room >= 3 )) || room=3
+  (( room <= 24 )) || room=24
+  tui_clear
+  tui_header 'Installing'
+  tui_blank
+  if [[ -n $stage ]]; then
+    tui_wrap "$(stage_label "$stage")" accent
+  else
+    tui_wrap 'Working' accent
+  fi
+  tui_blank
+  if [[ -r $RAW_LOG ]]; then
+    while IFS= read -r row; do
+      # Truncated rather than wrapped. A log line that wraps to three rows
+      # pushes two older lines off a screen whose whole purpose is showing the
+      # most recent ones, and the interesting part of these lines is the left.
+      tui_line "  ${row:0:$(( AURADE_TUI_INNER - 4 ))}" dim
+      shown=$(( shown + 1 ))
+    done < <(tail -n "$room" "$RAW_LOG" 2>/dev/null || true)
+  fi
+  if (( shown == 0 )); then
+    tui_wrap 'Nothing has been written to the log yet.' dim
+  fi
+  tui_footer 'g  next    esc  back to the install' "$(stage_position "$stage")"
+}
+
 screen_game() {
+  # Polled rather than read, so `?` does nothing here. See screen_progress_log.
+  local HELP_KEY=0
   local frame=${1:-0} row stage record pct detail label
   local arena_w arena_h pad border
   arena_w=$(( AURADE_TUI_INNER - 10 ))
@@ -2622,6 +2673,7 @@ run_engine_with_progress() {
       # is the property that makes it the right game for a screen somebody is
       # half watching: you can stop mid move and lose nothing.
       2048) screen_2048 ;;
+      log)  screen_progress_log ;;
       *)    screen_progress "$frame" ;;
     esac
     # `AURADE_TUI_KEYS` is the seam the flow tests drive the state machine
@@ -2636,8 +2688,12 @@ run_engine_with_progress() {
             # Cycle rather than a menu. Two games and the tips is a short
             # enough list that a key which always moves you on beats a screen
             # asking somebody to choose, on a screen nobody came here to use.
+            # The log comes first in the cycle, because it is the option
+            # for somebody who does not want a game at all: one press to see
+            # what the machine is doing, two to be given something to do.
             case ${WAIT_MODE:-tips} in
-              tips) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+              tips) WAIT_MODE=log; mode=log ;;
+              log)  WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
               2048) WAIT_MODE=snake; mode=snake ;;
               *)    WAIT_MODE=tips ;;
             esac
@@ -2651,6 +2707,12 @@ run_engine_with_progress() {
             # for a few seconds and then stops.
             progress_secret "$key"
           fi
+          ;;
+        log)
+          case $key in
+            g|G) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
           ;;
         2048)
           case $key in
@@ -3177,7 +3239,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help
+  access keycheck explain help watch
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3227,6 +3289,7 @@ if [[ -n $RENDER_ONLY ]]; then
     explain)   CURRENT_SCREEN=${AURADE_RENDER_EXPLAIN:-review}
                screen_explain ;;
     help)      screen_help_where ;;
+    watch)     screen_progress_log ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.
