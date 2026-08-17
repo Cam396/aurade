@@ -540,7 +540,154 @@ def run(window: InstallerWindow) -> None:
           ribbon.get_accessible_role() == Gtk.AccessibleRole.PROGRESS_BAR,
           "the progress ribbon does not report itself as a progress bar")
 
+    run_done_screen(window)
+    run_disk_bars(window)
     run_wallpaper(window)
+
+
+def run_done_screen(window: InstallerWindow) -> None:
+    """The two facts somebody needs thirty seconds after this page appears.
+
+    The text installer has named the username and the hostname on its done
+    screen since it had one. The graphical one said "the username you chose",
+    which is a sentence about a fact rather than the fact, and the sign-in
+    prompt it is sending somebody to asks for the fact.
+    """
+    def facts(where: str) -> None:
+        grid = window.widgets.get("done.facts")
+        check(grid is not None, "the done screen has no facts block")
+        if grid is None:
+            return
+        shown = False
+        for key in ("username", "hostname"):
+            wanted = str(window.model.get(key) or "")
+            value = window.widgets.get(f"done.{key}")
+            name = window.widgets.get(f"done.{key}.name")
+            check(value is not None and name is not None,
+                  f"the done screen has no {key} row")
+            if value is None or name is None:
+                continue
+            equal(value.get_label(), wanted, f"the done screen's {key} {where}")
+            # The label goes with its value. "This computer" followed by
+            # nothing reads as the installer having mislaid the hostname.
+            equal(value.get_visible(), bool(wanted),
+                  f"the {key} value's visibility {where}")
+            equal(name.get_visible(), bool(wanted),
+                  f"the {key} label's visibility {where}")
+            shown = shown or bool(wanted)
+        equal(grid.get_visible(), shown,
+              f"the facts block {where} is showing with nothing in it, or "
+              "hiding with something in it")
+
+    # Both halves of the rule, because the fixture answers no questions and a
+    # test that only ever sees empty values proves the block can hide and
+    # proves nothing at all about it filling in. The empty pass first, while
+    # nothing has been answered, then the same page again with two answers on
+    # it.
+    window.flow.state = F.DONE
+    window.refresh()
+    pump()
+    facts("with nothing answered")
+
+    for key, answer in (("username", "ada"), ("hostname", "aurora")):
+        ok, error = window.model.set(key, answer)
+        check(ok, f"the fixture would not take {key}={answer}: {error}")
+    window.refresh()
+    pump()
+    facts("with both answered")
+
+    # The settle, and which half of it this machine can actually see.
+    #
+    # `window.animate` reads GTK's own motion preference, and on this headless
+    # software rendered setup it comes back false. That is the same answer the
+    # safe graphics boot entry gets, so it is a real configuration rather than
+    # an artefact of the test. It is also not a limitation to work around: it
+    # is the more important of the two branches, because reduce motion is an
+    # accessibility setting, and "nothing decorative runs when it is off" is a
+    # promise the whole drawn layer makes. So this asserts that the settle did
+    # not run, rather than that it ran and finished.
+    #
+    # The other branch is written out too and does not execute here. There is
+    # no compositor on this side that reports animations as wanted, so a
+    # settle that fades the tick out and never brings it back is a bug this
+    # suite cannot see. It is seen by looking at a real install.
+    icon = window.widgets.get(f"{F.DONE}.icon")
+    check(icon is not None, "the done screen has no icon")
+    if icon is not None and not window.animate:
+        check(not window._settled,
+              "motion is off and the settle ran anyway, so the done screen is "
+              "animating for somebody who asked it not to")
+        equal(icon.get_opacity(), 1.0,
+              "motion is off and the done screen's tick is not at full "
+              "opacity, so something faded it and nothing is coming to bring "
+              "it back")
+    elif icon is not None:
+        settle_pump(window)
+        check(window._settled,
+              "motion is on and the settle never ran, so the check below it "
+              "is vacuous")
+        equal(icon.get_opacity(), 1.0,
+              "the done screen's tick is not at full opacity after the settle "
+              "has had its delay and its whole duration, so the settle has "
+              "faded it out with nothing coming to bring it back")
+
+
+def settle_pump(window: InstallerWindow) -> None:
+    """Run the loop for as long as the settle takes, in real time.
+
+    `pump` iterates whatever is pending, which is the right tool for widgets
+    and the wrong one for a timeout: nothing is pending until the clock says
+    so. Half a second of slack on top of the delay and the duration, because
+    the software renderer this runs under is not quick and a test that fails
+    when the machine is busy is a test people learn to rerun.
+    """
+    from aurade_gui.app import SETTLE_DELAY_MS, SETTLE_MS  # noqa: PLC0415
+
+    import time  # noqa: PLC0415
+
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + (SETTLE_DELAY_MS + SETTLE_MS + 500) / 1000.0
+    while time.monotonic() < deadline:
+        while context.pending():
+            context.iteration(False)
+        time.sleep(0.01)
+
+
+def run_disk_bars(window: InstallerWindow) -> None:
+    """One size bar per disk, and the biggest disk holds the longest one.
+
+    The bar is the only thing on that page that says which of two identically
+    named drives is larger without being read, so a bar that is the wrong
+    length is worse than no bar. A size the parser cannot read draws nothing.
+    """
+    from aurade_gui import brand  # noqa: PLC0415 - only needed here
+
+    window.flow.state = "pages"
+    window.flow.jump_to_page("disk")
+    window.refresh()
+    pump()
+
+    listbox = window.widgets.get("disk.list")
+    check(listbox is not None, "there is no disk list")
+    if listbox is None:
+        return
+
+    disks = list(window.model.disks())
+    readable = [d for d in disks if brand.parse_size(d.get("size") or "") > 0]
+    bars = [w for w in walk(listbox) if type(w).__name__ == "CapacityBar"]
+    equal(len(bars), len(readable),
+          f"{len(disks)} disks, {len(readable)} with a size this can read, "
+          f"{len(bars)} bars")
+    if not bars:
+        return
+
+    for bar in bars:
+        check(0.0 < bar.fraction <= 1.0,
+              f"a size bar is {bar.fraction} of its track")
+    largest = max(brand.parse_size(d.get("size") or "") for d in readable)
+    biggest_bar = max(bar.fraction for bar in bars)
+    equal(biggest_bar, 1.0,
+          f"the largest disk ({largest / 1024 ** 3:.0f}G) does not fill its bar")
 
 
 def run_wallpaper(window: InstallerWindow) -> None:

@@ -467,6 +467,13 @@ DONE_BODY = (
     "Take out the installation media and restart. Sign in with the username "
     "and password you chose."
 )
+#: The two facts people forget within a minute of the install finishing, and
+#: the two they need in the next thirty seconds. Word for word what the text
+#: installer says, because two front ends phrasing the same fact differently
+#: is two products.
+DONE_SIGN_IN = "Sign in as"
+DONE_COMPUTER = "This computer"
+
 DONE_ENCRYPTED = (
     "Your disk is encrypted. This computer asks for the disk passphrase "
     "before the sign-in screen, every time it starts. That is the passphrase "

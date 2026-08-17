@@ -70,6 +70,18 @@ SNAKE_GRADIENT_AT = 10
 #: gradient and a leading cap and both need room to be visible at a glance.
 PROGRESS_RIBBON_HEIGHT = 12
 
+#: The size bar on a disk row. Narrow, because it is repeating a number that
+#: is already written out two lines below it in mono, and the number is the
+#: authority. Six pixels tall so it has a shape rather than being a rule.
+CAPACITY_WIDTH = 84
+CAPACITY_HEIGHT = 6
+
+#: The done screen's settle. The pause is what makes it read as the page
+#: arriving rather than as a slow icon: the words are already there and being
+#: read, and then the tick catches up.
+SETTLE_DELAY_MS = 160
+SETTLE_MS = 520
+
 #: How far the highlight travels per second, in ribbon lengths. Slow: this is
 #: a sign of life on a five minute step, not something to watch.
 PROGRESS_SHEEN_PER_SECOND = 0.22
@@ -481,6 +493,33 @@ class Mark(Gtk.DrawingArea):
 SIGNAL_WORDS = {0: "none", 1: "weak", 2: "fair", 3: "good", 4: "excellent"}
 
 
+class CapacityBar(Gtk.DrawingArea):
+    """One disk's size, against the biggest one being offered.
+
+    A list of disks is the one page where two rows can be genuinely
+    indistinguishable: same maker, same model number, same transport, one row
+    apart. The words already separate them and somebody reading carefully will
+    get it right. This is for the glance before the reading, which is the same
+    argument the icon tiles are here for.
+    """
+
+    def __init__(self, window: "InstallerWindow", fraction: float) -> None:
+        super().__init__()
+        self.window = window
+        self.fraction = fraction
+        self.set_content_width(CAPACITY_WIDTH)
+        self.set_content_height(CAPACITY_HEIGHT)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_draw_func(
+            lambda _a, cr, w, h: brand.draw_capacity(
+                cr, w, h, self.window.dark, self.fraction))
+        self.set_can_target(False)
+        # The size is written out exactly, in mono, in this row's own
+        # subtitle. Announcing the bar as well would be the same fact twice,
+        # and the imprecise one of the two.
+        A.decorative(self)
+
+
 class SignalArcs(Gtk.DrawingArea):
     """Four arcs. A column of percentages is not a thing anyone reads."""
 
@@ -567,6 +606,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         #: The mark animation plays once. Coming back to the welcome screen
         #: and leaving it again is not a new arrival.
         self._swooped = False
+        #: The done screen's settle, likewise. There is only one arrival at
+        #: the end of an install, and a refresh is not it.
+        self._settled = False
+        self._settle = None
         self._secret = ""
         self._provider = None
         self._gate_token = ""
@@ -1234,6 +1277,43 @@ class InstallerWindow(Adw.ApplicationWindow):
         # Held on the window: an animation that goes out of scope stops.
         self._fade = animation
         animation.play()
+
+    def play_settle(self) -> None:
+        """The done screen arriving, rather than having been there all along.
+
+        The page draws, a beat passes, and the tick fades up. Then nothing
+        moves again, which is the whole difference between a moment and an
+        animation. Half a second, once per install.
+
+        Deliberately not confetti. Somebody who has just watched ten minutes
+        of an operating system being written to their disk does not want to be
+        congratulated at, and a machine that throws a party for itself is
+        pleased with itself rather than with you. What the moment is for is
+        marking that the waiting is over, and a beat of stillness followed by
+        one thing appearing does that.
+
+        Opacity only. Anything that changes a size relayouts a page whose
+        contents are vertically centred, so every other line on the screen
+        would shuffle to make room for the tick arriving. On the machines that
+        get the software renderer it would shuffle slowly.
+        """
+        icon = self.widgets.get(f"{F.DONE}.icon")
+        if icon is None or self._settled or not self.animate:
+            return
+        self._settled = True
+        icon.set_opacity(0.0)
+
+        def start() -> bool:
+            target = Adw.PropertyAnimationTarget.new(icon, "opacity")
+            animation = Adw.TimedAnimation.new(icon, 0.0, 1.0, SETTLE_MS, target)
+            animation.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+            # Held on the window: an animation that goes out of scope stops,
+            # and this one would go out of scope at the end of this function.
+            self._settle = animation
+            animation.play()
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(SETTLE_DELAY_MS, start)
 
     def play_swoop(self) -> None:
         """Draw the mark over the page, once, and then get out of the way."""
@@ -1984,7 +2064,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         while (existing := listbox.get_first_child()) is not None:
             listbox.remove(existing)
         removable = False
-        for disk in self.model.disks():
+        disks = list(self.model.disks())
+        # Against the biggest one on offer, so the bars answer "which of these
+        # is the big one" rather than "how does this compare to a disk that is
+        # not in the list".
+        largest = max((brand.parse_size(item.get("size") or "")
+                       for item in disks), default=0.0)
+        for disk in disks:
             item = Adw.ActionRow(title=disk["path"])
             item.add_css_class("aurade-mono")
             transport = (disk.get("transport") or "").upper()
@@ -2017,6 +2103,12 @@ class InstallerWindow(Adw.ApplicationWindow):
             item.add_prefix(
                 icon_tile("media-removable-symbolic", "warn") if transport == "USB"
                 else icon_tile("drive-harddisk-symbolic"))
+            # No bar at all when the size could not be read, rather than an
+            # empty one. A bar of the wrong length is a claim about which disk
+            # is bigger, on the page where that matters most.
+            fraction = brand.capacity_fraction(disk.get("size") or "", largest)
+            if fraction > 0:
+                item.add_suffix(CapacityBar(self, fraction))
             if transport == "USB":
                 removable = True
             listbox.append(item)
@@ -2692,17 +2784,51 @@ class InstallerWindow(Adw.ApplicationWindow):
         image.set_margin_bottom(20)
         if name == F.DONE:
             image.add_css_class("aurade-stage-done")
+        self.widgets[f"{name}.icon"] = image
         box.append(image)
         heading = label(title, "m3-headline-large", center=True)
         heading.set_margin_bottom(12)
         box.append(heading)
         box.append(label(body, "m3-body-large", center=True))
+        if name == F.DONE:
+            box.append(self._build_done_facts())
         extra = label("", "m3-body-medium", center=True, css="dim-label")
         extra.set_margin_top(16)
         extra.set_visible(False)
         self.widgets[f"{name}.extra"] = extra
         box.append(extra)
         return page_shell(box)
+
+    def _build_done_facts(self) -> Gtk.Widget:
+        """The username and the hostname, on the screen that just finished.
+
+        People forget both within the minute, and the sign-in prompt they are
+        about to meet asks for one of them. The text installer has said this
+        since it had a done screen; the graphical one said "the username you
+        chose", which is a sentence about a fact rather than the fact.
+
+        Set in mono, like every other thing in this installer somebody has to
+        type back exactly. A username in the prose face with an l and a 1 in
+        it is a username somebody gets wrong at the sign-in prompt, which is
+        the first thing that happens after this screen.
+        """
+        grid = Gtk.Grid()
+        grid.set_column_spacing(14)
+        grid.set_row_spacing(4)
+        grid.set_halign(Gtk.Align.CENTER)
+        grid.set_margin_top(20)
+        grid.set_visible(False)
+        for row_index, (key, title) in enumerate(
+                (("username", F.DONE_SIGN_IN), ("hostname", F.DONE_COMPUTER))):
+            name = label(title, "m3-label-medium", wrap=False, css="dim-label")
+            name.set_xalign(1.0)
+            self.widgets[f"done.{key}.name"] = name
+            grid.attach(name, 0, row_index, 1, 1)
+            value = label("", "m3-body-medium", wrap=False, css="aurade-mono")
+            self.widgets[f"done.{key}"] = value
+            grid.attach(value, 1, row_index, 1, 1)
+        self.widgets["done.facts"] = grid
+        return grid
 
     def _build_failure(self):
         box = column(16)
@@ -3007,8 +3133,34 @@ class InstallerWindow(Adw.ApplicationWindow):
             extra = self.widgets["done.extra"]
             extra.set_label(F.DONE_ENCRYPTED if encrypted else "")
             extra.set_visible(encrypted)
+            self._refresh_done_facts()
+            self.play_settle()
         elif state == F.FAILURE:
             self._refresh_failure()
+
+    def _refresh_done_facts(self) -> None:
+        """Fill the two facts in, and show nothing rather than a blank row.
+
+        The model is the only place either of these lives, and an install that
+        somehow reached the done screen without a username is an install with
+        a bigger problem than a missing line. Hiding the whole block is still
+        the right answer for it: a label with nothing after it reads as the
+        installer having lost something.
+        """
+        grid = self.widgets.get("done.facts")
+        if grid is None:
+            return
+        shown = False
+        for key in ("username", "hostname"):
+            value = str(self.model.get(key) or "")
+            self.widgets[f"done.{key}"].set_label(value)
+            # The label goes with its value. "This computer" followed by
+            # nothing is worse than no row: it reads as the installer having
+            # mislaid the hostname rather than as a row that does not apply.
+            self.widgets[f"done.{key}"].set_visible(bool(value))
+            self.widgets[f"done.{key}.name"].set_visible(bool(value))
+            shown = shown or bool(value)
+        grid.set_visible(shown)
 
     def _refresh_encryption(self) -> None:
         group = self.widgets.get("group.luks_passphrase")

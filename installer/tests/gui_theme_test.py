@@ -258,6 +258,7 @@ else:
         brand.draw_wordmark(cr, 10, 10, 18, T.scheme(dark)["on_surface"])
         brand.draw_signal(cr, 24, 20, 70, T.scheme(dark)["primary"],
                           T.scheme(dark)["outline_variant"])
+        brand.draw_capacity(cr, 84, 6, dark, 0.4)
         surface.flush()
         return bytes(surface.get_data())
 
@@ -280,6 +281,34 @@ else:
     equal(arcs, sorted(arcs), f"the signal scale is not monotonic: {arcs}")
     equal(B.signal_arcs(0), 0, "a dead signal lit an arc")
     equal(B.signal_arcs(100), 4, "a full signal did not light every arc")
+
+    # The disk size bar. A bar of the wrong length on the disk page is a claim
+    # about which drive is bigger, made to somebody about to erase one of
+    # them, so the failure mode that matters is a size this cannot read being
+    # drawn as though it could.
+    for text, want in (("476.9G", 476.9 * 1024 ** 3), ("1.8T", 1.8 * 1024 ** 4),
+                       ("356.9M", 356.9 * 1024 ** 2), ("512GB", 512 * 1024 ** 3),
+                       ("1024", 1024.0)):
+        got = B.parse_size(text)
+        check(abs(got - want) < 1,
+              f"parse_size({text!r}) is {got}, expected {want}")
+    for unreadable in ("", "nope", "12X", "-5G", None):
+        equal(B.parse_size(unreadable), 0.0,
+              f"parse_size({unreadable!r}) should refuse rather than guess")
+        equal(B.capacity_fraction(unreadable, 1024.0 ** 4), 0.0,
+              f"a bar was sized from {unreadable!r}")
+
+    biggest = B.parse_size("1.8T")
+    equal(B.capacity_fraction("1.8T", biggest), 1.0,
+          "the largest disk does not fill its bar")
+    sizes = ["8G", "356.9M", "476.9G", "1T", "1.8T"]
+    bars = [B.capacity_fraction(s, biggest) for s in sizes]
+    ordered = sorted(zip((B.parse_size(s) for s in sizes), bars))
+    equal([bar for _size, bar in ordered], sorted(bar for _size, bar in ordered),
+          f"a bigger disk drew a shorter bar: {list(zip(sizes, bars))}")
+    check(min(bars) >= B.CAPACITY_FLOOR,
+          f"the smallest disk drew {min(bars)} of a bar, which is nothing")
+    check(max(bars) <= 1.0, f"a bar ran past its track: {max(bars)}")
 
 
 if FAILURES:

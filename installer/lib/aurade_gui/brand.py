@@ -373,6 +373,67 @@ def draw_wallpaper(cr, width: int, height: int, path: str, dark: bool,
     return True
 
 
+# --------------------------------------------------------------------------
+# Disk sizes, as a bar
+# --------------------------------------------------------------------------
+#
+# What the bar says is "how big is this one next to the others", and it says
+# nothing else. That is deliberate and it is the whole of the design.
+#
+# The obvious reading of "capacity bar" is used against free, and on this page
+# it would be dangerous. Every disk in this list is a disk the installer is
+# offering to erase completely, and a bar showing forty percent free invites
+# exactly one misreading: that the install will go in the space that is left.
+# There is no page in this product where a wrong idea is more expensive.
+#
+# Relative size cannot be misread that way, and it answers the question the
+# page actually poses. Two 512G NVMe drives from the same maker are one row
+# apart and identical; a 2T next to a 32G stick is obvious at a glance and is
+# obvious without reading a single character, which is the same argument the
+# icon tiles are here for.
+
+#: What `lsblk` prints, in the powers it means by them.
+SIZE_UNITS = {"": 1.0, "K": 1024.0, "M": 1024.0 ** 2, "G": 1024.0 ** 3,
+              "T": 1024.0 ** 4, "P": 1024.0 ** 5}
+
+#: The shortest bar that still reads as a bar. A 32G stick beside a 4T disk is
+#: eight thousandths of the width, which draws as nothing at all and looks
+#: like a row where the drawing failed rather than like a very small disk.
+CAPACITY_FLOOR = 0.05
+
+
+def parse_size(text: str) -> float:
+    """Bytes from a size as `lsblk` writes it. Zero when it is not one.
+
+    Zero rather than a guess. The caller draws no bar for it, which is the
+    right outcome for a size this cannot read: a bar of the wrong length is a
+    statement about which disk is bigger, and getting that wrong on this page
+    is worse than saying nothing.
+    """
+    cleaned = str(text or "").strip()
+    if cleaned[-1:] in ("B", "b"):
+        cleaned = cleaned[:-1]
+    unit = ""
+    if cleaned[-1:].isalpha():
+        unit = cleaned[-1].upper()
+        cleaned = cleaned[:-1]
+    try:
+        value = float(cleaned.strip())
+    except ValueError:
+        return 0.0
+    if value < 0:
+        return 0.0
+    return value * SIZE_UNITS.get(unit, 0.0)
+
+
+def capacity_fraction(size: str, largest: float) -> float:
+    """How much of the bar this disk fills, against the biggest in the list."""
+    bytes_ = parse_size(size)
+    if bytes_ <= 0 or largest <= 0:
+        return 0.0
+    return max(CAPACITY_FLOOR, min(1.0, bytes_ / largest))
+
+
 def signal_arcs(strength: int) -> int:
     """How many of the four arcs are lit, from a 0-100 nmcli signal."""
     if strength >= 75:
@@ -450,6 +511,52 @@ def draw_ribbon_rule(cr, width: int, height: int, dark: bool) -> None:
     cr.fill()
 
 
+def _capsule(cr, x: float, width: float, height: float) -> None:
+    """A rounded rectangle with semicircular ends, left as a path.
+
+    Two caps and a middle rather than a clipped rectangle, because a filled
+    part that grows has to keep the track's left cap and grow its own right
+    one. Clipping a rectangle gives it square ends at every value except the
+    last, which is the value nobody is looking at.
+    """
+    radius = height / 2
+    cr.new_path()
+    if width <= 0:
+        return
+    if width <= height:
+        cr.arc(x + radius, radius, radius, 0, 6.283185)
+        return
+    cr.arc(x + radius, radius, radius, 1.570796, 4.712389)
+    cr.arc(x + width - radius, radius, radius, 4.712389, 1.570796)
+    cr.close_path()
+
+
+def draw_capacity(cr, width: int, height: int, dark: bool,
+                  fraction: float) -> None:
+    """One disk's size, against the largest one offered. See `parse_size`."""
+    import cairo  # noqa: PLC0415
+
+    if width <= 0 or height <= 0:
+        return
+    scheme = T.scheme(dark)
+    cr.set_source_rgba(*T.rgb(scheme["surface_container_highest"]), 1.0)
+    _capsule(cr, 0, width, height)
+    cr.fill()
+    filled = width * max(0.0, min(1.0, fraction))
+    if filled <= 0:
+        return
+    # The same lilac to aqua the ribbon runs, and laid across the filled part
+    # only for the same reason: a small disk is then a short complete ribbon
+    # rather than the first eighth of a long one, which would read as a bar
+    # part way through something.
+    gradient = cairo.LinearGradient(0, 0, filled, 0)
+    gradient.add_color_stop_rgb(0.0, *T.rgb(scheme["primary"]))
+    gradient.add_color_stop_rgb(1.0, *T.rgb(scheme["tertiary"]))
+    cr.set_source(gradient)
+    _capsule(cr, 0, filled, height)
+    cr.fill()
+
+
 def draw_progress_ribbon(cr, width: int, height: int, dark: bool,
                         fraction: float, phase: float = 0.0) -> None:
     """The install, drawn as the mark's own stroke rather than as a bar.
@@ -478,18 +585,7 @@ def draw_progress_ribbon(cr, width: int, height: int, dark: bool,
         return
 
     def track(x: float, w: float) -> None:
-        # A rounded rectangle, drawn as two caps and a middle, because the
-        # filled part has to keep the track's left cap and grow its own right
-        # one rather than being a clipped rectangle with square ends.
-        cr.new_path()
-        if w <= 0:
-            return
-        if w <= height:
-            cr.arc(x + radius, radius, radius, 0, 6.283185)
-            return
-        cr.arc(x + radius, radius, radius, 1.570796, 4.712389)
-        cr.arc(x + w - radius, radius, radius, 4.712389, 1.570796)
-        cr.close_path()
+        _capsule(cr, x, w, height)
 
     # The track. Low contrast on purpose: it is the space the ribbon has left
     # to cross, not a second bar.
