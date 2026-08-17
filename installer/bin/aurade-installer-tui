@@ -784,6 +784,15 @@ screen_question() {
   local id=$1 step=$2 total=$3 error=${4:-} buffer=${5:-} cursor=${6:-0}
   local type label help
   type=$(aurade_question_field "$id" type)
+  # The help key is off wherever the field takes arbitrary text, because a
+  # question mark is a character there. Decided by the screen rather than only
+  # by the prompt around it, so that a screen drawn on its own for review says
+  # the same thing the real one does.
+  local HELP_KEY=${HELP_KEY:-1}
+  case $type in
+    disk|bool|enum) ;;
+    *) HELP_KEY=0 ;;
+  esac
   label=${QUESTION_LABEL_OVERRIDE:-$(aurade_question_field "$id" label)}
   help=$(aurade_question_field "$id" help)
 
@@ -811,6 +820,11 @@ screen_question() {
   case $type in
     disk|bool|enum)
       tui_footer 'up/down  select    enter  continue' "$back" ;;
+    secret)
+      # The one field that says how to see what is in it. Masking exists
+      # because somebody might be watching, and the person best placed to
+      # know whether anybody is watching is the one at the keyboard.
+      tui_footer 'enter  continue    f3  show it' "$back" ;;
     *)
       tui_footer 'type your answer    enter  continue' "$back" ;;
   esac
@@ -850,10 +864,53 @@ widget_text() {
   tui_line "$(printf '  > %s_' "$1")" cyan
 }
 
+#: Whether the secret being typed is shown rather than masked. Off every time
+#: a secret field is entered, never remembered, and never on by default.
+SECRET_REVEAL=0
+
+#: Where the kernel reports the keyboard's caps lock light. Injectable, and
+#: absent on anything that is not a local console, which is the right answer
+#: there: a warning nobody can verify is worse than no warning.
+AURADE_CAPSLOCK_GLOB=${AURADE_CAPSLOCK_GLOB:-/sys/class/leds/*capslock/brightness}
+
+# Whether caps lock is on, as far as this machine can tell.
+#
+# The light is the only honest signal available. A terminal cannot be asked,
+# and guessing from the case of what somebody typed is exactly the kind of
+# cleverness that tells a person with a deliberately capitalised passphrase
+# that they have made a mistake.
+capslock_on() {
+  local path value
+  for path in $AURADE_CAPSLOCK_GLOB; do
+    [[ -r $path ]] || continue
+    read -r value <"$path" 2>/dev/null || continue
+    [[ $value =~ ^[0-9]+$ ]] || continue
+    (( value > 0 )) && return 0
+  done
+  return 1
+}
+
 widget_secret() {
   local masked='' i
-  for (( i = 0; i < ${#1}; i++ )); do masked+='*'; done
+  if (( SECRET_REVEAL )); then
+    masked=$1
+  else
+    for (( i = 0; i < ${#1}; i++ )); do masked+='*'; done
+  fi
   tui_line "$(printf '  > %s_' "$masked")" cyan
+  # Caps lock, said where it is being typed rather than after it is wrong.
+  # A disk passphrase set with caps lock on unlocks nothing afterwards, and
+  # this is the last screen where anybody can notice.
+  if capslock_on; then
+    tui_note '!' 'Caps lock is on.' warn
+  fi
+  # Length, said plainly and never enforced. Not a coloured bar and not a
+  # score: the honest thing a program can say about a passphrase is how long
+  # it is, and the honest thing it can do about a short one is nothing. A
+  # refusal here is a person locked out of their own installer.
+  if (( ${#1} > 0 && ${#1} < 8 )); then
+    tui_wrap 'That is short. It will still be accepted.' dim
+  fi
 }
 
 widget_bool() {
@@ -2125,6 +2182,10 @@ prompt_secret() {
   local id=$1 step=$2 total=$3 first='' second='' stage=1 error='' key
   # A passphrase may contain a question mark, so the help key is off here.
   local HELP_KEY=0 CURRENT_SCREEN=question
+  # Masked every time this field is entered. Revealing is a thing somebody
+  # asks for, in the moment, on the screen they are looking at, and carrying
+  # the choice forward would eventually show a passphrase to a room.
+  SECRET_REVEAL=0
   while true; do
     if (( stage == 1 )); then
       screen_question "$id" "$step" "$total" "$error" "$first"
@@ -2158,6 +2219,10 @@ prompt_secret() {
           return 1
         fi
         ;;
+      # Show what has been typed. The whole reason a secret field is masked is
+      # that somebody might be watching, and the person best placed to know
+      # whether anybody is watching is the person at the keyboard.
+      f3) SECRET_REVEAL=$(( ! SECRET_REVEAL )) ;;
       backspace)
         if (( stage == 1 )); then first=${first%?}; else second=${second%?}; fi ;;
       # A passphrase may contain spaces, and dropping them here would be found

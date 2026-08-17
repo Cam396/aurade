@@ -683,4 +683,43 @@ exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
 run_gate >/dev/null && fail 'a pasted token with a character too many was accepted'
 release
 
+# --- the secret field, and the three things it now says ---------------------
+#
+# A typo you cannot see is a disk you cannot open, and that is the only
+# mistake in this installer with no way back.
+#
+# Showing what has been typed is a thing somebody asks for in the moment, so
+# it starts masked every time the field is entered and the choice is never
+# carried forward. Carrying it would eventually show a passphrase to a room.
+reset_state
+SECRET_REVEAL=1
+{
+  echo enter; echo enter; echo enter; echo enter; echo enter; echo enter
+  typed 'alex'; echo enter
+  typed 'pw'; echo enter; typed 'pw'; echo enter
+  echo n
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_questions >/dev/null || fail 'the flow broke with reveal left on'
+release
+(( SECRET_REVEAL == 0 )) ||
+  fail 'a revealed secret field stayed revealed for the next one'
+
+# Caps lock is read from the keyboard light, which is the only honest signal
+# there is. Guessing from the case of what was typed would tell somebody with
+# a deliberately capitalised passphrase that they had made a mistake.
+install -d "$TMP/leds/input0::capslock"
+printf '1\n' >"$TMP/leds/input0::capslock/brightness"
+AURADE_CAPSLOCK_GLOB="$TMP/leds/*capslock/brightness" capslock_on ||
+  fail 'a lit caps lock light was not noticed'
+printf '0\n' >"$TMP/leds/input0::capslock/brightness"
+if AURADE_CAPSLOCK_GLOB="$TMP/leds/*capslock/brightness" capslock_on; then
+  fail 'an unlit caps lock light was reported as on'
+fi
+# And where there is no light to read, which is every terminal that is not a
+# local console, it says nothing rather than guessing.
+if AURADE_CAPSLOCK_GLOB="$TMP/no-such-place/*/brightness" capslock_on; then
+  fail 'caps lock was reported on a machine with no keyboard light to read'
+fi
+
 echo 'installer TUI flow test: PASS'
