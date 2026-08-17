@@ -310,6 +310,88 @@ AURADE_2048_SCORE=0
 aurade_2048_move up
 [[ ${AURADE_2048_BOARD[0]} == 4 ]] || fail 'tiles do not merge upward'
 
+# --- the bar is weighted by time, not by step count -------------------------
+#
+# An unweighted bar gives pacstrap the same share as confirm, so it sits still
+# for six minutes and then crosses five steps in as many seconds. Both halves
+# of that teach somebody the number means nothing, which is worse than showing
+# no number at all.
+#
+# Two things checked. Most of the way through a short step is only a little
+# way through the install, and the two front ends give the same answer,
+# because a graphical bar at 60 percent beside a text one at 8 is two products
+# disagreeing about one install.
+# A journal that looks like a real install partway through: every stage before
+# the running one finished, in order, the same shape as the fixture at the top
+# of this file. A fixture that jumps from preflight straight to pacstrap is not
+# a state this installer can be in, and testing the bar against one measures
+# nothing.
+weighted_journal() {
+  local want=$1 pct=$2 stage seq=0
+  : >"$TMP/weighted.jsonl"
+  for stage in preflight acquire confirm partition format mount pacstrap \
+               configure bootloader snapshot verify-install; do
+    seq=$(( seq + 1 ))
+    if [[ $stage == "$want" ]]; then
+      printf '{"v":1,"install_id":"w","seq":%s,"attempt":1,"stage":"%s","status":"running","pct":%s,"message":"x","reversible":true,"idempotent":true,"target":{"path":"/dev/sda"}}\n' \
+        "$seq" "$stage" "$pct" >>"$TMP/weighted.jsonl"
+      return 0
+    fi
+    printf '{"v":1,"install_id":"w","seq":%s,"attempt":1,"stage":"%s","status":"ok","elapsed_ms":3000,"reversible":true,"idempotent":true,"target":{"path":"/dev/sda"}}\n' \
+      "$seq" "$stage" >>"$TMP/weighted.jsonl"
+  done
+}
+
+bar_percent() {
+  env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=40 \
+    "$TUI" --render progress --journal "$TMP/weighted.jsonl" 2>/dev/null |
+    sed -n 's/.*\[\([#-]*\)\].*/\1/p' | head -1 |
+    awk '{ n = gsub(/#/, "#"); printf "%d", n * 100 / length($0) }'
+}
+
+# The test that actually distinguishes a weighted bar from a counted one is
+# how much of the bar a single stage spans, not where any one reading lands.
+#
+# Thresholds on a single reading pass either way: with eleven equal stages,
+# nine tenths through downloading still reads as a smallish number, because it
+# is early either way. What only a weighted bar does is give the six minute
+# step most of the bar and the instant one almost none of it.
+weighted_journal pacstrap 0
+pacstrap_start=$(bar_percent)
+weighted_journal pacstrap 100
+pacstrap_end=$(bar_percent)
+span=$(( pacstrap_end - pacstrap_start ))
+(( span > 40 )) ||
+  fail "the longest step spans $span percent of the bar, so the bar is counting steps"
+
+weighted_journal confirm 0
+confirm_start=$(bar_percent)
+weighted_journal confirm 100
+confirm_end=$(bar_percent)
+span=$(( confirm_end - confirm_start ))
+(( span < 5 )) ||
+  fail "an instant step spans $span percent of the bar"
+
+# And the ordering, which is the property somebody actually experiences: the
+# bar only ever moves forward as the install moves forward.
+weighted_journal acquire 90
+acquire_far=$(bar_percent)
+(( acquire_far < pacstrap_start )) ||
+  fail "the end of downloading reads as further along than the start of the longest step"
+
+# The two front ends, on the same journal, agreeing.
+weighted_journal pacstrap 50
+half=$(bar_percent)
+bridge=$(printf 'progress\nquit\n' |
+  "$ROOT/installer/bin/aurade-installer-gui-bridge" \
+    --journal "$TMP/weighted.jsonl" --raw-log "$TMP/weighted.log" \
+    --plan-only 2>/dev/null |
+  head -1 | sed -n 's/.*"overall":\([0-9]*\).*/\1/p')
+[[ -n $bridge ]] || fail 'the bridge does not report an overall percentage'
+# The text bar is quantised to its 34 cells, so they agree to within a cell.
+(( bridge >= half - 4 && bridge <= half + 4 )) ||
+  fail "the two front ends disagree: text $half, graphical $bridge"
+
 (( failures == 0 )) || exit 1
 printf 'installer progress screen test: PASS (%s tips, %s heights)\n' \
   "$(( ${#AURADE_TIPS[@]} + ${#AURADE_TIPS_NEXT[@]} + ${#AURADE_TIPS_RARE[@]} ))" 9

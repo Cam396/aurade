@@ -1327,6 +1327,11 @@ screen_progress() {
   local frame=${1:-0}
   local stage status label mark token elapsed pct detail record active=''
   local tip row shown=0 done_count=0 pending_count=0 done_ms=0
+  # Weighted, not counted. See `stage_weight`: an unweighted bar spends most
+  # of an install sitting on the one genuinely long step and then races
+  # through five short ones, and both halves of that teach somebody the
+  # number means nothing.
+  local weight_done=0 weight_total=0 weight_active=0
   local -a done_rows=() live_rows=() pending_rows=()
   local m_ok m_run m_fail m_wait
 
@@ -1345,6 +1350,7 @@ screen_progress() {
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
     shown=$(( shown + 1 ))
+    weight_total=$(( weight_total + $(stage_weight "$stage") ))
     record=$(journal_last_for_stage "$stage")
     status=pending
     [[ -z $record ]] || status=$(json_field status "$record")
@@ -1360,8 +1366,10 @@ screen_progress() {
                  elapsed=''
                fi
                done_count=$(( done_count + 1 ))
+               weight_done=$(( weight_done + $(stage_weight "$stage") ))
                done_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")") ;;
       running) mark=$m_run; token=cyan; active=$stage
+               weight_active=$(stage_weight "$stage")
                live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")")
                pct=$(json_field pct "$record")
                detail=$(json_field message "$record")
@@ -1400,11 +1408,22 @@ screen_progress() {
   fi
   progress_emit_rows "${live_rows[@]+"${live_rows[@]}"}"
   if [[ -n $active ]]; then
-    tui_bar "${PROGRESS_PCT:-0}" "${PROGRESS_DETAIL:-}"
+    # Everything finished, plus however far into the running stage the engine
+    # says it is. The engine reports progress within a stage and knows nothing
+    # about the shape of the whole install, which is the right division: it is
+    # the only thing that knows how many packages are left, and this is the
+    # only thing that knows how long the steps after it take.
+    PROGRESS_OVERALL=0
+    if (( weight_total > 0 )); then
+      PROGRESS_OVERALL=$(( (weight_done * 100
+        + weight_active * ${PROGRESS_PCT:-0}) / weight_total ))
+    fi
+    (( PROGRESS_OVERALL <= 100 )) || PROGRESS_OVERALL=100
+    tui_bar "$PROGRESS_OVERALL" "${PROGRESS_DETAIL:-}"
     # The one place the number is worth putting somewhere other than the
     # screen. Somebody who can see it in a tab does not have to keep this
     # window in front of them for ten minutes.
-    tui_title "$(printf '%s%% AuraDE  %s' "${PROGRESS_PCT:-0}" "$(stage_label "$active")")"
+    tui_title "$(printf '%s%% AuraDE  %s' "$PROGRESS_OVERALL" "$(stage_label "$active")")"
   fi
   if (( PROGRESS_FOLD_PENDING && pending_count > 0 )); then
     tui_line "$(printf ' %s %-50s' '   ' \

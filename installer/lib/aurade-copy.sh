@@ -76,6 +76,39 @@ stage_pacing() {
   esac
 }
 
+# Roughly how long each stage takes, as a share of the whole, in the same
+# units as each other. The numbers are seconds on a middling machine over a
+# middling connection, and they exist to weight a progress bar rather than to
+# predict anything.
+#
+# This is what stops the bar lying. A bar that gives every stage an equal
+# share spends most of an install sitting on whichever step is genuinely long,
+# then races through five short ones, and the two halves of that behaviour
+# teach somebody that the number means nothing. Weighted, `pacstrap` really is
+# most of the bar, because `pacstrap` really is most of the install.
+#
+# Deliberately coarse and deliberately here, next to the sentence that tells
+# the user the same thing in words, so the two cannot drift into disagreeing
+# about which step is the long one.
+stage_weight() {
+  case $1 in
+    preflight)      printf '5' ;;
+    network)        printf '5' ;;
+    acquire)        printf '150' ;;
+    verify)         printf '30' ;;
+    confirm)        printf '1' ;;
+    partition)      printf '5' ;;
+    format)         printf '30' ;;
+    mount)          printf '3' ;;
+    pacstrap)       printf '420' ;;
+    configure)      printf '90' ;;
+    bootloader)     printf '30' ;;
+    snapshot)       printf '20' ;;
+    verify-install) printf '6' ;;
+    *)              printf '0' ;;
+  esac
+}
+
 # What a failure at this stage means for the disk. The engine reports one cause
 # code, so the explanation is anchored on the stage, which is always present,
 # and refined by cause where a specific one is known.

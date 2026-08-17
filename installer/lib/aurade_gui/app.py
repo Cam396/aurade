@@ -2288,7 +2288,12 @@ class InstallerWindow(Adw.ApplicationWindow):
             F.PROGRESS_FOOTER_SAFE if reversible else F.PROGRESS_FOOTER)
         steps.set_title(F.progress_steps(done, pending))
         bar = self.widgets["progress.bar"]
-        wanted = max(0.0, min(1.0, pct / 100.0))
+        # The whole install, weighted by how long each stage takes, not how
+        # far through one stage the engine happens to be. `pct` is still what
+        # the detail line under the bar is built from, because "612 of 1041
+        # packages" is about the stage and the bar is about the wait.
+        overall = int(report.get("overall", 0))
+        wanted = max(0.0, min(1.0, overall / 100.0))
         # Stages complete in uneven jumps - a package set arrives all at once -
         # and a bar that teleports forward reads as a bar that is guessing.
         # Easing to the new value takes the same time either way and makes the
@@ -2310,7 +2315,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         # in it. Kept current on every refresh rather than set once, because a
         # progress bar whose reported value never moves is worse than one that
         # reports nothing: it says the install has stalled.
-        spoken = f"{running_label}, {pct} percent" if running_label else ""
+        spoken = f"{running_label}, {overall} percent" if running_label else ""
         A.meter(bar, "Installation progress", wanted, 0.0, 1.0, spoken)
 
         # And the part that matters most on this page. Ten minutes with no

@@ -744,6 +744,15 @@ gb_wifi_radio() {
 gb_progress() {
   local stage record status out='[' sep='' active='' pct detail elapsed running
   local reversible can_stop
+  # The overall bar, weighted by how long each stage actually takes. See
+  # `stage_weight`. Both front ends compute it from the same table, because a
+  # graphical bar at 60 percent next to a text one at 8 percent is two
+  # products disagreeing about the same install.
+  # `active_pct` is kept apart from `pct` on purpose. `pct` is reset at the
+  # top of every stage, so by the end of the loop it holds the last stage's
+  # value rather than the running one's, and the weighted total computed from
+  # it came out zero on every install.
+  local weight_done=0 weight_total=0 weight_active=0 overall=0 active_pct=0
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
     record=$(journal_last_for_stage "$stage")
@@ -751,6 +760,7 @@ gb_progress() {
     pct=0
     detail=''
     elapsed=''
+    weight_total=$(( weight_total + $(stage_weight "$stage") ))
     if [[ -n $record ]]; then
       status=$(json_field status "$record")
       detail=$(json_field message "$record")
@@ -759,8 +769,13 @@ gb_progress() {
           active=$stage
           pct=$(json_field pct "$record")
           [[ $pct =~ ^[0-9]+$ ]] || pct=0
+          weight_active=$(stage_weight "$stage")
+          active_pct=$pct
           ;;
-        ok) elapsed=$(json_field elapsed_ms "$record") ;;
+        ok)
+          elapsed=$(json_field elapsed_ms "$record")
+          weight_done=$(( weight_done + $(stage_weight "$stage") ))
+          ;;
       esac
     fi
     out+="${sep}{\"stage\":$(_gb_str "$stage"),"
@@ -794,6 +809,10 @@ gb_progress() {
   # engine is running AND nothing has been written. The instant the engine
   # reaches `partition` the offer is gone, because from there the only honest
   # thing to say is that stopping would leave a half-written disk.
+  if (( weight_total > 0 )); then
+    overall=$(( (weight_done * 100 + weight_active * active_pct) / weight_total ))
+    (( overall <= 100 )) || overall=100
+  fi
   reversible=true
   [[ -z $active ]] || aurade_stage_reversible "$active" || reversible=false
   can_stop=false
@@ -811,7 +830,7 @@ gb_progress() {
     ' "$JOURNAL_FILE" 2>/dev/null || printf '0')
     [[ $total_ms =~ ^[0-9]+$ ]] || total_ms=0
   fi
-  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"elapsed_ms\":${total_ms},\"reversible\":${reversible},\"can_stop\":${can_stop}}"
+  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"elapsed_ms\":${total_ms},\"overall\":${overall},\"reversible\":${reversible},\"can_stop\":${can_stop}}"
 }
 
 # Stop a run that has not written anything yet.

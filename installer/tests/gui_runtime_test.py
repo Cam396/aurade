@@ -284,8 +284,13 @@ def run(window: InstallerWindow) -> None:
     window.flow.state = F.PROGRESS
     window.refresh()
     try:
+        # `overall` is what the bar is set from, and `pct` is what the
+        # detail line is built from. They are different numbers on purpose:
+        # sixty percent through downloading is not sixty percent through
+        # installing, and the bridge sends both for exactly that reason.
         window._draw_progress({
             "running": True, "can_stop": True, "position": "2 of 7",
+            "overall": 60,
             "stages": [{"stage": "acquire", "label": "Downloading packages",
                         "status": "running", "pct": 60, "detail": "60%"}],
         })
@@ -314,6 +319,7 @@ def run(window: InstallerWindow) -> None:
     window.widgets["progress.bar"].set_fraction(0.0)
     window._draw_progress({
         "running": True, "can_stop": False, "position": "3 of 7",
+        "overall": 40,
         "stages": [{"stage": "pacstrap", "label": "Installing packages",
                     "status": "running", "pct": 40, "detail": ""}],
     })
