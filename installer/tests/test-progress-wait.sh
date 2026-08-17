@@ -444,8 +444,8 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # The two that ask nothing come first, in that order, before anything that
 # calls itself a game.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
-  sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Something Play Play Play Play Play Play ' ]] ||
+  sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
+[[ $order == 'Read Watch Something Solve Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -544,6 +544,44 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   aurade_mines_reveal
   [[ $(aurade_mines_rows) == "$before" ]] ||
     { echo 'a flagged cell was opened' >&2; exit 1; }
+  # A nonogram's clues have to describe its picture, or it is not solvable by
+  # deduction and the player finds out only after a lot of careful thought.
+  # Filling in the solution and asking whether it is solved is the round trip
+  # that proves the clues, the marks and the win check agree.
+  for seed in 1 2 3 4 5 6; do
+    RANDOM=$seed
+    aurade_nono_new
+    ! aurade_nono_won || { echo "seed $seed started solved" >&2; exit 1; }
+    for i in "${!AURADE_NONO_SOLUTION[@]}"; do
+      (( ! AURADE_NONO_SOLUTION[i] )) || AURADE_NONO_MARKS[i]=1
+    done
+    aurade_nono_won ||
+      { echo "seed $seed is not solved by its own picture" >&2; exit 1; }
+  done
+  # A square ruled out where the picture is empty is a note, not an answer,
+  # and must not stop the picture being finished.
+  RANDOM=2
+  aurade_nono_new
+  for i in "${!AURADE_NONO_SOLUTION[@]}"; do
+    if (( AURADE_NONO_SOLUTION[i] )); then
+      AURADE_NONO_MARKS[i]=1
+    else
+      AURADE_NONO_MARKS[i]=2
+    fi
+  done
+  aurade_nono_won || { echo 'ruled out squares blocked a finished picture' >&2; exit 1; }
+  # And every picture is the size it claims to be, because a short row would
+  # silently become empty cells and a clue nobody can satisfy.
+  for art in "${AURADE_NONO_ART[@]}"; do
+    rows=${art#*:}
+    IFS=':' read -r -a cells <<<"$rows"
+    (( ${#cells[@]} == 8 )) ||
+      { echo "${art%%:*} has ${#cells[@]} rows, not 8" >&2; exit 1; }
+    for row in "${cells[@]}"; do
+      (( ${#row} == 8 )) ||
+        { echo "${art%%:*} has a row ${#row} wide, not 8" >&2; exit 1; }
+    done
+  done
 ) || fail 'the puzzles do not hold their invariants'
 
 (( failures == 0 )) || exit 1

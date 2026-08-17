@@ -930,3 +930,129 @@ aurade_mines_rows() {
     printf '%s\n' "$row"
   done
 }
+
+# --------------------------------------------------------------------------
+# Nonogram
+# --------------------------------------------------------------------------
+#
+# Picross, in text, and the one thing on this screen that rewards a ten minute
+# window rather than being interrupted by one. Pure logic, no timing, and
+# every step of it is deduction rather than guessing.
+#
+# The pictures are drawn by hand rather than generated. A random grid produces
+# clues that are technically solvable and give no satisfaction at all, because
+# the reward for finishing a nonogram is seeing what it was, and a random one
+# is never anything. Eight by eight, which is small enough to finish while a
+# disk is being written and large enough to be a picture.
+# One picture per line, a row of the grid between each colon, so that the
+# pictures are legible in the source. A wall of dots on one line is not, and
+# the whole point of these is that somebody drew them.
+AURADE_NONO_ART=(
+  'heart:.##..##.:########:########:########:.######.:..####..:...##...:........'
+  'cat:#......#:##....##:########:#.#..#.#:########:.######.:..#..#..:........'
+  'key:..####..:.#....#.:.#....#.:..####..:...##...:...####.:...##...:...###..'
+  'up:...##...:..####..:.######.:########:...##...:...##...:...##...:...##...'
+  'wave:........:..##....:.####.#.:########:########:.######.:..####..:........'
+  'die:########:#......#:#.##...#:#......#:#...##.#:#......#:#......#:########'
+)
+AURADE_NONO_W=8
+AURADE_NONO_H=8
+AURADE_NONO_SOLUTION=()
+AURADE_NONO_MARKS=()
+AURADE_NONO_X=0
+AURADE_NONO_Y=0
+AURADE_NONO_NAME=
+
+aurade_nono_new() {
+  local entry rows row x y
+  local -a _nono_rows=()
+  entry=${AURADE_NONO_ART[RANDOM % ${#AURADE_NONO_ART[@]}]}
+  AURADE_NONO_NAME=${entry%%:*}
+  rows=${entry#*:}
+  AURADE_NONO_SOLUTION=()
+  AURADE_NONO_MARKS=()
+  IFS=':' read -r -a _nono_rows <<<"$rows"
+  for (( y = 0; y < AURADE_NONO_H; y++ )); do
+    row=${_nono_rows[y]}
+    for (( x = 0; x < AURADE_NONO_W; x++ )); do
+      if [[ ${row:x:1} == '#' ]]; then
+        AURADE_NONO_SOLUTION+=(1)
+      else
+        AURADE_NONO_SOLUTION+=(0)
+      fi
+      # 0 unknown, 1 filled, 2 ruled out
+      AURADE_NONO_MARKS+=(0)
+    done
+  done
+  AURADE_NONO_X=0
+  AURADE_NONO_Y=0
+  return 0
+}
+
+# The runs of filled cells along one line, which is what a clue is.
+_aurade_nono_runs() {
+  local -n _cells=$1
+  local out='' run=0 cell
+  for cell in "${_cells[@]}"; do
+    if (( cell )); then
+      run=$(( run + 1 ))
+    elif (( run )); then
+      out+="$run "
+      run=0
+    fi
+  done
+  (( ! run )) || out+="$run "
+  [[ -n $out ]] || out='0 '
+  printf '%s' "${out% }"
+}
+
+aurade_nono_row_clue() {
+  local y=$1 x
+  local -a cells=()
+  for (( x = 0; x < AURADE_NONO_W; x++ )); do
+    cells+=("${AURADE_NONO_SOLUTION[y * AURADE_NONO_W + x]}")
+  done
+  _aurade_nono_runs cells
+}
+
+aurade_nono_col_clue() {
+  local x=$1 y
+  local -a cells=()
+  for (( y = 0; y < AURADE_NONO_H; y++ )); do
+    cells+=("${AURADE_NONO_SOLUTION[y * AURADE_NONO_W + x]}")
+  done
+  _aurade_nono_runs cells
+}
+
+aurade_nono_move() {
+  case $1 in
+    up)    (( AURADE_NONO_Y > 0 )) && AURADE_NONO_Y=$(( AURADE_NONO_Y - 1 )) || true ;;
+    down)  (( AURADE_NONO_Y < AURADE_NONO_H - 1 )) && AURADE_NONO_Y=$(( AURADE_NONO_Y + 1 )) || true ;;
+    left)  (( AURADE_NONO_X > 0 )) && AURADE_NONO_X=$(( AURADE_NONO_X - 1 )) || true ;;
+    right) (( AURADE_NONO_X < AURADE_NONO_W - 1 )) && AURADE_NONO_X=$(( AURADE_NONO_X + 1 )) || true ;;
+  esac
+  return 0
+}
+
+# Unknown, filled, ruled out, and back. One key rather than two, because two
+# keys on a grid means remembering which is which.
+aurade_nono_cycle() {
+  local index=$(( AURADE_NONO_Y * AURADE_NONO_W + AURADE_NONO_X ))
+  AURADE_NONO_MARKS[index]=$(( (AURADE_NONO_MARKS[index] + 1) % 3 ))
+  return 0
+}
+
+# Solved when every filled cell is filled. Cells ruled out are not checked:
+# they are the player's notes, not their answer, and finishing a picture
+# without using them is a legitimate way to play.
+aurade_nono_won() {
+  local i
+  for (( i = 0; i < AURADE_NONO_W * AURADE_NONO_H; i++ )); do
+    if (( AURADE_NONO_SOLUTION[i] )); then
+      (( AURADE_NONO_MARKS[i] == 1 )) || return 1
+    else
+      (( AURADE_NONO_MARKS[i] != 1 )) || return 1
+    fi
+  done
+  return 0
+}

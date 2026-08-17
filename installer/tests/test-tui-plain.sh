@@ -66,7 +66,7 @@ for screen in "${SCREENS[@]}"; do
   # opens them returns to the tips, which is asserted below. Rendering one here
   # anyway and demanding it be frameless would be asserting on a screen nobody
   # can get to.
-  case $screen in game|2048|ttt|life|lights|fifteen|mines) continue ;; esac
+  case $screen in game|2048|ttt|life|lights|fifteen|mines|nono) continue ;; esac
   plain "$screen" >"$TMP/$screen" || { fail "$screen did not render in plain mode"; continue; }
 
   # Something has to come out. A screen that renders to nothing is a screen

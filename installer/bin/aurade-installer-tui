@@ -2544,19 +2544,6 @@ hash_password() {
 # small progress readout that stays on screen. Leaving the install out of sight
 # would be the wrong trade: this is a way to pass the time, not a way to stop
 # watching.
-#: What can be on the waiting card, in the order it is offered.
-#:
-#: The ambient option is first on purpose. Some people find a game on a screen
-#: they are already anxious about actively stressful, and for them the answer
-#: is something to watch rather than something to do. Putting it first means
-#: nobody has to scroll past two games to find out that reading is allowed.
-WAIT_MODES=(tips 2048 snake)
-declare -A WAIT_MODE_LABEL=(
-  [tips]='Read the tips'
-  [2048]='Play 2048'
-  [snake]='Play snake'
-)
-
 # 2048, drawn as four rows of four cells.
 #
 # Right aligned in a fixed six column cell, because the numbers grow by
@@ -2662,11 +2649,12 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log life 2048 mines lights fifteen snake ttt)
+WAIT_CHOICES=(tips log life nono 2048 mines lights fifteen snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
   [life]='Something moving, that needs nothing'
+  [nono]='Solve a nonogram'
   [2048]='Play 2048'
   [mines]='Play minesweeper'
   [lights]='Play lights out'
@@ -2698,6 +2686,82 @@ screen_wait_picker() {
   done
   tui_blank
   tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# A nonogram, with its clues.
+#
+# The clues are the whole interface: the numbers down the left are the runs of
+# filled cells in that row, the numbers across the top are the runs in that
+# column, and everything else is deduction. Drawn with the column clues
+# stacked upward so the last number of each sits against the grid, which is
+# how every nonogram anybody has played is drawn and therefore the only way it
+# reads without instructions.
+screen_nono() {
+  local HELP_KEY=0
+  local x y i row line clue pad
+  local -a rowclues=() colclues=()
+  local rowwidth=0 coldepth=0
+  for (( y = 0; y < AURADE_NONO_H; y++ )); do
+    clue=$(aurade_nono_row_clue "$y")
+    rowclues+=("$clue")
+    (( ${#clue} <= rowwidth )) || rowwidth=${#clue}
+  done
+  for (( x = 0; x < AURADE_NONO_W; x++ )); do
+    clue=$(aurade_nono_col_clue "$x")
+    colclues+=("$clue")
+    set -- $clue
+    (( $# <= coldepth )) || coldepth=$#
+  done
+
+  tui_clear
+  tui_header 'Nonogram'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - rowwidth - AURADE_NONO_W * 3) / 2 ))
+  (( pad >= 0 )) || pad=0
+
+  # Column clues, bottom aligned against the grid.
+  for (( i = coldepth; i > 0; i-- )); do
+    line=$(printf '%*s' "$(( pad + rowwidth ))" '')
+    for (( x = 0; x < AURADE_NONO_W; x++ )); do
+      set -- ${colclues[x]}
+      if (( $# >= i )); then
+        eval "clue=\${$(( $# - i + 1 ))}"
+        line+=$(printf '%3s' "$clue")
+      else
+        line+='   '
+      fi
+    done
+    tui_line "$line" dim
+  done
+
+  for (( y = 0; y < AURADE_NONO_H; y++ )); do
+    line=$(printf '%*s%*s' "$pad" '' "$rowwidth" "${rowclues[y]}")
+    for (( x = 0; x < AURADE_NONO_W; x++ )); do
+      i=$(( y * AURADE_NONO_W + x ))
+      case ${AURADE_NONO_MARKS[i]} in
+        1) row='#' ;;
+        2) row='x' ;;
+        *) row='.' ;;
+      esac
+      if (( x == AURADE_NONO_X && y == AURADE_NONO_Y )); then
+        line+="[$row]"
+      else
+        line+=" $row "
+      fi
+    done
+    tui_line "$line" cyan
+  done
+  tui_blank
+  if aurade_nono_won; then
+    tui_wrap "It was a $AURADE_NONO_NAME. Press enter for another." ok
+  else
+    # Both halves of how to play, in the body where they can wrap, rather than
+    # in a footer that has to fit sixty six columns alongside two other hints
+    # and the way out.
+    tui_wrap 'The numbers are the runs of filled squares in each line. Enter fills a square, again rules it out, again clears it.' dim
+  fi
+  tui_blank
+  tui_footer 'arrows  move    enter  mark    g  choose' 'esc  back'
 }
 
 # Minesweeper. Nine by nine with ten mines, which is the board everybody has
@@ -2946,6 +3010,7 @@ run_engine_with_progress() {
             # Slower than the redraw. Life at eight generations a second is a
             # boil rather than a thing to watch.
             (( frame % 3 )) || aurade_life_step ;;
+      nono)    screen_nono ;;
       mines)   screen_mines ;;
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
@@ -2991,6 +3056,7 @@ run_engine_with_progress() {
                 tips) mode=progress ;;
                 2048) mode=2048; aurade_2048_new ;;
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
+                nono)    mode=nono; aurade_nono_new ;;
                 mines)   mode=mines; aurade_mines_new ;;
                 lights)  mode=lights; aurade_lights_new ;;
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
@@ -3010,6 +3076,19 @@ run_engine_with_progress() {
           case $key in
             g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        nono)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_nono_move "$key" ;;
+            w|W) aurade_nono_move up ;;
+            s|S) aurade_nono_move down ;;
+            a|A) aurade_nono_move left ;;
+            d|D) aurade_nono_move right ;;
+            enter|space)
+              if aurade_nono_won; then aurade_nono_new; else aurade_nono_cycle; fi ;;
           esac
           ;;
         mines)
@@ -3601,7 +3680,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help watch ttt life picker lights fifteen mines
+  access keycheck explain help watch ttt life picker lights fifteen mines nono
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3667,6 +3746,7 @@ if [[ -n $RENDER_ONLY ]]; then
     ttt)       TTT_FRAMES=${AURADE_RENDER_TTT_FRAMES:-20}; screen_ttt ;;
     life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
     lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
+    nono)      RANDOM=${AURADE_NONO_SEED:-4}; aurade_nono_new; screen_nono ;;
     mines)     RANDOM=${AURADE_MINES_SEED:-9}; aurade_mines_new
                aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
