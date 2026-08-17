@@ -37,7 +37,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import (brand, flow as F, locales, stage as S, tokens as T,  # noqa: E402
+from . import (a11y as A, brand, flow as F, locales, stage as S, tokens as T,  # noqa: E402
                wait as W)
 from .bridge import Bridge, BridgeError  # noqa: E402
 
@@ -93,6 +93,12 @@ def software_drawing() -> bool:
 _LIB = os.path.dirname(os.path.realpath(__file__))
 THEME_CSS = os.path.join(_LIB, "theme.css")
 THEME_DARK_CSS = os.path.join(_LIB, "theme-dark.css")
+#: The same two schemes with every pair held to 7:1 and an outline on every
+#: container. Four sheets rather than two because GTK's `@define-color` is
+#: global: there is no selector or media query that can give a named colour a
+#: second value, which is the same reason light and dark are separate files.
+THEME_HC_CSS = os.path.join(_LIB, "theme-hc.css")
+THEME_DARK_HC_CSS = os.path.join(_LIB, "theme-dark-hc.css")
 
 
 # --------------------------------------------------------------------------
@@ -179,6 +185,9 @@ def icon_tile(name: str, state: str = "", size: int = 18) -> Gtk.Widget:
     subjects says which five.
     """
     tile = Gtk.Box()
+    # Every one of these repeats its row's title. Scannability for the eye,
+    # noise for a reader.
+    A.decorative(tile)
     tile.add_css_class("aurade-icon-tile")
     if state:
         tile.add_css_class(f"aurade-tile-{state}")
@@ -230,6 +239,9 @@ class Aurora(Gtk.DrawingArea):
         self.phase = 0.0
         self.set_draw_func(self._draw)
         self.set_can_target(False)
+        # Decoration. It says nothing the words do not, and a reader working
+        # through a page does not want a canvas announced to it.
+        A.decorative(self)
 
     def _draw(self, _area, cr, width: int, height: int) -> None:
         brand.draw_aurora(cr, width, height, self.window.dark, self.phase)
@@ -258,6 +270,7 @@ class Swoop(Gtk.DrawingArea):
         # second of decoration eating a click.
         self.set_can_target(False)
         self.set_visible(False)
+        A.decorative(self)
 
     def _draw(self, _area, cr, width: int, height: int) -> None:
         brand.draw_swoop(cr, width, height, self.window.dark, self.phase)
@@ -273,6 +286,7 @@ class RibbonRule(Gtk.DrawingArea):
         self.set_draw_func(
             lambda _a, cr, w, h: brand.draw_ribbon_rule(cr, w, h, self.window.dark))
         self.set_can_target(False)
+        A.decorative(self)
 
 
 class ProgressRibbon(Gtk.DrawingArea):
@@ -299,6 +313,11 @@ class ProgressRibbon(Gtk.DrawingArea):
         self.set_can_target(False)
         self.set_draw_func(self._draw)
         self.connect("notify::fraction", lambda *_a: self.queue_draw())
+        # Not decoration. It is a progress bar that happens to be drawn as the
+        # mark's stroke, and dropping it would cost a reader the one thing on
+        # the screen that says how far along an install is. `describe` keeps
+        # the percentage current; see `_refresh_progress`.
+        A.meter(self, "Installation progress", 0.0, 0.0, 1.0)
 
     def _draw(self, _area, cr, width, height) -> None:
         brand.draw_progress_ribbon(cr, width, height, self.window.dark,
@@ -323,6 +342,9 @@ class Wordmark(Gtk.DrawingArea):
         self.set_draw_func(self._draw)
         self.set_can_target(False)
         self.set_tooltip_text("AuraDE")
+        # The word "AuraDE" is written next to this in the header, so a reader
+        # that announced the drawing too would say it twice.
+        A.decorative(self)
 
     def _draw(self, _area, cr, _width, height) -> None:
         colour = T.scheme(self.window.dark)["on_surface"]
@@ -338,6 +360,11 @@ class Mark(Gtk.DrawingArea):
         self.set_content_height(size)
         self.set_draw_func(lambda _a, cr, w, h: brand.draw_mark(cr, w, h, min(w, h)))
         self.set_can_target(False)
+        A.decorative(self)
+
+
+#: What each arc count means, for the reader who cannot count arcs.
+SIGNAL_WORDS = {0: "none", 1: "weak", 2: "fair", 3: "good", 4: "excellent"}
 
 
 class SignalArcs(Gtk.DrawingArea):
@@ -351,6 +378,11 @@ class SignalArcs(Gtk.DrawingArea):
         self.set_content_height(20)
         self.set_draw_func(self._draw)
         self.set_can_target(False)
+        # Four arcs are how a sighted user reads signal strength here. Without
+        # this the network list is a column of names with nothing to choose
+        # between them.
+        A.described(self, "Signal strength", SIGNAL_WORDS.get(strength, ""),
+                    Gtk.AccessibleRole.IMG)
 
     def _draw(self, _area, cr, width, height) -> None:
         scheme = T.scheme(self.window.dark)
@@ -382,6 +414,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.enum_values: dict = {}
         self.probe: dict = {}
         self.install_status = 0
+        #: The last thing said out loud, so a refresh on a timer does not
+        #: repeat itself. Empty means nothing has been announced yet.
+        self._spoken_stage = ""
+        self._spoken_page = ""
+        #: Whether the high contrast sheets are the ones loaded. Read back from
+        #: the bridge rather than remembered here, so the two front ends cannot
+        #: disagree about what is currently on.
+        self.high_contrast = False
         #: Set by a page that will not let the flow past it. Read once, in
         #: `refresh`, after the page has drawn.
         self.forward_blocked = False
@@ -479,7 +519,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         if provider is None:
             return
         try:
-            provider.load_from_path(THEME_DARK_CSS if self.dark else THEME_CSS)
+            if self.high_contrast:
+                provider.load_from_path(
+                    THEME_DARK_HC_CSS if self.dark else THEME_HC_CSS)
+            else:
+                provider.load_from_path(THEME_DARK_CSS if self.dark else THEME_CSS)
         except GLib.Error:
             # An unstyled installer is still an installer. Refusing to start
             # because a stylesheet is missing would trade a cosmetic failure
@@ -554,6 +598,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         spacer.set_hexpand(True)
         top.append(spacer)
         top.append(self._build_advanced_toggle())
+        top.append(self._build_access_button())
         top.append(self._build_scheme_toggle())
         self.step_label = label("", "m3-label-medium", wrap=False, css="aurade-metric")
         self.step_label.set_valign(Gtk.Align.CENTER)
@@ -645,6 +690,143 @@ class InstallerWindow(Adw.ApplicationWindow):
         else:
             self.flow.set_show_advanced(False)
         self.refresh()
+
+    def _build_access_button(self) -> Gtk.Widget:
+        """One icon, beside the scheme toggle, on every screen.
+
+        Not a page in the flow. These are not part of deciding what to install,
+        they are how somebody is able to use the installer at all, so answering
+        them once at step three is the wrong shape: they have to be reachable
+        from wherever you already are.
+
+        `preferences-desktop-accessibility-symbolic` is the glyph people who
+        need it already scan for, and it is unnoticed by everyone else in
+        exactly the way the scheme toggle has been.
+        """
+        button = Gtk.Button()
+        button.set_child(Gtk.Image.new_from_icon_name(
+            "preferences-desktop-accessibility-symbolic"))
+        button.set_tooltip_text("Accessibility")
+        button.add_css_class("flat")
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_margin_end(6)
+        A.described(button, "Accessibility",
+                    "Screen reader, contrast, text size and motion. "
+                    "These are carried into the installed system.")
+        button.connect("clicked", lambda *_: self.open_accessibility())
+        self.widgets["access.button"] = button
+        return button
+
+    def open_accessibility(self) -> None:
+        """The choices, read from the shared state rather than held here.
+
+        The bridge sources the text installer, so there is exactly one set of
+        these variables and both front ends read and write it. A copy kept here
+        would be a second place for them to live, and the two would drift the
+        way the failure remediation tables did.
+        """
+        try:
+            report = self.model.call("access")
+        except BridgeError as exc:
+            self._toast(str(exc))
+            return
+        entries = report.get("access", {})
+        order = (report.get("order") or "").split()
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup()
+        group.set_title("Accessibility")
+        # The one sentence that makes this worth opening. Without it these look
+        # like ten minutes of convenience rather than the settings the machine
+        # will start with.
+        group.set_description(
+            "These take effect now, and are carried into the installed system.")
+        for key in order:
+            entry = entries.get(key)
+            if not entry:
+                continue
+            values = entry.get("values", [])
+            row_widget = Adw.ComboRow()
+            row_widget.set_title(entry.get("label", key))
+            row_widget.set_subtitle(entry.get("help", ""))
+            row_widget.set_model(Gtk.StringList.new(
+                [self._access_value_label(key, v) for v in values]))
+            current = entry.get("value")
+            if current in values:
+                row_widget.set_selected(values.index(current))
+            row_widget.connect("notify::selected",
+                               self._on_access_changed, key, values)
+            group.add(row_widget)
+        page.add(group)
+
+        dialog = Adw.PreferencesDialog()
+        dialog.set_title("Accessibility")
+        dialog.add(page)
+        dialog.present(self)
+
+    @staticmethod
+    def _spell(text: str) -> str:
+        """Say a device path so it can be heard rather than guessed at.
+
+        `/dev/nvme0n1` read at speaking speed is a run of sounds. Naming the
+        punctuation and separating the characters is the difference between
+        hearing it and hearing something like it.
+        """
+        spoken = {"/": "slash", ":": "colon", "-": "dash",
+                  "_": "underscore", ".": "dot"}
+        return " ".join(spoken.get(c, c) for c in text)
+
+    @staticmethod
+    def _access_value_label(key: str, value: str) -> str:
+        """`yes`, `no` and `high` are the engine's words, not a chooser's."""
+        if key == "text_scale":
+            return f"{value}%"
+        if key == "cursor_size":
+            return f"{value} pixels"
+        return {"yes": "On", "no": "Off",
+                "normal": "Normal", "high": "High"}.get(value, value)
+
+    def _on_access_changed(self, row_widget, _param, key: str,
+                           values: list) -> None:
+        index = row_widget.get_selected()
+        if index < 0 or index >= len(values):
+            return
+        try:
+            result = self.model.call("access-set", f"{key}={values[index]}")
+        except BridgeError as exc:
+            self._toast(str(exc))
+            return
+        if not result.get("ok"):
+            self._toast(result.get("error", "That could not be set."))
+            return
+        # Obeyed immediately as well as recorded, so the effect is visible
+        # rather than promised. A settings screen where nothing appears to
+        # happen is one people press twice and then stop trusting.
+        self._obey_access(key, values[index])
+        self.refresh()
+
+    def _obey_access(self, key: str, value: str) -> None:
+        """Apply a choice to this installer, now.
+
+        The GTK keys set here are the same ones the engine writes into
+        `/etc/xdg/gtk-4.0/settings.ini` on the installed system, which is the
+        point: what somebody sets up to get through the install is literally
+        the configuration the machine starts with, rather than a separate
+        thing that happens to resemble it.
+        """
+        settings = Gtk.Settings.get_default()
+        if key == "contrast":
+            self.high_contrast = value == "high"
+            self._apply_theme()
+        elif key == "reduce_motion" and settings is not None:
+            # `self.animate` reads this property, so every animation in the
+            # front end stops without any of them being told individually.
+            settings.set_property("gtk-enable-animations", value != "yes")
+        elif key == "text_scale" and settings is not None:
+            # GTK counts dpi in 1024ths of a point, which is why 100 is not 100.
+            settings.set_property("gtk-xft-dpi", int(value) * 96 * 1024 // 100)
+        elif key == "cursor_size" and settings is not None:
+            settings.set_property("gtk-cursor-theme-size", int(value))
 
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.
@@ -894,13 +1076,15 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         notes = []
         if chosen.get("filesystem", "btrfs") != "btrfs":
-            notes.append(f"{chosen['filesystem']} has no factory snapshot, so "
-                         "this install will have no rollback entry in the boot "
+            named = locales.describe_storage("filesystem",
+                                             chosen["filesystem"])[0]
+            notes.append(f"{named} has no snapshot to roll back to, so this "
+                         "install will have no rollback entry in the boot "
                          "menu.")
         if chosen.get("layout") == "alongside":
-            notes.append("Installing alongside needs free space that is already "
-                         "unallocated. The installer stops before writing "
-                         "anything if there is not enough.")
+            notes.append("Installing alongside only uses free space that is "
+                         "already there. Nothing on this disk is moved, "
+                         "resized or erased.")
         widget = self.widgets.get("storage.warning")
         if widget is None:
             return
@@ -1181,11 +1365,12 @@ class InstallerWindow(Adw.ApplicationWindow):
         status = self.model.call("net-status")
         item = self.widgets["net.status"]
         if not status.get("available"):
-            item.set_title("Network manager unavailable")
+            item.set_title("Wi-Fi cannot be set up here")
             item.set_subtitle(status.get("reason", ""))
             self.widgets["wifi.list"].set_visible(False)
             self.widgets["wifi.empty"].set_label(
-                "Wi-Fi cannot be set up from this image. Use a cable.")
+                "This image has no way to set up Wi-Fi. Connect a cable to "
+                "get online.")
             self.widgets["wifi.empty"].set_visible(True)
             return
         if status.get("wired"):
@@ -1196,7 +1381,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             item.set_subtitle("")
         elif status.get("radio") == "disabled":
             item.set_title("Wi-Fi is turned off")
-            item.set_subtitle("Turn the radio on to see networks.")
+            item.set_subtitle("Turn Wi-Fi on to see what is nearby.")
         else:
             item.set_title("Not connected")
             item.set_subtitle("Choose a network below.")
@@ -1514,7 +1699,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         # a heading for something missing, which is what it looked like.
         more = Adw.PreferencesGroup()
         entry = Adw.ActionRow(title="Advanced options")
-        entry.set_subtitle("Package snapshot, and where updates come from")
+        entry.set_subtitle("Package snapshot and where updates come from")
         entry.add_prefix(icon_tile("document-properties-symbolic"))
         entry.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
         entry.set_activatable(True)
@@ -1572,16 +1757,25 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(pane(facts, "aurade-danger-pane"))
         box.append(label(F.GATE_BODY, "m3-body-medium"))
 
+        # What to type comes before the place to type it, the way the text
+        # installer has always had it. Underneath the field, it is the one
+        # thing on the page you cannot see while you are using the page.
+        hint = label("", "m3-body-medium", css="aurade-mono")
+        # Selectable, so the token can be copied and pasted rather than
+        # retyped. Typing it exactly is a real motor and cognitive load and it
+        # is the one thing here that must not be made easier to get *wrong*;
+        # copying it is not easier to get wrong, it is harder.
+        hint.set_selectable(True)
+        self.widgets["gate.hint"] = hint
+        box.append(hint)
+
         prompt = Adw.PreferencesGroup()
-        entry = Adw.EntryRow(title="Type the confirmation")
+        entry = Adw.EntryRow(title="Confirmation")
         entry.add_css_class("aurade-token-field")
         entry.connect("changed", lambda *_: self.refresh_gate_button())
         self.widgets["gate.entry"] = entry
         prompt.add(entry)
         box.append(prompt)
-        hint = label("", "m3-body-small", css="aurade-mono")
-        self.widgets["gate.hint"] = hint
-        box.append(hint)
         return page_shell(box)
 
     def _refresh_gate(self) -> None:
@@ -1594,9 +1788,18 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._gate_token = info["token"]
         self.widgets["gate.headline"].set_label(
             f"This erases {info['path']} completely.")
+        # Said out loud on arrival, spelled out, because this is the one screen
+        # where hearing "dev nvme zero n one" as a run of characters is not
+        # good enough. A sighted user proofreads the token against the disk
+        # facts beside it; this is the equivalent.
+        A.announce(self,
+                   f"Erase gate. This erases {self._spell(info['path'])} "
+                   f"completely. Type {self._spell(info['token'])} to continue.",
+                   urgent=True)
         for key in ("model", "serial", "size", "transport"):
             self.widgets[f"gate.{key}"].set_subtitle(info.get(key) or "unknown")
-        self.widgets["gate.hint"].set_label(f"Type  {self._gate_token}")
+        self.widgets["gate.hint"].set_label(
+            f"Type  {self._gate_token}  to continue")
         self.widgets["gate.entry"].set_text("")
 
     def refresh_gate_button(self) -> None:
@@ -1707,6 +1910,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         arena.set_draw_func(self._draw_snake)
         arena.set_can_focus(True)
         arena.set_focusable(True)
+        # Focusable, so it is reachable, so it has to say what it is. A game
+        # nobody can be told about is a trap for anyone tabbing through.
+        A.described(arena, "Snake",
+                    "A game to pass the time. Arrow keys to steer.",
+                    Gtk.AccessibleRole.APPLICATION)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_snake_key)
         arena.add_controller(keys)
@@ -1955,6 +2163,22 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["progress.detail"].set_label(
             detail or report.get("position", ""))
 
+        # The ribbon is drawn, so without this it is a rectangle with no value
+        # in it. Kept current on every refresh rather than set once, because a
+        # progress bar whose reported value never moves is worse than one that
+        # reports nothing: it says the install has stalled.
+        spoken = f"{running_label}, {pct} percent" if running_label else ""
+        A.meter(bar, "Installation progress", wanted, 0.0, 1.0, spoken)
+
+        # And the part that matters most on this page. Ten minutes with no
+        # sound is indistinguishable from a hung machine if you cannot see the
+        # screen, so each stage says itself once as it starts. Once, not on
+        # every refresh: this runs on a timer, and a reader that repeats the
+        # same sentence every second is a reader you turn off.
+        if running_label and running_label != self._spoken_stage:
+            self._spoken_stage = running_label
+            A.announce(self, f"{running_label}. {pct} percent.")
+
         # The stop control exists only while the shared reversibility boundary
         # says nothing has been written, and it is removed rather than
         # disabled at the boundary: a greyed-out Stop invites the user to keep
@@ -1972,7 +2196,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         if report.get("can_stop"):
             self.secondary_button.set_label("Stop")
             self.secondary_button.set_visible(True)
-            state.set_label("Nothing has been written to the disk yet.")
+            state.set_label("Nothing has been written to any disk yet.")
             state.remove_css_class("warning")
             state.add_css_class("aurade-stage-done")
         else:
@@ -2054,9 +2278,9 @@ class InstallerWindow(Adw.ApplicationWindow):
     def stop_install(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Stop the installation?",
-            body=("Nothing has been written yet, so stopping leaves this "
-                  "computer exactly as it was. You can start again from the "
-                  "beginning."))
+            body=("Nothing has been written to any disk, so stopping leaves "
+                  "this computer exactly as it was. You can start again from "
+                  "the beginning."))
         dialog.add_response("keep", "Keep installing")
         dialog.add_response("stop", "Stop")
         dialog.set_response_appearance("stop", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -2267,11 +2491,67 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     # -- rendering ---------------------------------------------------------
 
+    def _sound(self, times: int) -> None:
+        """A pattern, not a pitch.
+
+        `Gdk.Display.beep` is whatever the session has: a real sound if there
+        is one, the terminal bell if not, nothing at all if neither. That is
+        the right failure mode for something whose absence costs nothing and
+        whose presence is the only thing telling somebody across the room that
+        ten minutes of waiting is over.
+
+        One for finished, three for stopped, matching the text installer, so
+        the two front ends do not disagree about what a machine sounds like.
+        """
+        display = self.get_display()
+        if display is None:
+            return
+        for index in range(times):
+            GLib.timeout_add(index * 150, lambda: (display.beep(), False)[1])
+
+    def _announce_page(self, state: str, name: str) -> None:
+        """Say where we now are, once per arrival.
+
+        A sighted user gets this from the page redrawing. Without it, moving
+        between pages is silent except for whatever the newly focused widget
+        happens to say, which is a field label with no context around it.
+
+        The position comes first because "step 3 of 7" is the question people
+        actually have during a wizard, and the failure states are urgent
+        because they are the one case where interrupting is the right thing.
+        """
+        if name == self._spoken_page:
+            return
+        self._spoken_page = name
+        if state == "pages":
+            page = F.PAGES_BY_NAME[self.flow.current_page]
+            position = self.flow.step_position()
+            title = page.title
+        else:
+            position = ""
+            title = {
+                F.WELCOME: F.WELCOME_TITLE, F.REVIEW: F.REVIEW_TITLE,
+                F.GATE: F.GATE_TITLE, F.PROGRESS: F.PROGRESS_TITLE,
+                F.DONE: F.DONE_TITLE, F.FAILURE: F.FAILURE_TITLE,
+                F.CANCELLED: F.CANCELLED_TITLE, F.STOPPED: F.STOPPED_TITLE,
+                F.PLANNED: F.PLANNED_TITLE,
+            }.get(state, "")
+        if not title:
+            return
+        urgent = state in (F.FAILURE, F.STOPPED)
+        A.announce(self, f"{position}. {title}." if position else f"{title}.",
+                   urgent=urgent)
+        if state == F.DONE:
+            self._sound(1)
+        elif state in (F.FAILURE, F.STOPPED):
+            self._sound(3)
+
     def refresh(self) -> None:
         state = self.flow.state
         name = f"page:{self.flow.current_page}" if state == "pages" else state
         self.stack.set_visible_child_name(name)
         self.step_label.set_label(self.flow.step_position())
+        self._announce_page(state, name)
 
         # A page may refuse to be left. Cleared before the page is drawn and
         # set by the page itself, because the alternative - the page disabling

@@ -472,6 +472,48 @@ def run(window: InstallerWindow) -> None:
         check(manager.get_color_scheme() == Adw.ColorScheme.FORCE_LIGHT,
               "the light button did not force the light scheme")
 
+    # -- nothing drawn is silent -------------------------------------------
+    #
+    # Every identity in this front end is drawn rather than written: the mark,
+    # the wordmark, the aurora, the swoop, the hairline, the progress ribbon,
+    # the signal arcs, the icon tile on every row. To a screen reader a
+    # `GtkDrawingArea` with no role and no label is an unlabelled box, so a
+    # page of them is a page of nothing.
+    #
+    # This does not check that the *right* choice was made, because that is a
+    # judgement: the aurora should be silent and the signal arcs must not be.
+    # It checks that a choice was made at all, which is the failure that
+    # actually happens, and it will catch the next drawn thing somebody adds
+    # without thinking about it.
+    drawn = [w for w in walk(window) if isinstance(w, Gtk.DrawingArea)]
+    check(len(drawn) >= 5,
+          f"expected the drawn layer to still be there, found {len(drawn)}")
+    for area in drawn:
+        role = area.get_accessible_role()
+        if role == Gtk.AccessibleRole.PRESENTATION:
+            continue  # deliberately skipped, which is a decision
+        labelled = False
+        try:
+            # There is no getter for an accessible property, so the state is
+            # read back off the widget the only way GTK exposes it.
+            labelled = bool(area.get_accessible_role() in (
+                Gtk.AccessibleRole.PROGRESS_BAR,
+                Gtk.AccessibleRole.IMG,
+                Gtk.AccessibleRole.APPLICATION,
+            ))
+        except Exception:
+            pass
+        check(labelled,
+              f"a drawing area is neither decorative nor described: "
+              f"role {role}, {type(area).__name__}")
+
+    # The ribbon specifically, because it is the one a blind user needs during
+    # the ten minutes when nothing else on the page changes.
+    ribbon = window.widgets.get("progress.bar")
+    check(ribbon is not None and
+          ribbon.get_accessible_role() == Gtk.AccessibleRole.PROGRESS_BAR,
+          "the progress ribbon does not report itself as a progress bar")
+
 
 def main() -> int:
     if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
