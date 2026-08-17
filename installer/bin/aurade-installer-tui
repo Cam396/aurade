@@ -449,6 +449,7 @@ cleanup() {
   # about.
   tui_palette_reset 2>/dev/null || true
   tui_title_reset 2>/dev/null || true
+  tui_paste_off 2>/dev/null || true
   if [[ -d ${SECRET_DIR:-} ]]; then
     while IFS= read -r -d '' file; do
       if command -v shred >/dev/null 2>&1; then
@@ -1793,17 +1794,33 @@ run_help_where() {
 screen_done() {
   # One bell: finished. See `tui_bell` for why it is a count rather than a tone.
   tui_bell 1
+  local CURRENT_SCREEN=done
   tui_clear
   tui_header 'You are all set'
   tui_blank
   tui_wrap 'AuraDE is installed.' ok
   tui_blank
-  tui_wrap 'Take out the installation media and restart. Sign in with the username and password you chose.' ink
+  tui_wrap 'Take out the installation media and restart.' ink
+  tui_blank
+  # The two things people forget inside a minute, put where they are still on
+  # the screen while the machine restarts.
+  #
+  # This is not padding. Somebody has just spent ten minutes answering
+  # questions, most of them about disks, and the sign in prompt they are about
+  # to meet asks for exactly one of those answers. Reading it back costs two
+  # lines and saves a reinstall.
+  tui_field 'Sign in as' "${ANSWERS[username]:-the name you chose}" accent
+  tui_field 'This computer' "${ANSWERS[hostname]:-aurade}" accent
   tui_blank
   if [[ ${ANSWERS[encrypt]:-no} == yes ]]; then
     tui_wrap 'Your disk is encrypted. This computer asks for the disk passphrase before the sign-in screen, every time it starts. That is the passphrase you set here, not your account password.' dim
     tui_blank
   fi
+  # Where the answers to all of this live afterwards, said once. Somebody
+  # rebuilding this machine in a year wants that file and would never think to
+  # look for it.
+  tui_wrap 'A record of this install is at /etc/aurade-install/summary.' dim
+  tui_blank
   tui_footer 'take out the installation media, then restart' ''
 }
 
@@ -2076,6 +2093,7 @@ prompt_text() {
       backspace) buffer=${buffer%?} ;;
       space) buffer+=' ' ;;
       up|down|left|right|tab) ;;
+      paste:*) buffer+=${key#paste:} ;;
       *) [[ ${#key} -ne 1 ]] || buffer+=$key ;;
     esac
   done
@@ -2274,6 +2292,7 @@ keyboard_check() {
       backspace) buffer=${buffer%?} ;;
       space) buffer+=' ' ;;
       up|down|left|right|tab) ;;
+      paste:*) buffer+=${key#paste:} ;;
       *) [[ ${#key} -ne 1 ]] || buffer+=$key ;;
     esac
   done
@@ -2810,13 +2829,15 @@ run_gate() {
       space) typed+=' ' ;;
       f2) GATE_SPELL=$(( ! GATE_SPELL )) ;;
       up|down|left|right|tab) ;;
-      # Anything else that is one character is part of the token, which is
-      # also how paste works here: a terminal that is not in bracketed paste
-      # mode delivers pasted text as ordinary keystrokes, one at a time.
+      # A paste arrives whole, and arrives as text rather than as keystrokes.
+      # That is what stops a copied line ending from pressing enter on this
+      # screen of all screens: the newline that came with the text is part of
+      # the text, and control characters are dropped from it.
       #
-      # Nothing is trimmed, folded or normalised on the way in. If it does not
+      # Nothing is trimmed, folded or normalised beyond that. If it does not
       # match, it does not match, and the engine compares the same string
       # again independently.
+      paste:*) typed+=${key#paste:} ;;
       *) [[ ${#key} -ne 1 ]] || typed+=$key ;;
     esac
   done
@@ -2985,6 +3006,9 @@ run_failure() {
 }
 
 main_flow() {
+  # Ask the terminal to bracket pastes, so that pasted text is text and not a
+  # run of keystrokes that can include a return. Put back in `cleanup`.
+  tui_paste_on
   SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX")
   chmod 700 "$SECRET_DIR"
   # Before anything is asked, so the questions open on these rather than on

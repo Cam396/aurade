@@ -661,4 +661,26 @@ reset_state
 answers_load "$TMP/no-such-file" && fail 'a missing answer file reported success'
 (( ${#ANSWERS[@]} == 0 )) || fail 'a missing answer file filled something in'
 
+# --- a pasted token reaches the gate whole ----------------------------------
+#
+# The scripted key stream can carry a paste, because that is what the reader
+# hands the screen: one key name with the text attached. This is the gate, so
+# the thing being checked is that the pasted string is compared exactly and
+# that nothing about arriving by paste makes it match more easily.
+reset_state
+ANSWERS[target]=/dev/sda
+ANSWERS[layout]=wipe
+token=$(aurade_confirmation_token /dev/sda wipe)
+{ printf 'paste:%s\n' "$token"; echo enter; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null || fail 'a pasted confirmation token was not accepted'
+release
+
+# And a paste that is nearly right is still refused, which is the half worth
+# testing: the gate has to compare, not merely receive.
+{ printf 'paste:%s\n' "${token}x"; echo enter; echo esc; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null && fail 'a pasted token with a character too many was accepted'
+release
+
 echo 'installer TUI flow test: PASS'

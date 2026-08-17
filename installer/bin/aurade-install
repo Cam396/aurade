@@ -1265,6 +1265,20 @@ write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
 write_target_file /etc/aurade-install/accessibility 0644 \
   "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nspacing=$SPACING\ntypeface=$TYPEFACE\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
 
+# What this install was, left where somebody can read it later.
+#
+# Six months from now the questions are "when did I install this", "which
+# snapshot is it built from" and "did I turn encryption on". All three are
+# known exactly once, here, and are guesswork forever afterwards. It is three
+# lines of writing and it answers a support conversation.
+#
+# Plain `key=value`, the same shape as the accessibility record beside it, so
+# a script can read it and so can a person. No secret goes in it: the disk is
+# named because the disk is not a secret and knowing which one the system came
+# from is the point.
+write_target_file /etc/aurade-install/summary 0644 \
+  "installed=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\n"
+
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
       $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||
       $SPACING != normal || $TYPEFACE != system ]]; then

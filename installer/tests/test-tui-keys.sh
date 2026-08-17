@@ -63,6 +63,38 @@ reads_as ' '         space
 # into a passphrase because the terminal reported its cursor position is not.
 reads_as '\033[6;1R' esc
 
+# --- a paste is text, not a run of keystrokes -------------------------------
+#
+# Typing ERASE:/dev/nvme0n1 by hand is a real load and somebody should be able
+# to paste it. The safety half is the less obvious one and is why bracketed
+# paste is turned on rather than left alone: without it a terminal delivers a
+# paste as ordinary keystrokes, so a copied line that ends in a newline types
+# the token and then presses enter, and the confirmation screen submits
+# itself. With it, the newline is part of the text and is dropped.
+#
+# That makes the gate harder to pass by accident than it was, which is the
+# only direction that screen is allowed to move.
+pasted=$(printf '%b' '\033[200~ERASE:/dev/sda\n\033[201~' | bash -c '
+  . "$0"
+  tui_read_key' "$LIB" 2>/dev/null || true)
+[[ $pasted == 'paste:ERASE:/dev/sda' ]] ||
+  fail "a pasted token came back as '$pasted'"
+
+# A paste carrying a newline in the middle of it does not become two answers
+# and does not become an enter either.
+pasted=$(printf '%b' '\033[200~one\ntwo\033[201~' | bash -c '
+  . "$0"
+  tui_read_key' "$LIB" 2>/dev/null || true)
+[[ $pasted == 'paste:onetwo' ]] ||
+  fail "a paste containing a newline came back as '$pasted'"
+
+# And a tab, which is what a copy out of a table brings with it.
+pasted=$(printf '%b' '\033[200~a\tb\033[201~' | bash -c '
+  . "$0"
+  tui_read_key' "$LIB" 2>/dev/null || true)
+[[ $pasted == 'paste:ab' ]] ||
+  fail "a paste containing a tab came back as '$pasted'"
+
 # --- the frame, measured again -----------------------------------------------
 #
 # Resizing a terminal mid install used to leave the frame in pieces until the
