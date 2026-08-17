@@ -370,6 +370,10 @@ WELCOME_TITLE = "Let's set up AuraDE"
 WELCOME_BODY = "A few questions, then AuraDE takes it from here."
 WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 
+#: What the credit line in the corner offers. Said as an invitation rather
+#: than as an instruction, because nothing depends on anybody taking it up.
+WALLPAPER_HINT = "Show a different photograph"
+
 #: The readiness page's verdict line, keyed by the model's verdict. It is the
 #: first sentence of the installer that is about *this* computer rather than
 #: about the product, so it says what happens next rather than restating the

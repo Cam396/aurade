@@ -270,7 +270,51 @@ grey. Four live states used it and all four drew caution in ordinary chrome.
 
 **One radius for a card.** 16px, on `.card` and on everything named
 `aurade-*-pane` or `aurade-live-step`. There were three: libadwaita's 12px
-default, the panes at 16, and two new cards at 20.
+default, the panes at 16, and two new cards at 20. The page sheet is 28,
+which is not a fourth number: 16 is `lg` on the shape scale and is what a card
+is, and the thing cards sit on is one step up at `xl`.
+
+## The photograph behind the window
+
+Twenty eight of them in `installer/wallpapers`, one picked at random per run,
+staged to `/usr/local/share/aurade/wallpapers` and indexed by a manifest the
+front end reads. They are the installer's background and not the installed
+desktop's. 1376x768 is what the generator emits, which is soft on a monitor
+and perfectly good behind a window that is mostly covered by the interface in
+front of it.
+
+**No text is ever on a photograph.** This is the whole design and not a
+detail of it. Pages sit on `.aurade-sheet`, which is opaque; the chrome above
+and below sits on a band that the backdrop paints in the surface colour at
+full opacity, as tall as the chrome measured itself to be. So every pair
+`test-gui-theme.sh` holds to a contrast floor is still the pair that is on the
+screen, and the floors keep meaning what they say. `test-wallpapers.sh` paints
+a real picture through the real function and reads the band back out of the
+pixels, because this is a property of the rendering rather than of the
+intention behind it.
+
+**The band is measured, not assumed.** Somebody at 200% text scale has a
+taller top bar, and a fixed band would end half way up the wordmark. The top
+is read from where the hairline ends, per frame. The bottom is read from
+whichever of the action bar and the credit line starts higher, because the
+progress page hides its buttons and the credit line is then the lowest thing
+on the screen.
+
+**Off wherever the ground is a decision.** High contrast exists so somebody
+can read, and a photograph is the opposite of that. The black scheme exists so
+an OLED panel can leave its pixels unlit, and a photograph lights every one of
+them. Both win; a wallpaper is a taste and a taste does not overrule either.
+With no set staged, nothing changes at all: every rule involved is scoped
+under `.aurade-grounded` and that class is only on the window when a picture
+is actually being drawn.
+
+**The aurora stays, at half strength.** The set has deliberately nothing in
+common, which is what stops it reading as a theme and would also make the
+installer look like twenty eight different products. The brand's own light
+over all of them is what makes them one.
+
+**One credit line, bottom right,** naming the picture, which is a button
+because the question after "where is that" is "show me another one".
 
 ## Type
 

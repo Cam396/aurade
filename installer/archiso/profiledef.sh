@@ -57,4 +57,10 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade_gui/theme-oled.css"]=0:0:644
   ["/usr/local/share/aurade/aurade-mark.png"]=0:0:644
   ["/usr/local/share/aurade/aurade-wordmark.png"]=0:0:644
+  # The wallpapers themselves are deliberately not listed one by one. There
+  # are twenty eight of them, `build-iso.sh` stages every one at 0644 from the
+  # manifest, and a hand written list of twenty eight file names is a list
+  # that is wrong the first time somebody adds a twenty ninth photograph. The
+  # stage test checks the mode of what actually landed instead.
+  ["/usr/local/share/aurade/wallpapers/manifest.tsv"]=0:0:644
 )

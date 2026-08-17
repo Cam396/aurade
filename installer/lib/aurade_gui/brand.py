@@ -105,6 +105,274 @@ def aurora_drift(phase: float, index: int) -> tuple[float, float]:
     )
 
 
+# --------------------------------------------------------------------------
+# The wallpaper
+# --------------------------------------------------------------------------
+#
+# Twenty eight photographs, and the reason they are the installer's background
+# rather than the installed desktop's is resolution: 1376x768 is what the model
+# emits, which is soft on a monitor and perfectly good behind a window that is
+# mostly covered by the interface in front of it.
+#
+# The rules that make a photograph safe to put behind an interface:
+#
+#   nothing readable ever sits on it. The page content is on an opaque sheet
+#   and the chrome at the top and the bottom is on an opaque band, so every
+#   contrast ratio in the theme test is still the ratio that is on the screen.
+#   The photograph is visible around all of it and under none of it.
+#
+#   the aurora stays, at about half strength. Twenty eight pictures with
+#   nothing in common is the whole point of the set, and it is also a way to
+#   make an installer look like twenty eight different products. A wash of the
+#   brand's own light over all of them is what makes them one.
+#
+#   it is off wherever the ground is a decision rather than a taste. High
+#   contrast exists so somebody can read, and a photograph is the opposite of
+#   that. The black scheme exists so an OLED panel can leave its pixels unlit,
+#   and a photograph lights every one of them.
+
+
+WALLPAPER_DIRS = [
+    os.environ.get("AURADE_WALLPAPER_DIR", ""),
+    "/usr/local/share/aurade/wallpapers",
+    os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..",
+                 "wallpapers"),
+]
+
+#: The index, written by `tools/wallpaper-manifest.py` and committed. Reading
+#: the directory instead would work until the day a half-written file is in it.
+WALLPAPER_MANIFEST = "manifest.tsv"
+
+#: How much of the surface colour goes over the photograph.
+#:
+#: Different per scheme because the problem is different per scheme. This set
+#: is dark: mean luminance runs 0.037 to 0.204, and there is not one bright
+#: picture in it. Behind the dark scheme that is nearly free. Behind the light
+#: scheme a dark picture at the edges of a pale interface is a hole in the
+#: window, so the light veil is the heavier of the two.
+#:
+#: Neither number is a legibility control - the sheet and the bands are - so
+#: both are taste, and both were set by rendering the result and looking at
+#: it. The light one started at 0.62 and Vestrahorn came out as a rumour: a
+#: veil strong enough that the photograph might as well not be there is a
+#: photograph that might as well not be there.
+WALLPAPER_VEIL_LIGHT = 0.40
+WALLPAPER_VEIL_DARK = 0.34
+
+#: The aurora, over a photograph. Full strength on top of a picture is three
+#: coloured clouds in front of a landscape; half of it is a cast over one.
+WALLPAPER_AURORA = 0.5
+
+#: How far the opaque band behind the chrome takes to fade into the picture.
+#:
+#: The band itself is measured from the chrome rather than set here, because
+#: the chrome is as tall as its text and its text is as tall as the person
+#: reading it asked for: at 200% scale a fixed band would end half way up the
+#: wordmark. This is only the distance over which it stops.
+#:
+#: 130 rather than something tidier because the fade has to be longer than the
+#: band is tall or it reads as an edge, and the band is around sixty pixels.
+WALLPAPER_FADE = 130
+
+_wallpapers: list[dict[str, str]] | None = None
+#: One scaled surface, keyed by the file and the size it was scaled for. The
+#: window is repainted many times a second and the picture is rescaled when
+#: the window changes shape, which is roughly never.
+_wall_cache: dict[str, object] = {"key": None, "surface": None}
+
+
+def wallpaper_dir() -> str | None:
+    """The first directory that has a manifest in it."""
+    for directory in WALLPAPER_DIRS:
+        if not directory:
+            continue
+        path = os.path.normpath(os.path.join(directory, WALLPAPER_MANIFEST))
+        if os.path.exists(path):
+            return os.path.dirname(path)
+    return None
+
+
+def wallpapers() -> list[dict[str, str]]:
+    """Every picture in the manifest that is actually on this machine.
+
+    A row whose file is missing is dropped rather than reported: the image
+    build stages the set and the manifest together, so the only way to be
+    holding one without the other is to be running from a source tree that is
+    part way through something.
+    """
+    global _wallpapers  # noqa: PLW0603 - read once per process, like _surfaces
+    if _wallpapers is not None:
+        return _wallpapers
+
+    _wallpapers = []
+    directory = wallpaper_dir()
+    if directory is None:
+        return _wallpapers
+    try:
+        with open(os.path.join(directory, WALLPAPER_MANIFEST),
+                  encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return _wallpapers
+
+    for line in lines:
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.rstrip("\n").split("\t")
+        path = os.path.join(directory, parts[0])
+        if not os.path.exists(path):
+            continue
+        _wallpapers.append({
+            "file": parts[0],
+            "title": parts[1] if len(parts) > 1 else "",
+            "place": parts[2] if len(parts) > 2 else "",
+            "path": path,
+        })
+    return _wallpapers
+
+
+def choose_wallpaper(name: str = "") -> dict[str, str] | None:
+    """One picture, once, for this run of the installer.
+
+    `name` pins it, by file name with or without the extension, which is what
+    the preview tool and the tests need and what anybody comparing two
+    treatments wants. A name that is not in the set returns nothing rather
+    than quietly picking something else, because a pinned wallpaper that
+    silently became a different one would waste the afternoon of whoever was
+    comparing them.
+    """
+    import random  # noqa: PLC0415 - one call, on one code path
+
+    available = wallpapers()
+    if not available or name == "none":
+        return None
+    if name:
+        stem = os.path.splitext(name)[0]
+        for entry in available:
+            if stem == os.path.splitext(entry["file"])[0]:
+                return entry
+        return None
+    return random.choice(available)
+
+
+def cover_box(image_w: int, image_h: int, width: int,
+              height: int) -> tuple[int, int, int, int]:
+    """Scale and offset to fill `width` by `height` without distorting.
+
+    Cover rather than contain, and centred on both axes. Contain would letter
+    box a 16:9 picture in a 4:3 window, which is a photograph with black bars
+    around it, which is a photograph that looks like a mistake.
+    """
+    if image_w <= 0 or image_h <= 0 or width <= 0 or height <= 0:
+        return 0, 0, 0, 0
+    scale = max(width / image_w, height / image_h)
+    scaled_w = max(1, round(image_w * scale))
+    scaled_h = max(1, round(image_h * scale))
+    return scaled_w, scaled_h, (width - scaled_w) // 2, (height - scaled_h) // 2
+
+
+def _wallpaper_surface(path: str, width: int, height: int):
+    """The picture, scaled and cropped to exactly this window, cached.
+
+    Cached because of the machines this runs on rather than the ones it is
+    written on. Under the cairo renderer a page transition damages the whole
+    window and the whole window is then redrawn on the CPU, at whatever frame
+    rate the transition asks for. Decoding and rescaling a photograph inside
+    that loop is the difference between a backdrop and a stutter, and the
+    machines that get the cairo renderer are exactly the ones with no GPU to
+    absorb it.
+
+    One entry. The size only changes when the window does, and the path only
+    changes when somebody asks for a different picture.
+    """
+    key = (path, width, height)
+    if _wall_cache["key"] == key:
+        return _wall_cache["surface"]
+
+    surface = None
+    try:
+        import cairo  # noqa: PLC0415
+        import gi  # noqa: PLC0415
+
+        # Both, named. `brand` is used without the widget layer by the design
+        # proof and by the tests, and in those the toolkit has not already
+        # said which Gdk it means.
+        gi.require_version("Gdk", "4.0")
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import Gdk, GdkPixbuf  # noqa: PLC0415
+
+        # The header, not the picture. `get_file_info` reads far enough to
+        # answer how big it is and stops, which is what is wanted here: the
+        # size decides the scale, and decoding a 1376x768 PNG to learn its
+        # width and then decoding it again at the right size is two decodes
+        # for one picture.
+        _, native_w, native_h = GdkPixbuf.Pixbuf.get_file_info(path)
+        scaled_w, scaled_h, dx, dy = cover_box(native_w, native_h, width, height)
+        if scaled_w:
+            picture = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                path, scaled_w, scaled_h, False)
+            surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+            context = cairo.Context(surface)
+            Gdk.cairo_set_source_pixbuf(context, picture, dx, dy)
+            context.paint()
+    except Exception:  # noqa: BLE001 - see below
+        # Deliberately everything. This is decoration on a program whose job
+        # is to install an operating system, and the list of ways an image
+        # loader can fail on unknown hardware is longer than the list anybody
+        # would write down. A missing backdrop is a plain window; a raised
+        # exception here is a traceback in front of somebody who was trying to
+        # install something.
+        surface = None
+
+    _wall_cache["key"] = key
+    _wall_cache["surface"] = surface
+    return surface
+
+
+def draw_wallpaper(cr, width: int, height: int, path: str, dark: bool,
+                   top_band: int = 0, bottom_band: int = 0) -> bool:
+    """Paint the photograph, the veil, and the bands the chrome stands on.
+
+    `top_band` and `bottom_band` are how tall the opaque part of each band is,
+    in pixels, measured from the chrome that is going to sit on it. Inside
+    those the surface colour is at full opacity, so a glyph drawn there is on
+    exactly the background the theme test measured it against and the
+    photograph cannot get between the two. Outside them it fades away over
+    `WALLPAPER_FADE` and the picture comes back.
+
+    False when the picture could not be decoded, in which case nothing at all
+    has been painted and the caller still owes the window a ground.
+    """
+    import cairo  # noqa: PLC0415
+
+    surface = _wallpaper_surface(path, width, height)
+    if surface is None:
+        return False
+    cr.set_source_surface(surface, 0, 0)
+    cr.paint()
+
+    scheme = T.scheme(dark)
+    red, green, blue = T.rgb(scheme["surface"])
+    cr.set_source_rgba(red, green, blue,
+                       WALLPAPER_VEIL_DARK if dark else WALLPAPER_VEIL_LIGHT)
+    cr.paint()
+
+    for band, from_top in ((top_band, True), (bottom_band, False)):
+        if band <= 0:
+            continue
+        depth = band + WALLPAPER_FADE
+        start = 0 if from_top else height
+        gradient = cairo.LinearGradient(
+            0, start, 0, start + depth if from_top else start - depth)
+        gradient.add_color_stop_rgba(0.0, red, green, blue, 1.0)
+        gradient.add_color_stop_rgba(band / depth, red, green, blue, 1.0)
+        gradient.add_color_stop_rgba(1.0, red, green, blue, 0.0)
+        cr.set_source(gradient)
+        cr.rectangle(0, 0 if from_top else height - depth, width, depth)
+        cr.fill()
+    return True
+
+
 def signal_arcs(strength: int) -> int:
     """How many of the four arcs are lit, from a 0-100 nmcli signal."""
     if strength >= 75:
@@ -130,14 +398,25 @@ def signal_words(strength: int) -> str:
 # --------------------------------------------------------------------------
 
 
-def draw_aurora(cr, width: int, height: int, dark: bool, phase: float = 0.0) -> None:
+def draw_aurora(cr, width: int, height: int, dark: bool, phase: float = 0.0,
+                ground: bool = True, strength: float = 1.0) -> None:
+    """The three fields of light.
+
+    `ground` paints the surface colour underneath them first, which is what
+    makes this the backdrop. Turn it off and the same three fields become a
+    wash over whatever is already there, which is how the aurora survives a
+    photograph being put behind it: the light is still the brand's light, it
+    is just no longer standing on its own ground.
+    """
     import cairo  # noqa: PLC0415
 
     scheme = T.scheme(dark)
-    cr.set_source_rgb(*T.rgb(scheme["surface"]))
-    cr.paint()
+    if ground:
+        cr.set_source_rgb(*T.rgb(scheme["surface"]))
+        cr.paint()
     span = max(width, height)
     for index, (colour, fx, fy, fr, alpha) in enumerate(aurora_fields(dark)):
+        alpha *= strength
         dx, dy = aurora_drift(phase, index)
         cx, cy = (fx + dx) * width, (fy + dy) * height
         radius = fr * span

@@ -46,6 +46,11 @@ def check(condition: bool, message: str) -> None:
         FAILURES.append(message)
 
 
+def equal(got: object, want: object, message: str) -> None:
+    if got != want:
+        FAILURES.append(f"{message}: expected {want!r}, got {got!r}")
+
+
 def pump(count: int = 12) -> None:
     context = GLib.MainContext.default()
     for _ in range(count):
@@ -535,6 +540,100 @@ def run(window: InstallerWindow) -> None:
           ribbon.get_accessible_role() == Gtk.AccessibleRole.PROGRESS_BAR,
           "the progress ribbon does not report itself as a progress bar")
 
+    run_wallpaper(window)
+
+
+def run_wallpaper(window: InstallerWindow) -> None:
+    """The photograph, and the two places it is not allowed to be.
+
+    High contrast and the black ground are decisions about what the ground is
+    for. A wallpaper is a taste. The rule is that the taste never wins, and it
+    is a rule that is easy to write and easy to leave half applied: the class
+    comes off the window and the caption stays, or the caption goes and the
+    drawing area carries on painting a mountain underneath it.
+    """
+    from aurade_gui import brand  # noqa: PLC0415 - only needed here
+
+    available = brand.wallpapers()
+    if not available:
+        print("installer GUI runtime test: no wallpapers staged, skipping those",
+              file=sys.stderr)
+        return
+
+    window.wallpaper = available[0]
+    window._update_ground()
+    pump()
+
+    caption = window.widgets.get("caption")
+    check(caption is not None, "there is no caption")
+    if caption is None:
+        return
+
+    check(window.wallpaper_shown is not None, "a wallpaper was set and is not shown")
+    check(window.has_css_class("aurade-grounded"),
+          "the window is showing a photograph and is not marked as grounded, "
+          "so the sheet under every page is transparent")
+    check(caption.get_visible(), "the caption is hidden with a photograph behind it")
+    equal(caption.get_label(), available[0]["title"],
+          "the caption names the wrong picture")
+
+    # Every page stands on exactly one sheet. Not "at least one": two nested
+    # sheets is two opaque grounds with a border between them, which looks
+    # like a rendering fault rather than a design.
+    stack = window.stack
+    child = stack.get_first_child()
+    pages = 0
+    while child is not None:
+        sheets = [w for w in walk(child) if w.has_css_class("aurade-sheet")]
+        equal(len(sheets), 1,
+              f"the {stack.get_page(child).get_name()} page has {len(sheets)} "
+              "sheets")
+        pages += 1
+        child = child.get_next_sibling()
+    check(pages >= 8, f"only {pages} pages were checked for a sheet")
+
+    if len(available) > 1:
+        first = window.wallpaper["file"]
+        window.next_wallpaper()
+        pump()
+        check(window.wallpaper["file"] != first,
+              "asking for a different photograph gave back the same one")
+        equal(caption.get_label(), window.wallpaper["title"],
+              "the caption did not follow the picture")
+
+    # -- the two places it must not appear ---------------------------------
+    #
+    # Driven through the real switch rather than by setting the flag, because
+    # the flag is not the mechanism: `_obey_access` reloads the stylesheet and
+    # the stylesheet reload is what notices.
+    window._obey_access("contrast", "high")
+    pump()
+    check(window.wallpaper_shown is None,
+          "high contrast is on and a photograph is still behind the window")
+    check(not window.has_css_class("aurade-grounded"),
+          "high contrast is on and the pages are still on a sheet")
+    check(not caption.get_visible(),
+          "high contrast is on and the caption is still offering another photograph")
+    window._obey_access("contrast", "normal")
+    pump()
+    check(window.wallpaper_shown is not None,
+          "the photograph did not come back when high contrast went off")
+
+    # The black scheme. The fourth scheme button sets `oled` and then asks
+    # libadwaita for the dark scheme, and it is the resulting sheet reload
+    # that gets here, so this sets both and reloads.
+    was_dark = window.dark
+    window.oled = True
+    window.dark = True
+    window._load_stylesheet()
+    pump()
+    check(window.wallpaper_shown is None,
+          "the black ground is on and a photograph is lighting every pixel of it")
+    window.oled = False
+    window.dark = was_dark
+    window._load_stylesheet()
+    pump()
+
 
 def main() -> int:
     if not os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
@@ -564,9 +663,20 @@ def main() -> int:
         pump(30)
         if window.get_allocated_width() < 2:
             FAILURES.append("the compositor never gave the window a size")
-        run(window)
-        window.close()
-        application.quit()
+        # Whatever happens in here, the loop has to stop.
+        #
+        # Without the finally, a mistake in an assertion leaves the main loop
+        # running with nothing left to drive it, and the test does not fail:
+        # it hangs, until whoever is waiting on the suite gives up and kills
+        # it. That is a much worse failure than a wrong assertion, and it is
+        # the one a typo in this file produces.
+        try:
+            run(window)
+        except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+            FAILURES.append(f"the run raised: {exc!r}")
+        finally:
+            window.close()
+            application.quit()
 
     app.connect("activate", activate)
     app.run([])

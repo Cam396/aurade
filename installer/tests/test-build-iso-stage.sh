@@ -291,6 +291,23 @@ grep -Fq '/usr/local/lib/aurade/aurade-tips' "$ROOT/installer/archiso/profiledef
 # with no logo in it and the graphics test cannot see that from source.
 [[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-mark.png ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/aurade-wordmark.png ]]
+# The wallpapers, every one the manifest names, at the mode the image expects.
+#
+# Derived from the manifest rather than counted, because the manifest is what
+# the front end reads: a picture staged and not indexed is a picture nothing
+# will ever show, and a picture indexed and not staged is a caption naming a
+# file that is not there.
+_wallpapers=$TMP/work/profile/airootfs/usr/local/share/aurade/wallpapers
+[[ -r $_wallpapers/manifest.tsv ]] ||
+  { echo 'build-iso.sh does not stage the wallpaper manifest' >&2; exit 1; }
+while IFS=$'\t' read -r _picture _rest; do
+  [[ -n ${_picture:-} && ${_picture:0:1} != '#' ]] || continue
+  [[ -r $_wallpapers/$_picture ]] ||
+    { echo "build-iso.sh does not stage wallpapers/$_picture" >&2; exit 1; }
+  _mode=$(stat -c '%a' "$_wallpapers/$_picture")
+  [[ $_mode == 644 ]] ||
+    { echo "wallpapers/$_picture staged as $_mode, not 644" >&2; exit 1; }
+done < "$ROOT/installer/wallpapers/manifest.tsv"
 # Every shell library in the source tree, not a list typed here. Both front
 # ends source these by name and exit if one is missing, so a library added to
 # the tree and forgotten in build-iso.sh is a text installer that will not

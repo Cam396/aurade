@@ -23,6 +23,19 @@ It needs a display, and a headless one is enough:
 Every page name from the flow works, plus the state names (`welcome`,
 `review`, `gate`, `progress`, `done`, `failure`, `stopped`, `planned`), plus
 `all`. Nothing here is imported by the installer; it is a tool that uses it.
+
+The installer picks a wallpaper at random, which is right in front of a person
+and wrong in a render somebody is comparing against another render. Pin one
+with `AURADE_WALLPAPER=place-vestrahorn`, or take them out of the picture with
+`AURADE_WALLPAPER=none`.
+
+Two more environment notes, both learned by watching this crash rather than by
+reading anything. `GTK_IM_MODULE=gtk-im-context-simple`, because the ibus
+module recurses until the stack runs out on a host with no input method
+daemon, and the segfault looks exactly like the installer crashing.
+`GTK_USE_PORTAL=0`, because every portal lookup otherwise waits out its own
+timeout before the first page is drawn. `tests/test-gui-runtime.sh` sets the
+full list; it is worth copying.
 """
 
 from __future__ import annotations

@@ -167,8 +167,31 @@ def page_shell(child: Gtk.Widget, width: int = PROSE_WIDTH) -> Gtk.Widget:
     box.set_margin_start(24)
     box.set_margin_end(24)
     box.append(child)
+    # The sheet the page stands on.
+    #
+    # Transparent, marginless and invisible until the window says there is a
+    # photograph behind it, at which point this becomes the opaque ground
+    # under every word on the page. One extra box either way, and with no
+    # wallpaper the CSS gives it nothing at all, so the layout is exactly the
+    # layout there was before there were any pictures.
+    #
+    # It is here rather than on `box` because the 44 and 24 pixel margins are
+    # the page's own breathing room and have to end up inside the ground, not
+    # between the ground and the window.
+    sheet = column(0)
+    sheet.add_css_class("aurade-sheet")
+    sheet.append(box)
+    # As tall as the page, not as tall as the window.
+    #
+    # The clamp gives its child the whole height, which nobody could see for
+    # as long as the child had no ground of its own. With one, a four line
+    # review page was a seven hundred pixel slab of empty white over a
+    # photograph. Pages that asked to be centred in the window still are: it
+    # is the sheet that centres now rather than the content inside it, which
+    # is the same result and one fewer empty container.
+    sheet.set_valign(Gtk.Align.CENTER if child.get_vexpand() else Gtk.Align.START)
     clamp = Adw.Clamp(maximum_size=width, tightening_threshold=int(width * 0.85))
-    clamp.set_child(box)
+    clamp.set_child(sheet)
     scroller = Gtk.ScrolledWindow()
     scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroller.set_vexpand(True)
@@ -235,6 +258,85 @@ def reveal(widget: Gtk.Widget) -> None:
 # --------------------------------------------------------------------------
 
 
+class Wallpaper(Gtk.DrawingArea):
+    """One photograph, under everything, for as long as the installer runs.
+
+    Under the aurora rather than instead of it. The set is twenty eight
+    pictures with deliberately nothing in common, which is what stops them
+    reading as a theme and would also make the installer look like twenty
+    eight different products; the aurora over the top of them, at half
+    strength, is the thing that makes them one.
+
+    Whichever of this and the aurora is actually showing paints the ground.
+    Exactly one of them does, always, which is why this paints a plain surface
+    when the picture will not load rather than leaving the window undefined
+    for the frame it takes to notice.
+    """
+
+    #: What the bands are before anything has been laid out. The first frame
+    #: is drawn before the chrome has a position, and a first frame with the
+    #: wordmark sitting on a mountain is the one frame everybody sees.
+    FIRST_FRAME_TOP = 58
+    FIRST_FRAME_BOTTOM = 74
+
+    #: Added above the action bar's own top edge. Its margin is outside its
+    #: allocation, so the measured edge is where the buttons start and not
+    #: where the eye reads the band as starting.
+    BAND_SLACK = 10
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.set_draw_func(self._draw)
+        self.set_can_target(False)
+        A.decorative(self)
+
+    def _bands(self, height: int) -> tuple[int, int]:
+        """How tall the opaque part of each band has to be, right now.
+
+        Measured from the chrome rather than assumed, because the chrome grows
+        with the text scale and somebody who set text to 200% is the last
+        person who should end up reading a heading over a photograph.
+        """
+        top, bottom = self.FIRST_FRAME_TOP, self.FIRST_FRAME_BOTTOM
+        rule = self.window.widgets.get("rule")
+        if rule is not None:
+            found, bounds = rule.compute_bounds(self.window)
+            if found:
+                top = int(bounds.origin.y + bounds.size.height)
+
+        # Both, because the action bar is not always the lowest thing. The
+        # progress page hides its buttons, which leaves the row a few pixels
+        # tall at the very bottom and the credit line below it, on the
+        # photograph, which is exactly the case this band exists to prevent.
+        edge = None
+        for name in ("actions", "caption"):
+            widget = self.window.widgets.get(name)
+            if widget is None or not widget.get_visible():
+                continue
+            found, bounds = widget.compute_bounds(self.window)
+            if found:
+                edge = bounds.origin.y if edge is None else min(edge, bounds.origin.y)
+        if edge is not None:
+            bottom = int(height - edge) + self.BAND_SLACK
+        return max(0, top), max(0, bottom)
+
+    def _draw(self, _area, cr, width: int, height: int) -> None:
+        entry = self.window.wallpaper_shown
+        if entry is None:
+            return
+        top, bottom = self._bands(height)
+        if brand.draw_wallpaper(cr, width, height, entry["path"], self.window.dark,
+                                top, bottom):
+            return
+        cr.set_source_rgb(*T.rgb(T.scheme(self.window.dark)["surface"]))
+        cr.paint()
+        # Said once. A picture that will not decode is not going to decode on
+        # the next frame either, and a caption naming a photograph nobody can
+        # see is worse than no caption.
+        self.window.drop_wallpaper()
+
+
 class Aurora(Gtk.DrawingArea):
     """The backdrop. The mark's ring, opened out to fill the window."""
 
@@ -249,7 +351,14 @@ class Aurora(Gtk.DrawingArea):
         A.decorative(self)
 
     def _draw(self, _area, cr, width: int, height: int) -> None:
-        brand.draw_aurora(cr, width, height, self.window.dark, self.phase)
+        # Over a photograph the aurora stops being the ground and becomes a
+        # cast of the brand's own light across somebody else's picture, which
+        # is a different job and a quieter one.
+        grounded = self.window.wallpaper_shown is not None
+        brand.draw_aurora(
+            cr, width, height, self.window.dark, self.phase,
+            ground=not grounded,
+            strength=brand.WALLPAPER_AURORA if grounded else 1.0)
 
     def advance(self) -> bool:
         self.phase += 0.012
@@ -447,6 +556,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.snake: W.Snake | None = None
         self._snake_source = 0
         self._aurora_source = 0
+        #: The photograph behind the window, picked once for this run. None
+        #: when the set is not installed, when the picture would not decode,
+        #: or when it was never wanted: see `wallpaper_shown`.
+        #:
+        #: `AURADE_WALLPAPER` pins one by name, or turns them off with `none`.
+        #: The preview tool and the tests both need to say which picture they
+        #: are looking at, and so does anybody comparing two of them.
+        self.wallpaper = brand.choose_wallpaper(os.environ.get("AURADE_WALLPAPER", ""))
         #: The mark animation plays once. Coming back to the welcome screen
         #: and leaving it again is not a new arrival.
         self._swooped = False
@@ -462,6 +579,11 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         self._apply_theme()
         self._build_chrome()
+        # Again, now that there is a caption to fill in. The first call ran
+        # from `_apply_theme`, before this window had any widgets in it, which
+        # is the right place for it because every later change to the ground
+        # arrives through the stylesheet.
+        self._update_ground()
         self._build_pages()
         self._install_shortcuts()
         self.refresh()
@@ -544,6 +666,80 @@ class InstallerWindow(Adw.ApplicationWindow):
             # because a stylesheet is missing would trade a cosmetic failure
             # for the text-mode fallback.
             pass
+        # Every route that changes the ground ends here: the scheme toggle,
+        # the black button and the high contrast switch all reload the sheet,
+        # so this is the one place that has to notice.
+        self._update_ground()
+
+    # -- the photograph ----------------------------------------------------
+
+    @property
+    def wallpaper_shown(self) -> dict | None:
+        """The picture that is actually on the screen, or None.
+
+        Off in high contrast, because high contrast exists so that somebody
+        can read and a photograph is the opposite of that. Off in the black
+        scheme, because that one exists so an OLED panel can leave its pixels
+        unlit and a photograph lights every one of them. Both are decisions
+        about what the ground is for; a wallpaper is a taste, and a taste does
+        not get to overrule either.
+        """
+        if self.wallpaper is None or self.high_contrast:
+            return None
+        if self.oled and self.dark:
+            return None
+        return self.wallpaper
+
+    def _update_ground(self) -> None:
+        """Tell the window whether it is standing on a photograph.
+
+        One class on the window, which every stylesheet rule that cares is
+        scoped under, so the sheet under every page turns opaque and back with
+        a single change. The caption is a widget and is told separately. The
+        bands are neither: they are painted by the backdrop, which reads the
+        same state per frame.
+        """
+        showing = self.wallpaper_shown
+        if showing is None:
+            self.remove_css_class("aurade-grounded")
+        else:
+            self.add_css_class("aurade-grounded")
+        caption = self.widgets.get("caption")
+        if caption is not None:
+            caption.set_visible(showing is not None)
+            if showing is not None:
+                self._set_caption(showing)
+        self._redraw_all(self)
+
+    def _set_caption(self, entry: dict) -> None:
+        caption = self.widgets.get("caption")
+        if caption is None:
+            return
+        title = entry["title"] or entry["file"]
+        caption.set_label(title)
+        # No role: a button already reports itself as one, and the role
+        # property is construct only on most widgets. The description is the
+        # part worth setting, because the label says where the picture is and
+        # says nothing about the button being a button.
+        A.described(caption, title, F.WALLPAPER_HINT)
+
+    def next_wallpaper(self) -> None:
+        """Another one. The answer to not liking the one you were given."""
+        available = [entry for entry in brand.wallpapers()
+                     if self.wallpaper is None or entry["file"] != self.wallpaper["file"]]
+        if not available:
+            return
+        import random  # noqa: PLC0415 - one call, on one code path
+
+        self.wallpaper = random.choice(available)
+        self._update_ground()
+
+    def drop_wallpaper(self) -> None:
+        """Give up on photographs for the rest of this run."""
+        if self.wallpaper is None:
+            return
+        self.wallpaper = None
+        self._update_ground()
 
     def _on_scheme_changed(self, manager, _param) -> None:
         self.dark = manager.get_dark()
@@ -584,9 +780,14 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         backdrop = Gtk.Overlay()
         self.toast_overlay.set_child(backdrop)
+        # Three layers, bottom first: the photograph, the brand's light over
+        # it, then the interface.
+        wallpaper = Wallpaper(self)
+        self.widgets["wallpaper"] = wallpaper
+        backdrop.set_child(wallpaper)
         aurora = Aurora(self)
         self.widgets["aurora"] = aurora
-        backdrop.set_child(aurora)
+        backdrop.add_overlay(aurora)
 
         frame = column(0)
         self.widgets["frame"] = frame
@@ -661,7 +862,35 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.forward_button.add_css_class("m3-label-large")
         self.forward_button.connect("clicked", lambda *_: self.on_forward())
         actions.append(self.forward_button)
+        self.widgets["actions"] = actions
         frame.append(actions)
+        frame.append(self._build_caption())
+
+    def _build_caption(self) -> Gtk.Widget:
+        """Where the photograph is, and a way to get a different one.
+
+        A credit line, in the corner, in the smallest type in the product,
+        answering the only question a background ever prompts. It is a button
+        rather than a label because the second thing anybody wants after "where
+        is that" is "show me another one", and a caption that is already there
+        is a better home for that than a preference nobody would find.
+
+        Hidden entirely when there is no photograph, rather than left empty:
+        a control that does nothing is worse than a control that is absent.
+        """
+        button = Gtk.Button(label="")
+        button.add_css_class("flat")
+        button.add_css_class("aurade-caption")
+        button.add_css_class("m3-label-small")
+        button.add_css_class("dim-label")
+        button.set_halign(Gtk.Align.END)
+        button.set_margin_end(24)
+        button.set_margin_bottom(10)
+        button.set_visible(False)
+        button.set_tooltip_text(F.WALLPAPER_HINT)
+        button.connect("clicked", lambda *_: self.next_wallpaper())
+        self.widgets["caption"] = button
+        return button
 
     def _build_advanced_toggle(self) -> Gtk.Widget:
         """A way in to the advanced page that does not require finding it.

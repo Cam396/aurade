@@ -140,6 +140,55 @@ window.aurade {
   background: @m3_surface;
 }
 
+/* ---- the photograph, and the sheet that stands on it -------------------
+
+   `.aurade-grounded` is set on the window, and only when a wallpaper is
+   actually being drawn. Every rule that exists because of one is scoped under
+   it, so an image with no wallpapers staged, a window in high contrast and a
+   window with the black ground on are all byte for byte the interface they
+   were before any of this existed.
+
+   The sheet is opaque, and that is the whole safety argument rather than a
+   detail of it. Every foreground and background pair the theme test measures
+   is still the pair that is on the screen, because there is no text anywhere
+   in this installer that sits on a photograph: the pages are on this, and the
+   chrome above and below them is on a band the backdrop paints at full
+   opacity behind exactly the height the chrome turned out to be.
+
+   Margins here rather than on the box inside it, because the page's own
+   forty four pixels of breathing room belong inside the ground, and the gap
+   between the ground and the hairline above it does not.
+
+   28px and not 16px, and not a fourth number either. 16 is `lg` on the shape
+   scale and it is what a card is; this is the thing cards sit on, one step
+   larger, which is `xl`. A radius picked because it looked right is how this
+   file ended up with three of them once. */
+
+.aurade-grounded .aurade-sheet {
+  background: @m3_surface;
+  border-radius: 28px;
+  border: 1px solid @m3_outline_variant;
+  margin-top: 16px;
+  margin-bottom: 8px;
+  /* Material 3 elevation level 2, and the only shadow in the product.
+     Nothing else needs one: a card on a flat ground is separated by its
+     outline, and an outline is cheaper and sharper than a blur. A card on a
+     photograph is not, because the ground behind it has its own detail and a
+     one pixel line disappears into it. This is the difference between a sheet
+     that floats and a pale rectangle somebody drew on a mountain. */
+  box-shadow: 0 2px 12px alpha(@m3_shadow, 0.18),
+              0 1px 3px alpha(@m3_shadow, 0.12);
+}
+
+/* The credit line under the action bar: where the photograph is, and a way to
+   ask for a different one. The smallest control in the product, and the only
+   one whose job is to answer a question nobody has to ask. */
+.aurade-caption {
+  padding: 1px 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* ---- the erase gate: serious, and legible ------------------------------
    This was `background: @m3_error_container` on a pane whose own padding is
    16px, with a boxed list inside it painting its own surface on top. The fill

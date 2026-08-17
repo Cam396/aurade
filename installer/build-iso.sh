@@ -114,6 +114,22 @@ for _asset in aurade-mark.png aurade-wordmark.png; do
   install -Dm0644 "$ROOT/assets/${_asset}" \
     "$STAGE/airootfs/usr/local/share/aurade/${_asset}"
 done
+# The wallpapers, and the manifest that indexes them.
+#
+# The manifest first and by name, because the front end finds the set by
+# looking for it: a directory of images with no manifest is not a set, and an
+# image staged without one would be a picture nothing can name.
+#
+# The whole directory rather than a list, because a list here is a list that
+# goes stale the next time somebody adds a photograph, and the gate that
+# decides what belongs in the set already ran when the manifest was written.
+install -Dm0644 "$ROOT/wallpapers/manifest.tsv" \
+  "$STAGE/airootfs/usr/local/share/aurade/wallpapers/manifest.tsv"
+while IFS=$'\t' read -r _wallpaper _rest; do
+  [[ -n ${_wallpaper:-} && ${_wallpaper:0:1} != '#' ]] || continue
+  install -Dm0644 "$ROOT/wallpapers/${_wallpaper}" \
+    "$STAGE/airootfs/usr/local/share/aurade/wallpapers/${_wallpaper}"
+done < "$ROOT/wallpapers/manifest.tsv"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
