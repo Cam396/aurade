@@ -318,7 +318,11 @@ measure "$TMP/glob.out" || fail 'a glob-bearing message broke the frame'
 # Both of these carry the sentence a user needs in order to act, so losing the
 # end of one at the frame is a functional defect rather than a cosmetic one.
 render review none ascii >"$TMP/review.layout"
-grep -Eq '^\|    Disk passphrase +set' "$TMP/review.layout" ||
+# The indent is not the point and is no longer fixed: the review screen now
+# carries a selection marker, so the label column starts further in. What has
+# to hold is the gap, because "Disk passphrase" is longer than the column and
+# the failure being guarded against is it touching its value.
+grep -Eq '^\| +Disk passphrase  +set' "$TMP/review.layout" ||
   fail 'a label longer than its column ran into its value'
 grep -Fq 'the EFI system partition' "$TMP/failure" ||
   fail 'the failure detail was truncated instead of wrapped'

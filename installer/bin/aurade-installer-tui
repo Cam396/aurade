@@ -565,8 +565,14 @@ widget_enum() {
   fi
 }
 
+#: The rows the review screen is currently showing, as question ids, in the
+#: order they are drawn. Rebuilt on every render because answering the
+#: encryption question changes which questions exist.
+REVIEW_ROWS=()
+
 screen_review() {
-  local id short value
+  local selected=${1:-0} id short value index=0 marked
+  REVIEW_ROWS=()
   tui_clear
   tui_header 'Review'
   tui_blank
@@ -582,20 +588,54 @@ screen_review() {
       value=${ANSWERS[$id]:-}
       [[ -n $value ]] || continue
     fi
-    tui_field "$short" "$value" ink
+    REVIEW_ROWS+=("$id")
+    # The marker is the same one the disk list and the failure options use, so
+    # "this is the line you are on" looks the same everywhere in the product.
+    marked=no
+    (( index != selected )) || marked=yes
+    review_row "$marked" "$short" "$value" ink
+    index=$(( index + 1 ))
   done
   if (( SHOW_ADVANCED )); then
     for id in "${AURADE_QUESTION_IDS[@]}"; do
       aurade_question_is_advanced "$id" || continue
       value=${ANSWERS[$id]:-}
       [[ -n $value ]] || continue
-      tui_field "$(aurade_question_field "$id" short)" "$value" dim
+      REVIEW_ROWS+=("$id")
+      marked=no
+      (( index != selected )) || marked=yes
+      review_row "$marked" "$(aurade_question_field "$id" short)" "$value" dim
+      index=$(( index + 1 ))
     done
   fi
   tui_blank
   tui_wrap 'Nothing has been written to any disk yet.' ok
   tui_blank
-  tui_footer 'enter  continue    a  advanced options' 'esc  back'
+  # Four hints and a way out, inside 66 columns. The first draft said
+  # "up/down choose" as well and the frame silently ate "esc back", which is
+  # the one hint somebody stuck on this screen actually needs. The arrows are
+  # discoverable from the marker moving; the way out is not discoverable from
+  # anything.
+  tui_footer 'enter  change    c  continue    a  advanced' 'esc  back'
+}
+
+# One line of the review, selectable.
+#
+# The label column stays fixed so values line up down the screen, which is the
+# whole reason this screen is readable at a glance. The marker sits outside it
+# so turning a line into the selected one does not move the value.
+review_row() {
+  local selected=$1 label=$2 value=$3 token=${4:-ink} marker='  '
+  # The marker rides inside the label column, so the column has to grow by
+  # exactly its width or the longest label loses its gap and reads as one word
+  # joined to its value. `local` here shadows the global for `tui_field` as
+  # well, which is the one place bash's dynamic scoping is the right tool.
+  local AURADE_TUI_LABEL=$(( AURADE_TUI_LABEL + 3 ))
+  if [[ $selected == yes ]]; then
+    marker=' >'
+    [[ $token != ink ]] || token=accent
+  fi
+  tui_field "$marker $label" "$value" "$token"
 }
 
 #: How each character of a confirmation token is said when it is spelled back.
@@ -1864,17 +1904,60 @@ run_advanced() {
   return 0
 }
 
+# The review screen, as the place you actually work rather than a page on the
+# way past.
+#
+# The wizard still runs first, so somebody installing for the first time walks
+# every question top to bottom and is never asked to find anything. After that
+# this is the hub: arrow to any line, press enter, change that one answer, come
+# back here. A returning user who wants a different disk changes the disk, and
+# does not answer eleven questions to get to it.
+#
+# `enter` edits and `c` continues, rather than `enter` continuing. On a screen
+# whose rows are all selectable, an enter that sometimes means "change this"
+# and sometimes means "start erasing a disk" is the wrong key to overload.
 run_review() {
-  local key
+  local key selected=0 count id position total rc
   while true; do
-    screen_review
+    screen_review "$selected"
+    count=${#REVIEW_ROWS[@]}
+    (( count )) || return 0
+    (( selected < count )) || selected=$(( count - 1 ))
     key=$(read_key) || return 1
     case $key in
-      enter) return 0 ;;
-      a|A) run_advanced ;;
-      esc) return 1 ;;
+      up)    selected=$(( (selected - 1 + count) % count )) ;;
+      down)  selected=$(( (selected + 1) % count )) ;;
+      enter)
+        id=${REVIEW_ROWS[selected]}
+        position=$(question_position "$id")
+        total=$(visible_questions | wc -l)
+        rc=0
+        # One question, then straight back here. `ask` is the same function the
+        # wizard uses, so a value changed from this screen goes through exactly
+        # the validation and the side effects it would have gone through there.
+        ask "$id" "$position" "$total" || rc=$?
+        if (( rc == 0 )); then
+          ANSWERS[$id]=$PROMPT_RESULT
+          apply_answer "$id" "${ANSWERS[$id]}" || true
+        fi
+        ;;
+      c|C)   return 0 ;;
+      a|A)   run_advanced ;;
+      esc)   return 1 ;;
     esac
   done
+}
+
+#: Where a question sits in the visible order, one based, for the step counter
+#: on a single edit. Zero when it is not in the order at all, which is what an
+#: advanced question is.
+question_position() {
+  local want=$1 id index=1
+  while IFS= read -r id; do
+    [[ $id != "$want" ]] || { printf '%s' "$index"; return 0; }
+    index=$(( index + 1 ))
+  done < <(visible_questions)
+  printf '0'
 }
 
 # The erase gate. The token is built from the canonical target and compared

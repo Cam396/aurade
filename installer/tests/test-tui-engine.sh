@@ -107,7 +107,11 @@ answers() {
   script_secret "$PASSWORD"
   echo enter                       # encrypt: yes
   script_secret "$PASSPHRASE"
-  echo enter                       # review: continue
+  echo c                           # review: continue
+                                 # `enter` on the review screen now edits the
+                                 # selected line, because a screen whose rows
+                                 # are all selectable should not have an enter
+                                 # that sometimes starts erasing a disk.
 }
 
 script_secret() {
@@ -282,7 +286,7 @@ grep -Fq -- '--dry-run' "$TMP/calls.planonly" || fail '--plan-only did not run t
 {
   answers
   echo esc                                   # gate -> review
-  echo enter                                 # review -> prepare -> gate again
+  echo c                                     # review -> prepare -> gate again
   typed_token 'ERASE:/dev/sda'; echo enter   # now go through
   echo enter
 } >"$TMP/keys.gateback"

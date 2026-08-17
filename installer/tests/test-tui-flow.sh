@@ -442,4 +442,46 @@ offered=${offered% }
 [[ $offered == 'btrfs ext4' ]] || fail "the filesystem list offered '$offered' on an image with no mkfs.xfs"
 PATH=$saved_path
 
+# --- the review screen is a hub, not a page you pass through -----------------
+#
+# The wizard still runs first, so a first install walks every question top to
+# bottom and nobody is asked to find anything. After that this screen is where
+# the work happens: arrow to a line, press enter, change that one answer, come
+# back. A returning user who wants a different disk changes the disk instead of
+# answering eleven questions to reach it.
+#
+# `enter` edits and `c` continues. On a screen whose rows are all selectable,
+# an enter that sometimes means "change this" and sometimes means "start
+# erasing a disk" is the wrong key to overload.
+TUI=$ROOT/installer/bin/aurade-installer-tui
+# `AURADE_INSTALLER_TUI_LIB=1` is exported near the top of this file so the
+# functions can be sourced. A render subprocess inherits it, acts as a library
+# and returns without drawing, which is a screen that captures as zero bytes
+# and fails every assertion below for a reason that has nothing to do with the
+# screen.
+review=$(env -u AURADE_INSTALLER_TUI_LIB AURADE_TUI_COLUMNS=68 \
+  AURADE_TUI_HEIGHT=34 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  "$TUI" --render review 2>/dev/null)
+grep -Fq 'enter  change' <<<"$review" ||
+  fail 'the review screen does not offer to change a line'
+grep -Fq 'c  continue' <<<"$review" ||
+  fail 'the review screen does not say how to continue'
+# The selection marker is the same one the disk list and the failure options
+# use, so "the line you are on" looks the same everywhere in the product.
+grep -q '^| *> ' <<<"$review" ||
+  fail 'the review screen shows no selected line'
+
+# Every row it lists is a question it can actually open, or enter lands on
+# nothing. This is the pair that drifts: the screen builds its rows from the
+# answers and the editor looks them up in the manifest. The library is already
+# sourced above, so this calls the real function rather than a copy of it.
+ANSWERS[locale]=en_US.UTF-8
+ANSWERS[target]=/dev/sda
+screen_review 0 >/dev/null 2>&1 || true
+for _row in ${REVIEW_ROWS[@]+"${REVIEW_ROWS[@]}"}; do
+  aurade_question_exists "$_row" ||
+    fail "the review screen lists '$_row', which is not a question it can open"
+done
+(( ${#REVIEW_ROWS[@]} > 0 )) || fail 'the review screen listed nothing at all'
+
 echo 'installer TUI flow test: PASS'
