@@ -285,4 +285,33 @@ env -u DISPLAY -u WAYLAND_DISPLAY WLR_RENDERER=pixman \
 grep -q '^cage renderer=pixman' "$TMP/log" || \
   fail 'an explicit WLR_RENDERER was overridden by the chain'
 
+
+# --- the seat, which is what actually stopped this working -------------------
+#
+# wlroots asks libseat for a seat before it looks at a graphics device. On the
+# real image both of libseat's usual backends were unavailable: seatd was never
+# added to the installer image, and the autostart runs as a systemd oneshot
+# with no logind session. Every compositor entry then failed identically,
+# before any renderer was chosen, which is why a machine with working graphics
+# spent 35 seconds trying and landed in the text installer.
+#
+# It has to be on every entry rather than on one fallback entry: the seat is
+# not one of the things being negotiated.
+missing=0
+while IFS=$'\t' read -r label settings; do
+  [[ -n $label ]] || continue
+  case $settings in
+    *LIBSEAT_BACKEND=builtin*) ;;
+    *) echo "test-renderer-chain: '$label' does not ask for a seat it can open" >&2
+       missing=$(( missing + 1 )) ;;
+  esac
+done < <(aurade_renderer_plan)
+(( missing == 0 )) || exit 1
+
+# And the daemon is on the image as well, so the ordinary path works too.
+grep -Fxq 'seatd' "$ROOT/installer/archiso/packages.x86_64" || {
+  echo 'test-renderer-chain: seatd is not on the image' >&2
+  exit 1
+}
+
 echo 'installer renderer chain test: PASS'

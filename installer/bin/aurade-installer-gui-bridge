@@ -243,7 +243,7 @@ _gb_readiness_disk() {
   done < <(disk_table)
   if (( count == 0 )); then
     _gb_check disk 'Storage' blocked 'No disk to install to.' \
-      'Check the drive is connected and that firmware can see it.'
+      'Check that the drive is connected and that the firmware can see it.'
     return 0
   fi
   if (( count == 1 )); then
@@ -514,7 +514,7 @@ NM_FIELDS=()
 gb_net_status() {
   local out wired=false wifi=false radio=unavailable ssid='' state=''
   if ! _nm_available; then
-    _gb_emit '{"ok":false,"available":false,"wired":false,"wifi":false,"radio":"unavailable","ssid":"","reason":"NetworkManager is not on this image"}'
+    _gb_emit '{"ok":false,"available":false,"wired":false,"wifi":false,"radio":"unavailable","ssid":"","reason":"Nothing on this image can set up a wireless connection."}'
     return 0
   fi
   while IFS= read -r line; do
@@ -663,6 +663,46 @@ gb_wifi_forget() {
   _nm_available || { _gb_err 'NetworkManager is not on this image'; return 0; }
   "$NMCLI" connection delete id "$ssid" >/dev/null 2>&1 || true
   _gb_ok
+}
+
+# The accessibility choices, read and written through the same shared state the
+# text installer uses. Neither command can reach a disk, so both are available
+# in plan-only mode: somebody checking a plan still has to be able to read the
+# screen they are checking it on.
+gb_access() {
+  local key out='{' sep='' value values
+  for key in "${ACCESS_ORDER[@]}"; do
+    values='['
+    local candidate first=1
+    for candidate in ${ACCESS_VALUES[$key]}; do
+      (( first )) || values+=','
+      values+=$(_gb_str "$candidate")
+      first=0
+    done
+    values+=']'
+    out+="${sep}$(_gb_str "$key"):{"
+    out+="\"value\":$(_gb_str "${ACCESS[$key]}"),"
+    out+="\"label\":$(_gb_str "${ACCESS_LABEL[$key]}"),"
+    out+="\"help\":$(_gb_str "${ACCESS_HELP[$key]}"),"
+    out+="\"values\":$values}"
+    sep=','
+  done
+  out+='}'
+  _gb_emit "{\"ok\":true,\"access\":$out,\"order\":$(_gb_str "${ACCESS_ORDER[*]}")}"
+}
+
+gb_access_set() {
+  local pair=$1 key value
+  [[ $pair == *=* ]] || { _gb_err 'expected key=value'; return 0; }
+  key=${pair%%=*}
+  value=${pair#*=}
+  if access_set "$key" "$value"; then
+    _gb_ok
+  else
+    # The engine refuses the same values independently. This refusal is what
+    # makes a mistake visible in the interface rather than at install time.
+    _gb_err "$key cannot be set to that"
+  fi
 }
 
 gb_wifi_radio() {
@@ -858,7 +898,7 @@ gb_plan() {
   [[ -n $ENGINE && -x $ENGINE ]] || { _gb_err 'the installation engine is missing from this image'; return 0; }
   [[ -n ${ANSWERS[target]:-} ]] || { _gb_err 'no disk has been chosen'; return 0; }
   if ! hash_password; then
-    _gb_err 'the account password could not be hashed on this system'
+    _gb_err 'the account password could not be prepared on this system'
     return 0
   fi
   if [[ ${ANSWERS[encrypt]:-no} == yes && ${ANSWERS[luks_passphrase]:-} != set ]]; then
@@ -945,6 +985,8 @@ _gb_common() {
     stages)    gb_stages ;;
     enum)      gb_enum "$argument" ;;
     answers)   gb_answers ;;
+    access)    gb_access ;;
+    access-set) gb_access_set "$argument" ;;
     target)    gb_target ;;
     progress)  gb_progress ;;
     failure)   gb_failure ;;

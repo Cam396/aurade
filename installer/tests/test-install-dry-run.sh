@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# These assertions are bare `grep -Fq` under `set -e`, so a stale expectation
+# ends the run with an exit code and not one word about where. This makes each
+# of them name itself on the way out. Guarded on errexit still being on,
+# because a non-zero exit inside a deliberate `set +e` block is an expected
+# result being collected, not an assertion giving up.
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -85,7 +91,7 @@ awk '/^die_keyring_failure\(\) \{/,/^\}/' "$ROOT/installer/bin/aurade-install" |
 # ...and the message it dies with still classifies as a keyring failure, which
 # is what tests/test-die-cause.sh pins by name.
 grep -Fq -- 'installer staging filesystem has ' "$TMP/plain.out"
-grep -Fq -- 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$ROOT/installer/bin/aurade-install"
 # The three Secure Boot states each get told to the user before the erase gate:
 # on and trusted, on and untrusted, and unreadable. Matched on the state rather
 # than on the sentence, because the sentences have been rewritten once already.
@@ -93,7 +99,7 @@ grep -Fq -- 'Secure Boot is on' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Secure Boot is in setup mode' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-installer"
 grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-install"
-grep -Fq -- 'continuing without signing' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'without signing' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '--secure-boot-auto-enroll yes' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'firmware setup mode' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pre-enrolled signing certificate' "$ROOT/installer/bin/aurade-install"
@@ -176,6 +182,40 @@ plan() {
     exit 1
   fi
 }
+
+# --- accessibility survives the reboot, or it is not accessibility ---------
+#
+# The whole point of collecting these in the installer is that they reach the
+# installed system. A setting that is true for the ten minutes of an install
+# and gone after the restart has moved the wall rather than removed it, so this
+# checks the writes actually happen rather than that the flags parse.
+plan a11y --screen-reader yes --braille yes --contrast high \
+  --text-scale 125 --reduce-motion yes --cursor-size 32
+# The record, which is what the installed system reads back to confirm.
+grep -Fq -- '/etc/aurade-install/accessibility' "$TMP/a11y.out" ||
+  { echo 'the accessibility record is not written into the target' >&2; exit 1; }
+# The two mechanisms that make the settings take effect.
+grep -Fq -- '/etc/xdg/gtk-4.0/settings.ini' "$TMP/a11y.out" ||
+  { echo 'the GTK defaults are not written into the target' >&2; exit 1; }
+grep -Fq -- '/etc/dconf/db/local.d/00-aurade-accessibility' "$TMP/a11y.out" ||
+  { echo 'the dconf defaults are not written into the target' >&2; exit 1; }
+# And the daemons, which have to be enabled rather than started because the
+# target is not running.
+grep -Fq -- 'systemctl enable espeakup.service' "$TMP/a11y.out" ||
+  { echo 'espeakup is not enabled on the installed system' >&2; exit 1; }
+grep -Fq -- 'systemctl enable brltty.service' "$TMP/a11y.out" ||
+  { echo 'brltty is not enabled on the installed system' >&2; exit 1; }
+# The reader has to exist on the installed system, not only on the image.
+grep -Fq -- 'espeakup' "$TMP/a11y.out" ||
+  { echo 'espeakup is not installed onto the target' >&2; exit 1; }
+
+# An install that asks for none of this is the install it was before. The
+# default path must not gain files, services or packages.
+plan a11y_default
+! grep -Fq -- '/etc/dconf/db/local.d/00-aurade-accessibility' "$TMP/a11y_default.out" ||
+  { echo 'a default install writes accessibility dconf defaults it was not asked for' >&2; exit 1; }
+! grep -Fq -- 'systemctl enable espeakup.service' "$TMP/a11y_default.out" ||
+  { echo 'a default install enables a screen reader nobody asked for' >&2; exit 1; }
 
 refuses() {
   local expected=$1

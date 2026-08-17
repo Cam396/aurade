@@ -42,6 +42,23 @@ KEYMAP=us
 # none of these new flags runs exactly the sequence it ran before.
 FILESYSTEM=btrfs
 SWAP=none
+
+# Accessibility, which is not a setting the installer applies to itself.
+#
+# Somebody who turns on a screen reader to get through an install and reboots
+# into a desktop that does not speak has not been helped, they have been moved
+# one wall further along. The installer is the only moment these can be
+# captured and written into the target, so they travel with the install rather
+# than living in the front end that collected them.
+#
+# Every default is the behaviour that exists today, so an install that never
+# passes any of these is byte for byte the install it was before.
+SCREEN_READER=no
+BRAILLE=no
+CONTRAST=normal
+TEXT_SCALE=100
+REDUCE_MOTION=no
+CURSOR_SIZE=24
 SWAP_SIZE=auto
 LAYOUT=wipe
 SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
@@ -174,7 +191,7 @@ check_workspace_capacity() {
   [[ $available_kib =~ ^[0-9]+$ ]] || die "cannot determine free space on installer staging filesystem: $path"
   available_bytes=$((available_kib * 1024))
   if (( available_bytes < minimum )); then
-    die "installer staging filesystem has ${available_bytes} bytes free; need at least ${minimum} bytes for the package cache (choose a disk-backed AURADE_INSTALL_WORK_DIR)"
+    die "the installer staging filesystem has ${available_bytes} bytes free and needs at least ${minimum} for the package cache. Set AURADE_INSTALL_WORK_DIR to a directory on a disk."
   fi
   log "installer staging filesystem has ${available_bytes} bytes free (minimum ${minimum})"
 }
@@ -223,7 +240,7 @@ secure_boot_generate_material() {
     -keyout "$SECURE_BOOT_KEY_FILE" -out "$SECURE_BOOT_CERT_FILE" \
     >/dev/null 2>&1 || die 'could not generate the temporary AuraDE Secure Boot key'
   chmod 0600 "$SECURE_BOOT_KEY_FILE" "$SECURE_BOOT_CERT_FILE"
-  log 'generated a per-install Secure Boot key; the firmware enrollment entry will be offered on first boot'
+  log 'generated a per-install Secure Boot key. The firmware enrollment entry will be offered on first boot.'
 }
 
 secure_boot_sign_in_place() {
@@ -369,7 +386,7 @@ run_pacstrap() {
       die_keyring_failure
     fi
     if (( attempt < 3 )); then
-      log "pacstrap attempt ${attempt}/3 failed; retrying the package transaction"
+      log "pacstrap attempt ${attempt}/3 failed. Retrying the package transaction."
     fi
   done
   die 'pacstrap failed after three attempts'
@@ -420,12 +437,12 @@ acquire_arch_packages() {
         die_keyring_failure
       fi
       signature_failure_seen=1
-      log 'one or more prefetched Arch package signatures were invalid; clearing the cache and retrying without touching the target disk'
+      log 'one or more prefetched Arch package signatures were invalid. Clearing the cache and retrying, without touching the target disk.'
     fi
     if pacman_keyring_failure "$attempt_log"; then
       die_keyring_failure
     fi
-    (( attempt < 3 )) && log 'Arch package acquisition failed; retrying without altering the target disk'
+    (( attempt < 3 )) && log 'Arch package acquisition failed. Retrying, without altering the target disk.'
   done
   if (( ! acquired )); then
     if (( signature_failure_seen )); then
@@ -449,7 +466,7 @@ LocalFileSigLevel = Required
 SigLevel = Required DatabaseOptional
 Server = file://${ARCH_CACHE}
 EOF
-  log "verified ${#ARCH_PACKAGE_FILES[@]} prefetched Arch packages; installation will continue offline"
+  log "verified ${#ARCH_PACKAGE_FILES[@]} prefetched Arch packages. The installation continues offline."
 }
 
 write_target_file() {
@@ -539,7 +556,7 @@ cleanup() {
   if (( status != 0 )) && [[ -n ${AURADE_JOURNAL_PATH:-} ]]; then
     if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
       aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
-        'installer stopped unexpectedly; inspect the private install log' \
+        'installer stopped unexpectedly. The private install log records where.' \
         log shell reboot
     fi
     # Preserve a specific die() record as well as a generic unexpected exit;
@@ -565,7 +582,7 @@ handle_cancel() {
   trap - INT TERM
   if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
     aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" cancelled \
-      'installer cancelled; inspect the private install log before retrying' \
+      'installer cancelled. The private install log records how far it got.' \
       log shell reboot || true
   fi
   aurade_journal_preserve_failure >/dev/null 2>&1 || true
@@ -598,6 +615,12 @@ while (($#)); do
     --swap) SWAP=${2:?}; shift 2 ;;
     --swap-size) SWAP_SIZE=${2:?}; shift 2 ;;
     --layout) LAYOUT=${2:?}; shift 2 ;;
+    --screen-reader) SCREEN_READER=${2:?}; shift 2 ;;
+    --braille) BRAILLE=${2:?}; shift 2 ;;
+    --contrast) CONTRAST=${2:?}; shift 2 ;;
+    --text-scale) TEXT_SCALE=${2:?}; shift 2 ;;
+    --reduce-motion) REDUCE_MOTION=${2:?}; shift 2 ;;
+    --cursor-size) CURSOR_SIZE=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
     --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
     --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
@@ -630,6 +653,15 @@ case $FILESYSTEM in
   btrfs|ext4|xfs) ;;
   *) die '--filesystem must be btrfs, ext4 or xfs' ;;
 esac
+case $SCREEN_READER in yes|no) ;; *) die '--screen-reader must be yes or no' ;; esac
+case $BRAILLE in yes|no) ;; *) die '--braille must be yes or no' ;; esac
+case $CONTRAST in normal|high) ;; *) die '--contrast must be normal or high' ;; esac
+case $REDUCE_MOTION in yes|no) ;; *) die '--reduce-motion must be yes or no' ;; esac
+# Three steps rather than a free number. A scale nobody can read back to you
+# over a phone is a scale nobody can be helped with.
+case $TEXT_SCALE in 100|125|150) ;; *) die '--text-scale must be 100, 125 or 150' ;; esac
+case $CURSOR_SIZE in 24|32|48) ;; *) die '--cursor-size must be 24, 32 or 48' ;; esac
+
 case $SWAP in
   none|file|zram) ;;
   # A swap partition is deliberately absent. On the encrypted path it would
@@ -772,6 +804,11 @@ case $FILESYSTEM in
   xfs)  BASE_PACKAGES+=(xfsprogs) ;;
 esac
 [[ $SWAP != zram ]] || BASE_PACKAGES+=(zram-generator)
+# The reader and the braille driver have to exist on the installed system, not
+# only on the image that installed it. This is the difference between a setting
+# that survives the reboot and a setting that was true for ten minutes.
+[[ $SCREEN_READER != yes ]] || BASE_PACKAGES+=(espeakup)
+[[ $BRAILLE != yes ]] || BASE_PACKAGES+=(brltty)
 
 # The tools this shape needs, checked in both modes.
 #
@@ -811,7 +848,7 @@ fi
 if [[ $MODE == execute ]]; then
   (( EUID == 0 )) || die '--execute requires root'
   [[ $CONFIRM == "$ERASE_TOKEN" ]] || die "refusing write: --confirm must exactly equal $ERASE_TOKEN"
-  [[ -d /sys/firmware/efi ]] || die 'AuraDE currently requires booting the installer in UEFI mode'
+  [[ -d /sys/firmware/efi ]] || die 'AuraDE requires booting the installer in UEFI mode'
   [[ -b $TARGET ]] || die "target is not a block device: $TARGET"
   target_type=$(lsblk -dnro TYPE "$TARGET")
   case "$target_type" in
@@ -851,7 +888,7 @@ if [[ $MODE == execute ]]; then
       die 'this disk has no EFI system partition, so AuraDE cannot be added alongside what is already on it'
     free_bytes=$(largest_free_bytes "$TARGET")
     (( free_bytes >= min_target_bytes )) || \
-      die "the largest unallocated region on the target is ${free_bytes} bytes; --layout alongside needs at least ${min_target_bytes} and never resizes an existing partition to make room"
+      die "the largest unallocated region on the target is ${free_bytes} bytes and --layout alongside needs at least ${min_target_bytes}. It never resizes an existing partition to make room."
     log "alongside: reusing ESP ${ALONGSIDE_ESP}, ${free_bytes} bytes of free space available"
   else
     (( target_bytes >= min_target_bytes )) || die 'target is too small (need at least 16 GiB)'
@@ -890,22 +927,22 @@ if [[ $MODE == execute ]]; then
         1)
           SECURE_BOOT_SETUP_MODE=1
           SECURE_BOOT_SIGN=1
-          log 'Secure Boot is enabled in firmware setup mode; AuraDE will prepare a signed boot chain and first-boot key enrollment' ;;
+          log 'Secure Boot is enabled in firmware setup mode. AuraDE will prepare a signed boot chain and first-boot key enrollment.' ;;
         0)
           if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
             SECURE_BOOT_SIGN=1
-            log 'Secure Boot is enabled with existing firmware keys; using the supplied pre-enrolled signing certificate'
+            log 'Secure Boot is enabled with existing firmware keys. Using the supplied pre-enrolled signing certificate.'
           else
             SECURE_BOOT_SIGN=0
-            log 'WARNING: Secure Boot is enabled but no trusted AuraDE signing key was supplied; continuing without signing. Disable Secure Boot or enroll an AuraDE key before the first boot'
+            log 'Secure Boot is enabled and no trusted AuraDE signing key was supplied. Continuing without signing. Turn Secure Boot off, or enroll an AuraDE key, before the first boot.'
           fi ;;
         *)
           if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
             SECURE_BOOT_SIGN=1
-            log 'WARNING: Secure Boot setup mode could not be read; using the supplied signing certificate and continuing'
+            log 'Secure Boot setup mode could not be read. Continuing with the supplied signing certificate.'
           else
             SECURE_BOOT_SIGN=0
-            log 'WARNING: Secure Boot is enabled and firmware setup mode could not be read; continuing without signing. Disable Secure Boot or enroll an AuraDE key before the first boot'
+            log 'Secure Boot is enabled and firmware setup mode could not be read. Continuing without signing. Turn Secure Boot off, or enroll an AuraDE key, before the first boot.'
           fi ;;
       esac ;;
     disabled)
@@ -913,10 +950,10 @@ if [[ $MODE == execute ]]; then
     *)
       if [[ -n $SECURE_BOOT_KEY_FILE ]]; then
         SECURE_BOOT_SIGN=1
-        log 'WARNING: Secure Boot state could not be read; using the supplied signing certificate and continuing'
+        log 'Secure Boot state could not be read. Continuing with the supplied signing certificate.'
       else
         SECURE_BOOT_SIGN=0
-        log 'WARNING: Secure Boot state could not be read; continuing without signing. If firmware has Secure Boot enabled, disable it or enroll an AuraDE key before the first boot'
+        log 'Secure Boot state could not be read. Continuing without signing. If firmware has Secure Boot enabled, turn it off or enroll an AuraDE key before the first boot.'
       fi ;;
   esac
   if (( SECURE_BOOT_SIGN )); then
@@ -924,7 +961,7 @@ if [[ $MODE == execute ]]; then
       command -v "$command" >/dev/null || die "required command not found for Secure Boot signing: $command"
     done
     if (( SECURE_BOOT_SETUP_MODE )) && ! bootctl --help 2>&1 | grep -Fq -- '--secure-boot-auto-enroll'; then
-      die 'this image is too old to enrol Secure Boot keys automatically'
+      die 'this image is too old to enroll Secure Boot keys automatically'
     fi
   fi
 fi
@@ -958,7 +995,7 @@ if [[ -n $WORK_PARENT ]] && \
   WORK_PARENT=
 fi
 if [[ -z $WORK_PARENT ]]; then
-  log "could not use ${WORK_PARENT_REQUESTED}; falling back to /tmp for installer state"
+  log "could not use ${WORK_PARENT_REQUESTED}. Falling back to /tmp for installer state."
   [[ -d /tmp && -w /tmp && -x /tmp ]] || die 'neither the configured installer work directory nor /tmp is writable'
   WORK_DIR=$(mktemp -d /tmp/aurade-install.XXXXXX)
   WORKSPACE_FS_PATH=/tmp
@@ -1068,7 +1105,7 @@ case $FILESYSTEM in
 esac
 aurade_journal_ok format
 
-aurade_journal_begin mount 'creating subvolumes and mounting'
+aurade_journal_begin mount 'laying out and mounting the filesystems'
 run install -d -m 0755 "$MOUNTPOINT"
 if [[ $FILESYSTEM == btrfs ]]; then
   run mount "$ROOT_DEVICE" "$MOUNTPOINT"
@@ -1196,6 +1233,52 @@ run arch-chroot "$MOUNTPOINT" hwclock --systohc
 write_target_file /etc/hostname 0644 "$HOSTNAME\n"
 write_target_file /etc/vconsole.conf 0644 "KEYMAP=$KEYMAP\n"
 write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
+
+# --- the accessibility choices, written into the installed system --------
+#
+# Three destinations, because there is no single place a desktop reads.
+#
+# The record is the authoritative one and is plain text on purpose: it is what
+# the first boot check reads back to confirm the settings survived, and it is
+# what somebody can read with `cat` when they want to know what an install
+# actually did.
+#
+# The GTK defaults and the dconf defaults are the two mechanisms that make the
+# settings take effect. Writing both is deliberate belt and braces: a setting
+# that silently does nothing is the exact failure this whole feature exists to
+# prevent, and the cost of the redundant one is a file.
+write_target_file /etc/aurade-install/accessibility 0644 \
+  "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
+
+if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
+      $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ]]; then
+  # GTK reads dpi in 1024ths of a point, which is why 100 is not 100 here.
+  _gtk_dpi=$(( TEXT_SCALE * 96 * 1024 / 100 ))
+  _gtk_anim=1
+  [[ $REDUCE_MOTION != yes ]] || _gtk_anim=0
+  write_target_file /etc/xdg/gtk-4.0/settings.ini 0644 \
+    "[Settings]\ngtk-xft-dpi=$_gtk_dpi\ngtk-enable-animations=$_gtk_anim\ngtk-cursor-theme-size=$CURSOR_SIZE\n"
+
+  _dconf_contrast=false
+  [[ $CONTRAST != high ]] || _dconf_contrast=true
+  _dconf_anim=true
+  [[ $REDUCE_MOTION != yes ]] || _dconf_anim=false
+  _dconf_scale=$(printf '%s.%02d' "$(( TEXT_SCALE / 100 ))" "$(( TEXT_SCALE % 100 ))")
+  write_target_file /etc/dconf/profile/user 0644 "user-db:user\nsystem-db:local\n"
+  write_target_file /etc/dconf/db/local.d/00-aurade-accessibility 0644 \
+    "[org/gnome/desktop/a11y/interface]\nhigh-contrast=$_dconf_contrast\n\n[org/gnome/desktop/interface]\ntext-scaling-factor=$_dconf_scale\nenable-animations=$_dconf_anim\ncursor-size=$CURSOR_SIZE\n"
+  run arch-chroot "$MOUNTPOINT" dconf update
+fi
+
+# Enabling rather than starting: the target is not running. `systemctl enable`
+# in a chroot writes the wants symlink, which is what makes the daemon come up
+# on the first boot of the installed system.
+if [[ $SCREEN_READER == yes ]]; then
+  run arch-chroot "$MOUNTPOINT" systemctl enable espeakup.service
+fi
+if [[ $BRAILLE == yes ]]; then
+  run arch-chroot "$MOUNTPOINT" systemctl enable brltty.service
+fi
 if [[ $MODE == execute ]]; then
   sed -i -E "s/^#(${LOCALE//./\\.}[[:space:]]+UTF-8)/\\1/" "$MOUNTPOINT/etc/locale.gen"
 else
@@ -1302,7 +1385,7 @@ if [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
       ROOT_OPTIONS="$ROOT_OPTIONS resume=UUID=${ROOT_UUID} resume_offset=${resume_offset}"
       HIBERNATION=supported
     else
-      log 'could not read the swap file physical offset; hibernation will not be configured'
+      log 'could not read the swap file physical offset. Hibernation will not be configured.'
     fi
   else
     ROOT_OPTIONS="$ROOT_OPTIONS resume=UUID=<root-filesystem-uuid> resume_offset=<swapfile-offset>"
@@ -1319,7 +1402,7 @@ if [[ $MODE == execute ]]; then
   case "$cpu_vendor" in
     GenuineIntel) MICROCODE_IMAGE=intel-ucode.img ;;
     AuthenticAMD) MICROCODE_IMAGE=amd-ucode.img ;;
-    *) log "unknown CPU vendor ${cpu_vendor:-unknown}; omitting a microcode initrd" ;;
+    *) log "unknown CPU vendor ${cpu_vendor:-unknown}. Omitting a microcode initrd." ;;
   esac
 else
   MICROCODE_IMAGE='<detected-microcode.img>'
@@ -1428,7 +1511,7 @@ aurade_journal_emit 'done' ok 'installation complete'
 
 log 'installation plan completed'
 if [[ $MODE == dry-run ]]; then
-  log "dry run only; rerun with --execute --confirm '$ERASE_TOKEN' after review"
+  log "dry run only. Rerun with --execute --confirm '$ERASE_TOKEN' after review."
 else
-  log 'AuraDE installed; factory rollback entry is available from systemd-boot'
+  log 'AuraDE installed. The factory rollback entry is available from the boot menu.'
 fi

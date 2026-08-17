@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# The accessibility choices, and the one property that makes them worth having.
+#
+# A screen reader turned on to get through an install, on a machine that
+# reboots into a desktop that does not speak, has not helped anybody. It has
+# moved the wall one step further along. So the thing being tested here is not
+# that the controls exist, it is that what they collect reaches the engine and
+# that the engine writes it into the target.
+#
+# The other half is the one that is easy to forget: an install where nobody
+# touched any of this has to be byte for byte the install it was before. A
+# feature that quietly changes every install is not an option, it is a
+# behaviour change wearing an option's clothes.
+set -Eeuo pipefail
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
+
+ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
+TUI=$ROOT/installer/bin/aurade-installer-tui
+ENGINE=$ROOT/installer/bin/aurade-install
+failures=0
+fail() { printf 'test-accessibility: %s\n' "$*" >&2; failures=$(( failures + 1 )); }
+
+# The front end's state, exercised by sourcing the shared library the way the
+# graphical bridge does rather than by driving a screen.
+probe() {
+  # `eval` rather than "$@": the point is to run in the shell that sourced the
+  # library. Anything that spawns a second shell loses the functions being
+  # tested and then reports them missing, which is a test of the harness.
+  env AURADE_INSTALLER_TUI_LIB=1 bash -c '
+    set -Eeuo pipefail
+    . "$1"
+    shift
+    eval "$*"
+  ' _ "$TUI" "$@"
+}
+
+# --- a default install is unchanged ----------------------------------------
+out=$(probe 'access_engine_args; printf "%s" "${#ACCESS_ARGS[@]}"' 2>/dev/null || true)
+[[ $out == 0 ]] ||
+  fail "a default install would pass $out accessibility arguments, and should pass none"
+
+# --- what is set travels ---------------------------------------------------
+out=$(probe '
+  access_set screen_reader yes
+  access_set text_scale 125
+  access_engine_args
+  printf "%s\n" "${ACCESS_ARGS[@]}"' 2>/dev/null || true)
+grep -Fqx -- '--screen-reader' <<<"$out" || fail 'a screen reader choice does not reach the engine'
+grep -Fqx -- 'yes' <<<"$out" || fail 'the screen reader value does not reach the engine'
+grep -Fqx -- '--text-scale' <<<"$out" || fail 'a text scale choice does not reach the engine'
+grep -Fqx -- '125' <<<"$out" || fail 'the text scale value does not reach the engine'
+# And only what was set. Two choices are four arguments, not twelve.
+(( $(wc -l <<<"$out") == 4 )) ||
+  fail "two choices produced $(wc -l <<<"$out") arguments, so defaults are being emitted"
+
+# --- a bad value is refused by the front end, not passed on -----------------
+for pair in 'text_scale 137' 'contrast lurid' 'screen_reader maybe' 'cursor_size 7'; do
+  set -- $pair
+  if probe "access_set $1 $2" 2>/dev/null; then
+    fail "the front end accepted $1=$2, which the engine would then refuse"
+  fi
+done
+
+# --- and the engine refuses the same values --------------------------------
+#
+# Two checks of one rule, on purpose. The front end's is what makes a mistake a
+# refusal in the interface; the engine's is what makes it a refusal at all,
+# because the engine is reachable without a front end.
+for pair in '--text-scale 137' '--contrast lurid' '--screen-reader maybe' '--cursor-size 7'; do
+  set -- $pair
+  if "$ENGINE" --target /dev/aurade-nonexistent --username a "$1" "$2" --dry-run \
+      >/dev/null 2>&1; then
+    fail "the engine accepted $1 $2"
+  fi
+done
+
+# --- every key the front end knows, the engine also knows ------------------
+#
+# The pair that drifts. The front end holds the list of choices and the engine
+# holds the flags, and a key added to one and not the other is a control that
+# silently does nothing.
+keys=$(probe 'printf "%s\n" "${ACCESS_ORDER[@]}"' 2>/dev/null || true)
+while IFS= read -r key; do
+  [[ -n $key ]] || continue
+  flag=$(probe "printf '%s' \"\${ACCESS_FLAGS[$key]}\"" 2>/dev/null || true)
+  [[ -n $flag ]] || { fail "$key has no engine flag"; continue; }
+  grep -Fq -- "    $flag)" "$ENGINE" ||
+    fail "the front end offers $key as $flag and the engine does not accept it"
+done <<<"$keys"
+
+# --- the key that reaches it ------------------------------------------------
+#
+# F1 rather than a letter, because every other screen consumes printable keys
+# as text: a letter is a letter in a hostname field and part of the token at
+# the erase gate. And not a chord, because somebody navigating with one switch
+# cannot press two keys at once.
+#
+# The decoder folds every unrecognised escape sequence into `esc`, so before
+# this was decoded, pressing F1 did not do nothing. It went back a screen.
+got=$(probe 'tui_decode_key "$(printf "\033OP")"' 2>/dev/null || true)
+[[ $got == f1 ]] || fail "xterm's F1 decodes as '$got', not f1"
+got=$(probe 'tui_decode_key "$(printf "\033[[A")"' 2>/dev/null || true)
+[[ $got == f1 ]] || fail "the linux console's F1 decodes as '$got', not f1"
+got=$(probe 'tui_decode_key "$(printf "\033[11~")"' 2>/dev/null || true)
+[[ $got == f1 ]] || fail "the numbered F1 decodes as '$got', not f1"
+
+# Long copy is wrapped to the frame, so a sentence is not necessarily on one
+# line. Flatten before matching, or the assertion is really about where the
+# wrap landed.
+flatten() { tr '\n' ' ' | tr -s ' '; }
+
+# It is written down where somebody starts.
+welcome=$(env AURADE_TUI_HEIGHT=34 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  "$TUI" --render welcome 2>/dev/null)
+grep -Fq 'f1  accessibility' <<<"$welcome" ||
+  fail 'the welcome screen does not say the accessibility key exists'
+
+# And the screen itself lists every choice it is supposed to.
+screen=$(env AURADE_TUI_PLAIN=1 AURADE_TUI_HEIGHT=34 "$TUI" --render access 2>/dev/null)
+for label in 'Screen reader' 'Braille display' 'Contrast' 'Text size' \
+             'Reduce motion' 'Pointer size'; do
+  grep -Fq "$label" <<<"$screen" || fail "the accessibility screen never offers '$label'"
+done
+# It has to say what it is for. A settings screen that does not explain that
+# these survive the restart is a settings screen nobody trusts with anything.
+flatten <<<"$screen" | grep -Fq 'carried into the installed system' ||
+  fail 'the accessibility screen does not say the choices survive the reboot'
+
+# --- the graphical front end reaches the same state -------------------------
+#
+# Not a second copy of the choices. The bridge sources the text installer, so
+# both front ends are reading and writing one set of variables, and this is
+# what proves it rather than assuming it: set a value through the bridge, read
+# it back through the bridge, and see the engine argument it produces.
+BRIDGE=$ROOT/installer/bin/aurade-installer-gui-bridge
+bridge_out=$(printf '%s\n' 'access-set contrast=high' 'access' 'quit' |
+  env AURADE_TUI_KEYS= "$BRIDGE" --plan-only 2>/dev/null || true)
+grep -Fq '"contrast":{"value":"high"' <<<"$bridge_out" ||
+  fail 'a choice set through the bridge does not read back through the bridge'
+grep -Fq '"label":"Screen reader"' <<<"$bridge_out" ||
+  fail 'the bridge does not offer the choices in words a chooser can read'
+
+# A refusal in the interface rather than at install time.
+bad=$(printf '%s\n' 'access-set contrast=lurid' 'quit' |
+  env AURADE_TUI_KEYS= "$BRIDGE" --plan-only 2>/dev/null || true)
+grep -Fq '"ok":false' <<<"$bad" ||
+  fail 'the bridge accepted a value the engine would refuse'
+
+# And it works in plan-only mode, because somebody checking a plan still has to
+# be able to read the screen they are checking it on.
+grep -Fq '"ok":true' <<<"$bridge_out" ||
+  fail 'the accessibility commands are unavailable in plan-only mode'
+
+# --- the boot menu's choice has to travel too --------------------------------
+#
+# The gap this closes: the speech entry starts espeakup itself, so somebody
+# boots it, installs with a talking installer, and reboots into silence. The
+# reader was started by a shell script and never became an answer. Presetting
+# it makes the boot menu's choice an answer like any other.
+out=$(env AURADE_ACCESS_SCREEN_READER=yes AURADE_INSTALLER_TUI_LIB=1 bash -c '
+  set -Eeuo pipefail
+  . "$1"
+  access_engine_args
+  printf "%s\n" "${ACCESS_ARGS[@]}"' _ "$TUI" 2>/dev/null || true)
+grep -Fqx -- '--screen-reader' <<<"$out" ||
+  fail 'a choice preset by the boot menu never reaches the engine'
+
+# And the entry that needs it actually sets it.
+grep -Fq 'AURADE_ACCESS_SCREEN_READER=yes' \
+  "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart" ||
+  fail 'the speech boot entry does not record the choice it just made'
+
+# A typo in a boot entry must not stop an install.
+out=$(env AURADE_ACCESS_CONTRAST=lurid AURADE_INSTALLER_TUI_LIB=1 bash -c '
+  set -Eeuo pipefail
+  . "$1"
+  printf "%s" "${ACCESS[contrast]}"' _ "$TUI" 2>/dev/null || true)
+[[ $out == normal ]] ||
+  fail "an unusable preset left contrast as '$out' instead of ignoring it"
+
+# --- and the installer obeys what it collects --------------------------------
+#
+# Recording without obeying is the failure that makes a settings screen
+# untrustworthy: nothing appears to happen, so people press it twice.
+before=$(env AURADE_TUI_HEIGHT=40 AURADE_TIP_RARITY=0 "$TUI" --render progress \
+  2>/dev/null | grep -cE '^\|  [:.=*#+-]{20,}' || true)
+after=$(env AURADE_ACCESS_REDUCE_MOTION=yes AURADE_TUI_HEIGHT=40 AURADE_TIP_RARITY=0 \
+  "$TUI" --render progress 2>/dev/null | grep -cE '^\|  [:.=*#+-]{20,}' || true)
+(( before > 0 )) || fail 'the progress screen draws no aurora to begin with'
+(( after == 0 )) || fail "reduce motion left $after rows of aurora moving"
+
+# --- the erase gate: fairer, and not one bit easier -------------------------
+#
+# Typing `ERASE:/dev/nvme0n1` exactly is a real motor and cognitive load and it
+# is the one thing in this product that must not be weakened. Everything here
+# makes it possible to *check* what was typed. Nothing makes the comparison
+# more forgiving.
+
+# Spelled back with the punctuation named, because `/dev/nvme0n1` heard at
+# speaking speed is a run of sounds rather than a string.
+out=$(probe 'gate_spelling "ERASE:/dev/sda"' 2>/dev/null || true)
+[[ $out == 'E R A S E colon slash d e v slash s d a' ]] ||
+  fail "the gate spells its token as '$out'"
+
+# On request, not by default: four lines of noise to somebody who can see the
+# field, and the only way to check it for somebody who cannot.
+plain_gate=$(env AURADE_TUI_HEIGHT=40 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  "$TUI" --render gate 2>/dev/null)
+! grep -Fq 'You typed:' <<<"$plain_gate" ||
+  fail 'the gate spells the token back without being asked'
+spelled=$(env GATE_SPELL=1 AURADE_TUI_HEIGHT=40 AURADE_TUI_COLOR=none \
+  AURADE_TUI_FRAME=ascii "$TUI" --render gate 2>/dev/null)
+grep -Fq 'You typed:' <<<"$spelled" ||
+  fail 'the gate cannot be asked to spell the token back'
+grep -Fq 'f2  spell it back' <<<"$plain_gate" ||
+  fail 'the gate does not say the spelling key exists'
+
+# F2 has to decode, or the key is another way to trip the escape fallback.
+for seq in 'OQ' '[[B' '[12~'; do
+  got=$(probe "tui_decode_key \"\$(printf '\033%s' '$seq')\"" 2>/dev/null || true)
+  [[ $got == f2 ]] || fail "F2 as ESC$seq decodes as '$got', not f2"
+done
+
+# And nothing is normalised. The token is compared whole, with no trimming and
+# no case folding, in the front end and again in the engine.
+grep -Fq '[[ $typed == "$token" ]]' "$TUI" ||
+  fail 'the gate no longer compares the typed token whole'
+! grep -qE 'typed=\$\{typed(,,|\^\^)\}|typed=\$\(.*tr ' "$TUI" ||
+  fail 'the gate folds or rewrites what was typed before comparing it'
+
+# --- sound, and where it must not appear ------------------------------------
+#
+# One bell for finished, three for stopped. A pattern rather than a pitch,
+# because a terminal bell has one pitch and two things somebody can tell apart
+# across a room without looking is the whole requirement.
+#
+# The important half is the second one: a bell written to stdout would land in
+# the middle of a rendered frame and every width measurement in the render
+# tests would be measuring a control character.
+for screen in done failure; do
+  out=$(env AURADE_TUI_HEIGHT=40 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+    "$TUI" --render "$screen" 2>/dev/null | tr -d '\n')
+  case $out in
+    *$'\a'*) fail "the $screen screen writes a bell into its own rendering" ;;
+  esac
+done
+
+# Both front ends agree on the pattern, or a machine sounds like two products.
+grep -Fq 'tui_bell 1' "$TUI" || fail 'the text installer does not ring once when it finishes'
+grep -Fq 'tui_bell 3' "$TUI" || fail 'the text installer does not ring three times when it stops'
+grep -Fq 'self._sound(1)' "$ROOT/installer/lib/aurade_gui/app.py" ||
+  fail 'the graphical installer does not ring once when it finishes'
+grep -Fq 'self._sound(3)' "$ROOT/installer/lib/aurade_gui/app.py" ||
+  fail 'the graphical installer does not ring three times when it stops'
+
+(( failures == 0 )) || exit 1
+printf 'installer accessibility test: PASS (%s choices, defaults unchanged, both ends agree)\n' \
+  "$(wc -l <<<"$keys")"
