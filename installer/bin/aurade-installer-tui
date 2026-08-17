@@ -450,6 +450,7 @@ cleanup() {
   tui_palette_reset 2>/dev/null || true
   tui_title_reset 2>/dev/null || true
   tui_paste_off 2>/dev/null || true
+  tui_mouse_off 2>/dev/null || true
   if [[ -d ${SECRET_DIR:-} ]]; then
     while IFS= read -r -d '' file; do
       if command -v shred >/dev/null 2>&1; then
@@ -3088,8 +3089,11 @@ run_failure() {
 
 main_flow() {
   # Ask the terminal to bracket pastes, so that pasted text is text and not a
-  # run of keystrokes that can include a return. Put back in `cleanup`.
+  # run of keystrokes that can include a return, and to report the wheel, so
+  # that a hundred and forty keyboard layouts scroll the way every other list
+  # on the machine scrolls. Both put back in `cleanup`.
   tui_paste_on
+  tui_mouse_on
   SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX")
   chmod 700 "$SECRET_DIR"
   # Before anything is asked, so the questions open on these rather than on

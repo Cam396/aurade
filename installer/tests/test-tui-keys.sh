@@ -95,6 +95,39 @@ pasted=$(printf '%b' '\033[200~a\tb\033[201~' | bash -c '
 [[ $pasted == 'paste:ab' ]] ||
   fail "a paste containing a tab came back as '$pasted'"
 
+# --- the wheel scrolls, and a click does not choose a disk ------------------
+#
+# A terminal reports the mouse if asked, and nothing here was asking. The
+# wheel is the gesture worth having: a hundred and forty keyboard layouts
+# should scroll the way every other list on the machine scrolls.
+#
+# Clicks decode to a name no screen acts on, and that is the decision rather
+# than an omission. A click carries a position, these screens do not record
+# where they drew anything, and acting on one would mean guessing which row
+# was meant. The screen where that guess would be worst is the one where
+# somebody is choosing which disk to erase.
+wheel() {
+  printf '%b' "$1" | bash -c '
+    . "$0"
+    tui_read_key' "$LIB" 2>/dev/null || true
+}
+[[ $(wheel '\033[<64;10;5M') == up ]] || fail 'the wheel up does not scroll up'
+[[ $(wheel '\033[<65;10;5M') == down ]] || fail 'the wheel down does not scroll down'
+# A press and a release of the left button, both inert.
+[[ $(wheel '\033[<0;10;5M') == mouse ]] || fail 'a click decoded to something a screen acts on'
+[[ $(wheel '\033[<0;10;5m') == mouse ]] || fail 'a release decoded to something a screen acts on'
+# And whatever it decodes to must be longer than one character, because that
+# is the test every screen's catch-all applies before treating a key as typed
+# text. A one character name would be typed into a passphrase.
+click=$(wheel '\033[<0;10;5M')
+(( ${#click} > 1 )) || fail "a click decodes to '$click', which screens would type"
+
+# The extended encoding is the one asked for, and this is why: the original
+# packs coordinates into single bytes, so past column 223 a click arrives as a
+# control character.
+grep -Fq '1006h' "$LIB" ||
+  fail 'the mouse is enabled without the encoding that survives a wide terminal'
+
 # --- the frame, measured again -----------------------------------------------
 #
 # Resizing a terminal mid install used to leave the frame in pieces until the
