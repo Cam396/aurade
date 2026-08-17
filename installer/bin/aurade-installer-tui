@@ -1843,7 +1843,7 @@ screen_help_where() {
   # there at all, and unlike the braille the progress bar uses, half blocks
   # are ambiguous width, so a terminal in a CJK locale may draw them double
   # and tear the frame. The addresses below say the same thing either way.
-  if [[ $AURADE_TUI_FRAME == unicode ]] && (( ! AURADE_TUI_PLAIN )) &&
+  if tui_frame_unicode && (( ! AURADE_TUI_PLAIN )) &&
      (( AURADE_TUI_HEIGHT >= 26 )); then
     local pad=0
     while IFS= read -r row; do

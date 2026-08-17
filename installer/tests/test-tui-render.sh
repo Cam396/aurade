@@ -519,6 +519,46 @@ grep -Fq '[[ ${TERM:-} == linux ]] || return 0' "$ROOT/installer/lib/aurade-tui.
 grep -Fq 'tui_palette_reset' "$TUI" ||
   fail 'the installer never puts the console palette back'
 
+# --- three tiers of box drawing, detected rather than assumed ---------------
+#
+# ASCII, then straight box drawing, then rounded corners. The middle tier is
+# not a stepping stone: it is what the Linux virtual console gets, because its
+# font is a few hundred glyphs, the straight box drawing is among them and the
+# rounded corners are not. A corner that falls back to a blank is a frame with
+# four holes in it.
+# Captured before it is matched, not piped into `grep -q`. That exits on the
+# first match and closes the pipe, the renderer upstream dies of a broken
+# pipe, and `pipefail` reports the whole pipeline as failed even though the
+# match succeeded. The same trap as `head -1`, and it looks exactly like the
+# feature being missing.
+corners=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=rounded AURADE_TUI_HEIGHT=24 \
+  "$TUI" --render welcome 2>/dev/null | sed -n '1p')
+[[ $corners == ╭*╮ ]] ||
+  fail 'the rounded tier does not draw rounded corners'
+corners=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=unicode AURADE_TUI_HEIGHT=24 \
+  "$TUI" --render welcome 2>/dev/null | sed -n '1p')
+[[ $corners == ┌*┐ ]] ||
+  fail 'the straight tier stopped drawing straight corners'
+
+detected_frame() {
+  env -u AURADE_TUI_FRAME AURADE_TUI_COLOR=none AURADE_TUI_HEIGHT=24 TERM="$1" \
+    bash -c '. "$0"; printf "%s" "$AURADE_TUI_FRAME"' \
+    "$ROOT/installer/lib/aurade-tui.sh" 2>/dev/null
+}
+# Not a terminal at all, so nothing is assumed about it.
+[[ $(detected_frame xterm-256color) == ascii ]] ||
+  fail 'a non-terminal was given box drawing on the strength of TERM alone'
+
+# Whatever the tier, everything that asks "can this terminal draw box
+# characters" has to accept both of the two that can. Forgetting one is how
+# the rounded tier silently loses its braille progress bar.
+grep -Fq 'tui_frame_unicode' "$ROOT/installer/lib/aurade-tui.sh" ||
+  fail 'the unicode-capable tiers are not asked about through one function'
+rounded_bar=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=rounded TERM=xterm-256color \
+  AURADE_TUI_HEIGHT=40 "$TUI" --render progress --journal "$TMP/journal.jsonl" 2>/dev/null)
+[[ $rounded_bar == *⣿* ]] ||
+  fail 'the rounded tier lost the braille progress bar'
+
 # --- the frame runs lilac to aqua where a terminal can draw it --------------
 #
 # The same two colours the mark's stroke runs between and the same two the
@@ -570,24 +610,30 @@ done
 # box drawing is among them, which is why the frame is safe there, and the
 # braille block is not. A bar made of missing glyphs is a row of blanks, which
 # looks exactly like an install that is not progressing.
+# Captured whole, then matched with a case pattern. Not piped into `grep -q`,
+# and this is worth stating because a negated one is a trap: `grep -q` exits
+# on the first match and closes the pipe, the renderer dies of a broken pipe,
+# `pipefail` reports 141, and `! pipeline` turns that failure into a pass. An
+# assertion written that way cannot fail, whatever the code does. Three of the
+# five below were negated.
 bar_on() {
   env AURADE_TUI_COLOR=none AURADE_TUI_FRAME="$1" TERM="$2" AURADE_TUI_HEIGHT=40 \
-    "$TUI" --render progress --journal "$TMP/journal.jsonl" 2>/dev/null |
-    grep -F '[' | head -1
+    "$TUI" --render progress --journal "$TMP/journal.jsonl" 2>/dev/null
 }
 
-grep -q '⣿' <<<"$(bar_on unicode xterm-256color)" ||
+[[ $(bar_on unicode xterm-256color) == *⣿* ]] ||
   fail 'a terminal that can draw braille got the plain bar'
-! grep -q '⣿' <<<"$(bar_on unicode linux)" ||
+[[ $(bar_on unicode linux) != *⣿* ]] ||
   fail 'the braille bar was drawn on the console whose font has no braille in it'
-grep -q '#' <<<"$(bar_on unicode linux)" ||
+[[ $(bar_on unicode linux) == *'#'* ]] ||
   fail 'the console fell back to no bar at all instead of the ASCII one'
-! grep -q '⣿' <<<"$(bar_on ascii xterm-256color)" ||
+[[ $(bar_on ascii xterm-256color) != *⣿* ]] ||
   fail 'the ascii tier drew braille'
 # And never under plain mode, where the cells are eight dot patterns under a
 # finger rather than a picture of anything.
-! env AURADE_TUI_PLAIN=1 AURADE_TUI_HEIGHT=40 "$TUI" --render progress \
-    --journal "$TMP/journal.jsonl" 2>/dev/null | grep -q '⣿' ||
+plain_bar=$(env AURADE_TUI_PLAIN=1 AURADE_TUI_HEIGHT=40 "$TUI" --render progress \
+  --journal "$TMP/journal.jsonl" 2>/dev/null)
+[[ $plain_bar != *⣿* ]] ||
   fail 'plain mode drew a braille progress bar at a braille display'
 
 # --- the battery warning, and the three times it stays quiet ----------------
