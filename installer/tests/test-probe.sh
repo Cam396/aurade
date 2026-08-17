@@ -14,6 +14,13 @@
 set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
+
+# The frame grows with the terminal, so the width is pinned here the way the
+# height already is. Without it a screen rendered on a build machine with a
+# wide terminal and the same screen rendered in CI are different screens, and
+# every column measurement below is measuring the margin.
+export AURADE_TUI_COLUMNS=68
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
