@@ -765,3 +765,168 @@ aurade_fifteen_rows() {
     printf '%s\n' "$row"
   done
 }
+
+# --------------------------------------------------------------------------
+# Minesweeper
+# --------------------------------------------------------------------------
+#
+# A grid, a cursor and two actions, with no clock anywhere in it. Nine by nine
+# with ten mines, which is the beginner board everybody has already played.
+#
+# The mines are placed after the first reveal, not before, and never under it.
+# Losing on the first keypress of a game somebody started to pass the time is
+# the single most annoying thing this screen could do, and the fix is three
+# lines. Every implementation that gets this wrong got it wrong by placing
+# first because that is the obvious order.
+AURADE_MINE_W=9
+AURADE_MINE_H=9
+AURADE_MINE_COUNT=10
+AURADE_MINES=()
+AURADE_MINE_SHOWN=()
+AURADE_MINE_FLAG=()
+AURADE_MINE_X=4
+AURADE_MINE_Y=4
+AURADE_MINE_STARTED=0
+AURADE_MINE_DEAD=0
+AURADE_MINE_WON=0
+
+aurade_mines_new() {
+  local i
+  AURADE_MINES=(); AURADE_MINE_SHOWN=(); AURADE_MINE_FLAG=()
+  for (( i = 0; i < AURADE_MINE_W * AURADE_MINE_H; i++ )); do
+    AURADE_MINES+=(0); AURADE_MINE_SHOWN+=(0); AURADE_MINE_FLAG+=(0)
+  done
+  AURADE_MINE_X=$(( AURADE_MINE_W / 2 ))
+  AURADE_MINE_Y=$(( AURADE_MINE_H / 2 ))
+  AURADE_MINE_STARTED=0
+  AURADE_MINE_DEAD=0
+  AURADE_MINE_WON=0
+}
+
+# Mines everywhere except the cell just opened and the ring around it, so the
+# first reveal always opens something.
+_aurade_mines_place() {
+  local safe_x=$1 safe_y=$2 placed=0 x y index
+  while (( placed < AURADE_MINE_COUNT )); do
+    x=$(( RANDOM % AURADE_MINE_W ))
+    y=$(( RANDOM % AURADE_MINE_H ))
+    (( x < safe_x - 1 || x > safe_x + 1 || y < safe_y - 1 || y > safe_y + 1 )) || continue
+    index=$(( y * AURADE_MINE_W + x ))
+    (( ! AURADE_MINES[index] )) || continue
+    AURADE_MINES[index]=1
+    placed=$(( placed + 1 ))
+  done
+  AURADE_MINE_STARTED=1
+}
+
+aurade_mines_near() {
+  local x=$1 y=$2 dx dy nx ny near=0
+  for dy in -1 0 1; do
+    for dx in -1 0 1; do
+      (( dx || dy )) || continue
+      nx=$(( x + dx )); ny=$(( y + dy ))
+      (( nx >= 0 && nx < AURADE_MINE_W && ny >= 0 && ny < AURADE_MINE_H )) || continue
+      (( ! AURADE_MINES[ny * AURADE_MINE_W + nx] )) || near=$(( near + 1 ))
+    done
+  done
+  printf '%s' "$near"
+}
+
+# Opening an empty cell opens its neighbours too, which is the whole game.
+# Iterative rather than recursive: bash recursion at eighty deep is slow
+# enough to be visible on a screen redrawing eight times a second.
+_aurade_mines_open() {
+  local -a queue=("$1,$2")
+  local item x y index near dx dy nx ny
+  while (( ${#queue[@]} )); do
+    item=${queue[0]}
+    queue=("${queue[@]:1}")
+    x=${item%,*}; y=${item#*,}
+    index=$(( y * AURADE_MINE_W + x ))
+    (( ! AURADE_MINE_SHOWN[index] )) || continue
+    (( ! AURADE_MINE_FLAG[index] )) || continue
+    AURADE_MINE_SHOWN[index]=1
+    near=$(aurade_mines_near "$x" "$y")
+    (( near == 0 )) || continue
+    for dy in -1 0 1; do
+      for dx in -1 0 1; do
+        (( dx || dy )) || continue
+        nx=$(( x + dx )); ny=$(( y + dy ))
+        (( nx >= 0 && nx < AURADE_MINE_W && ny >= 0 && ny < AURADE_MINE_H )) || continue
+        queue+=("$nx,$ny")
+      done
+    done
+  done
+}
+
+aurade_mines_reveal() {
+  local index=$(( AURADE_MINE_Y * AURADE_MINE_W + AURADE_MINE_X ))
+  (( ! AURADE_MINE_DEAD && ! AURADE_MINE_WON )) || return 0
+  (( ! AURADE_MINE_FLAG[index] )) || return 0
+  (( AURADE_MINE_STARTED )) || _aurade_mines_place "$AURADE_MINE_X" "$AURADE_MINE_Y"
+  if (( AURADE_MINES[index] )); then
+    AURADE_MINE_DEAD=1
+    return 0
+  fi
+  _aurade_mines_open "$AURADE_MINE_X" "$AURADE_MINE_Y"
+  # Explicitly, because `aurade_mines_check` reports "not won yet" as a
+  # non-zero status and this function would otherwise hand that to its caller
+  # as a failure. Under errexit that is not a subtle bug: it ends the program
+  # on the first move of a game.
+  aurade_mines_check || true
+  return 0
+}
+
+aurade_mines_flag() {
+  local index=$(( AURADE_MINE_Y * AURADE_MINE_W + AURADE_MINE_X ))
+  (( ! AURADE_MINE_DEAD && ! AURADE_MINE_WON )) || return 0
+  (( ! AURADE_MINE_SHOWN[index] )) || return 0
+  AURADE_MINE_FLAG[index]=$(( ! AURADE_MINE_FLAG[index] ))
+  return 0
+}
+
+# Won when every cell that is not a mine has been opened. Flags are not part
+# of it: a board can be finished without planting one, and requiring them
+# would be inventing a rule.
+aurade_mines_check() {
+  local i
+  for (( i = 0; i < AURADE_MINE_W * AURADE_MINE_H; i++ )); do
+    (( AURADE_MINES[i] || AURADE_MINE_SHOWN[i] )) || return 1
+  done
+  AURADE_MINE_WON=1
+  return 0
+}
+
+aurade_mines_move() {
+  case $1 in
+    up)    (( AURADE_MINE_Y > 0 )) && AURADE_MINE_Y=$(( AURADE_MINE_Y - 1 )) || true ;;
+    down)  (( AURADE_MINE_Y < AURADE_MINE_H - 1 )) && AURADE_MINE_Y=$(( AURADE_MINE_Y + 1 )) || true ;;
+    left)  (( AURADE_MINE_X > 0 )) && AURADE_MINE_X=$(( AURADE_MINE_X - 1 )) || true ;;
+    right) (( AURADE_MINE_X < AURADE_MINE_W - 1 )) && AURADE_MINE_X=$(( AURADE_MINE_X + 1 )) || true ;;
+  esac
+  return 0
+}
+
+aurade_mines_rows() {
+  local x y row index cell near left right
+  for (( y = 0; y < AURADE_MINE_H; y++ )); do
+    row=''
+    for (( x = 0; x < AURADE_MINE_W; x++ )); do
+      index=$(( y * AURADE_MINE_W + x ))
+      if (( AURADE_MINE_DEAD && AURADE_MINES[index] )); then
+        cell='*'
+      elif (( AURADE_MINE_FLAG[index] )); then
+        cell='F'
+      elif (( ! AURADE_MINE_SHOWN[index] )); then
+        cell='#'
+      else
+        near=$(aurade_mines_near "$x" "$y")
+        (( near )) && cell=$near || cell='.'
+      fi
+      left=' '; right=' '
+      if (( x == AURADE_MINE_X && y == AURADE_MINE_Y )); then left='['; right=']'; fi
+      row+="$left$cell$right"
+    done
+    printf '%s\n' "$row"
+  done
+}

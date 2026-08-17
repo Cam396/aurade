@@ -445,7 +445,7 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # calls itself a game.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Something Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Something Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -521,6 +521,29 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   aurade_fifteen_slide up && { echo 'a tile slid in from off the board' >&2; exit 1; }
   aurade_fifteen_slide left && { echo 'a tile slid in from off the board' >&2; exit 1; }
   aurade_fifteen_slide down || { echo 'a legal slide was refused' >&2; exit 1; }
+  # Minesweeper places its mines after the first reveal and never under it,
+  # so the first keypress of a game always opens something. Losing on move one
+  # of a game somebody started to pass the time is the most annoying thing
+  # this screen could do, and every implementation that gets it wrong got it
+  # wrong by placing the mines first, because that is the obvious order.
+  for seed in 1 2 3 4 5 6 7 8 9 10; do
+    RANDOM=$seed
+    aurade_mines_new
+    aurade_mines_reveal
+    (( ! AURADE_MINE_DEAD )) ||
+      { echo "seed $seed lost minesweeper on the first move" >&2; exit 1; }
+  done
+  # And a flagged cell cannot be opened by accident, which is the whole point
+  # of planting one.
+  RANDOM=9
+  aurade_mines_new
+  aurade_mines_reveal
+  AURADE_MINE_X=0; AURADE_MINE_Y=0
+  aurade_mines_flag
+  before=$(aurade_mines_rows)
+  aurade_mines_reveal
+  [[ $(aurade_mines_rows) == "$before" ]] ||
+    { echo 'a flagged cell was opened' >&2; exit 1; }
 ) || fail 'the puzzles do not hold their invariants'
 
 (( failures == 0 )) || exit 1

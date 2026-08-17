@@ -2662,12 +2662,13 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log life 2048 lights fifteen snake ttt)
+WAIT_CHOICES=(tips log life 2048 mines lights fifteen snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
   [life]='Something moving, that needs nothing'
   [2048]='Play 2048'
+  [mines]='Play minesweeper'
   [lights]='Play lights out'
   [fifteen]='Play the fifteen puzzle'
   [snake]='Play snake'
@@ -2697,6 +2698,34 @@ screen_wait_picker() {
   done
   tui_blank
   tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# Minesweeper. Nine by nine with ten mines, which is the board everybody has
+# already played.
+screen_mines() {
+  local HELP_KEY=0
+  local row pad flags=0 i
+  tui_clear
+  tui_header 'Minesweeper'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 27) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_mines_rows)
+  tui_blank
+  for (( i = 0; i < ${#AURADE_MINE_FLAG[@]}; i++ )); do
+    (( ! AURADE_MINE_FLAG[i] )) || flags=$(( flags + 1 ))
+  done
+  if (( AURADE_MINE_DEAD )); then
+    tui_wrap 'That one was a mine. Press enter for another board.' warn
+  elif (( AURADE_MINE_WON )); then
+    tui_wrap 'All clear. Press enter for another board.' ok
+  else
+    tui_wrap "Ten mines. $flags flagged." dim
+  fi
+  tui_blank
+  tui_footer 'arrows  move    enter  open    f  flag    g  choose' 'esc  back'
 }
 
 # Lights out. Five by five, one action, and the board is the whole state, so
@@ -2917,6 +2946,7 @@ run_engine_with_progress() {
             # Slower than the redraw. Life at eight generations a second is a
             # boil rather than a thing to watch.
             (( frame % 3 )) || aurade_life_step ;;
+      mines)   screen_mines ;;
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
@@ -2961,6 +2991,7 @@ run_engine_with_progress() {
                 tips) mode=progress ;;
                 2048) mode=2048; aurade_2048_new ;;
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
+                mines)   mode=mines; aurade_mines_new ;;
                 lights)  mode=lights; aurade_lights_new ;;
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
                 *)    mode=$WAIT_MODE ;;
@@ -2979,6 +3010,25 @@ run_engine_with_progress() {
           case $key in
             g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        mines)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_mines_move "$key" ;;
+            w|W) aurade_mines_move up ;;
+            s|S) aurade_mines_move down ;;
+            a|A) aurade_mines_move left ;;
+            d|D) aurade_mines_move right ;;
+            f|F) aurade_mines_flag ;;
+            enter|space)
+              if (( AURADE_MINE_DEAD || AURADE_MINE_WON )); then
+                aurade_mines_new
+              else
+                aurade_mines_reveal
+              fi
+              ;;
           esac
           ;;
         lights)
@@ -3551,7 +3601,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help watch ttt life picker lights fifteen
+  access keycheck explain help watch ttt life picker lights fifteen mines
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3617,6 +3667,8 @@ if [[ -n $RENDER_ONLY ]]; then
     ttt)       TTT_FRAMES=${AURADE_RENDER_TTT_FRAMES:-20}; screen_ttt ;;
     life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
     lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
+    mines)     RANDOM=${AURADE_MINES_SEED:-9}; aurade_mines_new
+               aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
