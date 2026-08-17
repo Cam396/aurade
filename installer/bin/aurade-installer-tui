@@ -245,7 +245,26 @@ SECRET_DIR=
 # because disk models contain spaces, and positional parsing of a model like
 # "WDC WD10EZEX-08WN4A0" silently shifts the transport and serial columns - on
 # the one screen where a wrong serial number could get the wrong disk erased.
+#
+# Removable disks come last, wherever the kernel happened to put them.
+# The list is arrowed through, the cursor starts at the top, and a fumbled
+# keypress should not be able to land on the stick the installer is running
+# from. Sorting is the cheapest safety there is: it costs nothing and it
+# removes a whole class of mistake before the gate ever sees it.
 disk_table() {
+  _disk_table_raw | awk -F'|' '
+    # A stable partition rather than a sort: everything that is not removable
+    # keeps the order the kernel reported, and the removable ones follow in
+    # the order they were reported too. A real sort would reshuffle disks that
+    # have nothing to do with the question.
+    { if ($4 == "usb") last[++l] = $0; else first[++f] = $0 }
+    END {
+      for (i = 1; i <= f; i++) print first[i]
+      for (i = 1; i <= l; i++) print last[i]
+    }'
+}
+
+_disk_table_raw() {
   if [[ -n ${AURADE_DISK_TABLE:-} && -r ${AURADE_DISK_TABLE:-} ]]; then
     cat "$AURADE_DISK_TABLE"
     return 0
@@ -319,6 +338,95 @@ battery_low() {
   (( percent < AURADE_BATTERY_FLOOR )) || return 1
   BATTERY_PERCENT=$percent
   return 0
+}
+
+# --------------------------------------------------------------------------
+# What is on a disk, and which one you booted from
+# --------------------------------------------------------------------------
+
+#: What each disk appears to hold, as `path|description` records. Injectable
+#: so the disk screen can be rendered and tested without block devices, the
+#: same way the disk table itself is.
+AURADE_DISK_CONTENTS=${AURADE_DISK_CONTENTS:-}
+
+#: Where the live image mounts the medium it booted from.
+AURADE_BOOT_MEDIUM_MOUNT=${AURADE_BOOT_MEDIUM_MOUNT:-/run/archiso/bootmnt}
+
+# A phrase for what is already on a disk.
+#
+# People pick the wrong disk because they genuinely cannot tell two 512G
+# drives apart, and a device path is not a distinguishing feature. "Windows"
+# is. The erase gate is the last line of defence against this, not the first,
+# and by the time somebody is typing a confirmation token they have already
+# decided.
+#
+# Deliberately coarse. This is not a partition editor and it is not trying to
+# be right about a dual boot layout with three data volumes: it is trying to
+# answer "is that the one with my photographs on it", and every extra word
+# spent on precision here is a word spent away from that question.
+disk_contents() {
+  local target=$1 path text found='' kinds='' kind label
+  if [[ -n $AURADE_DISK_CONTENTS && -r $AURADE_DISK_CONTENTS ]]; then
+    while IFS='|' read -r path text; do
+      [[ $path == "$target" ]] || continue
+      found=$text
+    done <"$AURADE_DISK_CONTENTS"
+    printf '%s' "$found"
+    return 0
+  fi
+  command -v lsblk >/dev/null 2>&1 || { printf ''; return 0; }
+  while IFS= read -r kind; do
+    [[ -n $kind ]] || continue
+    kinds+=" $kind"
+  done < <(lsblk -nlo FSTYPE "$target" 2>/dev/null || true)
+  # No filesystem anywhere on it. Said as a fact about the disk rather than as
+  # a reassurance, because "empty" is also what somebody's backup drive looks
+  # like to a tool that cannot read its filesystem.
+  [[ -n ${kinds// /} ]] || { printf 'nothing on it yet'; return 0; }
+  label=''
+  case $kinds in
+    *ntfs*) label='Windows' ;;
+  esac
+  case $kinds in
+    *btrfs*|*ext4*|*ext3*|*xfs*|*f2fs*)
+      [[ -z $label ]] && label='Linux' || label="$label and Linux" ;;
+  esac
+  if [[ -z $label ]]; then
+    case $kinds in
+      *apfs*|*hfsplus*) label='macOS' ;;
+    esac
+  fi
+  # Named honestly. "Unrecognised" reads as though the installer failed at
+  # something, and what actually happened is that a disk is holding something
+  # this installer has no opinion about.
+  [[ -n $label ]] || label='files this installer does not recognise'
+  printf '%s' "$label"
+}
+
+# The disk this installer is running from.
+#
+# Worth saying out loud rather than leaving to be worked out from the fact
+# that one entry is removable: a laptop with the installer on a USB stick and
+# a second USB drive plugged in shows two removable disks, and only one of
+# them is the one that would stop the install by being erased.
+boot_disk() {
+  local device where kind rest found='' name
+  [[ -r $AURADE_MOUNTS_FILE ]] || { printf ''; return 0; }
+  while read -r device where kind rest; do
+    where=${where//\\040/ }
+    [[ $where == "${AURADE_BOOT_MEDIUM_MOUNT%/}" ]] || continue
+    found=$device
+  done <"$AURADE_MOUNTS_FILE"
+  [[ $found == /dev/* ]] || { printf ''; return 0; }
+  name=$found
+  # A partition back to its disk. `nvme0n1p2` keeps a digit before the `p`,
+  # which is what separates it from `sda2`, where the digits come straight off.
+  if [[ $name =~ ^(.*[0-9])p[0-9]+$ ]]; then
+    name=${BASH_REMATCH[1]}
+  elif [[ $name =~ ^(.*[^0-9])[0-9]+$ ]]; then
+    name=${BASH_REMATCH[1]}
+  fi
+  printf '%s' "$name"
 }
 
 cleanup() {
@@ -598,7 +706,8 @@ widget_bool() {
 }
 
 widget_disk() {
-  local cursor=$1 index=0 line path size model tran removable=0
+  local cursor=$1 index=0 line path size model tran removable=0 holds booted
+  booted=$(boot_disk)
   while IFS='|' read -r path size model tran _; do
     [[ -n $path ]] || continue
     line=$(printf '%-14s %8s  %-26s %s' "$path" "$size" "${model:0:26}" "$tran")
@@ -607,6 +716,16 @@ widget_disk() {
     else
       tui_item no "$line"
     fi
+    # What is on it, on its own line under the disk it belongs to.
+    #
+    # Under rather than beside: the row above is already a device path, a
+    # size, a model and a connection, and the one fact somebody is actually
+    # scanning for would be the fifth column of five at 68 columns, where it
+    # would be the first thing truncated.
+    holds=$(disk_contents "$path")
+    [[ $path != "$booted" ]] ||
+      holds="you started this installer from this one${holds:+, $holds}"
+    [[ -z $holds ]] || tui_line "$(printf '       %s' "$holds")" dim
     [[ $tran != usb ]] || removable=1
     index=$(( index + 1 ))
   done < <(disk_table)
@@ -617,7 +736,7 @@ widget_disk() {
   fi
   if (( removable )); then
     tui_blank
-    tui_note '!' 'One of these is removable. That is probably the drive you started this installer from.' warn
+    tui_note '!' 'One of these is removable, and it is listed last.' warn
   fi
 }
 
@@ -821,7 +940,7 @@ review_detail() {
 # the size are what somebody checks it against, and the map is the part the
 # graphical front end's list cannot say: it is the plan, drawn.
 review_disk_detail() {
-  local target=$1 line root fs path size model rest
+  local target=$1 line root fs path size model rest holds
   size=''
   while IFS='|' read -r path size model rest; do
     [[ $path == "$target" ]] || continue
@@ -834,6 +953,8 @@ review_disk_detail() {
     tui_field 'Size' "${size:-not reported by this drive}" ink
     break
   done < <(disk_table 2>/dev/null || true)
+  holds=$(disk_contents "$target" 2>/dev/null || true)
+  [[ -z $holds ]] || tui_field 'Holds' "$holds" ink
   # The root partition gets what is left after the EFI system partition, which
   # for a disk measured in gigabytes is the whole number below what the drive
   # reports. Rounding down is the honest direction: it can be a little smaller
@@ -901,7 +1022,7 @@ gate_spelling() {
 }
 
 screen_gate() {
-  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran token layout
+  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran token layout holds
   layout=${ANSWERS[layout]:-$(aurade_question_default layout)}
   token=$(aurade_confirmation_token "$target" "$layout")
   size=$(disk_field "$target" 2)
@@ -917,10 +1038,18 @@ screen_gate() {
   tui_blank
   tui_wrap "This erases $target completely." danger
   tui_blank
-  tui_field 'Model' "${model:-unknown}" ink
-  tui_field 'Serial' "${serial:-unknown}" ink
-  tui_field 'Size' "${size:-unknown}" ink
-  tui_field 'Transport' "${tran:-unknown}" ink
+  # Never "unknown". A drive that does not report its serial number has not
+  # been misread by the installer, and "unknown" on the one screen where
+  # somebody is checking a number against a sticker reads as though the
+  # installer lost track of which disk it is talking about.
+  tui_field 'Model' "${model:-not reported by this drive}" ink
+  tui_field 'Serial' "${serial:-not reported by this drive}" ink
+  tui_field 'Size' "${size:-not reported by this drive}" ink
+  tui_field 'Transport' "${tran:-not reported by this drive}" ink
+  # The last chance to notice that this is the disk with the photographs on
+  # it. It costs one line and it is the sentence somebody would repeat back.
+  holds=$(disk_contents "$target" 2>/dev/null || true)
+  [[ -z $holds ]] || tui_field 'Holds' "$holds" warn
   tui_blank
   if [[ $layout == alongside ]]; then
     tui_wrap 'The partitions already on this disk are kept, including the one the other system boots from. AuraDE is written into unallocated space only, and nothing already there is moved, resized or erased.' ink

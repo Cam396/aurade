@@ -1759,10 +1759,23 @@ class InstallerWindow(Adw.ApplicationWindow):
             item = Adw.ActionRow(title=disk["path"])
             item.add_css_class("aurade-mono")
             transport = (disk.get("transport") or "").upper()
-            facts = [disk.get("model") or "unknown model", disk.get("size") or ""]
+            # Never "unknown". A drive that does not report its model has not
+            # been misread by the installer, and the other wording says which
+            # of the two actually happened.
+            facts = [disk.get("model") or "not reported by this drive",
+                     disk.get("size") or ""]
             if transport:
                 facts.append(transport)
             subtitle = "   ".join(f for f in facts if f)
+            # What is already on it, which is the line that stops somebody
+            # picking the wrong one of two identical looking drives. The erase
+            # gate is the last line of defence against that, not the first.
+            holds = disk.get("holds") or ""
+            if disk.get("booted"):
+                holds = ("You started this installer from this one"
+                         + (f", {holds}" if holds else ""))
+            if holds:
+                subtitle += f"\n{holds}"
             serial = disk.get("serial") or ""
             if serial:
                 subtitle += f"\nSerial {serial}"
@@ -1781,8 +1794,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         warning = self.widgets["disk.warning"]
         warning.set_visible(removable)
         if removable:
-            warning.set_label("One of these is removable. That is probably the "
-                              "drive you started this installer from.")
+            warning.set_label("One of these is removable, and it is listed last.")
         chosen = self.model.get("target")
         if chosen:
             for item in self._rows(listbox):

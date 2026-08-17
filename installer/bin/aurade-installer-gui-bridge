@@ -155,11 +155,18 @@ gb_manifest() {
 }
 
 gb_disks() {
-  local out='[' sep='' path size model tran serial
+  local out='[' sep='' path size model tran serial booted
+  booted=$(boot_disk)
   while IFS='|' read -r path size model tran serial; do
     [[ -n $path ]] || continue
     out+="${sep}{\"path\":$(_gb_str "$path"),\"size\":$(_gb_str "$size"),"
     out+="\"model\":$(_gb_str "$model"),\"transport\":$(_gb_str "$tran"),"
+    # What is already on it, and whether it is the one this installer is
+    # running from. Both come from the text installer's own functions rather
+    # than a second implementation, so the two front ends cannot describe the
+    # same disk differently on the screen before the same gate.
+    out+="\"holds\":$(_gb_str "$(disk_contents "$path")"),"
+    out+="\"booted\":$(_gb_bool test "$path" = "$booted"),"
     out+="\"serial\":$(_gb_str "$serial")}"
     sep=','
   done < <(disk_table)
