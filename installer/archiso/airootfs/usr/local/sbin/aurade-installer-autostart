@@ -35,11 +35,29 @@ aurade_requested_front_end() {
     esac
   done
   case $choice in
-    gui|text|safe|none) printf '%s' "$choice" ;;
+    gui|speech|text|safe|none) printf '%s' "$choice" ;;
     # An unknown value is a typo in a boot entry, not an instruction. Say so
     # and leave the console alone rather than guessing which was meant.
     *) printf 'unknown:%s' "$choice" ;;
   esac
+}
+
+# Bring up console speech before anything draws.
+#
+# espeakup is a small daemon in front of the kernel's speakup module, so the
+# module has to be there first. Both steps are allowed to fail: an image
+# without the module, or a machine with no working audio, should still get an
+# installer rather than a console that stopped before it started. Somebody who
+# chose this entry and hears nothing is in a bad position; somebody who chose
+# it and gets no installer at all is in a worse one.
+start_speech() {
+  modprobe speakup_soft >/dev/null 2>&1 || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl start espeakup.service >/dev/null 2>&1 || true
+  fi
+  # Give the daemon a moment to attach before the first screen is drawn,
+  # otherwise the welcome screen is spoken to nobody.
+  sleep 1
 }
 
 main() {
@@ -57,7 +75,7 @@ main() {
 
   [[ -x $START ]] || {
     printf 'The installer is missing from this image.\n' >&2
-    printf 'aurade-installer-autostart: %s does not exist\n' "$START" >&2
+    printf 'Nothing at %s.\n' "$START" >&2
     return 0
   }
 
@@ -71,15 +89,24 @@ main() {
   # The system service owns tty1 while this runs. The recovery-console entry
   # gets the ordinary login shell only after the selected installer exits.
   case $choice in
-    gui)  "$START" --graphical || status=$? ;;
-    safe) "$START" --graphical --safe-graphics || status=$? ;;
-    text) "$START" --text || status=$? ;;
+    gui)    "$START" --graphical || status=$? ;;
+    safe)   "$START" --graphical --safe-graphics || status=$? ;;
+    text)   "$START" --text || status=$? ;;
+    speech)
+      start_speech
+      # The boot menu made this choice, so the installer records it as one.
+      # Without the second variable somebody boots the speech entry, installs
+      # with a talking installer, and reboots into silence having done nothing
+      # wrong: the reader was started by this script and never became an
+      # answer that travelled to the engine.
+      AURADE_TUI_PLAIN=1 AURADE_ACCESS_SCREEN_READER=yes \
+        "$START" --text || status=$? ;;
   esac
 
   printf '\nThe installer closed.\n' >&2
   printf 'Run `aurade-installer-start` to start it again.\n' >&2
   (( status == 0 )) ||
-    printf 'aurade-installer-autostart: exit status %s\n' "$status" >&2
+    printf 'It stopped with status %s.\n' "$status" >&2
   return 0
 }
 

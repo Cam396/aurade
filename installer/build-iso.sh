@@ -99,13 +99,13 @@ install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin
 install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
 install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ bridge flow app brand locales stage tokens wait; do
+for _gui_module in __init__ a11y bridge flow app brand locales stage tokens wait; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
 done
 # Both stylesheets. GTK's @define-color is global, so the dark scheme is a
 # second sheet the front end swaps in rather than a section of the first.
-for _sheet in theme.css theme-dark.css; do
+for _sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_sheet}" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_sheet}"
 done

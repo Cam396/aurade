@@ -20,6 +20,9 @@ issues=0
 report() {
   (( QUIET )) || printf '  %s\n' "$*"
 }
+# `ERROR:` here is a marker, not a heading. The graphical bridge strips it
+# before the line reaches a screen; on a console it is what separates the two
+# streams by eye. Nothing a user reads keeps it.
 issue() {
   issues=$((issues + 1))
   (( QUIET )) || printf '  ERROR: %s\n' "$*" >&2
@@ -29,31 +32,31 @@ if [[ -z $SNAPSHOT && -r /etc/aurade-installer/snapshot ]]; then
   read -r SNAPSHOT </etc/aurade-installer/snapshot || true
 fi
 if [[ -n $SNAPSHOT && ! $SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]]; then
-  issue 'the configured Arch snapshot is malformed; verify the installer image metadata'
+  issue 'The package snapshot recorded on this image is not a date. The image was built wrong.'
   SNAPSHOT=
 fi
 
 if ! command -v ip >/dev/null 2>&1; then
-  issue 'iproute2 is unavailable; cannot inspect the network interface or default route'
+  issue 'This image has no network tools, so the connection could not be checked.'
 else
   if ip -o link show up 2>/dev/null | awk -F': ' '$2 != "lo" {found=1} END {exit !found}'; then
-    report 'an active network interface is present'
+    report 'A network connection is up.'
   else
-    issue 'no active network interface was detected; connect Wi-Fi or Ethernet before installing'
+    issue 'No active network connection. Connect Wi-Fi or a cable before installing.'
   fi
   if ip route show default 2>/dev/null | grep -q '^default '; then
-    report 'a default route is present'
+    report 'There is a route out to the internet.'
   else
-    issue 'no default route is configured; package acquisition will not reach the Arch snapshot'
+    issue 'There is no route out to the internet, so the package archive cannot be reached.'
   fi
 fi
 
 if ! command -v getent >/dev/null 2>&1; then
-  issue 'getent is unavailable; cannot verify DNS resolution'
+  issue 'This image cannot look up names, so the package archive was not checked.'
 elif getent ahosts archive.archlinux.org >/dev/null 2>&1; then
-  report 'DNS resolves archive.archlinux.org'
+  report 'The package archive can be looked up.'
 else
-  issue 'DNS cannot resolve archive.archlinux.org; check the connection or captive portal'
+  issue 'The package archive could not be looked up. Check the connection, or whether a sign-in page is waiting.'
 fi
 
 if [[ -n $SNAPSHOT ]]; then
@@ -61,28 +64,28 @@ if [[ -n $SNAPSHOT ]]; then
     archive_url="https://archive.archlinux.org/repos/${SNAPSHOT}/core/os/x86_64/"
     if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
       --proto '=https' --output /dev/null "$archive_url"; then
-      report "pinned Arch snapshot responds (${SNAPSHOT})"
+      report "The pinned package snapshot answers (${SNAPSHOT})."
     else
-      issue "pinned Arch snapshot is unreachable (${SNAPSHOT}); check archive health or a captive portal"
+      issue "The pinned package snapshot (${SNAPSHOT}) could not be reached. Check the connection, or whether a sign-in page is waiting."
     fi
   else
-    report 'curl is unavailable; pinned Arch snapshot health was not probed'
+    report 'This image cannot fetch over the network, so the package snapshot was not checked.'
   fi
 fi
 
 if command -v timedatectl >/dev/null 2>&1; then
   ntp_state=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
   if [[ $ntp_state == yes ]]; then
-    report 'system clock is synchronized'
+    report "This computer's clock is set."
   else
-    issue 'system clock is not synchronized; correct the date before signature verification'
+    issue "This computer's clock is wrong. Package signatures will not verify until it is right."
   fi
 else
-  report 'timedatectl is unavailable; verify the system clock manually before installing'
+  report "This computer's clock could not be checked. Make sure the date is right before installing."
 fi
 
 if (( issues )); then
-  (( QUIET )) || printf 'Network preflight: %d issue(s); installation will still acquire and verify packages before disk changes.\n' "$issues" >&2
+  (( QUIET )) || printf 'Network check: %d thing(s) to look at. Every package is still downloaded and verified before any disk changes.\n' "$issues" >&2
   exit 1
 fi
-report 'Network preflight: ready for bounded package acquisition'
+report 'Network check: ready to download packages.'

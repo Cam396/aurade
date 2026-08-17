@@ -55,13 +55,29 @@ SOURCES = [
     ("installer/bin/aurade-installer-start", "shell"),
     ("installer/bin/aurade-installer", "shell"),
     ("installer/lib/aurade-probe.sh", "shell"),
+    # The engine. Its `die` messages become the failure screen's cause code and
+    # its `log` lines are what a text install prints while it runs, so it is as
+    # user-facing as anything above. It went unread for the whole of the last
+    # pass, and that is where five memo headers arrived.
+    ("installer/bin/aurade-install", "shell"),
     ("installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart", "shell"),
+    # Every line this prints is read by the graphical bridge and put on the
+    # readiness page verbatim, so it is product copy however much it looks
+    # like a sysadmin's checklist.
+    ("installer/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics", "shell"),
     # The first words the product says, and the last place anyone reads.
-    ("installer/archiso/efiboot/loader/entries/01-aurade-gui.conf", "boot"),
-    ("installer/archiso/efiboot/loader/entries/02-aurade-tui.conf", "boot"),
-    ("installer/archiso/efiboot/loader/entries/03-aurade-safe.conf", "boot"),
-    ("installer/archiso/efiboot/loader/entries/04-aurade-shell.conf", "boot"),
     ("installer/archiso/airootfs/etc/motd", "plain"),
+]
+
+#: Every boot entry, found rather than listed. The four were listed by name
+#: until a fifth was added second and the other three shifted down a number,
+#: at which point this test failed on a missing file rather than on anything
+#: anybody had written. A directory that is entirely boot entries is a
+#: directory that can be read.
+_ENTRIES = os.path.join(ROOT, "installer/archiso/efiboot/loader/entries")
+SOURCES += [
+    (os.path.join("installer/archiso/efiboot/loader/entries", name), "boot")
+    for name in sorted(os.listdir(_ENTRIES)) if name.endswith(".conf")
 ]
 
 DASHES = {"—": "em dash", "–": "en dash", "―": "horizontal bar"}
@@ -71,10 +87,12 @@ STUFFY = (
     "utilise", "utilize", "in order to", "prior to", "subsequent to",
     "please note", "kindly", "at this time", "is able to", "has the ability",
     "facilitate", "leverage", "commence", "terminate the",
-    # Memo headers. A line that has to announce its own severity is a line
-    # that did not manage to convey it.
-    "warning:", "notice:", "note:", "error:", "attention:", "important:",
 )
+
+#: Memo headers. A line that has to announce its own severity is a line that
+#: did not manage to convey it. Matched at the front only, because that is what
+#: a header is: `${APPLY_ERROR:-...}` is a variable with a default, not a memo.
+HEADERS = ("warning:", "notice:", "note:", "error:", "attention:", "important:")
 
 #: The semicolon, which was never used here as a semicolon. Allowed inside a
 #: command or a code fragment, where it is punctuation for a shell rather than
@@ -88,7 +106,7 @@ EXEMPT = re.compile(r"^(https?://|/|-|\.|[A-Z_]+=)")
 #: Fragments that are shell, awk, sed or C rather than English. A semicolon in
 #: any of these is a statement separator and nothing to do with the voice.
 CODE = re.compile(
-    r"(\$\{|\$\(|&&|\|\||>&2|<<|=~|\bawk\b|\bsed\b|\bprintf\b|\bgrep\b"
+    r"(&&|\|\||>&2|<<|=~|\bawk\b|\bsed\b|\bprintf\b|\bgrep\b"
     r"|\bfor \w+ in\b|\bdone\b|\bfi\b|\besac\b|::|;;|\bIFS=|\belse\b"
     r"|\{[^}]*\bprint\b|\w\+?=\s*$)"
 )
@@ -122,8 +140,14 @@ def strings(path: str, kind: str) -> list[tuple[int, str]]:
                 for match in re.findall(r'"([^"\\]{4,})"', line):
                     found.append((number, match))
             else:
-                for match in re.findall(r"'([^'\\]{4,})'", line):
-                    found.append((number, match))
+                # Both quotes. Reading only the single-quoted ones let a
+                # semicolon splice sit in a `printf "..."` through three
+                # green runs, because interpolation needs double quotes and
+                # interpolation is exactly what a message with a value in it
+                # has.
+                for pattern in (r"'([^'\\]{4,})'", r'"([^"\\]{4,})"'):
+                    for match in re.findall(pattern, line):
+                        found.append((number, match))
     return [(number, text) for number, text in found if not EXEMPT.match(text)]
 
 
@@ -142,6 +166,10 @@ def main() -> int:
                 if word in lowered:
                     problems.append(
                         f"{path}:{number}: {word!r} in {text.strip()!r}")
+            for header in HEADERS:
+                if lowered.startswith(header):
+                    problems.append(
+                        f"{path}:{number}: {header!r} in {text.strip()!r}")
             if SEMICOLON in text and not CODE.search(text):
                 problems.append(
                     f"{path}:{number}: semicolon in {text.strip()!r}")

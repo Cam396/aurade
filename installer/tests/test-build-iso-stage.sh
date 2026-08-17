@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# These assertions are bare `grep -Fq` under `set -e`, so a stale expectation
+# ends the run with an exit code and not one word about where. This makes each
+# of them name itself on the way out. Guarded on errexit still being on,
+# because a non-zero exit inside a deliberate `set +e` block is an expected
+# result being collected, not an assertion giving up.
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -107,6 +113,19 @@ grep -Fxq 'xfsprogs' "$ROOT/installer/archiso/packages.x86_64" || {
   exit 1
 }
 
+# The two packages the speech boot entry is made of. Same argument as xfsprogs
+# above: without them the entry still appears in the menu, still boots, and
+# says nothing, which is a worse failure than not offering it. espeakup is the
+# console reader the entry starts; brltty is what a braille display needs, and
+# its presence is also what makes the text installer choose its plain
+# rendering without being asked.
+for _access in espeakup brltty; do
+  grep -Fxq "$_access" "$ROOT/installer/archiso/packages.x86_64" || {
+    echo "test-build-iso-stage: $_access is missing, so the speech entry would boot to silence" >&2
+    exit 1
+  }
+done
+
 # The boot menu, which is the first screen anyone sees.
 #
 # One entry per front end, each naming itself on the kernel command line, and
@@ -114,7 +133,7 @@ grep -Fxq 'xfsprogs' "$ROOT/installer/archiso/packages.x86_64" || {
 # menu whose default points at a missing entry is a machine that boots to a
 # firmware screen, which is the one failure nobody can debug from the console.
 entries=$ROOT/installer/archiso/efiboot/loader/entries
-for entry in gui text safe none; do
+for entry in gui speech text safe none; do
   grep -lq "aurade.installer=$entry" "$entries"/*.conf || {
     echo "test-build-iso-stage: no boot entry asks for the $entry front end" >&2
     exit 1
@@ -204,6 +223,18 @@ for module in "$ROOT"/installer/lib/aurade_gui/*.py; do
   grep -Fq "\"/usr/local/lib/aurade/aurade_gui/$module\"" \
     "$ROOT/installer/archiso/profiledef.sh" || {
     echo "test-build-iso-stage: aurade_gui/$module has no ownership entry in profiledef.sh" >&2
+    exit 1
+  }
+done
+for _sheet in "$ROOT"/installer/lib/aurade_gui/*.css; do
+  _sheet=${_sheet##*/}
+  [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade_gui/$_sheet ]] || {
+    echo "test-build-iso-stage: aurade_gui/$_sheet is not staged onto the image" >&2
+    exit 1
+  }
+  grep -Fq "\"/usr/local/lib/aurade/aurade_gui/$_sheet\"" \
+    "$ROOT/installer/archiso/profiledef.sh" || {
+    echo "test-build-iso-stage: aurade_gui/$_sheet has no ownership entry in profiledef.sh" >&2
     exit 1
   }
 done

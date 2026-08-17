@@ -41,6 +41,7 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade-probe.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-renderers.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/__init__.py"]=0:0:644
+  ["/usr/local/lib/aurade/aurade_gui/a11y.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/bridge.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/flow.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/app.py"]=0:0:644
@@ -51,6 +52,8 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade_gui/wait.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/theme.css"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/theme-dark.css"]=0:0:644
+  ["/usr/local/lib/aurade/aurade_gui/theme-hc.css"]=0:0:644
+  ["/usr/local/lib/aurade/aurade_gui/theme-dark-hc.css"]=0:0:644
   ["/usr/local/share/aurade/aurade-mark.png"]=0:0:644
   ["/usr/local/share/aurade/aurade-wordmark.png"]=0:0:644
 )
