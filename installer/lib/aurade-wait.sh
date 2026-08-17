@@ -1056,3 +1056,77 @@ aurade_nono_won() {
   done
   return 0
 }
+
+# --------------------------------------------------------------------------
+# The typing test
+# --------------------------------------------------------------------------
+#
+# The keyboard layout check wearing a game's clothes, which is why it is here
+# twice over: somebody who plays this for two minutes has proved their layout
+# is right far more thoroughly than the field after the layout question can.
+#
+# The phrases are chosen for coverage rather than for wit. Between them they
+# use every letter and the punctuation that moves between layouts, which is
+# the punctuation a disk passphrase is made of.
+AURADE_TYPE_PHRASES=(
+  'The quick brown fox jumps over the lazy dog.'
+  'Pack my box with five dozen liquid jars.'
+  'How vexingly quick daft zebras jump!'
+  'Sphinx of black quartz, judge my vow.'
+  'Waltz, bad nymph, for quick jigs vex.'
+)
+AURADE_TYPE_TARGET=
+AURADE_TYPE_TYPED=
+AURADE_TYPE_WRONG=0
+AURADE_TYPE_STARTED=0
+
+aurade_type_new() {
+  AURADE_TYPE_TARGET=${AURADE_TYPE_PHRASES[RANDOM % ${#AURADE_TYPE_PHRASES[@]}]}
+  AURADE_TYPE_TYPED=''
+  AURADE_TYPE_WRONG=0
+  AURADE_TYPE_STARTED=0
+  return 0
+}
+
+# Wrong characters are counted and kept, not rejected. A test that refuses the
+# wrong key tells somebody their layout is fine by making it impossible to
+# demonstrate that it is not, which is the opposite of what this is for.
+aurade_type_key() {
+  local char=$1 want
+  [[ ${#char} -eq 1 ]] || return 0
+  (( AURADE_TYPE_STARTED )) || AURADE_TYPE_STARTED=${EPOCHSECONDS:-0}
+  want=${AURADE_TYPE_TARGET:${#AURADE_TYPE_TYPED}:1}
+  [[ $char == "$want" ]] || AURADE_TYPE_WRONG=$(( AURADE_TYPE_WRONG + 1 ))
+  AURADE_TYPE_TYPED+=$char
+  return 0
+}
+
+aurade_type_back() {
+  AURADE_TYPE_TYPED=${AURADE_TYPE_TYPED%?}
+  return 0
+}
+
+aurade_type_done() {
+  (( ${#AURADE_TYPE_TYPED} >= ${#AURADE_TYPE_TARGET} ))
+}
+
+# What was typed, with each character marked against the phrase. Two lines
+# rather than colour, so it survives having the colour taken away: the second
+# line carries a caret under everything that came out wrong.
+aurade_type_marks() {
+  local i out=''
+  for (( i = 0; i < ${#AURADE_TYPE_TYPED}; i++ )); do
+    if [[ ${AURADE_TYPE_TYPED:i:1} == "${AURADE_TYPE_TARGET:i:1}" ]]; then
+      out+=' '
+    else
+      out+='^'
+    fi
+  done
+  printf '%s' "$out"
+}
+
+aurade_type_seconds() {
+  local now=${EPOCHSECONDS:-0}
+  (( AURADE_TYPE_STARTED )) || { printf '0'; return 0; }
+  printf '%s' "$(( now - AURADE_TYPE_STARTED ))"
+}

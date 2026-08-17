@@ -444,8 +444,8 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # The two that ask nothing come first, in that order, before anything that
 # calls itself a game.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
-  sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Something Solve Play Play Play Play Play Play ' ]] ||
+  sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
+[[ $order == 'Read Watch Something Test Solve Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -582,6 +582,29 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
         { echo "${art%%:*} has a row ${#row} wide, not 8" >&2; exit 1; }
     done
   done
+  # The typing test keeps wrong characters and counts them. Rejecting them
+  # would tell somebody their layout is fine by making it impossible to
+  # demonstrate that it is not, which is the opposite of what this is for: it
+  # is the keyboard layout check with a score on it.
+  RANDOM=2
+  aurade_type_new
+  target=$AURADE_TYPE_TARGET
+  aurade_type_key "${target:0:1}"
+  (( AURADE_TYPE_WRONG == 0 )) || { echo 'a correct character counted as wrong' >&2; exit 1; }
+  # A character that is definitely not the next one.
+  wrong='@'
+  [[ ${target:1:1} != '@' ]] || wrong='%'
+  aurade_type_key "$wrong"
+  (( AURADE_TYPE_WRONG == 1 )) ||
+    { echo 'a wrong character was not counted' >&2; exit 1; }
+  [[ ${AURADE_TYPE_TYPED:1:1} == "$wrong" ]] ||
+    { echo 'a wrong character was rejected instead of kept' >&2; exit 1; }
+  # And it shows, without needing a colour: a caret under everything wrong.
+  [[ $(aurade_type_marks) == ' ^' ]] ||
+    { echo "the marks line reads '$(aurade_type_marks)', not ' ^'" >&2; exit 1; }
+  # Typing the whole phrase finishes it, whatever was typed.
+  while ! aurade_type_done; do aurade_type_key 'x'; done
+  aurade_type_done || { echo 'the phrase never finished' >&2; exit 1; }
 ) || fail 'the puzzles do not hold their invariants'
 
 (( failures == 0 )) || exit 1

@@ -2649,11 +2649,12 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log life nono 2048 mines lights fifteen snake ttt)
+WAIT_CHOICES=(tips log life type nono 2048 mines lights fifteen snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
   [life]='Something moving, that needs nothing'
+  [type]='Test your typing, and your keyboard'
   [nono]='Solve a nonogram'
   [2048]='Play 2048'
   [mines]='Play minesweeper'
@@ -2686,6 +2687,34 @@ screen_wait_picker() {
   done
   tui_blank
   tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# The typing test, which is the keyboard layout check with a score on it.
+screen_type() {
+  local HELP_KEY=0
+  local pad seconds accuracy typed_len
+  tui_clear
+  tui_header 'Typing'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - ${#AURADE_TYPE_TARGET}) / 2 ))
+  (( pad >= 0 )) || pad=0
+  tui_line "$(printf '%*s%s' "$pad" '' "$AURADE_TYPE_TARGET")" dim
+  tui_line "$(printf '%*s%s' "$pad" '' "$AURADE_TYPE_TYPED")" cyan
+  # The carets, which is how a wrong character shows without colour.
+  tui_line "$(printf '%*s%s' "$pad" '' "$(aurade_type_marks)")" warn
+  tui_blank
+  if aurade_type_done; then
+    seconds=$(aurade_type_seconds)
+    typed_len=${#AURADE_TYPE_TYPED}
+    accuracy=100
+    (( typed_len == 0 )) ||
+      accuracy=$(( (typed_len - AURADE_TYPE_WRONG) * 100 / typed_len ))
+    tui_wrap "$accuracy percent right, in $seconds seconds. Press enter for another." ok
+  else
+    tui_wrap 'Type the line above. Wrong characters are kept and counted, so the keys that are not where you expect show up.' dim
+  fi
+  tui_blank
+  tui_footer 'type it    enter  another    g  choose' 'esc  back'
 }
 
 # A nonogram, with its clues.
@@ -3010,6 +3039,7 @@ run_engine_with_progress() {
             # Slower than the redraw. Life at eight generations a second is a
             # boil rather than a thing to watch.
             (( frame % 3 )) || aurade_life_step ;;
+      type)    screen_type ;;
       nono)    screen_nono ;;
       mines)   screen_mines ;;
       lights)  screen_lights ;;
@@ -3056,6 +3086,7 @@ run_engine_with_progress() {
                 tips) mode=progress ;;
                 2048) mode=2048; aurade_2048_new ;;
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
+                type)    mode=type; aurade_type_new ;;
                 nono)    mode=nono; aurade_nono_new ;;
                 mines)   mode=mines; aurade_mines_new ;;
                 lights)  mode=lights; aurade_lights_new ;;
@@ -3076,6 +3107,19 @@ run_engine_with_progress() {
           case $key in
             g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        type)
+          case $key in
+            # `g` and `esc` are the only keys this screen does not type, and
+            # neither appears in any of the phrases.
+            g|G) mode=picker ;;
+            esc) WAIT_MODE=tips; mode=progress ;;
+            enter) ! aurade_type_done || aurade_type_new ;;
+            backspace) aurade_type_back ;;
+            space) aurade_type_key ' ' ;;
+            up|down|left|right|tab) ;;
+            *) aurade_type_key "$key" ;;
           esac
           ;;
         nono)
@@ -3681,6 +3725,7 @@ fi
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
   access keycheck explain help watch ttt life picker lights fifteen mines nono
+  type
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3747,6 +3792,7 @@ if [[ -n $RENDER_ONLY ]]; then
     life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
     lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
     nono)      RANDOM=${AURADE_NONO_SEED:-4}; aurade_nono_new; screen_nono ;;
+    type)      RANDOM=${AURADE_TYPE_SEED:-2}; aurade_type_new; screen_type ;;
     mines)     RANDOM=${AURADE_MINES_SEED:-9}; aurade_mines_new
                aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
