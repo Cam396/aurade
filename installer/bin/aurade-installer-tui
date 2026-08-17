@@ -2662,12 +2662,14 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log life 2048 snake ttt)
+WAIT_CHOICES=(tips log life 2048 lights fifteen snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
   [life]='Something moving, that needs nothing'
   [2048]='Play 2048'
+  [lights]='Play lights out'
+  [fifteen]='Play the fifteen puzzle'
   [snake]='Play snake'
   [ttt]='Play tic-tac-toe'
 )
@@ -2695,6 +2697,52 @@ screen_wait_picker() {
   done
   tui_blank
   tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# Lights out. Five by five, one action, and the board is the whole state, so
+# looking away for a minute costs nothing.
+screen_lights() {
+  local HELP_KEY=0
+  local row pad
+  tui_clear
+  tui_header 'Lights out'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 15) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_lights_rows)
+  tui_blank
+  if aurade_lights_won; then
+    tui_wrap "All out, in $AURADE_LIGHTS_MOVES moves. Press enter for another." ok
+  else
+    tui_wrap "Turn them all off. Each press flips its neighbours too. $AURADE_LIGHTS_MOVES moves." dim
+  fi
+  tui_blank
+  tui_footer 'arrows  move    enter  press    g  choose something else' \
+    'esc  back'
+}
+
+# The fifteen puzzle. Arrows only, and everybody already knows it.
+screen_fifteen() {
+  local HELP_KEY=0
+  local row pad
+  tui_clear
+  tui_header 'Fifteen'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 16) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_fifteen_rows)
+  tui_blank
+  if aurade_fifteen_won; then
+    tui_wrap "In order, in $AURADE_FIFTEEN_MOVES moves. Press enter for another." ok
+  else
+    tui_wrap "Put them in order. $AURADE_FIFTEEN_MOVES moves." dim
+  fi
+  tui_blank
+  tui_footer 'arrows  slide a tile    g  choose something else' 'esc  back'
 }
 
 # Life, drawn. Nothing to press and nothing to lose.
@@ -2869,6 +2917,8 @@ run_engine_with_progress() {
             # Slower than the redraw. Life at eight generations a second is a
             # boil rather than a thing to watch.
             (( frame % 3 )) || aurade_life_step ;;
+      lights)  screen_lights ;;
+      fifteen) screen_fifteen ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
       *)    screen_progress "$frame" ;;
     esac
@@ -2911,6 +2961,8 @@ run_engine_with_progress() {
                 tips) mode=progress ;;
                 2048) mode=2048; aurade_2048_new ;;
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
+                lights)  mode=lights; aurade_lights_new ;;
+                fifteen) mode=fifteen; aurade_fifteen_new ;;
                 *)    mode=$WAIT_MODE ;;
               esac
               ;;
@@ -2927,6 +2979,30 @@ run_engine_with_progress() {
           case $key in
             g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        lights)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_lights_move "$key" ;;
+            w|W) aurade_lights_move up ;;
+            s|S) aurade_lights_move down ;;
+            a|A) aurade_lights_move left ;;
+            d|D) aurade_lights_move right ;;
+            enter|space)
+              if aurade_lights_won; then aurade_lights_new; else aurade_lights_toggle; fi ;;
+          esac
+          ;;
+        fifteen)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|w|W)    aurade_fifteen_slide up || true ;;
+            down|s|S)  aurade_fifteen_slide down || true ;;
+            left|a|A)  aurade_fifteen_slide left || true ;;
+            right|d|D) aurade_fifteen_slide right || true ;;
+            enter) ! aurade_fifteen_won || aurade_fifteen_new ;;
           esac
           ;;
         ttt)
@@ -3475,7 +3551,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help watch ttt life picker
+  access keycheck explain help watch ttt life picker lights fifteen
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3540,6 +3616,8 @@ if [[ -n $RENDER_ONLY ]]; then
     watch)     screen_progress_log ;;
     ttt)       TTT_FRAMES=${AURADE_RENDER_TTT_FRAMES:-20}; screen_ttt ;;
     life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
+    lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
+    fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
