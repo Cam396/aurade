@@ -273,6 +273,67 @@ classified_preserved=$(find "$TMP/classified-failures" -type f -name journal.jso
 grep -Fq '"cause":"keyring_error"' "$classified_preserved" || \
   fail 'classified fatal cause was not preserved'
 
+# --- pacstrap reports how far through it is --------------------------------
+#
+# This is the six minute step, and it used to report nothing at all, so the
+# bar sat still for the longest part of the install. That is exactly when
+# somebody starts wondering whether the machine has stopped.
+#
+# Three things are checked, and the third is the one that was wrong twice.
+PACSTRAP_TMP=$TMP/pacstrap
+install -d "$PACSTRAP_TMP"
+(
+  set -Eeuo pipefail
+  export AURADE_JOURNAL_PATH=$PACSTRAP_TMP/journal.jsonl
+  # shellcheck source=../lib/aurade-journal.sh
+  . "$ROOT/installer/lib/aurade-journal.sh"
+  aurade_journal_init execute /dev/sda >/dev/null 2>&1 || true
+  _PACSTRAP_MARK='@@aurade-pacstrap-status@@'
+  # The real function, lifted out of the engine so it can be driven without
+  # one. Copying it would test the copy.
+  eval "$(sed -n '/^run_pacstrap_logged() {/,/^}/p' "$ROOT/installer/bin/aurade-install")"
+
+  pretend_pacstrap() {
+    printf 'resolving dependencies...\n'
+    local i
+    for i in 1 40 90 160 260 331; do
+      printf '( %s/331) installing package-%s\n' "$i" "$i"
+    done
+    return 0
+  }
+  run_pacstrap_logged "$PACSTRAP_TMP/attempt.log" pretend_pacstrap
+
+  # And a failure, which has to come back as the status pacstrap exited with
+  # rather than as a generic one. The cause codes downstream are chosen from
+  # it, so flattening every failure to 1 makes every failure look the same.
+  failing_pacstrap() { printf '( 3/331) installing x\n'; return 17; }
+  status=0
+  run_pacstrap_logged "$PACSTRAP_TMP/attempt.log" failing_pacstrap || status=$?
+  printf '%s\n' "$status" >"$PACSTRAP_TMP/status"
+) || fail 'the pacstrap progress reader could not be driven'
+
+grep -q '"pct":' "$PACSTRAP_TMP/journal.jsonl" ||
+  fail 'pacstrap wrote no progress at all, so the bar cannot move during it'
+grep -Fq '331 of 331 packages' "$PACSTRAP_TMP/journal.jsonl" ||
+  fail 'pacstrap never reported reaching the end of the transaction'
+
+# The sequence numbers, which is the reason the reader does not run at the end
+# of a pipe. A `while read` on the right of a pipe is a subshell, the counter
+# increments inside it and is thrown away, and every record after pacstrap
+# reuses a number already on disk.
+duplicates=$(grep -o '"seq":[0-9]*' "$PACSTRAP_TMP/journal.jsonl" |
+  sed 's/.*://' | sort -n | uniq -d | wc -l)
+(( duplicates == 0 )) ||
+  fail "pacstrap progress reused $duplicates journal sequence numbers"
+
+status=$(cat "$PACSTRAP_TMP/status" 2>/dev/null || printf '')
+[[ $status == 17 ]] ||
+  fail "a pacstrap that exited 17 was reported as '$status'"
+
+# And the marker the status travels on never reaches the log a human reads.
+! grep -q 'aurade-pacstrap-status' "$PACSTRAP_TMP/attempt.log" ||
+  fail 'the internal status marker was written into the installer log'
+
 if (( failures )); then
   printf 'installer journal test: FAIL (%d)\n' "$failures" >&2
   exit 1

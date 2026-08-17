@@ -371,6 +371,66 @@ copy_public_keyring() {
   chmod -R u+rwX,go-rwx "$destination_dir"
 }
 
+# pacstrap, with the package count reported as it goes.
+#
+# This is the six minute step, and until now it reported nothing at all: the
+# bar sat still for the longest part of the install, which is exactly when
+# somebody starts wondering whether the machine has stopped.
+#
+# pacman prefixes each package with `( 12/531)`, and that is the only thing
+# read out of its output. Nothing else about the transaction is interpreted
+# and nothing is acted on: a line that does not match is passed over, and if
+# pacman ever stops printing that prefix the result is the silence there was
+# before rather than a failure.
+#
+# The loop runs in this shell rather than at the end of a pipe on purpose. A
+# `while read` on the right of a pipe is a subshell, the journal's sequence
+# counter would increment inside it and be thrown away at the end, and every
+# record written after pacstrap would reuse numbers already on disk.
+#
+# Which leaves getting the exit status back out of a process substitution,
+# and the answer is that it comes back in the stream. A status file races the
+# pipe closing, and a `read` that reaches end of file without a newline
+# reports failure even though it read the value, which between them turned a
+# pacstrap that exited 17 into one that exited 1. So the status is appended as
+# a line, after `tee`, where it reaches the loop and never reaches the log.
+_PACSTRAP_MARK='@@aurade-pacstrap-status@@'
+
+run_pacstrap_logged() {
+  local log_path=$1
+  shift
+  local line pct last=-1 done_count total status=1
+  while IFS= read -r line; do
+    if [[ $line == "$_PACSTRAP_MARK"* ]]; then
+      status=${line#"$_PACSTRAP_MARK"}
+      continue
+    fi
+    [[ $line =~ ^\(\ *([0-9]+)/([0-9]+)\) ]] || continue
+    done_count=${BASH_REMATCH[1]}
+    total=${BASH_REMATCH[2]}
+    (( total > 0 )) || continue
+    pct=$(( done_count * 100 / total ))
+    # One record per whole percent. Five hundred packages would otherwise be
+    # five hundred journal lines to say what a hundred can.
+    (( pct != last )) || continue
+    last=$pct
+    aurade_journal_progress pacstrap "$pct" \
+      "$(printf '%s of %s packages' "$done_count" "$total")"
+  done < <( if "$@" 2>&1 | tee -a "$log_path"; then
+              printf '%s0\n' "$_PACSTRAP_MARK"
+            else
+              # `if` is what makes this work under errexit. A bare pipeline
+              # here ends the subshell the moment pacstrap fails, before the
+              # status can be written, and the caller then sees a generic 1
+              # for every kind of failure. An `if` condition is exempt from
+              # errexit, and PIPESTATUS still holds the pipeline's statuses
+              # when the branch expands its arguments.
+              printf '%s%s\n' "$_PACSTRAP_MARK" "${PIPESTATUS[0]}"
+            fi )
+  [[ $status =~ ^[0-9]+$ ]] || status=1
+  return "$status"
+}
+
 run_pacstrap() {
   if [[ $MODE == dry-run ]]; then
     run pacstrap -M -G -C "$ARCH_PACMAN_CONF" "$@"
@@ -381,7 +441,7 @@ run_pacstrap() {
   for attempt in 1 2 3; do
     local attempt_log="$WORK_DIR/pacstrap-${attempt}.log"
     : >"$attempt_log"
-    if run_logged "$attempt_log" pacstrap -M -G -C "$ARCH_LOCAL_PACMAN_CONF" "$@"; then
+    if run_pacstrap_logged "$attempt_log" pacstrap -M -G -C "$ARCH_LOCAL_PACMAN_CONF" "$@"; then
       return 0
     fi
     if pacman_keyring_failure "$attempt_log"; then
