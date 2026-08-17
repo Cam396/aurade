@@ -253,6 +253,46 @@ grep -Fq 'self._sound(1)' "$ROOT/installer/lib/aurade_gui/app.py" ||
 grep -Fq 'self._sound(3)' "$ROOT/installer/lib/aurade_gui/app.py" ||
   fail 'the graphical installer does not ring three times when it stops'
 
+# --- the faces are on the image, and in the snapshot ------------------------
+#
+# Both halves matter and they fail differently. A package that is not in the
+# pinned Arch snapshot fails the whole install loudly. A font name written for
+# a family that is not installed fails silently: it renders in the default
+# face, and the person who chose it has no way to know it did not happen.
+#
+# So the choice only exists because both are in the snapshot, which was checked
+# against the archive rather than against today's repositories, and this is
+# what stops somebody removing one and leaving the choice behind.
+for _face in ttf-atkinson-hyperlegible otf-opendyslexic-nerd; do
+  grep -Fxq "$_face" "$ROOT/installer/archiso/packages.x86_64" ||
+    fail "$_face is offered as a choice and is not on the image"
+done
+grep -Fq 'ttf-atkinson-hyperlegible' "$ENGINE" ||
+  fail 'choosing Atkinson does not install it onto the target'
+grep -Fq 'otf-opendyslexic-nerd' "$ENGINE" ||
+  fail 'choosing OpenDyslexic does not install it onto the target'
+
+# The graphical front end resolves the family against what the machine has
+# rather than trusting a name, because the Nerd Fonts build does not
+# necessarily keep the plain family name.
+grep -Fq 'list_families' "$ROOT/installer/lib/aurade_gui/app.py" ||
+  fail 'the typeface is applied without checking the family exists'
+
+# --- text size on a console that has no text size ---------------------------
+#
+# The graphical front end scales by dpi. A virtual console cannot: its text is
+# exactly as tall as the font, so the only way to make it larger is to load a
+# taller one. Three sizes, matching the three steps, and gated on the console
+# that has fonts to load.
+grep -Fq 'ter-124n' "$TUI" || fail 'text scale 125 does not load a larger console font'
+grep -Fq 'ter-132n' "$TUI" || fail 'text scale 150 does not load a larger console font'
+grep -Fq 'command -v setfont' "$TUI" ||
+  fail 'the console font is changed without checking setfont exists'
+# A taller font means fewer rows, and the frame is measured in rows, so the
+# height has to be asked for again rather than remembered from boot.
+grep -Fq 'AURADE_TUI_HEIGHT=$(tput lines' "$TUI" ||
+  fail 'the frame does not re-measure after the console font changes'
+
 (( failures == 0 )) || exit 1
 printf 'installer accessibility test: PASS (%s choices, defaults unchanged, both ends agree)\n' \
   "$(wc -l <<<"$keys")"

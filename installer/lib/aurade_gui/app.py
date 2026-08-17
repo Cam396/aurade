@@ -799,7 +799,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         if key == "cursor_size":
             return f"{value} pixels"
         return {"yes": "On", "no": "Off",
-                "normal": "Normal", "high": "High"}.get(value, value)
+                "normal": "Normal", "high": "High",
+                # Named, not explained. The UI says nothing about who a face is
+                # for: telling somebody which typeface helps them is its own
+                # kind of patronising, and preference is a real reason on its
+                # own.
+                "system": "Default",
+                "atkinson": "Atkinson Hyperlegible",
+                "opendyslexic": "OpenDyslexic",
+                "roomy": "Roomy", "roomier": "Roomier"}.get(value, value)
 
     def _on_access_changed(self, row_widget, _param, key: str,
                            values: list) -> None:
@@ -837,6 +845,50 @@ class InstallerWindow(Adw.ApplicationWindow):
         "roomier": "label, entry, textview "
                    "{ line-height: 2.0; letter-spacing: 0.4px; }",
     }
+
+    #: Family names to try for each choice, best first.
+    #:
+    #: Two names for OpenDyslexic because the package in the pinned snapshot is
+    #: the Nerd Fonts build, and a patched build does not always keep the plain
+    #: family name. Guessing wrong here is the failure this whole feature has
+    #: to avoid: a font name written for a family that is not installed does
+    #: not error, it silently renders in the default face, and somebody who
+    #: needed the other one has no way to tell that it did not work.
+    TYPEFACES = {
+        "system": [],
+        "atkinson": ["Atkinson Hyperlegible"],
+        "opendyslexic": ["OpenDyslexic Nerd Font", "OpenDyslexic"],
+    }
+
+    def _resolve_family(self, names: list) -> str:
+        """The first of `names` this machine actually has, or empty."""
+        try:
+            context = self.get_pango_context()
+            have = {f.get_name() for f in context.list_families()}
+        except Exception:  # pragma: no cover - no font map yet
+            return ""
+        for name in names:
+            if name in have:
+                return name
+        return ""
+
+    def _apply_typeface(self, value: str) -> None:
+        settings = Gtk.Settings.get_default()
+        if settings is None:
+            return
+        if value == "system":
+            settings.reset_property("gtk-font-name")
+            return
+        family = self._resolve_family(self.TYPEFACES.get(value, []))
+        if not family:
+            # Said out loud rather than swallowed. The choice still travels to
+            # the installed system, where the engine installs the package, so
+            # the honest message is that it is not here yet rather than that it
+            # did not work.
+            self._toast("That face is not on this image. "
+                        "It will be on the installed system.")
+            return
+        settings.set_property("gtk-font-name", f"{family} 11")
 
     def _apply_spacing(self, value: str) -> None:
         css = self.SPACING_CSS.get(value, "")
@@ -880,6 +932,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             settings.set_property("gtk-cursor-theme-size", int(value))
         elif key == "spacing":
             self._apply_spacing(value)
+        elif key == "typeface":
+            self._apply_typeface(value)
 
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.

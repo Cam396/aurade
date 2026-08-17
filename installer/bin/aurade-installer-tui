@@ -124,6 +124,7 @@ declare -A ACCESS=(
   [reduce_motion]=no
   [cursor_size]=24
   [spacing]=normal
+  [typeface]=system
 )
 declare -A ACCESS_DEFAULT=(
   [screen_reader]=no
@@ -133,6 +134,7 @@ declare -A ACCESS_DEFAULT=(
   [reduce_motion]=no
   [cursor_size]=24
   [spacing]=normal
+  [typeface]=system
 )
 #: What each one is allowed to be, checked here as well as in the engine. The
 #: engine's check is the one that matters and this one is what makes a bad
@@ -145,6 +147,7 @@ declare -A ACCESS_VALUES=(
   [reduce_motion]='yes no'
   [cursor_size]='24 32 48'
   [spacing]='normal roomy roomier'
+  [typeface]='system atkinson opendyslexic'
 )
 #: The engine flag each one travels on.
 declare -A ACCESS_FLAGS=(
@@ -155,10 +158,11 @@ declare -A ACCESS_FLAGS=(
   [reduce_motion]=--reduce-motion
   [cursor_size]=--cursor-size
   [spacing]=--spacing
+  [typeface]=--typeface
 )
 #: A stable order, so both front ends list them the same way and the tests can
 #: rely on it. Ordered by how much difference each one makes.
-ACCESS_ORDER=(screen_reader braille contrast text_scale spacing reduce_motion cursor_size)
+ACCESS_ORDER=(screen_reader braille contrast text_scale typeface spacing reduce_motion cursor_size)
 
 # Preset from the environment, which is how a boot menu entry hands one of
 # these over.
@@ -1088,6 +1092,7 @@ declare -A ACCESS_LABEL=(
   [reduce_motion]='Reduce motion'
   [cursor_size]='Pointer size'
   [spacing]='Line spacing'
+  [typeface]='Typeface'
 )
 declare -A ACCESS_HELP=(
   [screen_reader]='Reads the screen aloud. Stays on after the restart.'
@@ -1097,6 +1102,7 @@ declare -A ACCESS_HELP=(
   [reduce_motion]='Stops the moving parts. Nothing else changes.'
   [cursor_size]='How large the pointer is.'
   [spacing]='More air between lines and letters. Helps most readers, not only some.'
+  [typeface]='A different face to read in. Whichever one suits you.'
 )
 
 access_shown_value() {
@@ -1132,6 +1138,36 @@ access_obey() {
   else
     AURADE_TUI_CONTRAST=0
   fi
+  access_obey_font
+}
+
+# Text size, on a console that has no text size.
+#
+# The graphical front end scales by changing dpi. A virtual console cannot: its
+# text is exactly as large as the font is tall, so the only way to make it
+# bigger is to load a taller font. Terminus ships in several heights and is
+# already the font most people reach for on a console, so 100, 125 and 150
+# become 16, 24 and 32 pixels.
+#
+# Every step is allowed to fail. A machine whose framebuffer refuses a larger
+# font, or an image without the fonts, should still get an installer. Somebody
+# who asked for larger text and got the same size is inconvenienced; somebody
+# who asked and got no installer is not.
+access_obey_font() {
+  local font
+  [[ ${TERM:-} == linux ]] || return 0
+  command -v setfont >/dev/null 2>&1 || return 0
+  case ${ACCESS[text_scale]} in
+    125) font=ter-124n ;;
+    150) font=ter-132n ;;
+    *)   font=ter-116n ;;
+  esac
+  setfont "$font" >/dev/null 2>&1 || true
+  # The frame is measured in rows, and a taller font means fewer of them, so
+  # the height has to be asked for again rather than remembered from boot.
+  AURADE_TUI_HEIGHT=$(tput lines 2>/dev/null || printf '')
+  [[ $AURADE_TUI_HEIGHT =~ ^[0-9]+$ ]] || AURADE_TUI_HEIGHT=24
+  (( AURADE_TUI_HEIGHT >= 10 )) || AURADE_TUI_HEIGHT=24
 }
 
 screen_access() {

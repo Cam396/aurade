@@ -181,7 +181,8 @@ plan() {
 # and gone after the restart has moved the wall rather than removed it, so this
 # checks the writes actually happen rather than that the flags parse.
 plan a11y --screen-reader yes --braille yes --contrast high \
-  --text-scale 125 --reduce-motion yes --cursor-size 32 --spacing roomy
+  --text-scale 125 --reduce-motion yes --cursor-size 32 --spacing roomy \
+  --typeface atkinson
 # The record, which is what the installed system reads back to confirm.
 grep -Fq -- '/etc/aurade-install/accessibility' "$TMP/a11y.out" ||
   { echo 'the accessibility record is not written into the target' >&2; exit 1; }
@@ -200,6 +201,11 @@ grep -Fq -- 'systemctl enable brltty.service' "$TMP/a11y.out" ||
 # thing it can: a stylesheet every GTK 4 application on the target reads.
 grep -Fq -- '/etc/xdg/gtk-4.0/gtk.css' "$TMP/a11y.out" ||
   { echo 'line spacing is not written into the installed system' >&2; exit 1; }
+# The face has to be installed on the target, not only named there. A font name
+# written for a family that is not present does not error: it renders in the
+# default face, and somebody who needed the other one cannot tell.
+grep -Fq -- 'ttf-atkinson-hyperlegible' "$TMP/a11y.out" ||
+  { echo 'the chosen typeface is not installed onto the target' >&2; exit 1; }
 # The reader has to exist on the installed system, not only on the image.
 grep -Fq -- 'espeakup' "$TMP/a11y.out" ||
   { echo 'espeakup is not installed onto the target' >&2; exit 1; }

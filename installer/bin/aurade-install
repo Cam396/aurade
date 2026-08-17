@@ -60,6 +60,7 @@ TEXT_SCALE=100
 REDUCE_MOTION=no
 CURSOR_SIZE=24
 SPACING=normal
+TYPEFACE=system
 SWAP_SIZE=auto
 LAYOUT=wipe
 SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
@@ -623,6 +624,7 @@ while (($#)); do
     --reduce-motion) REDUCE_MOTION=${2:?}; shift 2 ;;
     --cursor-size) CURSOR_SIZE=${2:?}; shift 2 ;;
     --spacing) SPACING=${2:?}; shift 2 ;;
+    --typeface) TYPEFACE=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
     --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
     --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
@@ -664,6 +666,7 @@ case $REDUCE_MOTION in yes|no) ;; *) die '--reduce-motion must be yes or no' ;; 
 case $TEXT_SCALE in 100|125|150) ;; *) die '--text-scale must be 100, 125 or 150' ;; esac
 case $CURSOR_SIZE in 24|32|48) ;; *) die '--cursor-size must be 24, 32 or 48' ;; esac
 case $SPACING in normal|roomy|roomier) ;; *) die '--spacing must be normal, roomy or roomier' ;; esac
+case $TYPEFACE in system|atkinson|opendyslexic) ;; *) die '--typeface must be system, atkinson or opendyslexic' ;; esac
 
 case $SWAP in
   none|file|zram) ;;
@@ -812,6 +815,15 @@ esac
 # that survives the reboot and a setting that was true for ten minutes.
 [[ $SCREEN_READER != yes ]] || BASE_PACKAGES+=(espeakup)
 [[ $BRAILLE != yes ]] || BASE_PACKAGES+=(brltty)
+# The face has to be on the installed system, not only on the image that
+# installed it. Both are in the pinned snapshot, which is what makes offering
+# them safe: a package that is not in the snapshot fails the whole install, and
+# a font name written for a face that is not there fails silently, which is
+# worse.
+case $TYPEFACE in
+  atkinson)     BASE_PACKAGES+=(ttf-atkinson-hyperlegible) ;;
+  opendyslexic) BASE_PACKAGES+=(otf-opendyslexic-nerd) ;;
+esac
 
 # The tools this shape needs, checked in both modes.
 #
@@ -1251,17 +1263,25 @@ write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
 # that silently does nothing is the exact failure this whole feature exists to
 # prevent, and the cost of the redundant one is a file.
 write_target_file /etc/aurade-install/accessibility 0644 \
-  "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nspacing=$SPACING\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
+  "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nspacing=$SPACING\ntypeface=$TYPEFACE\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
 
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
       $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||
-      $SPACING != normal ]]; then
+      $SPACING != normal || $TYPEFACE != system ]]; then
   # GTK reads dpi in 1024ths of a point, which is why 100 is not 100 here.
   _gtk_dpi=$(( TEXT_SCALE * 96 * 1024 / 100 ))
   _gtk_anim=1
   [[ $REDUCE_MOTION != yes ]] || _gtk_anim=0
+  # The face, by family name, which is what fontconfig matches on. Left out
+  # entirely for `system`, because writing the current default back is how a
+  # later change to that default silently stops applying.
+  _font=
+  case $TYPEFACE in
+    atkinson)     _font='\ngtk-font-name=Atkinson Hyperlegible 11' ;;
+    opendyslexic) _font='\ngtk-font-name=OpenDyslexic Nerd Font 11' ;;
+  esac
   write_target_file /etc/xdg/gtk-4.0/settings.ini 0644 \
-    "[Settings]\ngtk-xft-dpi=$_gtk_dpi\ngtk-enable-animations=$_gtk_anim\ngtk-cursor-theme-size=$CURSOR_SIZE\n"
+    "[Settings]\ngtk-xft-dpi=$_gtk_dpi\ngtk-enable-animations=$_gtk_anim\ngtk-cursor-theme-size=$CURSOR_SIZE$_font\n"
 
   _dconf_contrast=false
   [[ $CONTRAST != high ]] || _dconf_contrast=true

@@ -119,6 +119,28 @@ grep -Fxq 'xfsprogs' "$ROOT/installer/archiso/packages.x86_64" || {
 # console reader the entry starts; brltty is what a braille display needs, and
 # its presence is also what makes the text installer choose its plain
 # rendering without being asked.
+# The keyboard, which the installer reads out of a directory rather than asking
+# a command about.
+#
+# `aurade_valid_keymap` looks in /usr/share/kbd/keymaps, `loadkeys` applies the
+# choice to the live console, and `setfont` is how the text installer honours
+# a text size. All three come from kbd, which was not on the image: on a real
+# ISO every keymap was rejected and the picker offered nothing.
+#
+# The test suite could not see it, and that is the point of checking here. The
+# unit tests point AURADE_KEYMAP_DIR at a fixture, so the fixture made them
+# pass while the image lacked the package entirely. A path the installer reads
+# at runtime is a package the image has to carry, and only this test is looking
+# at the image.
+grep -Fxq 'kbd' "$ROOT/installer/archiso/packages.x86_64" || {
+  echo 'test-build-iso-stage: kbd is missing, so no keyboard layout can be chosen' >&2
+  exit 1
+}
+grep -Fxq 'terminus-font' "$ROOT/installer/archiso/packages.x86_64" || {
+  echo 'test-build-iso-stage: terminus-font is missing, so text size does nothing on the console' >&2
+  exit 1
+}
+
 for _access in espeakup brltty; do
   grep -Fxq "$_access" "$ROOT/installer/archiso/packages.x86_64" || {
     echo "test-build-iso-stage: $_access is missing, so the speech entry would boot to silence" >&2
