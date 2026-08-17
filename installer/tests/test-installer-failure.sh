@@ -89,4 +89,55 @@ if "$ROOT/installer/bin/aurade-install-failure" --status >"$TMP/missing-arg.out"
 fi
 grep -Fq -- '--status requires an argument' "$TMP/missing-arg.out"
 
+# --- where a saved report goes ----------------------------------------------
+#
+# The default is under /run, which is tmpfs, so the report a user saves after a
+# failed install is gone the moment they do the obvious next thing and restart.
+# The save appeared to work, it named a path, and the file is not there when it
+# is finally wanted. That is a bug wearing a feature's clothes.
+#
+# So the front end looks for somewhere a removable disk is mounted first, and
+# when there is nowhere it says out loud that what it wrote is in memory.
+export AURADE_INSTALLER_TUI_LIB=1
+# shellcheck source=../bin/aurade-installer-tui
+. "$ROOT/installer/bin/aurade-installer-tui"
+unset AURADE_INSTALLER_TUI_LIB
+
+install -d "$TMP/media/AURADE-STICK" "$TMP/media/GHOST" "$TMP/nothing" "$TMP/run"
+EXPORT_DIR=$TMP/run
+# One stick actually mounted, and one directory left behind by a stick that
+# was unplugged. The second is writable and would silently take the report.
+printf '%s\n' \
+  "/dev/sdz1 $TMP/media/AURADE-STICK vfat rw,noatime 0 0" \
+  "tmpfs $TMP/media tmpfs rw 0 0" >"$TMP/mounts"
+AURADE_MOUNTS_FILE=$TMP/mounts
+
+AURADE_MEDIA_DIRS=$TMP/media
+export_root
+[[ $EXPORT_ROOT == "$TMP/media/AURADE-STICK/aurade-install" ]] ||
+  { echo "a mounted stick was not chosen: got '$EXPORT_ROOT'" >&2; exit 1; }
+(( EXPORT_VOLATILE == 0 )) ||
+  { echo 'a real filesystem was reported as volatile' >&2; exit 1; }
+
+if export_durable "$TMP/media/GHOST"; then
+  echo 'a directory left behind by an unplugged stick was accepted' >&2
+  exit 1
+fi
+
+AURADE_MEDIA_DIRS=$TMP/nothing
+export_root
+[[ $EXPORT_ROOT == "$TMP/run" ]] ||
+  { echo "with nothing mounted the report should stay put: got '$EXPORT_ROOT'" >&2; exit 1; }
+(( EXPORT_VOLATILE == 1 )) ||
+  { echo 'the in-memory fallback was not reported as volatile' >&2; exit 1; }
+
+# The disk being installed to is never a candidate, however it came to be
+# searched. A report about a half written disk, written onto that disk, is the
+# one destination worse than losing it.
+AURADE_TARGET_MOUNT=$TMP/media/AURADE-STICK
+if export_durable "$TMP/media/AURADE-STICK"; then
+  echo 'the target mountpoint was accepted as a place to save a report' >&2
+  exit 1
+fi
+
 echo 'installer failure view test: PASS'

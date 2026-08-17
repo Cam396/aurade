@@ -8,6 +8,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-tui-render.sh"
 "$ROOT/test-tui-plain.sh"
 "$ROOT/test-tui-width.sh"
+"$ROOT/test-tui-keys.sh"
 "$ROOT/test-accessibility.sh"
 "$ROOT/test-greyscale.sh"
 "$ROOT/test-tui-flow.sh"

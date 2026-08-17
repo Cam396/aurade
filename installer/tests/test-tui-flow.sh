@@ -563,4 +563,33 @@ for _index in 0 1 2 3; do
     fail "row $_index is '$_short' and the pane beside it does not explain it"
 done
 
+# --- a question mark is a character, not a request for help -----------------
+#
+# `?` opens an explanation of the current screen, which is worth having and is
+# one keystroke away from being a disaster: a passphrase is allowed to contain
+# a question mark, and a help screen that swallowed one would set a passphrase
+# the user does not think they set, on a disk that then cannot be opened by
+# anybody. It is the only mistake in this program with no way back.
+#
+# So the text fields turn the help key off for as long as they are collecting,
+# and this types one through the whole flow to prove it.
+reset_state
+{
+  echo enter                       # locale
+  echo enter                       # keymap
+  echo enter                       # keyboard check
+  echo enter                       # timezone
+  echo enter                       # disk
+  echo enter                       # hostname
+  typed 'alex'; echo enter
+  typed 'why?not'; echo enter; typed 'why?not'; echo enter   # password
+  echo enter                       # encrypt: yes
+  typed 'kn?ck kn?ck'; echo enter; typed 'kn?ck kn?ck'; echo enter
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_questions >/dev/null || fail 'a question mark in a secret broke the flow'
+release
+check 'password with a question mark'   "${ANSWERS[password]}"        'why?not'
+check 'passphrase with a question mark' "${ANSWERS[luks_passphrase]}" 'kn?ck kn?ck'
+
 echo 'installer TUI flow test: PASS'

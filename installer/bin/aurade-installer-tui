@@ -85,6 +85,26 @@ EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
 PLAN_ONLY=0
 EXIT_STATUS=0
 
+#: Where to look for somewhere a saved report outlives the restart that tends
+#: to follow it.
+#:
+#: EXPORT_DIR is under /run, which is tmpfs. A report saved there is gone the
+#: moment somebody does the obvious next thing, which makes saving one a bug
+#: wearing a feature's clothes: it appears to work, it says where it went, and
+#: the file is not there when it is finally wanted.
+#:
+#: These are the usual places a removable disk is mounted. Colon separated and
+#: injectable, because a test cannot mount a USB stick.
+#:
+#: /mnt is deliberately not on this list. The engine mounts the disk it is
+#: installing to underneath it, and the one place a report about a failed
+#: install must never be written is the disk that install was half way through
+#: writing.
+AURADE_MEDIA_DIRS=${AURADE_MEDIA_DIRS:-/run/media:/media}
+
+#: The engine's own mountpoint, restated here only so that it can be refused.
+AURADE_TARGET_MOUNT=${AURADE_TARGET_MOUNT:-/mnt/aurade-target}
+
 usage() {
   cat <<'EOF'
 Usage: aurade-installer-tui [options]
@@ -308,6 +328,7 @@ cleanup() {
   # it happens even if the secret shredding below has something to complain
   # about.
   tui_palette_reset 2>/dev/null || true
+  tui_title_reset 2>/dev/null || true
   if [[ -d ${SECRET_DIR:-} ]]; then
     while IFS= read -r -d '' file; do
       if command -v shred >/dev/null 2>&1; then
@@ -320,7 +341,38 @@ cleanup() {
     rmdir -- "$SECRET_DIR" 2>/dev/null || rm -rf -- "$SECRET_DIR"
   fi
 }
-trap cleanup EXIT INT TERM
+
+#: Set the moment the confirmation is accepted, and never unset. Before it,
+#: nothing on any disk has been touched.
+GATE_PASSED=0
+
+# Ctrl+C, answered rather than absorbed.
+#
+# It used to run `cleanup` and then carry on, which shredded the secrets out
+# from under a flow that was still going: the next screen asked for a password
+# that no longer had anywhere to live. Worse, it said nothing, so somebody who
+# pressed it and saw the installer continue had no way to know it had done
+# anything at all.
+#
+# Before the confirmation this is a clean way out, and it says the one thing
+# somebody pressing it wants to hear. After the confirmation it declines, and
+# explains why in a sentence rather than a beep. The engine is not at risk
+# either way: it runs as a background job, and a background job in a script
+# has its interrupt ignored, so this decision is about the person and not
+# about the disk.
+on_interrupt() {
+  if (( GATE_PASSED )); then
+    tui_bell 1
+    return 0
+  fi
+  cleanup
+  tui_clear
+  printf '\n  Stopped. Nothing was written to any disk.\n\n'
+  exit 130
+}
+
+trap cleanup EXIT TERM
+trap on_interrupt INT
 
 # --------------------------------------------------------------------------
 # Stage vocabulary
@@ -1049,7 +1101,13 @@ screen_progress() {
     progress_emit_rows "${done_rows[@]+"${done_rows[@]}"}"
   fi
   progress_emit_rows "${live_rows[@]+"${live_rows[@]}"}"
-  [[ -z $active ]] || tui_bar "${PROGRESS_PCT:-0}" "${PROGRESS_DETAIL:-}"
+  if [[ -n $active ]]; then
+    tui_bar "${PROGRESS_PCT:-0}" "${PROGRESS_DETAIL:-}"
+    # The one place the number is worth putting somewhere other than the
+    # screen. Somebody who can see it in a tab does not have to keep this
+    # window in front of them for ten minutes.
+    tui_title "$(printf '%s%% AuraDE  %s' "${PROGRESS_PCT:-0}" "$(stage_label "$active")")"
+  fi
   if (( PROGRESS_FOLD_PENDING && pending_count > 0 )); then
     tui_line "$(printf ' %s %-50s' '   ' \
       "$(progress_plural "$pending_count" 'step to go' 'steps to go')")" dim
@@ -1442,7 +1500,74 @@ read_key() {
     printf 'redraw'
     return 0
   fi
+  if [[ $key == '?' ]] && (( HELP_KEY )); then
+    run_explain
+    printf 'redraw'
+    return 0
+  fi
+  # The terminal changed size while this screen was waiting. Measure it again
+  # before anybody draws into it.
+  [[ $key != redraw ]] || tui_measure
   printf '%s' "$key"
+}
+
+#: Which screen is on the glass, so that `?` can explain this one rather than
+#: the installer in general.
+CURRENT_SCREEN=welcome
+
+#: Whether `?` opens that explanation. Off while a field is collecting text: a
+#: passphrase is allowed to contain a question mark, and a help key that
+#: silently ate one would produce a disk that will not open, which is the
+#: single worst outcome this program has.
+HELP_KEY=1
+
+# What this screen is, and what the keys do on it.
+#
+# Not a manual. Somebody presses `?` because they are unsure whether it is
+# safe to carry on, so the first sentence answers that and the keys come
+# after.
+screen_explain() {
+  local title='About this screen' body='' keys='' key
+  case $CURRENT_SCREEN in
+    welcome)
+      body='This installs AuraDE onto a disk in this computer. Nothing is written to any disk until you type the words on the confirmation screen, and you can stop before then without leaving a trace.' ;;
+    question)
+      body='Answer the question and press enter. Going back keeps what you typed. Nothing is written to any disk while you are answering.' ;;
+    keycheck)
+      body='Type anything at all. It is not an answer and it is not saved. It is here so you can see where the keys are before you set a password you cannot see as you type.' ;;
+    review)
+      body='Every answer in one place. Move to a line and press enter to change that one thing. Press c when it all looks right.' ;;
+    gate)
+      body='The last screen before anything is written. Type the words exactly as they are shown. They are deliberately awkward, because after this the old contents of that disk are gone.' ;;
+    progress)
+      body='The install is running and needs nothing from you. It is safe to look away. Press g if you would rather have something to do than watch a bar.' ;;
+    failure)
+      body='The install stopped and nothing more will be written. Saving a report writes the log somewhere you can carry it away, and the screen tells you where it went.' ;;
+    done)
+      body='AuraDE is installed. Restart, and take the installation media out when the screen goes dark.' ;;
+    access)
+      body='These take effect straight away so you can see them working, and they are carried into the installed system so the computer you restart into behaves the same way.' ;;
+    *)
+      body='This is the AuraDE installer.' ;;
+  esac
+  keys='F1 opens the accessibility settings from any screen. Escape goes back. Nothing here has a time limit, so take as long as you like.'
+  tui_clear
+  tui_header "$title"
+  tui_blank
+  tui_wrap "$body" ink
+  tui_blank
+  tui_wrap "$keys" dim
+  tui_blank
+  tui_footer 'press any key to go back' ''
+}
+
+# Draw it, then wait. Kept apart from the drawing because every screen in this
+# file can be rendered on its own for review and for the tests, and a screen
+# that reads a key as part of drawing itself cannot be.
+run_explain() {
+  local key
+  screen_explain
+  key=$(tui_read_key) || true
 }
 
 # Text entry that redraws its screen on every keystroke. The redraw is the
@@ -1450,6 +1575,10 @@ read_key() {
 # reason about than tracking a cursor position across a frame.
 prompt_text() {
   local id=$1 step=$2 total=$3 buffer=${4:-} error='' key
+  # `local` shadows the global for every call made from inside this function,
+  # which is bash's dynamic scoping being exactly the right tool: the help key
+  # is off for the duration of the field and back on the moment it returns.
+  local HELP_KEY=0 CURRENT_SCREEN=question
   # Show the default in the field rather than applying it invisibly on enter.
   # A box that looks empty but means "aurade" is a default nobody can review.
   [[ -n $buffer ]] || buffer=$(aurade_question_default "$id")
@@ -1481,6 +1610,8 @@ prompt_text() {
 
 prompt_secret() {
   local id=$1 step=$2 total=$3 first='' second='' stage=1 error='' key
+  # A passphrase may contain a question mark, so the help key is off here.
+  local HELP_KEY=0 CURRENT_SCREEN=question
   while true; do
     if (( stage == 1 )); then
       screen_question "$id" "$step" "$total" "$error" "$first"
@@ -1586,6 +1717,9 @@ enum_index_of() {
 
 prompt_enum() {
   local id=$1 step=$2 total=$3 filter='' cursor=0 key error=''
+  # The filter takes typed characters, and nobody narrows a list of keyboard
+  # layouts with a question mark, so this one keeps its help key.
+  local CURRENT_SCREEN=question
   # Open on the default rather than on whatever sorts first. Every other
   # question type accepts its default when the user presses enter, and a list
   # that quietly starts somewhere else is the one place that promise breaks.
@@ -1656,6 +1790,8 @@ apply_answer() {
 # keys are where they should be is the person pressing them.
 keyboard_check() {
   local step=$1 total=$2 buffer='' key
+  # The whole point of the field is that every key reaches it.
+  local HELP_KEY=0 CURRENT_SCREEN=keycheck
   while true; do
     screen_keycheck "$step" "$total" "$buffer"
     key=$(read_key) || return 2
@@ -2134,6 +2270,7 @@ run_advanced() {
 # and sometimes means "start erasing a disk" is the wrong key to overload.
 run_review() {
   local key selected=0 count id position total rc
+  local CURRENT_SCREEN=review
   while true; do
     screen_review "$selected"
     count=${#REVIEW_ROWS[@]}
@@ -2181,6 +2318,11 @@ question_position() {
 # here cannot by itself cause an erase.
 run_gate() {
   local target=${ANSWERS[target]} token typed='' key
+  # The token is a device path and cannot contain a question mark, but this
+  # field is also where paste lands, and a pasted question mark that opened a
+  # help screen instead of failing to match would be a confusing way to learn
+  # that the paste was wrong.
+  local HELP_KEY=0 CURRENT_SCREEN=gate
   GATE_SPELL=0
   token=$(aurade_confirmation_token "$target" \
     "${ANSWERS[layout]:-$(aurade_question_default layout)}")
@@ -2217,10 +2359,82 @@ run_gate() {
 EXPORT_NOTICE=
 EXPORT_NOTICE_KIND=ok
 EXPORT_SEQ=0
+
+#: Set when the only place the report could go does not survive a restart, so
+#: that the screen says so rather than leaving somebody to discover it.
+EXPORT_VOLATILE=1
+
+#: The mount table. Injectable, because a test cannot mount a USB stick.
+AURADE_MOUNTS_FILE=${AURADE_MOUNTS_FILE:-/proc/mounts}
+
+# What is mounted at exactly this path, if anything. The last match wins,
+# because a later mount covers an earlier one at the same place.
+export_fstype() {
+  local dir=${1%/} device where kind rest found=''
+  [[ -r $AURADE_MOUNTS_FILE ]] || { printf ''; return 0; }
+  while read -r device where kind rest; do
+    # /proc/mounts writes a space in a path as \040.
+    where=${where//\\040/ }
+    [[ $where == "$dir" ]] || continue
+    found=$kind
+  done <"$AURADE_MOUNTS_FILE"
+  printf '%s' "$found"
+}
+
+# Writable, and still there tomorrow.
+export_durable() {
+  local dir=$1 kind
+  [[ -d $dir && -w $dir ]] || return 1
+  # Never the disk being installed to, however it came to be searched.
+  [[ $dir != "${AURADE_TARGET_MOUNT%/}"* ]] || return 1
+  # It has to be a mounted filesystem in its own right. An empty directory
+  # left under /run/media by a stick that was unplugged is writable, is on
+  # tmpfs, and would take the report and lose it, which is the exact failure
+  # this whole search exists to avoid.
+  kind=$(export_fstype "$dir")
+  case $kind in
+    # A read-only medium is not writable anyway, but naming the two the
+    # installer boots from says why they are not candidates rather than
+    # leaving it to a permission bit that might one day be different.
+    tmpfs|ramfs|devtmpfs|squashfs|iso9660|'') return 1 ;;
+  esac
+  return 0
+}
+
+# Somewhere the report still exists after a reboot, or an honest admission.
+#
+# Sets EXPORT_ROOT and EXPORT_VOLATILE rather than printing, because the two
+# answers belong together and a function whose result is captured with `$( )`
+# runs in a subshell, where the flag it set is thrown away with the subshell.
+# The path would have been right and the warning would silently never appear,
+# which is the failure that is hardest to notice.
+EXPORT_ROOT=
+export_root() {
+  local base dir
+  local -a bases=()
+  IFS=: read -r -a bases <<<"$AURADE_MEDIA_DIRS"
+  for base in ${bases[@]+"${bases[@]}"}; do
+    [[ -d $base ]] || continue
+    # One level for /media/<label>, two for /run/media/<user>/<label>. Both
+    # shapes are in the wild and neither is worth a recursive walk.
+    for dir in "$base"/* "$base"/*/*; do
+      export_durable "$dir" || continue
+      EXPORT_ROOT=${dir%/}/aurade-install
+      EXPORT_VOLATILE=0
+      return 0
+    done
+  done
+  EXPORT_ROOT=$EXPORT_DIR
+  EXPORT_VOLATILE=1
+  return 0
+}
+
 export_report() {
-  local status=$1 stamp destination errors
+  local status=$1 stamp destination errors root
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
-  destination="${EXPORT_DIR%/}/failure-${stamp}"
+  export_root
+  root=$EXPORT_ROOT
+  destination="${root%/}/failure-${stamp}"
   # The destination has to be one this call created, because "did anything get
   # written here" is the whole test and a directory that already existed
   # answers it with someone else's files. Two saves in the same second are
@@ -2229,7 +2443,7 @@ export_report() {
   # fail and still report the first attempt's success.
   while [[ -e $destination ]]; do
     EXPORT_SEQ=$(( EXPORT_SEQ + 1 ))
-    destination="${EXPORT_DIR%/}/failure-${stamp}-${EXPORT_SEQ}"
+    destination="${root%/}/failure-${stamp}-${EXPORT_SEQ}"
   done
   EXPORT_NOTICE_KIND=danger
   if [[ ! -x $FAILURE_HELPER ]]; then
@@ -2241,6 +2455,12 @@ export_report() {
     --raw-log "$RAW_LOG" --export "$destination" >/dev/null 2>"$errors" || true
   if [[ -d $destination ]] && find "$destination" -type f -print -quit 2>/dev/null | grep -q .; then
     EXPORT_NOTICE="Saved to $destination"
+    # The path alone is not the whole truth when the path is in memory. A
+    # report that quietly disappears on the restart somebody is about to
+    # perform is worse than one that was never offered, because they stopped
+    # looking for another way to keep it.
+    (( ! EXPORT_VOLATILE )) ||
+      EXPORT_NOTICE+='. That is in memory and will be gone after a restart. Copy it to a USB stick first, or plug one in and save again.'
     EXPORT_NOTICE_KIND=ok
     rm -f -- "$errors"
     return 0
@@ -2255,6 +2475,7 @@ export_report() {
 
 run_failure() {
   local cursor=0 key status=$1
+  local CURRENT_SCREEN=failure
   build_failure_options
   while true; do
     screen_failure "$cursor"
@@ -2373,6 +2594,10 @@ main_flow() {
       gate)
         rc=0
         run_gate || rc=$?
+        # Recorded here rather than inside the gate, so that the one place
+        # that decides an install is going ahead is the one place that says
+        # so. Ctrl+C reads it and stops offering to quit.
+        (( rc != 0 )) || GATE_PASSED=1
         if (( rc == 0 )); then state=execute; else state=review; fi
         ;;
 
@@ -2422,7 +2647,7 @@ fi
 [[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck
+  access keycheck explain
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -2467,6 +2692,8 @@ if [[ -n $RENDER_ONLY ]]; then
     welcome)   screen_welcome ;;
     access)    screen_access "${AURADE_RENDER_ACCESS_ROW:-0}" ;;
     keycheck)  screen_keycheck 2 9 "${AURADE_RENDER_TYPED:-}" ;;
+    explain)   CURRENT_SCREEN=${AURADE_RENDER_EXPLAIN:-review}
+               screen_explain ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.

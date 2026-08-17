@@ -60,14 +60,15 @@ for columns in 100 140; do
   (( ragged == 0 )) || fail "at $columns columns, $ragged rows do not start at the margin"
 done
 
-# --- a terminal narrower than the floor is not made narrower ---------------
+# --- a terminal narrower than the floor gives up the floor ------------------
 #
-# 40 columns cannot hold the frame. Drawing a 68 column frame into it wraps
-# every row and produces a staircase; drawing a 40 column one breaks the
-# budgets. It draws the floor and lets the terminal scroll, which is the same
-# answer the height already gives on a short console.
+# 40 columns cannot hold the frame, and something has to give. Drawing 68
+# columns into 40 wraps every row and produces a staircase, which is
+# unreadable; drawing 40 overruns the layout budgets, and those truncate,
+# which is merely cramped. So the frame follows the terminal below the floor
+# and the text loses its ends rather than its shape.
 width=$(render 40 | sed -n '1p' | sed 's/^ *//' | tr -d '\n' | wc -c)
-(( width >= 40 )) || fail "a 40 column terminal produced a $width column frame"
+[[ $width == 40 ]] || fail "a 40 column terminal produced a $width column frame"
 
 # --- an explicit width is still obeyed -------------------------------------
 #
