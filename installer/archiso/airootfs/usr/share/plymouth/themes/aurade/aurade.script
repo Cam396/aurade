@@ -1,0 +1,137 @@
+# The boot screen.
+#
+# Thirty five seconds of black was the worst thing in the product. It is the
+# first thing the machine does after somebody chooses to install an operating
+# system, and it looked exactly like a machine that had not started.
+#
+# So: the mark and the wordmark, centred on black, and three dots taking turns
+# fading up underneath them. That is the whole design and the restraint is the
+# point. There is no progress bar because there is no honest number to put in
+# one. The kernel does not know how long its own boot will take, and a bar
+# that fills at a made up rate and then sits at ninety five percent is worse
+# than no bar: it makes a working machine look stuck.
+#
+# What the dots promise is only what they can keep, which is "this is still
+# going". They are drawn by fading sprites in and out rather than by rotating
+# an arc, which would look better and would allocate a new image on every
+# frame in a script that cannot be run anywhere but on a booting machine. The
+# boot screen is the one piece of this installer no test on the build host can
+# execute, so it is built out of the oldest and least surprising thing the
+# script plugin does.
+#
+# There is no message function and no password function either, and both of
+# those are decisions rather than omissions. A live image has no encrypted root
+# to unlock, so nothing is going to ask for a passphrase here, and drawing text
+# from a script plugin means rendering it into an image with a font that has to
+# be found and sized, which is a lot of machinery to carry for a case that
+# cannot arise. What can arise is something going wrong, and the answer to that
+# is the same as it is under every other theme: Escape shows the boot messages.
+# That is plymouth's own behaviour and no theme can take it away, which is why
+# this file does not need a way out of its own.
+
+# Black, and the same black top and bottom. Not a dark grey and not a
+# gradient: on an OLED panel this is the difference between pixels that are
+# off and pixels that are on, and the boot screen is the longest continuous
+# stretch of one colour anybody sees.
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+# Display zero. A machine with two screens attached gets the splash on one of
+# them, which is what every other plymouth theme does and is not worth the
+# code to change, because the installer itself is a single window on a single
+# screen anyway.
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+screen_x = Window.GetX();
+screen_y = Window.GetY();
+
+# Sized against the height rather than the width. A 21:9 monitor is not
+# entitled to a bigger logo than a 4:3 one, and sizing off the width gives it
+# one.
+mark_size = screen_height * 0.15;
+if (mark_size < 96) {
+  mark_size = 96;
+}
+
+mark_image = Image("aurade-mark.png").Scale(mark_size, mark_size);
+
+# The wordmark keeps its own proportions, set against the mark rather than
+# against the screen so the two always sit together as one lockup. 628 by 142
+# is the shape of the asset.
+word_width = mark_size * 1.9;
+word_height = word_width * 142 / 628;
+word_image = Image("aurade-wordmark.png").Scale(word_width, word_height);
+
+dot_image = Image("dot.png");
+dot_size = dot_image.GetWidth();
+
+gap = mark_size * 0.30;
+dot_gap = mark_size * 0.55;
+dot_pitch = dot_size * 1.8;
+
+# The lockup is centred as a block, so the optical middle of the screen is the
+# middle of the mark and the wordmark together rather than the middle of the
+# mark with the wordmark hanging off it.
+block_height = mark_size + gap + word_height;
+block_top = screen_y + (screen_height - block_height) / 2 - dot_gap / 2;
+
+mark = Sprite(mark_image);
+mark.SetX(screen_x + (screen_width - mark_size) / 2);
+mark.SetY(block_top);
+mark.SetZ(1);
+
+word = Sprite(word_image);
+word.SetX(screen_x + (screen_width - word_width) / 2);
+word.SetY(block_top + mark_size + gap);
+word.SetZ(1);
+
+dot_y = block_top + block_height + dot_gap;
+dot_left = screen_x + (screen_width - (dot_pitch * 2 + dot_size)) / 2;
+
+for (i = 0; i < 3; i++) {
+  dots[i] = Sprite(dot_image);
+  dots[i].SetX(dot_left + i * dot_pitch);
+  dots[i].SetY(dot_y);
+  dots[i].SetZ(1);
+  dots[i].SetOpacity(0.0);
+}
+
+# Plymouth calls the refresh function at a fixed rate, and does not tell the
+# script what that rate is. Counting frames is what every script theme does.
+# Fifty a second is the usual figure, so a cycle of ninety frames is a little
+# under two seconds, and on a machine that refreshes slower the dots simply
+# breathe slower. Nothing here is timing sensitive, which is the reason it is
+# safe to count frames at all.
+CYCLE = 90;
+FLOOR = 0.16;
+frame = 0;
+
+fun refresh() {
+  frame++;
+  if (frame >= CYCLE) {
+    frame = 0;
+  }
+  for (i = 0; i < 3; i++) {
+    # A third of a cycle between each dot, so the light travels left to right
+    # rather than all three breathing together, which reads as a pulse and not
+    # as motion.
+    phase = (frame + i * CYCLE / 3) * 2 * Math.Pi / CYCLE;
+    # Sine, moved into 0 to 1 and then lifted off the floor. Never fully dark:
+    # a dot that reaches zero looks like a dot that has gone out, and three
+    # dots where one has gone out is a fault light.
+    level = (1 - Math.Cos(phase)) / 2;
+    dots[i].SetOpacity(FLOOR + level * (1 - FLOOR));
+  }
+}
+
+Plymouth.SetRefreshFunction(refresh);
+
+fun quit() {
+  mark.SetOpacity(0.0);
+  word.SetOpacity(0.0);
+  for (i = 0; i < 3; i++) {
+    dots[i].SetOpacity(0.0);
+  }
+}
+
+Plymouth.SetQuitFunction(quit);

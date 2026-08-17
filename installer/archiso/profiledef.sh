@@ -63,4 +63,15 @@ file_permissions=(
   # that is wrong the first time somebody adds a twenty ninth photograph. The
   # stage test checks the mode of what actually landed instead.
   ["/usr/local/share/aurade/wallpapers/manifest.tsv"]=0:0:644
+  # The boot screen. The theme is five files and all five are read by a daemon
+  # running as root before there is a user, so they are listed one by one:
+  # unlike the wallpapers this is a fixed set that does not grow, and a boot
+  # screen that silently fails to load is a boot that falls back to scrolling
+  # kernel messages, which nobody files a bug about.
+  ["/etc/plymouth/plymouthd.conf"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/aurade.plymouth"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/aurade.script"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/dot.png"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/aurade-mark.png"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/aurade-wordmark.png"]=0:0:644
 )

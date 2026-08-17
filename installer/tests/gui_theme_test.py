@@ -64,6 +64,21 @@ check(
     f"installer/tools/extract-brand-assets.py ({assets.stderr.strip()})",
 )
 
+# And the boot screen's one drawn asset. Plymouth's script plugin has no
+# drawing primitives, so the dot the splash animates is a PNG in the tree
+# rather than four lines of cairo, and a PNG in the tree with no way to check
+# it is a PNG nobody dares change. This is the way to check it.
+dot = subprocess.run(
+    [sys.executable,
+     os.path.join(ROOT, "installer", "tools", "make-plymouth-dot.py"), "--check"],
+    capture_output=True, text=True,
+)
+check(
+    dot.returncode == 0,
+    "the committed boot screen dot is not what its tool draws; run "
+    f"installer/tools/make-plymouth-dot.py ({dot.stderr.strip()})",
+)
+
 from aurade_gui import tokens as T  # noqa: E402
 
 import importlib.util  # noqa: E402

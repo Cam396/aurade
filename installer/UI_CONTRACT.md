@@ -60,7 +60,7 @@ says no - ends in the text installer, with the reason printed.
 
 ## The boot menu is part of the interface
 
-Four entries, one per way in, in `installer/archiso/efiboot/loader/entries/`.
+Six entries, one per way in, in `installer/archiso/efiboot/loader/entries/`.
 Each names a front end on the kernel command line as `aurade.installer=`, and
 `aurade-installer-autostart` reads that on tty1 and starts it. An entry that
 names a front end nothing acts on is a boot menu that lies, so the staging test
@@ -77,6 +77,7 @@ audit duly reported it.
 | `Install AuraDE (text only)` | `aurade.installer=text` | `aurade-installer-start --text` |
 | `Install AuraDE (safe graphics)` | `aurade.installer=safe` | the same, with every accelerated path skipped |
 | `Recovery console` | `aurade.installer=none` | nothing, just a root shell |
+| `Install AuraDE over a serial console` | `aurade.installer=serial` | the text installer on ttyS0 |
 
 **The speech entry is second, and its position is part of the feature.**
 Nobody who needs it can read the menu to find it, so it has to be reachable by
@@ -94,6 +95,36 @@ and marks a stamp on tmpfs so it happens once per boot. The console is an
 autologin getty: without both of those, quitting the installer ends the login,
 agetty starts another, and the installer comes back - an installer with no way
 out of it.
+
+### The boot screen
+
+Three of the six entries carry `splash`, and plymouth draws the mark and the
+wordmark on black with three dots breathing under them. The theme is
+`installer/archiso/airootfs/usr/share/plymouth/themes/aurade/`.
+
+**There is no progress bar and there must not be one.** Nothing at that point
+in the boot knows how long the rest of it will take. A bar that fills at a made
+up rate and then waits at ninety five percent makes a working machine look
+stuck, which is worse than the black screen this replaces. The dots promise
+only what they can keep, which is that something is still happening.
+
+**Three entries deliberately do not carry it.** The speech entry, because a
+picture is worth nothing to the person it is for and the console messages it
+would cover are worth something. The recovery console, because somebody who
+chose it chose it to watch the machine boot. The serial entry, because there is
+no screen. The staging test checks both lists, in both directions, so adding a
+seventh entry means deciding which side it is on.
+
+**The theme name is written twice**, in `plymouthd.conf` and implicitly in the
+directory name, and the mkinitcpio `plymouth` hook copies the theme the config
+names into the initramfs. If those disagree the boot falls back to scrolling
+kernel messages: not a crash, no error, and nobody files a bug about it. That
+is the reason the staging test checks the name rather than only the files.
+
+Nothing here can be tested on a build host. There is no way to run a plymouth
+script outside a booting machine, so what the suite checks is every joint the
+screen hangs from and none of what it looks like. **It is verified by booting
+it in VMware and not before.**
 
 ## Icons are pinned to the image, not to the build host
 

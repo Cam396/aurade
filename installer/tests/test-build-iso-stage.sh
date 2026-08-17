@@ -308,6 +308,54 @@ while IFS=$'\t' read -r _picture _rest; do
   [[ $_mode == 644 ]] ||
     { echo "wallpapers/$_picture staged as $_mode, not 644" >&2; exit 1; }
 done < "$ROOT/installer/wallpapers/manifest.tsv"
+# The boot screen, which is the one piece of this that nothing on this side of
+# a real boot can execute. There is no way to run a plymouth script here, so
+# what is checked instead is every joint it hangs from: the five files present,
+# the theme name agreeing in the two places it is written, the package on the
+# image, and the initramfs hook that carries the whole thing into the boot.
+# Each of those failing alone produces the same symptom, a boot that quietly
+# scrolls kernel messages instead, which looks like nothing was ever built.
+_theme=$TMP/work/profile/airootfs/usr/share/plymouth/themes/aurade
+for _part in aurade.plymouth aurade.script dot.png aurade-mark.png aurade-wordmark.png; do
+  [[ -r $_theme/$_part ]] ||
+    { echo "build-iso.sh does not stage the boot screen's $_part" >&2; exit 1; }
+  _mode=$(stat -c '%a' "$_theme/$_part")
+  [[ $_mode == 644 ]] ||
+    { echo "boot screen $_part staged as $_mode, not 644" >&2; exit 1; }
+  grep -Fq "/usr/share/plymouth/themes/aurade/$_part" \
+    "$ROOT/installer/archiso/profiledef.sh" ||
+    { echo "profiledef.sh has no permissions entry for the boot screen's $_part" >&2; exit 1; }
+done
+grep -Fq 'Theme=aurade' \
+  "$TMP/work/profile/airootfs/etc/plymouth/plymouthd.conf" ||
+  { echo 'plymouthd.conf does not name the aurade theme' >&2; exit 1; }
+grep -Fq 'ShowDelay=0' \
+  "$TMP/work/profile/airootfs/etc/plymouth/plymouthd.conf" ||
+  { echo 'plymouthd.conf waits before showing the boot screen' >&2; exit 1; }
+grep -Fxq 'plymouth' "$ROOT/installer/archiso/packages.x86_64" ||
+  { echo 'the boot screen is themed and plymouth is not on the image' >&2; exit 1; }
+# The hook, and its position. After `udev`, because it needs device nodes to
+# find a graphics card, and a hook order that puts it first is a boot screen
+# that never draws.
+_hooks=$(grep '^HOOKS=' "$ROOT/installer/archiso/airootfs/etc/mkinitcpio.conf.d/archiso.conf")
+[[ $_hooks == *"udev plymouth"* ]] ||
+  { echo "the plymouth hook is not directly after udev: $_hooks" >&2; exit 1; }
+# `splash` on the entries that have somebody looking at a screen, and off the
+# three that do not. The speech entry is the one that matters: a splash there
+# covers the console messages, which are the only thing anybody in that seat
+# can be read aloud from.
+for _entry in 01-aurade-gui 03-aurade-tui 04-aurade-safe; do
+  grep -q '^options .*[[:space:]]splash[[:space:]]' \
+    "$entries/$_entry.conf" ||
+    { echo "$_entry does not boot with splash" >&2; exit 1; }
+done
+for _entry in 02-aurade-speech 05-aurade-shell 06-aurade-serial; do
+  if grep -q '^options .*[[:space:]]splash[[:space:]]' \
+    "$entries/$_entry.conf"; then
+    echo "$_entry boots with splash and should not" >&2
+    exit 1
+  fi
+done
 # Every shell library in the source tree, not a list typed here. Both front
 # ends source these by name and exit if one is missing, so a library added to
 # the tree and forgotten in build-iso.sh is a text installer that will not

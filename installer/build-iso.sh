@@ -113,6 +113,14 @@ done
 for _asset in aurade-mark.png aurade-wordmark.png; do
   install -Dm0644 "$ROOT/assets/${_asset}" \
     "$STAGE/airootfs/usr/local/share/aurade/${_asset}"
+  # The boot screen gets the same two files rather than a copy kept beside its
+  # script. Plymouth's script plugin reads images out of its own theme
+  # directory and nowhere else, so they have to be there; committing a second
+  # pair of PNGs to sit there would be committing a logo that drifts from the
+  # logo the moment either is touched. Copied at build time instead, from the
+  # same place the installer window gets its own.
+  install -Dm0644 "$ROOT/assets/${_asset}" \
+    "$STAGE/airootfs/usr/share/plymouth/themes/aurade/${_asset}"
 done
 # The wallpapers, and the manifest that indexes them.
 #
