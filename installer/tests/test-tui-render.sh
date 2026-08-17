@@ -273,12 +273,18 @@ flatten "$TMP/reversible.out" | grep -Fq 'Check the network connection, then sta
 # Before the boundary there is no cost to starting again, so the warning about
 # what starting again destroys must not appear. It says the opposite of the
 # line above it and turns an untouched disk into a scare.
-! flatten "$TMP/reversible.out" | grep -Fq 'Starting again erases the disk' ||
+#
+# Captured and matched rather than piped into a negated `grep -q`. That form
+# cannot fail: grep exits on its first match, the pipeline upstream dies of a
+# broken pipe, `pipefail` reports 141, and the `!` turns the failure into a
+# pass. It passed when the string was absent and passed when it was there.
+reversible_text=$(flatten "$TMP/reversible.out")
+[[ $reversible_text != *'Starting again erases the disk'* ]] ||
   fail 'a pre-gate failure warned about a destructive restart'
 # ...and after the boundary it must.
 flatten "$TMP/failure" | grep -Fq 'Starting again erases the disk' ||
   fail 'a post-gate failure did not say what starting again costs'
-! flatten "$TMP/reversible.out" | grep -Fq 'Starting again erases the disk' ||
+[[ $reversible_text != *'Starting again erases the disk'* ]] ||
   fail 'a pre-gate failure warned about erasing a disk that was never touched'
 
 render cancelled none ascii >"$TMP/cancelled"

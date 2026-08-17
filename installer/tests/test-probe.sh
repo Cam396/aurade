@@ -270,7 +270,11 @@ flatten "$TMP/fallback.out" | grep -Fq 'display settings' ||
 render_fallback "$TMP/dri-ok" "$TMP/meminfo.small" "$TMP/bare-bin" >"$TMP/lowmem.out"
 flatten "$TMP/lowmem.out" | grep -Fq 'GB of free memory, and there is less than that here' ||
   fail 'the low-memory fallback does not explain itself'
-! flatten "$TMP/lowmem.out" | grep -Fq 'no working 3D acceleration' ||
+# Captured and matched rather than piped into a negated `grep -q`, which
+# cannot fail: grep exits on its first match, the pipeline upstream dies of a
+# broken pipe, `pipefail` reports 141, and the `!` turns that into a pass.
+lowmem_text=$(flatten "$TMP/lowmem.out")
+[[ $lowmem_text != *'no working 3D acceleration'* ]] ||
   fail 'a low-memory machine was told it has no 3D acceleration'
 
 echo 'installer graphics probe test: PASS'
