@@ -3,6 +3,10 @@ Description=Start the AuraDE installer selected by the boot menu
 After=systemd-vconsole-setup.service systemd-user-sessions.service dev-tty1.device
 Before=getty@tty1.service
 Wants=dev-tty1.device
+# Not when the boot menu asked for the serial console. That entry has its own
+# unit on ttyS0, and an image where both fire draws two installers over one
+# machine, each reading half the keystrokes.
+ConditionKernelCommandLine=!aurade.installer=serial
 
 [Service]
 Type=oneshot

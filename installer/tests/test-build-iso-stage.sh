@@ -155,12 +155,36 @@ done
 # menu whose default points at a missing entry is a machine that boots to a
 # firmware screen, which is the one failure nobody can debug from the console.
 entries=$ROOT/installer/archiso/efiboot/loader/entries
-for entry in gui speech text safe none; do
+for entry in gui speech text safe serial none; do
   grep -lq "aurade.installer=$entry" "$entries"/*.conf || {
     echo "test-build-iso-stage: no boot entry asks for the $entry front end" >&2
     exit 1
   }
 done
+# The serial entry, and the pair of conditions that keep it from fighting the
+# console one. Both units are enabled on the image, so the only thing stopping
+# two installers drawing over one machine is that each refuses the other's
+# command line. That is a condition in a unit file, which is the sort of thing
+# that gets deleted during a tidy-up and produces a symptom nobody can explain.
+serial_unit=$ROOT/installer/archiso/airootfs/etc/systemd/system/aurade-installer-serial.service
+console_unit=$ROOT/installer/archiso/airootfs/etc/systemd/system/aurade-installer-autostart.service
+grep -Fxq 'ConditionKernelCommandLine=aurade.installer=serial' "$serial_unit" || {
+  echo 'test-build-iso-stage: the serial unit would start on every boot' >&2
+  exit 1
+}
+grep -Fxq 'ConditionKernelCommandLine=!aurade.installer=serial' "$console_unit" || {
+  echo 'test-build-iso-stage: the console unit would also start on a serial boot' >&2
+  exit 1
+}
+grep -Fq 'TTYPath=/dev/ttyS0' "$serial_unit" || {
+  echo 'test-build-iso-stage: the serial unit does not put the installer on the serial line' >&2
+  exit 1
+}
+[[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-serial.service ]] || {
+  echo 'test-build-iso-stage: the serial unit is staged but never enabled' >&2
+  exit 1
+}
+
 for entry in "$entries"/*.conf; do
   grep -Fq 'cow_spacesize=4G' "$entry" || {
     echo "test-build-iso-stage: ${entry##*/} does not give the live overlay room to prefetch" >&2

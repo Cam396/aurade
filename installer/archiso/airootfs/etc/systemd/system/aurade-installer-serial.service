@@ -1,0 +1,32 @@
+[Unit]
+Description=Start the AuraDE installer on the serial console
+# The serial twin of aurade-installer-autostart.service. Same program, same
+# choice read from the same kernel command line, different terminal.
+#
+# The two are mutually exclusive by condition rather than by ordering. Both
+# claim a console and run the installer, and an image where both fire draws
+# two installers over one machine, so the tty1 unit refuses when this one is
+# asked for and this one only runs when it is.
+After=systemd-user-sessions.service dev-ttyS0.device
+Before=serial-getty@ttyS0.service
+Wants=dev-ttyS0.device
+ConditionKernelCommandLine=aurade.installer=serial
+ConditionPathExists=/dev/ttyS0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aurade-installer-autostart
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+TTYReset=yes
+TTYVHangup=yes
+# A serial line has no vt to deallocate, and the size is whatever the terminal
+# at the far end reports. The text installer measures it and centres itself in
+# what it finds, and remeasures when it changes.
+TimeoutStartSec=0
+Environment=TERM=vt220
+
+[Install]
+WantedBy=multi-user.target

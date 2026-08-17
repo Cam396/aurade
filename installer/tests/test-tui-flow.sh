@@ -592,4 +592,73 @@ release
 check 'password with a question mark'   "${ANSWERS[password]}"        'why?not'
 check 'passphrase with a question mark' "${ANSWERS[luks_passphrase]}" 'kn?ck kn?ck'
 
+# --- answer files ------------------------------------------------------------
+#
+# The question set is already a manifest, so writing the answers out and
+# reading them back is nearly free. What is not free is that the file is
+# untrusted input which ends at a destructive command line, so it gets the
+# same treatment as a typed answer and then some.
+#
+# Two rules carry the weight. No secret is ever written, because a file that
+# held a passphrase would be pasted into a chat by somebody trying to be
+# helpful inside a week. And an answer that does not pass its own validator is
+# dropped rather than used, because "it came from a file" is not evidence.
+reset_state
+ANSWERS[target]=/dev/sda
+ANSWERS[hostname]=aurade-laptop
+ANSWERS[username]=alex
+ANSWERS[encrypt]=yes
+ANSWERS[keymap]=us
+ANSWERS[timezone]=UTC
+ANSWERS[locale]=en_US.UTF-8
+ANSWERS[password]='hunter2'
+ANSWERS[luks_passphrase]='correct horse battery'
+answers_save "$TMP/answers" || fail 'the answers could not be written'
+
+grep -Fq 'target=/dev/sda' "$TMP/answers" ||
+  fail 'the answer file does not record the disk'
+grep -Fq 'hostname=aurade-laptop' "$TMP/answers" ||
+  fail 'the answer file does not record the computer name'
+# The rule that matters most, checked against the values rather than the keys,
+# because a secret written under a different name is still a secret written.
+! grep -Fq 'hunter2' "$TMP/answers" ||
+  fail 'the answer file contains the password'
+! grep -Fq 'correct horse battery' "$TMP/answers" ||
+  fail 'the answer file contains the disk passphrase'
+! grep -q '^password=' "$TMP/answers" || fail 'the answer file has a password line'
+! grep -q '^luks_passphrase=' "$TMP/answers" ||
+  fail 'the answer file has a passphrase line'
+[[ $(stat -c '%a' "$TMP/answers") == 600 ]] ||
+  fail 'the answer file is readable by anyone, and it names a disk to erase'
+
+# Read it back, with three kinds of rubbish appended: a question that does not
+# exist, a secret somebody pasted in by hand, and an answer that does not pass.
+printf '%s\n' \
+  'nosuchquestion=whatever' \
+  'password=leaked' \
+  'luks_passphrase=alsoleaked' \
+  'hostname=-not-a-hostname-' >>"$TMP/answers"
+reset_state
+answers_load "$TMP/answers" || fail 'the answer file could not be read back'
+check 'target read back'   "${ANSWERS[target]}"   '/dev/sda'
+check 'hostname read back' "${ANSWERS[hostname]}" 'aurade-laptop'
+check 'locale read back'   "${ANSWERS[locale]}"   'en_US.UTF-8'
+[[ -z ${ANSWERS[password]:-} ]] ||
+  fail 'a password in an answer file was accepted'
+[[ -z ${ANSWERS[luks_passphrase]:-} ]] ||
+  fail 'a passphrase in an answer file was accepted'
+# The invalid hostname later in the file must not have overwritten the good
+# one earlier in it, and must not be reported as missing either, because it
+# is not.
+[[ " ${ANSWERS_REJECTED[*]} " == *' password '* ]] ||
+  fail 'a refused password was not reported'
+[[ " ${ANSWERS_REJECTED[*]} " != *' hostname '* ]] ||
+  fail 'a question that was answered earlier in the file is reported as missing'
+
+# A file that is not there is not an error worth stopping for. Somebody who
+# mistypes a path should get the questions, not a refusal.
+reset_state
+answers_load "$TMP/no-such-file" && fail 'a missing answer file reported success'
+(( ${#ANSWERS[@]} == 0 )) || fail 'a missing answer file filled something in'
+
 echo 'installer TUI flow test: PASS'

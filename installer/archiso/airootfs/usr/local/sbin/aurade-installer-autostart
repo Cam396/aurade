@@ -35,7 +35,7 @@ aurade_requested_front_end() {
     esac
   done
   case $choice in
-    gui|speech|text|safe|none) printf '%s' "$choice" ;;
+    gui|speech|text|safe|serial|none) printf '%s' "$choice" ;;
     # An unknown value is a typo in a boot entry, not an instruction. Say so
     # and leave the console alone rather than guessing which was meant.
     *) printf 'unknown:%s' "$choice" ;;
@@ -92,6 +92,11 @@ main() {
     gui)    "$START" --graphical || status=$? ;;
     safe)   "$START" --graphical --safe-graphics || status=$? ;;
     text)   "$START" --text || status=$? ;;
+    # A serial line cannot show a graphical installer and there is no point
+    # probing for one. Everything else about it is ordinary: the text
+    # installer measures the terminal at the far end and centres itself in
+    # whatever it finds.
+    serial) "$START" --text || status=$? ;;
     speech)
       start_speech
       # The boot menu made this choice, so the installer records it as one.

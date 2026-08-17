@@ -85,6 +85,8 @@ RAW_LOG=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
 EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
 PLAN_ONLY=0
 EXIT_STATUS=0
+ANSWERS_IN=
+ANSWERS_OUT=
 
 #: Where to look for somewhere a saved report outlives the restart that tends
 #: to follow it.
@@ -115,8 +117,17 @@ Options:
   --journal FILE     Journal to render progress and failure screens from
   --raw-log FILE     Private unstructured installer log
   --plan-only        Ask the questions and show the plan; never offer to erase
+  --answers FILE     Start with the answers in FILE, already filled in
+  --save-answers FILE  Write the answers to FILE at the review screen
   --list-screens     Print the renderable screen names
   -h, --help         This message
+
+An answer file is what this installer writes with --save-answers: one
+question and answer to a line, and never a password or a passphrase.
+Answers read back in are validated exactly as though they had been typed,
+and anything that does not pass is dropped rather than used. It fills the
+questions in; it does not skip them, and it cannot reach past the
+confirmation screen.
 EOF
 }
 
@@ -560,6 +571,94 @@ journal_status_for_stage() {
 }
 
 # --------------------------------------------------------------------------
+# Answer files
+# --------------------------------------------------------------------------
+#
+# The question set is already a manifest, so writing the answers out and
+# reading them back is almost free, and it is exactly what somebody installing
+# the same machine twice, or helping a stranger over a chat, actually wants.
+#
+# Two rules, and neither is negotiable.
+#
+# No secrets, ever. A password and a disk passphrase are not answers that can
+# be written to a file, and the point is not that the file might leak: it is
+# that a file which contained them would be copied into a chat by somebody
+# trying to be helpful, within a week.
+#
+# An answer read from a file is validated exactly as though it had been typed.
+# This file is untrusted input that ends at a destructive command line, so an
+# answer that does not pass its own validator is dropped and the question is
+# asked. Nothing here can reach past the confirmation screen either: the token
+# is still typed by a person, every time.
+
+#: Answers that came from a file and were rejected, so the screen can say so
+#: rather than silently asking again.
+ANSWERS_REJECTED=()
+
+answers_load() {
+  local file=$1 line id value
+  ANSWERS_REJECTED=()
+  [[ -r $file ]] || return 1
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%%$'\r'}
+    [[ -n $line && $line != '#'* ]] || continue
+    [[ $line == *=* ]] || continue
+    id=${line%%=*}
+    value=${line#*=}
+    # Trailing and leading spaces around the name only. The value is taken
+    # byte for byte, because a locale or a device path that lost a character
+    # to tidying would be a different answer that still passes validation.
+    id=${id//[[:space:]]/}
+    aurade_question_exists "$id" || { ANSWERS_REJECTED+=("$id"); continue; }
+    # A secret in the file is refused rather than used. Nothing this installer
+    # writes contains one, so a file that has one was written by something
+    # else, and the safe reading of that is that somebody pasted a passphrase
+    # into a text file by mistake.
+    if aurade_question_is_secret "$id"; then
+      ANSWERS_REJECTED+=("$id")
+      continue
+    fi
+    if ! aurade_question_validate "$id" "$value"; then
+      ANSWERS_REJECTED+=("$id")
+      continue
+    fi
+    ANSWERS[$id]=$value
+  done <"$file"
+  # A question can be refused on one line and answered on another, and only
+  # the ones that ended up with nothing are worth mentioning. Reporting a
+  # question that did get filled in sends somebody looking for a problem that
+  # is not there.
+  local -a unfilled=()
+  for id in ${ANSWERS_REJECTED[@]+"${ANSWERS_REJECTED[@]}"}; do
+    [[ -z ${ANSWERS[$id]:-} ]] || continue
+    unfilled+=("$id")
+  done
+  ANSWERS_REJECTED=(${unfilled[@]+"${unfilled[@]}"})
+  return 0
+}
+
+answers_save() {
+  local file=$1 id value
+  local dir=${file%/*}
+  [[ $dir == "$file" ]] || install -d -- "$dir" 2>/dev/null || true
+  {
+    printf '# AuraDE answers, written %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '# Feed this back with: aurade-installer-tui --answers FILE\n'
+    printf '# Passwords and passphrases are deliberately not here.\n'
+    for id in "${AURADE_QUESTION_IDS[@]}"; do
+      aurade_question_is_secret "$id" && continue || true
+      value=${ANSWERS[$id]:-}
+      [[ -n $value ]] || continue
+      printf '%s=%s\n' "$id" "$value"
+    done
+  } >"$file" 2>/dev/null || return 1
+  # Not world readable. It holds no secret, and it does hold the identity of a
+  # disk somebody is about to erase.
+  chmod 600 -- "$file" 2>/dev/null || true
+  return 0
+}
+
+# --------------------------------------------------------------------------
 # Screens
 # --------------------------------------------------------------------------
 
@@ -951,6 +1050,13 @@ review_list() {
   fi
   tui_blank
   tui_wrap 'Nothing has been written to any disk yet.' ok
+  # An answer file that was partly refused says so here, once, where the
+  # answers it did not manage to fill in are visible next to it. Refusing
+  # quietly and asking the question again looks like the file was ignored.
+  if (( ${#ANSWERS_REJECTED[@]} > 0 )); then
+    tui_blank
+    tui_note '!' "The answer file did not supply these, so they were asked: ${ANSWERS_REJECTED[*]}." warn
+  fi
   # The last screen before the point of no return is the right place to
   # mention the one hardware fact that can turn a working machine into a
   # half written disk.
@@ -2881,6 +2987,9 @@ run_failure() {
 main_flow() {
   SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX")
   chmod 700 "$SECRET_DIR"
+  # Before anything is asked, so the questions open on these rather than on
+  # their defaults, and so the review lists them.
+  [[ -z $ANSWERS_IN ]] || answers_load "$ANSWERS_IN" || true
   install -d -m 0700 "$(dirname "$JOURNAL_FILE")" 2>/dev/null || true
 
   aurade_probe_renderer
@@ -2918,6 +3027,10 @@ main_flow() {
         ;;
 
       review)
+        # Written here rather than at the end, because this is the moment
+        # every answer exists and nothing has been done with them yet. An
+        # install that then fails still leaves a file worth reusing.
+        [[ -z $ANSWERS_OUT ]] || answers_save "$ANSWERS_OUT" || true
         rc=0
         run_review || rc=$?
         if (( rc == 0 )); then
@@ -3032,6 +3145,8 @@ while (($#)); do
     --journal) JOURNAL_FILE=$2; AURADE_JOURNAL_PATH=$2; shift 2 ;;
     --raw-log) RAW_LOG=$2; AURADE_JOURNAL_RAW=$2; shift 2 ;;
     --plan-only) PLAN_ONLY=1; shift ;;
+    --answers) ANSWERS_IN=${2:?}; shift 2 ;;
+    --save-answers) ANSWERS_OUT=${2:?}; shift 2 ;;
     # Detected from TERM=dumb and from brltty running, and available by hand
     # for the cases detection cannot see: a braille display on a serial line,
     # or somebody who simply wants the screens without the drawing.

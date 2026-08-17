@@ -220,6 +220,11 @@ ln -s /usr/lib/systemd/system/aurade-refresh-mirrors.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service"
 ln -s /etc/systemd/system/aurade-installer-autostart.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-autostart.service"
+# Both are enabled and their conditions decide which one runs. The serial unit
+# asks for aurade.installer=serial on the kernel command line and the tty1 one
+# refuses it, so exactly one of them ever claims a console.
+ln -s /etc/systemd/system/aurade-installer-serial.service \
+  "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-serial.service"
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 
 if (( STAGE_ONLY )); then
