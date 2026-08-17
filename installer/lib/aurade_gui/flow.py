@@ -412,7 +412,13 @@ GATE_BODY = (
 )
 
 PROGRESS_TITLE = "Making this computer yours"
+#: Two footers, and which one is showing is the answer to the only question
+#: somebody hovering over the power button has. Before the reversibility
+#: boundary, turning the machine off costs them a download. After it, it costs
+#: them the disk. A warning displayed at a moment it does not apply to is a
+#: warning that gets believed less at the moment it does.
 PROGRESS_FOOTER = "Do not turn off this computer."
+PROGRESS_FOOTER_SAFE = "Nothing has been written to any disk yet."
 PROGRESS_UNINTERRUPTIBLE = "This part cannot be interrupted safely."
 
 #: The pacing line, assembled from three pieces so that the two front ends can

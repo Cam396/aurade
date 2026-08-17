@@ -46,6 +46,7 @@ _find_lib() {
 # Captured before the libraries apply their defaults, so `--render` can tell
 # "the caller asked for this" from "nobody said".
 _TIP_RARITY_SET=${AURADE_TIP_RARITY+set}
+_STAR_RARITY_SET=${AURADE_STAR_RARITY+set}
 
 for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh \
             aurade-journal.sh aurade-copy.sh aurade-wait.sh; do
@@ -574,10 +575,70 @@ visible_questions() {
   done
 }
 
+#: How many rows of the mark to show. The welcome screen is drawn once with
+#: each value in turn the first time it appears, and at full height every time
+#: after that.
+WELCOME_MARK_ROWS=${#AURADE_MARK[@]}
+
+#: Whether the mark has already been drawn once this run.
+WELCOME_MARK_SEEN=0
+
+# The mark, and the sky above it on the few days a year there is one.
+#
+# Left off entirely when the frame is short, because the mark is the first
+# thing to go when there is a choice between a picture and the sentence that
+# says nothing has been written to any disk yet.
+welcome_mark() {
+  local row sky pad widest=0
+  (( ! AURADE_TUI_PLAIN )) || return 0
+  (( AURADE_TUI_HEIGHT >= 26 )) || return 0
+  # Centred on its own widest row rather than on the frame, so the letter
+  # stays a letter. Centring each row on its own length would spread the A
+  # into a diamond.
+  for row in "${AURADE_MARK[@]}"; do
+    (( ${#row} <= widest )) || widest=${#row}
+  done
+  pad=$(( (AURADE_TUI_INNER - widest) / 2 ))
+  (( pad >= 0 )) || pad=0
+  sky=$(aurade_mark_sky)
+  [[ -z $sky ]] || tui_line "$(printf '%*s%s' "$pad" '' "$sky")" dim
+  for row in "${AURADE_MARK[@]:0:WELCOME_MARK_ROWS}"; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" accent
+  done
+  tui_blank
+}
+
+# Draw it once, a row at a time, the first time this screen appears.
+#
+# Not an animation for its own sake: the mark is one continuous stroke, and
+# watching it arrive stroke first is the only way a text console can say that.
+# It happens once per run, it takes under half a second, and it is off for
+# anybody who asked for less motion or is reading this through speech, where
+# seven redraws of the same screen is seven times the same screen read out.
+welcome_draw() {
+  local i
+  if (( WELCOME_MARK_SEEN )) || (( AURADE_TUI_PLAIN )) || [[ ! -t 1 ]] ||
+     [[ ${ACCESS[reduce_motion]:-no} == yes ]] || (( AURADE_TUI_HEIGHT < 26 )); then
+    WELCOME_MARK_SEEN=1
+    screen_welcome
+    return 0
+  fi
+  WELCOME_MARK_SEEN=1
+  for (( i = 1; i <= ${#AURADE_MARK[@]}; i++ )); do
+    WELCOME_MARK_ROWS=$i
+    screen_welcome
+    sleep 0.05
+  done
+  WELCOME_MARK_ROWS=${#AURADE_MARK[@]}
+  screen_welcome
+}
+
 screen_welcome() {
+  local CURRENT_SCREEN=welcome
   tui_clear
   tui_header 'Welcome'
   tui_blank
+  welcome_mark
   tui_wrap 'Install AuraDE' accent
   tui_blank
   tui_wrap 'A few questions, then AuraDE takes it from here.' ink
@@ -1216,6 +1277,7 @@ screen_progress() {
   # Plain mode is not a narrower frame, it is the drawing removed.
   if (( PROGRESS_AURORA && ! AURADE_TUI_PLAIN )) &&
      [[ ${ACCESS[reduce_motion]:-no} != yes ]]; then
+    aurade_star_step "$(( AURADE_TUI_INNER - 4 ))" 3
     while IFS= read -r row; do
       tui_line "$(printf '  %s' "$row")" cyan
     done < <(aurade_aurora "$frame" "$(( AURADE_TUI_INNER - 4 ))" 3)
@@ -1253,10 +1315,17 @@ screen_progress() {
   fi
 
   if (( PROGRESS_TIP )); then
+    # Past twenty minutes the rotation stops and stays stopped. Somebody still
+    # on this screen then is not wondering what Btrfs is, they are wondering
+    # whether the thing has frozen, and every other line is answering a
+    # question they gave up on.
+    tip=$(aurade_tip_long "$(progress_elapsed)")
+    if [[ -n $tip ]]; then
+      :
     # With reduce motion on, the rotation stops rather than the tips going
     # away. A screen with nothing on it is not calmer, it is emptier, and the
     # tips are the only thing telling somebody the wait is expected.
-    if [[ ${ACCESS[reduce_motion]:-no} == yes ]]; then
+    elif [[ ${ACCESS[reduce_motion]:-no} == yes ]]; then
       tip=$(aurade_tip_for 0)
     else
       tip=$(aurade_tip_for "$(( frame / AURADE_TIP_FRAMES ))")
@@ -1271,12 +1340,38 @@ screen_progress() {
   # else stays unoffered for the same reason it always did: this is the least
   # recoverable moment in the product, and a footer that invites a keypress
   # here is inviting the wrong one.
-  if (( AURADE_TUI_PLAIN )); then
-    tui_footer 'do not turn off this computer' "$(stage_position "$active")"
-  else
-    tui_footer 'do not turn off this computer    g  something to do' \
-      "$(stage_position "$active")"
+  #
+  # And the warning is only there while it is true. Before the reversibility
+  # boundary nothing has been written and turning the machine off costs
+  # somebody a download, not a disk. A warning shown at a moment it does not
+  # apply to is a warning that gets believed less at the moment it does.
+  #
+  # Short, because the footer also carries the game key and the stage counter
+  # and 68 columns is the floor. The full strength version of this warning is
+  # already in the body, one line up, where it can wrap: "This part cannot be
+  # interrupted safely."
+  local warn='do not turn this off'
+  if [[ -n $active ]] && aurade_stage_reversible "$active"; then
+    warn='nothing is written yet'
   fi
+  if (( AURADE_TUI_PLAIN )); then
+    tui_footer "$warn" "$(stage_position "$active")"
+  else
+    tui_footer "$warn    g  something to do" "$(stage_position "$active")"
+  fi
+}
+
+#: When the install started, in seconds since the epoch. Zero until it does,
+#: which is what keeps the long tip off every screen that is not an install.
+PROGRESS_STARTED=0
+
+# How long this has been going, in seconds.
+#
+# EPOCHSECONDS rather than a `date` call, because this is consulted on every
+# frame and a process per frame to read a clock is a process per frame.
+progress_elapsed() {
+  (( PROGRESS_STARTED > 0 )) || { printf '0'; return 0; }
+  printf '%s' "$(( ${EPOCHSECONDS:-PROGRESS_STARTED} - PROGRESS_STARTED ))"
 }
 
 # Each row carries its colour token after a tab, because the rows are built
@@ -2226,6 +2321,7 @@ journal_running_stage() {
 # keyboard is none.
 run_engine_with_progress() {
   local status=0 pid key frame=0 mode=progress
+  PROGRESS_STARTED=${EPOCHSECONDS:-0}
   "$ENGINE" "$@" >>"$RAW_LOG" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
@@ -2659,7 +2755,7 @@ main_flow() {
   while true; do
     case $state in
       welcome)
-        screen_welcome
+        welcome_draw
         key=$(read_key) || key=esc
         if [[ $key == esc || $key == q ]]; then
           state=cancelled
@@ -2774,6 +2870,10 @@ fi
 # only random thing on any of these screens, so it is off here unless the
 # caller turned it on deliberately.
 [[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
+# And the same for the shooting star, for the same reason: it is the only
+# other thing on any of these screens that decides for itself whether to
+# appear.
+[[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
   access keycheck explain

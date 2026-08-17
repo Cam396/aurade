@@ -11,6 +11,8 @@
 #   tip    something true about the system being installed right now
 #   next   something to have ready for after the restart
 #   rare   shown roughly one rotation in forty
+#   long   shown instead of the rotation once the install passes twenty
+#          minutes, and not given back
 #
 # Rules for writing one. It has to be true of this install, not of operating
 # systems in general, because a fact the reader can check is worth ten that
@@ -18,6 +20,11 @@
 # characters, and tests/test-progress-wait.sh will say so if it does not. It is read by somebody with nothing to do for ten minutes,
 # so it can be interesting, and it is read by somebody who is nervous about
 # their disk, so it is never cute about that. No exclamation marks.
+#
+# The `long` lane is not a joke lane either, and it is the one place in this
+# product where the reader is worried. Twenty minutes in, the question is no
+# longer "what is Btrfs", it is "has this stopped". Answer that, say thank
+# you, and do not be clever.
 #
 # The `rare` lane is not a joke lane. It is the one that is allowed to be warm
 # about the fact that a person is sitting there waiting, and it shows up seldom
@@ -59,3 +66,5 @@ rare	This screen was built by people who have watched a lot of installers and be
 rare	Ten minutes is about four songs, or the time it takes tea to go cold. The install does not mind which.
 rare	If you are reading every one of these, the install is going fine and you have excellent patience.
 rare	There is a small game on this screen. It is not hidden very well.
+
+long	This is taking a while. It is still going. Thank you for waiting.

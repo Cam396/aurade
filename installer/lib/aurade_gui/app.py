@@ -1958,7 +1958,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         """
         box = column(18)
         box.append(label(F.PROGRESS_TITLE, "m3-headline-small"))
-        box.append(label(F.PROGRESS_FOOTER, "m3-body-medium", css="dim-label"))
+        # Starts as the safe wording and changes when the install crosses the
+        # reversibility boundary. Kept as a widget rather than a constant line
+        # because which of the two is showing is the answer to the only
+        # question somebody hovering over the power button has.
+        footer = label(F.PROGRESS_FOOTER_SAFE, "m3-body-medium", css="dim-label")
+        self.widgets["progress.footer"] = footer
+        box.append(footer)
 
         live = column(10)
         live.add_css_class("card")
@@ -2226,6 +2232,10 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _draw_progress(self, report: dict) -> None:
         steps = self.widgets["progress.steps"]
         pct, detail, running_label = 0, "", ""
+        # Safe until a stage says otherwise. An install that has not reached a
+        # running stage yet has not written anything either, and defaulting the
+        # other way would put the strong warning on screen before it is true.
+        reversible = True
         done = pending = 0
         for stage in report.get("stages", []):
             name = stage["stage"]
@@ -2264,6 +2274,7 @@ class InstallerWindow(Adw.ApplicationWindow):
                 pct = int(stage.get("pct", 0))
                 detail = stage.get("detail", "")
                 running_label = stage.get("label", "")
+                reversible = stage.get("reversible", True)
             elif status == "ok":
                 done += 1
             elif status != "failed":
@@ -2273,6 +2284,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         # because it is the only question this page exists to answer.
         self.widgets["progress.step"].set_label(
             running_label or F.PROGRESS_STEP_IDLE)
+        self.widgets["progress.footer"].set_label(
+            F.PROGRESS_FOOTER_SAFE if reversible else F.PROGRESS_FOOTER)
         steps.set_title(F.progress_steps(done, pending))
         bar = self.widgets["progress.bar"]
         wanted = max(0.0, min(1.0, pct / 100.0))

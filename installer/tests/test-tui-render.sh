@@ -160,10 +160,18 @@ env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN TERM=dumb \
 ! cmp -s "$TMP/nocolor" "$TMP/dumb" ||
   fail 'NO_COLOR and TERM=dumb produced identical text, so one of them is wrong'
 
-# --- the interior is strictly ASCII in every tier ---------------------------
-# Box drawing is reliably one column wide; check marks, arrows and bullets are
-# not, and a double-width glyph in the body is exactly how the frame breaks on
-# the terminals least able to show it.
+# --- the interior is one column per character in every tier -----------------
+# The rule people remember is "the body is ASCII", and the rule that actually
+# matters is that every character in it occupies exactly one column. Check
+# marks, arrows and bullets are ambiguous width, and a double-width glyph in
+# the body is exactly how the frame breaks on the terminals least able to show
+# it.
+#
+# Two blocks are as reliable as ASCII on that measure and both are used here:
+# box drawing for the frame, and the braille patterns the progress bar fills
+# itself with. Both are Neutral width, which every terminal renders narrow.
+# Whether the font has the glyph at all is a different question, and it is why
+# the braille bar is off on the Linux console, which is checked below.
 for screen in "${SCREENS[@]}"; do
   for frame in ascii unicode; do
     render "$screen" 256 "$frame" >"$TMP/raw"
@@ -177,6 +185,8 @@ for n, line in enumerate(open(path, encoding='utf-8').read().split('\n'), 1):
     if line == '' or line[0] not in '|│':
         continue
     for c in line[1:-1]:
+        if 0x2800 <= ord(c) <= 0x28ff:
+            continue
         if not (0x20 <= ord(c) <= 0x7e):
             print(f'test-tui-render: {screen} line {n} has a non-ASCII interior '
                   f'character {c!r} (U+{ord(c):04X})', file=sys.stderr)
@@ -499,6 +509,37 @@ grep -Fq '[[ ${TERM:-} == linux ]] || return 0' "$ROOT/installer/lib/aurade-tui.
 # And restored, because the palette outlives the process.
 grep -Fq 'tui_palette_reset' "$TUI" ||
   fail 'the installer never puts the console palette back'
+
+# --- the braille bar, and the console it must not appear on -----------------
+#
+# A braille cell is two columns of four dots, so filling one left to right
+# gives eight steps inside a single character and the bar moves continuously
+# instead of jumping a whole cell at a time.
+#
+# The Linux virtual console is the one place it must not be drawn, and it is
+# also where this installer mostly runs. Its fonts carry a few hundred glyphs;
+# box drawing is among them, which is why the frame is safe there, and the
+# braille block is not. A bar made of missing glyphs is a row of blanks, which
+# looks exactly like an install that is not progressing.
+bar_on() {
+  env AURADE_TUI_COLOR=none AURADE_TUI_FRAME="$1" TERM="$2" AURADE_TUI_HEIGHT=40 \
+    "$TUI" --render progress --journal "$TMP/journal.jsonl" 2>/dev/null |
+    grep -F '[' | head -1
+}
+
+grep -q '⣿' <<<"$(bar_on unicode xterm-256color)" ||
+  fail 'a terminal that can draw braille got the plain bar'
+! grep -q '⣿' <<<"$(bar_on unicode linux)" ||
+  fail 'the braille bar was drawn on the console whose font has no braille in it'
+grep -q '#' <<<"$(bar_on unicode linux)" ||
+  fail 'the console fell back to no bar at all instead of the ASCII one'
+! grep -q '⣿' <<<"$(bar_on ascii xterm-256color)" ||
+  fail 'the ascii tier drew braille'
+# And never under plain mode, where the cells are eight dot patterns under a
+# finger rather than a picture of anything.
+! env AURADE_TUI_PLAIN=1 AURADE_TUI_HEIGHT=40 "$TUI" --render progress \
+    --journal "$TMP/journal.jsonl" 2>/dev/null | grep -q '⣿' ||
+  fail 'plain mode drew a braille progress bar at a braille display'
 
 # --- the battery warning, and the three times it stays quiet ----------------
 #

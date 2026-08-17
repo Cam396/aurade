@@ -20,13 +20,66 @@
 # reach the engine. The worst a bug here can do is draw badly.
 
 # --------------------------------------------------------------------------
+# The mark
+# --------------------------------------------------------------------------
+#
+# The same A the graphical installer draws, at the only fidelity a virtual
+# console has.
+#
+# It is a letter and it is one continuous stroke, which is the whole idea of
+# the mark: the crossbar does not cross, it loops. A plain block A would have
+# been easier to draw and would have been a different logo, and a text
+# installer that shows a different logo to the graphical one is two products.
+#
+# Seven rows, because that is the smallest it can be and still keep the loop.
+AURADE_MARK=(
+'        /\'
+'       /  \'
+'      /    \'
+'     /  __  \'
+'    /  /  \  \'
+'   /  (____)  \'
+'  /__/      \__\'
+)
+
+#: Today, as month and day. Injectable, so the seasonal lines below can be
+#: tested without waiting for December.
+AURADE_TODAY=${AURADE_TODAY:-$(date +%m%d)}
+
+# One line of sky above the mark, which is empty on all but a few days a year.
+#
+# The rule for these is that somebody who is not looking for them never
+# notices, and somebody who happens to install AuraDE on the right day gets a
+# small thing that was clearly put there on purpose. An easter egg that
+# announces itself is a feature.
+aurade_mark_sky() {
+  case $AURADE_TODAY in
+    # The dark end of the year in the hemisphere most of these machines are
+    # in. Sparse, because snow drawn densely in ASCII is static.
+    12[2-9]*|123[01]|010[1]) printf '     .   *      .   *' ;;
+    # The twenty ninth of February: a day that is not usually there, marked by
+    # something crossing a sky that is not usually there either.
+    0229) printf '        - - *' ;;
+    *) printf '' ;;
+  esac
+}
+
+# --------------------------------------------------------------------------
 # Tips
 # --------------------------------------------------------------------------
 
 AURADE_TIPS=()
 AURADE_TIPS_NEXT=()
 AURADE_TIPS_RARE=()
+AURADE_TIPS_LONG=()
 AURADE_TIPS_LOADED=0
+
+#: After this many seconds the long lane takes over the tip line and does not
+#: give it back. Twenty minutes is well past the point where a normal install
+#: has finished, so anybody still reading has started to wonder whether the
+#: thing has frozen, and every other tip on the rotation is answering a
+#: question they have stopped asking.
+AURADE_TIP_LONG_AFTER=${AURADE_TIP_LONG_AFTER:-1200}
 
 #: How often the rare lane comes up. One rotation in this many, on average.
 AURADE_TIP_RARITY=${AURADE_TIP_RARITY:-40}
@@ -51,9 +104,23 @@ aurade_tips_load() {
       tip)  AURADE_TIPS+=("$text") ;;
       next) AURADE_TIPS_NEXT+=("$text") ;;
       rare) AURADE_TIPS_RARE+=("$text") ;;
+      long) AURADE_TIPS_LONG+=("$text") ;;
     esac
   done <"$file"
   return 0
+}
+
+# The line for somebody who has been watching this for twenty minutes.
+#
+# It replaces the rotation rather than joining it. At that point the useful
+# thing to say is not another fact about Btrfs, it is that this is still
+# running, because the question they now have is whether it has stopped.
+aurade_tip_long() {
+  local elapsed=${1:-0}
+  aurade_tips_load
+  (( elapsed >= AURADE_TIP_LONG_AFTER )) || { printf ''; return 0; }
+  (( ${#AURADE_TIPS_LONG[@]} > 0 )) || { printf ''; return 0; }
+  printf '%s' "${AURADE_TIPS_LONG[0]}"
 }
 
 # The tip for a given rotation.
@@ -107,12 +174,56 @@ AURADE_AURORA_RAMP=' .:-=+*#'
 #: a time, and it does nothing else.
 AURADE_AURORA_BLOOM=0
 
+# A shooting star, when there happens to be one.
+#
+# The aurora is a wave, and a wave is restful and completely predictable after
+# about thirty seconds of watching it. This is the thing that is not: it
+# crosses once, it takes about a second, and then there is not another one for
+# a while.
+#
+# Rare on purpose. At one in fifty-five frames it turns up roughly every seven
+# seconds, which over a ten minute install is often enough to be worth
+# glancing up for and seldom enough that it never becomes the screen's
+# heartbeat. Something that arrives on a schedule is not a surprise twice.
+#: Column of the head and the row it is on. A negative column means there is
+#: no star at the moment, which is nearly always.
+AURADE_STAR_X=-1
+AURADE_STAR_Y=0
+
+#: One frame in this many starts one. Zero switches them off, which is what
+#: the render tests and reduced motion both do.
+AURADE_STAR_RARITY=${AURADE_STAR_RARITY:-55}
+
+#: Head first, then the tail it leaves behind it.
+AURADE_STAR_TRAIL='*--..'
+
+aurade_star_step() {
+  local width=${1:-56} rows=${2:-3}
+  if (( AURADE_STAR_X >= 0 )); then
+    AURADE_STAR_X=$(( AURADE_STAR_X + 5 ))
+    # It descends across the whole crossing rather than travelling flat. On
+    # three rows that is the difference between a shooting star and an
+    # underline.
+    AURADE_STAR_Y=$(( (AURADE_STAR_X * rows) / (width + 8) ))
+    (( AURADE_STAR_Y < rows )) || AURADE_STAR_Y=$(( rows - 1 ))
+    (( AURADE_STAR_X <= width + 6 )) || AURADE_STAR_X=-1
+    return 0
+  fi
+  (( AURADE_STAR_RARITY > 0 )) || return 0
+  (( RANDOM % AURADE_STAR_RARITY == 0 )) || return 0
+  AURADE_STAR_X=0
+  AURADE_STAR_Y=0
+  return 0
+}
+
 aurade_aurora() {
   local frame=${1:-0} width=${2:-56} rows=${3:-3}
   local bloom=0
   (( AURADE_AURORA_BLOOM <= 0 )) || bloom=1
   awk -v frame="$frame" -v width="$width" -v rows="$rows" -v bloom="$bloom" \
-      -v ramp="$AURADE_AURORA_RAMP" '
+      -v ramp="$AURADE_AURORA_RAMP" \
+      -v star_x="$AURADE_STAR_X" -v star_y="$AURADE_STAR_Y" \
+      -v trail="$AURADE_STAR_TRAIL" '
     BEGIN {
       steps = length(ramp)
       middle = (rows - 1) / 2
@@ -132,6 +243,17 @@ aurade_aurora() {
           if (level > 1) level = 1
           index_ = int(level * (steps - 1) + 0.5) + 1
           line = line substr(ramp, index_, 1)
+        }
+        # The star is written over the wave rather than added to it, so it
+        # reads as being in front. Done here, while every row is still exactly
+        # `width` characters, because the trailing trim below would otherwise
+        # have to be undone to place anything.
+        if (star_x >= 0 && star_y == y) {
+          for (i = 0; i < length(trail); i++) {
+            px = star_x - i
+            if (px < 0 || px >= width) continue
+            line = substr(line, 1, px) substr(trail, i + 1, 1) substr(line, px + 2)
+          }
         }
         # Trailing spaces are invisible and would only be padding the frame
         # twice, so they come off before the row is handed back.

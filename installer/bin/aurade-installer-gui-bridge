@@ -770,6 +770,12 @@ gb_progress() {
     # Roughly how long this one takes, from lib/aurade-copy.sh, so the two
     # front ends give the same answer to "is it stuck".
     out+="\"pacing\":$(_gb_str "$(stage_pacing "$stage")"),"
+    # Whether this stage can still be walked away from. The renderer uses it
+    # to decide which of two footers to show, and both front ends read the
+    # answer from aurade_stage_reversible rather than from a list of their
+    # own, because the boundary moving in one and not the other is how one of
+    # them ends up telling somebody it is safe to turn the machine off.
+    out+="\"reversible\":$(_gb_bool aurade_stage_reversible "$stage"),"
     out+="\"elapsed\":$(_gb_str "$(format_elapsed "${elapsed:-}")")}"
     sep=','
   done
