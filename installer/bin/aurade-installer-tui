@@ -2664,6 +2664,74 @@ declare -A WAIT_LABELS=(
   [ttt]='Play tic-tac-toe'
 )
 
+#: How much of the sequence has been entered.
+#:
+#: Ten keypresses, none of which does anything on the welcome screen, which is
+# why that screen is where it lives. A sequence built out of keys that do
+#: something would be a sequence somebody enters by accident.
+KONAMI=(up up down down left right left right b a)
+KONAMI_AT=0
+
+# True once the whole sequence has been entered in order.
+#
+# Kept in the caller's shell rather than inside `read_key`, because that runs
+# in a command substitution and anything it counted would be thrown away with
+# the subshell.
+konami_watch() {
+  local key=$1
+  if [[ $key == "${KONAMI[KONAMI_AT]}" ]]; then
+    KONAMI_AT=$(( KONAMI_AT + 1 ))
+    if (( KONAMI_AT >= ${#KONAMI[@]} )); then
+      KONAMI_AT=0
+      return 0
+    fi
+    return 1
+  fi
+  # A wrong key restarts, and a wrong key that is the first key restarts at
+  # one rather than at nothing, or the sequence cannot be entered twice.
+  if [[ $key == "${KONAMI[0]}" ]]; then
+    KONAMI_AT=1
+  else
+    KONAMI_AT=0
+  fi
+  return 1
+}
+
+# The people who made it, and the people who found the bugs.
+#
+# Reachable only by the sequence above, which is the point: a credits screen
+# in a menu is a page nobody opens, and one behind ten keypresses that do
+# nothing is a thing somebody tells another person about.
+screen_credits() {
+  local HELP_KEY=0
+  local row pad widest=0
+  tui_clear
+  tui_header 'Thank you'
+  tui_blank
+  for row in "${AURADE_MARK[@]}"; do
+    (( ${#row} <= widest )) || widest=${#row}
+  done
+  pad=$(( (AURADE_TUI_INNER - widest) / 2 ))
+  (( pad >= 0 )) || pad=0
+  for row in "${AURADE_MARK[@]}"; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" accent
+  done
+  tui_blank
+  tui_wrap 'AuraDE is made by people who wanted a desktop that felt like somebody had thought about it.' ink
+  tui_blank
+  tui_wrap 'Thank you to everybody who installed a broken build, wrote down exactly what happened, and installed the next one.' dim
+  tui_blank
+  tui_wrap 'That is most of why this works.' ok
+  tui_blank
+  tui_footer 'press any key to go back' ''
+}
+
+run_credits() {
+  local key
+  screen_credits
+  key=$(tui_read_key) || true
+}
+
 # The picker.
 #
 # Costs one screen and answers the objection a cycle cannot: the choice is
@@ -3603,6 +3671,15 @@ main_flow() {
         key=$(read_key) || key=esc
         if [[ $key == esc || $key == q ]]; then
           state=cancelled
+        elif konami_watch "$key"; then
+          run_credits
+        elif [[ $key == up || $key == down || $key == left || $key == right ||
+                $key == b || $key == a || $key == redraw || $key == mouse ]]; then
+          # These do nothing here, which is what the footer already says: this
+          # screen offers enter and escape. They used to advance, because
+          # anything that was not escape did, and an arrow key on a screen
+          # with nothing to move through should not start an install.
+          :
         else
           entry=0
           state=questions
@@ -3725,7 +3802,7 @@ fi
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
   access keycheck explain help watch ttt life picker lights fifteen mines nono
-  type
+  type credits
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3793,6 +3870,7 @@ if [[ -n $RENDER_ONLY ]]; then
     lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
     nono)      RANDOM=${AURADE_NONO_SEED:-4}; aurade_nono_new; screen_nono ;;
     type)      RANDOM=${AURADE_TYPE_SEED:-2}; aurade_type_new; screen_type ;;
+    credits)   screen_credits ;;
     mines)     RANDOM=${AURADE_MINES_SEED:-9}; aurade_mines_new
                aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;

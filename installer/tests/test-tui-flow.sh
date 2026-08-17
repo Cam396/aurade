@@ -766,4 +766,37 @@ fi
 apply_answer hostname localhost-2 ||
   fail 'a hostname that merely starts with localhost was refused'
 
+# --- a sequence of keys that do nothing ------------------------------------
+#
+# The welcome screen is where this lives precisely because none of the ten
+# keys does anything there. A sequence built out of keys that do something is
+# a sequence somebody enters by accident.
+KONAMI_AT=0
+for _key in up up down down left right left right b; do
+  konami_watch "$_key" && fail 'the sequence fired early'
+done
+konami_watch a || fail 'the whole sequence did not fire'
+
+# A wrong key restarts it, and a wrong key that happens to be the first key
+# restarts at one rather than at nothing, or the sequence cannot be entered a
+# second time.
+KONAMI_AT=0
+konami_watch up || true
+konami_watch x || true
+(( KONAMI_AT == 0 )) || fail 'a wrong key did not reset the sequence'
+konami_watch up || true
+konami_watch up || true
+(( KONAMI_AT == 2 )) ||
+  fail "after up up the sequence is at $KONAMI_AT, so it cannot be entered twice"
+
+# And it fires a second time, which is what that restart rule is for.
+KONAMI_AT=0
+for _round in 1 2; do
+  fired=0
+  for _key in up up down down left right left right b a; do
+    konami_watch "$_key" && fired=1
+  done
+  (( fired )) || fail "the sequence did not fire on round $_round"
+done
+
 echo 'installer TUI flow test: PASS'
