@@ -60,17 +60,13 @@ plain() {
 
 # --- every screen, every rule ----------------------------------------------
 for screen in "${SCREENS[@]}"; do
-  # The game is the one screen with no plain rendering, deliberately. It is a
-  # grid of characters moving on a tick, there is nothing in it to read, and
-  # in plain mode it is unreachable: the footer does not offer it and the key
-  # that opens it is ignored. Both of those are asserted below. Rendering it
-  # here anyway and demanding it be frameless would be asserting on a screen
-  # nobody can get to.
-  # The two games are the screens with no plain rendering, deliberately. Both
+  # The games are the screens with no plain rendering, deliberately. All three
   # are grids of characters with nothing in them to read, and in plain mode
-  # both are unreachable: the footer offers neither and the key that opens
-  # them returns to the tips.
-  [[ $screen != game && $screen != 2048 ]] || continue
+  # all three are unreachable: the footer offers none of them and the key that
+  # opens them returns to the tips, which is asserted below. Rendering one here
+  # anyway and demanding it be frameless would be asserting on a screen nobody
+  # can get to.
+  case $screen in game|2048|ttt) continue ;; esac
   plain "$screen" >"$TMP/$screen" || { fail "$screen did not render in plain mode"; continue; }
 
   # Something has to come out. A screen that renders to nothing is a screen

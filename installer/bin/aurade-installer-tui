@@ -1248,7 +1248,8 @@ gate_spelling() {
 }
 
 screen_gate() {
-  local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran token layout holds
+  local target=${ANSWERS[target]:-} typed=${1:-} aside=${2:-}
+  local size model serial tran token layout holds
   layout=${ANSWERS[layout]:-$(aurade_question_default layout)}
   token=$(aurade_confirmation_token "$target" "$layout")
   size=$(disk_field "$target" 2)
@@ -1285,6 +1286,7 @@ screen_gate() {
   tui_blank
   tui_wrap "Type $token to continue" dim
   tui_line "$(printf '  > %s_' "$typed")" cyan
+  [[ -z $aside ]] || tui_wrap "$aside" dim
   # Spelled out on request, and only on request: it is four lines of noise to
   # somebody who can see the field and the only way to check it for somebody
   # who cannot.
@@ -2352,6 +2354,20 @@ apply_answer() {
   local id=$1 value=$2
   APPLY_ERROR=
   case $id in
+    hostname)
+      # `localhost` is a valid hostname by every rule this installer has, and
+      # naming a machine after the word every machine already answers to is a
+      # afternoon of confusion waiting to happen: every other computer on the
+      # network resolves it to itself.
+      #
+      # Declined with a joke rather than an error, because it is not a
+      # mistake, it is a person being funny, and an error message would be the
+      # installer failing to notice.
+      if [[ ${value,,} == localhost ]]; then
+        APPLY_ERROR='Every computer is already called that. Pick something this one answers to.'
+        return 1
+      fi
+      ;;
     keymap)
       command -v loadkeys >/dev/null 2>&1 || return 0
       if ! loadkeys "$value" >/dev/null 2>&1; then
@@ -2633,6 +2649,45 @@ screen_progress_log() {
   tui_footer 'g  next    esc  back to the install' "$(stage_position "$stage")"
 }
 
+#: How many frames the refusal has left to sit on the screen before the board
+#: clears itself and offers something else.
+TTT_FRAMES=0
+
+# Tic-tac-toe, which declines.
+#
+# It is on the list of things to play and it will not play, and the reason it
+# is the first easter egg built is that it is the only one that is also a
+# statement about the rest of the product. This installer spends its whole
+# length asking somebody to be certain before doing something irreversible.
+#
+# It draws the empty board, waits, and then says the line. Nothing is
+# playable, no key does anything but leave, and after a moment it offers the
+# game next in the cycle instead.
+screen_ttt() {
+  local HELP_KEY=0
+  local pad row
+  tui_clear
+  tui_header 'A strange game'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 11) / 2 ))
+  (( pad >= 0 )) || pad=0
+  for row in '   |   |   ' '---+---+---' '   |   |   ' '---+---+---' '   |   |   '; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" dim
+  done
+  tui_blank
+  if (( TTT_FRAMES > 8 )); then
+    tui_wrap 'A strange game.' ink
+    tui_blank
+    tui_wrap 'The only winning move is not to play.' accent
+    tui_blank
+    tui_wrap 'How about a nice game of 2048?' dim
+  else
+    tui_wrap 'Thinking.' dim
+  fi
+  tui_blank
+  tui_footer 'g  next    esc  back to the install' "$(stage_position "$(journal_running_stage)")"
+}
+
 screen_game() {
   # Polled rather than read, so `?` does nothing here. See screen_progress_log.
   local HELP_KEY=0
@@ -2740,6 +2795,7 @@ run_engine_with_progress() {
       # half watching: you can stop mid move and lose nothing.
       2048) screen_2048 ;;
       log)  screen_progress_log ;;
+      ttt)  screen_ttt; TTT_FRAMES=$(( TTT_FRAMES + 1 )) ;;
       *)    screen_progress "$frame" ;;
     esac
     # `AURADE_TUI_KEYS` is the seam the flow tests drive the state machine
@@ -2761,6 +2817,11 @@ run_engine_with_progress() {
               tips) WAIT_MODE=log; mode=log ;;
               log)  WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
               2048) WAIT_MODE=snake; mode=snake ;;
+              # Last in the cycle, and it hands back to the tips rather than
+              # to itself, so somebody who finds it once has to go round again
+              # to see it. An easter egg that is one keypress away every time
+              # is a menu item.
+              snake) WAIT_MODE=ttt; mode=ttt; TTT_FRAMES=0 ;;
               *)    WAIT_MODE=tips ;;
             esac
             # Both games are grids of characters and neither has anything in
@@ -2778,6 +2839,13 @@ run_engine_with_progress() {
           case $key in
             g|G) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        ttt)
+          # Every key leaves. There is nothing to press, which is the joke.
+          case $key in
+            g|G) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+            *) WAIT_MODE=tips; mode=progress ;;
           esac
           ;;
         2048)
@@ -2957,7 +3025,7 @@ question_position() {
 # whole; the engine independently requires the same token, so a front end bug
 # here cannot by itself cause an erase.
 run_gate() {
-  local target=${ANSWERS[target]} token typed='' key
+  local target=${ANSWERS[target]} token typed='' key aside=''
   # The token is a device path and cannot contain a question mark, but this
   # field is also where paste lands, and a pasted question mark that opened a
   # help screen instead of failing to match would be a confusing way to learn
@@ -2967,7 +3035,8 @@ run_gate() {
   token=$(aurade_confirmation_token "$target" \
     "${ANSWERS[layout]:-$(aurade_question_default layout)}")
   while true; do
-    screen_gate "$typed"
+    screen_gate "$typed" "$aside"
+    aside=''
     key=$(read_key) || return 1
     case $key in
       enter) [[ $typed == "$token" ]] && return 0 || true ;;
@@ -2986,6 +3055,16 @@ run_gate() {
       # again independently.
       paste:*) typed+=${key#paste:} ;;
       *) [[ ${#key} -ne 1 ]] || typed+=$key ;;
+    esac
+    # Two words this screen recognises, neither of which is a way past it.
+    #
+    # The gate is not weakened by either: the field is cleared, the token is
+    # unchanged, and the comparison that matters is still the one the engine
+    # makes for itself. They are here because somebody who types HELLO at a
+    # screen like this one has earned an answer.
+    case $typed in
+      HELLO) typed=''; aside='Not today.' ;;
+      xyzzy) typed=''; aside='Nothing happens.' ;;
     esac
   done
 }
@@ -3308,7 +3387,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help watch
+  access keycheck explain help watch ttt
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3326,6 +3405,18 @@ while (($#)); do
     # or somebody who simply wants the screens without the drawing.
     --plain) AURADE_TUI_PLAIN=1; AURADE_TUI_COLOR=none; shift ;;
     --list-screens) printf '%s\n' "${RENDERABLE[@]}"; exit 0 ;;
+    # Have you mooed today. Undocumented, harmless, and older than most of the
+    # people who will find it.
+    --moo)
+      printf '%s\n' \
+        '         (__)' \
+        '         (oo)' \
+        '   /------\/' \
+        '  / |    ||' \
+        ' *  /\---/\' \
+        '    ~~   ~~' \
+        '....."Have you mooed today?"...'
+      exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "aurade-installer-tui: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -3359,6 +3450,7 @@ if [[ -n $RENDER_ONLY ]]; then
                screen_explain ;;
     help)      screen_help_where ;;
     watch)     screen_progress_log ;;
+    ttt)       TTT_FRAMES=${AURADE_RENDER_TTT_FRAMES:-20}; screen_ttt ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.

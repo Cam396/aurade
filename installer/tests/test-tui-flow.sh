@@ -722,4 +722,48 @@ if AURADE_CAPSLOCK_GLOB="$TMP/no-such-place/*/brightness" capslock_on; then
   fail 'caps lock was reported on a machine with no keyboard light to read'
 fi
 
+# --- the things that are not features ---------------------------------------
+#
+# Two words the erase gate answers, and the only thing worth testing about
+# either is that the gate is exactly as hard to pass afterwards. They clear
+# the field, which makes it harder rather than easier, and the token they are
+# compared against does not change.
+reset_state
+ANSWERS[target]=/dev/sda
+ANSWERS[layout]=wipe
+token=$(aurade_confirmation_token /dev/sda wipe)
+{
+  typed 'HELLO'
+  typed 'xyzzy'
+  printf 'paste:%s\n' "$token"
+  echo enter
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null ||
+  fail 'the gate stopped accepting its own token after the asides'
+release
+
+# And neither of them is a way through. Typing HELLO and pressing enter is
+# still an empty field at a screen that erases a disk.
+{ typed 'HELLO'; echo enter; echo esc; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null && fail 'HELLO was accepted as a confirmation'
+release
+{ typed 'xyzzy'; echo enter; echo esc; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null && fail 'xyzzy was accepted as a confirmation'
+release
+
+# Naming a machine after the word every machine already answers to is declined
+# with a sentence rather than an error code, because it is not a mistake, it
+# is somebody being funny.
+if apply_answer hostname localhost; then
+  fail 'a machine was allowed to call itself localhost'
+fi
+[[ -n $APPLY_ERROR ]] || fail 'localhost was refused without saying why'
+[[ $APPLY_ERROR != *invalid* && $APPLY_ERROR != *error* ]] ||
+  fail 'localhost was refused with an error message rather than an answer'
+apply_answer hostname localhost-2 ||
+  fail 'a hostname that merely starts with localhost was refused'
+
 echo 'installer TUI flow test: PASS'
