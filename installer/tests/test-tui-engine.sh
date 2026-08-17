@@ -218,7 +218,8 @@ AURADE_STUB_DRYRUN_STATUS=3 run_flow dryfail && fail 'a failing dry run reported
 AURADE_STUB_FAIL_AT=bootloader run_flow bootfail && fail 'a failed install reported success'
 grep -Fq 'Making it bootable did not finish' "$TMP/out.bootfail" ||
   fail 'the failure screen did not name the failed stage'
-grep -Fq 'cannot yet continue from where it stopped' "$TMP/out.bootfail" ||
+sed 's/^ *[|+]//; s/[|+] *$//' "$TMP/out.bootfail" | tr '\n' ' ' | tr -s ' ' |
+  grep -Fq 'no way to carry on from where this stopped' ||
   fail 'the failure screen did not admit that it cannot resume'
 # Scoped to the failure screen. This file captures the whole session, and a
 # question's own help text earlier in the run is not the failure screen

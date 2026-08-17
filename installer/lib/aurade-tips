@@ -40,16 +40,16 @@ tip	Swap is where memory goes when there is not enough. A swap file can be added
 tip	Hibernating writes all of memory out to disk, which is why a hibernation swap file has to be at least that large.
 tip	This installer never resizes a partition. It only uses free space, which is why it can say what it will do beforehand.
 tip	The installer writes a journal as it goes. That file is what the progress list on this screen is drawn from.
-tip	If Secure Boot is on, AuraDE signs its boot files when a signing key is available. Without one, the install continues with a warning and firmware must be disabled or enrolled before first boot.
+tip	AuraDE signs its boot files when a Secure Boot key is available. Without one, turn Secure Boot off before restarting.
 tip	The EFI partition is the part of the disk the firmware reads. It is small, plain FAT, and any computer can mount it.
 tip	Everything here is true of the text installer too. They ask the same questions and run the same engine.
-tip	Your account is created during this step, with the name and password you chose. The live session has neither.
+tip	Your account is created during this step, with the username and password you chose. The live session has neither.
 tip	The time zone you picked sets the clock and nothing else. It can be changed later without reinstalling.
-tip	Your keyboard layout is written into both the system and the boot loader, so the passphrase prompt uses the same keys.
+tip	Your keyboard layout is written into both the system and the bootloader, so the passphrase prompt uses the same keys.
 
 next	Take out the installation media before restarting. Some computers will boot straight back into this installer.
-next	Sign in with the name and password you typed a few screens ago. They are not the disk passphrase.
-next	If you turned on encryption, the disk passphrase is asked for first, before the sign in screen.
+next	Sign in with the username and password you typed a few screens ago. They are not the disk passphrase.
+next	If you turned on encryption, the disk passphrase is asked for first, before the sign-in screen.
 next	The first start takes a little longer than the ones after it. Nothing is wrong.
 next	The rollback entry in the boot menu points at the snapshot being saved today.
 next	Nothing needs downloading after the restart. The system that starts is the one written here.

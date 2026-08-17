@@ -476,7 +476,7 @@ with session(AURADE_STUB_FAIL_AT="pacstrap") as model:
         "a failure after the erase gate was described as reversible",
     )
     check(
-        "erases it and begins from the beginning" in report["restart_advice"],
+        "erases the disk and begins from the beginning" in report["restart_advice"],
         f"restarting after an irreversible failure was undersold: {report}",
     )
     equal(report["position"], "stage 7 of 11", "the failure screen miscounted stages")
@@ -508,7 +508,7 @@ with session(program=BARE_BRIDGE, AURADE_FAILURE_HELPER=None) as model:
     result = model.export(1)
     check(not result.get("ok"), "a missing export helper reported success")
     check(
-        "missing from this image" in result.get("notice", ""),
+        "cannot save a report" in result.get("notice", ""),
         f"a missing export helper gave a poor message: {result}",
     )
 

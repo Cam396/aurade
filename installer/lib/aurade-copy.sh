@@ -33,8 +33,8 @@ stage_label() {
     verify)         printf 'Checking the downloads' ;;
     confirm)        printf 'Confirming the disk' ;;
     partition)      printf 'Partitioning the disk' ;;
-    format)         printf 'Formatting' ;;
-    mount)          printf 'Mounting' ;;
+    format)         printf 'Formatting the disk' ;;
+    mount)          printf 'Mounting the new system' ;;
     pacstrap)       printf 'Installing the base system' ;;
     configure)      printf 'Setting things up' ;;
     bootloader)     printf 'Making it bootable' ;;
@@ -86,8 +86,8 @@ stage_explanation() {
   case $1 in
     preflight)  printf 'Nothing has been changed. This computer did not meet one of the requirements.' ;;
     network)    printf 'Nothing has been changed. The package archive could not be reached.' ;;
-    acquire)    printf 'Nothing has been changed and no disk was touched. A package could not be downloaded.' ;;
-    verify)     printf 'Nothing has been changed. A download did not match its signature, so it was not installed.' ;;
+    acquire)    printf 'Nothing has been changed. A package could not be downloaded.' ;;
+    verify)     printf 'Nothing has been changed. A package did not match its signature, so it was not installed.' ;;
     confirm)    printf 'Nothing has been changed. The confirmation did not match the disk.' ;;
     partition)  printf 'What was on this disk is already gone. It could not be partitioned.' ;;
     format)     printf 'The disk is partitioned and has no filesystem on it yet. Formatting did not finish.' ;;
@@ -148,8 +148,8 @@ cause_next_step() {
     keyring_error)      printf "Check that this computer's date and time are right, then start again." ;;
     capacity_error)     printf 'Free up space on the disk holding the download, then start again.' ;;
     network_error)      printf 'Check the network connection, then start again.' ;;
-    secure_boot_error)  printf "Disable Secure Boot for the first boot, or verify the AuraDE signing key and certificate before trying again." ;;
-    target_error)       printf 'Choose a different disk, or check that this one is not in use, then start again.' ;;
+    secure_boot_error)  printf "Turn Secure Boot off in this computer's firmware settings, then start again." ;;
+    target_error)       printf 'Choose a different disk, then start again.' ;;
     storage_error)      printf 'Check the disk for faults, then start again.' ;;
     unexpected_exit)    printf 'Save a report, then start again.' ;;
     *)                  printf 'Save a report, then start again.' ;;
@@ -161,8 +161,8 @@ cause_next_step() {
 restart_advice() {
   local stage=${1:-}
   if [[ -z $stage ]] || aurade_stage_reversible "$stage"; then
-    printf '%s' 'Nothing was written to the disk. You can start the installer again, or save a report first if you want to send it on.'
+    printf '%s' 'Nothing was written to any disk. You can start the installer again, or save a report first if you want to send it on.'
   else
-    printf '%s' 'This installer cannot yet continue from where it stopped, and the disk has already been changed. Starting again erases it and begins from the beginning. Save a report first if you want a record of what happened.'
+    printf '%s' 'The disk has already been changed, and there is no way to carry on from where this stopped. Starting again erases the disk and begins from the beginning. Save a report first if you want a record of what happened.'
   fi
 }

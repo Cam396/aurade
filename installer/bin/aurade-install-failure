@@ -147,8 +147,7 @@ report() {
   printf '\n%s\n\n' "$next" >&2
 
   [[ -z $message ]] || printf 'Detail: %s\n' "$message" >&2
-  printf 'The full log is at %s, and it stays on this computer. Exit status %s.\n' \
-    "$RAW_LOG" "$STATUS" >&2
+  printf 'The full log is at %s, and it stays on this computer.\n' "$RAW_LOG" >&2
 }
 
 export_logs() {
@@ -169,7 +168,7 @@ export_logs() {
   done
   if (( ! copied )); then
     rmdir -- "$destination" 2>/dev/null || true
-    echo 'aurade-install-failure: there is nothing to save yet' >&2
+    echo 'There is nothing to save yet.' >&2
     return 1
   fi
   printf 'Report saved to %s\n' "$destination" >&2
@@ -197,9 +196,9 @@ while true; do
         destination="${EXPORT_DIR%/}/support-${stamp}"
         install -d -m 0700 "$destination"
         aurade-hardware-qualify --output-dir "$destination" ||
-          echo 'That did not finish. The report you can save has most of the same detail.' >&2
+          echo 'That did not finish. Save a report instead, which has most of the same detail.' >&2
       else
-        echo 'This image cannot collect that here.' >&2
+        echo 'This image cannot collect those details. Save a report instead.' >&2
       fi
       ;;
     t) bash ;;

@@ -76,7 +76,7 @@ printf 'stub engine invoked in %s mode\n' "$mode"
 handle_cancel() {
   trap - INT TERM
   [[ -z ${_J_ACTIVE_STAGE:-} ]] || aurade_journal_fail "$_J_ACTIVE_STAGE" 143 cancelled \
-    'installer cancelled; inspect the private install log before retrying' \
+    'installer cancelled. The private install log records how far it got.' \
     log shell reboot || true
   exit 143
 }
@@ -156,15 +156,15 @@ STUB
 
 cat >"$TMP/stub/net-ok" <<'STUB'
 #!/usr/bin/env bash
-printf '  an active network interface is present\n'
+printf '  A network connection is up.\n'
 printf '  the package archive answered\n'
 exit 0
 STUB
 
 cat >"$TMP/stub/net-bad" <<'STUB'
 #!/usr/bin/env bash
-printf '  an active network interface is present\n'
-printf '  ERROR: the clock is wrong; package signatures will not verify\n' >&2
+printf '  A network connection is up.\n'
+printf "  ERROR: This computer's clock is wrong. Package signatures will not verify until it is right.\n" >&2
 exit 1
 STUB
 

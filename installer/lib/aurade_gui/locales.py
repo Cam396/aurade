@@ -182,7 +182,7 @@ STORAGE_NAMES: dict[str, dict[str, tuple[str, str]]] = {
                       "Free space only. Nothing existing is moved"),
     },
     "filesystem": {
-        "btrfs": ("Btrfs", "Snapshots, and a rollback entry in the boot menu"),
+        "btrfs": ("Btrfs", "Snapshots and a rollback entry in the boot menu"),
         "ext4": ("ext4", "Long established. No snapshots, no rollback"),
         "xfs": ("XFS", "Fast with large files. No snapshots, no rollback"),
     },

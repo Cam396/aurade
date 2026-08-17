@@ -88,7 +88,7 @@ _q username \
   type text \
   default '' \
   validator aurade_valid_username \
-  error 'Start with a lowercase letter, then lowercase letters, digits, _ or -. Reserved system names are not available.' \
+  error 'Start with a lowercase letter, then lowercase letters, digits, underscores or hyphens. Some names are already taken by the system.' \
   advanced no \
   flag --username \
   secret no
@@ -180,7 +180,7 @@ _q layout \
 _q filesystem \
   label 'Root filesystem' \
   short 'Filesystem' \
-  help 'Btrfs is the default and the only one with a snapshot to roll back to, which is what the rollback entry in the boot menu uses. ext4 and xfs install a system that boots and updates, with nothing to roll back to.' \
+  help 'Btrfs is the default and the only one that can take a snapshot to roll back to. ext4 and xfs install a system that boots and updates, with nothing to roll back to.' \
   type enum \
   default btrfs \
   validator aurade_valid_filesystem \
@@ -192,7 +192,7 @@ _q filesystem \
 _q swap \
   label 'Swap' \
   short 'Swap' \
-  help 'A swap file lives inside the root filesystem, so encrypting the disk encrypts the swap with it. zram compresses pages in memory and never touches the disk.' \
+  help 'A swap file lives inside the root filesystem, so encrypting the disk encrypts the swap with it. zram compresses what is already in memory and never touches the disk.' \
   type enum \
   default none \
   validator aurade_valid_swap \
@@ -204,7 +204,7 @@ _q swap \
 _q swap_size \
   label 'Swap size' \
   short 'Swap size' \
-  help 'Auto keeps a desktop responsive under memory pressure. Hibernate makes the file big enough to hold everything in memory, which is what suspending to disk needs.' \
+  help 'Auto keeps a desktop responsive when memory runs short. Hibernate makes the file big enough to hold everything in memory, so the computer can be switched off and come back where it was.' \
   type enum \
   default auto \
   validator aurade_valid_swap_size \

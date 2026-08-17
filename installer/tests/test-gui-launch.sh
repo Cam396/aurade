@@ -106,7 +106,7 @@ out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-gui" --journal "$TMP/j" --raw-log "$TMP/r" 2>&1) ||
   fail "the entry point failed instead of falling back: $out"
 logged 'tui ' || fail 'a missing toolkit did not reach the text installer'
-grep -q 'PyGObject is not installed' <<<"$out" ||
+grep -q 'graphical toolkit is not installed' <<<"$out" ||
   fail "a missing toolkit did not say so: $out"
 logged '--journal' || fail 'the journal path was not passed to the text installer'
 
@@ -153,7 +153,7 @@ out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   fail 'the text installer was started inside a compositor nobody can type into'
 [[ $(cat "$TMP/stage" 2>/dev/null) == declined ]] ||
   fail "the front end did not tell the launcher it had declined: $(cat "$TMP/stage" 2>/dev/null)"
-grep -q 'PyGObject is not installed' <<<"$out" ||
+grep -q 'graphical toolkit is not installed' <<<"$out" ||
   fail "the launcher-managed fallback did not say why: $out"
 rm -f "$TMP/stage"
 
@@ -169,7 +169,7 @@ status=0
 out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-gui" --self-check 2>&1) || status=$?
 (( status == 1 )) || fail "self-check passed without a toolkit (status $status)"
-grep -q 'PyGObject is not installed' <<<"$out" ||
+grep -q 'graphical toolkit is not installed' <<<"$out" ||
   fail "self-check did not name the missing toolkit: $out"
 
 # --- the launcher chooses, and says what it chose ----------------------------

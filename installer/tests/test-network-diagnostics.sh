@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# These assertions are bare `grep -Fq` under `set -e`, so a stale expectation
+# ends the run with an exit code and not one word about where. This makes each
+# of them name itself on the way out. Guarded on errexit still being on,
+# because a non-zero exit inside a deliberate `set +e` block is an expected
+# result being collected, not an assertion giving up.
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -29,8 +35,8 @@ chmod 0755 "$TMP/bin"/*
 export AURADE_CURL_LOG="$TMP/curl.log"
 PATH="$TMP/bin:$PATH" "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   --snapshot 2026/07/12 >"$TMP/ok.out"
-grep -Fq 'Network preflight: ready' "$TMP/ok.out"
-grep -Fq 'pinned Arch snapshot responds (2026/07/12)' "$TMP/ok.out"
+grep -Fq 'Network check: ready' "$TMP/ok.out"
+grep -Fq 'The pinned package snapshot answers (2026/07/12)' "$TMP/ok.out"
 grep -Fq 'repos/2026/07/12/core/os/x86_64' "$TMP/curl.log"
 
 if PATH="$TMP/bin:$PATH" "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
@@ -38,7 +44,7 @@ if PATH="$TMP/bin:$PATH" "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade
   echo 'malformed snapshot unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'configured Arch snapshot is malformed' "$TMP/bad-snapshot.out"
+grep -Fq 'is not a date' "$TMP/bad-snapshot.out"
 
 cat >"$TMP/bin/ip" <<'EOF'
 #!/usr/bin/env bash
@@ -63,9 +69,9 @@ if PATH="$TMP/bin:$PATH" "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade
   echo 'network diagnostics unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'no active network interface' "$TMP/fail.out"
-grep -Fq 'DNS cannot resolve archive.archlinux.org' "$TMP/fail.out"
-grep -Fq 'system clock is not synchronized' "$TMP/fail.out"
-grep -Fq 'pinned Arch snapshot is unreachable' "$TMP/fail.out"
+grep -Fq 'No active network connection' "$TMP/fail.out"
+grep -Fq 'The package archive could not be looked up' "$TMP/fail.out"
+grep -Fq "This computer's clock is wrong" "$TMP/fail.out"
+grep -Fq 'could not be reached' "$TMP/fail.out"
 
 echo 'network diagnostics test: PASS'

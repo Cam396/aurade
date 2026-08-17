@@ -237,7 +237,7 @@ aurade_probe_advice() {
       fi
       ;;
     virtual-gpu-only)
-      printf '%s' "The only graphics device here is $AURADE_PROBE_DRIVER, which has no display output. Give this machine a real graphics adapter with 3D acceleration, or the desktop will not start."
+      printf '%s' "The only graphics device here is $AURADE_PROBE_DRIVER, and it has no display output. Without 3D acceleration from a real graphics adapter, the desktop will not start."
       ;;
     software-rendering)
       printf '%s' "Graphics are being drawn by the processor rather than by a graphics card. The desktop will start, and it will be slow. On a virtual machine, turning on 3D acceleration usually fixes it."
@@ -247,13 +247,13 @@ aurade_probe_advice() {
       ;;
     no-dri-dir|no-render-node)
       if [[ $AURADE_PROBE_VIRT != none ]]; then
-        printf '%s' "AuraDE's desktop needs 3D acceleration, and this $AURADE_PROBE_VIRT machine has none. Turn it on in the machine's display settings before installing."
+        printf '%s' "AuraDE's desktop needs 3D acceleration, and this virtual machine ($AURADE_PROBE_VIRT) has none. Turn it on in the machine's display settings before installing."
       else
         printf '%s' "This computer has no working graphics driver, and AuraDE's desktop needs one. It will install, and it will start to a blank screen."
       fi
       ;;
     low-memory)
-      printf '%s' "There is not enough free memory to run the graphical installer from this media, which needs $(( AURADE_PROBE_MIN_GUI_MIB / 1024 )) GB. The installed system will have more to work with, so the desktop itself is not affected."
+      printf '%s' "The graphical installer needs $(( AURADE_PROBE_MIN_GUI_MIB / 1024 )) GB of free memory, and there is less than that here. The installed system will have more to work with, so the desktop itself is not affected."
       ;;
     *)
       printf '%s' 'Continuing in text mode.'

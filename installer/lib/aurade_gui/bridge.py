@@ -68,7 +68,7 @@ class Bridge:
                 env=self._env,
             )
         except OSError as exc:
-            raise BridgeError(f"cannot start the installer model: {exc}") from exc
+            raise BridgeError(f"the installer could not be started: {exc}") from exc
         return self
 
     def close(self) -> int:
@@ -102,9 +102,9 @@ class Bridge:
     ) -> Any:
         proc = self._proc
         if proc is None or proc.stdin is None or proc.stdout is None:
-            raise BridgeError("the installer model is not running")
+            raise BridgeError("the installer is no longer running")
         if proc.poll() is not None:
-            raise BridgeError("the installer model exited unexpectedly")
+            raise BridgeError("the installer closed unexpectedly")
         line = command if argument is None else f"{command} {argument}"
         if "\n" in line:
             raise BridgeError("a command may not contain a newline")

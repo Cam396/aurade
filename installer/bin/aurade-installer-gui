@@ -30,7 +30,7 @@ try:
     from aurade_gui import stage as S
     from aurade_gui.bridge import Bridge, BridgeError, find_bridge
 except ImportError as exc:  # pragma: no cover - packaging failure
-    print(f"aurade-installer-gui: cannot load the installer model: {exc}", file=sys.stderr)
+    print(f"aurade-installer-gui: cannot load the graphical installer: {exc}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -77,13 +77,13 @@ def toolkit_available() -> tuple[bool, str]:
     try:
         import gi  # noqa: F401
     except ImportError:
-        return False, "PyGObject is not installed on this image"
+        return False, "the graphical toolkit is not installed on this image"
     try:
         gi.require_version("Gtk", "4.0")
         gi.require_version("Adw", "1")
         from gi.repository import Adw, Gtk  # noqa: F401
     except (ImportError, ValueError) as exc:
-        return False, f"GTK 4 and libadwaita are not usable here: {exc}"
+        return False, f"the graphical toolkit is not usable here: {exc}"
     return True, ""
 
 
@@ -118,7 +118,7 @@ def main() -> int:
 
     bridge_path = find_bridge(SELF_DIR)
     if bridge_path is None:
-        return fall_back("the installer model is missing from this image", passthrough)
+        return fall_back("part of the graphical installer is missing from this image", passthrough)
 
     ok, toolkit_reason = toolkit_available()
 

@@ -247,20 +247,23 @@ render_fallback() {
     "$ROOT/installer/bin/aurade-installer-tui" --render fallback
 }
 render_fallback "$TMP/absent" "$TMP/meminfo.big" "$TMP/vm-bin" >"$TMP/fallback.out"
-grep -Fq 'Running the text installer' "$TMP/fallback.out" ||
+flatten() {
+  sed 's/^ *[|+]//; s/[|+] *$//' "$1" | tr '\n' ' ' | tr -s ' '
+}
+flatten "$TMP/fallback.out" | grep -Fq 'Running the text installer' ||
   fail 'the fallback screen does not say what it is doing'
-grep -Fq 'no working 3D acceleration' "$TMP/fallback.out" ||
+flatten "$TMP/fallback.out" | grep -Fq 'no working 3D acceleration' ||
   fail 'the fallback screen does not explain why the graphical installer did not start'
-grep -Fq 'vmware' "$TMP/fallback.out" ||
+flatten "$TMP/fallback.out" | grep -Fq 'vmware' ||
   fail 'the fallback screen does not pass the virtual machine advice through'
-grep -Fq 'display settings' "$TMP/fallback.out" ||
+flatten "$TMP/fallback.out" | grep -Fq 'display settings' ||
   fail 'the fallback screen does not tell the user what to change'
 
 # Low memory is a different message: it must not claim the desktop is broken.
 render_fallback "$TMP/dri-ok" "$TMP/meminfo.small" "$TMP/bare-bin" >"$TMP/lowmem.out"
-grep -Fq 'not enough free memory' "$TMP/lowmem.out" ||
+flatten "$TMP/lowmem.out" | grep -Fq 'GB of free memory, and there is less than that here' ||
   fail 'the low-memory fallback does not explain itself'
-! grep -Fq 'no working 3D acceleration' "$TMP/lowmem.out" ||
+! flatten "$TMP/lowmem.out" | grep -Fq 'no working 3D acceleration' ||
   fail 'a low-memory machine was told it has no 3D acceleration'
 
 echo 'installer graphics probe test: PASS'

@@ -80,7 +80,7 @@ check_cause 'no EFI system partition'                          target_error
 check_cause 'Secure Boot signing requires both a private key'   secure_boot_error
 check_cause 'Secure Boot private key must not be group/world accessible' secure_boot_error
 check_cause 'openssl is required for Secure Boot key validation' secure_boot_error
-check_cause 'too old to enrol Secure Boot keys'                secure_boot_error
+check_cause 'too old to enroll Secure Boot keys'               secure_boot_error
 
 # --- and the codes still line up with the copy ------------------------------
 #

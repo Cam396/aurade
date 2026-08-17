@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Exercise the bounded failure view without starting the interactive frontend.
 set -Eeuo pipefail
+# These assertions are bare `grep -Fq` under `set -e`, so a stale expectation
+# ends the run with an exit code and not one word about where. This makes each
+# of them name itself on the way out. Guarded on errexit still being on,
+# because a non-zero exit inside a deliberate `set +e` block is an expected
+# result being collected, not an assertion giving up.
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -22,7 +28,7 @@ set -e
 # what pins the failure helper and the two front ends to the same sentences.
 grep -Fq 'The install stopped while downloading packages.' "$TMP/report.out"
 # Disk state leads, before any reason for it.
-grep -Fq 'Nothing has been changed and no disk was touched.' "$TMP/report.out"
+grep -Fq 'Nothing has been changed. A package could not be downloaded.' "$TMP/report.out"
 grep -Fq 'The package archive could not be reached.' "$TMP/report.out"
 # Exactly one next action, and it is the one for this cause.
 grep -Fq 'Check the network connection, then start again.' "$TMP/report.out"
@@ -68,7 +74,7 @@ if "$ROOT/installer/bin/aurade-install-failure" --status 7 --journal "$TMP/missi
   echo 'empty diagnostic export unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'there is nothing to save yet' "$TMP/missing.out"
+grep -Fq 'nothing to save yet' "$TMP/missing.out"
 
 if "$ROOT/installer/bin/aurade-install-failure" --status >"$TMP/missing-arg.out" 2>&1; then
   echo 'missing status argument unexpectedly passed' >&2

@@ -208,7 +208,7 @@ cleanup() {
   set +e
   if (( status != 0 )) && [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
     aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" unexpected_exit \
-      'installer stopped unexpectedly; inspect the private install log' \
+      'installer stopped unexpectedly. The private install log records where.' \
       log shell reboot
   fi
   aurade_journal_preserve_failure >/dev/null 2>&1 || true

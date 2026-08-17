@@ -3,6 +3,12 @@
 # stops the real installer before package acquisition, so this is not a full
 # installation test and cannot damage a host disk.
 set -Eeuo pipefail
+# These assertions are bare `grep -Fq` under `set -e`, so a stale expectation
+# ends the run with an exit code and not one word about where. This makes each
+# of them name itself on the way out. Guarded on errexit still being on,
+# because a non-zero exit inside a deliberate `set +e` block is an expected
+# result being collected, not an assertion giving up.
+trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 INSTALLER=$ROOT/installer/bin/aurade-install
@@ -186,7 +192,7 @@ set -e
 }
 
 grep -Fq 'installer staging filesystem has ' "$RUN_DIR/installer.out"
-grep -Fq 'choose a disk-backed AURADE_INSTALL_WORK_DIR' "$RUN_DIR/installer.out"
+grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$RUN_DIR/installer.out"
 for forbidden in \
   'wipefs --all' 'sgdisk ' 'mkfs.' ' mount ' 'pacman ' 'pacstrap ' \
   'bootctl ' 'cryptsetup '; do

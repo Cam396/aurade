@@ -401,36 +401,14 @@ READINESS_UNKNOWN = (
 STORAGE_TITLE = "Storage options"
 STORAGE_SUBTITLE = "The defaults are what AuraDE is built for."
 
-#: Consequences the engine actually enforces, restated where the choice is
-#: made. Each one is a fact about what the installed system will and will not
-#: have, not a warning about being careful.
-STORAGE_NOTES: dict[str, str] = {
-    "filesystem": (
-        "Only Btrfs gets a snapshot to roll back to. On ext4 or xfs there is "
-        "nothing to roll back to."
-    ),
-    "layout": (
-        "Alongside never resizes or moves a partition. It needs free space "
-        "that is already there, and it keeps the other system's EFI partition."
-    ),
-    "swap": (
-        "A swap file sits inside the root filesystem, so encrypting the disk "
-        "encrypts the swap with it."
-    ),
-    "swap_size": (
-        "Hibernating writes everything in memory to disk, so the file has to "
-        "be at least that big."
-    ),
-}
-
 REVIEW_TITLE = "Here is what will happen"
 REVIEW_ASSURANCE = "Nothing has been written to any disk yet."
 
 GATE_TITLE = "Confirm erase"
 GATE_BODY = (
     "Everything up to here can be undone. Nothing after it can.\n\n"
-    "The packages are already downloaded and verified, so this will not need "
-    "the network again."
+    "Packages are downloaded and checked first. If the network fails, this "
+    "stops with the disk untouched."
 )
 
 PROGRESS_TITLE = "Making this computer yours"
@@ -476,19 +454,19 @@ WAIT_SCORE_OVER = "Score %d. Any key to start again."
 
 DONE_TITLE = "You are all set"
 DONE_BODY = (
-    "Take out the installation media and restart. Sign in with the name and "
-    "password you picked."
+    "Take out the installation media and restart. Sign in with the username "
+    "and password you chose."
 )
 DONE_ENCRYPTED = (
-    "Your disk is encrypted, so it asks for the disk passphrase before the "
-    "sign-in screen every time it starts. That is the one you set here, not "
-    "your account password."
+    "Your disk is encrypted. This computer asks for the disk passphrase "
+    "before the sign-in screen, every time it starts. That is the passphrase "
+    "you set here, not your account password."
 )
 
 STOPPED_TITLE = "Stopped, and nothing was written"
 STOPPED_BODY = (
-    "No disk was partitioned, formatted or erased. This computer is exactly "
-    "as it was."
+    "No disk was partitioned, formatted or written to. This computer is "
+    "exactly as it was."
 )
 
 CANCELLED_TITLE = "Cancelled"

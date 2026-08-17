@@ -75,7 +75,7 @@ case "$COMMAND" in
     ;;
   snapshot)
     require_root
-    [[ $LABEL =~ ^[A-Za-z0-9._-]{1,48}$ ]] || { echo 'aurade-recovery: --label is required and has invalid characters' >&2; exit 2; }
+    [[ $LABEL =~ ^[A-Za-z0-9._-]{1,48}$ ]] || { echo 'aurade-recovery: --label must be 1 to 48 letters, digits, dots, underscores or hyphens' >&2; exit 2; }
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     destination=$SNAPSHOT_DIR/manual-${stamp}-${LABEL}/snapshot
     [[ ! -e $destination ]] || { echo "aurade-recovery: snapshot exists: $destination" >&2; exit 1; }
