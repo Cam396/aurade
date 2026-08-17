@@ -123,6 +123,7 @@ declare -A ACCESS=(
   [text_scale]=100
   [reduce_motion]=no
   [cursor_size]=24
+  [spacing]=normal
 )
 declare -A ACCESS_DEFAULT=(
   [screen_reader]=no
@@ -131,6 +132,7 @@ declare -A ACCESS_DEFAULT=(
   [text_scale]=100
   [reduce_motion]=no
   [cursor_size]=24
+  [spacing]=normal
 )
 #: What each one is allowed to be, checked here as well as in the engine. The
 #: engine's check is the one that matters and this one is what makes a bad
@@ -142,6 +144,7 @@ declare -A ACCESS_VALUES=(
   [text_scale]='100 125 150'
   [reduce_motion]='yes no'
   [cursor_size]='24 32 48'
+  [spacing]='normal roomy roomier'
 )
 #: The engine flag each one travels on.
 declare -A ACCESS_FLAGS=(
@@ -151,10 +154,11 @@ declare -A ACCESS_FLAGS=(
   [text_scale]=--text-scale
   [reduce_motion]=--reduce-motion
   [cursor_size]=--cursor-size
+  [spacing]=--spacing
 )
 #: A stable order, so both front ends list them the same way and the tests can
 #: rely on it. Ordered by how much difference each one makes.
-ACCESS_ORDER=(screen_reader braille contrast text_scale reduce_motion cursor_size)
+ACCESS_ORDER=(screen_reader braille contrast text_scale spacing reduce_motion cursor_size)
 
 # Preset from the environment, which is how a boot menu entry hands one of
 # these over.
@@ -1083,6 +1087,7 @@ declare -A ACCESS_LABEL=(
   [text_scale]='Text size'
   [reduce_motion]='Reduce motion'
   [cursor_size]='Pointer size'
+  [spacing]='Line spacing'
 )
 declare -A ACCESS_HELP=(
   [screen_reader]='Reads the screen aloud. Stays on after the restart.'
@@ -1091,6 +1096,7 @@ declare -A ACCESS_HELP=(
   [text_scale]='Makes everything larger, including the installed desktop.'
   [reduce_motion]='Stops the moving parts. Nothing else changes.'
   [cursor_size]='How large the pointer is.'
+  [spacing]='More air between lines and letters. Helps most readers, not only some.'
 )
 
 access_shown_value() {

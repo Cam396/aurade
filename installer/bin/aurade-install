@@ -59,6 +59,7 @@ CONTRAST=normal
 TEXT_SCALE=100
 REDUCE_MOTION=no
 CURSOR_SIZE=24
+SPACING=normal
 SWAP_SIZE=auto
 LAYOUT=wipe
 SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
@@ -621,6 +622,7 @@ while (($#)); do
     --text-scale) TEXT_SCALE=${2:?}; shift 2 ;;
     --reduce-motion) REDUCE_MOTION=${2:?}; shift 2 ;;
     --cursor-size) CURSOR_SIZE=${2:?}; shift 2 ;;
+    --spacing) SPACING=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
     --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
     --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
@@ -661,6 +663,7 @@ case $REDUCE_MOTION in yes|no) ;; *) die '--reduce-motion must be yes or no' ;; 
 # over a phone is a scale nobody can be helped with.
 case $TEXT_SCALE in 100|125|150) ;; *) die '--text-scale must be 100, 125 or 150' ;; esac
 case $CURSOR_SIZE in 24|32|48) ;; *) die '--cursor-size must be 24, 32 or 48' ;; esac
+case $SPACING in normal|roomy|roomier) ;; *) die '--spacing must be normal, roomy or roomier' ;; esac
 
 case $SWAP in
   none|file|zram) ;;
@@ -1248,10 +1251,11 @@ write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
 # that silently does nothing is the exact failure this whole feature exists to
 # prevent, and the cost of the redundant one is a file.
 write_target_file /etc/aurade-install/accessibility 0644 \
-  "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
+  "screen_reader=$SCREEN_READER\nbraille=$BRAILLE\ncontrast=$CONTRAST\ntext_scale=$TEXT_SCALE\nspacing=$SPACING\nreduce_motion=$REDUCE_MOTION\ncursor_size=$CURSOR_SIZE\n"
 
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
-      $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ]]; then
+      $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||
+      $SPACING != normal ]]; then
   # GTK reads dpi in 1024ths of a point, which is why 100 is not 100 here.
   _gtk_dpi=$(( TEXT_SCALE * 96 * 1024 / 100 ))
   _gtk_anim=1
@@ -1268,6 +1272,21 @@ if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
   write_target_file /etc/dconf/db/local.d/00-aurade-accessibility 0644 \
     "[org/gnome/desktop/a11y/interface]\nhigh-contrast=$_dconf_contrast\n\n[org/gnome/desktop/interface]\ntext-scaling-factor=$_dconf_scale\nenable-animations=$_dconf_anim\ncursor-size=$CURSOR_SIZE\n"
   run arch-chroot "$MOUNTPOINT" dconf update
+
+  # Line spacing has no GTK setting and no dconf key: it is a property of the
+  # text, so it travels as stylesheet. /etc/xdg/gtk-4.0/gtk.css is the ordinary
+  # system wide place for that, loaded by every GTK 4 application on the
+  # installed system rather than only by this installer.
+  #
+  # Letter spacing moves with it. Both hold up better in the evidence than any
+  # typeface choice does, which is why they are here and the fonts are not.
+  if [[ $SPACING != normal ]]; then
+    _line=1.75
+    _letter=0.2
+    if [[ $SPACING == roomier ]]; then _line=2.0; _letter=0.4; fi
+    write_target_file /etc/xdg/gtk-4.0/gtk.css 0644 \
+      "label, entry, textview { line-height: $_line; letter-spacing: ${_letter}px; }\n"
+  fi
 fi
 
 # Enabling rather than starting: the target is not running. `systemctl enable`

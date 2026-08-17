@@ -430,6 +430,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         #: Whether the true black ground is wanted. Only meaningful in the dark
         #: scheme, which is the only place a ground can be switched off.
         self.oled = False
+        #: The overlay that carries line and letter spacing, or None.
+        self._spacing_provider = None
         #: Set by a page that will not let the flow past it. Read once, in
         #: `refresh`, after the page has drawn.
         self.forward_blocked = False
@@ -818,6 +820,42 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._obey_access(key, values[index])
         self.refresh()
 
+    #: Line and letter spacing, as an overlay rather than a scheme.
+    #:
+    #: Three spacing levels times four schemes would be twelve stylesheets to
+    #: generate, stage and keep in step. A second provider at a higher priority
+    #: overrides two properties on top of whichever scheme is loaded, which is
+    #: one file's worth of behaviour instead of eight more files.
+    #:
+    #: The engine writes the same rule into /etc/xdg/gtk-4.0/gtk.css on the
+    #: installed system, so the setting is the same setting rather than a
+    #: resemblance.
+    SPACING_CSS = {
+        "normal": "",
+        "roomy": "label, entry, textview "
+                 "{ line-height: 1.75; letter-spacing: 0.2px; }",
+        "roomier": "label, entry, textview "
+                   "{ line-height: 2.0; letter-spacing: 0.4px; }",
+    }
+
+    def _apply_spacing(self, value: str) -> None:
+        css = self.SPACING_CSS.get(value, "")
+        display = self.get_display()
+        if display is None:
+            return
+        if self._spacing_provider is not None:
+            Gtk.StyleContext.remove_provider_for_display(
+                display, self._spacing_provider)
+            self._spacing_provider = None
+        if not css:
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_string(css)
+        # Above the scheme sheet, which sets line height per type role.
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+        self._spacing_provider = provider
+
     def _obey_access(self, key: str, value: str) -> None:
         """Apply a choice to this installer, now.
 
@@ -840,6 +878,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             settings.set_property("gtk-xft-dpi", int(value) * 96 * 1024 // 100)
         elif key == "cursor_size" and settings is not None:
             settings.set_property("gtk-cursor-theme-size", int(value))
+        elif key == "spacing":
+            self._apply_spacing(value)
 
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.

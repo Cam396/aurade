@@ -181,7 +181,7 @@ plan() {
 # and gone after the restart has moved the wall rather than removed it, so this
 # checks the writes actually happen rather than that the flags parse.
 plan a11y --screen-reader yes --braille yes --contrast high \
-  --text-scale 125 --reduce-motion yes --cursor-size 32
+  --text-scale 125 --reduce-motion yes --cursor-size 32 --spacing roomy
 # The record, which is what the installed system reads back to confirm.
 grep -Fq -- '/etc/aurade-install/accessibility' "$TMP/a11y.out" ||
   { echo 'the accessibility record is not written into the target' >&2; exit 1; }
@@ -196,6 +196,10 @@ grep -Fq -- 'systemctl enable espeakup.service' "$TMP/a11y.out" ||
   { echo 'espeakup is not enabled on the installed system' >&2; exit 1; }
 grep -Fq -- 'systemctl enable brltty.service' "$TMP/a11y.out" ||
   { echo 'brltty is not enabled on the installed system' >&2; exit 1; }
+# Line spacing has no GTK setting and no dconf key, so it travels as the one
+# thing it can: a stylesheet every GTK 4 application on the target reads.
+grep -Fq -- '/etc/xdg/gtk-4.0/gtk.css' "$TMP/a11y.out" ||
+  { echo 'line spacing is not written into the installed system' >&2; exit 1; }
 # The reader has to exist on the installed system, not only on the image.
 grep -Fq -- 'espeakup' "$TMP/a11y.out" ||
   { echo 'espeakup is not installed onto the target' >&2; exit 1; }
@@ -207,6 +211,8 @@ plan a11y_default
   { echo 'a default install writes accessibility dconf defaults it was not asked for' >&2; exit 1; }
 ! grep -Fq -- 'systemctl enable espeakup.service' "$TMP/a11y_default.out" ||
   { echo 'a default install enables a screen reader nobody asked for' >&2; exit 1; }
+! grep -Fq -- '/etc/xdg/gtk-4.0/gtk.css' "$TMP/a11y_default.out" ||
+  { echo 'a default install restyles every GTK application on the target' >&2; exit 1; }
 
 refuses() {
   local expected=$1

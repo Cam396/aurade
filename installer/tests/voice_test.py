@@ -107,7 +107,12 @@ EXEMPT = re.compile(r"^(https?://|/|-|\.|[A-Z_]+=)")
 CODE = re.compile(
     r"(&&|\|\||>&2|<<|=~|\bawk\b|\bsed\b|\bprintf\b|\bgrep\b"
     r"|\bfor \w+ in\b|\bdone\b|\bfi\b|\besac\b|::|;;|\bIFS=|\belse\b"
-    r"|\{[^}]*\bprint\b|\w\+?=\s*$)"
+    r"|\{[^}]*\bprint\b|\w\+?=\s*$"
+    # A braced block whose contents are `property: value` pairs. That is CSS,
+    # where the semicolon is a statement separator and nothing to do with the
+    # voice. Narrow on purpose: it wants both braces and a colon inside them,
+    # so a sentence that happens to contain a brace is still checked.
+    r"|\{[^}]*[a-z-]+:[^}]*\})"
 )
 
 
