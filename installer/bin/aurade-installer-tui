@@ -2653,6 +2653,75 @@ screen_progress_log() {
 #: clears itself and offers something else.
 TTT_FRAMES=0
 
+#: Where the picker's cursor is.
+WAIT_CURSOR=0
+
+#: What the waiting screen can show, in the order it is offered.
+#:
+#: The two that ask nothing of anybody come first, deliberately. Somebody who
+#: finds a game on a screen they are anxious about actively stressful should
+#: meet the two options that are not games before the four that are, and
+#: should not have to press past a snake to reach the log.
+WAIT_CHOICES=(tips log life 2048 snake ttt)
+declare -A WAIT_LABELS=(
+  [tips]='Read something about this system'
+  [log]='Watch the install work'
+  [life]='Something moving, that needs nothing'
+  [2048]='Play 2048'
+  [snake]='Play snake'
+  [ttt]='Play tic-tac-toe'
+)
+
+# The picker.
+#
+# Costs one screen and answers the objection a cycle cannot: the choice is
+# visible, so nobody presses a key repeatedly to find out what is behind it,
+# and nobody lands on a game they did not want.
+screen_wait_picker() {
+  local cursor=${1:-0} index=0 choice
+  local HELP_KEY=0
+  tui_clear
+  tui_header 'While you wait'
+  tui_blank
+  tui_wrap 'The install carries on either way.' dim
+  tui_blank
+  for choice in "${WAIT_CHOICES[@]}"; do
+    if (( index == cursor )); then
+      tui_item yes "${WAIT_LABELS[$choice]}"
+    else
+      tui_item no "${WAIT_LABELS[$choice]}"
+    fi
+    index=$(( index + 1 ))
+  done
+  tui_blank
+  tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# Life, drawn. Nothing to press and nothing to lose.
+screen_life() {
+  local HELP_KEY=0
+  local row pad w h
+  w=$(( AURADE_TUI_INNER - 8 ))
+  (( w <= 60 )) || w=60
+  h=$(( AURADE_TUI_HEIGHT - 3 - 3 - 4 ))
+  (( h <= 14 )) || h=14
+  (( h >= 4 )) || h=4
+  if (( AURADE_LIFE_W != w || AURADE_LIFE_H != h )); then
+    aurade_life_new "$w" "$h"
+  fi
+  tui_clear
+  tui_header 'Installing'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - w) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_life_rows)
+  tui_blank
+  tui_footer 'g  choose something else    esc  back' \
+    "$(stage_position "$(journal_running_stage)")"
+}
+
 # Tic-tac-toe, which declines.
 #
 # It is on the list of things to play and it will not play, and the reason it
@@ -2796,6 +2865,11 @@ run_engine_with_progress() {
       2048) screen_2048 ;;
       log)  screen_progress_log ;;
       ttt)  screen_ttt; TTT_FRAMES=$(( TTT_FRAMES + 1 )) ;;
+      life) screen_life
+            # Slower than the redraw. Life at eight generations a second is a
+            # boil rather than a thing to watch.
+            (( frame % 3 )) || aurade_life_step ;;
+      picker) screen_wait_picker "$WAIT_CURSOR" ;;
       *)    screen_progress "$frame" ;;
     esac
     # `AURADE_TUI_KEYS` is the seam the flow tests drive the state machine
@@ -2807,26 +2881,17 @@ run_engine_with_progress() {
       case $mode in
         progress)
           if [[ ( $key == g || $key == G ) ]] && (( ! AURADE_TUI_PLAIN )); then
-            # Cycle rather than a menu. Two games and the tips is a short
-            # enough list that a key which always moves you on beats a screen
-            # asking somebody to choose, on a screen nobody came here to use.
-            # The log comes first in the cycle, because it is the option
-            # for somebody who does not want a game at all: one press to see
-            # what the machine is doing, two to be given something to do.
-            case ${WAIT_MODE:-tips} in
-              tips) WAIT_MODE=log; mode=log ;;
-              log)  WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
-              2048) WAIT_MODE=snake; mode=snake ;;
-              # Last in the cycle, and it hands back to the tips rather than
-              # to itself, so somebody who finds it once has to go round again
-              # to see it. An easter egg that is one keypress away every time
-              # is a menu item.
-              snake) WAIT_MODE=ttt; mode=ttt; TTT_FRAMES=0 ;;
-              *)    WAIT_MODE=tips ;;
-            esac
-            # Both games are grids of characters and neither has anything in
-            # it to read, so plain mode never lands on one.
-            (( ! AURADE_TUI_PLAIN )) || { WAIT_MODE=tips; mode=progress; }
+            # A list rather than a cycle. Two games and the tips was short
+            # enough that a key which always moves you on beat a screen
+            # asking somebody to choose; six things behind one key is not a
+            # choice, it is a maze, and somebody who does not want a game
+            # should not have to press past a snake to reach the log.
+            #
+            # Plain mode never gets here: every one of these is a grid of
+            # characters with nothing in it to read, and the footer offering
+            # this key is not drawn there.
+            mode=picker
+            WAIT_CURSOR=0
           else
             # Nothing else on this screen is bound, so the keyboard is free,
             # and one word in it does something. It is not written down
@@ -2835,22 +2900,45 @@ run_engine_with_progress() {
             progress_secret "$key"
           fi
           ;;
+        picker)
+          case $key in
+            up)   (( WAIT_CURSOR > 0 )) && WAIT_CURSOR=$(( WAIT_CURSOR - 1 )) || WAIT_CURSOR=0 ;;
+            down) (( WAIT_CURSOR + 1 < ${#WAIT_CHOICES[@]} )) &&
+                    WAIT_CURSOR=$(( WAIT_CURSOR + 1 )) || true ;;
+            enter)
+              WAIT_MODE=${WAIT_CHOICES[WAIT_CURSOR]}
+              case $WAIT_MODE in
+                tips) mode=progress ;;
+                2048) mode=2048; aurade_2048_new ;;
+                ttt)  mode=ttt; TTT_FRAMES=0 ;;
+                *)    mode=$WAIT_MODE ;;
+              esac
+              ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
         log)
           case $key in
-            g|G) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        life)
+          case $key in
+            g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
           esac
           ;;
         ttt)
           # Every key leaves. There is nothing to press, which is the joke.
           case $key in
-            g|G) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+            g|G) mode=picker ;;
             *) WAIT_MODE=tips; mode=progress ;;
           esac
           ;;
         2048)
           case $key in
-            g|G) WAIT_MODE=snake; mode=snake ;;
+            g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
             up|w|W)    aurade_2048_move up ;;
             down|s|S)  aurade_2048_move down ;;
@@ -2861,7 +2949,7 @@ run_engine_with_progress() {
           ;;
         snake)
           case $key in
-            g|G) WAIT_MODE=tips; mode=progress ;;
+            g|G) mode=picker ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
             up|w|W)      aurade_snake_turn up ;;
             down|s|S)    aurade_snake_turn down ;;
@@ -3387,7 +3475,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain help watch ttt
+  access keycheck explain help watch ttt life picker
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -3451,6 +3539,8 @@ if [[ -n $RENDER_ONLY ]]; then
     help)      screen_help_where ;;
     watch)     screen_progress_log ;;
     ttt)       TTT_FRAMES=${AURADE_RENDER_TTT_FRAMES:-20}; screen_ttt ;;
+    life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
+    picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.

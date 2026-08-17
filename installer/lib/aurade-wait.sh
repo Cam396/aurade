@@ -513,3 +513,84 @@ aurade_2048_over() {
   done
   return 0
 }
+
+# --------------------------------------------------------------------------
+# Life
+# --------------------------------------------------------------------------
+#
+# Conway's, as something to watch rather than something to play.
+#
+# This one earns its place for a reason none of the games do. Some people find
+# a game on a screen they are anxious about actively stressful: they do not
+# want to be entertained while a disk is being erased, they want the minutes
+# to pass. A thing that moves on its own, needs nothing, and cannot be lost is
+# the answer for them, and it is the only option here with all three.
+#
+# It is also thematically right for a screen where something is being built.
+#
+# The grid wraps at the edges. A bounded grid dies back to a few stable blobs
+# in a corner within a minute, which is a screen that has stopped, and the
+# whole point is a screen that has not.
+AURADE_LIFE_W=0
+AURADE_LIFE_H=0
+AURADE_LIFE_CELLS=()
+AURADE_LIFE_AGE=0
+
+aurade_life_new() {
+  local w=${1:-40} h=${2:-12} i
+  AURADE_LIFE_W=$w
+  AURADE_LIFE_H=$h
+  AURADE_LIFE_CELLS=()
+  AURADE_LIFE_AGE=0
+  # Around a third alive. Sparser than that takes a long time to become
+  # interesting and denser than that boils for a while and then collapses.
+  for (( i = 0; i < w * h; i++ )); do
+    if (( RANDOM % 100 < 32 )); then
+      AURADE_LIFE_CELLS+=(1)
+    else
+      AURADE_LIFE_CELLS+=(0)
+    fi
+  done
+}
+
+aurade_life_step() {
+  local w=$AURADE_LIFE_W h=$AURADE_LIFE_H
+  (( w > 0 && h > 0 )) || return 0
+  local -a next=()
+  local x y dx dy nx ny live cell
+  for (( y = 0; y < h; y++ )); do
+    for (( x = 0; x < w; x++ )); do
+      live=0
+      for dy in -1 0 1; do
+        for dx in -1 0 1; do
+          (( dx || dy )) || continue
+          # The wrap, which is what keeps this alive for ten minutes.
+          nx=$(( (x + dx + w) % w ))
+          ny=$(( (y + dy + h) % h ))
+          (( ! AURADE_LIFE_CELLS[ny * w + nx] )) || live=$(( live + 1 ))
+        done
+      done
+      cell=${AURADE_LIFE_CELLS[y * w + x]}
+      if (( cell )); then
+        (( live == 2 || live == 3 )) && next+=(1) || next+=(0)
+      else
+        (( live == 3 )) && next+=(1) || next+=(0)
+      fi
+    done
+  done
+  AURADE_LIFE_CELLS=("${next[@]}")
+  AURADE_LIFE_AGE=$(( AURADE_LIFE_AGE + 1 ))
+}
+
+# The grid as rows of characters, no border and no padding, the same contract
+# the snake arena has: whoever is drawing owns the frame.
+aurade_life_rows() {
+  local x y row
+  for (( y = 0; y < AURADE_LIFE_H; y++ )); do
+    row=''
+    for (( x = 0; x < AURADE_LIFE_W; x++ )); do
+      if (( AURADE_LIFE_CELLS[y * AURADE_LIFE_W + x] )); then row+='#'; else row+=' '; fi
+    done
+    printf '%s\n' "$row"
+  done
+}

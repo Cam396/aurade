@@ -427,6 +427,47 @@ for screen in progress game 2048 watch; do
     fail "the $screen footer is ${#footer} columns wide in a 68 column frame"
 done
 
+# --- the picker, and what is at the top of it -------------------------------
+#
+# A list rather than a cycle. Six things behind one key is not a choice, it is
+# a maze, and the ordering is the part that matters: somebody who finds a game
+# on a screen they are anxious about actively stressful should meet the two
+# options that are not games before the four that are, and should not have to
+# press past a snake to reach the log.
+picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
+  "$TUI" --render picker --journal "$TMP/journal.jsonl" 2>/dev/null)
+[[ $picker == *'Watch the install work'* ]] ||
+  fail 'the picker does not offer the log'
+[[ $picker == *'that needs nothing'* ]] ||
+  fail 'the picker does not offer the ambient option'
+
+# The two that ask nothing come first, in that order, before anything that
+# calls itself a game.
+order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
+  sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Play\).*/\1/p' | tr '\n' ' ')
+[[ $order == 'Read Watch Something Play Play Play ' ]] ||
+  fail "the picker offers its options as '$order', with a game before an ambient one"
+
+# And it opens on the first, which is the one that asks least.
+[[ $picker == *'> Read something'* ]] ||
+  fail 'the picker does not open on the option that asks least of anybody'
+
+# Life is drawn and wraps at its edges, which is what keeps it alive. A
+# bounded grid dies back to a few stable blobs within a minute, and a screen
+# somebody chose because it moves that has stopped moving is worse than the
+# bar they left.
+(
+  # shellcheck source=../lib/aurade-wait.sh
+  . "$ROOT/installer/lib/aurade-wait.sh"
+  RANDOM=5
+  aurade_life_new 24 8
+  before=$(aurade_life_rows | tr -cd '#' | wc -c)
+  for _ in 1 2 3 4 5 6 7 8; do aurade_life_step; done
+  after=$(aurade_life_rows | tr -cd '#' | wc -c)
+  (( before > 0 )) || { echo 'life started empty' >&2; exit 1; }
+  (( after > 0 )) || { echo 'life died out in eight generations' >&2; exit 1; }
+) || fail 'life does not survive being run'
+
 (( failures == 0 )) || exit 1
 printf 'installer progress screen test: PASS (%s tips, %s heights)\n' \
   "$(( ${#AURADE_TIPS[@]} + ${#AURADE_TIPS_NEXT[@]} + ${#AURADE_TIPS_RARE[@]} ))" 9
