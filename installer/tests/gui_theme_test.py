@@ -153,6 +153,34 @@ css = open(os.path.join(LIB, "theme.css")).read()
 dark_css = open(os.path.join(LIB, "theme-dark.css")).read()
 app = open(os.path.join(LIB, "app.py")).read()
 
+# -- the text scale control has something to move ---------------------------
+#
+# A GTK CSS pixel is an absolute unit. `gtk-xft-dpi`, which is the only thing
+# the text scale control turns, moves sizes given in points and leaves sizes
+# given in pixels exactly where they were.
+#
+# Every size in this type scale was in `px`, and every string in this
+# installer carries one of these classes, so the accessibility control that
+# offers 100, 125, 150 and 200 percent moved nothing at all on the screen. It
+# was measured before it was fixed: across 100, 200 and 300 percent a plain
+# label went 280px, 559px, 838px, and `m3-body-medium` sat at 314px at all
+# three. Nothing in this suite noticed, because every assertion about type was
+# about which classes exist and what colour they are.
+#
+# So this is the assertion that was missing. It is deliberately about the unit
+# rather than about any particular size: a size is a design decision and can
+# change, and the unit is the thing that decides whether an accessibility
+# setting is real or decorative.
+for sheet in ("theme.css", "theme-dark.css", "theme-hc.css",
+              "theme-dark-hc.css", "theme-oled.css"):
+    text = open(os.path.join(LIB, sheet)).read()
+    for number, line in enumerate(text.splitlines(), 1):
+        if "font-size" not in line:
+            continue
+        check("px" not in line.split("font-size", 1)[1].split(";", 1)[0],
+              f"{sheet}:{number} sets a font size in pixels, which the text "
+              f"scale control cannot move: {line.strip()}")
+
 for role in ("m3_surface", "m3_on_surface", "m3_primary", "m3_error",
              "m3_outline_variant", "m3_tertiary"):
     check(f"@define-color {role} " in css, f"{role} is not defined in the stylesheet")

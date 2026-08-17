@@ -603,6 +603,26 @@ def _components() -> str:
     return _type_scale() + COMPONENT_CSS
 
 
+def pt(px: float) -> str:
+    """A size in points, from the Material 3 table's pixels.
+
+    Points, not pixels, and this is the whole reason the text scale control
+    does anything at all. A GTK CSS pixel is absolute: `gtk-xft-dpi` moves
+    `pt` and leaves `px` exactly where it was. Every size here was in `px`,
+    and every string in this installer carries one of these classes, so
+    setting the accessibility control to 200% moved nothing on the screen. It
+    was measured: a plain label went 280px to 559px to 838px across 100, 200
+    and 300 percent, and `m3-body-medium` sat at 314px at all three.
+
+    72 points to the inch against the 96 dpi the table was drawn at, so the
+    numbers are three quarters of the pixel figures and the design at 100% is
+    unchanged to the pixel.
+    """
+    value = px * 0.75
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def _type_scale() -> str:
     """Every role in the Material 3 type scale, emitted from the spec table.
 
@@ -611,17 +631,20 @@ def _type_scale() -> str:
     simply renders at the default size and the hierarchy quietly collapses.
     """
     lines = ['/* ---- type scale ---- */', '',
+             '/* Sizes in points rather than pixels, so that the text scale',
+             '   control reaches them. See `pt` above: a CSS pixel is absolute',
+             '   in GTK and does not move with `gtk-xft-dpi`. */',
              'window.aurade {',
              '  font-family: "Adwaita Sans", "Cantarell", sans-serif;',
-             '  font-size: 15px;',
+             f'  font-size: {pt(15)}pt;',
              '  line-height: 1.5;',
              '}',
              '']
     for name, (size, weight, tracking, line) in TYPE.items():
         selector = ".m3-" + name.replace("_", "-")
         lines.append(
-            f"{selector} {{ font-size: {size}px; font-weight: {weight}; "
-            f"letter-spacing: {tracking}px; line-height: {line}; }}"
+            f"{selector} {{ font-size: {pt(size)}pt; font-weight: {weight}; "
+            f"letter-spacing: {pt(tracking)}pt; line-height: {line}; }}"
         )
     return "\n".join(lines)
 
@@ -734,8 +757,8 @@ COMPONENT_CSS = r"""
    confirmation" came out as "Type the confirmatio..." above the field. */
 .aurade-token-field text {
   font-family: "JetBrains Mono", "Adwaita Mono", monospace;
-  font-size: 17px;
-  letter-spacing: 1.2px;
+  font-size: 12.75pt;
+  letter-spacing: 0.9pt;
 }
 
 /* ---- stage list ------------------------------------------------------- */
@@ -749,7 +772,7 @@ COMPONENT_CSS = r"""
 
 .aurade-metric {
   font-family: "JetBrains Mono", "Adwaita Mono", monospace;
-  font-size: 12px;
+  font-size: 9pt;
   color: @m3_on_surface_variant;
 }
 

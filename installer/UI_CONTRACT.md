@@ -363,6 +363,30 @@ the image because the toolkit depends on it. Renders taken on a build host are
 not evidence about type unless that host's fonts have been replaced with the
 image's, which is the same trap the icons set.
 
+**Sizes are in points, never in pixels, and this is not a style preference.**
+A GTK CSS pixel is an absolute unit. `gtk-xft-dpi` is the only thing the text
+scale control turns, and it moves sizes given in points and leaves sizes given
+in pixels exactly where they were.
+
+Every size in this scale was in `px`, and every string in this installer
+carries one of these classes, so the control offering 100, 125, 150 and 200
+percent moved nothing on the screen at all. Measured before it was fixed:
+across 100, 200 and 300 percent a plain label went 280, 559 and 838 pixels
+wide, and `m3-body-medium` sat at 314 pixels at all three. Nothing in the
+suite noticed, because every assertion about type was about which classes
+exist and what colour they are.
+
+72 points to the inch against the 96 dpi the table was drawn at, so the point
+figures are three quarters of the pixel ones and the design at 100% is
+unchanged to the pixel. `gui_theme_test.py` now fails on a font size in
+pixels in any of the five stylesheets. It checks the unit rather than any
+particular size, because a size is a design decision that is allowed to
+change and the unit is what decides whether an accessibility setting is real
+or decorative.
+
+Spacing, radii and borders stay in pixels on purpose. They are the frame the
+text sits in, not the text.
+
 ## Getting something onto the screen
 
 Two independent things have to work before anyone sees a window, and they fail
