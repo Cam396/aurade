@@ -178,6 +178,26 @@ def main() -> int:
                 problems.append(
                     f"{path}:{number}: semicolon in {text.strip()!r}")
 
+    # The dash rule again, over the documents, and only the dash rule.
+    #
+    # The checks above are about how the product sounds and they would be
+    # wrong applied to prose: a design document is allowed a semicolon and is
+    # allowed to say "note". The dash is different. It is banned everywhere
+    # rather than in product copy, it takes no judgement to spot, and the
+    # documents are where it comes back, because a paragraph explaining a
+    # decision is exactly the kind of writing that reaches for one.
+    for name in sorted(os.listdir(os.path.join(ROOT, "installer"))):
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join("installer", name)
+        with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
+            for number, line in enumerate(handle, 1):
+                checked += 1
+                for glyph, label in DASHES.items():
+                    if glyph in line:
+                        problems.append(
+                            f"{path}:{number}: {label} in {line.strip()!r}")
+
     for problem in problems:
         print(f"test-voice: {problem}", file=sys.stderr)
     if problems:

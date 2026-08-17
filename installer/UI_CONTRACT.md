@@ -570,7 +570,7 @@ to be able to go back:
 | Later questions | previous question |
 | Review | reopens the last question |
 | Erase gate | returns to review |
-| Progress | nothing — no key is offered, because none is read |
+| Progress | nothing - no key is offered, because none is read |
 
 The graphical renderer states the same thing with a button rather than a
 footer, and the label comes from the same call that decides the action:
@@ -617,7 +617,7 @@ from which the destructive call is unreachable.
 
 Both renderers say this the same way. The bridge chooses one of two dispatch
 tables once at startup, and the plan-only table has no `execute` command to
-refuse — it reports `unknown command`. The graphical flow's transition graph
+refuse - it reports `unknown command`. The graphical flow's transition graph
 is walked in its test, and `gate`, `progress` and `done` must all be absent
 from the set reachable from the welcome screen.
 
@@ -647,7 +647,7 @@ is operated with the setting just chosen. `apply_answer` owns this.
 The keyboard is the case that matters: the layout is chosen before any
 password, and a layout that passes validation but will not load on this
 console has to be rejected there rather than discovered at a masked prompt.
-A missing `loadkeys` is not a failure — the image ships `kbd`, but a test host
+A missing `loadkeys` is not a failure - the image ships `kbd`, but a test host
 or serial console may not, and refusing to continue would make the question
 unanswerable.
 
@@ -657,13 +657,13 @@ Every stop names the stage, explains what it means for the disk, and offers
 export, log, shell and restart.
 
 Saving a diagnostic report reports whether it worked. The helper's exit status
-cannot be used for this — it exits with the install's own status on success and
-2 on failure, and the install status may itself be 2 — so the artifact is
+cannot be used for this - it exits with the install's own status on success and
+2 on failure, and the install status may itself be 2 - so the artifact is
 checked directly. A failed export shows what went wrong and leaves the menu
 usable; it never shows "Saved".
 
 The destination has to be one the current call created. Two saves in the same
-second are ordinary — the second is usually a retry — and a directory that
+second are ordinary - the second is usually a retry - and a directory that
 already held a previous export would answer "did this write anything" with
 someone else's files.
 
@@ -706,8 +706,8 @@ different advice:
 | Finding | Predicts a black desktop |
 | --- | --- |
 | No render node, or only `vgem`/`vkms` | yes |
-| Software rendering (`llvmpipe` and friends) | no — it will start, and be slow |
-| Low memory on the live image | no — the installed system has more |
+| Software rendering (`llvmpipe` and friends) | no - it will start, and be slow |
+| Low memory on the live image | no - the installed system has more |
 
 The kernel driver behind the node is read from sysfs, which is always present.
 An optional, time-bounded `eglinfo` probe refines the result when mesa-utils is
