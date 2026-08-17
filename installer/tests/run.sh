@@ -10,6 +10,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 "$ROOT/test-tui-width.sh"
 "$ROOT/test-tui-keys.sh"
 "$ROOT/test-disk-identity.sh"
+"$ROOT/test-qr.sh"
 "$ROOT/test-accessibility.sh"
 "$ROOT/test-greyscale.sh"
 "$ROOT/test-tui-flow.sh"

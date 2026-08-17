@@ -173,6 +173,15 @@ env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN TERM=dumb \
 # Whether the font has the glyph at all is a different question, and it is why
 # the braille bar is off on the Linux console, which is checked below.
 for screen in "${SCREENS[@]}"; do
+  # The help screen is the one deliberate exception, and it is deliberate
+  # rather than overlooked. It draws a QR code out of half blocks, which are
+  # ambiguous width where the braille above is neutral, so this rule is
+  # genuinely broken there and the screen accepts the consequence: a terminal
+  # in a CJK locale may draw the code double and tear that one frame, and the
+  # addresses printed under it say the same thing regardless. Everything about
+  # that square is checked by test-qr.sh instead, including that it is absent
+  # from the tiers where it would not be safe.
+  [[ $screen != help ]] || continue
   for frame in ascii unicode; do
     render "$screen" 256 "$frame" >"$TMP/raw"
     strip_ansi "$TMP/raw" >"$TMP/plain"

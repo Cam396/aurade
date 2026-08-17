@@ -1529,16 +1529,159 @@ stage_position() {
 # *and* the disk present is still the disk the journal describes.
 FAILURE_OPTIONS=()
 build_failure_options() {
-  # The same four words the graphical failure page uses, in the same order.
-  # Two front ends offering "Save a diagnostic report" and "Save a report" for
-  # the identical action is the kind of seam that makes a product feel assembled
+  # The same words the graphical failure page uses, in the same order. Two
+  # front ends offering "Save a diagnostic report" and "Save a report" for the
+  # identical action is the kind of seam that makes a product feel assembled
   # rather than made.
   FAILURE_OPTIONS=(
     'Save a report'
+    'Where to get help'
     'See the full log'
     'Open a terminal'
     'Restart'
   )
+}
+
+# --------------------------------------------------------------------------
+# Where to get help
+# --------------------------------------------------------------------------
+
+#: Where the project lives, and where people are. The first is what the QR
+#: code carries; the second is short enough to read off a screen and type on
+#: a phone, which is the only reason it is not a second code.
+AURADE_HELP_URL=${AURADE_HELP_URL:-https://github.com/Cam396/aurade}
+AURADE_HELP_CHAT=${AURADE_HELP_CHAT:-https://discord.gg/vkZ7CSMG5}
+
+#: The QR matrix, one row of ones and zeroes per line, generated once by
+#: tools/make-qr.py and read here rather than encoded at runtime.
+AURADE_QR_FILE=${AURADE_QR_FILE:-}
+
+#: Light modules either side of the code. Two rather than the four a printed
+#: code wants: this one is inside a drawn frame on a dark screen, which is
+#: already quiet in every direction, and two rows of screen are two rows.
+AURADE_QR_QUIET=${AURADE_QR_QUIET:-2}
+
+qr_matrix_file() {
+  local candidate
+  if [[ -n $AURADE_QR_FILE ]]; then
+    printf '%s' "$AURADE_QR_FILE"
+    return 0
+  fi
+  for candidate in /usr/local/lib/aurade/aurade-qr-help \
+                   "${BASH_SOURCE[0]%/*}/../lib/aurade-qr-help"; do
+    [[ -r $candidate ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  printf ''
+}
+
+# The code, two module rows to a character row.
+#
+# Half blocks, because a QR module is square and a character cell is about
+# twice as tall as it is wide. One character per module would make a 25 module
+# code 25 rows deep, which is more rows than this screen has; stacking two
+# modules into one cell makes it 13, and square.
+#
+# Drawn light on dark rather than dark on light. On this screen the ground is
+# already dark, so a light module has to be painted and a dark module is the
+# screen showing through, and that is a correct rendering rather than an
+# inverted one: dark modules read dark, light modules read light.
+qr_rows() {
+  local file row line i top bottom a b out
+  local -a grid=()
+  file=$(qr_matrix_file)
+  [[ -n $file && -r $file ]] || return 1
+  while IFS= read -r line; do
+    [[ -n $line && $line != '#'* ]] || continue
+    grid+=("$line")
+  done <"$file"
+  (( ${#grid[@]} > 0 )) || return 1
+  local width=$(( ${#grid[0]} + 2 * AURADE_QR_QUIET ))
+  # The quiet zone is light, which in this matrix is a zero. Getting this
+  # backwards produces a code with no margin at all, and a reader that will
+  # not look at it.
+  local quiet blank_row
+  printf -v quiet '%*s' "$AURADE_QR_QUIET" ''
+  quiet=${quiet// /0}
+  printf -v blank_row '%*s' "$width" ''
+  blank_row=${blank_row// /0}
+  local -a padded=()
+  for (( i = 0; i < AURADE_QR_QUIET; i++ )); do
+    padded+=("$blank_row")
+  done
+  for row in "${grid[@]}"; do
+    padded+=("${quiet}${row}${quiet}")
+  done
+  for (( i = 0; i < AURADE_QR_QUIET; i++ )); do
+    padded+=("$blank_row")
+  done
+  # An odd number of module rows leaves the last character row with only a
+  # top half, and the half below it is quiet zone rather than nothing.
+  (( ${#padded[@]} % 2 == 0 )) || padded+=("$blank_row")
+  for (( i = 0; i < ${#padded[@]}; i += 2 )); do
+    top=${padded[i]}
+    bottom=${padded[i + 1]}
+    out=''
+    for (( a = 0; a < width; a++ )); do
+      b=${top:a:1}${bottom:a:1}
+      case $b in
+        # A one is a light module, and a light module is the one that gets
+        # painted. The matrix stores a one for a dark module, so this reads
+        # inverted on purpose.
+        00) out+='\u2588' ;;
+        01) out+='\u2580' ;;
+        10) out+='\u2584' ;;
+        *)  out+=' ' ;;
+      esac
+    done
+    printf '%b\n' "$out"
+  done
+  return 0
+}
+
+# Where to get help, with something a phone can read.
+#
+# You cannot type a URL from a machine that will not boot, and the machine in
+# front of somebody reading this screen is exactly that. A phone can see a
+# square from across a desk.
+screen_help_where() {
+  local CURRENT_SCREEN=failure
+  local row drawn=0
+  tui_clear
+  tui_header 'Where to get help'
+  tui_blank
+  tui_wrap 'Point a phone at this.' accent
+  tui_blank
+  # Only where the block characters are safe. In the ASCII tier they are not
+  # there at all, and unlike the braille the progress bar uses, half blocks
+  # are ambiguous width, so a terminal in a CJK locale may draw them double
+  # and tear the frame. The addresses below say the same thing either way.
+  if [[ $AURADE_TUI_FRAME == unicode ]] && (( ! AURADE_TUI_PLAIN )) &&
+     (( AURADE_TUI_HEIGHT >= 26 )); then
+    local pad=0
+    while IFS= read -r row; do
+      # Measured once, from the first row, because every row is the same
+      # width and a code centred row by row would not be square.
+      (( drawn )) || pad=$(( (AURADE_TUI_INNER - ${#row}) / 2 ))
+      (( pad >= 0 )) || pad=0
+      tui_line "$(printf '%*s%s' "$pad" '' "$row")" ink
+      drawn=1
+    done < <(qr_rows 2>/dev/null || true)
+  fi
+  (( drawn )) || tui_wrap 'This screen cannot draw the code, so here are the addresses.' dim
+  tui_blank
+  tui_field 'Project' "$AURADE_HELP_URL" ink
+  tui_field 'Chat' "$AURADE_HELP_CHAT" ink
+  tui_blank
+  tui_wrap 'Save a report first if you can. It is the one thing that turns a description of a problem into a fixable one.' dim
+  tui_footer 'press any key to go back' ''
+}
+
+run_help_where() {
+  local key
+  screen_help_where
+  key=$(tui_read_key) || true
 }
 
 screen_done() {
@@ -2718,12 +2861,14 @@ run_failure() {
             # of this screen and the menu stays exactly where it was.
             export_report "$status" || true ;;
           1)
-            ${PAGER:-less} "$RAW_LOG" 2>/dev/null || true ;;
+            run_help_where ;;
           2)
+            ${PAGER:-less} "$RAW_LOG" 2>/dev/null || true ;;
+          3)
             tui_clear
             printf 'Type exit to come back to the installer.\n'
             bash || true ;;
-          3)
+          4)
             systemctl reboot || true
             return "$status" ;;
         esac
@@ -2876,7 +3021,7 @@ fi
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
-  access keycheck explain
+  access keycheck explain help
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -2923,6 +3068,7 @@ if [[ -n $RENDER_ONLY ]]; then
     keycheck)  screen_keycheck 2 9 "${AURADE_RENDER_TYPED:-}" ;;
     explain)   CURRENT_SCREEN=${AURADE_RENDER_EXPLAIN:-review}
                screen_explain ;;
+    help)      screen_help_where ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.
