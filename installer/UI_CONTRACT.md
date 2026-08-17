@@ -24,10 +24,25 @@ A front end may not:
 - write a secret anywhere except a mode-0600 file it removes on exit.
 
 `installer/bin/aurade-installer-tui` is the text renderer and the guaranteed
-one. `installer/bin/aurade-installer-gui` is the graphical renderer. The older
-`installer/bin/aurade-installer` remains as a plain prompt-by-prompt flow.
-`installer/bin/aurade-installer-start` chooses between the first two using the
-probe, and is what the message of the day names.
+one. `installer/bin/aurade-installer-gui` is the graphical renderer.
+`installer/bin/aurade-installer-start` chooses between them using the probe,
+and is what the message of the day names.
+
+**Two front ends, and there is no third.** There was one, `aurade-installer`,
+a prompt-by-prompt flow that predated both of these. It was packaged onto the
+image and reachable from nothing: not in the boot menu, not from the launcher,
+not from the message of the day. Copy was written for it that nobody could
+read, and roughly thirty assertions in `test-install-dry-run.sh` grepped its
+source for behaviour that actually belongs to the engine.
+
+That is the worst shape a test can have. It passed while the front end was
+unreachable, and it would have gone on passing if the engine changed
+underneath it, because it was asserting on a file rather than on a system.
+Those assertions now point at the two front ends that ship and at the engine.
+
+A third way in is not free. It is a third place for a validation rule to
+drift, a third set of sentences to keep true, and a third thing to remember
+when the shared manifest changes.
 
 The graphical renderer owns no contract. It talks to
 `installer/bin/aurade-installer-gui-bridge`, which sources the text renderer

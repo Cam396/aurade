@@ -248,14 +248,60 @@ done
 render_at 34 progress >"$TMP/again"
 cmp -s "$TMP/p.34" "$TMP/again" || fail 'the progress screen is not deterministic'
 
-# And the game is reachable from it, said once, in the footer.
-grep -Fq 'g  game' "$TMP/p.24" || fail 'the progress screen does not offer the game'
+# And there is something to do, reachable from it, said once in the footer.
+#
+# Worded as "something to do" rather than "game" because the key now cycles
+# through the tips, 2048 and snake, and the first of those three is not a game.
+# Somebody who finds a game on a screen they are anxious about stressful should
+# not have to press a key labelled `game` to get back to reading.
+grep -Fq 'g  something to do' "$TMP/p.24" ||
+  fail 'the progress screen does not offer anything to do'
 # Nothing else is offered. The rest of the keyboard stays unbound here for the
 # same reason it always did.
 for offer in 'esc' 'cancel' 'l  ' 'enter' 'q  ' 'stop'; do
   ! grep -Fq "$offer" "$(printf '%s' "$TMP/p.24")" ||
     fail "the progress screen offers '$offer' at the least recoverable moment"
 done
+
+# --- 2048, whose rules are the whole game ----------------------------------
+#
+# Everything else on this screen can be wrong and merely look bad. A merge rule
+# that is wrong makes the game feel broken to everybody who has played it
+# before, which is everybody.
+
+# A tile merges at most once per move. `2 2 4` is the case people get wrong:
+# the twos make a four, and that four does not then eat the four beside it.
+AURADE_2048_BOARD=(2 2 4 0  0 0 0 0  0 0 0 0  0 0 0 0)
+AURADE_2048_SCORE=0
+aurade_2048_move left
+[[ ${AURADE_2048_BOARD[0]} == 4 && ${AURADE_2048_BOARD[1]} == 4 ]] ||
+  fail "2 2 4 merged into ${AURADE_2048_BOARD[0]} ${AURADE_2048_BOARD[1]}, so a tile merged twice"
+
+# Two independent merges in one move, and the score is the sum of what was made.
+AURADE_2048_BOARD=(4 4 4 4  0 0 0 0  0 0 0 0  0 0 0 0)
+AURADE_2048_SCORE=0
+aurade_2048_move left
+[[ ${AURADE_2048_BOARD[0]} == 8 && ${AURADE_2048_BOARD[1]} == 8 ]] ||
+  fail 'four equal tiles did not make two pairs'
+(( AURADE_2048_SCORE == 16 )) || fail "scored $AURADE_2048_SCORE for two eights, expected 16"
+
+# Nothing appears when nothing moved. Spawning on a dead move fills the board
+# while somebody presses a key that is doing nothing, which reads as cheating.
+AURADE_2048_BOARD=(2 4 2 4  0 0 0 0  0 0 0 0  0 0 0 0)
+aurade_2048_move left
+(( ! AURADE_2048_MOVED )) || fail 'a move that changed nothing was treated as a move'
+
+# Over means full and no neighbours match, not merely full.
+AURADE_2048_BOARD=(2 4 2 4  4 2 4 2  2 4 2 4  4 2 4 2)
+aurade_2048_over || fail 'a full board with no possible merge is not reported as over'
+AURADE_2048_BOARD=(2 2 2 4  4 2 4 2  2 4 2 4  4 2 4 2)
+! aurade_2048_over || fail 'a full board with a merge available was reported as over'
+
+# Vertical works, because four nearly identical loops is where this drifts.
+AURADE_2048_BOARD=(2 0 0 0  2 0 0 0  0 0 0 0  0 0 0 0)
+AURADE_2048_SCORE=0
+aurade_2048_move up
+[[ ${AURADE_2048_BOARD[0]} == 4 ]] || fail 'tiles do not merge upward'
 
 (( failures == 0 )) || exit 1
 printf 'installer progress screen test: PASS (%s tips, %s heights)\n' \

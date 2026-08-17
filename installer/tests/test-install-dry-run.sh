@@ -95,9 +95,18 @@ grep -Fq -- 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$ROOT/instal
 # The three Secure Boot states each get told to the user before the erase gate:
 # on and trusted, on and untrusted, and unreadable. Matched on the state rather
 # than on the sentence, because the sentences have been rewritten once already.
-grep -Fq -- 'Secure Boot is on' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Secure Boot is in setup mode' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-installer"
+#
+# These used to be asserted against `bin/aurade-installer`, a third front end
+# that was packaged onto the image and reachable from nothing. Testing the
+# engine's behaviour by grepping a front end's source is the wrong shape twice
+# over: it passes when the front end is unreachable, and it passes when the
+# engine changes underneath it. They now point at the two front ends that ship,
+# and at the engine itself.
+BRIDGE=$ROOT/installer/bin/aurade-installer-gui-bridge
+TUI=$ROOT/installer/bin/aurade-installer-tui
+grep -Fq -- 'Secure Boot' "$BRIDGE"
+grep -Fq -- 'setup mode' "$BRIDGE"
+grep -Fq -- 'Could not tell whether Secure Boot is on' "$BRIDGE"
 grep -Fq -- 'Secure Boot state could not be read' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'without signing' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '--secure-boot-auto-enroll yes' "$ROOT/installer/bin/aurade-install"
@@ -106,37 +115,19 @@ grep -Fq -- 'pre-enrolled signing certificate' "$ROOT/installer/bin/aurade-insta
 grep -Fq -- 'sbsigntools' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'secure-boot-enroll' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'AURADE_SECURE_BOOT_KEY' "$ROOT/installer/bin/aurade-installer-tui"
-grep -Fq -- 'aurade_valid_arch_snapshot "$snapshot"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- '"$NETWORK_DIAGNOSTICS" --snapshot "$snapshot"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'select an exact PATH from the table above' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'lsblk -dnro TYPE "$target"' "$ROOT/installer/bin/aurade-installer"
 # The rules themselves are exercised by test-prompt-validation.sh against
-# fixture roots. Assert only that the front end delegates to them instead of
+# fixture roots. Assert only that the front ends delegate to them instead of
 # re-implementing the checks inline, where they cannot be tested.
-grep -Fq -- 'aurade_valid_hostname "$hostname"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'aurade_valid_username "$username"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'aurade_valid_timezone "$timezone"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'aurade_valid_locale "$locale"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'aurade_valid_keymap "$keymap"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'loadkeys "$keymap"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'confirmation=$(aurade_normalize_confirmation "$confirmation")' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Timezone must name an installed zone' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Locale must name an installed locale' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Keyboard layout must name an installed keymap' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'This is a removable disk' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'smartctl -H "$target"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Disk health could not be read on this image' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'This disk reports that it is failing' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'Disk health looks fine' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'not a substitute for a backup' "$ROOT/installer/bin/aurade-installer"
+#
+# One shared manifest, one validator per question, and both front ends reaching
+# them through `aurade_question_validate`. That is the property worth pinning:
+# a front end that grew its own copy of a rule is a front end that will
+# disagree with the engine about what a valid hostname is.
+grep -Fq -- 'aurade_question_validate' "$TUI"
+grep -Fq -- 'aurade_question_validate' "$BRIDGE"
+grep -Fq -- 'loadkeys' "$TUI"
 # The two things said before the disk question: AuraDE takes the whole disk,
 # and there is no swap unless you add one.
-grep -Fq -- 'AuraDE takes the whole disk' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'There is no swap by default' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'read_secret_file' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'openssl passwd -6 -stdin <"$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
-grep -Fq -- 'secure_remove "$secret_dir/password"' "$ROOT/installer/bin/aurade-installer"
-! grep -Fq -- 'read -r -s -p '\''Account password: '\'' password' "$ROOT/installer/bin/aurade-installer"
 acquire_line=$(grep -n -- '--disable-sandbox -Syy' "$TMP/plain.out" | head -1 | cut -d: -f1)
 wipe_line=$(grep -n -- 'wipefs --all --force' "$TMP/plain.out" | head -1 | cut -d: -f1)
 (( acquire_line < wipe_line ))

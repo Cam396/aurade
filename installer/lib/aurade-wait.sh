@@ -269,3 +269,125 @@ aurade_snake_rows() {
     printf '%s\n' "$row"
   done
 }
+
+# --------------------------------------------------------------------------
+# 2048
+# --------------------------------------------------------------------------
+#
+# The best fit that exists for this screen, and it is not close.
+#
+# Four keys, no timing, and a 4x4 grid that renders exactly in a terminal.
+# Everybody already knows the rules, so there is nothing to explain on a screen
+# nobody came here to read. And it is satisfying in the particular low stakes
+# way a waiting screen wants: you can stop mid-move, look at the install, and
+# come back without having lost anything.
+#
+# The constraint that ruled out the obvious alternatives is that this screen
+# redraws on a fixed tick. Anything needing input latency is out, which is why
+# there is no Tetris here: a laggy Tetris is worse than no Tetris.
+#
+# The board is a flat 16 cell array, row major. A shell has no 2D arrays and
+# faking one with name references costs more than the index arithmetic does.
+AURADE_2048_BOARD=()
+AURADE_2048_SCORE=0
+AURADE_2048_WON=0
+AURADE_2048_MOVED=0
+
+aurade_2048_new() {
+  local i
+  AURADE_2048_BOARD=()
+  for (( i = 0; i < 16; i++ )); do AURADE_2048_BOARD+=(0); done
+  AURADE_2048_SCORE=0
+  AURADE_2048_WON=0
+  aurade_2048_spawn
+  aurade_2048_spawn
+}
+
+# A new tile in a free cell. Nine times in ten a 2, which is the standard
+# distribution and the reason the game is winnable at all.
+aurade_2048_spawn() {
+  local free=() i
+  for (( i = 0; i < 16; i++ )); do
+    (( AURADE_2048_BOARD[i] != 0 )) || free+=("$i")
+  done
+  (( ${#free[@]} )) || return 1
+  i=${free[RANDOM % ${#free[@]}]}
+  if (( RANDOM % 10 )); then
+    AURADE_2048_BOARD[i]=2
+  else
+    AURADE_2048_BOARD[i]=4
+  fi
+}
+
+# Collapse one line of four toward index 0.
+#
+# Written once and used for all four directions by handing it the indices in
+# the right order, because four nearly identical loops is four places for the
+# merge rule to drift. A tile merges at most once per move, which is the rule
+# everybody gets wrong: 2 2 4 does not become 8.
+_aurade_2048_line() {
+  local -n _cells=$1
+  local packed=() i value merged=0
+  for i in "${_cells[@]}"; do
+    (( AURADE_2048_BOARD[i] != 0 )) || continue
+    packed+=("${AURADE_2048_BOARD[i]}")
+  done
+  local out=() n=${#packed[@]}
+  i=0
+  while (( i < n )); do
+    if (( i + 1 < n && packed[i] == packed[i+1] )); then
+      value=$(( packed[i] * 2 ))
+      out+=("$value")
+      AURADE_2048_SCORE=$(( AURADE_2048_SCORE + value ))
+      (( value != 2048 )) || AURADE_2048_WON=1
+      i=$(( i + 2 ))
+    else
+      out+=("${packed[i]}")
+      i=$(( i + 1 ))
+    fi
+  done
+  while (( ${#out[@]} < 4 )); do out+=(0); done
+  for (( i = 0; i < 4; i++ )); do
+    if (( AURADE_2048_BOARD[_cells[i]] != out[i] )); then
+      AURADE_2048_MOVED=1
+      AURADE_2048_BOARD[_cells[i]]=${out[i]}
+    fi
+  done
+}
+
+aurade_2048_move() {
+  local direction=$1 r c line
+  AURADE_2048_MOVED=0
+  for (( r = 0; r < 4; r++ )); do
+    line=()
+    for (( c = 0; c < 4; c++ )); do
+      case $direction in
+        left)  line+=($(( r * 4 + c ))) ;;
+        right) line+=($(( r * 4 + 3 - c ))) ;;
+        up)    line+=($(( c * 4 + r ))) ;;
+        down)  line+=($(( (3 - c) * 4 + r ))) ;;
+      esac
+    done
+    _aurade_2048_line line
+  done
+  # A tile only appears when something actually moved. Spawning on a move that
+  # did nothing is how a board fills up while somebody is pressing a key that
+  # is doing nothing, which reads as the game cheating.
+  (( ! AURADE_2048_MOVED )) || aurade_2048_spawn
+}
+
+# Over when the board is full and no neighbours match.
+aurade_2048_over() {
+  local i r c
+  for (( i = 0; i < 16; i++ )); do
+    (( AURADE_2048_BOARD[i] != 0 )) || return 1
+  done
+  for (( r = 0; r < 4; r++ )); do
+    for (( c = 0; c < 4; c++ )); do
+      i=$(( r * 4 + c ))
+      (( c == 3 )) || ! (( AURADE_2048_BOARD[i] == AURADE_2048_BOARD[i+1] )) || return 1
+      (( r == 3 )) || ! (( AURADE_2048_BOARD[i] == AURADE_2048_BOARD[i+4] )) || return 1
+    done
+  done
+  return 0
+}

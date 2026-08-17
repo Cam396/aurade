@@ -852,7 +852,7 @@ screen_progress() {
   if (( AURADE_TUI_PLAIN )); then
     tui_footer 'do not turn off this computer' "$(stage_position "$active")"
   else
-    tui_footer 'do not turn off this computer    g  game' \
+    tui_footer 'do not turn off this computer    g  something to do' \
       "$(stage_position "$active")"
   fi
 }
@@ -1509,6 +1509,64 @@ hash_password() {
 # small progress readout that stays on screen. Leaving the install out of sight
 # would be the wrong trade: this is a way to pass the time, not a way to stop
 # watching.
+#: What can be on the waiting card, in the order it is offered.
+#:
+#: The ambient option is first on purpose. Some people find a game on a screen
+#: they are already anxious about actively stressful, and for them the answer
+#: is something to watch rather than something to do. Putting it first means
+#: nobody has to scroll past two games to find out that reading is allowed.
+WAIT_MODES=(tips 2048 snake)
+declare -A WAIT_MODE_LABEL=(
+  [tips]='Read the tips'
+  [2048]='Play 2048'
+  [snake]='Play snake'
+)
+
+# 2048, drawn as four rows of four cells.
+#
+# Right aligned in a fixed six column cell, because the numbers grow by
+# doubling and a grid that reflows every time a 512 appears is a grid nobody
+# can track. Six columns holds 131072, which nobody will reach on a screen that
+# lasts ten minutes, and the alignment costs nothing until they do.
+screen_2048() {
+  local pad row col index value cell line
+  (( ${#AURADE_2048_BOARD[@]} == 16 )) || aurade_2048_new
+
+  tui_clear
+  tui_header 'Installing'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 26) / 2 ))
+  (( pad >= 0 )) || pad=0
+  tui_line "$(printf '%*s+------+------+------+------+' "$pad" '')" dim
+  for (( row = 0; row < 4; row++ )); do
+    line=''
+    for (( col = 0; col < 4; col++ )); do
+      index=$(( row * 4 + col ))
+      value=${AURADE_2048_BOARD[index]}
+      if (( value )); then
+        cell=$(printf '%5s ' "$value")
+      else
+        cell='      '
+      fi
+      line+="|$cell"
+    done
+    tui_line "$(printf '%*s%s|' "$pad" '' "$line")" cyan
+    tui_line "$(printf '%*s+------+------+------+------+' "$pad" '')" dim
+  done
+  tui_blank
+  if (( AURADE_2048_WON )); then
+    tui_wrap "$(printf 'Score %s. You made 2048.' "$AURADE_2048_SCORE")" ok
+  elif aurade_2048_over; then
+    tui_wrap "$(printf 'Score %s. No moves left, any key to start again.' \
+      "$AURADE_2048_SCORE")" warn
+  else
+    tui_wrap "$(printf 'Score %s' "$AURADE_2048_SCORE")" dim
+  fi
+  tui_blank
+  tui_footer 'arrows  move    g  back to the install' \
+    "$(stage_position "$(journal_running_stage)")"
+}
+
 screen_game() {
   local frame=${1:-0} row stage record pct detail label
   local arena_w arena_h pad border
@@ -1551,7 +1609,7 @@ screen_game() {
     [[ $pct =~ ^[0-9]+$ ]] || pct=0
     tui_bar "$pct" "$detail"
   fi
-  tui_footer 'arrows or wasd  move    g  back to the install' \
+  tui_footer 'arrows or wasd  move    g  next    esc  back' \
     "$(stage_position "$stage")"
 }
 
@@ -1602,14 +1660,18 @@ run_engine_with_progress() {
   "$ENGINE" "$@" >>"$RAW_LOG" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    if [[ $mode == game ]]; then
-      screen_game "$frame"
-      # The snake moves on its own clock, slower than the redraw, so that the
-      # game is playable rather than frantic.
-      (( frame % 2 )) || aurade_snake_step || true
-    else
-      screen_progress "$frame"
-    fi
+    case $mode in
+      snake)
+        screen_game "$frame"
+        # The snake moves on its own clock, slower than the redraw, so that the
+        # game is playable rather than frantic.
+        (( frame % 2 )) || aurade_snake_step || true ;;
+      # 2048 has no clock of its own. Nothing happens between keystrokes, which
+      # is the property that makes it the right game for a screen somebody is
+      # half watching: you can stop mid move and lose nothing.
+      2048) screen_2048 ;;
+      *)    screen_progress "$frame" ;;
+    esac
     # `AURADE_TUI_KEYS` is the seam the flow tests drive the state machine
     # through. Those keys are queued for the screens after this one, so this
     # loop must not be the thing that consumes them.
@@ -1619,7 +1681,17 @@ run_engine_with_progress() {
       case $mode in
         progress)
           if [[ ( $key == g || $key == G ) ]] && (( ! AURADE_TUI_PLAIN )); then
-            mode=game
+            # Cycle rather than a menu. Two games and the tips is a short
+            # enough list that a key which always moves you on beats a screen
+            # asking somebody to choose, on a screen nobody came here to use.
+            case ${WAIT_MODE:-tips} in
+              tips) WAIT_MODE=2048; mode=2048; aurade_2048_new ;;
+              2048) WAIT_MODE=snake; mode=snake ;;
+              *)    WAIT_MODE=tips ;;
+            esac
+            # Both games are grids of characters and neither has anything in
+            # it to read, so plain mode never lands on one.
+            (( ! AURADE_TUI_PLAIN )) || { WAIT_MODE=tips; mode=progress; }
           else
             # Nothing else on this screen is bound, so the keyboard is free,
             # and one word in it does something. It is not written down
@@ -1628,9 +1700,21 @@ run_engine_with_progress() {
             progress_secret "$key"
           fi
           ;;
-        game)
+        2048)
           case $key in
-            g|G|q|Q|esc) mode=progress ;;
+            g|G) WAIT_MODE=snake; mode=snake ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|w|W)    aurade_2048_move up ;;
+            down|s|S)  aurade_2048_move down ;;
+            left|a|A)  aurade_2048_move left ;;
+            right|d|D) aurade_2048_move right ;;
+            *) ! aurade_2048_over || aurade_2048_new ;;
+          esac
+          ;;
+        snake)
+          case $key in
+            g|G) WAIT_MODE=tips; mode=progress ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
             up|w|W)      aurade_snake_turn up ;;
             down|s|S)    aurade_snake_turn down ;;
             left|a|A)    aurade_snake_turn left ;;
@@ -1990,7 +2074,7 @@ fi
 # caller turned it on deliberately.
 [[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
 
-RENDERABLE=(welcome fallback review gate progress game failure 'done' cancelled
+RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
   access
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
@@ -2035,6 +2119,11 @@ if [[ -n $RENDER_ONLY ]]; then
   case $RENDER_ONLY in
     welcome)   screen_welcome ;;
     access)    screen_access "${AURADE_RENDER_ACCESS_ROW:-0}" ;;
+    # Same fixed seed reasoning as the snake below: two tiles are placed at
+    # random, so without this the screen is a different picture on every render
+    # and the tier comparison in test-tui-render is comparing two boards.
+    2048)      RANDOM=${AURADE_2048_SEED:-7}
+               aurade_2048_new; screen_2048 ;;
     fallback)  screen_fallback ;;
     review)    screen_review ;;
     gate)      screen_gate "${AURADE_RENDER_TYPED:-$(aurade_confirmation_token \

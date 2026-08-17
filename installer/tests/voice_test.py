@@ -53,7 +53,6 @@ SOURCES = [
     # a pass and turned out to be where the worst of it had settled.
     ("installer/bin/aurade-install-failure", "shell"),
     ("installer/bin/aurade-installer-start", "shell"),
-    ("installer/bin/aurade-installer", "shell"),
     ("installer/lib/aurade-probe.sh", "shell"),
     # The engine. Its `die` messages become the failure screen's cause code and
     # its `log` lines are what a text install prints while it runs, so it is as

@@ -18,7 +18,6 @@ file_permissions=(
   ["/usr/local/sbin/aurade-install"]=0:0:755
   ["/usr/local/sbin/aurade-secure-boot-sign"]=0:0:755
   ["/usr/local/share/aurade/90-aurade-secure-boot.hook"]=0:0:644
-  ["/usr/local/sbin/aurade-installer"]=0:0:755
   ["/usr/local/sbin/aurade-installer-tui"]=0:0:755
   ["/usr/local/sbin/aurade-installer-gui"]=0:0:755
   ["/usr/local/sbin/aurade-installer-gui-bridge"]=0:0:755

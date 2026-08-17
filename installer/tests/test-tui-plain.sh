@@ -59,7 +59,11 @@ for screen in "${SCREENS[@]}"; do
   # that opens it is ignored. Both of those are asserted below. Rendering it
   # here anyway and demanding it be frameless would be asserting on a screen
   # nobody can get to.
-  [[ $screen != game ]] || continue
+  # The two games are the screens with no plain rendering, deliberately. Both
+  # are grids of characters with nothing in them to read, and in plain mode
+  # both are unreachable: the footer offers neither and the key that opens
+  # them returns to the tips.
+  [[ $screen != game && $screen != 2048 ]] || continue
   plain "$screen" >"$TMP/$screen" || { fail "$screen did not render in plain mode"; continue; }
 
   # Something has to come out. A screen that renders to nothing is a screen
