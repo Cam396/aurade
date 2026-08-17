@@ -484,4 +484,37 @@ for _row in ${REVIEW_ROWS[@]+"${REVIEW_ROWS[@]}"}; do
 done
 (( ${#REVIEW_ROWS[@]} > 0 )) || fail 'the review screen listed nothing at all'
 
+# --- the detail pane is about the row the marker is on -----------------------
+#
+# On a wide terminal the right hand pane explains the selected line. The two
+# halves are rendered independently, which is what keeps either from moving
+# the other, and is also exactly how they come to disagree: the list walks the
+# question order and the detail looks one question up by id, so an off-by-one
+# in either shows as a screen that confidently explains the wrong answer.
+#
+# Nothing about that looks broken, which is why it is worth a test. It walks
+# every row rather than checking one, because an off-by-one at the top is the
+# one an eye would catch anyway.
+for _index in 0 1 2 3; do
+  _pane=$(env -u AURADE_INSTALLER_TUI_LIB AURADE_TUI_COLUMNS=120 \
+    AURADE_TUI_HEIGHT=40 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+    AURADE_RENDER_REVIEW_ROW="$_index" "$TUI" --render review 2>/dev/null)
+  # The row the marker is on, by its short name, and the heading the pane on
+  # the right chose. Both read out of the drawn screen rather than out of the
+  # arrays, so this measures what somebody would be looking at.
+  _short=$(sed 's/^ *//' <<<"$_pane" |
+    awk -F'|' '/^\|/ && NF == 4 && $2 ~ /> / { sub(/^ *> */, "", $2); print $2; exit }')
+  _short=${_short%%"  "*}
+  [[ -n $_short ]] || fail "row $_index has no marked line"
+  _want=''
+  for _id in "${AURADE_QUESTION_IDS[@]}"; do
+    [[ $(aurade_question_field "$_id" short) == "$_short" ]] || continue
+    _want=$(aurade_question_field "$_id" label)
+    break
+  done
+  [[ -n $_want ]] || fail "the marked row '$_short' is not a question"
+  grep -Fq "$_want" <<<"$_pane" ||
+    fail "row $_index is '$_short' and the pane beside it does not explain it"
+done
+
 echo 'installer TUI flow test: PASS'

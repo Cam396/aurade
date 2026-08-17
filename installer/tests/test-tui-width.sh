@@ -86,5 +86,81 @@ lead=$(env AURADE_TUI_PLAIN=1 AURADE_TUI_COLUMNS=160 AURADE_TUI_HEIGHT=30 \
   "$TUI" --render welcome 2>/dev/null | grep -c '^ ' || true)
 (( lead == 0 )) || fail "plain mode indented $lead lines on a wide terminal"
 
+# --- two panes, and one divider ---------------------------------------------
+#
+# On a wide terminal the review screen puts the list on the left and what the
+# selected line means on the right. The failure this guards is not "the panes
+# are missing", it is a one column disagreement between the rows and the rules
+# that close them: `_tui_split` and `tui_pane_rule` compute the divider
+# separately, and a frame with a tee one column off its divider looks like a
+# rendering bug in a way a missing feature never does.
+#
+# So it measures rather than greps. Every row that carries two dividers puts
+# them in the same place, and so does every rule.
+review() {
+  env -u AURADE_TUI_WIDTH AURADE_TUI_COLUMNS="$1" AURADE_TUI_HEIGHT=34 \
+    AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render review 2>/dev/null
+}
+
+divider_columns() {
+  awk '
+    function nth(s, c, want,   i, n) {
+      n = 0
+      for (i = 1; i <= length(s); i++) {
+        if (substr(s, i, 1) != c) continue
+        if (++n == want) return i
+      }
+      return 0
+    }
+    function total(s, c,   i, n) {
+      n = 0
+      for (i = 1; i <= length(s); i++) if (substr(s, i, 1) == c) n++
+      return n
+    }
+    {
+      line = $0
+      sub(/^ +/, "", line)
+      # Three verticals is a split row; three corners is a rule with a tee.
+      # Everything else is a full width row and has no opinion about this.
+      if (total(line, "|") == 3) print "row " nth(line, "|", 2)
+      else if (total(line, "+") == 3) print "rule " nth(line, "+", 2)
+    }
+  ' "$1"
+}
+
+review 120 >"$TMP/two"
+divider_columns "$TMP/two" >"$TMP/cols"
+
+rows=$(grep -c '^row ' "$TMP/cols" || true)
+rules=$(grep -c '^rule ' "$TMP/cols" || true)
+(( rows >= 4 )) || fail "a 120 column terminal drew $rows split rows, so there is no second pane"
+(( rules == 2 )) || fail "the split is closed by $rules tee'd rules, expected one above and one below"
+
+distinct=$(awk '{ print $2 }' "$TMP/cols" | sort -u | wc -l)
+(( distinct == 1 )) ||
+  fail "the divider sits in $distinct different columns down the screen, expected 1"
+
+# The right pane has to actually say something. An empty second column is the
+# failure mode where the layout landed and the content did not.
+right=$(sed 's/^ *//' "$TMP/two" | awk -F'|' '/^\|/ && NF == 4 { print $3 }' | tr -d ' \n' | wc -c)
+(( right > 40 )) || fail "the detail pane drew $right characters, so it is empty"
+
+# --- and one pane everywhere else -------------------------------------------
+#
+# 88 columns split in two is two cramped columns rather than one comfortable
+# one, which is worse than what it replaced. The measure has to earn the
+# second pane, not merely be wider than the floor.
+for columns in 80 100; do
+  split=$(review "$columns" | sed 's/^ *//' | grep -c '^|.*|.*|' || true)
+  (( split == 0 )) ||
+    fail "a $columns column terminal split the review screen into two panes"
+done
+
+# Plain mode never splits. Columns are for an eye that moves sideways, and a
+# braille line is read in one direction only.
+split=$(env AURADE_TUI_PLAIN=1 AURADE_TUI_COLUMNS=160 AURADE_TUI_HEIGHT=34 \
+  "$TUI" --render review 2>/dev/null | grep -c '|' || true)
+(( split == 0 )) || fail "plain mode drew $split lines carrying a frame character"
+
 (( failures == 0 )) || exit 1
-echo 'installer TUI width test: PASS (frame grows to a measure, centred, floor held)'
+echo 'installer TUI width test: PASS (frame grows to a measure, centred, two panes when they fit)'

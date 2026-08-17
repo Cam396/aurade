@@ -571,10 +571,34 @@ widget_enum() {
 REVIEW_ROWS=()
 
 screen_review() {
-  local selected=${1:-0} id short value index=0 marked
+  local selected=${1:-0}
   REVIEW_ROWS=()
   tui_clear
-  tui_header 'Review'
+  tui_header 'Review' split
+  if (( AURADE_TUI_TWOPANE )); then
+    # The list is drawn first because it is what fills REVIEW_ROWS, and the
+    # detail pane is about whichever row that turned out to be.
+    tui_pane_begin left
+    review_list "$selected"
+    tui_pane_end
+    tui_pane_begin right
+    review_detail "${REVIEW_ROWS[selected]:-}"
+    tui_pane_end
+    tui_pane_flush
+  else
+    review_list "$selected"
+  fi
+  # Four hints and a way out, inside 66 columns. The first draft said
+  # "up/down choose" as well and the frame silently ate "esc back", which is
+  # the one hint somebody stuck on this screen actually needs. The arrows are
+  # discoverable from the marker moving; the way out is not discoverable from
+  # anything.
+  tui_footer 'enter  change    c  continue    a  advanced' 'esc  back' split
+}
+
+# The list of answers, one selectable row each.
+review_list() {
+  local selected=${1:-0} id short value index=0 marked
   tui_blank
   tui_wrap 'Here is what will happen' accent
   tui_blank
@@ -611,12 +635,78 @@ screen_review() {
   tui_blank
   tui_wrap 'Nothing has been written to any disk yet.' ok
   tui_blank
-  # Four hints and a way out, inside 66 columns. The first draft said
-  # "up/down choose" as well and the frame silently ate "esc back", which is
-  # the one hint somebody stuck on this screen actually needs. The arrows are
-  # discoverable from the marker moving; the way out is not discoverable from
-  # anything.
-  tui_footer 'enter  change    c  continue    a  advanced' 'esc  back'
+}
+
+# What the selected line means, in the pane beside it.
+#
+# The question manifest already carries a plain language sentence for every
+# question, written for the screen that asks it. Showing it here is not a
+# second copy of anything: it is the same sentence, at the moment somebody is
+# deciding whether to go back and change that answer, which is exactly when it
+# is worth reading and exactly when the wizard no longer shows it.
+review_detail() {
+  local id=${1:-} value
+  tui_blank
+  if [[ -z $id ]] || ! aurade_question_exists "$id"; then
+    tui_wrap 'Nothing selected.' dim
+    return 0
+  fi
+  tui_wrap "$(aurade_question_field "$id" label)" accent
+  tui_blank
+  tui_wrap "$(aurade_question_field "$id" help)" dim
+  if aurade_question_is_secret "$id"; then
+    tui_blank
+    # Said plainly rather than implied by the word "set", because "set" is the
+    # kind of word somebody reads as "the installer has it" and then wonders
+    # where it is kept.
+    tui_wrap 'It is not shown here, and it is never written to the log.' dim
+  else
+    value=${ANSWERS[$id]:-}
+    if [[ $id == target && -n $value ]]; then
+      tui_blank
+      review_disk_detail "$value"
+    fi
+  fi
+  tui_blank
+  tui_wrap 'Press enter to change this.' dim
+}
+
+# The disk the install is aimed at, and the shape it will be left in.
+#
+# A device path is not an answer to "is that the right disk". The model and
+# the size are what somebody checks it against, and the map is the part the
+# graphical front end's list cannot say: it is the plan, drawn.
+review_disk_detail() {
+  local target=$1 line root fs path size model rest
+  size=''
+  while IFS='|' read -r path size model rest; do
+    [[ $path == "$target" ]] || continue
+    # Never "unknown". A drive that does not report its model has not been
+    # misread by the installer, and "unknown" is the word that makes somebody
+    # think it has.
+    [[ -n $model && $model != unknown ]] ||
+      model='not reported by this drive'
+    tui_field 'Model' "$model" ink
+    tui_field 'Size' "${size:-not reported by this drive}" ink
+    break
+  done < <(disk_table 2>/dev/null || true)
+  # The root partition gets what is left after the EFI system partition, which
+  # for a disk measured in gigabytes is the whole number below what the drive
+  # reports. Rounding down is the honest direction: it can be a little smaller
+  # than stated and must never look bigger.
+  root=$size
+  [[ ! $root =~ ^([0-9]+)\.[0-9]+G$ ]] || root="${BASH_REMATCH[1]}G"
+  fs=${ANSWERS[filesystem]:-btrfs}
+  [[ $fs != btrfs ]] || fs=Btrfs
+  [[ $fs != xfs ]]   || fs=XFS
+  line='[ EFI 512M ]'
+  if [[ ${ANSWERS[encrypt]:-yes} == yes ]]; then
+    line+="[ LUKS: $fs root${root:+ $root} ]"
+  else
+    line+="[ $fs root${root:+ $root} ]"
+  fi
+  tui_blank
+  tui_wrap "$line" dim
 }
 
 # One line of the review, selectable.
@@ -2256,7 +2346,7 @@ if [[ -n $RENDER_ONLY ]]; then
     2048)      RANDOM=${AURADE_2048_SEED:-7}
                aurade_2048_new; screen_2048 ;;
     fallback)  screen_fallback ;;
-    review)    screen_review ;;
+    review)    screen_review "${AURADE_RENDER_REVIEW_ROW:-0}" ;;
     gate)      screen_gate "${AURADE_RENDER_TYPED:-$(aurade_confirmation_token \
                  "${ANSWERS[target]}" "${ANSWERS[layout]:-wipe}")}" ;;
     progress)  screen_progress "${AURADE_RENDER_FRAME:-0}" ;;
