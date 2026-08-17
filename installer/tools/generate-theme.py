@@ -269,6 +269,34 @@ HIGH_CONTRAST_DARK = {
 }
 
 
+def oled(scheme: dict[str, str], p: dict[str, dict[int, str]]) -> dict[str, str]:
+    """The dark scheme with the ground actually switched off.
+
+    An OLED pixel at #000000 is not dark, it is unlit: no power and infinite
+    contrast. The dark scheme's ground is `#121318`, which is a pixel that is
+    on and pretending. On a laptop panel that is the difference between a
+    backdrop and a hole in the front of the machine, and it is most of the
+    screen for the ten minutes of an install.
+
+    Only the grounds move. The containers stay separated from each other so a
+    card is still findable, and every accent is untouched, because an OLED
+    scheme that also restyles the brand is two changes wearing one name.
+    """
+    N = p["neutral"]
+    out = dict(scheme)
+    out["surface"] = "#000000"
+    out["surface_dim"] = "#000000"
+    out["surface_container_lowest"] = "#000000"
+    # The cards lift off the black rather than sinking into it, which is the
+    # one thing a true black ground makes harder rather than easier.
+    out["surface_container_low"] = N[6]
+    out["surface_container"] = N[10]
+    out["surface_container_high"] = N[12]
+    out["surface_container_highest"] = N[17]
+    out["scrim"] = "#000000"
+    return out
+
+
 def high_contrast(scheme: dict[str, str], p: dict[str, dict[int, str]],
                   dark: bool) -> dict[str, str]:
     """The same roles, pushed to the ends of their ramps.
@@ -921,9 +949,11 @@ def main() -> int:
     light, dark = roles(palettes, False), roles(palettes, True)
     light_hc = high_contrast(light, palettes, False)
     dark_hc = high_contrast(dark, palettes, True)
+    dark_oled = oled(dark, palettes)
 
     failures = []
-    for scheme_name, scheme in (("light", light), ("dark", dark)):
+    for scheme_name, scheme in (("light", light), ("dark", dark),
+                                ("dark oled", dark_oled)):
         for fg, bg, want in CONTRAST_PAIRS:
             got = contrast(scheme[fg], scheme[bg])
             if got < want:
@@ -952,6 +982,7 @@ def main() -> int:
         os.path.join(lib, "theme-dark.css"): emit_css(dark, "dark"),
         os.path.join(lib, "theme-hc.css"): emit_css(light_hc, "light high contrast"),
         os.path.join(lib, "theme-dark-hc.css"): emit_css(dark_hc, "dark high contrast"),
+        os.path.join(lib, "theme-oled.css"): emit_css(dark_oled, "dark oled"),
         os.path.join(lib, "tokens.py"): emit_python(palettes, light, dark, brand),
     }
     stale = []

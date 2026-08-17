@@ -104,7 +104,7 @@ for _gui_module in __init__ a11y bridge flow app brand locales stage tokens wait
 done
 # Both stylesheets. GTK's @define-color is global, so the dark scheme is a
 # second sheet the front end swaps in rather than a section of the first.
-for _sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css; do
+for _sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_sheet}" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_sheet}"
 done

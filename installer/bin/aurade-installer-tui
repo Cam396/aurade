@@ -240,6 +240,11 @@ disk_table() {
 
 cleanup() {
   local file
+  # The console palette outlives this process, so a console left with a lilac
+  # "blue" is a console every later program draws wrongly on. Reset first, so
+  # it happens even if the secret shredding below has something to complain
+  # about.
+  tui_palette_reset 2>/dev/null || true
   if [[ -d ${SECRET_DIR:-} ]]; then
     while IFS= read -r -d '' file; do
       if command -v shred >/dev/null 2>&1; then
@@ -1163,6 +1168,7 @@ run_access() {
 
 _access_seed
 access_obey
+(( AURADE_TUI_PLAIN )) || tui_palette_apply
 
 read_key() {
   local key

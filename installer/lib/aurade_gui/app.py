@@ -99,6 +99,11 @@ THEME_DARK_CSS = os.path.join(_LIB, "theme-dark.css")
 #: second value, which is the same reason light and dark are separate files.
 THEME_HC_CSS = os.path.join(_LIB, "theme-hc.css")
 THEME_DARK_HC_CSS = os.path.join(_LIB, "theme-dark-hc.css")
+#: The dark scheme with the ground switched off rather than dimmed. An OLED
+#: pixel at #000000 draws no power and has infinite contrast; `#121318` is a
+#: pixel that is on and pretending, and it is most of the screen for ten
+#: minutes.
+THEME_OLED_CSS = os.path.join(_LIB, "theme-oled.css")
 
 
 # --------------------------------------------------------------------------
@@ -422,6 +427,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         #: the bridge rather than remembered here, so the two front ends cannot
         #: disagree about what is currently on.
         self.high_contrast = False
+        #: Whether the true black ground is wanted. Only meaningful in the dark
+        #: scheme, which is the only place a ground can be switched off.
+        self.oled = False
         #: Set by a page that will not let the flow past it. Read once, in
         #: `refresh`, after the page has drawn.
         self.forward_blocked = False
@@ -520,8 +528,13 @@ class InstallerWindow(Adw.ApplicationWindow):
             return
         try:
             if self.high_contrast:
+                # High contrast wins over black. Both push the ground to an
+                # extreme and the one somebody turned on to be able to read
+                # is the one that should decide.
                 provider.load_from_path(
                     THEME_DARK_HC_CSS if self.dark else THEME_HC_CSS)
+            elif self.oled and self.dark:
+                provider.load_from_path(THEME_OLED_CSS)
             else:
                 provider.load_from_path(THEME_DARK_CSS if self.dark else THEME_CSS)
         except GLib.Error:
@@ -849,6 +862,11 @@ class InstallerWindow(Adw.ApplicationWindow):
             (Adw.ColorScheme.DEFAULT, "display-brightness-symbolic", "Match the system"),
             (Adw.ColorScheme.FORCE_LIGHT, "weather-clear-symbolic", "Light"),
             (Adw.ColorScheme.FORCE_DARK, "weather-clear-night-symbolic", "Dark"),
+            # A fourth, because on an OLED panel the difference between a dark
+            # ground and an unlit one is not a matter of taste. Only offered
+            # here rather than as an accessibility choice: it is about the
+            # screen rather than about the person.
+            (Adw.ColorScheme.FORCE_DARK, "night-light-symbolic", "Black"),
         ):
             button = Gtk.ToggleButton()
             button.set_child(Gtk.Image.new_from_icon_name(icon))
@@ -869,6 +887,9 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _on_scheme_button(self, button: Gtk.ToggleButton, scheme) -> None:
         if not button.get_active():
             return
+        # The fourth button is the dark scheme with the ground off, so it asks
+        # for the same colour scheme and a different sheet underneath it.
+        self.oled = button.get_tooltip_text() == "Black"
         Adw.StyleManager.get_default().set_color_scheme(scheme)
 
     def fade_in(self) -> None:

@@ -458,9 +458,13 @@ def run(window: InstallerWindow) -> None:
     toggles = [w for w in walk(window)
                if isinstance(w, Gtk.ToggleButton)
                and w.has_css_class("aurade-scheme-button")]
-    check(len(toggles) == 3,
-          f"expected three colour scheme buttons, found {len(toggles)}")
-    if len(toggles) == 3:
+    # Four: match the system, light, dark, and dark with the ground switched
+    # off. The fourth is not a taste setting. On an OLED panel a pixel at
+    # #000000 draws no power and has infinite contrast, and the dark scheme's
+    # ground is a pixel that is on and pretending.
+    check(len(toggles) == 4,
+          f"expected four colour scheme buttons, found {len(toggles)}")
+    if len(toggles) == 4:
         manager = Adw.StyleManager.get_default()
         toggles[2].set_active(True)
         pump()
@@ -471,6 +475,17 @@ def run(window: InstallerWindow) -> None:
         pump()
         check(manager.get_color_scheme() == Adw.ColorScheme.FORCE_LIGHT,
               "the light button did not force the light scheme")
+        # The black button asks for the dark scheme and a different sheet
+        # underneath it, so the scheme alone cannot tell them apart.
+        toggles[3].set_active(True)
+        pump()
+        check(manager.get_color_scheme() == Adw.ColorScheme.FORCE_DARK,
+              "the black button did not force the dark scheme")
+        check(window.oled, "the black button did not select the unlit ground")
+        toggles[2].set_active(True)
+        pump()
+        check(not window.oled,
+              "going back to dark left the ground switched off")
 
     # -- nothing drawn is silent -------------------------------------------
     #

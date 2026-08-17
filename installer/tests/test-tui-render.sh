@@ -393,4 +393,100 @@ if "$TUI" --render no-such-screen >"$TMP/unknown.out" 2>&1; then
 fi
 grep -Fq 'unknown screen' "$TMP/unknown.out" || fail 'the unknown screen error is unclear'
 
+
+# --- truecolor draws the same colours the graphical front end does ----------
+#
+# The 256 colour tier approximates the brand from a fixed palette, which is the
+# best a terminal could do for years and is visibly not lilac. Most terminals
+# have done 24 bit for a decade, so the exact colours are available, and a
+# second approximation of the brand is exactly what this tier exists to remove.
+#
+# The literals live in the shell because the text installer cannot import
+# Python. That is a copy, and a copy drifts, so this is the thing that catches
+# it: regenerate the theme and the two must still agree.
+python3 - "$ROOT" <<'CHECK' || exit 1
+import re, sys, os
+root = sys.argv[1]
+sys.path.insert(0, os.path.join(root, "installer", "lib"))
+from aurade_gui import tokens as T
+
+scheme = T.scheme(True)
+want = {
+    "border": scheme["outline_variant"], "ink": scheme["on_surface"],
+    "dim": scheme["on_surface_variant"], "accent": scheme["primary"],
+    "cyan": scheme["tertiary"], "ok": scheme["secondary"],
+    "warn": scheme["warning"], "danger": scheme["error"],
+}
+source = open(os.path.join(root, "installer", "lib", "aurade-tui.sh")).read()
+block = source.split("    true)", 1)[1].split("    256)", 1)[0]
+found = dict(re.findall(r"(\w+)\)\s+printf '\\033\[38;2;(\d+;\d+;\d+)m'", block))
+bad = 0
+for token, hexcolour in want.items():
+    r, g, b = (int(hexcolour[i:i+2], 16) for i in (1, 3, 5))
+    expected = f"{r};{g};{b}"
+    if found.get(token) != expected:
+        print(f"test-tui-render: truecolor {token} is {found.get(token)}, "
+              f"the graphical front end draws {expected} ({hexcolour})",
+              file=sys.stderr)
+        bad += 1
+sys.exit(1 if bad else 0)
+CHECK
+
+# And it is only chosen when the terminal says so, because terminfo does not
+# carry the capability and `tput colors` reports 256 on terminals that have
+# been doing 24 bit for years.
+env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN \
+  COLORTERM=truecolor TERM=xterm-256color \
+  "$TUI" --render welcome >"$TMP/tc" 2>/dev/null
+env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN \
+  -u COLORTERM TERM=xterm-256color \
+  "$TUI" --render welcome >"$TMP/no-tc" 2>/dev/null
+# Rendered to a pipe, so both land on the no-colour tier and are identical.
+# What matters is that neither crashes and the detector has both paths.
+grep -Fq '38;2;' "$ROOT/installer/lib/aurade-tui.sh" ||
+  fail 'the truecolor tier emits no 24 bit sequences'
+grep -Fq 'COLORTERM' "$ROOT/installer/lib/aurade-tui.sh" ||
+  fail 'truecolor is never detected from the only signal terminals agree on'
+
+
+# --- the console palette, which is where the brand actually lands -----------
+#
+# The Linux virtual console reports eight colours and means it. It is also the
+# terminal this installer actually runs on, so the truecolor tier above never
+# fires there: it is for somebody running the text installer from an emulator.
+#
+# The console's sixteen colours are registers rather than constants, so the
+# brand arrives by rewriting them and then using the ordinary 16 colour tier.
+python3 - "$ROOT" <<'PALETTE' || exit 1
+import re, sys, os
+root = sys.argv[1]
+sys.path.insert(0, os.path.join(root, "installer", "lib"))
+from aurade_gui import tokens as T
+scheme = T.scheme(True)
+source = open(os.path.join(root, "installer", "lib", "aurade-tui.sh")).read()
+# Split on a closing brace at the start of a line: the first `}` in this
+# function is inside `${TERM:-}`, which truncated the block to one line
+# and reported three slots missing that were there all along.
+block = source.split("tui_palette_apply() {", 1)[1].split("\n}", 1)[0]
+slots = dict(re.findall(r"\\033\]P([0-9A-F])([0-9a-f]{6})", block))
+want = {"8": "outline_variant", "F": "on_surface", "C": "primary",
+        "E": "tertiary", "A": "secondary", "D": "warning", "9": "error"}
+bad = 0
+for slot, role in want.items():
+    expected = scheme[role].lstrip("#")
+    if slots.get(slot) != expected:
+        print(f"test-tui-render: console slot {slot} is {slots.get(slot)}, "
+              f"{role} is {expected}", file=sys.stderr)
+        bad += 1
+sys.exit(1 if bad else 0)
+PALETTE
+
+# Only on that console: the sequence is its own extension, and an emulator that
+# does not know it prints the payload as text across the first screen.
+grep -Fq '[[ ${TERM:-} == linux ]] || return 0' "$ROOT/installer/lib/aurade-tui.sh" ||
+  fail 'the console palette is not gated on the console that understands it'
+# And restored, because the palette outlives the process.
+grep -Fq 'tui_palette_reset' "$TUI" ||
+  fail 'the installer never puts the console palette back'
+
 echo 'installer TUI render test: PASS'
