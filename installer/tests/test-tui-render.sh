@@ -56,6 +56,12 @@ export AURADE_PROBE_DRI_DIR="$TMP/dri"
 AURADE_TUI_HEIGHT=34
 export AURADE_TUI_HEIGHT
 
+# Long copy is wrapped to the frame, so grepping a whole sentence in the raw
+# render is really a test of where the wrap landed. Flatten first.
+flatten() {
+  sed 's/^ *[|+]//; s/[|+] *$//' "$1" | tr '\n' ' ' | tr -s ' '
+}
+
 render() {
   local screen=$1 color=$2 frame=$3
   env AURADE_TUI_COLOR="$color" AURADE_TUI_FRAME="$frame" \
@@ -119,14 +125,33 @@ for screen in "${SCREENS[@]}"; do
   ! grep -q $'\033' "$TMP/raw" || fail "$screen emitted an escape sequence in the no-colour tier"
 done
 
-# --- NO_COLOR and TERM=dumb select the bottom tier on their own -------------
-env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME NO_COLOR=1 TERM=xterm-256color \
+# --- NO_COLOR and TERM=dumb are not the same request ------------------------
+#
+# They used to be, and this asserted they produced identical text. They do not
+# mean the same thing and now do not behave the same way.
+#
+# NO_COLOR is somebody saying "not in colour". They are looking at the screen,
+# so the frame is still doing its job and only the escapes go.
+#
+# TERM=dumb is a terminal saying it has no capabilities, which is what a serial
+# console and several screen reader setups report. Nobody sets it because they
+# dislike colour. It now selects plain mode, where the frame goes too, because
+# a console reader speaks the frame out loud and a braille display renders it
+# one cell at a time.
+env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN \
+  NO_COLOR=1 TERM=xterm-256color \
   "$TUI" --render welcome >"$TMP/nocolor"
 ! grep -q $'\033' "$TMP/nocolor" || fail 'NO_COLOR did not disable colour'
-env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME TERM=dumb \
+grep -q '^+[-]*+$' "$TMP/nocolor" ||
+  fail 'NO_COLOR dropped the frame, which is not what it asks for'
+
+env -u AURADE_TUI_COLOR -u AURADE_TUI_FRAME -u AURADE_TUI_PLAIN TERM=dumb \
   "$TUI" --render welcome >"$TMP/dumb"
 ! grep -q $'\033' "$TMP/dumb" || fail 'TERM=dumb did not disable colour'
-cmp -s "$TMP/nocolor" "$TMP/dumb" || fail 'NO_COLOR and TERM=dumb produced different text'
+! grep -q '^+[-]*+$' "$TMP/dumb" ||
+  fail 'TERM=dumb kept the frame instead of selecting plain mode'
+! cmp -s "$TMP/nocolor" "$TMP/dumb" ||
+  fail 'NO_COLOR and TERM=dumb produced identical text, so one of them is wrong'
 
 # --- the interior is strictly ASCII in every tier ---------------------------
 # Box drawing is reliably one column wide; check marks, arrows and bullets are
@@ -195,7 +220,7 @@ grep -Fq 'A filesystem could not be created or mounted.' "$TMP/failure" ||
   fail 'failure does not explain the cause'
 ! grep -Fq 'storage_error' "$TMP/failure" ||
   fail 'failure printed the raw cause code'
-grep -Fq 'Check the disk for faults, then start again.' "$TMP/failure" ||
+flatten "$TMP/failure" | grep -Fq 'Check the disk for faults, then start again.' ||
   fail 'failure does not name one next step'
 grep -Fq 'Save a report' "$TMP/failure" || fail 'failure does not offer a report'
 grep -Fq 'Open a terminal' "$TMP/failure" || fail 'failure does not offer a terminal'
@@ -204,9 +229,9 @@ grep -Fq 'stage 9 of 11' "$TMP/failure" || fail 'failure does not say where in t
 # wipefs. The screen must not offer one, and must say what starting over costs.
 ! grep -Fq 'Try ' "$TMP/failure" ||
   fail 'the failure screen offers a retry the engine cannot honour'
-grep -Fq 'cannot yet continue from where it stopped' "$TMP/failure" ||
+flatten "$TMP/failure" | grep -Fq 'no way to carry on from where this stopped' ||
   fail 'the failure screen does not admit that it cannot resume'
-grep -Fq 'Starting again erases it' "$TMP/failure" ||
+flatten "$TMP/failure" | grep -Fq 'Starting again erases the disk' ||
   fail 'the failure screen does not say what starting over costs after the disk was changed'
 
 # A failure before the erase gate has a different, non-destructive message.
@@ -215,19 +240,19 @@ cat >"$TMP/reversible.jsonl" <<'EOF'
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   --journal "$TMP/reversible.jsonl" >"$TMP/reversible.out"
-grep -Fq 'Nothing has been changed and no disk was touched.' "$TMP/reversible.out" ||
+flatten "$TMP/reversible.out" | grep -Fq 'Nothing has been changed. A package could not be downloaded.' ||
   fail 'a pre-gate failure did not say the disk is untouched'
-grep -Fq 'Check the network connection, then start again.' "$TMP/reversible.out" ||
+flatten "$TMP/reversible.out" | grep -Fq 'Check the network connection, then start again.' ||
   fail 'a pre-gate failure did not name one next step'
 # Before the boundary there is no cost to starting again, so the warning about
 # what starting again destroys must not appear. It says the opposite of the
 # line above it and turns an untouched disk into a scare.
-! grep -Fq 'Starting again erases it' "$TMP/reversible.out" ||
+! flatten "$TMP/reversible.out" | grep -Fq 'Starting again erases the disk' ||
   fail 'a pre-gate failure warned about a destructive restart'
 # ...and after the boundary it must.
-grep -Fq 'Starting again erases it' "$TMP/failure" ||
+flatten "$TMP/failure" | grep -Fq 'Starting again erases the disk' ||
   fail 'a post-gate failure did not say what starting again costs'
-! grep -Fq 'Starting again erases it' "$TMP/reversible.out" ||
+! flatten "$TMP/reversible.out" | grep -Fq 'Starting again erases the disk' ||
   fail 'a pre-gate failure warned about erasing a disk that was never touched'
 
 render cancelled none ascii >"$TMP/cancelled"
@@ -339,7 +364,7 @@ env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   fail 'a retry was offered for a stage the journal says cannot be retried'
 grep -Fq 'Saving a snapshot to roll back to' "$TMP/nonresumable.out" ||
   fail 'the failure screen did not name the non-resumable stage'
-grep -Fq 'cannot yet continue' "$TMP/nonresumable.out" ||
+flatten "$TMP/nonresumable.out" | grep -Fq 'no way to carry on' ||
   fail 'the failure screen does not say it cannot resume'
 
 # --- a journal message cannot forge a record field --------------------------

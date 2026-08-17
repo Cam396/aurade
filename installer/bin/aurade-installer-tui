@@ -104,6 +104,106 @@ EOF
 # --------------------------------------------------------------------------
 
 declare -A ANSWERS=()
+
+# The accessibility choices, which are not questions.
+#
+# They are not in the shared manifest and they are not a page in the flow,
+# because they are not part of deciding what to install. They are how somebody
+# is able to use the installer at all, so they have to be reachable from every
+# screen rather than answered once at step three. Both front ends put them
+# behind one control that is always present.
+#
+# Every value here is the behaviour that exists today. `access_engine_args`
+# emits nothing for a default, so an install where nobody touched any of this
+# reaches the engine with exactly the command line it reached before.
+declare -A ACCESS=(
+  [screen_reader]=no
+  [braille]=no
+  [contrast]=normal
+  [text_scale]=100
+  [reduce_motion]=no
+  [cursor_size]=24
+)
+declare -A ACCESS_DEFAULT=(
+  [screen_reader]=no
+  [braille]=no
+  [contrast]=normal
+  [text_scale]=100
+  [reduce_motion]=no
+  [cursor_size]=24
+)
+#: What each one is allowed to be, checked here as well as in the engine. The
+#: engine's check is the one that matters and this one is what makes a bad
+#: value a refusal in the front end rather than a failed install.
+declare -A ACCESS_VALUES=(
+  [screen_reader]='yes no'
+  [braille]='yes no'
+  [contrast]='normal high'
+  [text_scale]='100 125 150'
+  [reduce_motion]='yes no'
+  [cursor_size]='24 32 48'
+)
+#: The engine flag each one travels on.
+declare -A ACCESS_FLAGS=(
+  [screen_reader]=--screen-reader
+  [braille]=--braille
+  [contrast]=--contrast
+  [text_scale]=--text-scale
+  [reduce_motion]=--reduce-motion
+  [cursor_size]=--cursor-size
+)
+#: A stable order, so both front ends list them the same way and the tests can
+#: rely on it. Ordered by how much difference each one makes.
+ACCESS_ORDER=(screen_reader braille contrast text_scale reduce_motion cursor_size)
+
+# Preset from the environment, which is how a boot menu entry hands one of
+# these over.
+#
+# The speech entry is the case that matters. Without this it starts espeakup,
+# gives somebody a talking installer, and then installs a system that does not
+# talk, because the choice was made by the boot menu rather than on the
+# accessibility screen and nothing carried it across. Somebody would reboot
+# into silence having done everything right.
+#
+# Read as AURADE_ACCESS_SCREEN_READER and so on. An invalid value is ignored
+# rather than fatal: a typo in a boot entry should not stop an install.
+_access_seed() {
+  local key name value
+  for key in "${ACCESS_ORDER[@]}"; do
+    name=AURADE_ACCESS_${key^^}
+    value=${!name:-}
+    [[ -n $value ]] || continue
+    access_set "$key" "$value" || true
+  done
+}
+
+access_valid() {
+  local key=$1 value=$2 candidate
+  [[ -n ${ACCESS_VALUES[$key]:-} ]] || return 1
+  for candidate in ${ACCESS_VALUES[$key]}; do
+    [[ $candidate != "$value" ]] || return 0
+  done
+  return 1
+}
+
+access_set() {
+  local key=$1 value=$2
+  access_valid "$key" "$value" || return 1
+  ACCESS[$key]=$value
+}
+
+# Only what was changed. A default install must reach the engine with the
+# command line it had before this existed, or every argument-level test in the
+# suite becomes a test of this feature instead of what it was written for.
+access_engine_args() {
+  local key
+  ACCESS_ARGS=()
+  for key in "${ACCESS_ORDER[@]}"; do
+    [[ ${ACCESS[$key]} != "${ACCESS_DEFAULT[$key]}" ]] || continue
+    ACCESS_ARGS+=("${ACCESS_FLAGS[$key]}" "${ACCESS[$key]}")
+  done
+}
+ACCESS_ARGS=()
 SHOW_ADVANCED=0
 # Set while a screen needs a headline other than the question's own, so that
 # rendering never has to write to the shared question manifest.
@@ -252,15 +352,17 @@ screen_welcome() {
   tui_blank
   tui_wrap 'Install AuraDE' accent
   tui_blank
-  tui_wrap 'This will ask a few questions, then install AuraDE on a disk you choose. Nothing is written to any disk until you confirm the exact disk by name.' ink
+  tui_wrap 'A few questions, then AuraDE takes it from here.' ink
   tui_blank
-  tui_wrap 'You can go back at any point before that confirmation, and quitting before it leaves this computer exactly as it is now.' dim
+  tui_wrap 'Nothing is written to any disk until you confirm.' ink
+  tui_blank
+  tui_wrap 'You can go back at any point before that. Quitting leaves this computer exactly as it is now.' dim
   tui_blank
   tui_field 'Move' 'up and down arrows' dim
   tui_field 'Continue' 'enter' dim
   tui_field 'Go back' 'esc' dim
   tui_blank
-  tui_footer 'enter  continue' 'esc  quit'
+  tui_footer 'enter  continue    f1  accessibility' 'esc  quit'
 }
 
 screen_fallback() {
@@ -365,7 +467,7 @@ widget_disk() {
   fi
   if (( removable )); then
     tui_blank
-    tui_note '!' 'A removable disk is listed. That is probably the drive you started this installer from.' warn
+    tui_note '!' 'One of these is removable. That is probably the drive you started this installer from.' warn
   fi
 }
 
@@ -455,7 +557,7 @@ screen_review() {
   tui_clear
   tui_header 'Review'
   tui_blank
-  tui_wrap 'Check these before continuing' accent
+  tui_wrap 'Here is what will happen' accent
   tui_blank
   for id in "${AURADE_QUESTION_ORDER[@]}"; do
     aurade_question_exists "$id" || continue
@@ -483,6 +585,34 @@ screen_review() {
   tui_footer 'enter  continue    a  advanced options' 'esc  back'
 }
 
+#: How each character of a confirmation token is said when it is spelled back.
+#: Only the ones that are ambiguous by ear; letters and digits say themselves.
+#: Whether the gate is currently spelling the typed text back. Off unless
+#: asked for, and reset every time the gate is entered.
+GATE_SPELL=${GATE_SPELL:-0}
+
+declare -A GATE_SPOKEN=(
+  [/]='slash' [:]='colon' [-]='dash' [_]='underscore' [.]='dot'
+)
+
+# Spell the typed text out, one character to a line.
+#
+# A sighted user proofreads this field by looking at it. Somebody using speech
+# hears it as a run of characters at whatever rate the reader chooses, and
+# `/dev/nvme0n1` is precisely the string that is hard to hear correctly. So it
+# can be asked to say it slowly with the punctuation named.
+#
+# This makes the gate stronger rather than weaker: it is one more way to check
+# what you typed, and the comparison it is checked against does not change.
+gate_spelling() {
+  local typed=$1 i char out=()
+  for (( i = 0; i < ${#typed}; i++ )); do
+    char=${typed:i:1}
+    out+=("${GATE_SPOKEN[$char]:-$char}")
+  done
+  printf '%s' "${out[*]}"
+}
+
 screen_gate() {
   local target=${ANSWERS[target]:-} typed=${1:-} size model serial tran token layout
   layout=${ANSWERS[layout]:-$(aurade_question_default layout)}
@@ -506,18 +636,25 @@ screen_gate() {
   tui_field 'Transport' "${tran:-unknown}" ink
   tui_blank
   if [[ $layout == alongside ]]; then
-    tui_wrap 'The existing partitions and the existing EFI system partition are kept. AuraDE is written into unallocated space only, and nothing already on this disk is moved, resized or erased.' ink
+    tui_wrap 'The partitions already on this disk are kept, including the one the other system boots from. AuraDE is written into unallocated space only, and nothing already there is moved, resized or erased.' ink
   else
-    tui_wrap 'Everything before this point can be undone. Nothing after it can. The packages are already downloaded and verified, so the installation will not need the network again.' ink
+    tui_wrap 'Everything up to here can be undone. Nothing after it can. Packages are downloaded and checked first. If the network fails, this stops with the disk untouched.' ink
   fi
   tui_blank
   tui_wrap "Type $token to continue" dim
   tui_line "$(printf '  > %s_' "$typed")" cyan
+  # Spelled out on request, and only on request: it is four lines of noise to
+  # somebody who can see the field and the only way to check it for somebody
+  # who cannot.
+  if (( GATE_SPELL )) && [[ -n $typed ]]; then
+    tui_blank
+    tui_wrap "You typed: $(gate_spelling "$typed")" ink
+  fi
   tui_blank
   if [[ $layout == alongside ]]; then
-    tui_footer 'enter  install alongside' 'esc  go back'
+    tui_footer 'enter  install alongside    f2  spell it back' 'esc  go back'
   else
-    tui_footer 'enter  erase and install' 'esc  go back'
+    tui_footer 'enter  erase and install    f2  spell it back' 'esc  go back'
   fi
 }
 
@@ -607,6 +744,19 @@ screen_progress() {
   local stage status label mark token elapsed pct detail record active=''
   local tip row shown=0 done_count=0 pending_count=0 done_ms=0
   local -a done_rows=() live_rows=() pending_rows=()
+  local m_ok m_run m_fail m_wait
+
+  # Four stage states, marked by a glyph in a fixed column. Three of the four
+  # marks are characters and the fourth is three spaces, which is fine for the
+  # eye and fatal read linearly: plain mode strips indentation, so "waiting"
+  # becomes no mark at all and every unstarted stage looks finished. So the
+  # states say themselves instead. This is the colour-alone rule one level
+  # down: whitespace is not a mark either.
+  if (( AURADE_TUI_PLAIN )); then
+    m_ok='Done:'; m_run='Now:'; m_fail='Stopped:'; m_wait='Waiting:'
+  else
+    m_ok=' + '; m_run=' > '; m_fail=' ! '; m_wait='   '
+  fi
 
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
@@ -617,7 +767,7 @@ screen_progress() {
     label=$(stage_label "$stage")
     elapsed=''
     case $status in
-      ok)      mark=' + '; token=ok
+      ok)      mark=$m_ok; token=ok
                elapsed=$(json_field elapsed_ms "$record")
                if [[ $elapsed =~ ^[0-9]+$ ]]; then
                  done_ms=$(( done_ms + elapsed ))
@@ -627,16 +777,16 @@ screen_progress() {
                fi
                done_count=$(( done_count + 1 ))
                done_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")") ;;
-      running) mark=' > '; token=cyan; active=$stage
+      running) mark=$m_run; token=cyan; active=$stage
                live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")")
                pct=$(json_field pct "$record")
                detail=$(json_field message "$record")
                [[ $pct =~ ^[0-9]+$ ]] || pct=0
                PROGRESS_PCT=$pct
                PROGRESS_DETAIL=$detail ;;
-      failed)  mark=' ! '; token=danger
+      failed)  mark=$m_fail; token=danger
                live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
-      *)       mark='   '; token=dim
+      *)       mark=$m_wait; token=dim
                pending_count=$(( pending_count + 1 ))
                pending_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
     esac
@@ -646,7 +796,10 @@ screen_progress() {
 
   tui_clear
   tui_header 'Installing'
-  if (( PROGRESS_AURORA )); then
+  # The aurora is three rows of drawn characters that mean nothing read out.
+  # Plain mode is not a narrower frame, it is the drawing removed.
+  if (( PROGRESS_AURORA && ! AURADE_TUI_PLAIN )) &&
+     [[ ${ACCESS[reduce_motion]:-no} != yes ]]; then
     while IFS= read -r row; do
       tui_line "$(printf '  %s' "$row")" cyan
     done < <(aurade_aurora "$frame" "$(( AURADE_TUI_INNER - 4 ))" 3)
@@ -678,7 +831,14 @@ screen_progress() {
   fi
 
   if (( PROGRESS_TIP )); then
-    tip=$(aurade_tip_for "$(( frame / AURADE_TIP_FRAMES ))")
+    # With reduce motion on, the rotation stops rather than the tips going
+    # away. A screen with nothing on it is not calmer, it is emptier, and the
+    # tips are the only thing telling somebody the wait is expected.
+    if [[ ${ACCESS[reduce_motion]:-no} == yes ]]; then
+      tip=$(aurade_tip_for 0)
+    else
+      tip=$(aurade_tip_for "$(( frame / AURADE_TIP_FRAMES ))")
+    fi
     if [[ -n $tip ]]; then
       tui_blank
       tui_wrap "$tip" dim
@@ -689,8 +849,12 @@ screen_progress() {
   # else stays unoffered for the same reason it always did: this is the least
   # recoverable moment in the product, and a footer that invites a keypress
   # here is inviting the wrong one.
-  tui_footer 'do not turn off this computer    g  game' \
-    "$(stage_position "$active")"
+  if (( AURADE_TUI_PLAIN )); then
+    tui_footer 'do not turn off this computer' "$(stage_position "$active")"
+  else
+    tui_footer 'do not turn off this computer    g  game' \
+      "$(stage_position "$active")"
+  fi
 }
 
 # Each row carries its colour token after a tab, because the rows are built
@@ -759,6 +923,9 @@ format_elapsed() {
 }
 
 screen_failure() {
+  # Three: stopped. Distinguishable from finished without looking, which is
+  # the only property that matters here.
+  tui_bell 3
   local cursor=${1:-0} record stage cause message index=0 option explanation
   record=$(journal_last_failed)
   stage=$(json_field stage "$record")
@@ -858,18 +1025,20 @@ build_failure_options() {
 }
 
 screen_done() {
+  # One bell: finished. See `tui_bell` for why it is a count rather than a tone.
+  tui_bell 1
   tui_clear
-  tui_header 'Finished'
+  tui_header 'You are all set'
   tui_blank
   tui_wrap 'AuraDE is installed.' ok
   tui_blank
-  tui_wrap 'Remove the installation media and restart. Sign in with the username and password you chose.' ink
+  tui_wrap 'Take out the installation media and restart. Sign in with the username and password you chose.' ink
   tui_blank
   if [[ ${ANSWERS[encrypt]:-no} == yes ]]; then
-    tui_wrap 'This disk is encrypted. You will be asked for the disk passphrase each time the computer starts, before the sign-in screen appears.' dim
+    tui_wrap 'Your disk is encrypted. This computer asks for the disk passphrase before the sign-in screen, every time it starts. That is the passphrase you set here, not your account password.' dim
     tui_blank
   fi
-  tui_footer 'remove the installation media, then restart' ''
+  tui_footer 'take out the installation media, then restart' ''
 }
 
 screen_cancelled() {
@@ -878,7 +1047,7 @@ screen_cancelled() {
   tui_blank
   tui_wrap 'Nothing was changed.' ok
   tui_blank
-  tui_wrap 'No disk was partitioned, formatted or written to. This computer is exactly as it was before the installer started.' ink
+  tui_wrap 'No disk was partitioned, formatted or written to. This computer is exactly as it was.' ink
   tui_blank
   tui_footer 'nothing was written to any disk' ''
 }
@@ -887,7 +1056,124 @@ screen_cancelled() {
 # Input
 # --------------------------------------------------------------------------
 
-read_key() { tui_read_key; }
+# One interception point for the whole front end.
+#
+# The accessibility settings have to be reachable from every screen, and every
+# screen except this one consumes printable keys as text: a letter is a letter
+# in a hostname field and part of the token at the erase gate. F1 is the only
+# key that is never input, is not a chord, and is conventionally help.
+#
+# The sentinel is deliberately longer than one character. Every catch-all in
+# the front end guards on `${#key} -ne 1` before appending, so a multi
+# character name falls through to no arm at all and the caller simply loops
+# and redraws, which is exactly what should happen after coming back from a
+# settings screen.
+#: What each accessibility choice is called on screen, and what each value is
+#: called. The engine's vocabulary is `yes`, `no`, `high`; those are correct
+#: and they are not what a chooser reads.
+declare -A ACCESS_LABEL=(
+  [screen_reader]='Screen reader'
+  [braille]='Braille display'
+  [contrast]='Contrast'
+  [text_scale]='Text size'
+  [reduce_motion]='Reduce motion'
+  [cursor_size]='Pointer size'
+)
+declare -A ACCESS_HELP=(
+  [screen_reader]='Reads the screen aloud. Stays on after the restart.'
+  [braille]='Drives a connected braille display. Stays on after the restart.'
+  [contrast]='Stronger separation between text and what is behind it.'
+  [text_scale]='Makes everything larger, including the installed desktop.'
+  [reduce_motion]='Stops the moving parts. Nothing else changes.'
+  [cursor_size]='How large the pointer is.'
+)
+
+access_shown_value() {
+  local key=$1 value=${ACCESS[$1]}
+  case $key in
+    text_scale) printf '%s%%' "$value" ;;
+    cursor_size) printf '%s pixels' "$value" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+# Step to the next allowed value, wrapping. One key that always does something
+# beats two keys where one of them is sometimes a dead end.
+access_cycle() {
+  local key=$1 direction=$2 candidates current index=0 i=0 count
+  # shellcheck disable=SC2206  # a fixed list of words, not a glob
+  candidates=(${ACCESS_VALUES[$key]})
+  count=${#candidates[@]}
+  current=${ACCESS[$key]}
+  for (( i = 0; i < count; i++ )); do
+    [[ ${candidates[i]} != "$current" ]] || index=$i
+  done
+  index=$(( (index + direction + count) % count ))
+  ACCESS[$key]=${candidates[index]}
+}
+
+# Apply what was just chosen to this installer, now. The graphical front end
+# does the same through GTK's settings; here it is two variables the drawing
+# already reads.
+access_obey() {
+  if [[ ${ACCESS[contrast]} == high ]]; then
+    AURADE_TUI_CONTRAST=1
+  else
+    AURADE_TUI_CONTRAST=0
+  fi
+}
+
+screen_access() {
+  local selected=$1 key i=0
+  tui_clear
+  tui_header 'Accessibility'
+  tui_blank
+  tui_wrap 'These take effect now, and are carried into the installed system.' ink
+  tui_blank
+  for key in "${ACCESS_ORDER[@]}"; do
+    if (( i == selected )); then
+      tui_item yes "$(printf '%-18s %s' "${ACCESS_LABEL[$key]}" "$(access_shown_value "$key")")"
+    else
+      tui_item no "$(printf '%-18s %s' "${ACCESS_LABEL[$key]}" "$(access_shown_value "$key")")" dim
+    fi
+    i=$(( i + 1 ))
+  done
+  tui_blank
+  tui_wrap "${ACCESS_HELP[${ACCESS_ORDER[selected]}]}" dim
+  tui_blank
+  tui_footer 'up/down  choose    left/right  change' 'esc  back'
+}
+
+# Reachable from every screen by F1, so it is never something you had to
+# decide before you could see.
+run_access() {
+  local selected=0 key count=${#ACCESS_ORDER[@]}
+  while true; do
+    screen_access "$selected"
+    key=$(tui_read_key) || return 0
+    case $key in
+      up)    selected=$(( (selected - 1 + count) % count )) ;;
+      down)  selected=$(( (selected + 1) % count )) ;;
+      left)  access_cycle "${ACCESS_ORDER[selected]}" -1; access_obey ;;
+      right|enter|space) access_cycle "${ACCESS_ORDER[selected]}" 1; access_obey ;;
+      esc|q|Q|f1) return 0 ;;
+    esac
+  done
+}
+
+_access_seed
+access_obey
+
+read_key() {
+  local key
+  key=$(tui_read_key) || return 1
+  if [[ $key == f1 ]]; then
+    run_access
+    printf 'redraw'
+    return 0
+  fi
+  printf '%s' "$key"
+}
 
 # Text entry that redraws its screen on every keystroke. The redraw is the
 # whole screen rather than the input line, which is slower and much easier to
@@ -1153,6 +1439,10 @@ build_engine_args() {
     [[ -n $value ]] || continue
     ENGINE_ARGS+=("$flag" "$value")
   done
+  # Whatever accessibility was asked for, on the way to the installed system.
+  access_engine_args
+  (( ${#ACCESS_ARGS[@]} == 0 )) || ENGINE_ARGS+=("${ACCESS_ARGS[@]}")
+
   bundle_dir=${AURADE_BUNDLE_DIR:-/opt/aurade/repo}
   ENGINE_ARGS+=(--bundle-dir "$bundle_dir")
 
@@ -1328,7 +1618,7 @@ run_engine_with_progress() {
     elif key=$(tui_poll_key "$AURADE_PROGRESS_TICK"); then
       case $mode in
         progress)
-          if [[ $key == g || $key == G ]]; then
+          if [[ ( $key == g || $key == G ) ]] && (( ! AURADE_TUI_PLAIN )); then
             mode=game
           else
             # Nothing else on this screen is bound, so the keyboard is free,
@@ -1460,6 +1750,7 @@ run_review() {
 # here cannot by itself cause an erase.
 run_gate() {
   local target=${ANSWERS[target]} token typed='' key
+  GATE_SPELL=0
   token=$(aurade_confirmation_token "$target" \
     "${ANSWERS[layout]:-$(aurade_question_default layout)}")
   while true; do
@@ -1470,7 +1761,15 @@ run_gate() {
       esc) return 1 ;;
       backspace) typed=${typed%?} ;;
       space) typed+=' ' ;;
+      f2) GATE_SPELL=$(( ! GATE_SPELL )) ;;
       up|down|left|right|tab) ;;
+      # Anything else that is one character is part of the token, which is
+      # also how paste works here: a terminal that is not in bracketed paste
+      # mode delivers pasted text as ordinary keystrokes, one at a time.
+      #
+      # Nothing is trimmed, folded or normalised on the way in. If it does not
+      # match, it does not match, and the engine compares the same string
+      # again independently.
       *) [[ ${#key} -ne 1 ]] || typed+=$key ;;
     esac
   done
@@ -1503,7 +1802,7 @@ export_report() {
   done
   EXPORT_NOTICE_KIND=danger
   if [[ ! -x $FAILURE_HELPER ]]; then
-    EXPORT_NOTICE='Cannot save a report: the diagnostic helper is missing from this image.'
+    EXPORT_NOTICE='This image cannot save a report. The part that collects one is missing from it.'
     return 1
   fi
   errors=$(mktemp "${TMPDIR:-/tmp}/aurade-export.XXXXXX")
@@ -1692,6 +1991,7 @@ fi
 [[ -n ${_TIP_RARITY_SET:-} ]] || AURADE_TIP_RARITY=0
 
 RENDERABLE=(welcome fallback review gate progress game failure 'done' cancelled
+  access
   question-target question-hostname question-username question-password
   question-encrypt question-keymap question-timezone question-locale
   question-snapshot)
@@ -1702,6 +2002,10 @@ while (($#)); do
     --journal) JOURNAL_FILE=$2; AURADE_JOURNAL_PATH=$2; shift 2 ;;
     --raw-log) RAW_LOG=$2; AURADE_JOURNAL_RAW=$2; shift 2 ;;
     --plan-only) PLAN_ONLY=1; shift ;;
+    # Detected from TERM=dumb and from brltty running, and available by hand
+    # for the cases detection cannot see: a braille display on a serial line,
+    # or somebody who simply wants the screens without the drawing.
+    --plain) AURADE_TUI_PLAIN=1; AURADE_TUI_COLOR=none; shift ;;
     --list-screens) printf '%s\n' "${RENDERABLE[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "aurade-installer-tui: unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -1730,6 +2034,7 @@ if [[ -n $RENDER_ONLY ]]; then
   aurade_probe_renderer
   case $RENDER_ONLY in
     welcome)   screen_welcome ;;
+    access)    screen_access "${AURADE_RENDER_ACCESS_ROW:-0}" ;;
     fallback)  screen_fallback ;;
     review)    screen_review ;;
     gate)      screen_gate "${AURADE_RENDER_TYPED:-$(aurade_confirmation_token \
