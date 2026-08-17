@@ -29,6 +29,7 @@ installer that excludes people.
 from __future__ import annotations
 
 import os
+import re
 
 import gi
 
@@ -37,8 +38,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import (a11y as A, brand, flow as F, locales, stage as S, tokens as T,  # noqa: E402
-               wait as W)
+from . import (a11y as A, bible, brand, flow as F, locales, stage as S,  # noqa: E402
+               tokens as T, wait as W)
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
@@ -1414,7 +1415,160 @@ class InstallerWindow(Adw.ApplicationWindow):
         assurance.append(label(F.WELCOME_ASSURANCE, "m3-label-large", wrap=False))
         assurance.add_css_class("aurade-stage-done")
         box.append(assurance)
+        reader = self._build_bible_button()
+        if reader is not None:
+            box.append(reader)
         return page_shell(box)
+
+    def _build_bible_button(self) -> Gtk.Widget | None:
+        """The Bible, offered once, quietly, and only if it is on the image.
+
+        A flat button under the assurance line, in the small label size, which
+        is the same weight as the photograph credit in the other corner. Not a
+        card, not an icon tile, and nothing above it explaining what it is for:
+        somebody who wants it will find it, and somebody who does not should
+        be able to walk past without the installer having made a point of
+        itself. An installer with opinions about your evening is worse than an
+        installer with none.
+
+        Absent entirely when no Bible is staged, rather than present and
+        apologetic. A button that opens an empty window is a bug wearing a
+        feature's clothes.
+        """
+        if not bible.available():
+            return None
+        button = Gtk.Button(label=F.BIBLE_BUTTON)
+        button.add_css_class("flat")
+        button.add_css_class("m3-label-small")
+        button.add_css_class("dim-label")
+        button.set_halign(Gtk.Align.CENTER)
+        button.set_margin_top(30)
+        button.connect("clicked", lambda _b: self._open_bible())
+        A.described(button, F.BIBLE_BUTTON, F.BIBLE_EDITION)
+        self.widgets["bible.button"] = button
+        return button
+
+    def _bible_markup(self, lines: list[str]) -> str:
+        """One chapter as Pango markup.
+
+        Escaped first and marked up second, in that order and never the other
+        way round, because a verse carrying an ampersand would otherwise take
+        the whole label down to a markup parse error and show nothing at all.
+
+        The asterisks are the converter's, and they are the King James
+        italics: the words the translators supplied rather than found. The
+        verse number goes dim rather than bold. Bold numbers turn a page of
+        prose into a numbered list, which is not how the book reads.
+        """
+        out = []
+        for line in lines:
+            if not line:
+                out.append("")
+                continue
+            text = GLib.markup_escape_text(line)
+            text = re.sub(r"\*([^*]+)\*", r"<i>\1</i>", text)
+            number = re.match(r"^(\d+) ", text)
+            if number:
+                text = (f'<span alpha="55%">{number.group(1)}</span> '
+                        f"{text[number.end():]}")
+            out.append(text)
+        return "\n".join(out)
+
+    def _open_bible(self) -> None:
+        """The reader. Two pickers and a page.
+
+        Book and chapter as dropdowns rather than a sidebar, because eighty
+        books and a hundred and fifty Psalms do not fit in a list beside the
+        text on the screens this installer supports, and because a dropdown is
+        reachable with Tab and Enter alone, which a two pane navigation is not
+        without arrow keys nobody was told about.
+        """
+        books = bible.books()
+        if not books:
+            return
+
+        page = label("", "m3-body-large")
+        page.set_selectable(True)
+        page.set_use_markup(True)
+        page.set_max_width_chars(72)
+        page.set_margin_top(20)
+        page.set_margin_bottom(28)
+        page.set_margin_start(24)
+        page.set_margin_end(24)
+
+        heading = label("", "m3-title-medium")
+        heading.set_margin_start(24)
+        heading.set_margin_top(18)
+
+        chapter_list = Gtk.StringList()
+        chapters = Gtk.DropDown(model=chapter_list)
+        book_list = Gtk.StringList()
+        for book in books:
+            book_list.append(book["short"])
+        picker = Gtk.DropDown(model=book_list)
+        picker.set_enable_search(True)
+        # Searching a dropdown needs to know what to search. Without an
+        # expression the eighty entries are a list you can only scroll.
+        picker.set_expression(Gtk.PropertyExpression.new(
+            Gtk.StringObject, None, "string"))
+
+        def show(*_args) -> None:
+            index = picker.get_selected()
+            if index >= len(books):
+                return
+            book = books[index]
+            wanted = chapters.get_selected()
+            count = len(bible.chapters(book["code"]))
+            if chapter_list.get_n_items() != count:
+                chapter_list.splice(0, chapter_list.get_n_items(),
+                                    [str(n) for n in range(1, count + 1)])
+                wanted = 0
+            if wanted >= count:
+                wanted = 0
+            chapters.set_selected(wanted)
+            heading.set_label(book["name"])
+            page.set_label(self._bible_markup(
+                bible.chapter(book["code"], wanted + 1)))
+            # Back to the top. A reader who was at verse forty of one chapter
+            # and turns the page should be at the start of the next one, not
+            # forty verses into it.
+            adjustment = scroller.get_vadjustment()
+            if adjustment is not None:
+                adjustment.set_value(0)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_overlay_scrolling(False)
+        scroller.set_vexpand(True)
+        body = column(0)
+        body.append(heading)
+        body.append(page)
+        scroller.set_child(body)
+
+        picker.connect("notify::selected", show)
+        chapters.connect("notify::selected", show)
+        A.described(picker, F.BIBLE_BOOK, F.BIBLE_TITLE)
+        A.described(chapters, F.BIBLE_CHAPTER, F.BIBLE_TITLE)
+
+        header = Adw.HeaderBar()
+        header.pack_start(picker)
+        header.pack_start(chapters)
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(scroller)
+
+        dialog = Adw.Dialog()
+        dialog.set_title(F.BIBLE_TITLE)
+        dialog.set_content_width(720)
+        dialog.set_content_height(620)
+        dialog.set_child(toolbar)
+        self.widgets["bible.dialog"] = dialog
+        self.widgets["bible.picker"] = picker
+        self.widgets["bible.chapters"] = chapters
+        self.widgets["bible.page"] = page
+        self.widgets["bible.heading"] = heading
+        show()
+        dialog.present(self)
 
     def _build_page(self, page: F.Page) -> Gtk.Widget:
         box = column(20)

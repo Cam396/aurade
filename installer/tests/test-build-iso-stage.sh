@@ -308,6 +308,29 @@ while IFS=$'\t' read -r _picture _rest; do
   [[ $_mode == 644 ]] ||
     { echo "wallpapers/$_picture staged as $_mode, not 644" >&2; exit 1; }
 done < "$ROOT/installer/wallpapers/manifest.tsv"
+# The Bible, every book the manifest names, at the mode the image expects, and
+# the manifest itself. The interesting failure is not a missing file: it is an
+# image carrying sixty six books, which is what three of the four candidate
+# sources turned out to be, so the count is checked here as well as in
+# `test-bible.sh`. The archive the text is made from must not be staged; it is
+# a source, and two and a half megabytes the image would never open.
+_bible=$TMP/work/profile/airootfs/usr/local/share/aurade/bible
+[[ -r $_bible/manifest.tsv ]] ||
+  { echo 'build-iso.sh does not stage the Bible manifest' >&2; exit 1; }
+_books=0
+while IFS=$'\t' read -r _code _section _short _name _chapters _verses _book; do
+  [[ -n ${_code:-} && ${_code:0:1} != '#' && -n ${_book:-} ]] || continue
+  [[ -r $_bible/$_book ]] ||
+    { echo "build-iso.sh does not stage bible/$_book" >&2; exit 1; }
+  _mode=$(stat -c '%a' "$_bible/$_book")
+  [[ $_mode == 644 ]] ||
+    { echo "bible/$_book staged as $_mode, not 644" >&2; exit 1; }
+  _books=$(( _books + 1 ))
+done < "$ROOT/installer/bible/manifest.tsv"
+(( _books == 80 )) ||
+  { echo "the image carries $_books books, and the edition with the Apocrypha has 80" >&2; exit 1; }
+[[ ! -e $_bible/eng-kjv_usfm.zip ]] ||
+  { echo 'build-iso.sh stages the Bible source archive, which the image never reads' >&2; exit 1; }
 # The boot screen, which is the one piece of this that nothing on this side of
 # a real boot can execute. There is no way to run a plymouth script here, so
 # what is checked instead is every joint it hangs from: the five files present,

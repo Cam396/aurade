@@ -429,11 +429,11 @@ done
 
 # --- the picker, and what is at the top of it -------------------------------
 #
-# A list rather than a cycle. Six things behind one key is not a choice, it is
-# a maze, and the ordering is the part that matters: somebody who finds a game
-# on a screen they are anxious about actively stressful should meet the two
-# options that are not games before the four that are, and should not have to
-# press past a snake to reach the log.
+# A list rather than a cycle. A dozen things behind one key is not a choice, it
+# is a maze, and the ordering is the part that matters: somebody who finds a
+# game on a screen they are anxious about actively stressful should meet the
+# three options that ask nothing of them before anything that calls itself a
+# game, and should not have to press past a snake to reach the log.
 picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
   "$TUI" --render picker --journal "$TMP/journal.jsonl" 2>/dev/null)
 [[ $picker == *'Watch the install work'* ]] ||
@@ -441,11 +441,13 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 [[ $picker == *'that needs nothing'* ]] ||
   fail 'the picker does not offer the ambient option'
 
-# The two that ask nothing come first, in that order, before anything that
-# calls itself a game.
+# The three that ask nothing come first, in that order, before anything that
+# calls itself a game. The Bible is one of them: it is something to read, not
+# something to win, and somebody who opened this list because a progress bar
+# was making them anxious should not have to walk past six games to find it.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Something Test Solve Play Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.

@@ -39,6 +39,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-tui-engine.sh"
 "$ROOT/test-gui-theme.sh"
 "$ROOT/test-wallpapers.sh"
+"$ROOT/test-bible.sh"
 "$ROOT/test-gui-flow.sh"
 "$ROOT/test-gui-bridge.sh"
 "$ROOT/test-gui-launch.sh"

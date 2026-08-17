@@ -540,9 +540,93 @@ def run(window: InstallerWindow) -> None:
           ribbon.get_accessible_role() == Gtk.AccessibleRole.PROGRESS_BAR,
           "the progress ribbon does not report itself as a progress bar")
 
+    run_bible(window)
     run_done_screen(window)
     run_disk_bars(window)
     run_wallpaper(window)
+
+
+def run_bible(window: InstallerWindow) -> None:
+    """The reader, and the reason it exists rather than a shorter one.
+
+    The failure this is really watching for is a Bible with sixty six books
+    in it. Three of the four sources checked when this was chosen were exactly
+    that, and a sixty six book edition opens correctly, pages correctly and
+    looks completely right. The only place it shows is the picker, which is
+    why the count and one apocryphal book by name are asserted here and not
+    only in the file level test.
+
+    The other half is that the markup survives being turned into Pango. A
+    verse carrying an ampersand takes the whole label down to a parse error
+    and draws nothing, and an empty page in a reader looks like a book that
+    happens to be blank.
+    """
+    from aurade_gui import bible  # noqa: PLC0415 - only needed here
+
+    window.flow.state = F.WELCOME
+    window.refresh()
+    pump()
+
+    button = window.widgets.get("bible.button")
+    check(button is not None,
+          "the welcome page offers no way to read the Bible, and there is one "
+          "on the image")
+    if button is None:
+        return
+    check(button.get_visible(), "the Bible button is built and not shown")
+
+    button.emit("clicked")
+    pump()
+
+    picker = window.widgets.get("bible.picker")
+    page = window.widgets.get("bible.page")
+    heading = window.widgets.get("bible.heading")
+    chapters = window.widgets.get("bible.chapters")
+    check(picker is not None and page is not None,
+          "clicking the Bible button opened nothing")
+    if picker is None or page is None or heading is None or chapters is None:
+        return
+
+    names = [picker.get_model().get_string(i)
+             for i in range(picker.get_model().get_n_items())]
+    equal(len(names), 80,
+          "the books offered, and eighty rather than sixty six is the whole "
+          "reason this edition was chosen")
+    for wanted in ("Genesis", "Tobit", "Revelation"):
+        check(wanted in names, f"{wanted} is not in the book picker")
+
+    # Something is actually on the page, and it is the book that was asked for.
+    check(len(page.get_label()) > 200,
+          f"the first chapter drew {len(page.get_label())} characters")
+    check(heading.get_label() != "", "the reader shows no book title")
+
+    # Every chapter of a book with a hard one in it. Psalm 119 is the longest
+    # chapter in the Bible and Psalms is where the poetry markup lives, so if
+    # anything is going to fail to escape or fail to close a tag it is here.
+    picker.set_selected(names.index("Psalms"))
+    pump()
+    equal(chapters.get_model().get_n_items(), 150, "chapters offered in Psalms")
+    for number in (1, 119, 150):
+        markup = window._bible_markup(bible.chapter("PSA", number))
+        parsed = True
+        try:
+            Gtk.Label(label="").set_markup(f"<span>{markup}</span>")
+        except Exception:  # noqa: BLE001
+            parsed = False
+        check(parsed, f"Psalm {number} does not survive being marked up")
+        check(markup.count("<i>") == markup.count("</i>"),
+              f"Psalm {number} has unbalanced emphasis")
+
+    # And the Apocrypha opens, which is the part that is not in most Bibles.
+    picker.set_selected(names.index("Tobit"))
+    pump()
+    equal(chapters.get_model().get_n_items(), 14, "chapters offered in Tobit")
+    check(len(page.get_label()) > 200, "Tobit chapter one drew almost nothing")
+
+    dialog = window.widgets.get("bible.dialog")
+    if dialog is not None:
+        dialog.force_close()
+        pump()
 
 
 def run_done_screen(window: InstallerWindow) -> None:

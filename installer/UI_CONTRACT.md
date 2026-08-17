@@ -305,6 +305,56 @@ default, the panes at 16, and two new cards at 20. The page sheet is 28,
 which is not a fourth number: 16 is `lg` on the shape scale and is what a card
 is, and the thing cards sit on is one step up at `xl`.
 
+## The Bible
+
+Eighty books in `installer/bible`, one markdown file each, indexed by a
+manifest and staged to `/usr/local/share/aurade/bible`. It is the King James
+Version with the Apocrypha, from eBible.org's `eng-kjv`, which is public
+domain. `installer/bible/README.md` carries the provenance and the checksum.
+
+**Eighty rather than sixty six, and that is the whole reason for the source.**
+Three of the four candidates checked first were the protocanon only, and a
+sixty six book edition passes every check about file shape, verse numbering
+and markup. So the canon is pinned by count and by book name in
+`test-bible.sh`, and again in the runtime test where the picker is counted.
+The near identical `engKJV` on the same site is the protocanon one.
+
+**Offered once, quietly, and never mentioned again.** A small flat button at
+the bottom of the graphical welcome page, in the same weight as the photograph
+credit in the other corner, and one entry in the text installer's list of
+things to do while the install runs. Nothing explains what it is for. Somebody
+who wants it will find it, and somebody who does not should be able to walk
+past without the installer having made a point of itself.
+
+It sits with the options that ask nothing rather than with the games, because
+it is something to read and not something to win, and the list is ordered for
+the person who opened it because a progress bar was making them anxious.
+
+**Absent entirely when it is not staged**, rather than present and apologetic.
+A button that opens an empty window is a bug wearing a feature's clothes.
+
+**The italics are the King James italics**, the words the translators supplied
+rather than found, and they survive as markdown emphasis because that is what
+emphasis means. The graphical reader draws them as italics. The text installer
+strips them, because a terminal has no italic that survives every tier this
+installer draws for, and on a braille display asterisks would be worse than
+noise. Footnotes and the red letter are dropped, and the README says why.
+
+**One verse per line, `## Chapter N` between chapters.** Both front ends walk
+lines, and neither has a markdown engine. A converter that leaves markup in
+the text is not a crash and not a blank page; it is one wrong looking word in
+the middle of a verse, which is the kind of thing nobody reports. That
+happened: thirty five thousand nested markers survived, the converter's own
+guard and the test's had the identical blind spot and agreed with each other,
+and it was found by rendering a psalm and looking at it. Both guards now take
+USFM's nested form, and the test renders a psalm and looks at it every run.
+
+**Do not ship the NIV.** It is under live copyright to Biblica and Zondervan,
+and bundling it in a distributed image is infringement landing on whoever
+ships the ISO. This is a different situation in every respect from the Queen's
+Printer's Patent, which restricts printing the King James inside the United
+Kingdom and has no bearing on a text file.
+
 ## The photograph behind the window
 
 Twenty eight of them in `installer/wallpapers`, one picked at random per run,

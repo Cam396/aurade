@@ -40,8 +40,10 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade-tips"]=0:0:644
   ["/usr/local/lib/aurade/aurade-probe.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-renderers.sh"]=0:0:644
+  ["/usr/local/lib/aurade/aurade-bible.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/__init__.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/a11y.py"]=0:0:644
+  ["/usr/local/lib/aurade/aurade_gui/bible.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/bridge.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/flow.py"]=0:0:644
   ["/usr/local/lib/aurade/aurade_gui/app.py"]=0:0:644
@@ -63,6 +65,11 @@ file_permissions=(
   # that is wrong the first time somebody adds a twenty ninth photograph. The
   # stage test checks the mode of what actually landed instead.
   ["/usr/local/share/aurade/wallpapers/manifest.tsv"]=0:0:644
+  # The eighty books are left out of this list for the same reason as the
+  # twenty eight photographs: a hand written list of eighty file names is a
+  # list that is wrong the moment anything about the set changes, and the
+  # stage test checks the mode of what actually landed instead.
+  ["/usr/local/share/aurade/bible/manifest.tsv"]=0:0:644
   # The boot screen. The theme is five files and all five are read by a daemon
   # running as root before there is a user, so they are listed one by one:
   # unlike the wallpapers this is a fixed set that does not grow, and a boot

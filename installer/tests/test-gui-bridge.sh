@@ -198,11 +198,12 @@ done
 install -d "$TMP/image/sbin" "$TMP/image/lib"
 install -m 0755 "$ROOT/installer/bin/aurade-installer-tui" \
   "$ROOT/installer/bin/aurade-installer-gui-bridge" "$TMP/image/sbin/"
-install -m 0644 "$ROOT/installer/lib/aurade-validate.sh" \
-  "$ROOT/installer/lib/aurade-questions.sh" "$ROOT/installer/lib/aurade-tui.sh" \
-  "$ROOT/installer/lib/aurade-probe.sh" "$ROOT/installer/lib/aurade-journal.sh" \
-  "$ROOT/installer/lib/aurade-copy.sh" "$ROOT/installer/lib/aurade-wait.sh" \
-  "$TMP/image/lib/"
+# Every shell library in the tree, not a list typed here. The text installer
+# sources them all by name and exits if one is missing, so a library added to
+# the tree and forgotten in this list is a bridge that cannot start on a fake
+# image and starts fine everywhere else. That has already happened once, and
+# the staging test derives its list the same way for the same reason.
+install -m 0644 "$ROOT"/installer/lib/aurade-*.sh "$TMP/image/lib/"
 install -m 0644 "$ROOT/installer/lib/aurade-tips" "$TMP/image/lib/"
 [[ ! -e $TMP/image/sbin/aurade-install-failure ]] || {
   echo 'test-gui-bridge: the bare image copy carries a diagnostic helper' >&2

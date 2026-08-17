@@ -49,7 +49,8 @@ _TIP_RARITY_SET=${AURADE_TIP_RARITY+set}
 _STAR_RARITY_SET=${AURADE_STAR_RARITY+set}
 
 for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh \
-            aurade-journal.sh aurade-copy.sh aurade-wait.sh; do
+            aurade-journal.sh aurade-copy.sh aurade-wait.sh \
+            aurade-bible.sh; do
   if ! _path=$(_find_lib "$_lib"); then
     echo "aurade-installer-tui: cannot find $_lib" >&2
     exit 1
@@ -2649,10 +2650,11 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log life type nono 2048 mines lights fifteen snake ttt)
+WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
+  [bible]='Read the Bible'
   [life]='Something moving, that needs nothing'
   [type]='Test your typing, and your keyboard'
   [nono]='Solve a nonogram'
@@ -2755,6 +2757,143 @@ screen_wait_picker() {
   done
   tui_blank
   tui_footer 'up/down  choose    enter  start' 'esc  back to the install'
+}
+
+# The Bible, for the ten minutes somebody is sitting in front of a progress
+# bar. Two screens: a list of the books, and a page of one chapter.
+#
+# The asterisks the converter wrote are the King James italics, the words the
+# translators supplied rather than found. The graphical front end draws them
+# as italics. Here they come off, because a terminal has no italic that
+# survives every tier this installer draws for, and asterisks scattered
+# through a page of prose read as damage rather than as emphasis. On a braille
+# display they would be worse than that.
+BIBLE_INDEX=0
+BIBLE_CHAPTER=1
+BIBLE_TOP=0
+BIBLE_CURSOR=0
+BIBLE_KEY=
+BIBLE_LINES=()
+
+#: How many lines of the book fit, after the frame has taken its share.
+bible_rows() {
+  local rows=$(( AURADE_TUI_HEIGHT - 10 ))
+  (( rows >= 4 )) || rows=4
+  printf '%s\n' "$rows"
+}
+
+#: Load the chapter that is selected, once per chapter rather than per frame.
+bible_load() {
+  local code key
+  code=$(aurade_bible_field "$BIBLE_INDEX" 1)
+  key=$code:$BIBLE_CHAPTER
+  [[ $key == "$BIBLE_KEY" ]] && return 0
+  BIBLE_LINES=()
+  local line
+  while IFS= read -r line; do
+    BIBLE_LINES+=("${line//\*/}")
+  done < <(aurade_bible_chapter "$code" "$BIBLE_CHAPTER")
+  BIBLE_KEY=$key
+  BIBLE_TOP=0
+}
+
+#: Move by whole chapters, and off the end of one book into the next. A reader
+#: who finishes Jude should arrive at Revelation rather than at a wall.
+bible_turn() {
+  local step=$1 code count total
+  code=$(aurade_bible_field "$BIBLE_INDEX" 1)
+  count=$(aurade_bible_chapters "$code")
+  total=$(aurade_bible_count)
+  BIBLE_CHAPTER=$(( BIBLE_CHAPTER + step ))
+  if (( BIBLE_CHAPTER < 1 )); then
+    if (( BIBLE_INDEX > 0 )); then
+      BIBLE_INDEX=$(( BIBLE_INDEX - 1 ))
+      code=$(aurade_bible_field "$BIBLE_INDEX" 1)
+      BIBLE_CHAPTER=$(aurade_bible_chapters "$code")
+    else
+      BIBLE_CHAPTER=1
+    fi
+  elif (( BIBLE_CHAPTER > count )); then
+    if (( BIBLE_INDEX + 1 < total )); then
+      BIBLE_INDEX=$(( BIBLE_INDEX + 1 ))
+      BIBLE_CHAPTER=1
+    else
+      BIBLE_CHAPTER=$count
+    fi
+  fi
+  BIBLE_KEY=
+}
+
+screen_bible() {
+  local HELP_KEY=0
+  local rows index line total shown
+  bible_load
+  rows=$(bible_rows)
+  total=${#BIBLE_LINES[@]}
+  (( BIBLE_TOP >= 0 )) || BIBLE_TOP=0
+  if (( BIBLE_TOP > total - rows )); then
+    BIBLE_TOP=$(( total - rows ))
+    (( BIBLE_TOP >= 0 )) || BIBLE_TOP=0
+  fi
+  tui_clear
+  tui_header "$(aurade_bible_field "$BIBLE_INDEX" 3)"
+  tui_blank
+  tui_wrap "$(printf 'Chapter %s' "$BIBLE_CHAPTER")" accent
+  tui_blank
+  shown=0
+  for (( index = BIBLE_TOP; index < total && shown < rows; index++ )); do
+    line=${BIBLE_LINES[index]}
+    if [[ -z $line ]]; then
+      tui_blank
+    else
+      tui_wrap "$line" ink
+    fi
+    shown=$(( shown + 1 ))
+  done
+  tui_blank
+  if (( total > rows )); then
+    tui_footer 'up/down  read on    left/right  chapter    b  another book' \
+      "$(printf 'line %s of %s    esc  back' "$(( BIBLE_TOP + 1 ))" "$total")"
+  else
+    tui_footer 'left/right  chapter    b  another book' 'esc  back'
+  fi
+}
+
+screen_bible_books() {
+  local HELP_KEY=0
+  local rows index=0 first shown=0 short section last_section=
+  rows=$(bible_rows)
+  first=$(( BIBLE_CURSOR - rows / 2 ))
+  (( first >= 0 )) || first=0
+  tui_clear
+  tui_header 'The Bible'
+  tui_blank
+  while IFS=$'\t' read -r _code section short _name _chapters; do
+    if (( index >= first && shown < rows )); then
+      # The three sections named as they are passed, so somebody scrolling
+      # can tell where the Apocrypha starts without counting.
+      if [[ $section != "$last_section" ]]; then
+        case $section in
+          old)       tui_wrap 'Old Testament' dim ;;
+          apocrypha) tui_wrap 'Apocrypha' dim ;;
+          new)       tui_wrap 'New Testament' dim ;;
+        esac
+        last_section=$section
+        shown=$(( shown + 1 ))
+      fi
+      if (( index == BIBLE_CURSOR )); then
+        tui_item yes "$short"
+      else
+        tui_item no "$short"
+      fi
+      shown=$(( shown + 1 ))
+    elif (( index < first )); then
+      last_section=$section
+    fi
+    index=$(( index + 1 ))
+  done < <(aurade_bible_books)
+  tui_blank
+  tui_footer 'up/down  choose    enter  read' 'esc  back'
 }
 
 # The typing test, which is the keyboard layout check with a score on it.
@@ -3112,6 +3251,8 @@ run_engine_with_progress() {
       mines)   screen_mines ;;
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
+      bible)  screen_bible ;;
+      books)  screen_bible_books ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
       *)    screen_progress "$frame" ;;
     esac
@@ -3152,6 +3293,7 @@ run_engine_with_progress() {
               WAIT_MODE=${WAIT_CHOICES[WAIT_CURSOR]}
               case $WAIT_MODE in
                 tips) mode=progress ;;
+                bible) mode=bible; BIBLE_KEY= ;;
                 2048) mode=2048; aurade_2048_new ;;
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
                 type)    mode=type; aurade_type_new ;;
@@ -3163,6 +3305,30 @@ run_engine_with_progress() {
               esac
               ;;
             q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        bible)
+          case $key in
+            up)    (( BIBLE_TOP > 0 )) && BIBLE_TOP=$(( BIBLE_TOP - 1 )) || BIBLE_TOP=0 ;;
+            down)  BIBLE_TOP=$(( BIBLE_TOP + 1 )) ;;
+            left)  bible_turn -1 ;;
+            right) bible_turn 1 ;;
+            b|B)   mode=books; BIBLE_CURSOR=$BIBLE_INDEX ;;
+            g|G)   mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+          esac
+          ;;
+        books)
+          case $key in
+            up)   (( BIBLE_CURSOR > 0 )) && BIBLE_CURSOR=$(( BIBLE_CURSOR - 1 )) || BIBLE_CURSOR=0 ;;
+            down) (( BIBLE_CURSOR + 1 < $(aurade_bible_count) )) &&
+                    BIBLE_CURSOR=$(( BIBLE_CURSOR + 1 )) || true ;;
+            enter)
+              BIBLE_INDEX=$BIBLE_CURSOR
+              BIBLE_CHAPTER=1
+              BIBLE_KEY=
+              mode=bible ;;
+            q|Q|esc) mode=bible ;;
           esac
           ;;
         log)
@@ -3875,6 +4041,10 @@ if [[ -n $RENDER_ONLY ]]; then
                aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
+    bible)     BIBLE_INDEX=${AURADE_RENDER_BIBLE_BOOK:-0}
+               BIBLE_CHAPTER=${AURADE_RENDER_BIBLE_CHAPTER:-1}
+               BIBLE_TOP=${AURADE_RENDER_BIBLE_TOP:-0}; screen_bible ;;
+    books)     BIBLE_CURSOR=${AURADE_RENDER_BIBLE_BOOK:-0}; screen_bible_books ;;
     # Same fixed seed reasoning as the snake below: two tiles are placed at
     # random, so without this the screen is a different picture on every render
     # and the tier comparison in test-tui-render is comparing two boards.

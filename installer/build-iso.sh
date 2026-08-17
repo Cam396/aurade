@@ -98,7 +98,7 @@ install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin
 install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
 install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ a11y bridge flow app brand locales stage tokens wait; do
+for _gui_module in __init__ a11y bible bridge flow app brand locales stage tokens wait; do
   install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
     "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
 done
@@ -138,6 +138,25 @@ while IFS=$'\t' read -r _wallpaper _rest; do
   install -Dm0644 "$ROOT/wallpapers/${_wallpaper}" \
     "$STAGE/airootfs/usr/local/share/aurade/wallpapers/${_wallpaper}"
 done < "$ROOT/wallpapers/manifest.tsv"
+# The King James Version, with the Apocrypha.
+#
+# The markdown only. `bible/eng-kjv_usfm.zip` is the archive it was made from
+# and stays in the source tree: it is what lets the test re-derive all eighty
+# books, and it is another two and a half megabytes of something the image
+# would never read.
+#
+# Derived from the manifest for the same reason the wallpapers are. Eighty
+# file names typed out here is eighty chances to be wrong, and the manifest is
+# what the front ends open first anyway: a book staged and not indexed is a
+# book nothing can reach, and a book indexed and not staged is a menu entry
+# that opens nothing.
+install -Dm0644 "$ROOT/bible/manifest.tsv" \
+  "$STAGE/airootfs/usr/local/share/aurade/bible/manifest.tsv"
+while IFS=$'\t' read -r _code _section _short _name _chapters _verses _book; do
+  [[ -n ${_code:-} && ${_code:0:1} != '#' && -n ${_book:-} ]] || continue
+  install -Dm0644 "$ROOT/bible/${_book}" \
+    "$STAGE/airootfs/usr/local/share/aurade/bible/${_book}"
+done < "$ROOT/bible/manifest.tsv"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
@@ -147,6 +166,7 @@ install -Dm0644 "$ROOT/lib/aurade-wait.sh" "$STAGE/airootfs/usr/local/lib/aurade
 install -Dm0644 "$ROOT/lib/aurade-tips" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tips"
 install -Dm0644 "$ROOT/lib/aurade-probe.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-probe.sh"
 install -Dm0644 "$ROOT/lib/aurade-renderers.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-renderers.sh"
+install -Dm0644 "$ROOT/lib/aurade-bible.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-bible.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"
 "$ROOT/tools/generate-package-lock.sh" "$AURADE_REPO_DIR" "$STAGE/airootfs/opt/aurade/repo/packages.lock" "$ROOT/expected-packages.txt"
 while read -r _digest filename _pkgname _pkgver _arch; do

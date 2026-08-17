@@ -374,6 +374,17 @@ WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 #: than as an instruction, because nothing depends on anybody taking it up.
 WALLPAPER_HINT = "Show a different photograph"
 
+#: The Bible, offered quietly on the welcome page and nowhere else.
+#:
+#: A small button at the bottom, and no explanation attached to it. Somebody
+#: who wants it knows what it is, and somebody who does not want it should be
+#: able to walk past without the installer having made a point.
+BIBLE_BUTTON = "Read the Bible"
+BIBLE_TITLE = "The Bible"
+BIBLE_EDITION = "King James Version, with the Apocrypha"
+BIBLE_BOOK = "Book"
+BIBLE_CHAPTER = "Chapter"
+
 #: The readiness page's verdict line, keyed by the model's verdict. It is the
 #: first sentence of the installer that is about *this* computer rather than
 #: about the product, so it says what happens next rather than restating the
