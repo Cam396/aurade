@@ -76,6 +76,47 @@ set -e
 [[ $(stat -c '%a' "$TMP/export/install.log") == 600 ]]
 grep -Fq 'Report saved to' "$TMP/export.out"
 
+# --- the report leads with one line -----------------------------------------
+#
+# Somebody whose machine will not boot is going to read this off a phone
+# camera or paste it into a chat, so the first line has to carry the whole
+# answer without a second line: which stage, which cause, which exit status.
+[[ $(stat -c '%a' "$TMP/export/summary.txt") == 600 ]]
+head -n 1 "$TMP/export/summary.txt" >"$TMP/summary.first"
+grep -Fqx \
+  'AuraDE install failed during Downloading packages (cause network_error), exit 7.' \
+  "$TMP/summary.first"
+# The engine's cause code belongs in the report and never on the screen: the
+# report is read by whoever is answering, the screen by whoever is stuck. Both
+# halves are asserted so neither drifts into the other.
+! grep -Fq 'network_error' "$TMP/report.out"
+# Short enough that "leads with" stays true. The provenance under it is three
+# lines and a blank; a summary that grows a paragraph is no longer a summary.
+[[ $(wc -l <"$TMP/export/summary.txt") -le 6 ]]
+grep -Fq 'Journal: journal.jsonl' "$TMP/export/summary.txt"
+grep -Fq 'Log: install.log' "$TMP/export/summary.txt"
+# The raw log is copied verbatim next to it, and the summary is not allowed to
+# quote from it. This is what stops a future "include the last line of the log"
+# from putting a secret into the one file people paste into chat.
+! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/export/summary.txt"
+
+# A failure recorded with no stage still gets a first line. The branch exists
+# because a summary that reads "failed during ,  exit 7." is worse than no
+# summary, and an engine that dies before it opens a stage is the case that
+# produces it.
+cat >"$TMP/stageless.jsonl" <<'EOF'
+{"v":1,"status":"failed","message":"stopped before a stage was opened"}
+EOF
+set +e
+"$ROOT/installer/bin/aurade-install-failure" \
+  --status 4 --journal "$TMP/stageless.jsonl" --raw-log "$TMP/install.log" \
+  --export "$TMP/stageless-export" >"$TMP/stageless.out" 2>&1
+status=$?
+set -e
+[[ $status -eq 4 ]]
+head -n 1 "$TMP/stageless-export/summary.txt" >"$TMP/stageless.first"
+grep -Fqx 'AuraDE install failed, exit 4. No stage was recorded.' "$TMP/stageless.first"
+
 if "$ROOT/installer/bin/aurade-install-failure" --status 7 --journal "$TMP/missing-journal" \
   --raw-log "$TMP/missing-log" --export "$TMP/missing-export" >"$TMP/missing.out" 2>&1; then
   echo 'empty diagnostic export unexpectedly passed' >&2

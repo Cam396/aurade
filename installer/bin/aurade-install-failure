@@ -108,6 +108,34 @@ latest_failed_record() {
   awk '/"status":"failed"/ { record=$0 } END { if (record) print record }' "$JOURNAL"
 }
 
+# The one line the report leads with.
+#
+# A saved report is two files of JSON and a log, and the first thing anybody
+# does with it is paste it somewhere and ask for help. What they need at the
+# top is the sentence that says what happened, in an amount of text that
+# survives being pasted into a chat window: which stage, which cause, which
+# exit code. Everything under it is for whoever answers.
+#
+# Built from the same journal record the screen is built from, so the report
+# and the screen cannot disagree about what failed.
+summary_line() {
+  local record stage cause label
+  record=$(latest_failed_record || true)
+  stage=$(extract_field stage "$record")
+  cause=$(extract_field cause "$record")
+  label=$stage
+  if [[ -n $stage ]] && declare -F stage_label >/dev/null 2>&1; then
+    label=$(stage_label "$stage")
+  fi
+  if [[ -z $label && -z $cause ]]; then
+    printf 'AuraDE install failed, exit %s. No stage was recorded.' "$STATUS"
+    return 0
+  fi
+  printf 'AuraDE install failed during %s' "${label:-an unrecorded stage}"
+  [[ -z $cause ]] || printf ' (cause %s)' "$cause"
+  printf ', exit %s.' "$STATUS"
+}
+
 report() {
   local record stage cause message headline explanation disk_state next
   record=$(latest_failed_record || true)
@@ -171,6 +199,16 @@ export_logs() {
     echo 'There is nothing to save yet.' >&2
     return 1
   fi
+  # First line first. Written after the copy so that a report which turned out
+  # to have nothing in it does not leave a summary of nothing behind.
+  {
+    summary_line
+    printf '\n\n'
+    printf 'Saved %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'Journal: %s\n' "$(basename "$JOURNAL")"
+    printf 'Log: %s\n' "$(basename "$RAW_LOG")"
+  } >"$destination/summary.txt"
+  chmod 0600 "$destination/summary.txt" 2>/dev/null || true
   printf 'Report saved to %s\n' "$destination" >&2
 }
 
