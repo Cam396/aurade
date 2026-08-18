@@ -86,14 +86,72 @@ done
 # The pair that drifts. The front end holds the list of choices and the engine
 # holds the flags, and a key added to one and not the other is a control that
 # silently does nothing.
+#
+# One key on the panel deliberately stops here: a heartbeat has nothing to
+# survive the restart into, because the install it reports on is over. That
+# exception is a written list rather than an inferred one, so a key that loses
+# its flag by accident fails here instead of quietly ceasing to be sent.
 keys=$(probe 'printf "%s\n" "${ACCESS_ORDER[@]}"' 2>/dev/null || true)
+local_keys=$(probe 'printf "%s\n" "${ACCESS_LOCAL[@]}"' 2>/dev/null || true)
+[[ -n $local_keys ]] || fail 'no key is declared front end only'
 while IFS= read -r key; do
   [[ -n $key ]] || continue
-  flag=$(probe "printf '%s' \"\${ACCESS_FLAGS[$key]}\"" 2>/dev/null || true)
+  flag=$(probe "printf '%s' \"\${ACCESS_FLAGS[$key]:-}\"" 2>/dev/null || true)
+  if grep -Fqx -- "$key" <<<"$local_keys"; then
+    # A local key with a flag is a control somebody meant to send and did not.
+    [[ -z $flag ]] ||
+      fail "$key is declared front end only and yet carries the engine flag $flag"
+    probe "access_travels $key" 2>/dev/null &&
+      fail "$key is in ACCESS_LOCAL and access_travels still says it travels"
+    continue
+  fi
   [[ -n $flag ]] || { fail "$key has no engine flag"; continue; }
+  probe "access_travels $key" 2>/dev/null ||
+    fail "$key carries the flag $flag and access_travels says it does not travel"
   grep -Fq -- "    $flag)" "$ENGINE" ||
     fail "the front end offers $key as $flag and the engine does not accept it"
 done <<<"$keys"
+# Every front-end-only key is a key the panel actually offers.
+while IFS= read -r key; do
+  [[ -n $key ]] || continue
+  grep -Fqx -- "$key" <<<"$keys" ||
+    fail "$key is declared front end only and is not on the panel at all"
+done <<<"$local_keys"
+
+# A setting that stops at the front end must not reach the engine even when it
+# is turned on, which is the half of the contract a missing flag alone does not
+# prove: `access_engine_args` could just as easily send an empty flag.
+#
+# The status is checked as well as the output. A probe that dies partway
+# through prints nothing, and nothing is also what a correctly skipped setting
+# looks like, so without this an `access_engine_args` that crashes on the very
+# key being tested would read as one that quietly declined to send it.
+build_args() {
+  local out status
+  out=$(probe "$1; access_engine_args; printf '%s ' \"\${ACCESS_ARGS[@]+\"\${ACCESS_ARGS[@]}\"}\"" 2>&1)
+  status=$?
+  (( status == 0 )) ||
+    fail "building the engine arguments after '$1' failed with $status: $out"
+  printf '%s' "$out"
+}
+args=$(build_args 'ACCESS[heartbeat]=yes')
+case $args in
+  *heartbeat*) fail "turning the heartbeat on put '$args' on the engine command line" ;;
+esac
+[[ -z ${args// /} ]] ||
+  fail "turning only the heartbeat on changed the engine command line to '$args'"
+# And a setting that does travel still does, so the check above is not passing
+# because nothing reaches the engine any more.
+args=$(build_args 'ACCESS[contrast]=high')
+[[ $args == '--contrast high '* ]] ||
+  fail "turning contrast up sent '$args' rather than --contrast high"
+# Both at once: the one that travels goes and the one that does not stays.
+args=$(build_args 'ACCESS[contrast]=high; ACCESS[heartbeat]=yes')
+[[ $args == '--contrast high '* ]] ||
+  fail "with the heartbeat on as well, contrast sent '$args'"
+case $args in
+  *heartbeat*) fail "the heartbeat rode along with contrast as '$args'" ;;
+esac
 
 # --- the key that reaches it ------------------------------------------------
 #
@@ -255,6 +313,44 @@ done
 # Both front ends agree on the pattern, or a machine sounds like two products.
 grep -Fq 'tui_bell 1' "$TUI" || fail 'the text installer does not ring once when it finishes'
 grep -Fq 'tui_bell 3' "$TUI" || fail 'the text installer does not ring three times when it stops'
+# Two for still working, which is the only short pattern the other two leave.
+grep -Fq 'tui_bell 2' "$TUI" || fail 'the text installer has no heartbeat'
+# Off unless somebody asks for it. A sound every thirty seconds is a fault for
+# everybody who did not want one.
+[[ $(probe 'printf "%s" "${ACCESS_DEFAULT[heartbeat]}"') == no ]] ||
+  fail 'the heartbeat is on by default'
+# The first ring is a whole interval away. One at the moment you press enter
+# has told you nothing you did not just do.
+rings=$(probe '
+  AURADE_HEARTBEAT_SECONDS=1
+  ACCESS[heartbeat]=yes
+  count=0
+  tui_bell() { count=$(( count + 1 )); }
+  EPOCHSECONDS=1000 progress_heartbeat
+  EPOCHSECONDS=1000 progress_heartbeat
+  printf "%s" "$count"' 2>/dev/null || true)
+[[ $rings == 0 ]] || fail "the heartbeat rang $rings times before one interval had passed"
+# And it does ring once the interval has passed, then waits for the next.
+rings=$(probe '
+  AURADE_HEARTBEAT_SECONDS=30
+  ACCESS[heartbeat]=yes
+  count=0
+  tui_bell() { count=$(( count + 1 )); }
+  PROGRESS_HEARTBEAT_AT=1000
+  EPOCHSECONDS=1029 progress_heartbeat
+  EPOCHSECONDS=1030 progress_heartbeat
+  EPOCHSECONDS=1031 progress_heartbeat
+  printf "%s" "$count"' 2>/dev/null || true)
+[[ $rings == 1 ]] || fail "the heartbeat rang $rings times across one interval boundary"
+# Silent while it is off, which is the default and therefore the common case.
+rings=$(probe '
+  AURADE_HEARTBEAT_SECONDS=1
+  count=0
+  tui_bell() { count=$(( count + 1 )); }
+  PROGRESS_HEARTBEAT_AT=1000
+  EPOCHSECONDS=2000 progress_heartbeat
+  printf "%s" "$count"' 2>/dev/null || true)
+[[ $rings == 0 ]] || fail 'the heartbeat rings even when it is turned off'
 grep -Fq 'self._sound(1)' "$ROOT/installer/lib/aurade_gui/app.py" ||
   fail 'the graphical installer does not ring once when it finishes'
 grep -Fq 'self._sound(3)' "$ROOT/installer/lib/aurade_gui/app.py" ||

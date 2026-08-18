@@ -165,6 +165,7 @@ declare -A ACCESS=(
   [cursor_size]=24
   [spacing]=normal
   [typeface]=system
+  [heartbeat]=no
 )
 declare -A ACCESS_DEFAULT=(
   [screen_reader]=no
@@ -175,6 +176,7 @@ declare -A ACCESS_DEFAULT=(
   [cursor_size]=24
   [spacing]=normal
   [typeface]=system
+  [heartbeat]=no
 )
 #: What each one is allowed to be, checked here as well as in the engine. The
 #: engine's check is the one that matters and this one is what makes a bad
@@ -188,8 +190,15 @@ declare -A ACCESS_VALUES=(
   [cursor_size]='24 32 48'
   [spacing]='normal roomy roomier'
   [typeface]='system atkinson opendyslexic'
+  [heartbeat]='yes no'
 )
 #: The engine flag each one travels on.
+#:
+#: `heartbeat` deliberately has none. Everything else on this panel is a way of
+#: using a computer and has to survive the restart, which is the whole reason
+#: the panel exists. A sound that says an install is still running has nothing
+#: to survive into: the install is over. It is here because this is where
+#: somebody who cannot see the screen will look for it, not because it travels.
 declare -A ACCESS_FLAGS=(
   [screen_reader]=--screen-reader
   [braille]=--braille
@@ -202,7 +211,19 @@ declare -A ACCESS_FLAGS=(
 )
 #: A stable order, so both front ends list them the same way and the tests can
 #: rely on it. Ordered by how much difference each one makes.
-ACCESS_ORDER=(screen_reader braille contrast text_scale typeface spacing reduce_motion cursor_size)
+ACCESS_ORDER=(screen_reader braille contrast text_scale typeface spacing reduce_motion cursor_size heartbeat)
+#: The keys that stop at the front end. Written out rather than inferred from a
+#: missing flag, so that a key which loses its flag by accident is a failing
+#: test rather than a control that quietly stops reaching the engine.
+ACCESS_LOCAL=(heartbeat)
+
+access_travels() {
+  local key=$1 local_key
+  for local_key in "${ACCESS_LOCAL[@]}"; do
+    [[ $key != "$local_key" ]] || return 1
+  done
+  return 0
+}
 
 # Preset from the environment, which is how a boot menu entry hands one of
 # these over.
@@ -247,6 +268,7 @@ access_engine_args() {
   local key
   ACCESS_ARGS=()
   for key in "${ACCESS_ORDER[@]}"; do
+    access_travels "$key" || continue
     [[ ${ACCESS[$key]} != "${ACCESS_DEFAULT[$key]}" ]] || continue
     ACCESS_ARGS+=("${ACCESS_FLAGS[$key]}" "${ACCESS[$key]}")
   done
@@ -1407,6 +1429,159 @@ stage_displayed() {
 # for the pacing block, which wraps to two lines and can carry the
 # uninterruptible warning under it, one for the bar, and the blank above and
 # below the list.
+#: Stage transitions, which move rather than cut.
+#:
+#: A stage finishing used to be a repaint: the row was `>  Installing the base
+#: system` on one frame and `+  Installing the base system   5:23` on the next,
+#: with nothing in between. On a screen somebody watches for ten minutes, the
+#: two moments worth seeing are a step finishing and the next one starting, and
+#: both of them were happening in the gap between two frames.
+#:
+#: So both are drawn. The finishing stage's mark swells from a dot into the
+#: plus while its elapsed time reveals itself a character at a time, and the
+#: starting stage's mark swells from the same dot into the arrow. They share
+#: their first frames on purpose: what you see is one movement travelling down
+#: the list rather than two unrelated rows repainting.
+#:
+#: A transition needs something to transition from, which is the whole reason
+#: this tracks the previous status rather than a timestamp. The first frame a
+#: stage is seen in a given state is somebody arriving at a screen, not a stage
+#: changing on it, so nothing moves. That is also what keeps `--render` honest:
+#: one call sees one status, has nothing to compare it to, and draws the screen
+#: at rest, so every screen in the render tests is the settled screen.
+PROGRESS_SETTLE_FRAMES=${AURADE_PROGRESS_SETTLE_FRAMES:-6}
+declare -A PROGRESS_LAST_STATUS=()
+declare -A PROGRESS_SETTLE_AT=()
+#: -1 rather than 0, because 0 is a real percentage and this has to mean "no
+#: frame has been drawn yet, so there is nothing to have moved from".
+PROGRESS_SHOWN=-1
+
+#: Reduce motion means no transition, not a quicker one, and plain mode means
+#: no drawing at all. Both are the same answer given for different reasons.
+progress_motion() {
+  (( ! AURADE_TUI_PLAIN )) || return 1
+  [[ ${ACCESS[reduce_motion]:-no} != yes ]] || return 1
+  (( PROGRESS_SETTLE_FRAMES > 0 )) || return 1
+  return 0
+}
+
+#: Frames since this stage entered this state, or -1 for "at rest", left in
+#: PROGRESS_AGE.
+#:
+#: Sets a global rather than printing one, because a caller writing
+#: `age=$(progress_settle_age ...)` would run this in a subshell and throw away
+#: every line below that remembers something. That is the same subshell trap
+#: the engine's pacstrap loop is built around, and here it costs an animation
+#: that silently never plays rather than a journal that silently reuses
+#: sequence numbers, which is a good deal less obvious.
+PROGRESS_AGE=-1
+
+progress_settle_age() {
+  local stage=$1 status=$2 frame=$3 previous age
+  previous=${PROGRESS_LAST_STATUS[$stage]:-}
+  if [[ $previous != "$status" ]]; then
+    PROGRESS_LAST_STATUS[$stage]=$status
+    if [[ -n $previous ]] && progress_motion; then
+      PROGRESS_SETTLE_AT[$stage]=$frame
+    else
+      unset 'PROGRESS_SETTLE_AT[$stage]'
+    fi
+  fi
+  PROGRESS_AGE=-1
+  [[ -n ${PROGRESS_SETTLE_AT[$stage]:-} ]] || return 0
+  age=$(( frame - PROGRESS_SETTLE_AT[$stage] ))
+  # A frame counter that went backwards is a screen being redrawn out of
+  # sequence, which is not a thing to animate.
+  (( age >= 0 && age < PROGRESS_SETTLE_FRAMES )) || return 0
+  PROGRESS_AGE=$age
+}
+
+#: The mark in the fixed column, at rest or partway through arriving.
+#:
+#: Plain mode says the state instead, for the reason the settled marks already
+#: do: three spaces for "waiting" is a mark to the eye and nothing at all read
+#: linearly, so an unstarted stage would look finished.
+progress_mark() {
+  local state=$1 age=${2:--1} third
+  if (( AURADE_TUI_PLAIN )); then
+    case $state in
+      ok)      printf 'Done:' ;;
+      running) printf 'Now:' ;;
+      failed)  printf 'Stopped:' ;;
+      *)       printf 'Waiting:' ;;
+    esac
+    return 0
+  fi
+  if (( age >= 0 )); then
+    # Proportional rather than counted, so the shape survives somebody
+    # changing how long a settle lasts.
+    third=$(( PROGRESS_SETTLE_FRAMES / 3 ))
+    (( third > 0 )) || third=1
+    case $state in
+      ok)
+        if   (( age < third ));     then printf ' . '; return 0
+        elif (( age < third * 2 )); then printf ' o '; return 0
+        fi ;;
+      running)
+        if   (( age < third ));     then printf ' . '; return 0
+        elif (( age < third * 2 )); then printf ' - '; return 0
+        fi ;;
+      # A failure is not eased into. It happened, and the screen should say so
+      # on the frame it happened rather than a little later and more gently.
+    esac
+  fi
+  case $state in
+    ok)      printf ' + ' ;;
+    running) printf ' > ' ;;
+    failed)  printf ' ! ' ;;
+    *)       printf '   ' ;;
+  esac
+}
+
+#: A string arriving a character at a time, in the width it will end up
+#: occupying. Padded rather than grown, because a right aligned field that
+#: grows moves every character it already drew, which reads as a stutter
+#: rather than as typing.
+progress_reveal() {
+  local text=$1 age=${2:--1} len shown
+  len=${#text}
+  if (( len == 0 )) || (( age < 0 )); then
+    printf '%s' "$text"
+    return 0
+  fi
+  shown=$(( ((age + 1) * len + PROGRESS_SETTLE_FRAMES - 1) / PROGRESS_SETTLE_FRAMES ))
+  (( shown >= 1 )) || shown=1
+  (( shown <= len )) || shown=$len
+  printf '%-*s' "$len" "${text:0:shown}"
+}
+
+#: The bar catching up with the number rather than jumping to it.
+#:
+#: Real stages are jagged: `confirm` completes instantly and takes the bar
+#: eight percent in one frame. Easing a third of the remaining distance per
+#: frame turns that into about half a second of movement, which is long enough
+#: to see and short enough that the number is never meaningfully behind the
+#: truth.
+#:
+#: The `+ 2` is what makes it close. A third of a remaining distance of one is
+#: zero, so without it the bar approaches the target and stops a percent short
+#: of it forever, which is the one outcome worse than jumping.
+#: Leaves the answer in PROGRESS_SHOWN, for the subshell reason above: read
+#: through a command substitution this would recompute from -1 every frame and
+#: snap every time, which looks exactly like working correctly.
+progress_ease() {
+  local target=$1
+  if ! progress_motion || (( PROGRESS_SHOWN < 0 )); then
+    PROGRESS_SHOWN=$target
+  elif (( PROGRESS_SHOWN < target )); then
+    PROGRESS_SHOWN=$(( PROGRESS_SHOWN + (target - PROGRESS_SHOWN + 2) / 3 ))
+  else
+    # Progress does not go backwards. If the weighting ever says it did,
+    # believe the engine rather than the animation.
+    PROGRESS_SHOWN=$target
+  fi
+}
+
 #: The download meter under the bar, during `acquire` and nowhere else.
 #:
 #: The engine samples the size of the package cache once a second and leaves a
@@ -1491,19 +1666,11 @@ screen_progress() {
   # number means nothing.
   local weight_done=0 weight_total=0 weight_active=0
   local -a done_rows=() live_rows=() pending_rows=()
-  local m_ok m_run m_fail m_wait
+  local age
 
-  # Four stage states, marked by a glyph in a fixed column. Three of the four
-  # marks are characters and the fourth is three spaces, which is fine for the
-  # eye and fatal read linearly: plain mode strips indentation, so "waiting"
-  # becomes no mark at all and every unstarted stage looks finished. So the
-  # states say themselves instead. This is the colour-alone rule one level
-  # down: whitespace is not a mark either.
-  if (( AURADE_TUI_PLAIN )); then
-    m_ok='Done:'; m_run='Now:'; m_fail='Stopped:'; m_wait='Waiting:'
-  else
-    m_ok=' + '; m_run=' > '; m_fail=' ! '; m_wait='   '
-  fi
+  # Four stage states, marked by a glyph in a fixed column, and drawn by
+  # `progress_mark` because two of them arrive rather than appear. See the
+  # comment on it for why plain mode says the state in words instead.
 
   for stage in "${AURADE_STAGES[@]}"; do
     stage_displayed "$stage" || continue
@@ -1514,8 +1681,11 @@ screen_progress() {
     [[ -z $record ]] || status=$(json_field status "$record")
     label=$(stage_label "$stage")
     elapsed=''
+    progress_settle_age "$stage" "$status" "$frame"
+    age=$PROGRESS_AGE
+    mark=$(progress_mark "$status" "$age")
     case $status in
-      ok)      mark=$m_ok; token=ok
+      ok)      token=ok
                elapsed=$(json_field elapsed_ms "$record")
                if [[ $elapsed =~ ^[0-9]+$ ]]; then
                  done_ms=$(( done_ms + elapsed ))
@@ -1523,10 +1693,14 @@ screen_progress() {
                else
                  elapsed=''
                fi
+               # The time arrives with the mark. It is the one piece of
+               # information the row gains by finishing, so it is worth the
+               # half second of somebody watching it land.
+               elapsed=$(progress_reveal "$elapsed" "$age")
                done_count=$(( done_count + 1 ))
                weight_done=$(( weight_done + $(stage_weight "$stage") ))
                done_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")") ;;
-      running) mark=$m_run; token=cyan; active=$stage
+      running) token=cyan; active=$stage
                weight_active=$(stage_weight "$stage")
                live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")")
                pct=$(json_field pct "$record")
@@ -1534,9 +1708,9 @@ screen_progress() {
                [[ $pct =~ ^[0-9]+$ ]] || pct=0
                PROGRESS_PCT=$pct
                PROGRESS_DETAIL=$detail ;;
-      failed)  mark=$m_fail; token=danger
+      failed)  token=danger
                live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
-      *)       mark=$m_wait; token=dim
+      *)       token=dim
                pending_count=$(( pending_count + 1 ))
                pending_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")") ;;
     esac
@@ -1581,6 +1755,10 @@ screen_progress() {
         + weight_active * ${PROGRESS_PCT:-0}) / weight_total ))
     fi
     (( PROGRESS_OVERALL <= 100 )) || PROGRESS_OVERALL=100
+    # Eased before it is used anywhere, so the bar, the title and the done
+    # screen are never three different opinions about how far along this is.
+    progress_ease "$PROGRESS_OVERALL"
+    PROGRESS_OVERALL=$PROGRESS_SHOWN
     tui_bar "$PROGRESS_OVERALL" "${PROGRESS_DETAIL:-}"
     (( ! PROGRESS_RATE )) || progress_rate_row
     # The one place the number is worth putting somewhere other than the
@@ -2070,6 +2248,7 @@ declare -A ACCESS_LABEL=(
   [cursor_size]='Pointer size'
   [spacing]='Line spacing'
   [typeface]='Typeface'
+  [heartbeat]='Heartbeat'
 )
 declare -A ACCESS_HELP=(
   [screen_reader]='Reads the screen aloud. Stays on after the restart.'
@@ -2080,6 +2259,7 @@ declare -A ACCESS_HELP=(
   [cursor_size]='How large the pointer is.'
   [spacing]='More air between lines and letters. Helps most readers, not only some.'
   [typeface]='A different face to read in. Whichever one suits you.'
+  [heartbeat]='A sound every half minute while the install runs, so you can tell it is still going without looking. Two rings. One means finished, three means stopped.'
 )
 
 access_shown_value() {
@@ -3461,6 +3641,40 @@ journal_running_stage() {
   printf ''
 }
 
+#: A sound every half minute that says the install is still running.
+#:
+#: Ten minutes of silence is ten minutes of not knowing whether the machine is
+#: working or hung, and for somebody who cannot see the screen that is the
+#: whole of the install. Off by default, because for everybody else it is a
+#: noise every thirty seconds.
+#:
+#: Two rings. One is already "finished" and three is already "stopped", and
+#: those two have to stay instantly recognisable, so the new one takes the
+#: pattern neither of them uses. Two is also the only one of the three that
+#: repeats, which is a second way to know it apart.
+#:
+#: Wall clock rather than the frame counter, because the frame counter is a
+#: redraw rate and this is a duration; a slower terminal would otherwise get a
+#: slower heartbeat.
+AURADE_HEARTBEAT_SECONDS=${AURADE_HEARTBEAT_SECONDS:-30}
+PROGRESS_HEARTBEAT_AT=0
+
+progress_heartbeat() {
+  local now=${EPOCHSECONDS:-0}
+  [[ ${ACCESS[heartbeat]:-no} == yes ]] || return 0
+  (( AURADE_HEARTBEAT_SECONDS > 0 )) || return 0
+  (( now > 0 )) || return 0
+  if (( PROGRESS_HEARTBEAT_AT == 0 )); then
+    # The first one is a whole interval away, not immediate. An install that
+    # rings the moment it starts has told you nothing you did not just do.
+    PROGRESS_HEARTBEAT_AT=$now
+    return 0
+  fi
+  (( now - PROGRESS_HEARTBEAT_AT >= AURADE_HEARTBEAT_SECONDS )) || return 0
+  PROGRESS_HEARTBEAT_AT=$now
+  tui_bell 2
+}
+
 # Drive the progress screen while the engine runs.
 #
 # Two things changed here and they are the same change. The screen redraws on a
@@ -3762,6 +3976,7 @@ run_engine_with_progress() {
     fi
     (( AURADE_AURORA_BLOOM <= 0 )) ||
       AURADE_AURORA_BLOOM=$(( AURADE_AURORA_BLOOM - 1 ))
+    progress_heartbeat
     frame=$(( frame + 1 ))
   done
   wait "$pid" || status=$?
