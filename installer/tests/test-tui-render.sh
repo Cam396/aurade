@@ -684,4 +684,40 @@ install -d "$TMP/power"
 said=$(battery_says "$TMP/power")
 (( said == 0 )) || fail 'a machine with no battery at all was warned about one'
 
+# The two lines on the done screen that are usually not there.
+#
+# Both are conditional and both are quiet, which is exactly the shape of thing
+# that rots: nobody notices a line that stopped appearing, because not
+# appearing is what it does almost every time. So all three combinations are
+# drawn here, including the ordinary install, which is the one that has to
+# stay silent.
+done_says() {
+  env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+    AURADE_RENDER_INSTALL_SECONDS="$1" AURADE_RENDER_2048_WON="$2" \
+    "$TUI" --render done | grep -ci "$3" || true
+}
+
+(( $(done_says 0 0 'four minutes') == 0 )) ||
+  fail 'an install with no timing claimed to be quick'
+(( $(done_says 900 0 'four minutes') == 0 )) ||
+  fail 'a fifteen minute install was called quick'
+(( $(done_says 180 0 'four minutes') == 1 )) ||
+  fail 'a three minute install was not noticed'
+(( $(done_says 239 0 'four minutes') == 1 )) ||
+  fail 'an install one second under the line was not noticed'
+(( $(done_says 240 0 'four minutes') == 0 )) ||
+  fail 'an install exactly on the line was called under it'
+
+(( $(done_says 900 0 '2048') == 0 )) ||
+  fail 'the done screen mentioned 2048 to somebody who never played it'
+(( $(done_says 900 1 '2048') == 1 )) ||
+  fail 'reaching 2048 was not acknowledged'
+
+# And neither line is congratulation with an exclamation mark on it.
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  AURADE_RENDER_INSTALL_SECONDS=180 AURADE_RENDER_2048_WON=1 \
+  "$TUI" --render done >"$TMP/done-both"
+grep -q '!' "$TMP/done-both" &&
+  fail 'the done screen is congratulating somebody at' || true
+
 echo 'installer TUI render test: PASS'

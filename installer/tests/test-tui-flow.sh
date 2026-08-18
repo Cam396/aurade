@@ -754,6 +754,33 @@ exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
 run_gate >/dev/null && fail 'xyzzy was accepted as a confirmation'
 release
 
+# The cheat code, at the one screen in this product that must not have one.
+#
+# It clears the field and says no, which is the same thing HELLO does and is
+# strictly harder rather than easier: the `b` and the `a` that are part of the
+# sequence go with it. The token is untouched and the engine still makes its
+# own comparison.
+konami() {
+  local k
+  for k in up up down down left right left right b a; do printf '%s\n' "$k"; done
+}
+reset_state
+ANSWERS[target]=/dev/sda
+ANSWERS[layout]=wipe
+token=$(aurade_confirmation_token /dev/sda wipe)
+{ konami; printf 'paste:%s\n' "$token"; echo enter; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+# This also proves the field is left empty. A sequence that ended with `b`
+# and `a` still in there would mean the token no longer matched after it.
+run_gate >/dev/null ||
+  fail 'the gate stopped accepting its own token after the sequence'
+release
+
+{ konami; echo enter; echo esc; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_gate >/dev/null && fail 'the cheat code was accepted as a confirmation'
+release
+
 # Naming a machine after the word every machine already answers to is declined
 # with a sentence rather than an error code, because it is not a mistake, it
 # is somebody being funny.

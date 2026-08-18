@@ -1554,6 +1554,15 @@ screen_progress() {
 #: which is what keeps the long tip off every screen that is not an install.
 PROGRESS_STARTED=0
 
+#: How long the install took, once it is over. Zero until then.
+INSTALL_SECONDS=0
+
+#: What counts as quick. Four minutes is not a boast about this installer, it
+#: is a fact about the machine it just ran on: nothing here makes pacstrap
+#: faster, and an install that lands under this did it on somebody's NVMe and
+#: somebody's connection. Saying so is noticing, which is the whole point.
+QUICK_INSTALL_SECONDS=240
+
 # How long this has been going, in seconds.
 #
 # EPOCHSECONDS rather than a `date` call, because this is consulted on every
@@ -1902,6 +1911,20 @@ screen_done() {
   # rebuilding this machine in a year wants that file and would never think to
   # look for it.
   tui_wrap 'A record of this install is at /etc/aurade-install/summary.' dim
+  # Two lines that are usually not here.
+  #
+  # Neither is a reward and neither is congratulation. They are the installer
+  # noticing something that actually happened, once, in one quiet line, and
+  # then not mentioning it again. An installer that throws a party for itself
+  # is pleased with itself rather than with you.
+  if (( INSTALL_SECONDS > 0 && INSTALL_SECONDS < QUICK_INSTALL_SECONDS )); then
+    tui_blank
+    tui_wrap 'That took under four minutes. This is a quick computer.' dim
+  fi
+  if (( AURADE_2048_WON )); then
+    tui_blank
+    tui_wrap 'You also reached 2048 while that was going. Well played.' dim
+  fi
   tui_blank
   tui_footer 'take out the installation media, then restart' ''
 }
@@ -3449,6 +3472,11 @@ run_engine_with_progress() {
     frame=$(( frame + 1 ))
   done
   wait "$pid" || status=$?
+  # How long it took, taken once and kept. Asking `progress_elapsed` from the
+  # done screen would keep counting while somebody reads it, so an install
+  # that finished in three minutes would stop having finished in three minutes
+  # about ninety seconds later.
+  INSTALL_SECONDS=$(progress_elapsed)
   # Always end on the install, whatever was on screen a moment ago.
   screen_progress "$frame"
   return "$status"
@@ -3603,6 +3631,9 @@ run_gate() {
   # that the paste was wrong.
   local HELP_KEY=0 CURRENT_SCREEN=gate
   GATE_SPELL=0
+  # The sequence starts again here. Four arrow keys left over from the welcome
+  # screen finishing on this one would be a surprise nobody could reproduce.
+  KONAMI_AT=0
   token=$(aurade_confirmation_token "$target" \
     "${ANSWERS[layout]:-$(aurade_question_default layout)}")
   while true; do
@@ -3637,6 +3668,16 @@ run_gate() {
       HELLO) typed=''; aside='Not today.' ;;
       xyzzy) typed=''; aside='Nothing happens.' ;;
     esac
+    # And the sequence, which does something on the welcome screen and does
+    # nothing here. Watched after the field has been updated so that the `b`
+    # and the `a` are cleared along with it, exactly as the two words above
+    # are: the token is untouched, the comparison is unchanged, and the engine
+    # still makes its own. Somebody who tries the cheat code at the one screen
+    # in this product that must not have one has earned being told no.
+    if konami_watch "$key"; then
+      typed=''
+      aside='Nice try.'
+    fi
   done
 }
 
@@ -4060,7 +4101,9 @@ if [[ -n $RENDER_ONLY ]]; then
     game)      RANDOM=${AURADE_SNAKE_SEED:-11}
                screen_game "${AURADE_RENDER_FRAME:-0}" ;;
     failure)   build_failure_options; screen_failure 0 ;;
-    done)      screen_done ;;
+    done)      INSTALL_SECONDS=${AURADE_RENDER_INSTALL_SECONDS:-0}
+               AURADE_2048_WON=${AURADE_RENDER_2048_WON:-0}
+               screen_done ;;
     cancelled) screen_cancelled ;;
     question-*)
       _qid=${RENDER_ONLY#question-}
