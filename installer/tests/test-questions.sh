@@ -60,6 +60,32 @@ for id in "${AURADE_QUESTION_IDS[@]}"; do
     *) fail "$id has a non-boolean 'secret' value" ;;
   esac
   [[ -n $(aurade_question_field "$id" error) ]] || fail "$id has no error message"
+  # Set is not the same as said. The loop above only checks the field exists,
+  # and `help ''` satisfies that while leaving the one line explaining what a
+  # question is for completely blank.
+  [[ -n $(aurade_question_field "$id" help) ]] || fail "$id has no help text"
+done
+
+# --- the advanced options explain themselves --------------------------------
+#
+# Somebody who opened the advanced section is being offered a filesystem, a
+# swap policy and a package snapshot, and the whole reason those are behind a
+# toggle is that the defaults are right for nearly everybody. A choice offered
+# without a sentence saying what it changes is a choice somebody makes by
+# guessing, which is worse than not offering it.
+#
+# A length rather than mere presence, because the failure mode here is a
+# placeholder: `help 'Filesystem.'` passes a non-empty check and explains
+# nothing.
+for id in "${AURADE_QUESTION_IDS[@]}"; do
+  [[ $(aurade_question_field "$id" advanced) == yes ]] || continue
+  text=$(aurade_question_field "$id" help)
+  words=$(wc -w <<<"$text")
+  (( words >= 8 )) ||
+    fail "the advanced option $id explains itself in $words words: '$text'"
+  # Not the label with a full stop after it.
+  [[ ${text%.} != "$(aurade_question_field "$id" label)" ]] ||
+    fail "$id repeats its own label instead of explaining anything"
 done
 
 # --- every named validator exists ------------------------------------------
