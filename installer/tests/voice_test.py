@@ -52,6 +52,10 @@ SOURCES = [
     # The screens people see when it does not work, which went unchecked for
     # a pass and turned out to be where the worst of it had settled.
     ("installer/bin/aurade-install-failure", "shell"),
+    # Every sentence this prints is read by somebody whose install has just
+    # gone wrong, which makes it the most user-facing thing in the tree that
+    # looks like a diagnostic tool.
+    ("installer/bin/aurade-explain", "shell"),
     ("installer/bin/aurade-installer-start", "shell"),
     ("installer/lib/aurade-probe.sh", "shell"),
     # The engine. Its `die` messages become the failure screen's cause code and

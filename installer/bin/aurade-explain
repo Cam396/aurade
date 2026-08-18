@@ -27,9 +27,28 @@
 set -Eeuo pipefail
 
 SELF=${0##*/}
-ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
-CATALOGUE=${AURADE_NOTES_FILE:-$ROOT/data/hardware-notes.tsv}
+# Where the catalogue is depends on whether this is running out of the tree or
+# out of the image, and it has to work both ways. On the image every program
+# lands in `/usr/local/sbin` with its data beside it in `/usr/local/lib/aurade`,
+# and a path worked out relative to this file would point at
+# `/usr/local/data`, which is nowhere. This is the same search the failure
+# helper does for its libraries, for the same reason.
+_find_notes() {
+  local candidate
+  for candidate in \
+    "/usr/local/lib/aurade/hardware-notes.tsv" \
+    "$SELF_DIR/../data/hardware-notes.tsv"
+  do
+    [[ -r $candidate ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+CATALOGUE=${AURADE_NOTES_FILE:-$(_find_notes || true)}
 SHOW_NORMAL=0
 QUOTE=1
 SOURCES=()
@@ -71,6 +90,7 @@ while (($#)); do
   shift
 done
 
+[[ -n $CATALOGUE ]] || die 'no catalogue of log messages is installed'
 [[ -f $CATALOGUE && -r $CATALOGUE ]] || die "no catalogue at $CATALOGUE"
 
 WORK=$(mktemp -d)
