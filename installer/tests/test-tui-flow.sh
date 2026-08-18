@@ -655,6 +655,22 @@ check 'locale read back'   "${ANSWERS[locale]}"   'en_US.UTF-8'
 [[ " ${ANSWERS_REJECTED[*]} " != *' hostname '* ]] ||
   fail 'a question that was answered earlier in the file is reported as missing'
 
+# An answer file may not say something the keyboard could not.
+#
+# Two rules live in `apply_answer` and nowhere else, and loading a file used to
+# skip it: it validated and wrote straight into ANSWERS. So `localhost` was
+# refused when typed and accepted when read from a file, from the same tree, on
+# the same run. That is the shape of drift that ends with a front end quietly
+# holding a different rule from the engine.
+reset_state
+printf '%s\n' 'hostname=localhost' >"$TMP/localhost-answers"
+answers_load "$TMP/localhost-answers" ||
+  fail 'a file whose only line was refused reported failure rather than a rejection'
+[[ ${ANSWERS[hostname]:-} != localhost ]] ||
+  fail 'an answer file named a machine localhost, which typing it is refused for'
+[[ " ${ANSWERS_REJECTED[*]} " == *' hostname '* ]] ||
+  fail 'localhost was dropped from an answer file without being reported'
+
 # A file that is not there is not an error worth stopping for. Somebody who
 # mistypes a path should get the questions, not a refusal.
 reset_state

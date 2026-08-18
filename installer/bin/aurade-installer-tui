@@ -625,6 +625,17 @@ answers_load() {
       ANSWERS_REJECTED+=("$id")
       continue
     fi
+    # And the same second step a typed answer goes through, which this used to
+    # skip. Two rules live in `apply_answer` and nowhere else: a machine may
+    # not call itself localhost, and a keymap has to actually load on this
+    # console. Validating without applying meant a file could set something
+    # the keyboard could not, which is the one thing an answer file must never
+    # be. `hostname=localhost` was accepted from a file and declined when
+    # typed, from the same tree, on the same run.
+    if ! apply_answer "$id" "$value"; then
+      ANSWERS_REJECTED+=("$id")
+      continue
+    fi
     ANSWERS[$id]=$value
   done <"$file"
   # A question can be refused on one line and answered on another, and only
