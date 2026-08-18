@@ -447,7 +447,7 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # was making them anxious should not have to walk past six games to find it.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -674,6 +674,80 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   aurade_maze_move left && { echo 'a step left the maze through the side' >&2; exit 1; }
   (( AURADE_MAZE_MOVES == 0 )) ||
     { echo 'a refused step was counted as a move' >&2; exit 1; }
+
+  # The word guess. Every word in the list has to be five letters, because a
+  # six letter one is a round nobody can win and it would only ever be found by
+  # the person it happened to.
+  for word_entry in "${AURADE_WORDS[@]}"; do
+    (( ${#word_entry} == 5 )) ||
+      { echo "the word list holds '$word_entry', which is ${#word_entry} letters" >&2; exit 1; }
+    [[ $word_entry == +([a-z]) ]] ||
+      { echo "the word list holds '$word_entry', which is not plain letters" >&2; exit 1; }
+  done
+
+  # Marking, and the duplicate letter cases that every naive version gets
+  # wrong. A letter the answer holds once must come back right in one place
+  # and absent in the other, never present twice.
+  word_mark_is() {
+    local got
+    got=$(aurade_word_mark "$1" "$2")
+    [[ $got == "$3" ]] ||
+      { echo "marking $1 against $2 gave $got, expected $3" >&2; exit 1; }
+  }
+  word_mark_is crane crane '====='
+  word_mark_is abcde vwxyz '.....'
+  word_mark_is crane nacre '~~~~='
+  word_mark_is sassy space '=~...'
+  word_mark_is geese those '...=='
+  word_mark_is abbey bacon '~~...'
+
+  # And the rule those cases are examples of, stated once and checked over
+  # every pairing of a handful of awkward words.
+  for word_answer in space geese abbey crane sassy; do
+    for word_guess in sassy eerie speed llama geese; do
+      word_marks=$(aurade_word_mark "$word_guess" "$word_answer")
+      for word_letter in {a..z}; do
+        word_have=$(printf '%s' "$word_answer" | tr -cd "$word_letter" | wc -c)
+        word_said=0
+        for word_i in 0 1 2 3 4; do
+          [[ ${word_guess:word_i:1} == "$word_letter" && ${word_marks:word_i:1} != '.' ]] &&
+            word_said=$(( word_said + 1 )) || true
+        done
+        (( word_said <= word_have )) ||
+          { echo "$word_guess against $word_answer marked $word_letter $word_said times and it appears $word_have" >&2; exit 1; }
+      done
+    done
+  done
+
+  # Six tries and then it is over, and guessing right ends it early.
+  RANDOM=4
+  aurade_word_new
+  for word_i in 1 2 3 4 5; do
+    AURADE_WORD_INPUT=zzzzz
+    aurade_word_enter || { echo 'a five letter guess was refused' >&2; exit 1; }
+  done
+  (( AURADE_WORD_OVER == 0 )) ||
+    { echo 'the word game ended before the sixth try' >&2; exit 1; }
+  AURADE_WORD_INPUT=zzzzz
+  aurade_word_enter
+  (( AURADE_WORD_OVER == 2 )) ||
+    { echo 'the word game did not end after six wrong guesses' >&2; exit 1; }
+
+  RANDOM=4
+  aurade_word_new
+  AURADE_WORD_INPUT=$AURADE_WORD
+  aurade_word_enter
+  (( AURADE_WORD_OVER == 1 )) ||
+    { echo 'guessing the word did not win' >&2; exit 1; }
+
+  # A short guess is not a guess, and typing past five letters does nothing.
+  aurade_word_new
+  AURADE_WORD_INPUT=abc
+  aurade_word_enter && { echo 'a three letter guess was accepted' >&2; exit 1; }
+  AURADE_WORD_INPUT=''
+  for word_letter in a b c d e f; do aurade_word_type "$word_letter" || true; done
+  (( ${#AURADE_WORD_INPUT} == 5 )) ||
+    { echo "typing six letters left ${#AURADE_WORD_INPUT} in the field" >&2; exit 1; }
 
   # Minesweeper places its mines after the first reveal and never under it,
   # so the first keypress of a game always opens something. Losing on move one

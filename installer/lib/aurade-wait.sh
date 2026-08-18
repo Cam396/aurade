@@ -1565,3 +1565,180 @@ aurade_maze_rows() {
     printf '%s\n' "$row"
   done
 }
+
+# --------------------------------------------------------------------------
+# A five letter word guess
+# --------------------------------------------------------------------------
+#
+# Six tries at a five letter word. Letters, backspace and enter, which is the
+# whole input model, and no clock anywhere in it.
+#
+# Two decisions worth writing down.
+#
+# **A guess is not checked against a dictionary.** The usual rule is that a
+# guess has to be a real word, and enforcing that needs a word list of tens of
+# thousands rather than the hundred or so here. With a short list the rule
+# stops meaning "that is not a word" and starts meaning "that is not a word I
+# know", which is a worse thing to be told while waiting for a disk to be
+# written. Any five letters are accepted.
+#
+# **The result is marked, not coloured.** `=` is the right letter in the right
+# place, `~` is the right letter somewhere else, `.` is not in the word at all.
+# Nothing about this screen depends on colour, which is the rule for every
+# screen here and is the only reason it works in plain mode and on a braille
+# display.
+AURADE_WORDS=(
+  about above actor acute admit adopt after again agent agree ahead alarm album
+  alert alike alive allow alone along alter among anger angle angry ankle apart
+  apple apply arena argue arise armor aroma array arrow aside asset audio audit
+  avoid awake award aware badly baker basic basin batch beach began begin begun
+  being below bench birth black blade blame blank blast blend bless blind block
+  blood board boost booth bound brain brand brass brave bread break breed brick
+  bride brief bring broad broke brown brush build built bunch burnt burst cabin
+  cable candy canal cargo carry carve catch cause cease chain chair chalk charm
+  chart chase cheap check chess chest chief child chill china chose civil claim
+  clean clear clerk click cliff climb clock close cloth cloud coach coast could
+  count court cover crack craft crash cream crime cross crowd crown crude curve
+  cycle daily dance dated dealt death debut delay dense depth doing doubt dozen
+  draft drain drama drawn dream dress dried drift drink drive drove dying eager
+  eagle early earth eight elder elect empty enemy enjoy enter entry equal error
+  event every exact exist extra faith false fault favor feast fence fever field
+  fifth fight final first flame flash fleet flesh float flood floor flour fluid
+  focus force forge forth forty forum found frame fresh front frost fruit fully
+  funny giant given glass globe glory grace grade grain grand grant grape grasp
+  grass grave great green greet grief gross group grown guard guess guest guide
+  habit happy harsh haste heart heavy hedge hello hence hobby honey honor horse
+  hotel house human humor ideal image imply index inner input issue ivory joint
+  judge juice knife knock known label labor large laser later laugh layer learn
+  lease least leave legal lemon level light limit linen liver lobby local lodge
+  logic loose lower loyal lucky lunar lunch magic major maker maple march match
+  maybe mayor meant medal media mercy merit metal meter midst might minor minus
+  mixed model money month moral motor mount mouse mouth movie music naked nerve
+  never newly night noble noise north noted novel nurse occur ocean offer often
+  onion order other ought ounce outer owner paint panel paper party pause peace
+  pearl phase phone photo piano piece pilot pitch place plain plane plant plate
+  point polar porch pound power press price pride prime print prior prize probe
+  proof proud prove pulse punch pupil purse queen query quest queue quick quiet
+  quite quota radio raise rally range rapid ratio reach ready realm rebel refer
+  reign relax relay renew reply rider ridge right rigid rival river roast robot
+  rocky roman rough round route royal rural saint salad sales sauce scale scene
+  scope score sense serve seven shade shaft shall shape share sharp sheep sheet
+  shelf shell shift shine shirt shock shoot shore short shown sight silly since
+  siren sixth skill slate sleep slide slope small smart smell smile smoke snake
+  solar solid solve sound south space spare spark speak speed spell spend spent
+  spice spine spite split spoke sport spray squad stack staff stage stair stake
+  stamp stand stare start state steam steel steep steer stern stick stiff still
+  stock stone stood store storm story stove strap straw strip stuck study stuff
+  style sugar suite sunny super sweep sweet swift swing sword table taken tally
+  taste teach tempo tenth thank theft their theme there thick thief thing think
+  third those three throw thumb tiger tight timer title toast today token tooth
+  topic torch total touch tough tower trace track trade trail train trait trash
+  treat trend trial tribe trick tried tripe trust truth twice twist ultra uncle
+  under union unite unity until upper upset urban usage usual vague valid value
+  vapor vault venue verse video vigor villa vinyl virus visit vital vivid vocal
+  voice voter wagon waist waste watch water weigh weird whale wheat wheel where
+  which while white whole whose widow width witch woman world worry worse worth
+  would wound wrist write wrong wrote yield young youth
+)
+
+AURADE_WORD=''
+AURADE_WORD_GUESSES=()
+AURADE_WORD_MARKS=()
+AURADE_WORD_INPUT=''
+AURADE_WORD_OVER=0
+AURADE_WORD_TRIES=6
+
+aurade_word_new() {
+  local word
+  # Anything that is not five letters is a typing mistake in the list above,
+  # and one of those would make a round unwinnable.
+  while true; do
+    word=${AURADE_WORDS[RANDOM % ${#AURADE_WORDS[@]}]}
+    (( ${#word} == 5 )) && break
+  done
+  AURADE_WORD=$word
+  AURADE_WORD_GUESSES=()
+  AURADE_WORD_MARKS=()
+  AURADE_WORD_INPUT=''
+  AURADE_WORD_OVER=0
+  return 0
+}
+
+#: Mark one guess against the answer.
+#
+# Two passes, and the second one is the reason. A letter guessed twice when
+# the answer holds it once must come back right in one place and absent in the
+# other, so exact matches are taken out of the pool before anything else is
+# allowed to claim a letter. One pass marks both of them present and tells
+# somebody there are two of a letter when there is one.
+aurade_word_mark() {
+  local guess=$1 answer=$2 i j ch marks=''
+  local -a used=(0 0 0 0 0)
+  for (( i = 0; i < 5; i++ )); do
+    if [[ ${guess:i:1} == "${answer:i:1}" ]]; then
+      marks+='='
+      used[i]=1
+    else
+      marks+='?'
+    fi
+  done
+  for (( i = 0; i < 5; i++ )); do
+    [[ ${marks:i:1} == '?' ]] || continue
+    ch=${guess:i:1}
+    for (( j = 0; j < 5; j++ )); do
+      (( ! used[j] )) || continue
+      [[ ${answer:j:1} == "$ch" ]] || continue
+      used[j]=1
+      marks=${marks:0:i}'~'${marks:i+1}
+      break
+    done
+    [[ ${marks:i:1} != '?' ]] || marks=${marks:0:i}'.'${marks:i+1}
+  done
+  printf '%s' "$marks"
+}
+
+aurade_word_type() {
+  local ch=$1
+  (( ! AURADE_WORD_OVER )) || return 1
+  [[ $ch == [a-zA-Z] ]] || return 1
+  (( ${#AURADE_WORD_INPUT} < 5 )) || return 1
+  AURADE_WORD_INPUT+=${ch,,}
+  return 0
+}
+
+aurade_word_rub() {
+  (( ! AURADE_WORD_OVER )) || return 1
+  [[ -n $AURADE_WORD_INPUT ]] || return 1
+  AURADE_WORD_INPUT=${AURADE_WORD_INPUT%?}
+  return 0
+}
+
+aurade_word_enter() {
+  local marks
+  (( ! AURADE_WORD_OVER )) || return 1
+  (( ${#AURADE_WORD_INPUT} == 5 )) || return 1
+  marks=$(aurade_word_mark "$AURADE_WORD_INPUT" "$AURADE_WORD")
+  AURADE_WORD_GUESSES+=("$AURADE_WORD_INPUT")
+  AURADE_WORD_MARKS+=("$marks")
+  AURADE_WORD_INPUT=''
+  if [[ $marks == '=====' ]]; then
+    AURADE_WORD_OVER=1
+  elif (( ${#AURADE_WORD_GUESSES[@]} >= AURADE_WORD_TRIES )); then
+    AURADE_WORD_OVER=2
+  fi
+  return 0
+}
+
+#: Rows of characters: each guess, then its marks underneath it.
+aurade_word_rows() {
+  local i guess
+  for (( i = 0; i < ${#AURADE_WORD_GUESSES[@]}; i++ )); do
+    guess=${AURADE_WORD_GUESSES[i]}
+    printf '%s\n' "${guess^^}"
+    printf '%s\n' "${AURADE_WORD_MARKS[i]}"
+  done
+  if (( ! AURADE_WORD_OVER )); then
+    printf '%s\n' "$(printf '%-5s' "${AURADE_WORD_INPUT^^}" | tr ' ' '_')"
+    printf '%s\n' ''
+  fi
+}
