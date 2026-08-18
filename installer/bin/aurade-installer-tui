@@ -394,6 +394,87 @@ AURADE_DISK_CONTENTS=${AURADE_DISK_CONTENTS:-}
 #: Where the live image mounts the medium it booted from.
 AURADE_BOOT_MEDIUM_MOUNT=${AURADE_BOOT_MEDIUM_MOUNT:-/run/archiso/bootmnt}
 
+#: How much of a drive's write life it reports having used.
+#:
+#: An SSD that has been in a machine for eight years is a fine place to put an
+#: operating system right up until it is not, and the drive knows which it is
+#: long before the person choosing it does. Both NVMe and SATA drives keep a
+#: wear counter, and both of them will hand it over for the asking.
+#:
+#: Only ever a number, and only ever this one. Reading SMART hands back
+#: firmware revisions, serial numbers, temperatures and power-on hours, which
+#: between them identify a drive precisely; one integer is what this question
+#: needs and so one integer is all that is taken out of the answer.
+#:
+#: Injectable the same way disk contents are, because a test cannot have a
+#: worn out drive and this is exactly the case worth having a test for.
+AURADE_DISK_HEALTH=${AURADE_DISK_HEALTH:-}
+
+#: A percentage, or nothing. One gate rather than one per source, so that a
+#: reader added later cannot be the one that forgets: anything that is not a
+#: whole number from 0 to 100 is a drive that did not answer the question, and
+#: a drive that did not answer is silent rather than alarming.
+_disk_wear_ok() {
+  [[ $1 =~ ^[0-9]+$ ]] || return 1
+  # Leading zeros would be read as octal by the arithmetic below, and `08` is
+  # a syntax error rather than eight.
+  local value=$(( 10#$1 ))
+  (( value >= 0 && value <= 100 ))
+}
+
+disk_wear() {
+  local target=$1 path used value
+  if [[ -n $AURADE_DISK_HEALTH && -r $AURADE_DISK_HEALTH ]]; then
+    while IFS='|' read -r path used; do
+      [[ $path == "$target" ]] || continue
+      _disk_wear_ok "$used" || continue
+      printf '%s' "$(( 10#$used ))"
+      return 0
+    done <"$AURADE_DISK_HEALTH"
+    printf ''
+    return 0
+  fi
+  # nvme first, because on an NVMe drive it is the direct answer and smartctl
+  # is reporting the same counter through a translation layer.
+  if command -v nvme >/dev/null 2>&1 && [[ $target == *nvme* ]]; then
+    value=$(nvme smart-log "$target" 2>/dev/null |
+      awk -F: '/^percentage_used/ { gsub(/[^0-9]/, "", $2); print $2; exit }')
+    _disk_wear_ok "$value" && { printf '%s' "$(( 10#$value ))"; return 0; }
+  fi
+  if command -v smartctl >/dev/null 2>&1; then
+    # Percentage_Used on NVMe through smartctl, and the wear levelling count
+    # on SATA, which is a health percentage counting down rather than a wear
+    # percentage counting up.
+    value=$(smartctl -A "$target" 2>/dev/null | awk '
+      /Percentage Used:/ { gsub(/[^0-9]/, "", $NF); print $NF; found = 1; exit }
+      /Wear_Leveling_Count|Media_Wearout_Indicator|SSD_Life_Left/ {
+        if ($4 ~ /^[0-9]+$/) { print 100 - $4; found = 1; exit }
+      }
+      END { if (! found) exit 1 }')
+    _disk_wear_ok "$value" && { printf '%s' "$(( 10#$value ))"; return 0; }
+  fi
+  printf ''
+}
+
+#: Nothing at all until it is worth saying something.
+#:
+#: A drive at nine percent is a drive with nothing wrong with it, and a line
+#: on the screen saying so is a line that teaches somebody to read every other
+#: line as a warning too. The threshold is high because being wrong in this
+#: direction costs somebody their trust in the whole screen.
+#:
+#: Never blocking, and never phrased as advice about what to do. The drive
+#: reported a number; that is the entire claim being made.
+AURADE_WEAR_THRESHOLD=${AURADE_WEAR_THRESHOLD:-80}
+
+disk_wear_note() {
+  local used
+  used=$(disk_wear "$1")
+  [[ $used =~ ^[0-9]+$ ]] || return 0
+  (( used >= AURADE_WEAR_THRESHOLD )) || return 0
+  printf 'this drive reports %s%% of its write life used' "$used"
+}
+
 # A phrase for what is already on a disk.
 #
 # People pick the wrong disk because they genuinely cannot tell two 512G
@@ -966,7 +1047,7 @@ widget_bool() {
 }
 
 widget_disk() {
-  local cursor=$1 index=0 line path size model tran removable=0 holds booted
+  local cursor=$1 index=0 line path size model tran removable=0 holds wear booted
   booted=$(boot_disk)
   while IFS='|' read -r path size model tran _; do
     [[ -n $path ]] || continue
@@ -986,6 +1067,11 @@ widget_disk() {
     [[ $path != "$booted" ]] ||
       holds="you started this installer from this one${holds:+, $holds}"
     [[ -z $holds ]] || tui_line "$(printf '       %s' "$holds")" dim
+    # A worn drive gets its own line rather than joining the one above,
+    # because what is on a disk and how much life it has left are two
+    # different questions and running them together reads as neither.
+    wear=$(disk_wear_note "$path")
+    [[ -z $wear ]] || tui_line "$(printf '       %s' "$wear")" warn
     [[ $tran != usb ]] || removable=1
     index=$(( index + 1 ))
   done < <(disk_table)
@@ -1207,7 +1293,7 @@ review_detail() {
 # the size are what somebody checks it against, and the map is the part the
 # graphical front end's list cannot say: it is the plan, drawn.
 review_disk_detail() {
-  local target=$1 path size model rest holds
+  local target=$1 path size model rest holds wear
   size=''
   while IFS='|' read -r path size model rest; do
     [[ $path == "$target" ]] || continue
@@ -1222,6 +1308,8 @@ review_disk_detail() {
   done < <(disk_table 2>/dev/null || true)
   holds=$(disk_contents "$target" 2>/dev/null || true)
   [[ -z $holds ]] || tui_field 'Holds' "$holds" ink
+  wear=$(disk_wear_note "$target" 2>/dev/null || true)
+  [[ -z $wear ]] || tui_field 'Wear' "${wear#this drive reports }" warn
   # The root partition gets what is left after the EFI system partition, which
   # for a disk measured in gigabytes is the whole number below what the drive
   # reports. Rounding down is the honest direction: it can be a little smaller
@@ -1310,7 +1398,7 @@ gate_spelling() {
 
 screen_gate() {
   local target=${ANSWERS[target]:-} typed=${1:-} aside=${2:-}
-  local size model serial tran token layout holds
+  local size model serial tran token layout holds wear
   layout=${ANSWERS[layout]:-$(aurade_question_default layout)}
   token=$(aurade_confirmation_token "$target" "$layout")
   size=$(disk_field "$target" 2)
@@ -1338,6 +1426,12 @@ screen_gate() {
   # it. It costs one line and it is the sentence somebody would repeat back.
   holds=$(disk_contents "$target" 2>/dev/null || true)
   [[ -z $holds ]] || tui_field 'Holds' "$holds" warn
+  # And how much of it is left. Here rather than only on the review, because
+  # this is the screen somebody reads when they have already decided, and a
+  # drive with nine tenths of its life gone is worth one more line at the
+  # point where the decision is still reversible.
+  wear=$(disk_wear_note "$target" 2>/dev/null || true)
+  [[ -z $wear ]] || tui_field 'Wear' "${wear#this drive reports }" warn
   # And what is about to be written, on the screen where it is about to be
   # written. The review has the same line; somebody who walked past it there
   # should not have to remember it here.
