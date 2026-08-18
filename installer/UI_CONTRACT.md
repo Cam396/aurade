@@ -258,6 +258,49 @@ it is a rule about what may be added later: anything that alternates faster
 than about three times a second can trigger a seizure, and the person it
 happens to has no way to have prevented it.
 
+### Nothing on any screen expires
+
+No screen in this installer times out. Not a confirmation, not a question, not
+the erase gate, not a dialog. Every screen that is waiting for somebody waits
+until they answer, however long that takes.
+
+This is an accessibility rule before it is a courtesy one. A confirmation that
+expires while somebody navigates it with a switch, or reads it a character at
+a time off a braille line, or listens to it at the speed speech runs, is a
+locked door. The person it shuts out is precisely the person who needed the
+extra time, and from their side it is indistinguishable from the installer
+having crashed.
+
+It is also a safety rule at one specific screen. The erase gate exists to make
+somebody certain before something irreversible, and a gate that gets bored is
+a gate that has stopped asking the question it was built to ask.
+
+`tui_read_key` is where this lives: `read -rsn1` with no `-t`, so it blocks
+until a key arrives. `read_key` wraps it and adds nothing. Both are asserted to
+carry no timed read in `tests/test-no-timeouts.sh`, along with the behaviour
+itself, because the rule is about what may be added later rather than about
+what is there now.
+
+Three timed reads exist and none of them is a timeout in this sense, which is
+why the test names each one rather than allowing timed reads in general.
+
+The escape sequence decoder reads the rest of a sequence with a fifty
+millisecond limit, which is how a bare Escape is told apart from an arrow key.
+It disambiguates bytes that have already arrived and expires no decision.
+
+The bracketed paste reader consumes the paste body with a five second per byte
+limit and a four thousand character cap. It is reading text the terminal has
+already committed to sending, and the bound is there because the other end is a
+terminal: one that sends the start marker and then dies would otherwise hang
+the installer forever, which is a worse outcome than a truncated paste.
+
+The progress screen polls for input on its redraw tick, and that screen has no
+decision on it to expire.
+
+The graphical installer inherits the same rule. Its timers drive animation, the
+snake, the tip rotation and the progress poll, and not one of them dismisses a
+dialog or advances a page.
+
 ### One next step
 
 A failure screen names exactly one thing to do. Not five. Where several things

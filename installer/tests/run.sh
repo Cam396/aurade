@@ -33,6 +33,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-qr.sh"
 "$ROOT/test-accessibility.sh"
 "$ROOT/test-first-boot.sh"
+"$ROOT/test-no-timeouts.sh"
 "$ROOT/test-greyscale.sh"
 "$ROOT/test-tui-flow.sh"
 "$ROOT/test-probe.sh"
