@@ -1441,3 +1441,127 @@ aurade_c4_rows() {
     printf '%s\n' "${row%  }"
   done
 }
+
+# --------------------------------------------------------------------------
+# A maze, generated fresh every time
+# --------------------------------------------------------------------------
+#
+# Arrows only, no clock, and never the same twice, which is the one thing a
+# generated puzzle has over a hand written one: there is no solution to look
+# up and no level to have already done.
+#
+# Carved by depth first search with an explicit stack, which produces a
+# perfect maze: exactly one path between any two cells, so it is always
+# solvable and never has a loop to go round twice. The stack is explicit
+# because bash recursion at this depth is a way to find out what the limit is.
+AURADE_MAZE_W=9
+AURADE_MAZE_H=5
+AURADE_MAZE=()
+AURADE_MAZE_COLS=0
+AURADE_MAZE_ROWS=0
+AURADE_MAZE_X=1
+AURADE_MAZE_Y=1
+AURADE_MAZE_MOVES=0
+
+aurade_maze_new() {
+  local x y i cells visited stack top cx cy dirs dir nx ny picked
+  AURADE_MAZE_COLS=$(( AURADE_MAZE_W * 2 + 1 ))
+  AURADE_MAZE_ROWS=$(( AURADE_MAZE_H * 2 + 1 ))
+  AURADE_MAZE=()
+  for (( i = 0; i < AURADE_MAZE_COLS * AURADE_MAZE_ROWS; i++ )); do
+    AURADE_MAZE+=('#')
+  done
+  cells=$(( AURADE_MAZE_W * AURADE_MAZE_H ))
+  visited=()
+  for (( i = 0; i < cells; i++ )); do visited+=(0); done
+
+  visited[0]=1
+  AURADE_MAZE[AURADE_MAZE_COLS + 1]=' '
+  stack=(0)
+  while (( ${#stack[@]} )); do
+    top=${stack[-1]}
+    cx=$(( top % AURADE_MAZE_W ))
+    cy=$(( top / AURADE_MAZE_W ))
+    # The four neighbours, in an order that changes every time. Always trying
+    # them in the same order carves the same shape of maze from every seed.
+    dirs=()
+    for dir in 0 1 2 3; do dirs+=("$dir"); done
+    for (( i = 3; i > 0; i-- )); do
+      picked=$(( RANDOM % (i + 1) ))
+      x=${dirs[i]}; dirs[i]=${dirs[picked]}; dirs[picked]=$x
+    done
+    picked=-1
+    for dir in "${dirs[@]}"; do
+      nx=$cx; ny=$cy
+      case $dir in
+        0) ny=$(( cy - 1 )) ;;
+        1) nx=$(( cx + 1 )) ;;
+        2) ny=$(( cy + 1 )) ;;
+        3) nx=$(( cx - 1 )) ;;
+      esac
+      (( nx >= 0 && nx < AURADE_MAZE_W && ny >= 0 && ny < AURADE_MAZE_H )) || continue
+      (( ! visited[ny * AURADE_MAZE_W + nx] )) || continue
+      picked=$(( ny * AURADE_MAZE_W + nx ))
+      # Open the cell and the wall between it and where we came from.
+      AURADE_MAZE[(ny * 2 + 1) * AURADE_MAZE_COLS + (nx * 2 + 1)]=' '
+      AURADE_MAZE[(cy + ny + 1) * AURADE_MAZE_COLS + (cx + nx + 1)]=' '
+      visited[picked]=1
+      stack+=("$picked")
+      break
+    done
+    (( picked >= 0 )) || unset 'stack[-1]'
+  done
+
+  AURADE_MAZE_X=1
+  AURADE_MAZE_Y=1
+  AURADE_MAZE_MOVES=0
+  return 0
+}
+
+#: Where the way out is, in character coordinates.
+aurade_maze_exit_x() { printf '%s' "$(( AURADE_MAZE_W * 2 - 1 ))"; }
+aurade_maze_exit_y() { printf '%s' "$(( AURADE_MAZE_H * 2 - 1 ))"; }
+
+#: One step, refused by a wall. Two characters at a time, because a cell is
+#: two characters from the next one and the character between them is the wall.
+aurade_maze_move() {
+  local dir=$1 dx=0 dy=0 wall
+  case $dir in
+    up) dy=-1 ;; down) dy=1 ;; left) dx=-1 ;; right) dx=1 ;;
+    *) return 1 ;;
+  esac
+  wall=$(( (AURADE_MAZE_Y + dy) * AURADE_MAZE_COLS + (AURADE_MAZE_X + dx) ))
+  (( AURADE_MAZE_Y + dy >= 0 && AURADE_MAZE_Y + dy < AURADE_MAZE_ROWS )) || return 1
+  (( AURADE_MAZE_X + dx >= 0 && AURADE_MAZE_X + dx < AURADE_MAZE_COLS )) || return 1
+  [[ ${AURADE_MAZE[wall]} != '#' ]] || return 1
+  AURADE_MAZE_X=$(( AURADE_MAZE_X + dx * 2 ))
+  AURADE_MAZE_Y=$(( AURADE_MAZE_Y + dy * 2 ))
+  AURADE_MAZE_MOVES=$(( AURADE_MAZE_MOVES + 1 ))
+  return 0
+}
+
+aurade_maze_won() {
+  (( AURADE_MAZE_X == AURADE_MAZE_W * 2 - 1 && AURADE_MAZE_Y == AURADE_MAZE_H * 2 - 1 ))
+}
+
+#: Rows of characters. The walls are drawn solid and the corridors are blank,
+#: which reads as a maze without needing colour.
+aurade_maze_rows() {
+  local x y row index
+  for (( y = 0; y < AURADE_MAZE_ROWS; y++ )); do
+    row=''
+    for (( x = 0; x < AURADE_MAZE_COLS; x++ )); do
+      index=$(( y * AURADE_MAZE_COLS + x ))
+      if (( x == AURADE_MAZE_X && y == AURADE_MAZE_Y )); then
+        row+='@'
+      elif (( x == AURADE_MAZE_W * 2 - 1 && y == AURADE_MAZE_H * 2 - 1 )); then
+        row+='>'
+      elif [[ ${AURADE_MAZE[index]} == '#' ]]; then
+        row+='#'
+      else
+        row+=' '
+      fi
+    done
+    printf '%s\n' "$row"
+  done
+}

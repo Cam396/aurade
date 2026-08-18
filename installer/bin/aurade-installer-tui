@@ -2684,7 +2684,7 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko c4 snake ttt)
+WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko c4 maze snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
@@ -2698,6 +2698,7 @@ declare -A WAIT_LABELS=(
   [fifteen]='Play the fifteen puzzle'
   [soko]='Play sokoban'
   [c4]='Play connect 4'
+  [maze]='Play a maze, made just now'
   [snake]='Play snake'
   [ttt]='Play tic-tac-toe'
 )
@@ -3088,6 +3089,33 @@ screen_lights() {
     'esc  back'
 }
 
+# A maze, carved fresh every time this is opened.
+#
+# The one thing a generated puzzle has over a hand written one is that there
+# is nothing to look up and no level anybody has already done. Depth first
+# carving gives a perfect maze, so there is exactly one path between any two
+# points: always solvable, never a loop to walk round twice.
+screen_maze() {
+  local HELP_KEY=0
+  local row pad
+  tui_clear
+  tui_header 'Maze'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - AURADE_MAZE_COLS) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_maze_rows)
+  tui_blank
+  if aurade_maze_won; then
+    tui_wrap "Out, in $AURADE_MAZE_MOVES moves. Press enter for a new one." ok
+  else
+    tui_wrap "Find your way to the mark. $AURADE_MAZE_MOVES moves." dim
+  fi
+  tui_blank
+  tui_footer 'arrows  move    g  choose something else' 'esc  back'
+}
+
 # Connect 4, against an opponent that is deliberately not very good.
 #
 # It takes a win it can see and blocks one it can see, and past that it
@@ -3351,6 +3379,7 @@ run_engine_with_progress() {
       fifteen) screen_fifteen ;;
       soko)   screen_soko ;;
       c4)     screen_c4 ;;
+      maze)   screen_maze ;;
       bible)  screen_bible ;;
       books)  screen_bible_books ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
@@ -3403,6 +3432,7 @@ run_engine_with_progress() {
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
                 soko)    mode=soko; aurade_soko_new 0 ;;
                 c4)      mode=c4; aurade_c4_new ;;
+                maze)    mode=maze; aurade_maze_new ;;
                 *)    mode=$WAIT_MODE ;;
               esac
               ;;
@@ -3501,6 +3531,21 @@ run_engine_with_progress() {
             d|D) aurade_lights_move right ;;
             enter|space)
               if aurade_lights_won; then aurade_lights_new; else aurade_lights_toggle; fi ;;
+          esac
+          ;;
+        maze)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_maze_move "$key" || true ;;
+            w|W) aurade_maze_move up || true ;;
+            s|S) aurade_maze_move down || true ;;
+            a|A) aurade_maze_move left || true ;;
+            d|D) aurade_maze_move right || true ;;
+            enter|space)
+              # A new maze only once this one is finished, for the same reason
+              # sokoban does not restart mid puzzle.
+              aurade_maze_won && aurade_maze_new || true ;;
           esac
           ;;
         c4)
@@ -4196,6 +4241,7 @@ if [[ -n $RENDER_ONLY ]]; then
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
     soko)      aurade_soko_new "${AURADE_RENDER_SOKO_LEVEL:-0}"; screen_soko ;;
     c4)        RANDOM=${AURADE_C4_SEED:-7}; aurade_c4_new; screen_c4 ;;
+    maze)      RANDOM=${AURADE_MAZE_SEED:-5}; aurade_maze_new; screen_maze ;;
     bible)     BIBLE_INDEX=${AURADE_RENDER_BIBLE_BOOK:-0}
                BIBLE_CHAPTER=${AURADE_RENDER_BIBLE_CHAPTER:-1}
                BIBLE_TOP=${AURADE_RENDER_BIBLE_TOP:-0}; screen_bible ;;

@@ -447,7 +447,7 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # was making them anxious should not have to walk past six games to find it.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -621,6 +621,59 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   done
   _aurade_c4_put 0 1 &&
     { echo 'a seventh counter fitted into a six row column' >&2; exit 1; }
+
+  # The maze, and the only thing a generated puzzle really has to promise:
+  # that the way out is actually reachable. A carving bug does not produce an
+  # obviously broken maze, it produces a normal looking one with a sealed
+  # corner, and the person who finds it is the one who kept trying longest.
+  # So every maze is flood filled from the start and the exit has to be in it.
+  maze_reachable() {
+    local -A seen=()
+    local queue=("1,1") cur cx cy nx ny step
+    seen["1,1"]=1
+    while (( ${#queue[@]} )); do
+      cur=${queue[0]}
+      queue=("${queue[@]:1}")
+      cx=${cur%,*}
+      cy=${cur#*,}
+      for step in "0,-1" "1,0" "0,1" "-1,0"; do
+        nx=$(( cx + ${step%,*} ))
+        ny=$(( cy + ${step#*,} ))
+        (( nx >= 0 && nx < AURADE_MAZE_COLS && ny >= 0 && ny < AURADE_MAZE_ROWS )) || continue
+        [[ ${AURADE_MAZE[ny * AURADE_MAZE_COLS + nx]} != '#' ]] || continue
+        [[ -z ${seen[$nx,$ny]:-} ]] || continue
+        seen["$nx,$ny"]=1
+        queue+=("$nx,$ny")
+      done
+    done
+    [[ -n ${seen[$(( AURADE_MAZE_W * 2 - 1 )),$(( AURADE_MAZE_H * 2 - 1 ))]:-} ]]
+  }
+  for maze_seed in 1 2 3 5 8 13 21 34 55 89; do
+    RANDOM=$maze_seed
+    aurade_maze_new
+    maze_reachable ||
+      { echo "maze seed $maze_seed has no way out of it" >&2; exit 1; }
+    # And it is a maze rather than a room. A carve that opened everything
+    # would be reachable and would not be a puzzle.
+    maze_walls=$(printf '%s' "${AURADE_MAZE[*]}" | tr -cd '#' | wc -c)
+    (( maze_walls > 20 )) ||
+      { echo "maze seed $maze_seed came out as a room with $maze_walls walls" >&2; exit 1; }
+  done
+
+  # Fresh every time is the whole point of generating it.
+  RANDOM=1; aurade_maze_new; maze_one=$(aurade_maze_rows)
+  RANDOM=2; aurade_maze_new; maze_two=$(aurade_maze_rows)
+  [[ $maze_one != "$maze_two" ]] ||
+    { echo 'two seeds carved the same maze' >&2; exit 1; }
+
+  # A wall is a wall. Without this a step walks through one and the maze is
+  # decoration.
+  RANDOM=3
+  aurade_maze_new
+  aurade_maze_move up && { echo 'a step left the maze through the top' >&2; exit 1; }
+  aurade_maze_move left && { echo 'a step left the maze through the side' >&2; exit 1; }
+  (( AURADE_MAZE_MOVES == 0 )) ||
+    { echo 'a refused step was counted as a move' >&2; exit 1; }
 
   # Minesweeper places its mines after the first reveal and never under it,
   # so the first keypress of a game always opens something. Losing on move one
