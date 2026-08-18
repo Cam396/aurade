@@ -175,10 +175,20 @@ die() {
   # so a reworded sentence that lands in the wrong bucket fails there rather
   # than in front of a user.
   if [[ -n ${_J_ACTIVE_STAGE:-} ]]; then
+    # Order is the whole of the logic here, because a `case` takes the first
+    # arm that matches and several of these messages match more than one.
+    #
+    # Secure Boot goes first for a reason worth keeping: `sbverify` failing
+    # produces "Secure Boot signature verification failed for systemd-boot",
+    # which contains the word signature, and while the signature arm was above
+    # this one that failure told the user a package had not matched its
+    # signature and sent them to check the clock on their computer. A Secure
+    # Boot problem is a Secure Boot problem however it is worded, so the most
+    # specific subject wins over the most general one.
     case $message in
+      *Secure\ Boot*) cause=secure_boot_error ;;
       *keyring*|*signature*) cause=keyring_error ;;
       *staging\ filesystem*|*capacity*|*free\ space*) cause=capacity_error ;;
-      *Secure\ Boot*) cause=secure_boot_error ;;
       *archive*|*acquire*|*network*|*DNS*|*route*|*clock*) cause=network_error ;;
       *target*|*disk*|*partition*) cause=target_error ;;
       *mount*|*filesystem*|*subvolume*) cause=storage_error ;;
@@ -527,7 +537,10 @@ acquire_arch_packages() {
     return
   fi
 
-  command -v pacman >/dev/null || die 'pacman is required to acquire Arch packages'
+  # "install" rather than "acquire": the classifier matches the word acquire
+  # and sent a missing pacman to the network explanation, which told somebody
+  # with a broken image to check their network connection.
+  command -v pacman >/dev/null || die 'pacman is required to install Arch packages'
   command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
   command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
   install -d -m 0755 "$ARCH_CACHE"

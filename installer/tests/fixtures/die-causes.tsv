@@ -1,0 +1,100 @@
+installer_error	--arch-snapshot is not a real calendar date
+installer_error	--arch-snapshot must be YYYY/MM/DD
+installer_error	--braille must be yes or no
+installer_error	--contrast must be normal or high
+installer_error	--cursor-size must be 24, 32 or 48
+installer_error	--encrypt requires a readable --luks-passphrase-file
+installer_error	--execute requires root
+installer_error	--layout must be wipe or alongside
+installer_error	--reduce-motion must be yes or no
+installer_error	--repo-key is required unless --allow-unsigned is explicit
+installer_error	--repo-url may not use the development placeholder host
+installer_error	--repo-url must be an HTTPS or file URL without whitespace
+installer_error	--screen-reader must be yes or no
+installer_error	--secure-boot-enroll must be manual or if-safe
+installer_error	--secure-boot-key and --secure-boot-cert must be provided together
+installer_error	--spacing must be normal, roomy or roomier
+installer_error	--swap must be none, file or zram
+installer_error	--swap-size must be auto, hibernate, or a size like 8G
+installer_error	--text-scale must be 100, 125 or 150
+installer_error	--typeface must be system, atkinson or opendyslexic
+installer_error	--username is required
+installer_error	AURADE_FAILURE_JOURNAL_DIR must be an absolute non-root path
+installer_error	AURADE_INSTALL_WORK_DIR must be an absolute non-root path
+installer_error	AURADE_MIN_WORKSPACE_BYTES must be an integer byte count
+installer_error	Arch package acquisition produced no package files
+installer_error	AuraDE requires booting the installer in UEFI mode
+installer_error	LUKS passphrase file is empty
+installer_error	LUKS passphrase file must not be group/world accessible
+installer_error	a full --repo-fingerprint is required
+installer_error	bsdtar is required to inspect locked packages
+installer_error	could not build the local Arch package repository
+installer_error	gpg is required to validate the repository key
+installer_error	hibernation needs a swap file with a stable physical offset, which xfs does not provide
+installer_error	invalid hostname
+installer_error	invalid keymap
+installer_error	invalid locale
+installer_error	invalid repository name
+installer_error	invalid timezone
+installer_error	invalid username
+installer_error	neither the configured installer work directory nor /tmp is writable
+installer_error	package lock is empty
+installer_error	package lock must include aurade
+installer_error	package lock must include chromiumos-ash
+installer_error	pacman is required to install Arch packages
+installer_error	pacstrap failed after three attempts
+installer_error	password hash file must not be group/world accessible
+installer_error	password hash must be a single crypt(3) hash, not plaintext
+installer_error	post-install verification failed: UEFI fallback loader is missing
+installer_error	post-install verification failed: expected AuraDE packages are not installed
+installer_error	post-install verification failed: fstab is empty
+installer_error	post-install verification failed: installed root account is not locked
+installer_error	post-install verification failed: placeholder repository URL remains
+installer_error	post-install verification failed: required services are not enabled
+installer_error	post-install verification failed: the rollback boot entry is missing
+installer_error	post-install verification failed: the swap file is missing
+installer_error	post-install verification failed: the swap file is not in fstab
+installer_error	post-install verification failed: the systemd-boot entry is missing
+installer_error	refusing to install a repository secret key
+installer_error	repo-add is required to prepare the offline Arch package set
+installer_error	repository key fingerprint does not match --repo-fingerprint
+installer_error	repository public key could not be parsed
+installer_error	required command not found: cryptsetup
+installer_error	required command not found: fallocate
+installer_error	required command not found: mkfs.ext4
+installer_error	required command not found: mkfs.xfs
+installer_error	required command not found: mkswap
+installer_error	the install journal could not be started, and nothing runs without one
+installer_error	timeout is required to bound Arch package acquisition
+installer_error	zram swap lives in memory, so it cannot be used for hibernation
+keyring_error	gpg is required to initialize the writable Arch keyring
+keyring_error	gpgv is required to validate package signatures
+keyring_error	pacman-key is required to initialize the writable Arch keyring
+keyring_error	the downloaded packages did not match their signatures, after three attempts
+keyring_error	the package signing keyring could not be set up. The most common reason is a wrong date on this computer
+keyring_error	this image is missing the Arch signing keyring
+network_error	the packages could not all be downloaded from the archive
+secure_boot_error	Secure Boot certificate is not a readable PEM X.509 certificate
+secure_boot_error	Secure Boot key generation requires an installer workspace
+secure_boot_error	Secure Boot private key and certificate do not contain the same public key
+secure_boot_error	Secure Boot private key is not a readable PEM key
+secure_boot_error	Secure Boot private key must not be group/world accessible
+secure_boot_error	Secure Boot signature verification failed for systemd-boot
+secure_boot_error	Secure Boot signing requires both a private key and certificate
+secure_boot_error	Secure Boot signing source is missing: systemd-bootx64.efi
+secure_boot_error	could not generate the temporary AuraDE Secure Boot key
+secure_boot_error	could not sign the systemd-boot loader for Secure Boot
+secure_boot_error	openssl is required for Secure Boot key validation
+secure_boot_error	openssl is required to generate Secure Boot keys
+secure_boot_error	this image is too old to enroll Secure Boot keys automatically
+storage_error	--filesystem must be btrfs, ext4 or xfs
+storage_error	--mountpoint must be an absolute non-root path
+storage_error	post-install verification failed: a rollback entry exists on a filesystem with no factory snapshot
+target_error	--target is required
+target_error	--target must be an absolute /dev path
+target_error	loop targets require --allow-loop
+target_error	target contains the running root filesystem
+target_error	target device path contains unsupported characters
+target_error	target is too small (need at least 16 GiB)
+target_error	the new partition did not appear after partitioning the target
+target_error	this disk has no EFI system partition, so AuraDE cannot be added alongside what is already on it
