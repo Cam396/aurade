@@ -1,0 +1,85 @@
+# What a log line means, in words.
+#
+# One literal string per row, and what it means when it turns up. Read by
+# `bin/aurade-explain`, which is what turns four hundred lines of kernel
+# messages into two sentences somebody can act on.
+#
+# Six tab separated fields:
+#
+#   key       the literal that appears in the log, byte for byte. A literal and
+#             never a pattern: a thousand of them match in one pass, anybody
+#             can search for one and find the driver that prints it, and it
+#             cannot quietly become clever.
+#   source    kernel, pacman, systemd, efi, luks, installer. `--source` narrows
+#             a scan to one of these.
+#   severity  fault, warn or note.
+#             fault  something is broken and the reader has to do something
+#             warn   something is degraded and will probably still work
+#             note   this looks alarming and is normal. Hidden unless --all.
+#   what      what happened. One or two sentences. For a note, lead with the
+#             reassurance, the same way a failure screen leads with the disk.
+#   do        what to do, in one sentence, or `-` when the honest answer is
+#             nothing at all.
+#   evidence  where the string is emitted, so an entry can be checked rather
+#             than believed. For kernel rows this is `path:line` in the kernel
+#             source, and `tools/verify-hardware-notes.sh` checks every one of
+#             them against a real tree. A row that nothing emits is worse than
+#             no row at all, because it never fires and so is never noticed.
+#
+# The voice is the one in UI_CONTRACT.md, and it applies here harder than
+# anywhere else: this file is read by somebody who is already worried. No
+# jargon they have not already got, no hexadecimal, and never an account of
+# how the computer knows. Say what happened, then say what to do.
+#
+# The `note` rows are not filler. Most of what looks frightening in a kernel
+# log is normal, and somebody who cannot tell which is which pastes all four
+# hundred lines somewhere and waits. Saying "nothing is wrong" about the right
+# lines is the half of this file that saves a person an evening.
+timeout, reset controller	kernel	fault	The drive stopped answering, so Linux reset it and carried on.	Copy anything you care about off this drive before you install. A drive that does this is often on its way out.	drivers/nvme/host/core.c:4476
+controller is down; will reset	kernel	fault	The drive stopped responding altogether and Linux is restarting it.	Copy anything you care about off this drive before you install.	drivers/nvme/host/pci.c:1400
+Device not ready; aborting	kernel	fault	The drive did not come back after a reset.	Shut the computer down fully, wait ten seconds, then start it again. A restart alone does not always power the drive down.	drivers/nvme/host/core.c:2435
+failed to set APST feature	kernel	warn	The drive refused a power saving setting Linux asked for.	On some laptops the drive then stops answering later in the install. Add nvme_core.default_ps_max_latency_us=0 to the boot options and try again.	drivers/nvme/host/core.c:2747
+Failed to read smart log	kernel	note	Nothing is wrong. The drive did not report its own health figures.	-	drivers/nvme/host/hwmon.c:248
+exception Emask	kernel	fault	The drive reported an error and the command had to be retried.	Check the SATA cable at both ends first. A loose or worn cable causes this far more often than a failing drive does.	drivers/ata/libata-eh.c:2433
+hard resetting link	kernel	warn	Linux reset the connection to the drive to get it answering again.	Check the SATA cable at both ends. One of these on its own is normal, and a run of them is not.	drivers/ata/libata-eh.c:2792
+SATA link down	kernel	note	Nothing is wrong. There is no drive attached to that port.	-	drivers/ata/libata-core.c:3233
+link is slow to respond	kernel	note	Nothing is wrong. The drive is taking its time to wake up and Linux is waiting for it.	-	drivers/ata/libata-core.c:3659
+limiting SATA link speed	kernel	warn	Linux slowed the connection to the drive down to keep it stable.	The drive will work and it will be slower. A different cable usually fixes it.	drivers/ata/libata-sata.c:594
+NCQ disabled due to excessive errors	kernel	warn	Linux turned off a speed feature because the drive kept getting it wrong.	The drive will work and it will be slower. Check the cable, then check the drive for faults.	drivers/ata/libata-eh.c:1895
+revalidation failed	kernel	fault	The drive stopped identifying itself the way it did a moment ago.	Copy anything you care about off this drive. Do not install onto it until you have checked it for faults.	drivers/ata/libata-core.c:3933
+failed to resume link	kernel	warn	The connection to the drive did not come back after the computer woke up.	Restart the computer rather than waking it. This is a firmware problem and a full restart clears it.	drivers/ata/libata-sata.c:331
+device reported invalid CHS sector 0	kernel	note	Nothing is wrong. The drive answered an old question in an old way.	-	drivers/ata/libata-core.c:676
+device descriptor read/64, error	kernel	warn	A USB device did not answer when Linux asked what it was.	Move it to a different USB socket, and use one on the computer itself rather than a hub.	drivers/usb/core/hub.c:5064
+unable to enumerate USB device	kernel	fault	A USB device is plugged in and Linux cannot talk to it.	Move it to a different USB socket. If it is the drive you started the installer from, write the image again onto a different USB stick.	drivers/usb/core/hub.c:5615
+Cannot enable. Maybe the USB cable is bad	kernel	warn	A USB device kept failing to start.	Try a different cable and a different socket. On a USB drive this is usually the cable.	drivers/usb/core/hub.c:3149
+Card is consuming too much power	kernel	fault	The card reader cut power to the card to protect the computer.	Take the card out and put it back in. If it happens again the card is faulty.	drivers/mmc/host/sdhci.c:3578
+Timeout waiting for hardware interrupt	kernel	warn	The card reader stopped answering while it was being used.	Take the card out and put it back in. Do not install onto a card that does this.	drivers/mmc/host/alcor.c:970
+Buffer I/O error on device	kernel	fault	Part of the disk could not be read or written.	Copy anything you care about off this disk now. Do not install onto it.	fs/ext4/page-io.c:95
+EXT4-fs error	kernel	fault	An existing Linux filesystem on one of these disks is damaged.	This does not stop the install. Check that filesystem with fsck before you trust anything on it.	fs/ext4/super.c:826
+BTRFS: error	kernel	fault	A Btrfs filesystem reported an error.	Save a report. If this is the disk being installed to, start the install again from the beginning.	fs/btrfs/messages.c:127
+parent transid verify failed	kernel	fault	A Btrfs filesystem is inconsistent with itself.	This usually follows a power cut or a failing disk. Check the disk for faults before installing onto it.	fs/btrfs/disk-io.c:133
+checksum error at logical	kernel	fault	Btrfs read data back and it was not what was written.	The disk is corrupting data. Do not install onto it.	fs/btrfs/inode.c:172
+open_ctree failed	kernel	fault	A Btrfs filesystem could not be opened at all.	Save a report before doing anything else. Mounting it again will not help.	fs/btrfs/super.c:976
+failed to read the system array	kernel	fault	The part of the Btrfs filesystem that says where everything is could not be read.	Save a report. Do not write anything else to this disk.	fs/btrfs/disk-io.c:3381
+No Caching mode page found	kernel	note	Nothing is wrong. The drive did not say whether it caches writes, so Linux assumed the safe answer.	-	drivers/scsi/sd.c:3127
+Assuming drive cache: write through	kernel	note	Nothing is wrong. Linux picked the safe assumption about how the drive caches writes.	-	drivers/scsi/sd.c:3183
+APIC error on CPU	kernel	note	Nothing is wrong. The processor reported an interrupt problem and carried on.	-	arch/x86/kernel/apic/apic.c:2178
+Uhhuh. NMI received for unknown reason	kernel	note	Nothing is wrong. The computer's firmware sent Linux a signal it does not recognise.	-	arch/x86/kernel/nmi.c:349
+Dazed and confused, but trying to continue	kernel	note	Nothing is wrong. That is the kernel's own wording for a signal it does not recognise, and it carried on.	-	arch/x86/kernel/nmi.c:282
+TSC_DEADLINE disabled due to Errata	kernel	note	Nothing is wrong. Linux turned off a timer feature this processor gets wrong.	-	arch/x86/kernel/apic/apic.c:562
+Marking TSC unstable due to	kernel	note	Nothing is wrong. Linux switched to a different clock because the processor's own one drifted.	-	arch/x86/kernel/tsc.c:1164
+perf: interrupt took too long	kernel	note	Nothing is wrong. Linux slowed its own measuring down to stay out of the way.	-	kernel/events/core.c:559
+[Hardware Error]: 	kernel	fault	The processor or the memory reported a real hardware fault.	Run a memory test before installing. This is one of the few messages here that is never noise.	include/linux/printk.h:119
+Machine check events logged	kernel	warn	The processor recorded a hardware fault and kept going.	Run a memory test before installing.	arch/x86/kernel/cpu/mce/core.c:1765
+Firmware Error (ACPI): 	kernel	note	Nothing is wrong with your computer. Its firmware has a bug in it and Linux worked around it.	-	drivers/acpi/acpica/acutils.h:98
+Firmware Warning (ACPI): 	kernel	note	Nothing is wrong with your computer. Its firmware did something out of spec and Linux carried on.	-	drivers/acpi/acpica/acutils.h:101
+Could not resolve symbol	kernel	note	Nothing is wrong. The firmware referred to something that is not there and Linux skipped it.	-	drivers/acpi/acpica/uterror.c:192
+Aborting method	kernel	note	Nothing is wrong. A firmware routine failed and Linux stopped running it.	-	drivers/acpi/acpica/psparse.c:526
+Killed process	kernel	fault	The computer ran out of memory and Linux stopped a program to get some back.	Close everything else and start the install again. If it happens again, this computer does not have enough memory for it.	mm/oom_kill.c:955
+Memory cgroup out of memory	kernel	fault	Something ran out of the memory it was allowed to use.	Close everything else and start the install again.	mm/oom_kill.c:1180
+GPU fault detected	kernel	warn	The graphics card reported a fault and Linux recovered from it.	The screen may have flickered. If it keeps happening, start the installer in safe graphics mode.	drivers/gpu/drm/amd/amdgpu/gmc_v6_0.c:1073
+timeout, but soft recovered	kernel	note	Nothing is wrong. The graphics card stopped for a moment and picked itself back up.	-	drivers/gpu/drm/amd/amdgpu/amdgpu_job.c:118
+GPU reset succeeded	kernel	warn	The graphics card locked up and Linux restarted it.	The screen may have gone black for a second. If it keeps happening, start the installer in safe graphics mode.	drivers/gpu/drm/amd/amdgpu/amdgpu_device.c:5517
+Resetting chip for	kernel	warn	The graphics card locked up and Linux restarted it.	If it keeps happening, start the installer in safe graphics mode.	drivers/gpu/drm/i915/gt/intel_reset.c:1222
+Direct firmware load for	kernel	warn	A piece of hardware asked for firmware that is not on this system.	Wireless and graphics are the usual ones. Everything else will install, and that device will not work until its firmware is installed.	drivers/base/firmware_loader/main.c:938
+efivars: Subsystem registration failed	kernel	warn	Linux could not reach the firmware settings store.	The install will finish, and this computer may not offer AuraDE in its boot menu afterwards.	drivers/firmware/efi/efi.c:452

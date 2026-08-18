@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# Turn a log into sentences.
+#
+# Every Linux installer in the world ends the same way when it ends badly: a
+# person looks at four hundred lines of kernel messages, recognises none of
+# them, and posts the whole thing somewhere and waits. The lines that matter
+# and the lines that are noise look identical, because they are the same
+# format written by the same printk, and knowing which is which is exactly the
+# expertise the person does not have and should not need.
+#
+# So this reads a log and says what is in it, in the same voice as everything
+# else here: what happened, and what to do about it. Nothing else. It is not a
+# diagnostic tool, it does not score anything, and it never asks the reader to
+# interpret a hexadecimal value.
+#
+# The catalogue is `data/hardware-notes.tsv` and it is deliberately plain: one
+# literal string per line, and the sentences that string means. A literal, not
+# a pattern, for three reasons. It is fast, because `grep -F` with a thousand
+# of them is one Aho-Corasick pass rather than a thousand regex passes. It is
+# reviewable, because anybody can search for the literal and find the driver
+# that prints it. And it cannot drift into cleverness, because a literal either
+# appears in the log or it does not.
+#
+# The last line of the output when nothing matches is the important one. It
+# invites the report, because a log this does not recognise is the only thing
+# that makes the catalogue bigger.
+set -Eeuo pipefail
+
+SELF=${0##*/}
+ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+
+CATALOGUE=${AURADE_NOTES_FILE:-$ROOT/data/hardware-notes.tsv}
+SHOW_NORMAL=0
+QUOTE=1
+SOURCES=()
+FILES=()
+
+usage() {
+  cat <<'USAGE'
+Read a log and say what is in it.
+
+  aurade-explain [FILE ...]      read these files, or standard input
+  dmesg | aurade-explain         the usual way to run it
+
+  --all         include the lines that are normal and look alarming
+  --quiet       leave out the log lines themselves
+  --source X    only entries from this source (kernel, pacman, efi, ...)
+  --catalogue F read the notes from F instead of the installed one
+  --list        print the whole catalogue and stop
+  --help        this
+
+Exit status is 1 when something in the log is a fault, and 0 otherwise, so
+this can be used in a script as well as read.
+USAGE
+}
+
+die() { printf '%s: %s\n' "$SELF" "$1" >&2; exit 2; }
+
+while (($#)); do
+  case $1 in
+    --all)       SHOW_NORMAL=1 ;;
+    --quiet)     QUOTE=0 ;;
+    --source)    [[ ${2-} ]] || die '--source requires an argument'; SOURCES+=("$2"); shift ;;
+    --catalogue) [[ ${2-} ]] || die '--catalogue requires an argument'; CATALOGUE=$2; shift ;;
+    --list)      LIST=1 ;;
+    --help|-h)   usage; exit 0 ;;
+    --)          shift; FILES+=("$@"); break ;;
+    -*)          die "unknown option: $1" ;;
+    *)           FILES+=("$1") ;;
+  esac
+  shift
+done
+
+[[ -f $CATALOGUE && -r $CATALOGUE ]] || die "no catalogue at $CATALOGUE"
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# --------------------------------------------------------------------------
+# The catalogue
+# --------------------------------------------------------------------------
+#
+# Six tab separated fields. Comments and blank lines are skipped, and a row
+# that is not six fields is skipped rather than guessed at: a half read row
+# would put half a sentence on a screen.
+#
+#   key       the literal that appears in the log, verbatim
+#   source    which log it comes from, so `--source` can narrow it
+#   severity  fault, warn or note
+#   what      what happened, in words the reader already has
+#   do        what to do about it, or a dash when the answer is nothing
+#   evidence  where the string is emitted, so the entry can be checked
+declare -A NOTE_SOURCE=() NOTE_SEVERITY=() NOTE_WHAT=() NOTE_DO=()
+declare -a KEYS=()
+
+while IFS=$'\t' read -r key source severity what todo evidence || [[ -n ${key:-} ]]; do
+  [[ -n ${key:-} && $key != '#'* ]] || continue
+  [[ -n ${evidence:-} ]] || continue
+  case $severity in fault|warn|note) ;; *) continue ;; esac
+  KEYS+=("$key")
+  NOTE_SOURCE[$key]=$source
+  NOTE_SEVERITY[$key]=$severity
+  NOTE_WHAT[$key]=$what
+  NOTE_DO[$key]=$todo
+done <"$CATALOGUE"
+
+(( ${#KEYS[@]} > 0 )) || die "the catalogue at $CATALOGUE has no usable entries"
+
+if [[ ${LIST:-0} == 1 ]]; then
+  for key in "${KEYS[@]}"; do
+    printf '%s\t%s\t%s\n' "${NOTE_SEVERITY[$key]}" "${NOTE_SOURCE[$key]}" "$key"
+  done
+  exit 0
+fi
+
+# --source narrows the catalogue before anything is scanned, which is what
+# makes it worth having: scanning pacman's output against every kernel string
+# in the file is time spent finding things that cannot be there.
+if (( ${#SOURCES[@]} > 0 )); then
+  declare -a narrowed=()
+  for key in "${KEYS[@]}"; do
+    for want in "${SOURCES[@]}"; do
+      [[ ${NOTE_SOURCE[$key]} == "$want" ]] && { narrowed+=("$key"); break; }
+    done
+  done
+  KEYS=(${narrowed[@]+"${narrowed[@]}"})
+  (( ${#KEYS[@]} > 0 )) || die "no catalogue entries for that source"
+fi
+
+printf '%s\n' "${KEYS[@]}" >"$WORK/keys"
+
+# --------------------------------------------------------------------------
+# The log
+# --------------------------------------------------------------------------
+if (( ${#FILES[@]} > 0 )); then
+  for f in "${FILES[@]}"; do
+    [[ -f $f && -r $f ]] || die "cannot read $f"
+  done
+  cat -- "${FILES[@]}" >"$WORK/log" 2>/dev/null || true
+else
+  cat >"$WORK/log" 2>/dev/null || true
+fi
+
+# `-a` because a kernel log is not guaranteed to be text: a driver that prints
+# a device name straight out of firmware can put any byte on the line, and grep
+# treating the whole file as binary would report nothing at all rather than
+# report what is there.
+grep -anoFf "$WORK/keys" -- "$WORK/log" >"$WORK/hits" 2>/dev/null || true
+
+if [[ ! -s $WORK/hits ]]; then
+  printf 'Nothing in this log is something AuraDE recognises.\n'
+  printf 'Save a report and send it on. That is how this list gets longer.\n'
+  exit 0
+fi
+
+# A key that is contained in another matched key is the same event described
+# twice, and the longer one is the more specific. Printing both is how a
+# summary starts being as long as the log it replaced.
+#
+# Counted with awk and read back over a tab rather than with `uniq -c` and a
+# space, because two of the keys in the catalogue end in a space and `read`
+# eats it. The symptom was the whole tool dying on an unbound array subscript
+# the first time it met a real log, which is a good argument for not asking a
+# separator to also be data.
+#
+# In the order the log is in, because that is the order the reader would have
+# read it in, and because the alternative is whatever order a hash table felt
+# like that morning. The split is on the first colon only: `grep -n` puts the
+# line number in front, and plenty of these keys contain a colon of their own.
+declare -A COUNT=()
+declare -a MATCHED=()
+while IFS=$'\t' read -r _first n key; do
+  [[ -n $key ]] || continue
+  COUNT[$key]=$n
+  MATCHED+=("$key")
+done < <(awk '
+  { i = index($0, ":"); n = substr($0, 1, i - 1); k = substr($0, i + 1)
+    c[k]++; if (!(k in first)) first[k] = n + 0 }
+  END { for (k in c) printf "%d\t%d\t%s\n", first[k], c[k], k }
+' "$WORK/hits" | sort -n)
+
+declare -a KEEP=()
+for key in "${MATCHED[@]}"; do
+  covered=0
+  for other in "${MATCHED[@]}"; do
+    [[ $other == "$key" ]] && continue
+    if [[ $other == *"$key"* ]]; then covered=1; break; fi
+  done
+  (( covered )) || KEEP+=("$key")
+done
+
+# --------------------------------------------------------------------------
+# What to say
+# --------------------------------------------------------------------------
+declare -a FAULTS=() WARNS=() NOTES=()
+for key in ${KEEP[@]+"${KEEP[@]}"}; do
+  case ${NOTE_SEVERITY[$key]} in
+    fault) FAULTS+=("$key") ;;
+    warn)  WARNS+=("$key") ;;
+    note)  NOTES+=("$key") ;;
+  esac
+done
+
+declare -a SHOW=(${FAULTS[@]+"${FAULTS[@]}"} ${WARNS[@]+"${WARNS[@]}"})
+(( SHOW_NORMAL )) && SHOW+=(${NOTES[@]+"${NOTES[@]}"})
+
+if (( ${#SHOW[@]} == 0 )); then
+  printf 'Nothing in this log is a fault.\n'
+  case ${#NOTES[@]} in
+    0) ;;
+    1) printf 'One thing in it looks alarming and is normal. Run this again with --all to read it.\n' ;;
+    *) printf '%s things in it look alarming and are normal. Run this again with --all to read them.\n' \
+         "${#NOTES[@]}" ;;
+  esac
+  exit 0
+fi
+
+# One line of scene setting, then the findings. The count is worth saying
+# because the reader is deciding how much of their evening this is.
+case ${#SHOW[@]} in
+  1) printf 'One thing in this log is worth knowing about.\n' ;;
+  *) printf '%s things in this log are worth knowing about.\n' "${#SHOW[@]}" ;;
+esac
+
+for key in "${SHOW[@]}"; do
+  printf '\n'
+  printf '  %s\n' "${NOTE_WHAT[$key]}"
+  [[ ${NOTE_DO[$key]} == '-' ]] || printf '  %s\n' "${NOTE_DO[$key]}"
+  if (( QUOTE )); then
+    line=$(grep -am1 -F -- "$key" "$WORK/log" 2>/dev/null || true)
+    # The `|| true` above is load bearing under `pipefail`: a key that is in
+    # the hit list is in the log, so this cannot miss, and a `head` would still
+    # close the pipe early and take the whole script with it.
+    line=${line//[$'\t\r']/ }
+    line=$(printf '%s' "$line" | tr -d '\000-\037\177')
+    (( ${#line} <= 100 )) || line=${line:0:100}...
+    [[ -z $line ]] || printf '  %s\n' "$line"
+  fi
+  if (( ${COUNT[$key]} > 1 )); then
+    printf '  Seen %s times.\n' "${COUNT[$key]}"
+  fi
+done
+
+if (( ${#NOTES[@]} > 0 && ! SHOW_NORMAL )); then
+  printf '\n'
+  case ${#NOTES[@]} in
+    1) printf 'One other thing here looks alarming and is normal. Run this again with --all to read it.\n' ;;
+    *) printf '%s other things here look alarming and are normal. Run this again with --all to read them.\n' \
+         "${#NOTES[@]}" ;;
+  esac
+fi
+
+(( ${#FAULTS[@]} == 0 )) || exit 1
+exit 0
