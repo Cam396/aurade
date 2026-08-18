@@ -1281,3 +1281,163 @@ aurade_soko_rows() {
     printf '%s\n' "${row%  }"
   done
 }
+
+# --------------------------------------------------------------------------
+# Connect 4
+# --------------------------------------------------------------------------
+#
+# Seven columns and two keys, which is the whole reason it is on the list: it
+# needs no timing, no pointer and no chord, and it plays fine on a screen
+# somebody is half watching.
+#
+# The opponent is deliberately weak. It takes a win it can see and blocks one
+# it can see, and past that it prefers the middle and picks at random. It does
+# not look two moves ahead, which is the difference between an opponent that
+# is beatable while distracted and one that is not beatable at all. Losing
+# every game to an installer is not a way to spend ten minutes.
+AURADE_C4=()
+AURADE_C4_COL=3
+AURADE_C4_OVER=0
+
+aurade_c4_new() {
+  local i
+  AURADE_C4=()
+  for (( i = 0; i < 42; i++ )); do AURADE_C4+=(0); done
+  AURADE_C4_COL=3
+  AURADE_C4_OVER=0
+  return 0
+}
+
+#: Four of one player's counters in a line from here, in one direction.
+_aurade_c4_line() {
+  local player=$1 x=$2 y=$3 dx=$4 dy=$5 i cx cy
+  for (( i = 0; i < 4; i++ )); do
+    cx=$(( x + dx * i ))
+    cy=$(( y + dy * i ))
+    (( cx >= 0 && cx < 7 && cy >= 0 && cy < 6 )) || return 1
+    (( AURADE_C4[cy * 7 + cx] == player )) || return 1
+  done
+  return 0
+}
+
+#: Anywhere on the board, in any of the four directions a line can run.
+aurade_c4_wins() {
+  local player=$1 x y
+  for (( y = 0; y < 6; y++ )); do
+    for (( x = 0; x < 7; x++ )); do
+      _aurade_c4_line "$player" "$x" "$y" 1 0 && return 0
+      _aurade_c4_line "$player" "$x" "$y" 0 1 && return 0
+      _aurade_c4_line "$player" "$x" "$y" 1 1 && return 0
+      _aurade_c4_line "$player" "$x" "$y" 1 -1 && return 0
+    done
+  done
+  return 1
+}
+
+_aurade_c4_open() { (( AURADE_C4[$1] == 0 )); }
+
+#: Drop into a column, into the lowest free row. Refused when the column is
+#: full, which is the only illegal move in this game.
+_aurade_c4_put() {
+  local col=$1 player=$2 y
+  for (( y = 5; y >= 0; y-- )); do
+    if (( AURADE_C4[y * 7 + col] == 0 )); then
+      AURADE_C4[y * 7 + col]=$player
+      return 0
+    fi
+  done
+  return 1
+}
+
+#: Take back the topmost counter in a column. Only ever used to try a move and
+#: change its mind, never by a player.
+_aurade_c4_take() {
+  local col=$1 y
+  for (( y = 0; y < 6; y++ )); do
+    if (( AURADE_C4[y * 7 + col] != 0 )); then
+      AURADE_C4[y * 7 + col]=0
+      return 0
+    fi
+  done
+  return 1
+}
+
+aurade_c4_full() {
+  local col
+  for (( col = 0; col < 7; col++ )); do
+    (( AURADE_C4[col] != 0 )) || return 1
+  done
+  return 0
+}
+
+#: Where the opponent plays. Win, then block, then the middle, then anywhere.
+_aurade_c4_reply() {
+  local col found
+  for (( col = 0; col < 7; col++ )); do
+    _aurade_c4_put "$col" 2 || continue
+    if aurade_c4_wins 2; then return 0; fi
+    _aurade_c4_take "$col"
+  done
+  for (( col = 0; col < 7; col++ )); do
+    _aurade_c4_put "$col" 1 || continue
+    found=1
+    aurade_c4_wins 1 || found=0
+    _aurade_c4_take "$col"
+    if (( found )); then
+      _aurade_c4_put "$col" 2 && return 0
+    fi
+  done
+  # The middle is worth more than the edges in this game, and preferring it is
+  # the one piece of strategy in here.
+  for col in 3 2 4 1 5 0 6; do
+    (( RANDOM % 4 )) || continue
+    _aurade_c4_put "$col" 2 && return 0
+  done
+  for col in 3 2 4 1 5 0 6; do
+    _aurade_c4_put "$col" 2 && return 0
+  done
+  return 1
+}
+
+aurade_c4_move() {
+  case $1 in
+    left)  (( AURADE_C4_COL > 0 )) && AURADE_C4_COL=$(( AURADE_C4_COL - 1 )) || true ;;
+    right) (( AURADE_C4_COL < 6 )) && AURADE_C4_COL=$(( AURADE_C4_COL + 1 )) || true ;;
+  esac
+  return 0
+}
+
+#: One turn: the player drops, then the opponent answers, unless the player
+#: has just won or filled the board.
+aurade_c4_drop() {
+  (( ! AURADE_C4_OVER )) || return 1
+  _aurade_c4_put "$AURADE_C4_COL" 1 || return 1
+  if aurade_c4_wins 1; then AURADE_C4_OVER=1; return 0; fi
+  if aurade_c4_full; then AURADE_C4_OVER=3; return 0; fi
+  _aurade_c4_reply || true
+  if aurade_c4_wins 2; then AURADE_C4_OVER=2; return 0; fi
+  if aurade_c4_full; then AURADE_C4_OVER=3; return 0; fi
+  return 0
+}
+
+#: Rows of characters, two columns per cell so the grid reads as square.
+aurade_c4_rows() {
+  local x y row cell
+  row=''
+  for (( x = 0; x < 7; x++ )); do
+    (( x == AURADE_C4_COL )) && row+='v ' || row+='  '
+  done
+  printf '%s\n' "${row%  }"
+  for (( y = 0; y < 6; y++ )); do
+    row=''
+    for (( x = 0; x < 7; x++ )); do
+      cell=${AURADE_C4[y * 7 + x]}
+      case $cell in
+        1) row+='O ' ;;
+        2) row+='X ' ;;
+        *) row+='. ' ;;
+      esac
+    done
+    printf '%s\n' "${row%  }"
+  done
+}

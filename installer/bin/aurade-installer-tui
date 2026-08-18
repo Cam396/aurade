@@ -2684,7 +2684,7 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko snake ttt)
+WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko c4 snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
@@ -2697,6 +2697,7 @@ declare -A WAIT_LABELS=(
   [lights]='Play lights out'
   [fifteen]='Play the fifteen puzzle'
   [soko]='Play sokoban'
+  [c4]='Play connect 4'
   [snake]='Play snake'
   [ttt]='Play tic-tac-toe'
 )
@@ -3087,6 +3088,35 @@ screen_lights() {
     'esc  back'
 }
 
+# Connect 4, against an opponent that is deliberately not very good.
+#
+# It takes a win it can see and blocks one it can see, and past that it
+# prefers the middle and picks at random. Anything stronger wins every time
+# against somebody who is mostly watching a progress bar, and losing every
+# game to an installer is not a way to spend ten minutes.
+screen_c4() {
+  local HELP_KEY=0
+  local row pad
+  tui_clear
+  tui_header 'Connect 4'
+  tui_blank
+  pad=$(( (AURADE_TUI_INNER - 13) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_c4_rows)
+  tui_blank
+  case $AURADE_C4_OVER in
+    1) tui_wrap 'Four in a row. You win. Press enter for another.' ok ;;
+    2) tui_wrap 'Four in a row, and not yours. Press enter for another.' warn ;;
+    3) tui_wrap 'The board is full and nobody got four. Press enter for another.' dim ;;
+    *) tui_wrap 'You are O. Get four in a row, any direction.' dim ;;
+  esac
+  tui_blank
+  tui_footer 'left/right  choose a column    enter  drop' \
+    'g  choose something else    esc  back'
+}
+
 # Sokoban. Arrows only, has levels, and has an undo.
 #
 # The undo is the part worth arguing about. Sokoban is a puzzle you can
@@ -3320,6 +3350,7 @@ run_engine_with_progress() {
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
       soko)   screen_soko ;;
+      c4)     screen_c4 ;;
       bible)  screen_bible ;;
       books)  screen_bible_books ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
@@ -3371,6 +3402,7 @@ run_engine_with_progress() {
                 lights)  mode=lights; aurade_lights_new ;;
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
                 soko)    mode=soko; aurade_soko_new 0 ;;
+                c4)      mode=c4; aurade_c4_new ;;
                 *)    mode=$WAIT_MODE ;;
               esac
               ;;
@@ -3469,6 +3501,17 @@ run_engine_with_progress() {
             d|D) aurade_lights_move right ;;
             enter|space)
               if aurade_lights_won; then aurade_lights_new; else aurade_lights_toggle; fi ;;
+          esac
+          ;;
+        c4)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            left|right) aurade_c4_move "$key" ;;
+            a|A) aurade_c4_move left ;;
+            d|D) aurade_c4_move right ;;
+            enter|space)
+              if (( AURADE_C4_OVER )); then aurade_c4_new; else aurade_c4_drop || true; fi ;;
           esac
           ;;
         soko)
@@ -4152,6 +4195,7 @@ if [[ -n $RENDER_ONLY ]]; then
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
     soko)      aurade_soko_new "${AURADE_RENDER_SOKO_LEVEL:-0}"; screen_soko ;;
+    c4)        RANDOM=${AURADE_C4_SEED:-7}; aurade_c4_new; screen_c4 ;;
     bible)     BIBLE_INDEX=${AURADE_RENDER_BIBLE_BOOK:-0}
                BIBLE_CHAPTER=${AURADE_RENDER_BIBLE_CHAPTER:-1}
                BIBLE_TOP=${AURADE_RENDER_BIBLE_TOP:-0}; screen_bible ;;

@@ -447,7 +447,7 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # was making them anxious should not have to walk past six games to find it.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -565,6 +565,62 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   (( AURADE_SOKO_MOVES == 0 )) ||
     { echo "undo left the move count at $AURADE_SOKO_MOVES" >&2; exit 1; }
   aurade_soko_undo && { echo 'undo went back past the start' >&2; exit 1; }
+
+  # Connect 4. The opponent is meant to be weak, and weak is not the same as
+  # broken: it has to take a win it can see and block one it can see, because
+  # an opponent that walks past a winning move is not an opponent, and one
+  # that lets three in a row become four is not worth beating.
+  aurade_c4_new
+  (( ${#AURADE_C4[@]} == 42 )) ||
+    { echo "connect 4 has ${#AURADE_C4[@]} cells" >&2; exit 1; }
+  ! aurade_c4_wins 1 || { echo 'an empty connect 4 board was a win' >&2; exit 1; }
+
+  # All four directions, because a win check that misses one direction still
+  # passes every game that happens to end in another.
+  for c4_dir in flat upright rising falling; do
+    aurade_c4_new
+    case $c4_dir in
+      flat)    for c4_i in 0 1 2 3; do AURADE_C4[5 * 7 + c4_i]=1; done ;;
+      upright) for c4_i in 2 3 4 5; do AURADE_C4[c4_i * 7 + 2]=1; done ;;
+      rising)  for c4_i in 0 1 2 3; do AURADE_C4[(5 - c4_i) * 7 + c4_i]=1; done ;;
+      falling) for c4_i in 0 1 2 3; do AURADE_C4[(2 + c4_i) * 7 + c4_i]=1; done ;;
+    esac
+    aurade_c4_wins 1 ||
+      { echo "connect 4 missed a $c4_dir four in a row" >&2; exit 1; }
+    ! aurade_c4_wins 2 ||
+      { echo "connect 4 counted a $c4_dir line for the wrong player" >&2; exit 1; }
+  done
+
+  # The threat is stacked in the far right column on purpose, and not laid
+  # along the bottom next to the middle.
+  #
+  # A horizontal three beside the centre is completed by the same column the
+  # opponent already prefers when it has no idea what to do, so it wins by
+  # accident with the winning move deleted from it, and the assertion passes
+  # while proving nothing. Both of these did exactly that until a deliberately
+  # broken opponent was tried against them and walked through. Column six is
+  # the last one the fallback would ever reach.
+  aurade_c4_new
+  for c4_i in 3 4 5; do AURADE_C4[c4_i * 7 + 6]=2; done
+  RANDOM=5
+  _aurade_c4_reply
+  aurade_c4_wins 2 ||
+    { echo 'the connect 4 opponent walked past a winning move' >&2; exit 1; }
+
+  aurade_c4_new
+  for c4_i in 3 4 5; do AURADE_C4[c4_i * 7 + 6]=1; done
+  RANDOM=5
+  _aurade_c4_reply
+  (( AURADE_C4[2 * 7 + 6] == 2 )) ||
+    { echo 'the connect 4 opponent let three in a row become four' >&2; exit 1; }
+
+  # A column holds six and no more, which is the only illegal move in the game.
+  aurade_c4_new
+  for c4_i in 1 2 3 4 5 6; do
+    _aurade_c4_put 0 1 || { echo 'a legal drop was refused' >&2; exit 1; }
+  done
+  _aurade_c4_put 0 1 &&
+    { echo 'a seventh counter fitted into a six row column' >&2; exit 1; }
 
   # Minesweeper places its mines after the first reveal and never under it,
   # so the first keypress of a game always opens something. Losing on move one
