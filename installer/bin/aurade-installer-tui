@@ -1178,7 +1178,7 @@ review_detail() {
 # the size are what somebody checks it against, and the map is the part the
 # graphical front end's list cannot say: it is the plan, drawn.
 review_disk_detail() {
-  local target=$1 line root fs path size model rest holds
+  local target=$1 path size model rest holds
   size=''
   while IFS='|' read -r path size model rest; do
     [[ $path == "$target" ]] || continue
@@ -1197,6 +1197,27 @@ review_disk_detail() {
   # for a disk measured in gigabytes is the whole number below what the drive
   # reports. Rounding down is the honest direction: it can be a little smaller
   # than stated and must never look bigger.
+  tui_blank
+  tui_wrap "$(disk_layout_map "$size")" dim
+}
+
+# The disk as it will be, in one line of characters.
+#
+# `[ EFI 512M ][ LUKS: Btrfs root 476G ]` says something the graphical list
+# cannot: what is about to be made, in order, at what size. It is native to a
+# terminal and it is the shape somebody would sketch on paper if you asked
+# them what the installer was going to do.
+#
+# One function and two callers, because the review and the gate must not
+# disagree about the layout. They are the two screens where somebody checks
+# before pressing the thing that cannot be taken back, and two copies of this
+# is two chances for one of them to be describing a different disk.
+disk_layout_map() {
+  local size=$1 root fs line
+  # The root partition gets what is left after the EFI system partition, which
+  # for a disk measured in gigabytes is the whole number below what the drive
+  # reports. Rounding down is the honest direction: it can be a little smaller
+  # than stated and must never look bigger.
   root=$size
   [[ ! $root =~ ^([0-9]+)\.[0-9]+G$ ]] || root="${BASH_REMATCH[1]}G"
   fs=${ANSWERS[filesystem]:-btrfs}
@@ -1208,8 +1229,7 @@ review_disk_detail() {
   else
     line+="[ $fs root${root:+ $root} ]"
   fi
-  tui_blank
-  tui_wrap "$line" dim
+  printf '%s' "$line"
 }
 
 # One line of the review, selectable.
@@ -1289,6 +1309,18 @@ screen_gate() {
   # it. It costs one line and it is the sentence somebody would repeat back.
   holds=$(disk_contents "$target" 2>/dev/null || true)
   [[ -z $holds ]] || tui_field 'Holds' "$holds" warn
+  # And what is about to be written, on the screen where it is about to be
+  # written. The review has the same line; somebody who walked past it there
+  # should not have to remember it here.
+  #
+  # Only on the layout that lays the disk out. `alongside` writes into
+  # unallocated space and leaves the existing partitions where they are, so a
+  # map showing two partitions and nothing else would be a drawing of a disk
+  # that is not this one.
+  if [[ $layout != alongside ]]; then
+    tui_blank
+    tui_wrap "$(disk_layout_map "$size")" dim
+  fi
   tui_blank
   if [[ $layout == alongside ]]; then
     tui_wrap 'The partitions already on this disk are kept, including the one the other system boots from. AuraDE is written into unallocated space only, and nothing already there is moved, resized or erased.' ink

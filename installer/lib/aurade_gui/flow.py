@@ -379,6 +379,15 @@ WALLPAPER_HINT = "Show a different photograph"
 #: A small button at the bottom, and no explanation attached to it. Somebody
 #: who wants it knows what it is, and somebody who does not want it should be
 #: able to walk past without the installer having made a point.
+#: Said when the two secret fields disagree, and said on leaving the second
+#: one rather than on pressing Continue.
+#:
+#: It does not say which character differs, or how far in, or which of the two
+#: is longer. Anything that narrows it down is a hint about a secret, printed
+#: on a screen that might have somebody standing behind it, and the person who
+#: typed it does not need the hint anyway: they need to type it again.
+SECRET_MISMATCH = "These two do not match."
+
 BIBLE_BUTTON = "Read the Bible"
 BIBLE_TITLE = "The Bible"
 BIBLE_EDITION = "King James Version, with the Apocrypha"

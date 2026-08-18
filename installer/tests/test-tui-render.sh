@@ -684,6 +684,28 @@ install -d "$TMP/power"
 said=$(battery_says "$TMP/power")
 (( said == 0 )) || fail 'a machine with no battery at all was warned about one'
 
+# The disk as it will be, on both screens where somebody checks before
+# pressing the thing that cannot be taken back.
+#
+# The review had this line and the gate did not, which is the wrong way round
+# if either of them was going to: the gate is the last screen before the disk
+# is erased. One function draws it for both now, and this checks both, because
+# two copies of a layout description is two chances for one of them to be
+# describing a different disk.
+gate_drawn=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
+  "$TUI" --render gate)
+[[ $gate_drawn == *'[ EFI 512M ]'* ]] ||
+  fail 'the erase gate does not show what the disk is about to become'
+[[ $gate_drawn == *'root'* ]] ||
+  fail 'the gate map names no root partition'
+
+# And it follows the answers rather than being a fixed string. The fixture
+# encrypts, so LUKS has to be in the line; a map that ignored the answers
+# would be the installer describing somebody else's disk on the one screen
+# where that matters most.
+[[ $gate_drawn == *LUKS* ]] ||
+  fail 'the gate map does not mention LUKS on an encrypted install'
+
 # The two lines on the done screen that are usually not there.
 #
 # Both are conditional and both are quiet, which is exactly the shape of thing

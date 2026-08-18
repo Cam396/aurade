@@ -44,6 +44,9 @@ from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
 
+#: What the window is called when nothing is installing.
+WINDOW_TITLE = "AuraDE Installer"
+
 #: How often the progress page re-reads the journal. The journal is the only
 #: account of what happened; this is a view of it and keeps no tally.
 PROGRESS_INTERVAL_MS = 400
@@ -617,7 +620,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._export_notice = None
         self._wifi_target = ""
 
-        self.set_title("AuraDE Installer")
+        self.set_title(WINDOW_TITLE)
         self.set_default_size(980, 720)
         self.add_css_class("aurade")
 
@@ -2085,6 +2088,14 @@ class InstallerWindow(Adw.ApplicationWindow):
             repeat = Adw.PasswordEntryRow(title="Type it again")
             self.widgets[f"q.{question}"] = entry
             self.widgets[f"q.{question}.repeat"] = repeat
+            # Checked on leaving the second field rather than on pressing
+            # Continue. Finding out at the end of a page that two boxes near
+            # the top disagree means going back up and doing both again, and
+            # for a disk passphrase it means doing it again with no idea which
+            # of the two was the one you meant.
+            focus = Gtk.EventControllerFocus()
+            focus.connect("leave", self._on_secret_blur, question)
+            repeat.add_controller(focus)
             return [entry, repeat]
         if kind == "bool":
             item = Adw.SwitchRow(title=spec["label"])
@@ -2793,6 +2804,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         spoken = f"{running_label}, {overall} percent" if running_label else ""
         A.meter(bar, "Installation progress", wanted, 0.0, 1.0, spoken)
 
+        # The title bar, which is the actual answer to a ten minute wait.
+        #
+        # Somebody who can see "58% AuraDE" in a taskbar can go and do
+        # something else and glance back, and somebody who cannot has to sit
+        # in front of the window. The text installer has put this in the
+        # terminal title since it had one; this is the same string, so the two
+        # front ends read identically in a tab and in a task switcher.
+        self.set_title(f"{overall}% AuraDE  {running_label}".rstrip())
+
         # And the part that matters most on this page. Ten minutes with no
         # sound is indistinguishable from a hung machine if you cannot see the
         # screen, so each stage says itself once as it starts. Once, not on
@@ -3429,6 +3449,27 @@ class InstallerWindow(Adw.ApplicationWindow):
             index = widget.get_selected()
             return values[index] if 0 <= index < len(values) else spec["default"]
         return widget.get_text()
+
+    def _on_secret_blur(self, _controller, question: str) -> None:
+        """The two secret fields, compared when the second one is left.
+
+        Silent while either is empty, because a field somebody has not
+        finished typing has not disagreed with anything yet, and a warning
+        that appears on the way past is a warning that means nothing.
+        """
+        entry = self.widgets.get(f"q.{question}")
+        repeat = self.widgets.get(f"q.{question}.repeat")
+        if entry is None or repeat is None:
+            return
+        first, second = entry.get_text(), repeat.get_text()
+        if not first or not second:
+            repeat.remove_css_class("error")
+            return
+        if first == second:
+            repeat.remove_css_class("error")
+            return
+        repeat.add_css_class("error")
+        self._toast(F.SECRET_MISMATCH)
 
     def _flag(self, question: str, message: str) -> None:
         widget = self.widgets.get(f"q.{question}")
