@@ -471,6 +471,37 @@ run_pacstrap() {
   die 'pacstrap failed after three attempts'
 }
 
+# The download meter that lets the progress screen draw a sparkline during
+# `acquire`. See bin/aurade-rate-sampler for why it is a separate program and
+# why it watches the cache directory rather than reading pacman's output.
+#
+# Everything here is best effort. A sampler that will not start, or that dies
+# halfway through, costs a line on a screen and nothing else, so none of this
+# is allowed to fail an install: no `die`, no unchecked command, no exit
+# status that reaches errexit.
+RATE_SAMPLER_PID=
+
+start_rate_sampler() {
+  local watched=$1 sampler
+  [[ -n ${AURADE_RATE_PATH:-} ]] || return 0
+  sampler=${AURADE_RATE_SAMPLER:-/usr/local/bin/aurade-rate-sampler}
+  [[ -x $sampler ]] || sampler="$SELF_DIR/aurade-rate-sampler"
+  [[ -x $sampler ]] || return 0
+  "$sampler" "$watched" "$AURADE_RATE_PATH" \
+    "${AURADE_RATE_SAMPLE_SECONDS:-1}" "${AURADE_RATE_WINDOW:-48}" \
+    >/dev/null 2>&1 &
+  RATE_SAMPLER_PID=$!
+  return 0
+}
+
+stop_rate_sampler() {
+  [[ -n ${RATE_SAMPLER_PID:-} ]] || return 0
+  kill "$RATE_SAMPLER_PID" 2>/dev/null || true
+  wait "$RATE_SAMPLER_PID" 2>/dev/null || true
+  RATE_SAMPLER_PID=
+  return 0
+}
+
 acquire_arch_packages() {
   if [[ $MODE == dry-run ]]; then
     run install -d -m 0755 "$ARCH_CACHE"
@@ -490,6 +521,7 @@ acquire_arch_packages() {
   command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
   command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
   install -d -m 0755 "$ARCH_CACHE"
+  start_rate_sampler "$ARCH_CACHE"
 
   local attempt acquired=0 signature_failure_seen=0
   local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
@@ -523,6 +555,9 @@ acquire_arch_packages() {
     fi
     (( attempt < 3 )) && log 'Arch package acquisition failed. Retrying, without altering the target disk.'
   done
+  # Before the `die`s below, so a failure screen is not drawn over a meter
+  # still ticking along behind it.
+  stop_rate_sampler
   if (( ! acquired )); then
     if (( signature_failure_seen )); then
       die 'the downloaded packages did not match their signatures, after three attempts'
@@ -629,6 +664,9 @@ swap_mib() {
 cleanup() {
   local status=$?
   set +e
+  # First, because it is a process this shell started and every line below is
+  # teardown it must not be sampling through.
+  stop_rate_sampler
   # A command can fail after a stage has started without passing through a
   # helper that knows the right cause code. Preserve a bounded, secret-free
   # failure record before tearing down mounts and private installer state.

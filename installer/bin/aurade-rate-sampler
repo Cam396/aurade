@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Watch a directory grow and write down how fast it is growing.
+#
+# This exists so the progress screen can draw a download meter during
+# `acquire`, and it is a separate program on purpose.
+#
+# The obvious implementation parses the transfer lines pacman prints, and the
+# obvious implementation is a trap. That meter refreshes with carriage returns
+# rather than newlines, so a `while IFS= read -r line` blocks until the whole
+# download finishes and then reports it all at once; with ParallelDownloads it
+# is not a counter at all but a block of lines being redrawn in place. Getting
+# that wrong means having got the stdin and stdout plumbing of the download
+# step wrong, one stage before the first write to the target disk.
+#
+# So this watches the cache directory instead. It opens no pipe the installer
+# uses, holds no descriptor, reads no output, and writes nothing the installer
+# reads back. If it dies the result is a missing sparkline, not a missing
+# package. `du` once a second over a few hundred files costs nothing.
+#
+# It also deliberately does not write to the journal. The journal is the audit
+# trail, read after a failure by somebody who was not in the room, and three
+# hundred records saying "still going" would bury the fourteen that matter.
+# A background process would have its own copy of the sequence counter as
+# well, so every record it emitted would reuse a number the installer had
+# already used.
+#
+# Usage: aurade-rate-sampler DIRECTORY OUTPUT [INTERVAL_SECONDS] [WINDOW]
+set -Eeuo pipefail
+
+WATCHED=${1:-}
+OUTPUT=${2:-}
+INTERVAL=${3:-1}
+WINDOW=${4:-48}
+
+usage() {
+  printf 'usage: %s DIRECTORY OUTPUT [INTERVAL_SECONDS] [SAMPLES]\n' "${0##*/}" >&2
+  exit 2
+}
+
+[[ -n $WATCHED && -n $OUTPUT ]] || usage
+[[ $OUTPUT == /* ]] || usage
+[[ $INTERVAL =~ ^[0-9]+$ ]] && (( INTERVAL > 0 )) || usage
+[[ $WINDOW =~ ^[0-9]+$ ]] && (( WINDOW > 1 )) || usage
+[[ -d $WATCHED ]] || {
+  printf '%s: not a directory: %s\n' "${0##*/}" "$WATCHED" >&2
+  exit 1
+}
+
+# A sampler that outlives the thing it is sampling is a file that keeps
+# claiming a download is happening after it stopped.
+trap 'rm -f -- "${OUTPUT}.new"; exit 0' TERM INT HUP
+
+dir=${OUTPUT%/*}
+[[ -d $dir ]] || install -d -m 0700 "$dir"
+: >"$OUTPUT"
+chmod 0600 "$OUTPUT" 2>/dev/null || true
+
+size() {
+  local bytes
+  bytes=$(du -sb "$WATCHED" 2>/dev/null | cut -f1)
+  [[ $bytes =~ ^[0-9]+$ ]] || bytes=
+  printf '%s' "$bytes"
+}
+
+previous=$(size)
+[[ -n $previous ]] || previous=0
+samples=()
+
+while sleep "$INTERVAL"; do
+  current=$(size)
+  [[ -n $current ]] || continue
+  # A cache that shrank is a retry clearing it before another attempt, not a
+  # negative download rate.
+  if (( current >= previous )); then
+    delta=$(( (current - previous) / INTERVAL ))
+  else
+    delta=0
+  fi
+  previous=$current
+  samples+=("$delta")
+  (( ${#samples[@]} <= WINDOW )) || samples=("${samples[@]: -WINDOW}")
+  # Written by rename rather than in place. A front end reading the file while
+  # it was being rewritten would otherwise see it empty and draw a gap in the
+  # line that never happened.
+  printf '%s\n' "${samples[@]}" >"${OUTPUT}.new" || exit 0
+  chmod 0600 "${OUTPUT}.new" 2>/dev/null || true
+  mv -f -- "${OUTPUT}.new" "$OUTPUT" || exit 0
+done

@@ -23,6 +23,21 @@ AURADE_JOURNAL_PATH=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
 AURADE_JOURNAL_RAW=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
 AURADE_FAILURE_JOURNAL_DIR=${AURADE_FAILURE_JOURNAL_DIR:-}
 
+# Download rate samples, and deliberately not a journal record.
+#
+# The journal is the audit trail: one line per thing that happened, read after
+# a failure by somebody who was not in the room. A download meter is the
+# opposite, three hundred lines that all say "still going" and mean nothing an
+# hour later, and putting them in would bury the fourteen records that matter.
+# The pacstrap loop already throttles itself to one record per whole percent
+# for the same reason.
+#
+# So the samples live beside the journal instead: a short list of integers,
+# bytes per second, oldest first, rewritten in place so it never grows. It is
+# derived from the path above rather than defaulted separately, so a test that
+# moves the journal moves this with it.
+AURADE_RATE_PATH=${AURADE_RATE_PATH:-${AURADE_JOURNAL_PATH%/*}/acquire-rate}
+
 # Stage order. Everything up to and including `confirm` leaves the disk
 # untouched; `partition` is the first stage that cannot be undone.
 AURADE_STAGES=(

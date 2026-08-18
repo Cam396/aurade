@@ -47,6 +47,11 @@ _find_lib() {
 # "the caller asked for this" from "nobody said".
 _TIP_RARITY_SET=${AURADE_TIP_RARITY+set}
 _STAR_RARITY_SET=${AURADE_STAR_RARITY+set}
+# The journal library derives the rate path from the default journal path the
+# moment it is sourced, so by the time `--journal` is parsed there is always a
+# value there and it is always the wrong one. What matters is whether the
+# caller set it, which is only knowable before the source.
+_RATE_PATH_SET=${AURADE_RATE_PATH+set}
 
 for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh \
             aurade-journal.sh aurade-copy.sh aurade-wait.sh \
@@ -83,6 +88,8 @@ AURADE_PROGRESS_TICK=${AURADE_PROGRESS_TICK:-0.12}
 RENDER_ONLY=
 JOURNAL_FILE=${AURADE_JOURNAL_PATH:-/run/aurade-install/journal.jsonl}
 RAW_LOG=${AURADE_JOURNAL_RAW:-/run/aurade-install/install.log}
+RATE_FILE=${_RATE_PATH_SET:+$AURADE_RATE_PATH}
+RATE_FILE=${RATE_FILE:-${JOURNAL_FILE%/*}/acquire-rate}
 EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
 PLAN_ONLY=0
 EXIT_STATUS=0
@@ -1400,8 +1407,55 @@ stage_displayed() {
 # for the pacing block, which wraps to two lines and can carry the
 # uninterruptible warning under it, one for the bar, and the blank above and
 # below the list.
+#: The download meter under the bar, during `acquire` and nowhere else.
+#:
+#: The engine samples the size of the package cache once a second and leaves a
+#: short list of integers beside the journal; nothing here parses anything and
+#: nothing here can fail in a way the install notices. A missing or unreadable
+#: file draws no row, which is also what a resumed install and a machine that
+#: got its packages from the medium look like.
+#:
+#: In plain mode this is one sentence instead. A row of block characters is a
+#: row of block characters read out loud, and the thing it is worth knowing is
+#: the number.
+#:
+#: Loading is separate from drawing because the row has to be counted before
+#: the screen is laid out. A row that appears only sometimes and is not in the
+#: height budget is a footer pushed off the bottom of a 24 line console for
+#: the one stage it appears during.
+PROGRESS_RATE_SAMPLES=()
+PROGRESS_RATE=0
+
+progress_rate_load() {
+  local line
+  PROGRESS_RATE_SAMPLES=()
+  [[ -r $RATE_FILE ]] || return 1
+  while IFS= read -r line; do
+    [[ $line =~ ^[0-9]+$ ]] || continue
+    PROGRESS_RATE_SAMPLES+=("$line")
+  done <"$RATE_FILE"
+  # One sample is a dot, not a line, and says nothing a percentage did not.
+  (( ${#PROGRESS_RATE_SAMPLES[@]} >= 2 ))
+}
+
+#: Drawing is unguarded on purpose. `progress_rate_load` decided whether there
+#: is a row, the layout was told, and a second copy of the same condition here
+#: would be a condition no test can reach and therefore no test can check.
+progress_rate_row() {
+  local current spark
+  current=${PROGRESS_RATE_SAMPLES[-1]}
+  if (( AURADE_TUI_PLAIN )); then
+    tui_line "$(printf 'Downloading at %s.' "$(tui_rate "$current")")"
+    return 0
+  fi
+  spark=$(tui_spark "${PROGRESS_RATE_SAMPLES[@]}")
+  [[ -n $spark ]] || return 0
+  tui_line "$(printf '%*s%s  %s' "$(( AURADE_TUI_INDENT * 3 ))" '' \
+    "$spark" "$(tui_rate "$current")")" dim
+}
+
 progress_layout() {
-  local stages=$1 done_count=$2 pending_count=$3
+  local stages=$1 done_count=$2 pending_count=$3 rate=${4:-0}
   local candidate fold_done fold_pending aurora tip cost list
   for candidate in '0 0 1 1' '1 0 1 1' '1 1 1 1' '1 1 0 1' '1 1 0 0'; do
     read -r fold_done fold_pending aurora tip <<<"$candidate"
@@ -1410,7 +1464,7 @@ progress_layout() {
       list=$(( list - done_count + 1 ))
     (( ! fold_pending || pending_count < 2 )) ||
       list=$(( list - pending_count + 1 ))
-    cost=$(( 12 + list + aurora * 3 + tip * 3 ))
+    cost=$(( 12 + rate + list + aurora * 3 + tip * 3 ))
     (( cost <= AURADE_TUI_HEIGHT )) || continue
     PROGRESS_FOLD_DONE=$fold_done
     PROGRESS_FOLD_PENDING=$fold_pending
@@ -1488,7 +1542,11 @@ screen_progress() {
     esac
   done
 
-  progress_layout "$shown" "$done_count" "$pending_count"
+  PROGRESS_RATE=0
+  if [[ $active == acquire ]] && progress_rate_load; then
+    PROGRESS_RATE=1
+  fi
+  progress_layout "$shown" "$done_count" "$pending_count" "$PROGRESS_RATE"
 
   tui_clear
   tui_header 'Installing'
@@ -1524,6 +1582,7 @@ screen_progress() {
     fi
     (( PROGRESS_OVERALL <= 100 )) || PROGRESS_OVERALL=100
     tui_bar "$PROGRESS_OVERALL" "${PROGRESS_DETAIL:-}"
+    (( ! PROGRESS_RATE )) || progress_rate_row
     # The one place the number is worth putting somewhere other than the
     # screen. Somebody who can see it in a tab does not have to keep this
     # window in front of them for ten minutes.
@@ -4251,7 +4310,10 @@ RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cance
 while (($#)); do
   case $1 in
     --render) RENDER_ONLY=${2:?}; shift 2 ;;
-    --journal) JOURNAL_FILE=$2; AURADE_JOURNAL_PATH=$2; shift 2 ;;
+    --journal) JOURNAL_FILE=$2; AURADE_JOURNAL_PATH=$2
+               RATE_FILE=${_RATE_PATH_SET:+$AURADE_RATE_PATH}
+               RATE_FILE=${RATE_FILE:-${JOURNAL_FILE%/*}/acquire-rate}
+               shift 2 ;;
     --raw-log) RAW_LOG=$2; AURADE_JOURNAL_RAW=$2; shift 2 ;;
     --plan-only) PLAN_ONLY=1; shift ;;
     --answers) ANSWERS_IN=${2:?}; shift 2 ;;
