@@ -1477,6 +1477,32 @@ if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
   fi
 fi
 
+# And the other half of the promise: something on the installed system that
+# reads that record back and confirms the settings actually survived.
+#
+# Writing them was never the hard part. The failure this exists for is silent:
+# the installer says it will carry them over, the record says it did, and the
+# machine in front of somebody who cannot see the screen says otherwise. A
+# write with nothing checking it is a promise nobody kept.
+#
+# It verifies and does not repair. Putting the settings back would hide the
+# fault that lost them, and finding that fault is the point.
+FIRST_BOOT_CHECK=${AURADE_FIRST_BOOT_CHECK:-/usr/local/bin/aurade-first-boot-accessibility}
+[[ -x $FIRST_BOOT_CHECK ]] || FIRST_BOOT_CHECK="$SELF_DIR/aurade-first-boot-accessibility"
+FIRST_BOOT_UNIT=${AURADE_FIRST_BOOT_UNIT:-/usr/local/share/aurade/aurade-first-boot-accessibility.service}
+[[ -r $FIRST_BOOT_UNIT ]] || FIRST_BOOT_UNIT="$SELF_DIR/../units/aurade-first-boot-accessibility.service"
+# The unit is a file rather than a string built here, so that what a test reads
+# is what the installed system gets. Embedded in an escaped string it was
+# checked by grepping this file for a line that also appeared in the comment
+# above it, which passed against an engine that had stopped writing it.
+if [[ -x $FIRST_BOOT_CHECK && -r $FIRST_BOOT_UNIT ]]; then
+  run install -D -m 0755 "$FIRST_BOOT_CHECK" \
+    "$MOUNTPOINT/usr/local/bin/aurade-first-boot-accessibility"
+  run install -D -m 0644 "$FIRST_BOOT_UNIT" \
+    "$MOUNTPOINT/etc/systemd/system/aurade-first-boot-accessibility.service"
+  run arch-chroot "$MOUNTPOINT" systemctl enable aurade-first-boot-accessibility.service
+fi
+
 # Enabling rather than starting: the target is not running. `systemctl enable`
 # in a chroot writes the wants symlink, which is what makes the daemon come up
 # on the first boot of the installed system.

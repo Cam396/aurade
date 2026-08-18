@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Confirm, once, that the accessibility settings survived the restart.
+#
+# This is the other half of a promise the installer makes. Somebody who turns
+# on a screen reader and high contrast to get through an install and then
+# restarts into a desktop with neither has not been helped, they have been
+# moved one wall further along, and the failure is silent: the installer said
+# it would carry them over, the file says it did, and the machine in front of
+# them says otherwise.
+#
+# So the record written at install time is read back here and checked against
+# the mechanisms that were supposed to carry each setting. It is a verification
+# and not a repair: putting the settings back would hide the fault that made
+# them go missing, and this exists to find that fault.
+#
+# Silent when everything landed. A first boot that announces a success nobody
+# doubted is a first boot that teaches people to ignore it.
+set -Eeuo pipefail
+
+RECORD=${AURADE_ACCESSIBILITY_RECORD:-/etc/aurade-install/accessibility}
+GTK_SETTINGS=${AURADE_GTK_SETTINGS:-/etc/xdg/gtk-4.0/settings.ini}
+GTK_CSS=${AURADE_GTK_CSS:-/etc/xdg/gtk-4.0/gtk.css}
+DCONF_FILE=${AURADE_DCONF_FILE:-/etc/dconf/db/local.d/00-aurade-accessibility}
+RESULT=${AURADE_ACCESSIBILITY_RESULT:-/var/lib/aurade/accessibility-checked}
+SYSTEMCTL=${AURADE_SYSTEMCTL:-systemctl}
+
+MISSING=()
+
+# `key=value` out of the record, with no eval and no sourcing: this file is
+# written by the installer and read by a unit that runs as root on first boot,
+# and sourcing it would make a stray line in it a command.
+field() {
+  local key=$1 line value
+  [[ -r $RECORD ]] || return 0
+  while IFS='=' read -r line value; do
+    [[ $line == "$key" ]] || continue
+    printf '%s' "$value"
+    return 0
+  done <"$RECORD"
+  printf ''
+}
+
+# A setting is present if the file that carries it says what it should say.
+# Checked by content rather than by the file existing, because the file exists
+# whenever any setting was changed and says nothing about this one.
+carries() {
+  local file=$1 pattern=$2
+  [[ -r $file ]] || return 1
+  grep -Eq -- "$pattern" "$file"
+}
+
+enabled() {
+  local unit=$1 state
+  state=$("$SYSTEMCTL" is-enabled "$unit" 2>/dev/null || true)
+  [[ $state == enabled || $state == enabled-runtime || $state == static ]]
+}
+
+note() {
+  MISSING+=("$1")
+}
+
+main() {
+  [[ -r $RECORD ]] || {
+    # No record is not a failure. It is an install that predates this, or one
+    # where nobody changed anything, and inventing a complaint about either
+    # would be this check's first act being a false alarm.
+    printf 'no accessibility record at %s, nothing to confirm\n' "$RECORD"
+    return 0
+  }
+
+  local screen_reader braille contrast text_scale spacing typeface
+  local reduce_motion cursor_size
+  screen_reader=$(field screen_reader)
+  braille=$(field braille)
+  contrast=$(field contrast)
+  text_scale=$(field text_scale)
+  spacing=$(field spacing)
+  typeface=$(field typeface)
+  reduce_motion=$(field reduce_motion)
+  cursor_size=$(field cursor_size)
+
+  # Only what was asked for. A default that is still the default carried over
+  # by definition, and checking it would be checking that nothing happened.
+  [[ $screen_reader != yes ]] || enabled espeakup.service ||
+    note 'the screen reader was turned on during the install and espeakup is not enabled'
+  [[ $braille != yes ]] || enabled brltty.service ||
+    note 'a braille display was turned on during the install and brltty is not enabled'
+  [[ $contrast != high ]] || carries "$DCONF_FILE" '^high-contrast=true$' ||
+    note 'high contrast was turned on during the install and the desktop defaults do not set it'
+  if [[ -n $text_scale && $text_scale != 100 ]]; then
+    # GTK counts dpi in 1024ths of a point, which is why 100 is not 100.
+    carries "$GTK_SETTINGS" "^gtk-xft-dpi=$(( text_scale * 96 * 1024 / 100 ))\$" ||
+      note "text size was set to ${text_scale}% during the install and the desktop defaults do not set it"
+  fi
+  [[ $reduce_motion != yes ]] || carries "$GTK_SETTINGS" '^gtk-enable-animations=0$' ||
+    note 'reduced motion was turned on during the install and the desktop defaults do not set it'
+  if [[ -n $cursor_size && $cursor_size != 24 ]]; then
+    carries "$GTK_SETTINGS" "^gtk-cursor-theme-size=${cursor_size}\$" ||
+      note "pointer size was set to ${cursor_size} during the install and the desktop defaults do not set it"
+  fi
+  [[ -z $spacing || $spacing == normal ]] || carries "$GTK_CSS" 'line-height' ||
+    note 'line spacing was changed during the install and the desktop stylesheet does not set it'
+  case $typeface in
+    atkinson)     carries "$GTK_SETTINGS" '^gtk-font-name=Atkinson Hyperlegible' ||
+                    note 'a typeface was chosen during the install and the desktop defaults do not set it' ;;
+    opendyslexic) carries "$GTK_SETTINGS" '^gtk-font-name=OpenDyslexic' ||
+                    note 'a typeface was chosen during the install and the desktop defaults do not set it' ;;
+  esac
+
+  install -d -m 0755 "$(dirname "$RESULT")"
+  if (( ${#MISSING[@]} == 0 )); then
+    printf 'checked %s\nall the accessibility settings carried over\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$RESULT"
+    return 0
+  fi
+
+  # Said on the console as well as written down. Somebody whose screen reader
+  # did not start cannot read a file, and the console is the one place a
+  # message reaches a machine that has not brought up a desktop yet.
+  {
+    printf 'checked %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'some accessibility settings did not carry over:\n'
+    printf '  %s\n' "${MISSING[@]}"
+    printf 'the settings chosen during the install are recorded in %s\n' "$RECORD"
+  } | tee "$RESULT" >&2
+  return 1
+}
+
+main "$@"

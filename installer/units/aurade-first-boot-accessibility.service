@@ -1,0 +1,25 @@
+[Unit]
+Description=Confirm the accessibility settings carried over
+Documentation=file:/etc/aurade-install/accessibility
+# Both of these are what make it happen once: the first is the record it reads
+# and the second is the result it writes.
+ConditionPathExists=/etc/aurade-install/accessibility
+ConditionPathExists=!/var/lib/aurade/accessibility-checked
+After=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aurade-first-boot-accessibility
+# The check reporting a fault is the check working, so the unit does not also
+# go red. The person this protects cannot read `systemctl --failed`, so the
+# console line and the file it writes are the channels that reach them, and a
+# unit that goes red adds a second alarm about the same fact for somebody
+# else. A unit that goes red on some machines is also a unit people disable.
+SuccessExitStatus=0 1
+# Somebody whose screen reader did not start cannot read a file, and has no
+# desktop yet either. The console is the one place a message reaches them.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

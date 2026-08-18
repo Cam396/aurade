@@ -82,6 +82,25 @@ grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-insta
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
 
+# --- the first boot check, which is the other half of a promise -------------
+#
+# Writing the accessibility settings into the installed system was never the
+# hard part. The failure this guards is silent: the installer says it will
+# carry them over, the record says it did, and the machine in front of
+# somebody who cannot see the screen says otherwise.
+#
+# Asserted against the plan rather than the engine's source, because a grep
+# for a path cannot tell `install` from `:` and passed against an engine that
+# had stopped installing the unit while still naming it.
+grep -Eq 'install .*-m 0755 .*aurade-first-boot-accessibility .*/usr/local/bin/aurade-first-boot-accessibility' \
+  "$TMP/plain.out" ||
+  { echo 'the plan never installs the first boot check' >&2; exit 1; }
+grep -Eq 'install .*-m 0644 .*aurade-first-boot-accessibility\.service .*/etc/systemd/system/aurade-first-boot-accessibility\.service' \
+  "$TMP/plain.out" ||
+  { echo 'the plan never installs the first boot unit' >&2; exit 1; }
+grep -Fq 'systemctl enable aurade-first-boot-accessibility.service' "$TMP/plain.out" ||
+  { echo 'the plan installs the first boot unit and never enables it' >&2; exit 1; }
+
 # --- the mark this machine gets and no other machine has --------------------
 #
 # Written into the installed system and announced nowhere, which is the whole

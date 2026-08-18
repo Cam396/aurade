@@ -93,6 +93,8 @@ install -Dm0755 "$ROOT/bin/aurade-recovery" "$STAGE/airootfs/usr/local/sbin/aura
 install -Dm0755 "$ROOT/bin/aurade-hardware-qualify" "$STAGE/airootfs/usr/local/sbin/aurade-hardware-qualify"
 install -Dm0755 "$ROOT/bin/aurade-install-failure" "$STAGE/airootfs/usr/local/sbin/aurade-install-failure"
 install -Dm0755 "$ROOT/bin/aurade-rate-sampler" "$STAGE/airootfs/usr/local/bin/aurade-rate-sampler"
+install -Dm0755 "$ROOT/bin/aurade-first-boot-accessibility" "$STAGE/airootfs/usr/local/bin/aurade-first-boot-accessibility"
+install -Dm0644 "$ROOT/units/aurade-first-boot-accessibility.service" "$STAGE/airootfs/usr/local/share/aurade/aurade-first-boot-accessibility.service"
 install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-tui"

@@ -411,6 +411,21 @@ while IFS= read -r _bin; do
     { echo "profiledef.sh has no permissions entry for bin/$_name" >&2; exit 1; }
 done < <(find "$ROOT/installer/bin" -maxdepth 1 -type f -perm -u+x -print | LC_ALL=C sort)
 
+# Every systemd unit in units/, for the reason above and one more.
+#
+# The engine looks for the unit on the image first and falls back to a path
+# relative to its own directory, which resolves to nothing on a real install.
+# So an unstaged unit is not a broken install, it is an install that quietly
+# skips the whole block: the machine boots, the accessibility settings are
+# never confirmed, and nothing anywhere says why.
+while IFS= read -r _unit; do
+  _name=$(basename "$_unit")
+  [[ -r $TMP/work/profile/airootfs/usr/local/share/aurade/$_name ]] ||
+    { echo "build-iso.sh does not stage units/$_name onto the image" >&2; exit 1; }
+  grep -Fq "/usr/local/share/aurade/$_name\"]=" "$ROOT/installer/archiso/profiledef.sh" ||
+    { echo "profiledef.sh has no permissions entry for units/$_name" >&2; exit 1; }
+done < <(find "$ROOT/installer/units" -maxdepth 1 -type f -name '*.service' -print | LC_ALL=C sort)
+
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
 grep -Fq -- 'root with no password' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq -- 'not copied to the installed system' "$ROOT/installer/archiso/airootfs/etc/motd"
