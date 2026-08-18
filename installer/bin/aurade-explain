@@ -199,15 +199,22 @@ done < <(awk '
   END { for (k in c) printf "%d\t%d\t%s\n", first[k], c[k], k }
 ' "$WORK/hits" | sort -n)
 
-declare -a KEEP=()
-for key in "${MATCHED[@]}"; do
-  covered=0
-  for other in "${MATCHED[@]}"; do
-    [[ $other == "$key" ]] && continue
-    if [[ $other == *"$key"* ]]; then covered=1; break; fi
-  done
-  (( covered )) || KEEP+=("$key")
-done
+# Two keys where one contains the other need no handling here, which is worth
+# writing down because the obvious handling is wrong.
+#
+# On one line, `grep -oF` is leftmost longest: given `reset controller` and
+# `timeout, reset controller` against `nvme0: I/O tag 42 timeout, reset
+# controller`, it reports the longer one and nothing else. It does the same for
+# two keys that start at the same character and for two that overlap from
+# different ones. So the specific explanation already wins where it should.
+#
+# Across two lines they are not the same event at all. A line saying `hard
+# resetting link` and another saying `soft resetting link` are two things that
+# happened, and dropping the shorter because a longer one matched somewhere
+# else in the file loses the second one. There was a loop here that did exactly
+# that. It could not be made to fail a test, because the case it was written
+# for is handled a layer down, and the case it did affect it got wrong.
+declare -a KEEP=("${MATCHED[@]}")
 
 # --------------------------------------------------------------------------
 # What to say

@@ -44,6 +44,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-wallpapers.sh"
 "$ROOT/test-bible.sh"
 "$ROOT/test-badge.sh"
+"$ROOT/test-explain.sh"
 "$ROOT/test-gui-flow.sh"
 "$ROOT/test-gui-bridge.sh"
 "$ROOT/test-gui-launch.sh"
