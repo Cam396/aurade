@@ -571,6 +571,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.enum_values: dict = {}
         self.probe: dict = {}
         self.install_status = 0
+        #: The one accessibility choice that stops at the front end. Off until
+        #: somebody asks for it, because for everybody else it is a noise every
+        #: thirty seconds.
+        self.heartbeat = False
+        self._heartbeat_at = 0.0
         #: The last thing said out loud, so a refresh on a timer does not
         #: repeat itself. Empty means nothing has been announced yet.
         self._spoken_stage = ""
@@ -1023,6 +1028,9 @@ class InstallerWindow(Adw.ApplicationWindow):
             return
         entries = report.get("access", {})
         order = (report.get("order") or "").split()
+        # Read rather than assumed: the two front ends share one set of these
+        # variables through the bridge, so this may already be on.
+        self.heartbeat = entries.get("heartbeat", {}).get("value") == "yes"
 
         page = Adw.PreferencesPage()
         group = Adw.PreferencesGroup()
@@ -1030,6 +1038,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         # The one sentence that makes this worth opening. Without it these look
         # like ten minutes of convenience rather than the settings the machine
         # will start with.
+        # Almost everything here does both. The heartbeat is the exception and
+        # says so on its own row, rather than this sentence being softened into
+        # one that no longer promises the thing that matters.
         group.set_description(
             "These take effect now, and are carried into the installed system.")
         for key in order:
@@ -1210,6 +1221,12 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._apply_spacing(value)
         elif key == "typeface":
             self._apply_typeface(value)
+        elif key == "heartbeat":
+            # The only choice on this panel that stops at the front end. A
+            # sound reporting that an install is still running has nothing to
+            # survive the restart into, because by then the install is over.
+            self.heartbeat = value == "yes"
+            self._heartbeat_at = 0.0
 
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.
@@ -2904,6 +2921,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
         self._draw_progress(report)
         if report.get("running"):
+            self._beat()
             return GLib.SOURCE_CONTINUE
         self._progress_source = 0
         try:
@@ -3168,6 +3186,37 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     # -- rendering ---------------------------------------------------------
 
+    #: How often the heartbeat rings, in seconds, and when it last did.
+    HEARTBEAT_SECONDS = 30
+
+    def _beat(self) -> None:
+        """Say the install is still running, for somebody not watching it.
+
+        Ten minutes of silence is ten minutes of not knowing whether the
+        machine is working or hung, and for somebody who cannot see the screen
+        that is the whole install.
+
+        Two rings. One is already "finished" and three is already "stopped",
+        and those two have to stay instantly recognisable, so this takes the
+        pattern neither of them uses. The same three patterns as the text
+        installer, because a machine that sounds like two products is two
+        products.
+
+        The first one is a whole interval away rather than immediate: a ring at
+        the moment somebody presses install has told them nothing they did not
+        just do.
+        """
+        if not self.heartbeat:
+            return
+        now = GLib.get_monotonic_time() / 1_000_000
+        if self._heartbeat_at == 0.0:
+            self._heartbeat_at = now
+            return
+        if now - self._heartbeat_at < self.HEARTBEAT_SECONDS:
+            return
+        self._heartbeat_at = now
+        self._sound(2)
+
     def _sound(self, times: int) -> None:
         """A pattern, not a pitch.
 
@@ -3177,8 +3226,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         whose presence is the only thing telling somebody across the room that
         ten minutes of waiting is over.
 
-        One for finished, three for stopped, matching the text installer, so
-        the two front ends do not disagree about what a machine sounds like.
+        One for finished, two for still working, three for stopped, matching
+        the text installer, so the two front ends do not disagree about what a
+        machine sounds like.
         """
         display = self.get_display()
         if display is None:

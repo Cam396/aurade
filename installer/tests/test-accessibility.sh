@@ -355,6 +355,17 @@ grep -Fq 'self._sound(1)' "$ROOT/installer/lib/aurade_gui/app.py" ||
   fail 'the graphical installer does not ring once when it finishes'
 grep -Fq 'self._sound(3)' "$ROOT/installer/lib/aurade_gui/app.py" ||
   fail 'the graphical installer does not ring three times when it stops'
+grep -Fq 'self._sound(2)' "$ROOT/installer/lib/aurade_gui/app.py" ||
+  fail 'the graphical installer has no heartbeat'
+# Both front ends share one set of these variables through the bridge, so the
+# graphical installer shows the heartbeat row whether or not it can honour it.
+# A control that appears and does nothing is worse than one that is missing.
+grep -Fq 'if not self.heartbeat' "$ROOT/installer/lib/aurade_gui/app.py" ||
+  fail 'the graphical installer offers a heartbeat it never rings'
+# The panel promises these are carried into the installed system, and the
+# heartbeat is the one that is not, so its own row has to say so.
+probe "printf '%s' \"\${ACCESS_HELP[heartbeat]}\"" | grep -Fq 'does not carry over' ||
+  fail 'the heartbeat does not say that it stops at the installer'
 
 # --- the faces are on the image, and in the snapshot ------------------------
 #

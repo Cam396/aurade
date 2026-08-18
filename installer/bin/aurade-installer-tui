@@ -2353,7 +2353,7 @@ declare -A ACCESS_HELP=(
   [cursor_size]='How large the pointer is.'
   [spacing]='More air between lines and letters. Helps most readers, not only some.'
   [typeface]='A different face to read in. Whichever one suits you.'
-  [heartbeat]='A sound every half minute while the install runs, so you can tell it is still going without looking. Two rings. One means finished, three means stopped.'
+  [heartbeat]='A sound every half minute while the install runs, so you can tell it is still going without looking. Two rings. One means finished, three means stopped. This one is for the install only and does not carry over.'
 )
 
 access_shown_value() {
