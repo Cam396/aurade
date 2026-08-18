@@ -708,31 +708,89 @@ journal_status_for_stage() {
 #: rather than silently asking again.
 ANSWERS_REJECTED=()
 
+#: How many more were rejected than the screen is willing to name.
+ANSWERS_REJECTED_MORE=0
+
+#: The most names one warning will carry, and the longest any one of them may
+#: be. A file that names four hundred questions that do not exist was generated
+#: wrongly, and the useful answer to it is the first few and a count. A key
+#: three hundred thousand bytes long is a legal line in a text file and would
+#: wrap over every screen in the frame.
+ANSWERS_REJECT_MAX=8
+ANSWERS_REJECT_WIDTH=24
+
+# Record a name the file gave and this installer did not use, in a form that is
+# safe to put on a screen.
+#
+# The name is bytes out of a file this installer did not write, not an
+# identifier, and it goes straight onto the review screen. So the control
+# characters come out of it first. A terminal that reads `\e[2J` out of the
+# middle of a warning clears the screen and one that reads `\e[?1049h`
+# replaces it, and the review screen is the last one before the erase gate:
+# a file that can repaint it is a file that can make the gate say something
+# else. The journal already applies this rule on the way out; this is the same
+# rule on the way in.
+#
+# A name that is nothing but control characters sanitises to an empty string,
+# which is not a name and is also a fatal array subscript, so it is counted
+# rather than listed. This function is the only thing that appends to that
+# array, which is why the check is here and is not repeated at every reader.
+answers_reject() {
+  local name
+  name=$(printf '%s' "$1" | tr -d '\000-\037\177')
+  if [[ -z $name ]] || (( ${#ANSWERS_REJECTED[@]} >= ANSWERS_REJECT_MAX )); then
+    (( ++ANSWERS_REJECTED_MORE ))
+    return 0
+  fi
+  (( ${#name} <= ANSWERS_REJECT_WIDTH )) || name=${name:0:ANSWERS_REJECT_WIDTH}...
+  ANSWERS_REJECTED+=("$name")
+}
+
 answers_load() {
-  local file=$1 line id value
+  local file=$1 line id value first=1
   ANSWERS_REJECTED=()
-  [[ -r $file ]] || return 1
-  while IFS= read -r line || [[ -n $line ]]; do
+  ANSWERS_REJECTED_MORE=0
+  # A regular file, and not merely something readable. `--answers /mnt/usb`
+  # where `--answers /mnt/usb/answers` was meant passes `-r` on a directory,
+  # and then `read` fails without ever assigning `line`, which under `set -u`
+  # is not a refused file but a dead installer. The same is true of a device
+  # node and of a socket.
+  [[ -f $file && -r $file ]] || return 1
+  while IFS= read -r line || [[ -n ${line:-} ]]; do
     line=${line%%$'\r'}
+    # A byte order mark, which is what an editor on Windows writes when it is
+    # asked for UTF-8 and nobody unticked the box. Without this the first
+    # answer in the file is silently not an answer, and the name reported back
+    # is the real name with three invisible bytes in front of it, so the screen
+    # says `hostname` was not supplied while the file plainly says `hostname=`.
+    # There is no worse shape of bug than one whose evidence looks correct.
+    (( first )) && { first=0; line=${line#$'\xef\xbb\xbf'}; }
     [[ -n $line && $line != '#'* ]] || continue
     [[ $line == *=* ]] || continue
     id=${line%%=*}
     value=${line#*=}
-    # Trailing and leading spaces around the name only. The value is taken
-    # byte for byte, because a locale or a device path that lost a character
-    # to tidying would be a different answer that still passes validation.
-    id=${id//[[:space:]]/}
-    aurade_question_exists "$id" || { ANSWERS_REJECTED+=("$id"); continue; }
+    # Trailing and leading spaces around the name only, which is what this
+    # always said it did and is not what it did: it deleted every space in the
+    # name, so `t a r g e t=/dev/sda` set the disk to erase. The value is taken
+    # byte for byte, because a locale or a device path that lost a character to
+    # tidying would be a different answer that still passes validation.
+    id=${id#"${id%%[![:space:]]*}"}
+    id=${id%"${id##*[![:space:]]}"}
+    # A line that is `=something` has no name. It is as malformed as a line
+    # with no `=` at all and is skipped the same way, rather than reaching an
+    # associative array as an empty subscript, which is fatal.
+    [[ -n $id ]] || continue
+    aurade_question_exists "$id" || { answers_reject "$id"; continue; }
     # A secret in the file is refused rather than used. Nothing this installer
     # writes contains one, so a file that has one was written by something
     # else, and the safe reading of that is that somebody pasted a passphrase
     # into a text file by mistake.
     if aurade_question_is_secret "$id"; then
-      ANSWERS_REJECTED+=("$id")
+      answers_reject "$id"
       continue
     fi
     if ! aurade_question_validate "$id" "$value"; then
-      ANSWERS_REJECTED+=("$id")
+      answers_reject "$id"
       continue
     fi
     # And the same second step a typed answer goes through, which this used to
@@ -743,7 +801,7 @@ answers_load() {
     # be. `hostname=localhost` was accepted from a file and declined when
     # typed, from the same tree, on the same run.
     if ! apply_answer "$id" "$value"; then
-      ANSWERS_REJECTED+=("$id")
+      answers_reject "$id"
       continue
     fi
     ANSWERS[$id]=$value
@@ -1200,7 +1258,7 @@ screen_review() {
 
 # The list of answers, one selectable row each.
 review_list() {
-  local selected=${1:-0} id short value index=0 marked
+  local selected=${1:-0} id short value index=0 marked rejected
   tui_blank
   tui_wrap 'Here is what will happen' accent
   tui_blank
@@ -1239,9 +1297,19 @@ review_list() {
   # An answer file that was partly refused says so here, once, where the
   # answers it did not manage to fill in are visible next to it. Refusing
   # quietly and asking the question again looks like the file was ignored.
-  if (( ${#ANSWERS_REJECTED[@]} > 0 )); then
+  if (( ${#ANSWERS_REJECTED[@]} > 0 || ANSWERS_REJECTED_MORE > 0 )); then
     tui_blank
-    tui_note '!' "The answer file did not supply these, so they were asked: ${ANSWERS_REJECTED[*]}." warn
+    # Comma separated, because a name in this list can now be a truncated
+    # piece of somebody's mistyped file rather than a tidy identifier, and
+    # spaces alone stop being a separator the moment one of them is inside a
+    # name.
+    rejected=$(printf ', %s' ${ANSWERS_REJECTED[@]+"${ANSWERS_REJECTED[@]}"})
+    rejected=${rejected:2}
+    if (( ANSWERS_REJECTED_MORE > 0 )); then
+      [[ -z $rejected ]] || rejected+=', '
+      rejected+="and $ANSWERS_REJECTED_MORE more"
+    fi
+    tui_note '!' "The answer file did not supply these, so they were asked: ${rejected}." warn
   fi
   # The last screen before the point of no return is the right place to
   # mention the one hardware fact that can turn a working machine into a
