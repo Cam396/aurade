@@ -10,6 +10,9 @@
 # whatever the build host happens to have installed.
 set -Eeuo pipefail
 
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -270,6 +273,100 @@ autostart_again() {
 
 autostart 'root=live quiet aurade.installer=gui' || fail 'the graphical entry failed'
 logged 'start --graphical' || fail 'the graphical boot entry did not start the graphical installer'
+
+# --- the boot screen is gone before anything tries to draw -------------------
+#
+# This is the one that turned a working graphical installer into a black
+# screen and a text installer, on the default boot entry, on real hardware.
+#
+# `splash` puts plymouth on tty1, and plymouth holds DRM master until it is
+# told to go. `cage` opens the graphics device itself and asks to become DRM
+# master, which cannot succeed while plymouth is still there. So every renderer
+# in the negotiation failed in turn, none of them for a reason that had
+# anything to do with graphics, and all of it happened behind the boot screen
+# that was causing it. What the user saw was the boot screen, then black for as
+# long as the chain took, then the text installer.
+#
+# Every getty on the image already waits for plymouth. This unit replaces the
+# getty on tty1 and did not inherit the one line that made it work.
+cat >"$TMP/bin/plymouth" <<'STUB'
+#!/usr/bin/env bash
+printf 'plymouth %s
+' "$*" >>"$AURADE_LAUNCH_LOG"
+# `--ping` succeeding is what says a boot screen is actually up.
+exit 0
+STUB
+chmod +x "$TMP/bin/plymouth"
+
+launch
+rm -f "$TMP/autostart-stamp"
+printf '%s
+' 'root=live quiet splash aurade.installer=gui' >"$TMP/cmdline"
+PATH="$TMP/bin:$PATH" AURADE_CMDLINE_FILE="$TMP/cmdline"   AURADE_INSTALLER_START="$TMP/bin/start-recorder"   AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp"   "$AUTOSTART" >>"$TMP/launch.log" 2>&1 ||
+  fail 'the graphical entry failed with a boot screen up'
+logged 'plymouth quit' || fail 'the boot screen was left up while the installer tried to draw'
+logged 'plymouth --wait' ||
+  fail 'the installer did not wait for the boot screen to actually go'
+# Order is the whole point. Quitting after the front end has started is the
+# same bug with a longer delay in front of it.
+quit_line=$(grep -n '^plymouth quit' "$TMP/launch.log" | head -1 | cut -d: -f1)
+start_line=$(grep -n '^start ' "$TMP/launch.log" | head -1 | cut -d: -f1)
+[[ -n $quit_line && -n $start_line ]] ||
+  fail 'could not tell when the boot screen went and when the installer started'
+(( quit_line < start_line )) ||
+  fail 'the installer started before the boot screen was retired'
+
+# And an image with no plymouth on it still gets an installer. Three of the six
+# boot entries have no `splash`, and a recovery image might have no plymouth at
+# all, so this must not become a new way to end up with nothing.
+cat >"$TMP/bin-noplymouth-start" <<'STUB'
+#!/usr/bin/env bash
+printf 'start %s
+' "$*" >>"$AURADE_LAUNCH_LOG"
+exit 0
+STUB
+chmod +x "$TMP/bin-noplymouth-start"
+launch
+rm -f "$TMP/autostart-stamp"
+printf '%s
+' 'root=live quiet aurade.installer=gui' >"$TMP/cmdline"
+PATH=/usr/bin:/bin AURADE_CMDLINE_FILE="$TMP/cmdline"   AURADE_INSTALLER_START="$TMP/bin-noplymouth-start"   AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp"   "$AUTOSTART" >>"$TMP/launch.log" 2>&1 ||
+  fail 'an image with no boot screen failed to start the installer'
+logged 'start --graphical' ||
+  fail 'an image with no plymouth on it did not reach the installer'
+
+# Plymouth installed, and no boot screen up. This is not a corner: three of the
+# six boot entries carry no `splash` on purpose, so on those the daemon was
+# never started and there is nothing to quit.
+#
+# It matters because `plymouth --wait` blocks until the daemon goes away, and
+# asking it to wait for a daemon that never existed is a console that stops
+# before the installer starts. The guard is `--ping`, and this is the case that
+# makes it load bearing rather than decorative.
+cat >"$TMP/bin/plymouth" <<'STUB'
+#!/usr/bin/env bash
+printf 'plymouth %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+# No daemon: the ping fails, and anything that waits for one waits forever.
+case ${1-} in
+  --ping) exit 1 ;;
+  --wait) sleep 300 ;;
+esac
+exit 0
+STUB
+chmod +x "$TMP/bin/plymouth"
+launch
+rm -f "$TMP/autostart-stamp"
+printf '%s\n' 'root=live quiet aurade.installer=gui' >"$TMP/cmdline"
+timeout 20 env PATH="$TMP/bin:$PATH" AURADE_CMDLINE_FILE="$TMP/cmdline" \
+  AURADE_INSTALLER_START="$TMP/bin/start-recorder" \
+  AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
+  "$AUTOSTART" >>"$TMP/launch.log" 2>&1
+timeout_status=$?
+(( timeout_status != 124 )) ||
+  fail 'the installer waited forever for a boot screen that was never up'
+logged 'start --graphical' ||
+  fail 'a boot entry with no boot screen did not reach the installer'
+refute grep -Fq 'plymouth --wait' "$TMP/launch.log"
 
 autostart 'root=live aurade.installer=text quiet' || fail 'the text entry failed'
 logged 'start --text' || fail 'the text boot entry did not start the text installer'

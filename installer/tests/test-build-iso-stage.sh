@@ -176,6 +176,18 @@ grep -Fxq 'ConditionKernelCommandLine=!aurade.installer=serial' "$console_unit" 
   echo 'test-build-iso-stage: the console unit would also start on a serial boot' >&2
   exit 1
 }
+# The line that decides whether the graphical installer can start at all.
+#
+# plymouth holds DRM master until it is told to go, and `cage` cannot become
+# DRM master while it is there, so the whole renderer negotiation fails for a
+# reason that is not about graphics, behind the boot screen that is causing it.
+# Every getty on the image carries this ordering. This unit replaces the getty
+# on tty1 and shipped without it, and the symptom was the default boot entry
+# showing a boot screen, then black, then the text installer.
+grep -Fxq 'After=plymouth-quit.service' "$console_unit" || {
+  echo 'test-build-iso-stage: the installer can start before the boot screen has gone' >&2
+  exit 1
+}
 grep -Fq 'TTYPath=/dev/ttyS0' "$serial_unit" || {
   echo 'test-build-iso-stage: the serial unit does not put the installer on the serial line' >&2
   exit 1

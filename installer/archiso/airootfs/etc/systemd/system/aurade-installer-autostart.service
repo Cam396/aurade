@@ -1,6 +1,22 @@
 [Unit]
 Description=Start the AuraDE installer selected by the boot menu
 After=systemd-vconsole-setup.service systemd-user-sessions.service dev-tty1.device
+# The one that decides whether the graphical installer can start at all.
+#
+# `splash` puts plymouth on tty1, and plymouth holds DRM master until it is
+# told to go. `cage` opens the graphics device itself and asks to become DRM
+# master, which fails for as long as plymouth is still there, so every renderer
+# in the negotiation fails in turn, for a reason that has nothing to do with
+# graphics, behind a boot screen that hides the messages saying so. What the
+# user sees is the boot screen, then a black screen for as long as the chain
+# takes, then the text installer.
+#
+# Every getty on this image already carries this line. This unit replaces the
+# getty on tty1 and did not inherit the one piece of ordering that made it
+# work. `After=` and not `Wants=`: three of the six boot entries deliberately
+# have no `splash`, and on those plymouth never starts and this constrains
+# nothing.
+After=plymouth-quit.service
 Before=getty@tty1.service
 Wants=dev-tty1.device
 # Not when the boot menu asked for the serial console. That entry has its own

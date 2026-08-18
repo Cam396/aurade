@@ -60,6 +60,26 @@ start_speech() {
   sleep 1
 }
 
+# Retire the boot screen, if there is one, and wait until it is really gone.
+#
+# Every step is allowed to fail. An image with no plymouth, a boot entry with
+# no `splash`, or a daemon that has already exited must all end with an
+# installer rather than with a console that stopped before it started.
+quit_boot_screen() {
+  # `--ping` is the whole guard, and it covers both ways there is nothing to
+  # quit: no plymouth on this image, and plymouth installed with no boot screen
+  # up. The second is not unusual, it is three of the six boot entries, which
+  # carry no `splash` on purpose. It matters because `--wait` below blocks
+  # until a daemon goes away, and asking it to wait for a daemon that was never
+  # there is a console that stops before the installer starts.
+  plymouth --ping >/dev/null 2>&1 || return 0
+  plymouth quit >/dev/null 2>&1 || true
+  # `--wait` returns when the daemon has gone. Without it the next thing to
+  # open the graphics device can still be too early, which is the whole bug
+  # this is here for, moved a second later.
+  plymouth --wait >/dev/null 2>&1 || true
+}
+
 main() {
   local choice status=0
   choice=$(aurade_requested_front_end)
@@ -72,6 +92,27 @@ main() {
       return 0
       ;;
   esac
+
+  # Make sure the boot screen has actually gone before anything tries to draw.
+  #
+  # The unit is ordered after `plymouth-quit.service`, which is the real fix and
+  # is what every getty on this image does. This is the second line of defence,
+  # because the ordering only helps when that service is present and enabled,
+  # and because `quit` returning is a stronger statement than a unit having
+  # been started.
+  #
+  # It matters because of what failure looks like without it. plymouth holds
+  # DRM master, `cage` cannot take it, every renderer in the negotiation fails
+  # for a reason that is not about graphics, and all of it happens behind a
+  # boot screen that hides the messages explaining why. The install still
+  # works, in text, and nobody can tell why it did not offer the other one.
+  #
+  # Plain `quit` rather than `quit --retain-splash`. Retaining the splash is
+  # prettier when the graphical installer starts, and leaves an image on the
+  # screen with an invisible text installer underneath it when it does not.
+  # Until the graphical path is proven on real hardware, the fallback has to
+  # be the one that is certain to be readable.
+  quit_boot_screen
 
   [[ -x $START ]] || {
     printf 'The installer is missing from this image.\n' >&2
