@@ -92,6 +92,7 @@ install -Dm0644 "$ROOT/secure-boot/90-aurade-secure-boot.hook" \
 install -Dm0755 "$ROOT/bin/aurade-recovery" "$STAGE/airootfs/usr/local/sbin/aurade-recovery"
 install -Dm0755 "$ROOT/bin/aurade-hardware-qualify" "$STAGE/airootfs/usr/local/sbin/aurade-hardware-qualify"
 install -Dm0755 "$ROOT/bin/aurade-install-failure" "$STAGE/airootfs/usr/local/sbin/aurade-install-failure"
+install -Dm0755 "$ROOT/bin/aurade-rate-sampler" "$STAGE/airootfs/usr/local/bin/aurade-rate-sampler"
 install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-tui"
@@ -167,6 +168,7 @@ install -Dm0644 "$ROOT/lib/aurade-tips" "$STAGE/airootfs/usr/local/lib/aurade/au
 install -Dm0644 "$ROOT/lib/aurade-probe.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-probe.sh"
 install -Dm0644 "$ROOT/lib/aurade-renderers.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-renderers.sh"
 install -Dm0644 "$ROOT/lib/aurade-bible.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-bible.sh"
+install -Dm0644 "$ROOT/lib/aurade-badge.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-badge.sh"
 install -d -m 0755 "$STAGE/airootfs/opt/aurade/repo" "$STAGE/airootfs/etc/aurade-installer"
 "$ROOT/tools/generate-package-lock.sh" "$AURADE_REPO_DIR" "$STAGE/airootfs/opt/aurade/repo/packages.lock" "$ROOT/expected-packages.txt"
 while read -r _digest filename _pkgname _pkgver _arch; do

@@ -81,6 +81,21 @@ grep -Fq -- 'trap '\''handle_cancel 130'\'' INT' "$ROOT/installer/bin/aurade-ins
 grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
+
+# --- the mark this machine gets and no other machine has --------------------
+#
+# Written into the installed system and announced nowhere, which is the whole
+# of the idea: it is found by somebody who went looking. The summary carries
+# the short code beside it so a support conversation can name an install
+# without anybody having to read a mosaic down a telephone.
+grep -Fq '/etc/aurade-install/badge' "$TMP/plain.out" ||
+  { echo 'the plan never writes a fingerprint into the installed system' >&2; exit 1; }
+grep -Fq '/etc/aurade-install/summary' "$TMP/plain.out"
+# The seed is derived from board identifiers and one network address, and none
+# of them may survive into anything written down. The engine holds them in
+# BADGE_SEED only long enough to hash, so what must never appear in a plan is
+# the material itself.
+refute grep -Eq 'product_uuid|board_serial|product_serial' "$TMP/plain.out"
 # A keyring failure stops rather than retries. This used to be asserted by
 # grepping for a phrase inside the error message, which pinned the wording of
 # a sentence in place of the behaviour it described. The behaviour is that

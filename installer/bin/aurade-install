@@ -14,6 +14,16 @@ JOURNAL_LIB=${AURADE_JOURNAL_LIB:-/usr/local/lib/aurade/aurade-journal.sh}
 # shellcheck source=../lib/aurade-journal.sh
 . "$JOURNAL_LIB"
 
+# The install fingerprint. Optional: a machine that cannot find the library
+# gets an install without a mark on it, which is a missing file in /etc and
+# nothing else.
+BADGE_LIB=${AURADE_BADGE_LIB:-/usr/local/lib/aurade/aurade-badge.sh}
+[[ -r $BADGE_LIB ]] || BADGE_LIB="$SELF_DIR/../lib/aurade-badge.sh"
+if [[ -r $BADGE_LIB ]]; then
+  # shellcheck source=../lib/aurade-badge.sh
+  . "$BADGE_LIB"
+fi
+
 MODE=dry-run
 TARGET=
 CONFIRM=
@@ -1391,8 +1401,37 @@ write_target_file /etc/aurade-install/accessibility 0644 \
 # a script can read it and so can a person. No secret goes in it: the disk is
 # named because the disk is not a secret and knowing which one the system came
 # from is the point.
+INSTALLED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# The mark this machine gets and no other machine has.
+#
+# Every AuraDE install is identical by design; that is what a pinned snapshot
+# is for. It also means there is nothing anywhere that says this one is mine.
+#
+# It is derived and never collected. The board identifiers and the one network
+# address that seed it go into a digest and the digest is the only thing that
+# is kept, so nothing recoverable about this hardware is written down. The
+# install time is part of the seed on purpose: a fingerprint that survived a
+# reinstall would be a hardware identifier, which is precisely what this is
+# not, and reinstalling should give a machine a new mark rather than the old
+# one back.
+#
+# Nothing announces it. It is written here and found later by somebody who
+# went looking, which is the whole of the idea.
+BADGE_SEED=
+BADGE_CODE=
+if declare -F aurade_badge_seed >/dev/null 2>&1; then
+  BADGE_SEED=$(aurade_badge_seed "$INSTALLED_AT" "$TARGET" 2>/dev/null || true)
+  BADGE_CODE=$(aurade_badge_code "$BADGE_SEED" 2>/dev/null || true)
+fi
+if [[ -n $BADGE_CODE ]]; then
+  BADGE_ART=$(aurade_badge_rows "$BADGE_SEED" '##' '  ' 2>/dev/null || true)
+  write_target_file /etc/aurade-install/badge 0644 \
+    "${BADGE_ART}\n\n${BADGE_CODE}\n"
+fi
+
 write_target_file /etc/aurade-install/summary 0644 \
-  "installed=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\n"
+  "installed=${INSTALLED_AT}\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\nfingerprint=${BADGE_CODE:-none}\n"
 
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
       $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||

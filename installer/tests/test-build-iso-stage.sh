@@ -392,6 +392,25 @@ for _lib in "$ROOT"/installer/lib/aurade-*.sh; do
   grep -Fq "/usr/local/lib/aurade/$_name" "$ROOT/installer/archiso/profiledef.sh" ||
     { echo "profiledef.sh has no permissions entry for lib/$_name" >&2; exit 1; }
 done
+# Every program in bin/, derived the same way and for the same reason.
+#
+# The libraries have been checked this way for a while; the programs were a
+# list typed by hand, and a program added to the tree and left out of it is a
+# feature that works on every machine that built the image and on no machine
+# that boots it. That is exactly what happened to the download rate sampler:
+# the engine treats a missing sampler as "no meter", so the install succeeds,
+# the screen is simply missing a line, and nothing anywhere says why.
+while IFS= read -r _bin; do
+  _name=$(basename "$_bin")
+  _found=$(find "$TMP/work/profile/airootfs" -name "$_name" -type f -print -quit 2>/dev/null)
+  [[ -n $_found ]] ||
+    { echo "build-iso.sh does not stage bin/$_name onto the image" >&2; exit 1; }
+  [[ -x $_found ]] ||
+    { echo "bin/$_name is staged without the executable bit" >&2; exit 1; }
+  grep -Fq "/$_name\"]=" "$ROOT/installer/archiso/profiledef.sh" ||
+    { echo "profiledef.sh has no permissions entry for bin/$_name" >&2; exit 1; }
+done < <(find "$ROOT/installer/bin" -maxdepth 1 -type f -perm -u+x -print | LC_ALL=C sort)
+
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-network-diagnostics ]]
 grep -Fq -- 'root with no password' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq -- 'not copied to the installed system' "$ROOT/installer/archiso/airootfs/etc/motd"
