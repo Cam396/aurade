@@ -1130,3 +1130,154 @@ aurade_type_seconds() {
   (( AURADE_TYPE_STARTED )) || { printf '0'; return 0; }
   printf '%s' "$(( now - AURADE_TYPE_STARTED ))"
 }
+
+# --------------------------------------------------------------------------
+# Sokoban
+# --------------------------------------------------------------------------
+#
+# Arrows only, no clock, and levels, which is what earns it a place on a list
+# where anything needing input latency was ruled out. Push a box onto a target.
+# A box against a wall with a target elsewhere is stuck, so there is an undo,
+# because a puzzle you can permanently ruin on move three while half watching a
+# progress bar is a puzzle that makes the wait worse.
+#
+# Three levels, small enough to fit the frame at its narrowest and each one
+# solvable in a handful of pushes. `#` wall, `.` target, `$` box, `@` player,
+# `*` box already on a target.
+AURADE_SOKO_LEVELS=(
+  '#######|#     #|# @$. #|#     #|#######'
+  '#######|#  .  #|#  $  #|# @   #|#     #|#######'
+  '########|#  ..  #|#  $$  #|#      #|#  @   #|#      #|########'
+)
+
+AURADE_SOKO_STATIC=()
+AURADE_SOKO_BOXES=()
+AURADE_SOKO_W=0
+AURADE_SOKO_H=0
+AURADE_SOKO_X=0
+AURADE_SOKO_Y=0
+AURADE_SOKO_MOVES=0
+AURADE_SOKO_LEVEL=0
+AURADE_SOKO_UNDO=()
+
+#: Read one level into the two grids and the player position.
+aurade_soko_new() {
+  local level=${1:-$AURADE_SOKO_LEVEL} text rows row x y cell
+  (( level >= 0 && level < ${#AURADE_SOKO_LEVELS[@]} )) || level=0
+  AURADE_SOKO_LEVEL=$level
+  text=${AURADE_SOKO_LEVELS[level]}
+  IFS='|' read -r -a rows <<<"$text"
+  AURADE_SOKO_H=${#rows[@]}
+  AURADE_SOKO_W=0
+  for row in "${rows[@]}"; do
+    (( ${#row} <= AURADE_SOKO_W )) || AURADE_SOKO_W=${#row}
+  done
+  AURADE_SOKO_STATIC=()
+  AURADE_SOKO_BOXES=()
+  AURADE_SOKO_MOVES=0
+  AURADE_SOKO_UNDO=()
+  for (( y = 0; y < AURADE_SOKO_H; y++ )); do
+    row=${rows[y]}
+    for (( x = 0; x < AURADE_SOKO_W; x++ )); do
+      cell=${row:x:1}
+      # A short row is floor to its right rather than a ragged edge.
+      [[ -n $cell ]] || cell=' '
+      case $cell in
+        '#') AURADE_SOKO_STATIC+=('#'); AURADE_SOKO_BOXES+=(0) ;;
+        '.') AURADE_SOKO_STATIC+=('.'); AURADE_SOKO_BOXES+=(0) ;;
+        '$') AURADE_SOKO_STATIC+=(' '); AURADE_SOKO_BOXES+=(1) ;;
+        '*') AURADE_SOKO_STATIC+=('.'); AURADE_SOKO_BOXES+=(1) ;;
+        '@') AURADE_SOKO_STATIC+=(' '); AURADE_SOKO_BOXES+=(0)
+             AURADE_SOKO_X=$x; AURADE_SOKO_Y=$y ;;
+        '+') AURADE_SOKO_STATIC+=('.'); AURADE_SOKO_BOXES+=(0)
+             AURADE_SOKO_X=$x; AURADE_SOKO_Y=$y ;;
+        *)   AURADE_SOKO_STATIC+=(' '); AURADE_SOKO_BOXES+=(0) ;;
+      esac
+    done
+  done
+  return 0
+}
+
+#: Move, pushing one box if there is one and the cell past it is free.
+aurade_soko_move() {
+  local dir=$1 dx=0 dy=0 nx ny bx by here beyond
+  case $dir in
+    up) dy=-1 ;; down) dy=1 ;; left) dx=-1 ;; right) dx=1 ;;
+    *) return 1 ;;
+  esac
+  nx=$(( AURADE_SOKO_X + dx ))
+  ny=$(( AURADE_SOKO_Y + dy ))
+  (( nx >= 0 && nx < AURADE_SOKO_W && ny >= 0 && ny < AURADE_SOKO_H )) || return 1
+  here=$(( ny * AURADE_SOKO_W + nx ))
+  [[ ${AURADE_SOKO_STATIC[here]} != '#' ]] || return 1
+  if (( AURADE_SOKO_BOXES[here] )); then
+    bx=$(( nx + dx ))
+    by=$(( ny + dy ))
+    (( bx >= 0 && bx < AURADE_SOKO_W && by >= 0 && by < AURADE_SOKO_H )) || return 1
+    beyond=$(( by * AURADE_SOKO_W + bx ))
+    [[ ${AURADE_SOKO_STATIC[beyond]} != '#' ]] || return 1
+    (( ! AURADE_SOKO_BOXES[beyond] )) || return 1
+    # The whole board before the push, so undo is one string rather than a
+    # replay. Three levels of this fit in a variable without anybody noticing.
+    AURADE_SOKO_UNDO+=("$AURADE_SOKO_X,$AURADE_SOKO_Y,${AURADE_SOKO_BOXES[*]}")
+    AURADE_SOKO_BOXES[here]=0
+    AURADE_SOKO_BOXES[beyond]=1
+  else
+    AURADE_SOKO_UNDO+=("$AURADE_SOKO_X,$AURADE_SOKO_Y,${AURADE_SOKO_BOXES[*]}")
+  fi
+  AURADE_SOKO_X=$nx
+  AURADE_SOKO_Y=$ny
+  AURADE_SOKO_MOVES=$(( AURADE_SOKO_MOVES + 1 ))
+  return 0
+}
+
+#: One step back. The reason a stuck box is not the end of the game.
+aurade_soko_undo() {
+  local last rest
+  (( ${#AURADE_SOKO_UNDO[@]} > 0 )) || return 1
+  last=${AURADE_SOKO_UNDO[-1]}
+  unset 'AURADE_SOKO_UNDO[-1]'
+  AURADE_SOKO_X=${last%%,*}
+  rest=${last#*,}
+  AURADE_SOKO_Y=${rest%%,*}
+  # shellcheck disable=SC2206 # the field is a space separated list of digits
+  AURADE_SOKO_BOXES=(${rest#*,})
+  (( AURADE_SOKO_MOVES > 0 )) && AURADE_SOKO_MOVES=$(( AURADE_SOKO_MOVES - 1 )) || true
+  return 0
+}
+
+#: Every box on a target.
+aurade_soko_won() {
+  local i
+  for (( i = 0; i < ${#AURADE_SOKO_BOXES[@]}; i++ )); do
+    (( ! AURADE_SOKO_BOXES[i] )) || [[ ${AURADE_SOKO_STATIC[i]} == '.' ]] || return 1
+  done
+  return 0
+}
+
+#: How many levels there are, so a screen can say which one this is.
+aurade_soko_levels() { printf '%s' "${#AURADE_SOKO_LEVELS[@]}"; }
+
+#: Rows of characters. Two columns per cell so the grid is close to square in
+#: a terminal, where a character is about half as wide as it is tall.
+aurade_soko_rows() {
+  local x y row index
+  for (( y = 0; y < AURADE_SOKO_H; y++ )); do
+    row=''
+    for (( x = 0; x < AURADE_SOKO_W; x++ )); do
+      index=$(( y * AURADE_SOKO_W + x ))
+      if (( x == AURADE_SOKO_X && y == AURADE_SOKO_Y )); then
+        row+='@ '
+      elif (( AURADE_SOKO_BOXES[index] )); then
+        [[ ${AURADE_SOKO_STATIC[index]} == '.' ]] && row+='* ' || row+='$ '
+      else
+        case ${AURADE_SOKO_STATIC[index]} in
+          '#') row+='##' ;;
+          '.') row+='. ' ;;
+          *)   row+='  ' ;;
+        esac
+      fi
+    done
+    printf '%s\n' "${row%  }"
+  done
+}

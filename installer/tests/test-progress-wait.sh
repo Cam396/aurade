@@ -447,7 +447,7 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # was making them anxious should not have to walk past six games to find it.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play ' ]] ||
+[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play ' ]] ||
   fail "the picker offers its options as '$order', with a game before an ambient one"
 
 # And it opens on the first, which is the one that asks least.
@@ -523,6 +523,49 @@ order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   aurade_fifteen_slide up && { echo 'a tile slid in from off the board' >&2; exit 1; }
   aurade_fifteen_slide left && { echo 'a tile slid in from off the board' >&2; exit 1; }
   aurade_fifteen_slide down || { echo 'a legal slide was refused' >&2; exit 1; }
+  # Sokoban, and the one assertion a puzzle with hand written levels needs:
+  # every level can actually be finished. An unsolvable level is worse than no
+  # level, it fails silently, and it fails only for the person who was patient
+  # enough to keep trying.
+  soko_solve() {
+    local level=$1 move
+    shift
+    aurade_soko_new "$level"
+    ! aurade_soko_won ||
+      { echo "sokoban level $(( level + 1 )) started solved" >&2; exit 1; }
+    for move in "$@"; do
+      aurade_soko_move "$move" ||
+        { echo "sokoban level $(( level + 1 )) refused a legal $move" >&2; exit 1; }
+    done
+    aurade_soko_won ||
+      { echo "sokoban level $(( level + 1 )) cannot be solved by its own solution" >&2; exit 1; }
+  }
+  soko_solve 0 right
+  soko_solve 1 right up
+  soko_solve 2 up up down right up
+
+  # A box against a wall does not move, and neither does the player behind it.
+  # Without this a push at the edge walks a box off the board.
+  aurade_soko_new 0
+  aurade_soko_move left || { echo 'sokoban refused a legal step' >&2; exit 1; }
+  aurade_soko_move left && { echo 'the player walked into a wall' >&2; exit 1; }
+
+  # Undo puts the board back exactly, which is what makes a stuck box
+  # recoverable rather than the end of the game.
+  aurade_soko_new 2
+  soko_before=${AURADE_SOKO_BOXES[*]}
+  aurade_soko_move up || true
+  aurade_soko_move up || true
+  [[ ${AURADE_SOKO_BOXES[*]} != "$soko_before" ]] ||
+    { echo 'two pushes moved no box' >&2; exit 1; }
+  aurade_soko_undo || { echo 'undo refused after a push' >&2; exit 1; }
+  aurade_soko_undo || { echo 'undo refused after a push' >&2; exit 1; }
+  [[ ${AURADE_SOKO_BOXES[*]} == "$soko_before" ]] ||
+    { echo 'undo did not put the boxes back' >&2; exit 1; }
+  (( AURADE_SOKO_MOVES == 0 )) ||
+    { echo "undo left the move count at $AURADE_SOKO_MOVES" >&2; exit 1; }
+  aurade_soko_undo && { echo 'undo went back past the start' >&2; exit 1; }
+
   # Minesweeper places its mines after the first reveal and never under it,
   # so the first keypress of a game always opens something. Losing on move one
   # of a game somebody started to pass the time is the most annoying thing

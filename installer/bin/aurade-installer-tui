@@ -2684,7 +2684,7 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen snake ttt)
+WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
@@ -2696,6 +2696,7 @@ declare -A WAIT_LABELS=(
   [mines]='Play minesweeper'
   [lights]='Play lights out'
   [fifteen]='Play the fifteen puzzle'
+  [soko]='Play sokoban'
   [snake]='Play snake'
   [ttt]='Play tic-tac-toe'
 )
@@ -3086,6 +3087,39 @@ screen_lights() {
     'esc  back'
 }
 
+# Sokoban. Arrows only, has levels, and has an undo.
+#
+# The undo is the part worth arguing about. Sokoban is a puzzle you can
+# permanently ruin on move three by pushing a box into a corner, and a wait
+# screen that can be quietly ruined is a wait screen that makes the wait
+# worse. One step back costs a line of state and takes nothing away from the
+# puzzle, because the puzzle was never the punishment.
+screen_soko() {
+  local HELP_KEY=0
+  local row pad width
+  tui_clear
+  tui_header 'Sokoban'
+  tui_blank
+  width=$(( AURADE_SOKO_W * 2 ))
+  pad=$(( (AURADE_TUI_INNER - width) / 2 ))
+  (( pad >= 0 )) || pad=0
+  while IFS= read -r row; do
+    tui_line "$(printf '%*s%s' "$pad" '' "$row")" cyan
+  done < <(aurade_soko_rows)
+  tui_blank
+  if aurade_soko_won; then
+    if (( AURADE_SOKO_LEVEL + 1 < $(aurade_soko_levels) )); then
+      tui_wrap "Solved in $AURADE_SOKO_MOVES moves. Press enter for the next one." ok
+    else
+      tui_wrap "Solved in $AURADE_SOKO_MOVES moves. That was the last one." ok
+    fi
+  else
+    tui_wrap "Push every box onto a dot. $AURADE_SOKO_MOVES moves. Level $(( AURADE_SOKO_LEVEL + 1 )) of $(aurade_soko_levels)." dim
+  fi
+  tui_blank
+  tui_footer 'arrows  push    u  undo    g  choose something else' 'esc  back'
+}
+
 # The fifteen puzzle. Arrows only, and everybody already knows it.
 screen_fifteen() {
   local HELP_KEY=0
@@ -3285,6 +3319,7 @@ run_engine_with_progress() {
       mines)   screen_mines ;;
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
+      soko)   screen_soko ;;
       bible)  screen_bible ;;
       books)  screen_bible_books ;;
       picker) screen_wait_picker "$WAIT_CURSOR" ;;
@@ -3335,6 +3370,7 @@ run_engine_with_progress() {
                 mines)   mode=mines; aurade_mines_new ;;
                 lights)  mode=lights; aurade_lights_new ;;
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
+                soko)    mode=soko; aurade_soko_new 0 ;;
                 *)    mode=$WAIT_MODE ;;
               esac
               ;;
@@ -3433,6 +3469,28 @@ run_engine_with_progress() {
             d|D) aurade_lights_move right ;;
             enter|space)
               if aurade_lights_won; then aurade_lights_new; else aurade_lights_toggle; fi ;;
+          esac
+          ;;
+        soko)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_soko_move "$key" || true ;;
+            w|W) aurade_soko_move up || true ;;
+            s|S) aurade_soko_move down || true ;;
+            a|A) aurade_soko_move left || true ;;
+            d|D) aurade_soko_move right || true ;;
+            u|U) aurade_soko_undo || true ;;
+            enter|space)
+              # Enter is the next level, and only once this one is finished.
+              # It does nothing mid puzzle on purpose: on a screen somebody is
+              # half watching, a key that silently restarts the board is a key
+              # that loses ten minutes of somebody's puzzle.
+              if aurade_soko_won; then
+                if (( AURADE_SOKO_LEVEL + 1 < $(aurade_soko_levels) )); then
+                  aurade_soko_new $(( AURADE_SOKO_LEVEL + 1 ))
+                fi
+              fi ;;
           esac
           ;;
         fifteen)
@@ -4093,6 +4151,7 @@ if [[ -n $RENDER_ONLY ]]; then
                aurade_mines_reveal; screen_mines ;;
     fifteen)   RANDOM=${AURADE_FIFTEEN_SEED:-11}; aurade_fifteen_new; screen_fifteen ;;
     picker)    screen_wait_picker "${AURADE_RENDER_WAIT_ROW:-0}" ;;
+    soko)      aurade_soko_new "${AURADE_RENDER_SOKO_LEVEL:-0}"; screen_soko ;;
     bible)     BIBLE_INDEX=${AURADE_RENDER_BIBLE_BOOK:-0}
                BIBLE_CHAPTER=${AURADE_RENDER_BIBLE_CHAPTER:-1}
                BIBLE_TOP=${AURADE_RENDER_BIBLE_TOP:-0}; screen_bible ;;
