@@ -545,6 +545,113 @@ def run(window: InstallerWindow) -> None:
     run_disk_bars(window)
     run_disk_wear(window)
     run_wallpaper(window)
+    # Last, because it turns the text scale up and puts it back. Anything
+    # measured after it would be measured through that restore.
+    run_text_scale(window)
+
+
+def run_text_scale(window: InstallerWindow) -> None:
+    """Every page still reachable at 200% text on a 1024x768 screen.
+
+    1024x768 is the smallest screen this installer claims to support and 200%
+    is twice the largest step the accessibility control offers, so this is the
+    corner rather than the common case. It is the corner that matters: the
+    person who turns text size up is the person least able to cope with a
+    button that has been pushed off the bottom of the window.
+
+    What is measured is not "does it fit". Almost nothing fits at 200%, and
+    that is fine, because `page_shell` puts every question page inside a
+    `Gtk.ScrolledWindow` with non-overlay scrollbars. Content taller than the
+    screen is only a fault when you cannot reach it, so the assertion is that
+    anything too tall has a scroller above it.
+
+    Three things this was got wrong before, all of which produced a clean
+    result against broken code:
+
+    A widget's *minimum* width is its longest word once it wraps, so measuring
+    that barely moves between 100% and 400% and reports nothing at either.
+    Height at a fixed width is the question.
+
+    A `Gtk.ScrolledWindow` reports a minimum height of a few dozen pixels
+    whatever is inside it. Measuring the scroller reports the same number at
+    every scale; what has a height worth measuring is the child it scrolls.
+
+    And the knob has to be read back. An earlier version reported an identical
+    clean result at 400% and at 100%, and the reason was that the setting had
+    never changed.
+    """
+    settings = Gtk.Settings.get_default()
+    check(settings is not None, "there are no GTK settings to scale")
+    if settings is None:
+        return
+    before = settings.get_property("gtk-xft-dpi")
+
+    #: 1024ths of a point, so 96dpi is 98304 and 200% is twice that. The same
+    #: knob `_obey_access` turns for the text size control.
+    doubled = 98304 * 2
+    width, height = 1024, 768
+    #: Roughly what the top bar and the action row take before a page gets any.
+    #: Generous on purpose: too generous makes this quiet rather than noisy,
+    #: which is the direction to be wrong in for an assertion about layout.
+    chrome = 160
+    room = height - chrome
+
+    def scroller_of(root):
+        for widget in walk(root):
+            if isinstance(widget, Gtk.ScrolledWindow):
+                return widget
+        return None
+
+    unreachable = []
+    measured = 0
+    try:
+        settings.set_property("gtk-xft-dpi", doubled)
+        pump(40)
+        got = settings.get_property("gtk-xft-dpi")
+        equal(got, doubled,
+              f"asked for {doubled} and the toolkit reports {got}, so nothing "
+              "below was measured at the scale it claims")
+        if got != doubled:
+            return
+
+        screens = [("page", name) for name in F.PAGE_ORDER]
+        screens += [("state", state) for state in
+                    (F.WELCOME, F.REVIEW, F.GATE, F.PROGRESS, F.DONE, F.FAILURE)]
+        for kind, name in screens:
+            if kind == "page":
+                window.flow.state = "pages"
+                window.flow.jump_to_page(name)
+            else:
+                window.flow.state = name
+            window.refresh()
+            pump()
+            content = window.stack.get_visible_child()
+            if content is None:
+                unreachable.append(f"{kind} {name}: the stack is showing nothing")
+                continue
+            measured += 1
+            scroller = scroller_of(content)
+            subject = scroller.get_child() if scroller is not None else content
+            if subject is None:
+                subject = content
+            tall, _, _, _ = subject.measure(Gtk.Orientation.VERTICAL, width)
+            if tall > room and scroller is None:
+                unreachable.append(
+                    f"{kind} {name}: insists on {tall}px in {room}px of room "
+                    "and has no scroller, so the bottom of it is unreachable")
+    finally:
+        settings.set_property("gtk-xft-dpi", before)
+        window.flow.state = "pages"
+        window.refresh()
+        pump(20)
+
+    # Guard against the quiet failure this whole check is prone to: a pass
+    # because nothing was looked at.
+    check(measured >= 10,
+          f"only {measured} screens were measured at 200%, so a clean result "
+          "here means nothing")
+    check(not unreachable,
+          "at 200% text on 1024x768: " + "; ".join(unreachable))
 
 
 def run_bible(window: InstallerWindow) -> None:
