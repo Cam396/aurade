@@ -543,6 +543,7 @@ def run(window: InstallerWindow) -> None:
     run_bible(window)
     run_done_screen(window)
     run_disk_bars(window)
+    run_disk_wear(window)
     run_wallpaper(window)
 
 
@@ -772,6 +773,50 @@ def run_disk_bars(window: InstallerWindow) -> None:
     biggest_bar = max(bar.fraction for bar in bars)
     equal(biggest_bar, 1.0,
           f"the largest disk ({largest / 1024 ** 3:.0f}G) does not fill its bar")
+
+
+def run_disk_wear(window: InstallerWindow) -> None:
+    """A worn drive says so on the row, and a healthy one says nothing.
+
+    The text installer grew this line first, and the two front ends read the
+    same disks through the same bridge, so a drive called worn out on one and
+    fine on the other would be the two of them disagreeing about the disk
+    somebody is choosing on the page where that matters most.
+
+    Both halves matter. A drive at four percent is a drive with nothing wrong
+    with it, and a row saying so teaches somebody to read every other row as a
+    warning too.
+    """
+    window.flow.state = "pages"
+    window.flow.jump_to_page("disk")
+    window.refresh()
+    pump()
+
+    listbox = window.widgets.get("disk.list")
+    check(listbox is not None, "there is no disk list")
+    if listbox is None:
+        return
+
+    rows = {}
+    for widget in walk(listbox):
+        title = getattr(widget, "get_title", None)
+        subtitle = getattr(widget, "get_subtitle", None)
+        if title is None or subtitle is None:
+            continue
+        try:
+            rows[widget.get_title()] = widget.get_subtitle() or ""
+        except TypeError:
+            continue
+
+    worn = [text for path, text in rows.items() if "write life" in text]
+    check(len(worn) == 1,
+          f"{len(worn)} disk rows mention write life, expected exactly one")
+    if worn:
+        check("93%" in worn[0],
+              f"the worn drive does not carry its number: {worn[0]!r}")
+    healthy = rows.get("/dev/sda", "")
+    check("write life" not in healthy,
+          f"a drive at four percent was called out: {healthy!r}")
 
 
 def run_wallpaper(window: InstallerWindow) -> None:

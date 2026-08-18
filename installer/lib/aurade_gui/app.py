@@ -2273,6 +2273,15 @@ class InstallerWindow(Adw.ApplicationWindow):
                          + (f", {holds}" if holds else ""))
             if holds:
                 subtitle += f"\n{holds}"
+            # How much of its write life the drive says it has spent. Its own
+            # line, because what is on a disk and how much life it has left are
+            # two different questions and running them together reads as
+            # neither. Present only for a drive worn enough to be worth saying
+            # something about, decided once in the text installer so both front
+            # ends agree about which those are.
+            wear = disk.get("wear") or ""
+            if wear:
+                subtitle += f"\n{wear[:1].upper()}{wear[1:]}"
             serial = disk.get("serial") or ""
             if serial:
                 subtitle += f"\nSerial {serial}"

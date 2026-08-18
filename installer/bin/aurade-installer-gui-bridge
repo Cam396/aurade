@@ -166,6 +166,11 @@ gb_disks() {
     # than a second implementation, so the two front ends cannot describe the
     # same disk differently on the screen before the same gate.
     out+="\"holds\":$(_gb_str "$(disk_contents "$path")"),"
+    # And how much of its write life the drive says it has spent, from the
+    # same function and the same threshold, so a drive called worn out on one
+    # front end is not called fine on the other. Empty for every drive with
+    # nothing worth saying about it, which is nearly all of them.
+    out+="\"wear\":$(_gb_str "$(disk_wear_note "$path")"),"
     out+="\"booted\":$(_gb_bool test "$path" = "$booted"),"
     out+="\"serial\":$(_gb_str "$serial")}"
     sep=','

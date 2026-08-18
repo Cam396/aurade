@@ -49,6 +49,10 @@ printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
   '/dev/nvme0n1|476.9G|Samsung SSD 980 PRO|nvme|S6B2NS0T900123X' \
   '/dev/sda|931.5G|WDC WD10EZEX|sata|WD-WCC6Y4KP1234' >"$TMP/disks"
+# One drive near the end of its life and one with nothing wrong with it, so
+# the page can be checked for saying something about the first and nothing
+# about the second.
+printf '%s\n' '/dev/nvme0n1|93' '/dev/sda|4' >"$TMP/health"
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf '#!/usr/bin/env bash\nprintf "stub engine\\n"\nexit 0\n' >"$TMP/stub-engine"
 printf '#!/usr/bin/env bash\n[[ $* == *is-secure-boot* ]] && printf "disabled\\n"\nexit 0\n' \
@@ -60,6 +64,7 @@ export PATH="$TMP/stub:$PATH"
 export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
 export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_BLOCK_DIR="$TMP/block"
 export AURADE_DISK_TABLE="$TMP/disks" AURADE_PROBE_MEMINFO="$TMP/meminfo"
+export AURADE_DISK_HEALTH="$TMP/health"
 export AURADE_PROBE_DRM_DIR="$TMP/drm" AURADE_PROBE_DRI_DIR="$TMP/dri"
 export AURADE_SNAPSHOT_FILE="$TMP/snapshot" AURADE_EFI_DIR="$TMP/efi"
 export AURADE_INSTALL_ENGINE="$TMP/stub-engine" AURADE_BUNDLE_DIR="$TMP/bundle"
