@@ -6,6 +6,9 @@ set -Eeuo pipefail
 # because a non-zero exit inside a deliberate `set +e` block is an expected
 # result being collected, not an assertion giving up.
 trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -55,7 +58,7 @@ grep -Fq -- 'aurade-powerd.service aurade-host-bridge.service aurade-greetd.serv
 grep -Fq -- 'seatd.service aurade-powerd.service' "$TMP/plain.out"
 grep -Fq -- 'useradd -m -G wheel\,audio\,video\,input\,storage\,seat' "$TMP/plain.out"
 grep -Fq -- 'chpasswd --encrypted' "$ROOT/installer/bin/aurade-install"
-! grep -Fq -- 'usermod --password "$(<"$PASSWORD_HASH_FILE")"' \
+refute grep -Fq -- 'usermod --password "$(<"$PASSWORD_HASH_FILE")"' \
   "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '/boot/aurade-rollback/factory/vmlinuz-linux' "$TMP/plain.out"
 grep -Fq -- 'intel-ucode' "$TMP/plain.out"
@@ -156,9 +159,9 @@ grep -Fq -- '/boot/aurade-rollback/factory/initramfs-linux.img' "$TMP/encrypted.
 # rather than left as a half-configured system.
 # ---------------------------------------------------------------------------
 
-! grep -Fq -- 'mkswap' "$TMP/plain.out"
-! grep -Fq -- 'mkswapfile' "$TMP/plain.out"
-! grep -Fq -- 'zram' "$TMP/plain.out"
+refute grep -Fq -- 'mkswap' "$TMP/plain.out"
+refute grep -Fq -- 'mkswapfile' "$TMP/plain.out"
+refute grep -Fq -- 'zram' "$TMP/plain.out"
 grep -Fq -- 'mkfs.btrfs' "$TMP/plain.out"
 grep -Fq -- 'btrfs subvolume create' "$TMP/plain.out"
 grep -Fq -- 'boot options: root=UUID=<root-filesystem-uuid> rw rootflags=subvol=@ quiet' "$TMP/plain.out"
@@ -241,7 +244,7 @@ refuses() {
 plan swapfile --swap file --swap-size 4G
 grep -Fq -- 'btrfs filesystem mkswapfile --size 4096m' "$TMP/swapfile.out"
 grep -Fq -- '/swap/swapfile none swap defaults 0 0' "$TMP/swapfile.out"
-! grep -Fq -- 'resume_offset' "$TMP/swapfile.out"
+refute grep -Fq -- 'resume_offset' "$TMP/swapfile.out"
 
 plan hibernate --swap file --swap-size hibernate
 grep -Fq -- 'resume=UUID=<root-filesystem-uuid> resume_offset=<swapfile-offset>' "$TMP/hibernate.out"
@@ -249,15 +252,15 @@ grep -Fq -- 'add the mkinitcpio resume hook' "$TMP/hibernate.out"
 
 plan zram --swap zram
 grep -Fq -- 'zram-generator.conf' "$TMP/zram.out"
-! grep -Fq -- 'mkswapfile' "$TMP/zram.out"
+refute grep -Fq -- 'mkswapfile' "$TMP/zram.out"
 
 # ext4 has no subvolumes, so it has no factory snapshot; the rollback entry
 # must be absent rather than present and broken.
 plan ext4 --filesystem ext4
 grep -Fq -- 'mkfs.ext4' "$TMP/ext4.out"
-! grep -Fq -- 'btrfs subvolume create' "$TMP/ext4.out"
-! grep -Fq -- 'aurade-rollback.conf' "$TMP/ext4.out"
-! grep -Fq -- 'rootflags=subvol=@' "$TMP/ext4.out"
+refute grep -Fq -- 'btrfs subvolume create' "$TMP/ext4.out"
+refute grep -Fq -- 'aurade-rollback.conf' "$TMP/ext4.out"
+refute grep -Fq -- 'rootflags=subvol=@' "$TMP/ext4.out"
 grep -Fq -- 'boot options: root=UUID=<root-filesystem-uuid> rw quiet' "$TMP/ext4.out"
 grep -Fq -- 'no factory snapshot and no rollback boot entry' "$TMP/ext4.out"
 
@@ -291,9 +294,9 @@ PATH=$saved_path
 # Installing alongside must not wipe, must not zap, and must not reformat the
 # EFI system partition it was asked to share.
 plan alongside --layout alongside
-! grep -Fq -- 'wipefs --all --force' "$TMP/alongside.out"
-! grep -Fq -- 'sgdisk --zap-all' "$TMP/alongside.out"
-! grep -Fq -- 'mkfs.fat' "$TMP/alongside.out"
+refute grep -Fq -- 'wipefs --all --force' "$TMP/alongside.out"
+refute grep -Fq -- 'sgdisk --zap-all' "$TMP/alongside.out"
+refute grep -Fq -- 'mkfs.fat' "$TMP/alongside.out"
 grep -Fq -- 'sgdisk --largest-new=0' "$TMP/alongside.out"
 grep -Fq -- 'keeping the existing EFI system partition' "$TMP/alongside.out"
 grep -Fq -- 'INSTALL:/dev/aurade-test-disk' "$TMP/alongside.out"

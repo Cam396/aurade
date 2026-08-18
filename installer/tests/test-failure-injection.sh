@@ -2,6 +2,9 @@
 # Safe refusal-path fixtures. None of these cases reaches an execute path or
 # opens a block device; they prove bad inputs fail before a destructive plan.
 set -Eeuo pipefail
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -53,7 +56,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/hash.out" 2>&1; th
   exit 1
 fi
 grep -Fq 'SHA-256 mismatch: aurade-1.0-1-any.pkg.tar.zst' "$TMP/hash.out"
-! grep -Fq 'wipefs --all --force' "$TMP/hash.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/hash.out"
 
 # A digest can be correct while the archive metadata is for another package.
 # The engine must inspect .PKGINFO and reject the mismatch before any target
@@ -69,7 +72,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" \
   exit 1
 fi
 grep -Fq 'package metadata does not match lock' "$TMP/metadata.out"
-! grep -Fq 'wipefs --all --force' "$TMP/metadata.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/metadata.out"
 
 # A package archive without .PKGINFO must fail closed as well.
 printf 'not package metadata\n' >"$TMP/package/README"
@@ -84,7 +87,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" \
   exit 1
 fi
 grep -Fq 'cannot read .PKGINFO' "$TMP/missing-metadata.out"
-! grep -Fq 'wipefs --all --force' "$TMP/missing-metadata.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/missing-metadata.out"
 
 # Restore the exact package whose digest is recorded in the lock, then reject
 # a password file with unsafe permissions.
@@ -95,7 +98,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/perms.out" 2>&1; t
   exit 1
 fi
 grep -Fq 'password hash file must not be group/world accessible' "$TMP/perms.out"
-! grep -Fq 'wipefs --all --force' "$TMP/perms.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/perms.out"
 
 # Plaintext and multi-line credential files are rejected without reading a
 # secret into a shell variable or reaching the destructive plan.
@@ -106,7 +109,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/plaintext.out" 2>&
   exit 1
 fi
 grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/plaintext.out"
-! grep -Fq 'wipefs --all --force' "$TMP/plaintext.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/plaintext.out"
 
 printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
 
@@ -118,7 +121,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" --encrypt \
   exit 1
 fi
 grep -Fq 'LUKS passphrase file must not be group/world accessible' "$TMP/luks-perms.out"
-! grep -Fq 'wipefs --all --force' "$TMP/luks-perms.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/luks-perms.out"
 
 # An invalid target is rejected before any package or disk operation.
 if "$ROOT/installer/bin/aurade-install" "${common[@]}" --target relative-disk >"$TMP/target.out" 2>&1; then
@@ -126,7 +129,7 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" --target relative-disk >"
   exit 1
 fi
 grep -Fq -- '--target must be an absolute /dev path' "$TMP/target.out"
-! grep -Fq 'wipefs --all --force' "$TMP/target.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/target.out"
 
 # A staged installer missing its recovery helper must fail before it can read
 # or modify a target. Use a copied engine so the real source tree is untouched.
@@ -140,7 +143,7 @@ if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   exit 1
 fi
 grep -Fq 'installer helper is missing' "$TMP/helper.out"
-! grep -Fq 'wipefs --all --force' "$TMP/helper.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/helper.out"
 
 # A readable directory must not satisfy the staged-helper contract. This
 # catches a malformed image before the engine can reach any destructive stage.
@@ -152,7 +155,7 @@ if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   exit 1
 fi
 grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-directory.out"
-! grep -Fq 'wipefs --all --force' "$TMP/helper-directory.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/helper-directory.out"
 
 # A symlink to an executable outside the staged engine must not satisfy the
 # helper contract. The staged image must contain the helper as a regular file.
@@ -164,7 +167,7 @@ if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   exit 1
 fi
 grep -Fq 'installer helper must be a regular executable file' "$TMP/helper-symlink.out"
-! grep -Fq 'wipefs --all --force' "$TMP/helper-symlink.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/helper-symlink.out"
 
 # If the requested staging path cannot be used, the engine falls back to /tmp
 # and measures capacity on the filesystem that actually holds its workdir.
@@ -185,8 +188,8 @@ if AURADE_MIN_WORKSPACE_BYTES=999999999999999999 \
   exit 1
 fi
 grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$TMP/capacity.out"
-! grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
-! grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
+refute grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
+refute grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
 
 # The encrypted execute path must reject a missing cryptsetup dependency
 # before the first erase command. This source-order assertion is intentionally

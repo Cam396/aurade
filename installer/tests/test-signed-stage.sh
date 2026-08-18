@@ -7,6 +7,9 @@ set -Eeuo pipefail
 # because a non-zero exit inside a deliberate `set +e` block is an expected
 # result being collected, not an assertion giving up.
 trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
@@ -44,7 +47,7 @@ actual=$(find "$staged" -maxdepth 1 -type f -name '*.pkg.tar.*.sig' | wc -l)
 [[ $actual -eq $expected ]]
 [[ -r $staged/aurade-repository.gpg ]]
 grep -Fxq "$fingerprint" "$TMP/work/profile/airootfs/etc/aurade-installer/repo-fingerprint"
-! grep -Fq 'development-unsigned' "$TMP/work/profile/airootfs/etc/aurade-installer/repo-fingerprint"
+refute grep -Fq 'development-unsigned' "$TMP/work/profile/airootfs/etc/aurade-installer/repo-fingerprint"
 
 # A detached signature that is present but corrupted must fail closed before
 # the profile is accepted. This exercises the real gpgv path with only the

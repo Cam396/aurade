@@ -7,6 +7,9 @@ set -Eeuo pipefail
 # because a non-zero exit inside a deliberate `set +e` block is an expected
 # result being collected, not an assertion giving up.
 trap 'case $- in *e*) printf "%s: line %s gave up: %s\n" "${0##*/}" "$LINENO" "$BASH_COMMAND" >&2 ;; esac' ERR
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 
@@ -41,9 +44,9 @@ grep -Fq 'The package archive could not be reached.' "$TMP/report.out"
 grep -Fq 'Check the network connection, then start again.' "$TMP/report.out"
 [[ $(grep -c 'then start again\.' "$TMP/report.out") -eq 1 ]]
 grep -Fq 'Detail: archive unavailable' "$TMP/report.out"
-! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"
+refute grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"
 # No engine cause code reaches the screen.
-! grep -Fq 'network_error' "$TMP/report.out"
+refute grep -Fq 'network_error' "$TMP/report.out"
 
 cat >"$TMP/escaped-journal.jsonl" <<'EOF'
 {"stage":"configure","status":"failed","message":"quoted \"stage\":\"fake\" text","cause":"config\\path"}
@@ -59,11 +62,28 @@ grep -Fq 'The install stopped while setting things up.' "$TMP/escaped.out"
 # An unrecognised cause code is silence plus the stage explanation, never the
 # token itself. Printing `keyring_error` at somebody whose install just died is
 # the regression this asserts against.
-! grep -Fq 'config' "$TMP/escaped.out"
+refute grep -Fq 'config' "$TMP/escaped.out"
 grep -Fq 'Every file is in place.' "$TMP/escaped.out"
 grep -Fq 'Save a report, then start again.' "$TMP/escaped.out"
 # A message that contains a quoted field must not impersonate one.
-! grep -Fq 'fake' "$TMP/escaped.out"
+#
+# The message itself is echoed back under `Detail:`, so the word is on the
+# screen once and has to be: refusing to print somebody's own failure message
+# is not the protection here. What must not happen is the parser reading
+# `"stage":"fake"` out of the middle of a string and believing it, which the
+# headline above already proves it did not. So the check is that the word
+# appears nowhere except in the message it came from.
+#
+# Written this way because the obvious version, a bare `! grep -Fq fake`, was
+# true of the whole file and quietly wrong for eleven months, and because a
+# bare `!` under `set -e` could not have failed even if it had been right.
+grep -v '^Detail: ' "$TMP/escaped.out" >"$TMP/escaped.nodetail"
+refute grep -Fq 'fake' "$TMP/escaped.nodetail"
+# And the message that was echoed is the whole message, JSON escaping and all.
+# Unescaping it for display would mean a `\n` in a journal message becoming a
+# real newline in a report that is read a line at a time, which is how a
+# message starts impersonating a field again.
+grep -Fq 'Detail: quoted \"stage\":\"fake\" text' "$TMP/escaped.out"
 
 set +e
 "$ROOT/installer/bin/aurade-install-failure" \
@@ -89,7 +109,7 @@ grep -Fqx \
 # The engine's cause code belongs in the report and never on the screen: the
 # report is read by whoever is answering, the screen by whoever is stuck. Both
 # halves are asserted so neither drifts into the other.
-! grep -Fq 'network_error' "$TMP/report.out"
+refute grep -Fq 'network_error' "$TMP/report.out"
 # Short enough that "leads with" stays true. The provenance under it is three
 # lines and a blank; a summary that grows a paragraph is no longer a summary.
 [[ $(wc -l <"$TMP/export/summary.txt") -le 6 ]]
@@ -98,7 +118,7 @@ grep -Fq 'Log: install.log' "$TMP/export/summary.txt"
 # The raw log is copied verbatim next to it, and the summary is not allowed to
 # quote from it. This is what stops a future "include the last line of the log"
 # from putting a secret into the one file people paste into chat.
-! grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/export/summary.txt"
+refute grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/export/summary.txt"
 
 # A failure recorded with no stage still gets a first line. The branch exists
 # because a summary that reads "failed during ,  exit 7." is worse than no
