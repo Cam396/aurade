@@ -126,6 +126,11 @@ safe_clients=$(AURADE_SAFE_GRAPHICS=1 bash -c ". '$ROOT/installer/lib/aurade-ren
 # the real installer does when it actually draws.
 
 install -m 0755 "$ROOT/installer/bin/aurade-installer-start" "$TMP/bin/"
+# The real explainer, beside the launcher, because the launcher asks it what
+# the kernel thought of a failed attempt and finds it the same way it finds
+# everything else: next to itself, or in the installed location.
+install -m 0755 "$ROOT/installer/bin/aurade-explain" "$TMP/bin/"
+export AURADE_NOTES_FILE="$ROOT/installer/data/hardware-notes.tsv"
 install -m 0644 "$ROOT/installer/lib/aurade-renderers.sh" \
   "$ROOT/installer/lib/aurade-probe.sh" "$TMP/lib/"
 cat >"$TMP/bin/aurade-installer-gui" <<'STUB'
@@ -173,6 +178,7 @@ run_launcher() {
     ${AURADE_TEST_WORKING_GSK:+AURADE_TEST_WORKING_GSK="$AURADE_TEST_WORKING_GSK"} \
     ${AURADE_TEST_STAGE:+AURADE_TEST_STAGE="$AURADE_TEST_STAGE"} \
     ${AURADE_TEST_GUI_STATUS:+AURADE_TEST_GUI_STATUS="$AURADE_TEST_GUI_STATUS"} \
+    AURADE_NOTES_FILE="$AURADE_NOTES_FILE" \
     "$TMP/bin/aurade-installer-start" --graphical >>"$TMP/log" 2>&1 || true
 }
 
@@ -258,6 +264,48 @@ grep -q 'text installer ran' "$TMP/log" || \
   fail 'no renderer worked and the text installer was not started'
 grep -q 'what each attempt printed is in' "$TMP/log" || \
   fail 'the chain failed without saying where the attempt output was kept'
+
+# A window that drew and then vanished, with the kernel having an opinion.
+#
+# The graphical installer records its own crashes, and there is one death it
+# cannot record: the kernel killing it. An out of memory kill is SIGKILL, so
+# there is no handler, no traceback and no file, and all that is left is a
+# window that went away for no stated reason. The evidence is in the kernel
+# log, in the format nobody reads, and `aurade-explain` exists to turn that
+# into a sentence.
+reset_case
+cat >"$TMP/stub/dmesg" <<'STUB'
+#!/usr/bin/env bash
+printf '[  312.4] Out of memory: Killed process 812 (aurade-installer-gui)\n'
+STUB
+chmod +x "$TMP/stub/dmesg"
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_STAGE=mapped
+AURADE_TEST_GUI_STATUS=1
+run_launcher
+grep -Fq 'ran out of memory' "$TMP/log" ||
+  fail 'a window killed by the kernel was reported without saying the kernel killed it'
+rm -f "$TMP/stub/dmesg"
+
+# And a quiet kernel says nothing at all, because a paragraph about a machine
+# where nothing is wrong is noise on a screen somebody is already worried about.
+reset_case
+cat >"$TMP/stub/dmesg" <<'STUB'
+#!/usr/bin/env bash
+printf '[    0.0] Linux version 6.12.4-aurade\n[    1.2] usb 1-1: new high-speed USB device number 2\n'
+STUB
+chmod +x "$TMP/stub/dmesg"
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_STAGE=mapped
+AURADE_TEST_GUI_STATUS=1
+run_launcher
+# Asserted on what reaches the console rather than on what reaches the attempt
+# log, because the console is the thing a person is looking at and the attempt
+# log is in a temporary directory this test never opens. The first version of
+# this checked the header that only ever goes to the log, so removing the guard
+# entirely still passed.
+refute grep -Fq 'Nothing in this log' "$TMP/log"
+rm -f "$TMP/stub/dmesg"
 
 # The person asked to leave.
 #

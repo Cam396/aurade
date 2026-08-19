@@ -240,6 +240,31 @@ prepare_seat() {
 
 prepare_seat || true
 
+# What the kernel thought of that attempt.
+#
+# The graphical installer records its own crashes now, and there is one death
+# it cannot record: the kernel killing it. An out of memory kill is SIGKILL, so
+# there is no handler, no traceback and no file, and what is left behind is a
+# window that vanished for no stated reason. The evidence exists, in the kernel
+# log, in the format nobody reads.
+#
+# `aurade-explain` is on this image and its whole purpose is turning that into
+# a sentence, so it is asked. A silent answer is the common case and prints
+# nothing; anything else goes next to the attempt it belongs to.
+explain_kernel_view() {
+  local explain
+  explain=$(_find aurade-explain) || return 0
+  command -v dmesg >/dev/null 2>&1 || return 0
+  local view
+  view=$(dmesg 2>/dev/null | "$explain" --quiet 2>/dev/null) || true
+  [[ -n $view ]] || return 0
+  case $view in
+    'Nothing in this log'*) return 0 ;;
+  esac
+  printf '\n--- what the kernel said during that attempt ---\n%s\n' "$view" >>"$ATTEMPT_LOG"
+  say "$view"
+}
+
 renderer_lib=$(_find_lib aurade-renderers.sh) || {
   say 'Starting the text installer, which installs exactly the same system.'
   note 'the renderer list is missing from this image'
@@ -357,6 +382,7 @@ while IFS=$'\t' read -r label settings; do
       mapped)
         (( status != 0 )) || exit 0   # a window, then a clean exit: they quit
         note "$label drew a window and then stopped (status $status)"
+        explain_kernel_view
         ;;
       *)
         # The compositor never drew. Nothing on the client side can change
