@@ -34,6 +34,65 @@ except ImportError as exc:  # pragma: no cover - packaging failure
     sys.exit(1)
 
 
+#: Where a crash gets written down, if this process has one.
+#:
+#: The launcher runs this inside a compositor and keeps every attempt's output
+#: in a log, so in principle a crash is already recorded. In practice the text
+#: installer then clears the screen, and what the person in front of the
+#: machine remembers is that the installer vanished. The path is fixed rather
+#: than made unique on purpose: "run this one command" is the whole difference
+#: between a diagnosis and a conversation.
+CRASH_LOG = os.environ.get("AURADE_GUI_CRASH_LOG", "/tmp/aurade-installer-crash.log")
+
+
+def record_crashes() -> None:
+    """Leave evidence, whichever way this process dies.
+
+    Two different deaths, and neither of them left anything findable before.
+
+    A Python exception raised inside a GTK callback is printed by PyGObject and
+    swallowed, so the installer carries on in a state where some of the screen
+    is from before the exception and some is from after. That is worse than
+    stopping, and it is invisible.
+
+    A crash in the graphics stack is not a Python exception at all. It is a
+    signal, and Python's default handling of it is to be gone, with nothing
+    written anywhere. `faulthandler` turns that into a stack trace, which on a
+    machine whose driver has just died is the only evidence there will ever be.
+    """
+    try:
+        handle = open(CRASH_LOG, "a", buffering=1)
+    except OSError:
+        return
+
+    import faulthandler
+    faulthandler.enable(file=handle, all_threads=True)
+
+    import traceback
+
+    def hook(kind, value, tb) -> None:
+        handle.write("\n=== aurade-installer-gui stopped ===\n")
+        traceback.print_exception(kind, value, tb, file=handle)
+        traceback.print_exception(kind, value, tb, file=sys.stderr)
+
+    sys.excepthook = hook
+
+    # The one that matters most here. An exception raised inside a GTK signal
+    # handler never reaches `sys.excepthook`: PyGObject prints it and lets the
+    # program carry on, so a failed button press leaves half the screen from
+    # before the exception and half from after, on a console that is about to
+    # be cleared. Python routes those through `sys.unraisablehook`, which is
+    # how they get written down here as well.
+    def unraisable(args) -> None:
+        handle.write("\n=== aurade-installer-gui: unraisable ===\n")
+        traceback.print_exception(
+            args.exc_type, args.exc_value, args.exc_traceback, file=handle)
+        traceback.print_exception(
+            args.exc_type, args.exc_value, args.exc_traceback, file=sys.stderr)
+
+    sys.unraisablehook = unraisable
+
+
 def find_tui() -> str | None:
     override = os.environ.get("AURADE_INSTALLER_TUI")
     if override:
@@ -88,6 +147,9 @@ def toolkit_available() -> tuple[bool, str]:
 
 
 def main() -> int:
+    # Before anything else, because the thing most worth recording is a crash
+    # during setup, and a handler installed after it would miss exactly that.
+    record_crashes()
     parser = argparse.ArgumentParser(
         prog="aurade-installer-gui",
         description="Graphical installer for AuraDE.",

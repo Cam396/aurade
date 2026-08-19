@@ -48,6 +48,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-gui-flow.sh"
 "$ROOT/test-gui-bridge.sh"
 "$ROOT/test-gui-launch.sh"
+"$ROOT/test-crash-log.sh"
 "$ROOT/test-gui-widgets.sh"
 "$ROOT/test-gui-icons.sh"
 "$ROOT/test-voice.sh"
