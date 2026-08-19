@@ -1,7 +1,19 @@
 [Unit]
 Description=Refresh AuraDE live-session Arch mirrors
-Wants=NetworkManager-online.target
-After=NetworkManager-online.target
+# `network-online.target`, which is the one that exists. This said
+# `NetworkManager-online.target`, which is not a unit on this image or on any
+# Arch install: the NetworkManager units are `NetworkManager.service` and
+# `NetworkManager-wait-online.service`, and the target they feed is the
+# standard one. systemd logs a line about not being able to load it and carries
+# on, so both the `Wants` and the `After` were doing nothing at all.
+#
+# What that cost is the whole point of the unit. reflector ran before there was
+# a network, found no mirrors, and spent its 45 second timeout finding that
+# out. Then the bundled mirrorlist was kept, which is the fallback working, so
+# nothing looked wrong except that every boot was three quarters of a minute
+# longer than it needed to be.
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot

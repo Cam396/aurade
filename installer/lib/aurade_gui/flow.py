@@ -134,6 +134,28 @@ CANCELLED = "cancelled"
 STOPPED = "stopped"
 PLANNED = "planned"
 
+def engages(state: str) -> bool:
+    """Whether leaving this state is a commitment the renderer chain must keep.
+
+    The launcher walks a list of ways to draw, and stops walking it the moment
+    the front end reports `engaged`, because after that there are answers on
+    the screen that restarting under a different renderer would throw away.
+
+    The welcome screen is the one state where that is not true. Nothing has
+    been answered on it, no network has been joined, and a restart would
+    discard nothing at all. Reporting it there cost the whole client list at
+    the worst possible moment: leaving the welcome page is the first animation
+    the process draws, so it is the single most likely place for a graphics
+    stack to take the process down, and that is exactly the failure the rest of
+    the list exists to recover from. What happened instead was a console, one
+    keypress into somebody's install.
+
+    A rule and not a condition written inline, because the inline version is
+    one line in a GTK callback that no test without a display can reach.
+    """
+    return state != WELCOME
+
+
 #: States that end the session. None of them offers a way back into the flow.
 TERMINAL: frozenset[str] = frozenset({DONE, FAILURE, CANCELLED, STOPPED, PLANNED})
 

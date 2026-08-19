@@ -3556,11 +3556,23 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._toast(error or "That disk cannot be installed to.")
 
     def on_forward(self) -> None:
-        # The first Continue is the point of no return for the renderer chain:
-        # after it there are answers on screen that a restart under a different
-        # renderer would silently discard.
-        S.report(S.ENGAGED)
         state = self.flow.state
+        # Continue is the point of no return for the renderer chain, because
+        # after it there are answers on screen that a restart under a different
+        # renderer would silently discard. Every Continue except the first one.
+        #
+        # This used to fire on all of them, welcome included, and the welcome
+        # screen is the one page where the justification above is not true:
+        # nothing has been answered, nothing has been joined, and a restart
+        # would discard nothing at all. What it cost was the whole point of
+        # having a client list. Leaving the welcome page is the first time this
+        # process draws an animation, so it is the most likely place for a
+        # graphics stack to take the process down with it, and that is exactly
+        # the failure the remaining client candidates exist to recover from.
+        # Instead the launcher read `engaged`, refused to try them, and put the
+        # user on a console one keypress into their install.
+        if F.engages(state):
+            S.report(S.ENGAGED)
         if state == F.WELCOME:
             self.play_swoop()
         try:

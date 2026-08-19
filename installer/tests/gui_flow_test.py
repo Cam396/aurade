@@ -253,6 +253,24 @@ check("shell" not in keys, "the failure screen offers a shell the image cannot o
 check("export" in keys, "the failure screen cannot save a diagnostic report")
 
 
+# --- what counts as having started ------------------------------------------
+#
+# The launcher stops trying other ways to draw the moment the front end reports
+# `engaged`, because after that there are answers on screen that restarting
+# would throw away. Every state has that property except the one where nothing
+# has been done yet.
+#
+# This is worth a test of its own because getting it wrong is silent and
+# expensive. Reporting on the welcome screen made the first Continue the end of
+# the renderer chain, and leaving the welcome screen is the first animation the
+# process draws, so a graphics stack that takes the process down there put the
+# user on a console one keypress in with three untried candidates left.
+check(not F.engages(F.WELCOME),
+      "leaving the welcome screen is treated as a commitment, and nothing has been answered on it")
+for _state in ("pages", F.REVIEW, F.GATE, F.PROGRESS):
+    check(F.engages(_state),
+          f"leaving {_state} is not treated as a commitment, and a restart there would discard answers")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"test-gui-flow: {failure}", file=sys.stderr)
