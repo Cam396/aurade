@@ -376,28 +376,51 @@ class Wallpaper(Gtk.DrawingArea):
 class Aurora(Gtk.DrawingArea):
     """The backdrop. The mark's ring, opened out to fill the window."""
 
+    #: How long a bloom lasts, in frames of the aurora's own clock. The clock
+    #: runs at about eleven a second, so this is a little under four seconds:
+    #: long enough to be sure it was on purpose, short enough that somebody
+    #: who set it off by accident is not stuck watching it.
+    BLOOM_FRAMES = 42
+
     def __init__(self, window: "InstallerWindow") -> None:
         super().__init__()
         self.window = window
         self.phase = 0.0
+        #: Frames of bloom left to draw. Zero almost always.
+        self.bloom = 0
         self.set_draw_func(self._draw)
         self.set_can_target(False)
         # Decoration. It says nothing the words do not, and a reader working
         # through a page does not want a canvas announced to it.
         A.decorative(self)
 
+    def start_bloom(self) -> None:
+        """Turn the light up, once, and let it come back down on its own."""
+        self.bloom = self.BLOOM_FRAMES
+
     def _draw(self, _area, cr, width: int, height: int) -> None:
         # Over a photograph the aurora stops being the ground and becomes a
         # cast of the brand's own light across somebody else's picture, which
         # is a different job and a quieter one.
         grounded = self.window.wallpaper_shown is not None
+        strength = brand.WALLPAPER_AURORA if grounded else 1.0
+        if self.bloom:
+            # In and out on a curve rather than on and off, so it reads as
+            # light rising rather than as a value having been changed. Half as
+            # bright again at the peak, which over a photograph is still a
+            # wash and over the plain ground is unmistakable.
+            through = 1.0 - abs(self.bloom / self.BLOOM_FRAMES * 2 - 1)
+            strength *= 1.0 + 0.5 * through * through
         brand.draw_aurora(
             cr, width, height, self.window.dark, self.phase,
-            ground=not grounded,
-            strength=brand.WALLPAPER_AURORA if grounded else 1.0)
+            ground=not grounded, strength=strength)
 
     def advance(self) -> bool:
-        self.phase += 0.012
+        # Faster while it blooms, because a wave that brightens without
+        # speeding up looks like a brightness control rather than weather.
+        self.phase += 0.036 if self.bloom else 0.012
+        if self.bloom:
+            self.bloom -= 1
         self.queue_draw()
         return GLib.SOURCE_CONTINUE
 
@@ -725,6 +748,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._settled = False
         self._settle = None
         self._secret = ""
+        self._konami = 0
         self._provider = None
         self._gate_token = ""
         self._export_notice = None
@@ -2333,9 +2357,14 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["wifi.password"] = entry
         box.append(prompt)
 
+        # Not the page subtitle again. It says "everything is downloaded and
+        # checked before any disk is touched" four inches above this, and
+        # repeating the first eleven words of it here read as a screen with
+        # one thought. This says the part that follows from it, and then what
+        # to do about it.
         box.append(label(
-            "Everything is downloaded and checked before any disk is touched, "
-            "so a connection that fails here costs you nothing.",
+            "A connection that fails here costs you nothing. Try another "
+            "network, or plug in a cable.",
             "m3-body-small", css="dim-label"))
 
     def _refresh_network(self) -> None:
@@ -2590,14 +2619,28 @@ class InstallerWindow(Adw.ApplicationWindow):
         layout in the field below. The text installer has that field. This is
         that field, and without it the instruction was a lie.
         """
+        # The description says one thing and not three. The page subtitle has
+        # already said the layout takes effect now, and the question's own
+        # help has already said there is a place to try it, and both of those
+        # are on the screen at the same time as this. Three sentences about
+        # the same fact, one under another, read as an installer that does not
+        # trust you to have read the first one.
         group = Adw.PreferencesGroup(
             title="Try your keyboard",
-            description=("Try the layout here before you set a password. "
-                         "Nothing typed in this box is saved."))
+            description="Nothing typed in this box is saved.")
         entry = Adw.EntryRow(title="Test the keys")
         entry.set_show_apply_button(False)
         self.widgets["keymap.test"] = entry
         group.add(entry)
+        # Which characters are actually worth typing. Letters mostly stay put
+        # between layouts and punctuation does not, and punctuation is what a
+        # good disk passphrase is full of, so "type anything" is the least
+        # useful thing this field could say. Word for word the line the text
+        # installer puts under its own keyboard check.
+        hint = label(F.KEYCHECK_MOVERS, "m3-body-small", css="dim-label")
+        hint.add_css_class("aurade-mono")
+        hint.set_margin_top(8)
+        group.add(hint)
         return group
 
     # -- disks -------------------------------------------------------------
@@ -2803,7 +2846,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         prompt = Adw.PreferencesGroup()
         entry = Adw.EntryRow(title="Confirmation")
         entry.add_css_class("aurade-token-field")
-        entry.connect("changed", lambda *_: self.refresh_gate_button())
+        entry.connect("changed", self._on_gate_typed)
         self.widgets["gate.entry"] = entry
         prompt.add(entry)
         box.append(prompt)
@@ -2842,6 +2885,26 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["gate.hint"].set_label(
             f"Type  {self._gate_token}  to continue")
         self.widgets["gate.entry"].set_text("")
+
+    #: The one string that may be typed into the confirmation field and is
+    #: not the token.
+    #:
+    #: It empties the field and declines, which is stricter than doing
+    #: nothing: whatever was in there has to be typed again. The comparison
+    #: below is untouched, the token is untouched, and there is no path from
+    #: here to the forward button. A gate that can be talked round is not a
+    #: gate, and this one cannot; it just has manners.
+    GATE_GREETING = "HELLO"
+
+    def _on_gate_typed(self, entry) -> None:
+        if entry.get_text() == self.GATE_GREETING:
+            # Cleared first, so that the only reachable state after this is a
+            # field holding nothing and a button that is off. Setting the text
+            # runs this handler again with an empty string, which matches
+            # nothing and falls through to the check below.
+            entry.set_text("")
+            self._toast(F.GATE_NOT_TODAY)
+        self.refresh_gate_button()
 
     def refresh_gate_button(self) -> None:
         if self.flow.state != F.GATE:
@@ -3748,10 +3811,52 @@ class InstallerWindow(Adw.ApplicationWindow):
     #: them. Any other page, any other key, and the buffer empties.
     SECRET_WORD = "aurora"
 
+    #: And the other one, which is ten keypresses long and which every person
+    #: who would try it already knows. The text installer has had it on its
+    #: welcome screen for a while; this is the same sequence on the same page.
+    #:
+    #: The arrows still move focus while it is being entered, which is the
+    #: right way round: nothing here may take a key away from somebody using
+    #: the keyboard to reach a button, so the sequence watches rather than
+    #: intercepts, and only the last key of a completed sequence is swallowed.
+    KONAMI = ("up", "up", "down", "down", "left", "right", "left", "right",
+              "b", "a")
+
+    #: Which keyvals count as which name. Only the four arrows; the two
+    #: letters arrive as letters.
+    KONAMI_KEYS = {
+        Gdk.KEY_Up: "up", Gdk.KEY_KP_Up: "up",
+        Gdk.KEY_Down: "down", Gdk.KEY_KP_Down: "down",
+        Gdk.KEY_Left: "left", Gdk.KEY_KP_Left: "left",
+        Gdk.KEY_Right: "right", Gdk.KEY_KP_Right: "right",
+    }
+
     def _on_secret_key(self, _controller, keyval, _code, _state) -> bool:
         if self.flow.state != F.WELCOME:
             self._secret = ""
+            self._konami = 0
             return False
+        name = self.KONAMI_KEYS.get(keyval)
+        if name is None and 32 <= keyval < 127:
+            name = chr(keyval).lower()
+        if name is not None and name == self.KONAMI[self._konami]:
+            self._konami += 1
+            if self._konami >= len(self.KONAMI):
+                self._konami = 0
+                aurora = self.widgets.get("aurora")
+                # Reduce motion turns it off, the same as everything else here
+                # that moves. An easter egg is not a reason to break the one
+                # setting somebody chose for a medical reason.
+                if aurora is not None and self.animate:
+                    aurora.start_bloom()
+                    self.start_aurora()
+                return True
+        elif name is not None and name == self.KONAMI[0]:
+            # A wrong key restarts at one rather than at nothing, or the
+            # sequence cannot be entered twice in a row.
+            self._konami = 1
+        else:
+            self._konami = 0
         letter = chr(keyval) if 32 <= keyval < 127 else ""
         if not letter:
             self._secret = ""

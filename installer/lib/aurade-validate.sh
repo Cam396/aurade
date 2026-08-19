@@ -81,11 +81,21 @@ aurade_valid_username() {
 }
 
 # RFC 1123 host label rules: letters, digits and inner hyphens only.
+#
+# And not `localhost`, which passes every one of those rules and is the one
+# name that must not be used. `/etc/hosts` maps it to 127.0.0.1 on every
+# machine ever made, so a computer called `localhost` is a computer that
+# resolves its own name to itself and then cannot be reached by it: file
+# sharing, printing and anything that looks the machine up by name all fail
+# later, in ways nobody traces back to a question asked before the disk was
+# erased. Refusing it here costs one line.
 aurade_valid_hostname() {
   local hostname=$1
   [[ -n $hostname ]] || return 1
   (( ${#hostname} <= 63 )) || return 1
   [[ $hostname =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+  # Case folded, because `LocalHost` resolves exactly the same way.
+  [[ ${hostname,,} != localhost ]] || return 1
   return 0
 }
 

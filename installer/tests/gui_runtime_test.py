@@ -202,6 +202,72 @@ def run(window: InstallerWindow) -> None:
         window.widgets["q.filesystem"].set_selected(values.index("btrfs"))
         pump()
 
+    # -- the erase gate, and the one string that is not the token ---------
+    #
+    # The gate is the last thing between somebody and an erased disk, and it
+    # has just gained a string that does something other than not match. This
+    # is the check that it does nothing else: the button stays off, the field
+    # ends up empty, and the token still works exactly as it did.
+    #
+    # Driven through the real widgets rather than by reading the source,
+    # because "the comparison is untouched" is a claim about behaviour.
+    # The disk is chosen the way a person chooses one: by activating a row in
+    # the list the page just built. Reading a value out of an enum would have
+    # tested a code path this page does not use, which is how this check first
+    # went green against an empty list.
+    listbox = window.widgets["disk.list"]
+    rows = []
+    index = 0
+    while (row := listbox.get_row_at_index(index)) is not None:
+        rows.append(row)
+        index += 1
+    if rows:
+        window._on_disk_selected(listbox, rows[0])
+        pump()
+        check(bool(window.model.target().get("ok")),
+              "activating the first disk row did not choose a disk")
+        window.flow.state = F.GATE
+        window.refresh()
+        pump(2)
+        entry = window.widgets["gate.entry"]
+        token = window._gate_token
+        check(bool(token), "the erase gate has no token to type")
+
+        entry.set_text(window.GATE_GREETING)
+        pump(2)
+        check(entry.get_text() == "",
+              "saying hello to the erase gate left something in the field")
+        check(not window.forward_button.get_sensitive(),
+              "saying hello to the erase gate armed the button")
+
+        # And the gate still opens for the one string that is supposed to
+        # open it, which is the half of this that would otherwise rot into a
+        # gate nobody can get through.
+        entry.set_text(token)
+        pump(2)
+        check(window.forward_button.get_sensitive(),
+              "typing the token exactly did not arm the button")
+
+        # Nothing is normalised. A trailing space is not the token, and an
+        # installer that quietly trims one is an installer that has decided
+        # what somebody meant on the screen where that must never happen.
+        for near in (token + " ", " " + token, token.lower(), token[:-1]):
+            if near == token:
+                continue
+            entry.set_text(near)
+            pump()
+            check(not window.forward_button.get_sensitive(),
+                  f"the gate accepted {near!r}, which is not the token")
+        entry.set_text("")
+        pump()
+        window.flow.state = "pages"
+        window.flow.jump_to_page("disk")
+        window.refresh()
+        pump()
+    else:
+        FAILURES.append("the disk list is empty, so the erase gate was never "
+                        "reached and nothing about it was checked")
+
     # -- a Secure Boot warning remains actionable -------------------------
     #
     # Secure Boot without an AuraDE key is not a reason to make the user fill
@@ -507,6 +573,61 @@ def run(window: InstallerWindow) -> None:
     for letter in "aurora":
         check(not window._on_secret_key(None, ord(letter), 0, 0),
               "the word did something on a page that is not the welcome page")
+    window.flow.state = F.PROGRESS
+
+    # -- the other sequence ------------------------------------------------
+    #
+    # Ten keypresses on the welcome page, none of which does anything there,
+    # which is why that is the page it lives on. It turns the light up for
+    # about four seconds and changes nothing else.
+    aurora = window.widgets["aurora"]
+
+    def konami(window, keys):
+        named = {"up": Gdk.KEY_Up, "down": Gdk.KEY_Down, "left": Gdk.KEY_Left,
+                 "right": Gdk.KEY_Right}
+        for key in keys:
+            window._on_secret_key(None, named.get(key) or ord(key), 0, 0)
+
+    window.flow.state = F.WELCOME
+    window._konami = 0
+    aurora.bloom = 0
+    # Motion is GTK's preference rather than the window's, which is the point
+    # of it: the window reads the accessibility setting instead of keeping an
+    # opinion of its own. So the setting is what a test moves.
+    settings = Gtk.Settings.get_default()
+    settings.set_property("gtk-enable-animations", True)
+    konami(window, window.KONAMI)
+    check(aurora.bloom > 0, "the sequence on the welcome page did nothing")
+
+    # Twice in a row, because a counter that resets to nothing rather than to
+    # one cannot see the same sequence entered again.
+    aurora.bloom = 0
+    konami(window, window.KONAMI)
+    check(aurora.bloom > 0, "the sequence worked once and not twice")
+
+    # A wrong key in the middle is a wrong sequence, and the light stays put.
+    aurora.bloom = 0
+    window._konami = 0
+    konami(window, ("up", "up", "down", "left", "right", "left", "right",
+                    "b", "a"))
+    check(aurora.bloom == 0, "a sequence with a wrong key in it still fired")
+
+    # And it comes back down on its own rather than staying up.
+    aurora.bloom = 0
+    konami(window, window.KONAMI)
+    for _ in range(Aurora_frames := aurora.BLOOM_FRAMES + 2):
+        aurora.advance()
+    check(aurora.bloom == 0,
+          f"the light was still up {Aurora_frames} frames later")
+
+    # Reduce motion turns it off, the same as everything else that moves.
+    aurora.bloom = 0
+    window._konami = 0
+    settings.set_property("gtk-enable-animations", False)
+    check(not window.animate, "turning animations off did not reach the window")
+    konami(window, window.KONAMI)
+    check(aurora.bloom == 0, "the sequence fired with motion turned off")
+    settings.set_property("gtk-enable-animations", True)
     window.flow.state = F.PROGRESS
 
     # -- the scheme toggle -------------------------------------------------

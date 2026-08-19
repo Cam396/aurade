@@ -116,6 +116,16 @@ reject aurade_valid_hostname -leading
 reject aurade_valid_hostname trailing-
 reject aurade_valid_hostname 'has space'
 reject aurade_valid_hostname 'under_score'
+# The one name that passes every rule above and must still be refused. Every
+# machine maps it to 127.0.0.1, so a computer called this resolves its own
+# name to itself and then cannot be reached by it.
+reject aurade_valid_hostname localhost
+reject aurade_valid_hostname LocalHost
+reject aurade_valid_hostname LOCALHOST
+# And the names near it are ordinary names, so the rule has to be the word and
+# not a pattern that swallows anything containing it.
+accept aurade_valid_hostname localhost2
+accept aurade_valid_hostname my-localhost
 reject aurade_valid_hostname ''
 reject aurade_valid_hostname "$(printf 'a%.0s' {1..64})"
 reject aurade_valid_arch_snapshot 2026/02/30

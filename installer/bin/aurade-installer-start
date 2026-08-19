@@ -315,6 +315,32 @@ attempt_stage() {
   printf '%s' "${stage:-none}"
 }
 
+#: What every attempt gets, whichever renderer and whichever client.
+#:
+#: All three of these are here because of something that was measured, and all
+#: three are what `installer/tests/test-gui-runtime.sh` has been setting for
+#: its own runs since it was written. The tests set them and the image did
+#: not, which is the worst way round: the harness was papering over three
+#: things that only happen on the machine somebody actually installs from.
+#:
+#: `GTK_USE_PORTAL=0`, because there is no xdg-desktop-portal on this image
+#: and every portal lookup GTK makes otherwise waits out its own D-Bus
+#: timeout before the first page is drawn. Twenty five seconds each, and it
+#: makes more than one of them.
+#:
+#: `GIO_USE_VFS=local`, because there is no GVFS daemon either and the same
+#: waiting applies to it.
+#:
+#: `GTK_IM_MODULE=gtk-im-context-simple`, because the ibus module recurses
+#: until the stack runs out on a host with no input method daemon, and the
+#: segfault that produces looks exactly like the installer crashing. This one
+#: is not about speed at all.
+#:
+#: None of them is a workaround for a bug in this installer. They are three
+#: statements of what this image is: a live medium with no desktop session
+#: behind it, telling a toolkit that expects one not to go looking.
+BASE_ENV='GTK_USE_PORTAL=0 GIO_USE_VFS=local GTK_IM_MODULE=gtk-im-context-simple'
+
 attempted=0
 mapfile -t CLIENTS < <(aurade_renderer_client_plan)
 
@@ -338,20 +364,32 @@ while IFS=$'\t' read -r label settings; do
       say 'Trying another way to draw the screen.'
     fi
 
-    printf '\n=== %s / %s (%s %s)\n' "$label" "$client_label" "$settings" \
-      "$client_settings" >>"$ATTEMPT_LOG"
+    # Stamped, and the time each attempt took recorded after it.
+    #
+    # "It sat on a black screen for two minutes" is not something anybody can
+    # act on, and it is the only report available from a machine whose virtual
+    # consoles are taken by a kiosk compositor. With this, the log that is
+    # already being written says which attempt the two minutes were spent in,
+    # which turns the next report into a number.
+    attempt_started=$SECONDS
+    printf '\n=== %s  %s / %s (%s %s %s)\n' \
+      "$(date -u +%H:%M:%S)" "$label" "$client_label" "$BASE_ENV" \
+      "$settings" "$client_settings" >>"$ATTEMPT_LOG"
 
     # `env` rather than exporting: each attempt gets exactly the settings for
     # that combination and nothing carried over from the attempt before it.
     set +e
     # shellcheck disable=SC2086  # both are deliberate lists of KEY=VALUE
-    env $settings $client_settings cage -- "$GUI" \
+    env $BASE_ENV $settings $client_settings cage -- "$GUI" \
       ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} \
       ${GUI_EXTRA[@]+"${GUI_EXTRA[@]}"} 2>&1 | tee -a "$ATTEMPT_LOG"
     status=${PIPESTATUS[0]}
     set -e
 
     stage=$(attempt_stage)
+    printf -- '--- %s after %ss, status %s, reached %s\n' \
+      "$client_label" "$(( SECONDS - attempt_started ))" "$status" "$stage" \
+      >>"$ATTEMPT_LOG"
     case $stage in
       engaged)
         (( status == 0 )) || {

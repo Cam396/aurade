@@ -514,6 +514,18 @@ def progress_steps(done: int, pending: int) -> str:
 #: `arcade.py` rather than here. A score is not copy about installing AuraDE;
 #: it is a game saying what just happened, and putting fourteen of those in
 #: this file would bury the twenty strings that are about the install.
+#: Typed into the erase gate's confirmation field. It declines and clears the
+#: field, which is stricter than ignoring it, and nothing about the gate is
+#: weakened by it: the token is unchanged, the comparison is unchanged, and
+#: there is no path from here to the button.
+GATE_NOT_TODAY = "Not today."
+
+#: The characters worth typing into the keyboard check, which are the ones
+#: that move between layouts. Letters mostly stay put and punctuation does
+#: not, and punctuation is what a good disk passphrase is full of. Word for
+#: word what the text installer puts under its own keyboard check.
+KEYCHECK_MOVERS = r'These move around between layouts:  @  #  "  |  \  /  y  z'
+
 #: The status area, top right. Three facts every other computer puts in a
 #: corner and this one did not have anywhere.
 #:

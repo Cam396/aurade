@@ -88,7 +88,7 @@ _q hostname \
   type text \
   default aurade \
   validator aurade_valid_hostname \
-  error 'Use 1-63 letters, digits or inner hyphens, for example aurade-laptop.' \
+  error 'Use 1-63 letters, digits or inner hyphens, for example aurade-laptop. Not localhost, which this computer already answers to.' \
   advanced no \
   flag --hostname \
   secret no
