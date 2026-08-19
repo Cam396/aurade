@@ -236,10 +236,10 @@ logged 'systemctl start seatd.service' ||
   fail 'the launcher did not try to start the seat manager'
 grep -q 'no seat manager is running' <<<"$out" ||
   fail "a missing seat manager was not named: $out"
-# And it still tries, because a machine may have a seat by a route this cannot
-# see, and refusing to try would turn a maybe into a no.
-logged 'cage -- ' ||
-  fail 'a missing seat manager stopped the compositor being tried at all'
+! logged 'cage -- ' ||
+  fail 'a missing seat manager still started a compositor'
+logged 'tui ' ||
+  fail 'a missing seat manager did not reach the text installer'
 
 # A logind session is the other way to have a seat, and needs no daemon.
 launch

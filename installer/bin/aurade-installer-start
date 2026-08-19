@@ -238,7 +238,11 @@ prepare_seat() {
   return 1
 }
 
-prepare_seat || true
+# Without a seat, wlroots cannot open any graphics device. Continuing into the
+# renderer matrix only repeats the same guaranteed failure several times and
+# leaves the person watching a black console. The text path installs the same
+# system and is the only useful fallback until a seat manager is available.
+prepare_seat || run_text
 
 # What the kernel thought of that attempt.
 #
