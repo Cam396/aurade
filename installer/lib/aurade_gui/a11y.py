@@ -25,15 +25,61 @@ worse for exactly the person it was meant to help.
 
 from __future__ import annotations
 
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gtk  # noqa: E402
 
-#: Whether this GTK can be told about announcements at all. 4.14 and up.
-#: Older images keep every label and lose only the running commentary.
-CAN_ANNOUNCE = hasattr(Gtk.Accessible, "announce")
+
+def _can_announce() -> bool:
+    """Whether saying something out loud is safe here, not merely possible.
+
+    Two questions, and the second one cost a week.
+
+    The method has to exist, which means GTK 4.14 or newer. An older image
+    keeps every label and loses only the running commentary.
+
+    And there has to be something listening. GTK hands an announcement to an
+    assistive technology over the session bus, and on this installer's live
+    image there is no session bus: the compositor is started by a systemd
+    oneshot with no login session behind it. Calling it anyway segfaults, and a
+    segfault is not an exception, so the `try` around it caught nothing:
+
+        Fatal Python error: Segmentation fault
+          File "aurade_gui/a11y.py", line 113 in announce
+          File "aurade_gui/app.py", line 3431 in _announce_page
+          File "aurade_gui/app.py", line 3443 in refresh
+          File "aurade_gui/app.py", line 3745 in on_forward
+
+    That is every page change in the graphical installer. Pressing Get started
+    ended the process, on every machine, and it took a week to find because the
+    file this crash is in is the one whose whole purpose is to degrade quietly.
+    The docstring above already promised it never raises. It never raised.
+
+    Nothing is lost by the check. An announcement with no assistive technology
+    listening is a sentence said to an empty room, so the case being refused is
+    the case that was worth nothing and cost everything.
+
+    `AURADE_ANNOUNCE` overrides in both directions, for a machine where the bus
+    is reached some other way and for reproducing this.
+    """
+    if not hasattr(Gtk.Accessible, "announce"):
+        return False
+    forced = os.environ.get("AURADE_ANNOUNCE", "")
+    if forced in ("0", "1"):
+        return forced == "1"
+    if os.environ.get("GTK_A11Y", "") == "none":
+        return False
+    return bool(os.environ.get("AT_SPI_BUS_ADDRESS")
+                or os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
+
+
+#: Whether this installer may announce. Read once, because the answer is about
+#: the session and the session does not change under it.
+CAN_ANNOUNCE = _can_announce()
 
 
 def decorative(widget: Gtk.Widget) -> Gtk.Widget:
