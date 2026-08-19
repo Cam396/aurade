@@ -773,7 +773,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         # property is construct only on most widgets. The description is the
         # part worth setting, because the label says where the picture is and
         # says nothing about the button being a button.
-        A.described(caption, title, F.WALLPAPER_HINT)
+        #
+        # It says what the button opens rather than what it changes. Clicking
+        # this used to change the picture and now opens the card that describes
+        # it, and a description left saying the old thing is worse than none:
+        # somebody navigating by screen reader would be told the one thing
+        # about this control that had stopped being true.
+        A.described(caption, title, F.WALLPAPER_CARD_HINT)
 
     def next_wallpaper(self) -> None:
         """Another one. The answer to not liking the one you were given."""
@@ -939,7 +945,6 @@ class InstallerWindow(Adw.ApplicationWindow):
         button.set_margin_end(24)
         button.set_margin_bottom(10)
         button.set_visible(False)
-        button.connect("clicked", lambda *_: self.next_wallpaper())
         self.widgets["caption"] = button
         self._attach_wallpaper_card(button)
         return button
@@ -951,25 +956,27 @@ class InstallerWindow(Adw.ApplicationWindow):
         immediately after it, which people ask out loud at other people's
         computers and have never had anywhere to ask here.
 
-        It replaces the tooltip rather than sitting next to it. A tooltip
-        saying "Show a different photograph" over a card that says what the
-        place is would be two boxes fighting for the same corner, and the card
-        says what the button does at the bottom of it instead.
+        Clicking the caption opens it, and the way to another picture is inside
+        it rather than being what the click does. That ordering is the whole
+        design: the first thing anybody wants is to know what they are looking
+        at, and the second is to see a different one, so the second lives one
+        layer in. Changing the picture leaves the card open and rewrites it,
+        which turns the corner of the screen into something you can browse
+        while an installer downloads.
 
-        On pointer and on focus both. A card that only exists for a mouse is a
-        card half the people who would enjoy it cannot reach, and this one is
-        pure pleasure, which is exactly the kind of thing that quietly gets
-        built for pointers only.
+        It opens on keyboard focus as well as on click. A card that only a
+        mouse can reach is a card half the people who would enjoy it cannot
+        get to, and pure pleasure is exactly the kind of thing that quietly
+        ends up built for pointers only.
 
-        No timer anywhere in here. It opens when pointed at and closes when
-        not, and `test-no-timeouts.sh` is right to refuse anything else: the
-        clock it shows is read once, when it opens, because a card that ticks
-        is a card that has to be redrawn forever behind an installer.
+        No timer anywhere in it. `test-no-timeouts.sh` refused an earlier
+        version that closed on a clock, correctly: a thing that goes away on a
+        timer is a thing that expires. The clock it shows is read when it
+        opens, because a card that ticks is a card being redrawn forever
+        behind an install.
         """
         card = Gtk.Popover()
-        card.set_autohide(False)
         card.set_position(Gtk.PositionType.TOP)
-        card.set_has_arrow(True)
         card.add_css_class("aurade-wallpaper-card")
         card.set_parent(button)
 
@@ -998,23 +1005,36 @@ class InstallerWindow(Adw.ApplicationWindow):
             box.append(item)
             self.widgets[f"card.{name}"] = item
 
-        hint = label(F.WALLPAPER_HINT, "m3-label-small", css="dim-label")
-        hint.set_xalign(0)
-        hint.set_margin_top(12)
-        box.append(hint)
+        another = Gtk.Button(label=F.WALLPAPER_HINT)
+        another.add_css_class("flat")
+        another.add_css_class("m3-label-large")
+        another.set_halign(Gtk.Align.START)
+        another.set_margin_top(10)
+        another.connect("clicked", lambda *_: self._another_wallpaper())
+        box.append(another)
 
         card.set_child(box)
         self.widgets["card"] = card
 
-        pointer = Gtk.EventControllerMotion()
-        pointer.connect("enter", lambda *_: self._show_wallpaper_card())
-        pointer.connect("leave", lambda *_: card.popdown())
-        button.add_controller(pointer)
+        button.connect("clicked", lambda *_: self._toggle_wallpaper_card())
 
         focus = Gtk.EventControllerFocus()
         focus.connect("enter", lambda *_: self._show_wallpaper_card())
-        focus.connect("leave", lambda *_: card.popdown())
         button.add_controller(focus)
+
+    def _another_wallpaper(self) -> None:
+        """A different picture, without leaving the card that described the last."""
+        self.next_wallpaper()
+        self._show_wallpaper_card()
+
+    def _toggle_wallpaper_card(self) -> None:
+        card = self.widgets.get("card")
+        if card is None:
+            return
+        if card.get_visible():
+            card.popdown()
+            return
+        self._show_wallpaper_card()
 
     def _show_wallpaper_card(self) -> None:
         entry = self.wallpaper_shown
@@ -1033,11 +1053,11 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["card.fact"].set_label(fact)
         self.widgets["card.fact"].set_visible(bool(fact))
 
-        # The clock, which is the part that is purely for fun and is the part
-        # most likely to lie. It is only shown when both halves are known: the
-        # picture has a real place, and this computer has been told where it
-        # is. A live image thinks it is on UTC until the timezone question is
-        # answered, and "midnight here" would then be a fact about nobody.
+        # The clock, which is the part that is purely for fun and the part most
+        # likely to lie. Shown only when both halves are known: the picture has
+        # a real place, and this computer has been told where it is. A live
+        # image thinks it is on UTC until the timezone question is answered,
+        # and "midnight here" would then be a fact about nobody.
         there, here = brand.local_times(entry.get("zone", ""))
         if there and here:
             clock = f"{there} {F.WALLPAPER_CARD_ELSEWHERE}, {here} {F.WALLPAPER_CARD_HERE}"
@@ -1464,6 +1484,23 @@ class InstallerWindow(Adw.ApplicationWindow):
         # Linear here on purpose: the easing is inside the drawing, where the
         # sweep and the ring need different curves from each other.
         animation.set_easing(Adw.Easing.LINEAR)
+        # Keep the target and the function it wraps, not only the animation.
+        #
+        # This is the only animation in this program that runs a Python
+        # function. The other three drive a property on a widget, so the whole
+        # arrangement is C objects holding C objects and nothing can be
+        # collected while it is in use. Here libadwaita holds a raw pointer to
+        # a closure over a local, and a local goes away when this method
+        # returns. What is left is an animation calling into freed memory
+        # sixty times a second, which is not an exception, has no traceback and
+        # ends the process.
+        #
+        # It is also the animation on the one transition that was crashing, and
+        # it explains why: leaving the welcome screen is the only place it
+        # plays, it took the process down under every renderer including the
+        # one with no GPU involved at all, and it left nothing behind.
+        self._swoop_frame = frame
+        self._swoop_target = target
         self._swoop_animation = animation
         animation.play()
 
@@ -1943,7 +1980,15 @@ class InstallerWindow(Adw.ApplicationWindow):
         return item
 
     def _refresh_readiness(self) -> None:
-        self.probe = self.model.probe()
+        # Both calls inside the guard, not one. The probe was outside it, so a
+        # bridge that had gone away took the exception all the way out to
+        # `on_forward`, which answers a bridge failure by putting up a dialog
+        # and closing. The readiness page can be drawn without a probe and
+        # cannot be drawn without a window.
+        try:
+            self.probe = self.model.probe()
+        except BridgeError:
+            pass
         try:
             report = self.model.call("readiness")
         except BridgeError:

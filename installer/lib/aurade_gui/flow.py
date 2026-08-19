@@ -395,6 +395,9 @@ WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 #: What the credit line in the corner offers. Said as an invitation rather
 #: than as an instruction, because nothing depends on anybody taking it up.
 WALLPAPER_HINT = "Show a different photograph"
+#: What the caption itself does now. The picture changes from inside the card
+#: rather than from the caption, so the caption opens and no longer swaps.
+WALLPAPER_CARD_HINT = "Read about this photograph"
 
 #: The card that appears when the caption is pointed at or focused.
 WALLPAPER_CARD_ELSEWHERE = "there"

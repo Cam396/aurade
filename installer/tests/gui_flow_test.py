@@ -271,6 +271,52 @@ for _state in ("pages", F.REVIEW, F.GATE, F.PROGRESS):
     check(F.engages(_state),
           f"leaving {_state} is not treated as a commitment, and a restart there would discard answers")
 
+
+# --- an animation that calls a Python function has to be held onto -----------
+#
+# A source check, which is the wrong shape for almost everything and the right
+# shape for this. The defect is not that something returns a wrong value, it is
+# that an object is not stored anywhere, and the symptom is a process that
+# stops existing sixty milliseconds later with no exception and no traceback to
+# catch.
+#
+# `Adw.CallbackAnimationTarget` holds a raw pointer to a Python closure and
+# nothing on the C side owns that closure, so a target kept only in a local is
+# collected when the method returns, and the animation then calls into freed
+# memory. `PropertyAnimationTarget` has no such problem: it drives a property
+# on a widget, which is C objects holding C objects all the way down.
+#
+# It lives here rather than with the other checks on this file because the
+# widget test needs introspection data installed and skips without it, and a
+# check that does not run on the machine the image is built on is not a check.
+#
+# This one cost two days. The single animation in this program that ran a
+# Python function was the one on the transition out of the welcome screen. It
+# took the process down under every renderer including the one with no GPU
+# involved at all, and it left nothing behind to read.
+_APP = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                    "..", "lib", "aurade_gui", "app.py")
+_lines = open(_APP, encoding="utf-8").read().splitlines()
+_made = [i for i, line in enumerate(_lines)
+         if "Adw.CallbackAnimationTarget.new(" in line]
+check(bool(_made),
+      "no callback animation targets found at all, so this check is now blind")
+for _index in _made:
+    # To the end of the method rather than a fixed number of lines. The first
+    # version looked ahead sixteen and the explanation of why the reference is
+    # kept is longer than that, so the check failed on the fixed code.
+    _window = []
+    for _line in _lines[_index:]:
+        if _window and _line.startswith("    def "):
+            break
+        _window.append(_line)
+    check(any("self._" in l and l.rstrip().endswith("= target") for l in _window),
+          f"app.py:{_index + 1}: the animation target is not kept on self, so the "
+          "animation will call into freed memory")
+    check(any("self._" in l and l.rstrip().endswith("= frame") for l in _window),
+          f"app.py:{_index + 1}: the function the animation calls is not kept on "
+          "self, so it is collected as soon as the method returns")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"test-gui-flow: {failure}", file=sys.stderr)
