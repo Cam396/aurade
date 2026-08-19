@@ -338,6 +338,15 @@ while IFS=$'\t' read -r label settings; do
         }
         exit "$status"
         ;;
+      quit)
+        # A decision, not a failure. Nothing else is tried whatever the exit
+        # status, because the one thing worse than an installer that will not
+        # start is one that will not stop: `cage` has no VT-switch bindings, so
+        # Quit is the only way out, and restarting on it leaves no way out at
+        # all.
+        say 'The installer closed. Nothing has been written to any disk.'
+        exit 0
+        ;;
       declined)
         # The front end itself said no: no model, no toolkit, or a probe that
         # says this machine cannot display one. Every remaining candidate

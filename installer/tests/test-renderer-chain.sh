@@ -15,6 +15,9 @@
 # drawn, and that report is what these tests exercise.
 set -Eeuo pipefail
 
+# shellcheck source=assert.sh
+. "$(dirname -- "$0")/assert.sh"
+
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -256,6 +259,26 @@ grep -q 'text installer ran' "$TMP/log" || \
 grep -q 'what each attempt printed is in' "$TMP/log" || \
   fail 'the chain failed without saying where the attempt output was kept'
 
+# The person asked to leave.
+#
+# `cage` is a kiosk compositor with no VT-switch bindings, so Quit is the only
+# way out of the graphical installer, and a Quit that ends the process looked
+# exactly like a window that died. The launcher does the right thing for a
+# window that died: it starts another one. So Quit restarted the installer, and
+# there was no way out of it at all. This is the one case where the exit status
+# must not be consulted, because leaving is a decision and not an outcome.
+reset_case
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_STAGE=quit
+AURADE_TEST_GUI_STATUS=1
+run_launcher
+(( $(grep -c '^cage ' "$TMP/log") == 1 )) || \
+  fail 'quitting the installer started another one'
+grep -q 'text installer ran' "$TMP/log" && \
+  fail 'quitting the graphical installer dropped into the text one'
+grep -q 'Nothing has been written to any disk' "$TMP/log" || \
+  fail 'leaving the installer did not say the disk was untouched'
+
 # The front end itself says the graphical installer cannot run here - no
 # toolkit, or a probe that predicts a black screen. That is not a renderer
 # finding, and walking the rest of the list only delays the text installer.
@@ -356,5 +379,44 @@ grep -Fq 'multi-user.target.wants/seatd.service' "$ROOT/installer/build-iso.sh" 
   echo 'test-renderer-chain: seatd is on the image and nothing starts it' >&2
   exit 1
 }
+
+# --- a dumb framebuffer is not negotiated with ---------------------------------
+#
+# The negotiation tries things for real rather than predicting them, because
+# predicting graphics is how you refuse to draw on a machine that would have
+# been fine. But there is a difference between a driver that might not manage
+# GL and one that has no GL at all, and for the second an attempt is not
+# evidence, it is a wait. On a virtual machine that wait is most of the black
+# screen somebody sits through.
+install -d "$TMP/dumb-dri" "$TMP/dumb-drm/card0/device" "$TMP/dumb-drm/card0-Virtual-1"
+: >"$TMP/dumb-dri/card0"
+printf 'DRIVER=bochs\n' >"$TMP/dumb-drm/card0/device/uevent"
+printf 'connected\n' >"$TMP/dumb-drm/card0-Virtual-1/status"
+
+AURADE_RENDERER_DRI_DIR="$TMP/dumb-dri" AURADE_RENDERER_DRM_DIR="$TMP/dumb-drm" \
+  bash -c '. "'"$ROOT"'/installer/lib/aurade-renderers.sh"; aurade_renderer_plan' >"$TMP/dumb.plan"
+refute grep -q 'WLR_RENDERER=gles2 WLR_DRM_DEVICES=' "$TMP/dumb.plan"
+refute grep -q 'WLR_RENDERER=vulkan' "$TMP/dumb.plan"
+grep -q 'WLR_RENDERER=pixman' "$TMP/dumb.plan" ||
+  { echo 'test-renderer-chain: a dumb framebuffer got no way to draw at all' >&2; exit 1; }
+# The software entries at the end are still there, because a card that cannot
+# be opened at all still has to fall through to something.
+grep -q 'software OpenGL' "$TMP/dumb.plan" ||
+  { echo 'test-renderer-chain: the software fallbacks were dropped along with the accelerated ones' >&2; exit 1; }
+
+AURADE_RENDERER_DRI_DIR="$TMP/dumb-dri" AURADE_RENDERER_DRM_DIR="$TMP/dumb-drm" \
+  bash -c '. "'"$ROOT"'/installer/lib/aurade-renderers.sh"; aurade_renderer_client_plan' >"$TMP/dumb.clients"
+[[ $(wc -l <"$TMP/dumb.clients") -eq 1 ]] ||
+  { echo "test-renderer-chain: a machine with no 3D got $(wc -l <"$TMP/dumb.clients") client attempts, not 1" >&2; exit 1; }
+grep -q 'GSK_RENDERER=cairo' "$TMP/dumb.clients" ||
+  { echo 'test-renderer-chain: the one client attempt on a dumb framebuffer still asks for hardware' >&2; exit 1; }
+
+# And a real card is still negotiated with, because "might not manage GL" is
+# exactly the case the chain exists for and predicting it is how a working
+# graphics card gets refused.
+AURADE_RENDERER_DRI_DIR="$TMP/dri" AURADE_RENDERER_DRM_DIR="$TMP/drm" \
+  bash -c '. "'"$ROOT"'/installer/lib/aurade-renderers.sh"; aurade_renderer_plan' >"$TMP/real.plan"
+grep -q 'WLR_RENDERER=gles2 WLR_DRM_DEVICES=' "$TMP/real.plan" ||
+  { echo 'test-renderer-chain: a real graphics card was skipped as though it had no 3D' >&2; exit 1; }
 
 echo 'installer renderer chain test: PASS'

@@ -3624,8 +3624,26 @@ class InstallerWindow(Adw.ApplicationWindow):
     def _on_quit_response(self, _dialog, response: str) -> None:
         if response != "quit":
             return
-        self.flow.cancel()
-        self.refresh()
+        # Say so before leaving, so the launcher knows this was a decision and
+        # not a crash. Without it a Quit that ends the process is
+        # indistinguishable from a window that died, and the launcher does the
+        # right thing for a window that died: it starts another one.
+        S.report(S.QUIT)
+        # And go, rather than showing a screen that says nothing was written
+        # and offers nothing to press.
+        #
+        # On a desktop that screen is a window somebody closes. Here it is
+        # inside `cage`, a kiosk compositor with no VT-switch bindings, so
+        # there is no window furniture, no other console, and nothing to do
+        # next. Quit stopped there, so Quit did not quit, and there was no way
+        # out of the installer at all.
+        #
+        # Closing on a short timer instead was the first attempt and
+        # `test-no-timeouts.sh` refused it, correctly: a screen that goes away
+        # on a clock is a screen that expires, and that rule has no exceptions.
+        # The reassurance belongs on the dialog that asked, where it already
+        # is, and on the console this returns to, where the launcher says it.
+        self.close()
 
     def _start_plan(self) -> None:
         self.forward_button.set_sensitive(False)
