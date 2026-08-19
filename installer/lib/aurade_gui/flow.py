@@ -396,6 +396,13 @@ WELCOME_ASSURANCE = "Nothing is written to any disk until you confirm."
 #: than as an instruction, because nothing depends on anybody taking it up.
 WALLPAPER_HINT = "Show a different photograph"
 
+#: The card that appears when the caption is pointed at or focused.
+WALLPAPER_CARD_ELSEWHERE = "there"
+WALLPAPER_CARD_HERE = "here"
+#: Said instead of a time when the picture is not of anywhere, so there is no
+#: clock to read. Nothing is invented to fill the space.
+WALLPAPER_CARD_NOWHERE = "Not anywhere in particular."
+
 #: The Bible, offered quietly on the welcome page and nowhere else.
 #:
 #: A small button at the bottom, and no explanation attached to it. Somebody

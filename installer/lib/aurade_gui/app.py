@@ -939,10 +939,118 @@ class InstallerWindow(Adw.ApplicationWindow):
         button.set_margin_end(24)
         button.set_margin_bottom(10)
         button.set_visible(False)
-        button.set_tooltip_text(F.WALLPAPER_HINT)
         button.connect("clicked", lambda *_: self.next_wallpaper())
         self.widgets["caption"] = button
+        self._attach_wallpaper_card(button)
         return button
+
+    def _attach_wallpaper_card(self, button: Gtk.Widget) -> None:
+        """Where the picture is, what is in it, and one true thing about it.
+
+        The caption already answers "where is that". This answers the question
+        immediately after it, which people ask out loud at other people's
+        computers and have never had anywhere to ask here.
+
+        It replaces the tooltip rather than sitting next to it. A tooltip
+        saying "Show a different photograph" over a card that says what the
+        place is would be two boxes fighting for the same corner, and the card
+        says what the button does at the bottom of it instead.
+
+        On pointer and on focus both. A card that only exists for a mouse is a
+        card half the people who would enjoy it cannot reach, and this one is
+        pure pleasure, which is exactly the kind of thing that quietly gets
+        built for pointers only.
+
+        No timer anywhere in here. It opens when pointed at and closes when
+        not, and `test-no-timeouts.sh` is right to refuse anything else: the
+        clock it shows is read once, when it opens, because a card that ticks
+        is a card that has to be redrawn forever behind an installer.
+        """
+        card = Gtk.Popover()
+        card.set_autohide(False)
+        card.set_position(Gtk.PositionType.TOP)
+        card.set_has_arrow(True)
+        card.add_css_class("aurade-wallpaper-card")
+        card.set_parent(button)
+
+        box = column(0)
+        box.set_size_request(300, -1)
+
+        picture = Gtk.Picture()
+        picture.set_size_request(276, 154)
+        picture.set_content_fit(Gtk.ContentFit.COVER)
+        picture.add_css_class("aurade-wallpaper-thumb")
+        picture.set_margin_bottom(14)
+        A.decorative(picture)
+        box.append(picture)
+        self.widgets["card.picture"] = picture
+
+        for name, style, css, gap in (
+            ("title", "m3-title-medium", "", 6),
+            ("note", "m3-body-medium", "dim-label", 10),
+            ("fact", "m3-body-medium", "", 10),
+            ("clock", "m3-label-medium", "dim-label", 0),
+        ):
+            item = label("", style, css=css)
+            item.set_wrap(True)
+            item.set_xalign(0)
+            item.set_margin_bottom(gap)
+            box.append(item)
+            self.widgets[f"card.{name}"] = item
+
+        hint = label(F.WALLPAPER_HINT, "m3-label-small", css="dim-label")
+        hint.set_xalign(0)
+        hint.set_margin_top(12)
+        box.append(hint)
+
+        card.set_child(box)
+        self.widgets["card"] = card
+
+        pointer = Gtk.EventControllerMotion()
+        pointer.connect("enter", lambda *_: self._show_wallpaper_card())
+        pointer.connect("leave", lambda *_: card.popdown())
+        button.add_controller(pointer)
+
+        focus = Gtk.EventControllerFocus()
+        focus.connect("enter", lambda *_: self._show_wallpaper_card())
+        focus.connect("leave", lambda *_: card.popdown())
+        button.add_controller(focus)
+
+    def _show_wallpaper_card(self) -> None:
+        entry = self.wallpaper_shown
+        card = self.widgets.get("card")
+        if entry is None or card is None:
+            return
+
+        self.widgets["card.picture"].set_filename(entry["path"])
+        self.widgets["card.title"].set_label(entry["title"] or entry["file"])
+
+        note = entry.get("note", "")
+        self.widgets["card.note"].set_label(note)
+        self.widgets["card.note"].set_visible(bool(note))
+
+        fact = entry.get("fact", "")
+        self.widgets["card.fact"].set_label(fact)
+        self.widgets["card.fact"].set_visible(bool(fact))
+
+        # The clock, which is the part that is purely for fun and is the part
+        # most likely to lie. It is only shown when both halves are known: the
+        # picture has a real place, and this computer has been told where it
+        # is. A live image thinks it is on UTC until the timezone question is
+        # answered, and "midnight here" would then be a fact about nobody.
+        there, here = brand.local_times(entry.get("zone", ""))
+        if there and here:
+            clock = f"{there} {F.WALLPAPER_CARD_ELSEWHERE}, {here} {F.WALLPAPER_CARD_HERE}"
+        elif there:
+            clock = f"{there} {F.WALLPAPER_CARD_ELSEWHERE}"
+        elif entry.get("place", ""):
+            clock = ""
+        else:
+            clock = F.WALLPAPER_CARD_NOWHERE
+        self.widgets["card.clock"].set_label(clock)
+        self.widgets["card.clock"].set_visible(bool(clock))
+
+        card.popup()
 
     def _build_advanced_toggle(self) -> Gtk.Widget:
         """A way in to the advanced page that does not require finding it.

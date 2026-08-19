@@ -222,10 +222,23 @@ def wallpapers() -> list[dict[str, str]]:
         path = os.path.join(directory, parts[0])
         if not os.path.exists(path):
             continue
+        def field(index: int) -> str:
+            return parts[index] if len(parts) > index else ""
+
         _wallpapers.append({
             "file": parts[0],
-            "title": parts[1] if len(parts) > 1 else "",
-            "place": parts[2] if len(parts) > 2 else "",
+            "title": field(1),
+            "place": field(2),
+            # 3 and 4 are the pixel dimensions, which nothing reads: they are
+            # in the manifest so the set can be checked without opening every
+            # file.
+            "zone": field(5),
+            "note": field(6),
+            # A dash means the picture is not of anywhere, so there is nothing
+            # true to say about where it is. Read as absence rather than as
+            # text, because a card showing a literal dash is worse than a card
+            # with one fewer line on it.
+            "fact": "" if field(7) == "-" else field(7),
             "path": path,
         })
     return _wallpapers
@@ -800,3 +813,44 @@ def draw_signal(cr, width: int, height: int, strength: int, colour: str,
         cr.new_path()
         cr.arc(cx, cy, radius, math.radians(218), math.radians(322))
         cr.stroke()
+
+
+def local_times(zone: str) -> tuple[str, str]:
+    """What time it is where the picture was taken, and what time it is here.
+
+    Two strings, either of which may be empty. Empty means there is nothing
+    honest to say: no zone on the picture, no zone database on this machine, or
+    a name the database does not have.
+
+    The second one is deliberately withheld while this computer still thinks it
+    is on UTC, which is what a live image thinks until somebody answers the
+    timezone question. "11:12 pm here" is a fact about the reader's evening and
+    it would be a guess, and a guess next to a real answer reads as two real
+    answers.
+    """
+    if not zone:
+        return "", ""
+    try:
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+    except ImportError:  # pragma: no cover - stdlib since 3.9
+        return "", ""
+    import datetime  # noqa: PLC0415
+
+    try:
+        there = datetime.datetime.now(ZoneInfo(zone))
+    except Exception:  # pragma: no cover - no tzdata on this machine
+        return "", ""
+
+    def spoken(when: datetime.datetime) -> str:
+        # Lower case am and pm, and no leading zero on the hour, because this
+        # is a sentence rather than a timetable.
+        hour = when.hour % 12 or 12
+        return f"{hour}:{when.minute:02d} {'am' if when.hour < 12 else 'pm'}"
+
+    here = datetime.datetime.now().astimezone()
+    offset = here.utcoffset()
+    if offset is None or not offset.total_seconds():
+        return spoken(there), ""
+    if here.utcoffset() == there.utcoffset():
+        return spoken(there), ""
+    return spoken(there), spoken(here)

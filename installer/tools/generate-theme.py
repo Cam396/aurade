@@ -725,6 +725,21 @@ COMPONENT_CSS = r"""
   min-width: 0;
 }
 
+/* ---- the card behind the caption ---------------------------------------
+   Where the picture is, what is in it, and one true thing about the place.
+   A surface rather than a tooltip, because it holds a photograph and four
+   lines of text and a tooltip holds neither of those well. The radius is the
+   dialog radius rather than the tooltip radius for the same reason: it is a
+   small piece of the interface, not a label that grew. */
+.aurade-wallpaper-card > contents {
+  padding: 16px;
+  border-radius: 18px;
+}
+
+.aurade-wallpaper-thumb {
+  border-radius: 12px;
+}
+
 /* ---- the erase gate: serious, and legible ------------------------------
    This was `background: @m3_error_container` on a pane whose own padding is
    16px, with a boxed list inside it painting its own surface on top. The fill
