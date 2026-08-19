@@ -191,6 +191,10 @@ class Bridge:
     def export(self, status: int) -> dict[str, Any]:
         return self.call("export", str(int(status)))
 
+    def reboot(self) -> dict[str, Any]:
+        """Ask the privileged model to restart after explicit confirmation."""
+        return self.call("reboot")
+
 
 def find_bridge(self_dir: str) -> str | None:
     """Where the model process lives, image first, source tree second."""

@@ -900,6 +900,23 @@ gb_stop() {
   _gb_ok '"stopping":true'
 }
 
+# Reboot only after the renderer has shown the finished screen and asked for a
+# second confirmation. Keeping the privileged operation here leaves the GUI as
+# a renderer: it cannot accidentally gain a direct systemctl path while it is
+# handling an ordinary button click. `--no-block` lets the response reach the
+# renderer before systemd takes the live session down.
+gb_reboot() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    _gb_err 'the system could not be restarted from this image'
+    return 0
+  fi
+  if systemctl --no-block reboot >/dev/null 2>&1; then
+    _gb_ok '"restarting":true'
+  else
+    _gb_err 'the system could not be restarted'
+  fi
+}
+
 gb_failure() {
   local record stage cause message out
   record=$(journal_last_failed)
@@ -1097,6 +1114,7 @@ _gb_dispatch_full() {
     execute) gb_execute "$argument"; return 0 ;;
     wait)    gb_wait; return 0 ;;
     stop)    gb_stop; return 0 ;;
+    reboot)  gb_reboot; return 0 ;;
   esac
   _gb_common "$command" "$argument" && return 0
   _gb_err "unknown command: $command"

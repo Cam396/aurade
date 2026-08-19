@@ -512,6 +512,23 @@ with session(program=BARE_BRIDGE, AURADE_FAILURE_HELPER=None) as model:
         f"a missing export helper gave a poor message: {result}",
     )
 
+# Restart is a privileged model operation, not a renderer subprocess. The
+# fixture records the exact systemctl shape and the bridge returns before the
+# simulated system goes away.
+with session(PATH=f"{TMP}/stub:{os.environ['PATH']}") as model:
+    result = model.reboot()
+    check(result.get("ok"), f"the bridge refused a confirmed restart: {result}")
+    check(result.get("restarting"), f"the bridge did not acknowledge restart: {result}")
+    with open(os.path.join(TMP, "systemctl.calls")) as handle:
+        equal(handle.read().strip(), "--no-block reboot",
+              "the bridge used an unexpected restart command")
+
+with session(plan_only=True, PATH=f"{TMP}/stub:{os.environ['PATH']}") as model:
+    result = model.reboot()
+    check(not result.get("ok"), "plan-only mode exposed a restart command")
+    check("unknown command" in result.get("error", ""),
+          f"plan-only restart was refused rather than absent: {result}")
+
 # Two saves in the same second. The second one has nowhere new to write, and
 # must not inherit the first one's success.
 with session() as model:

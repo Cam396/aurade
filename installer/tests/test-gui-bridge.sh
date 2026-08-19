@@ -106,6 +106,12 @@ printf '%s\n' "$1" >>"$AURADE_TEST_LOADKEYS_LOG"
 exit 0
 STUB
 
+cat >"$TMP/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$AURADE_STUB_DIR/systemctl.calls"
+[[ $* == "--no-block reboot" ]]
+STUB
+
 # Exits non-zero and writes nothing. Its exit status is deliberately 2, which
 # is also a status a real install can exit with, which is exactly why the
 # export check looks at the artifact instead.
@@ -169,7 +175,8 @@ exit 1
 STUB
 
 chmod +x "$TMP/stub-engine" "$TMP/stub/loadkeys" "$TMP/stub/broken-helper" \
-  "$TMP/stub/net-ok" "$TMP/stub/net-bad" "$TMP/stub/nmcli"
+  "$TMP/stub/net-ok" "$TMP/stub/net-bad" "$TMP/stub/nmcli" \
+  "$TMP/stub/systemctl"
 : >"$TMP/loadkeys.log"
 
 # A search path with everything the bridge needs and no loadkeys, so the

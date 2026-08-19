@@ -753,6 +753,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._gate_token = ""
         self._export_notice = None
         self._wifi_target = ""
+        #: The waiting card is shared with the progress page. On the done
+        #: screen it moves into a dialog so the install can be finished without
+        #: building a second arcade or letting a game hide the outcome.
+        self._done_arcade_dialog = None
 
         self.set_title(WINDOW_TITLE)
         self.set_default_size(980, 720)
@@ -2992,7 +2996,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         group.add(steps)
         box.append(group)
 
-        box.append(self._build_waiting())
+        self.widgets["progress.host"] = box
+        waiting = self._build_waiting()
+        self.widgets["progress.waiting"] = waiting
+        box.append(waiting)
         return page_shell(box)
 
     # -- the ten minutes in the middle -------------------------------------
@@ -3627,6 +3634,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.append(label(body, "m3-body-large", center=True))
         if name == F.DONE:
             box.append(self._build_done_facts())
+            box.append(self._build_done_arcade_button())
         extra = label("", "m3-body-medium", center=True, css="dim-label")
         extra.set_margin_top(16)
         extra.set_visible(False)
@@ -3664,6 +3672,64 @@ class InstallerWindow(Adw.ApplicationWindow):
             grid.attach(value, 1, row_index, 1, 1)
         self.widgets["done.facts"] = grid
         return grid
+
+    def _build_done_arcade_button(self) -> Gtk.Widget:
+        """Offer the waiting card again, without hiding the finished result.
+
+        The progress card already has the picker, board and accessibility
+        descriptions. Reusing that widget in a dialog keeps one source of
+        truth for every game and leaves the done screen readable while a game
+        is open. Closing the dialog returns the card to the progress page for
+        the next install.
+        """
+        button = Gtk.Button(label=F.DONE_PLAY)
+        button.add_css_class("pill")
+        button.set_halign(Gtk.Align.CENTER)
+        button.set_margin_top(22)
+        button.connect("clicked", lambda _button: self._open_done_arcade())
+        A.described(button, F.DONE_PLAY,
+                    "Open the waiting card without changing the installed system.")
+        self.widgets["done.play"] = button
+        return button
+
+    def _open_done_arcade(self) -> None:
+        """Move the existing waiting card into a closable finished-state view."""
+        waiting = self.widgets.get("progress.waiting")
+        if waiting is None or self._done_arcade_dialog is not None:
+            return
+        self._show_wait("tips")
+        waiting.unparent()
+
+        header = Adw.HeaderBar()
+        title = label(F.WAIT_ARENA, "m3-title-medium")
+        header.set_title_widget(title)
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(waiting)
+
+        dialog = Adw.Dialog()
+        dialog.set_title(F.WAIT_ARENA)
+        dialog.set_content_width(760)
+        dialog.set_content_height(560)
+        dialog.set_child(toolbar)
+        dialog.connect("closed", self._on_done_arcade_closed)
+        self._done_arcade_dialog = dialog
+        dialog.present(self)
+
+    def _on_done_arcade_closed(self, _dialog) -> None:
+        """Stop the game and put the shared card back where the next run uses it."""
+        waiting = self.widgets.get("progress.waiting")
+        if waiting is None:
+            self._done_arcade_dialog = None
+            return
+        self._stop_arcade()
+        parent = waiting.get_parent()
+        if parent is not None:
+            waiting.unparent()
+        host = self.widgets.get("progress.host")
+        if host is not None:
+            host.append(waiting)
+        self._done_arcade_dialog = None
 
     def _build_failure(self):
         box = column(16)
@@ -3753,7 +3819,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         elif key == "log":
             self._show_log()
         elif key == "reboot":
-            Gio.Subprocess.new(["systemctl", "reboot"], Gio.SubprocessFlags.NONE)
+            self._confirm_reboot()
 
     def _show_log(self) -> None:
         path = self.model.failure().get("raw_log", "")
@@ -4249,6 +4315,9 @@ class InstallerWindow(Adw.ApplicationWindow):
 
     def on_forward(self) -> None:
         state = self.flow.state
+        if state == F.DONE:
+            self._confirm_reboot()
+            return
         # Continue is the point of no return for the renderer chain, because
         # after it there are answers on screen that a restart under a different
         # renderer would silently discard. Every Continue except the first one.
@@ -4288,6 +4357,39 @@ class InstallerWindow(Adw.ApplicationWindow):
     def on_secondary(self) -> None:
         if self.flow.state == F.PROGRESS:
             self.stop_install()
+
+    def _confirm_reboot(self) -> None:
+        """Require a deliberate second action before restarting the machine."""
+        if self.flow.state == F.DONE:
+            body = ("The installation is finished. Remove the installation "
+                    "media after the computer begins restarting.")
+        else:
+            body = ("The installer has stopped. Restart the computer to leave "
+                    "this session and try again.")
+        dialog = Adw.AlertDialog(
+            heading="Restart this computer?",
+            body=body)
+        dialog.add_response("stay", "Keep this screen")
+        dialog.add_response("restart", "Restart")
+        dialog.set_response_appearance("restart", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("stay")
+        dialog.set_close_response("stay")
+        dialog.connect("response", self._on_reboot_response)
+        dialog.present(self)
+
+    def _on_reboot_response(self, _dialog, response: str) -> None:
+        if response != "restart":
+            return
+        try:
+            result = self.model.reboot()
+        except BridgeError as exc:
+            self._toast(str(exc))
+            return
+        if not result.get("ok"):
+            self._toast(result.get("error", "The system could not be restarted."))
+            return
+        self.forward_button.set_sensitive(False)
+        self._toast("Restarting")
 
     def on_back(self) -> None:
         self.skip_swoop()

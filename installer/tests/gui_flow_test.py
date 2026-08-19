@@ -156,6 +156,10 @@ equal(nav.back_action(), "", "the progress screen offers a back control")
 equal(nav.forward_label(), "", "the progress screen offers a forward control")
 equal(nav.cancel(), F.PROGRESS, "the progress screen could be cancelled")
 
+nav.state = F.DONE
+equal(nav.forward_label(), "Restart", "the done screen has no restart control")
+equal(nav.back_action(), "", "the done screen offers an unexpected back control")
+
 # Stated as a graph property as well as a label one, because "no cancel after
 # the erase gate" is really "nothing downstream of the gate leads back to a
 # screen that says nothing was written".

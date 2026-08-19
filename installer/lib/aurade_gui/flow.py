@@ -376,6 +376,8 @@ class Flow:
             return "Check the plan" if self.plan_only else "Continue"
         if self.state == GATE:
             return "Erase and install"
+        if self.state == DONE:
+            return "Restart"
         return ""
 
     def step_position(self) -> str:
@@ -592,6 +594,8 @@ WAIT_ARENA_IDLE = (
 )
 
 DONE_TITLE = "You are all set"
+DONE_RESTART = "Restart"
+DONE_PLAY = "Keep playing"
 DONE_BODY = (
     "Take out the installation media and restart. Sign in with the username "
     "and password you chose."

@@ -936,6 +936,12 @@ def run_done_screen(window: InstallerWindow) -> None:
               f"the facts block {where} is showing with nothing in it, or "
               "hiding with something in it")
 
+        play = window.widgets.get("done.play")
+        check(play is not None and play.get_label() == F.DONE_PLAY,
+              "the done screen does not offer its waiting card")
+        check(play is not None and play.get_visible(),
+              "the done screen's waiting-card control is hidden")
+
     # Both halves of the rule, because the fixture answers no questions and a
     # test that only ever sees empty values proves the block can hide and
     # proves nothing at all about it filling in. The empty pass first, while
