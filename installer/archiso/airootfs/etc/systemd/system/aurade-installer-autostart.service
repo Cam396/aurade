@@ -17,6 +17,12 @@ After=systemd-vconsole-setup.service systemd-user-sessions.service dev-tty1.devi
 # have no `splash`, and on those plymouth never starts and this constrains
 # nothing.
 After=plymouth-quit.service
+# And the seat manager, for the same class of reason. wlroots asks libseat for
+# a seat before it looks at a graphics device, and libseat can only get one
+# from seatd or from a logind session, which a oneshot service does not have.
+# Both this and seatd are wanted by multi-user.target, so without the ordering
+# they start in whatever order systemd picks.
+After=seatd.service
 Before=getty@tty1.service
 Wants=dev-tty1.device
 # Not when the boot menu asked for the serial console. That entry has its own

@@ -198,6 +198,48 @@ prepare_runtime_dir() {
 
 prepare_runtime_dir || run_text
 
+# Make sure there is a seat before anything asks for one.
+#
+# wlroots asks libseat for a seat before it looks at a graphics device, and
+# libseat has two ways to get one: the seatd daemon on /run/seatd.sock, or a
+# logind session. A live console started from a systemd oneshot has no logind
+# session, so on this image the answer has to be seatd, and without it every
+# renderer in the negotiation fails identically for a reason that has nothing
+# to do with graphics.
+#
+# The unit is ordered after `seatd.service`, which is the real fix. This is
+# here anyway because `Type=simple` means systemd calls the service started
+# when it has been executed, not when its socket exists, so the ordering alone
+# still leaves a race, and losing it costs the whole graphical installer.
+AURADE_SEAT_SOCKET=${AURADE_SEAT_SOCKET:-/run/seatd.sock}
+
+seat_available() {
+  [[ -S $AURADE_SEAT_SOCKET ]] && return 0
+  # A session that already has logind behind it needs no daemon.
+  [[ -n ${XDG_SESSION_ID:-} ]] && return 0
+  return 1
+}
+
+prepare_seat() {
+  local waited=0
+  seat_available && return 0
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl start seatd.service >/dev/null 2>&1 || true
+  fi
+  # Three seconds, in tenths, because the daemon either binds its socket almost
+  # at once or is not going to. Waiting longer would only add to the black
+  # screen this whole path exists to prevent.
+  while (( waited < 30 )); do
+    seat_available && return 0
+    sleep 0.1
+    waited=$(( waited + 1 ))
+  done
+  note 'no seat manager is running, so the compositor will not be able to start'
+  return 1
+}
+
+prepare_seat || true
+
 renderer_lib=$(_find_lib aurade-renderers.sh) || {
   say 'Starting the text installer, which installs exactly the same system.'
   note 'the renderer list is missing from this image'

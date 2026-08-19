@@ -270,6 +270,13 @@ ln -s /dev/null "$STAGE/airootfs/etc/systemd/system/systemd-firstboot.service"
 ln -s /usr/lib/systemd/system/NetworkManager.service "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
 ln -s /usr/lib/systemd/system/aurade-refresh-mirrors.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-refresh-mirrors.service"
+# The seat manager. wlroots asks libseat for a seat before it looks at a
+# graphics device, libseat can only get one from seatd or from logind, and the
+# autostart is a systemd oneshot with no logind session. seatd was on the image
+# and was never enabled, so there was no seat, so the graphical installer could
+# not start on any machine at all.
+ln -s /usr/lib/systemd/system/seatd.service \
+  "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/seatd.service"
 ln -s /etc/systemd/system/aurade-installer-autostart.service \
   "$STAGE/airootfs/etc/systemd/system/multi-user.target.wants/aurade-installer-autostart.service"
 # Both are enabled and their conditions decide which one runs. The serial unit

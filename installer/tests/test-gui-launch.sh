@@ -175,6 +175,84 @@ out=$(PYTHONPATH="$TMP/no-gi" AURADE_PROBE_DRI_DIR="$TMP/dri" \
 grep -q 'graphical toolkit is not installed' <<<"$out" ||
   fail "self-check did not name the missing toolkit: $out"
 
+# --- the seat, without which no compositor starts at all ---------------------
+#
+# wlroots asks libseat for a seat before it looks at a graphics device, and
+# libseat can only get one from the seatd daemon or from a logind session. The
+# autostart is a systemd oneshot and has no logind session, so on this image it
+# has to be seatd, and when it is not there every renderer in the negotiation
+# fails identically for a reason that has nothing to do with graphics.
+#
+# `env -u XDG_SESSION_ID` on the cases that are about the daemon. The build
+# host runs these under a logind session and passes its `XDG_SESSION_ID` down,
+# which is a seat by the other route and is exactly what the launcher checks
+# for, so without this the machine running the tests answers the question the
+# tests are asking.
+#
+# A real socket, because `-S` is the test and a regular file would pass a
+# weaker one.
+python3 -c "
+import socket
+s = socket.socket(socket.AF_UNIX)
+s.bind('$TMP/seat.sock')
+" || fail 'could not make a socket to stand in for the seat manager'
+
+cat >"$TMP/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+printf 'systemctl %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+exit 0
+STUB
+chmod +x "$TMP/stub/systemctl"
+
+# A seat that is already there is used, and nothing is started on its behalf.
+launch
+env -u XDG_SESSION_ID PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  AURADE_SEAT_SOCKET="$TMP/seat.sock" \
+  "$TMP/bin/aurade-installer-start" >/dev/null 2>&1 ||
+  fail 'the launcher failed with a seat manager already running'
+logged 'cage -- ' || fail 'a machine with a seat did not start the compositor'
+refute grep -Fq 'systemctl start seatd' "$TMP/launch.log"
+
+# No seat, and the launcher asks for one.
+# Under `timeout`, and that is the assertion rather than a stopwatch after the
+# fact. A wait with no end is the black screen this whole path exists to
+# prevent, moved one layer down and made permanent, and measuring how long the
+# launcher took only works if it comes back. The first version of this test
+# measured afterwards, and the mutation that removed the bound hung the suite
+# instead of failing it.
+launch
+set +e
+out=$(timeout 15 env -u XDG_SESSION_ID PATH="$TMP/stub:$PATH" \
+  AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  AURADE_SEAT_SOCKET="$TMP/no-such-seat.sock" \
+  "$TMP/bin/aurade-installer-start" 2>&1)
+seat_status=$?
+set -e
+(( seat_status != 124 )) ||
+  fail 'the launcher waited without end for a seat manager that was never coming'
+(( seat_status == 0 )) ||
+  fail "the launcher failed with no seat manager (status $seat_status): $out"
+logged 'systemctl start seatd.service' ||
+  fail 'the launcher did not try to start the seat manager'
+grep -q 'no seat manager is running' <<<"$out" ||
+  fail "a missing seat manager was not named: $out"
+# And it still tries, because a machine may have a seat by a route this cannot
+# see, and refusing to try would turn a maybe into a no.
+logged 'cage -- ' ||
+  fail 'a missing seat manager stopped the compositor being tried at all'
+
+# A logind session is the other way to have a seat, and needs no daemon.
+launch
+XDG_SESSION_ID=3 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  AURADE_SEAT_SOCKET="$TMP/no-such-seat.sock" \
+  "$TMP/bin/aurade-installer-start" >/dev/null 2>&1 ||
+  fail 'the launcher failed inside a logind session'
+refute grep -Fq 'systemctl start seatd' "$TMP/launch.log"
+
+# Every launcher case below has a seat, so none of them spends three seconds
+# discovering it has not.
+export AURADE_SEAT_SOCKET="$TMP/seat.sock"
+
 # --- the launcher chooses, and says what it chose ----------------------------
 
 launch

@@ -288,29 +288,72 @@ grep -q '^cage renderer=pixman' "$TMP/log" || \
 
 # --- the seat, which is what actually stopped this working -------------------
 #
-# wlroots asks libseat for a seat before it looks at a graphics device. On the
-# real image both of libseat's usual backends were unavailable: seatd was never
-# added to the installer image, and the autostart runs as a systemd oneshot
-# with no logind session. Every compositor entry then failed identically,
-# before any renderer was chosen, which is why a machine with working graphics
-# spent 35 seconds trying and landed in the text installer.
+# wlroots asks libseat for a seat before it looks at a graphics device, and
+# libseat has exactly two ways to give it one: the seatd daemon on
+# /run/seatd.sock, or a logind session. The autostart is a systemd oneshot and
+# has no logind session, and seatd was on the image and never enabled. So every
+# compositor entry failed identically, before any renderer was chosen, and a
+# machine with working graphics spent the length of the chain failing and
+# landed in the text installer.
 #
-# It has to be on every entry rather than on one fallback entry: the seat is
-# not one of the things being negotiated.
-missing=0
+# The fix applied to that was `LIBSEAT_BACKEND=builtin` on every entry, and
+# there was a test here asserting the setting was present on every entry. It
+# passed. `builtin` is a real libseat backend and it is a build option that
+# Arch does not enable, so the string is not in the shipped library at all, and
+# every entry went on failing one error message later:
+#
+#   [libseat] No backend matched name 'builtin'
+#
+# The test checked that a setting was there. Nothing checked it named anything,
+# which was the entire question, and the suite reported a working installer for
+# three days.
+#
+# So the assertion is inverted. Naming a backend can only narrow what libseat
+# would have tried by itself, and the one time it was done it narrowed it to
+# nothing. If a future change does name one, it has to be a backend that
+# exists.
+LIBSEAT_REAL='seatd logind'
+named=0
 while IFS=$'\t' read -r label settings; do
   [[ -n $label ]] || continue
   case $settings in
-    *LIBSEAT_BACKEND=builtin*) ;;
-    *) echo "test-renderer-chain: '$label' does not ask for a seat it can open" >&2
-       missing=$(( missing + 1 )) ;;
+    *LIBSEAT_BACKEND=*)
+      backend=${settings##*LIBSEAT_BACKEND=}
+      backend=${backend%% *}
+      case " $LIBSEAT_REAL " in
+        *" $backend "*) ;;
+        *) echo "test-renderer-chain: '$label' asks for a libseat backend that does not exist: $backend" >&2
+           named=$(( named + 1 )) ;;
+      esac
+      ;;
   esac
 done < <(aurade_renderer_plan)
-(( missing == 0 )) || exit 1
+(( named == 0 )) || exit 1
 
-# And the daemon is on the image as well, so the ordinary path works too.
+# The obvious strengthening of that check is to read the names out of a real
+# libseat instead of a list in this file, and it is wrong, which is worth
+# writing down because it looks right and it was tried.
+#
+# Which backends exist is decided when libseat is compiled, and the build host
+# is not the image. This tree builds on Ubuntu, whose libseat carries `logind`
+# and `builtin` and no `seatd`. The Arch image it produces carries `seatd` and
+# `logind` and no `builtin`. So checking the host's library would have failed
+# on the correct setting and passed on the one that was broken, which is worse
+# than not checking at all.
+#
+# The library that matters is the one pacman installs during the ISO build, and
+# it does not exist when this runs. Naming no backend is what makes that
+# unanswerable question stop mattering.
+
+# The daemon is on the image, and it is enabled. Being on the image was already
+# true and was not enough: nothing started it, so the socket every entry needs
+# was never there.
 grep -Fxq 'seatd' "$ROOT/installer/archiso/packages.x86_64" || {
   echo 'test-renderer-chain: seatd is not on the image' >&2
+  exit 1
+}
+grep -Fq 'multi-user.target.wants/seatd.service' "$ROOT/installer/build-iso.sh" || {
+  echo 'test-renderer-chain: seatd is on the image and nothing starts it' >&2
   exit 1
 }
 

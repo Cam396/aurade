@@ -188,6 +188,20 @@ grep -Fxq 'After=plymouth-quit.service' "$console_unit" || {
   echo 'test-build-iso-stage: the installer can start before the boot screen has gone' >&2
   exit 1
 }
+# The seat, which is the other thing that has to exist before a compositor can
+# start and the one that stopped this working at all. libseat can get a seat
+# from seatd or from a logind session, and a systemd oneshot has no logind
+# session, so on this image it has to be seatd. Both units are wanted by
+# multi-user.target, so without the ordering they start in whatever order
+# systemd picks, and losing that race costs the whole graphical installer.
+grep -Fxq 'After=seatd.service' "$console_unit" || {
+  echo 'test-build-iso-stage: the installer can start before there is a seat to open' >&2
+  exit 1
+}
+[[ -L $TMP/work/profile/airootfs/etc/systemd/system/multi-user.target.wants/seatd.service ]] || {
+  echo 'test-build-iso-stage: seatd is on the image and nothing starts it' >&2
+  exit 1
+}
 grep -Fq 'TTYPath=/dev/ttyS0' "$serial_unit" || {
   echo 'test-build-iso-stage: the serial unit does not put the installer on the serial line' >&2
   exit 1
