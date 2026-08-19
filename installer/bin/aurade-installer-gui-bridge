@@ -160,7 +160,11 @@ gb_disks() {
   while IFS='|' read -r path size model tran serial; do
     [[ -n $path ]] || continue
     out+="${sep}{\"path\":$(_gb_str "$path"),\"size\":$(_gb_str "$size"),"
+    # Both: the raw code, because the removable check compares against it, and
+    # the words, because the raw code is what put `SPI` under a disk somebody
+    # was about to erase.
     out+="\"model\":$(_gb_str "$model"),\"transport\":$(_gb_str "$tran"),"
+    out+="\"connection\":$(_gb_str "$(connection_label "$tran")"),"
     # What is already on it, and whether it is the one this installer is
     # running from. Both come from the text installer's own functions rather
     # than a second implementation, so the two front ends cannot describe the
@@ -436,6 +440,7 @@ gb_target() {
   out+="\"serial\":$(_gb_str "$(disk_serial "$target")"),"
   out+="\"size\":$(_gb_str "$(disk_field "$target" 2)"),"
   out+="\"transport\":$(_gb_str "$(disk_field "$target" 4)"),"
+  out+="\"connection\":$(_gb_str "$(connection_label "$(disk_field "$target" 4)")"),"
   out+="\"layout\":$(_gb_str "$layout"),"
   out+="\"token\":$(_gb_str "$(aurade_confirmation_token "$target" "$layout")")}"
   _gb_emit "$out"

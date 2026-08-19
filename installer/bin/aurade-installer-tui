@@ -320,10 +320,15 @@ _disk_table_raw() {
       if (!end) return ""
       return substr(rest, 1, end - 1)
     }
+    # A drive that does not report a model reports nothing, and the screens
+    # decide what to say about that. This used to fill in the word "unknown"
+    # here, which is the one word the erase gate is written not to use: both
+    # front ends carry a fallback to "not reported by this drive", with a
+    # comment above it explaining why, and neither could ever reach it because
+    # this had already made the field non-empty. The comments described
+    # behaviour the code could not produce.
     val("TYPE") == "disk" {
-      model = val("MODEL")
-      if (model == "") model = "unknown"
-      printf "%s|%s|%s|%s|%s\n", val("PATH"), val("SIZE"), model, val("TRAN"), val("SERIAL")
+      printf "%s|%s|%s|%s|%s\n", val("PATH"), val("SIZE"), val("MODEL"), val("TRAN"), val("SERIAL")
     }'
 }
 
@@ -1109,7 +1114,11 @@ widget_disk() {
   booted=$(boot_disk)
   while IFS='|' read -r path size model tran _; do
     [[ -n $path ]] || continue
-    line=$(printf '%-14s %8s  %-26s %s' "$path" "$size" "${model:0:26}" "$tran")
+    line=$(printf '%-14s %8s  %-26s %s' "$path" "$size" \
+      "${model:0:26}" "$(connection_label "$tran")")
+    [[ -n $model ]] ||
+      line=$(printf '%-14s %8s  %-26s %s' "$path" "$size" \
+        'not reported by this drive' "$(connection_label "$tran")")
     if (( index == cursor )); then
       tui_item yes "$line"
     else
@@ -1124,7 +1133,12 @@ widget_disk() {
     holds=$(disk_contents "$path")
     [[ $path != "$booted" ]] ||
       holds="you started this installer from this one${holds:+, $holds}"
-    [[ -z $holds ]] || tui_line "$(printf '       %s' "$holds")" dim
+    # Capitalised here rather than at the source, because the source is a
+    # fragment that gets composed into the line above and a capital in the
+    # middle of it would read as two sentences run together. On screen this is
+    # a line of its own and started lower case: `files this installer does not
+    # recognise`, under the disk somebody is choosing to erase.
+    [[ -z $holds ]] || tui_line "$(printf '       %s' "${holds^}")" dim
     # A worn drive gets its own line rather than joining the one above,
     # because what is on a disk and how much life it has left are two
     # different questions and running them together reads as neither.
@@ -1375,7 +1389,7 @@ review_disk_detail() {
     break
   done < <(disk_table 2>/dev/null || true)
   holds=$(disk_contents "$target" 2>/dev/null || true)
-  [[ -z $holds ]] || tui_field 'Holds' "$holds" ink
+  [[ -z $holds ]] || tui_field 'Holds' "${holds^}" ink
   wear=$(disk_wear_note "$target" 2>/dev/null || true)
   [[ -z $wear ]] || tui_field 'Wear' "${wear#this drive reports }" warn
   # The root partition gets what is left after the EFI system partition, which
@@ -1489,7 +1503,11 @@ screen_gate() {
   tui_field 'Model' "${model:-not reported by this drive}" ink
   tui_field 'Serial' "${serial:-not reported by this drive}" ink
   tui_field 'Size' "${size:-not reported by this drive}" ink
-  tui_field 'Transport' "${tran:-not reported by this drive}" ink
+  # `Connection`, which is what the graphical installer has always called it.
+  # This said `Transport`, so the same fact had two names depending on which
+  # front end you were in, which is the drift `lib/aurade-copy.sh` exists to
+  # stop and which nothing was checking for.
+  tui_field 'Connection' "$(connection_label "$tran")" ink
   # The last chance to notice that this is the disk with the photographs on
   # it. It costs one line and it is the sentence somebody would repeat back.
   holds=$(disk_contents "$target" 2>/dev/null || true)

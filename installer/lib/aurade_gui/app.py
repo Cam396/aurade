@@ -2038,7 +2038,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             f"{check.get('title', '')}: {check.get('detail')}"
             for check in checks if check.get("detail")
         ]
-        detail_lines.append(f"Installer: {self.probe.get('renderer', 'unknown')}"
+        detail_lines.append(f"Installer: {self.probe.get('renderer') or 'not reported'}"
                             f" ({self.probe.get('reason', '')})")
         if self.probe.get("advice"):
             detail_lines.append(self.probe["advice"])
@@ -2408,14 +2408,21 @@ class InstallerWindow(Adw.ApplicationWindow):
         for disk in disks:
             item = Adw.ActionRow(title=disk["path"])
             item.add_css_class("aurade-mono")
+            # Two of them, and they are not the same thing. `transport` is the
+            # code `lsblk` reports and is what the removable check below
+            # compares against. `connection` is that code in words, and it is
+            # the only one that goes on screen: the code for a VMware disk is
+            # `spi`, so this row read `VMware Virtual S   64G   SPI` under a
+            # disk somebody was about to erase.
             transport = (disk.get("transport") or "").upper()
+            connection = disk.get("connection") or ""
             # Never "unknown". A drive that does not report its model has not
             # been misread by the installer, and the other wording says which
             # of the two actually happened.
             facts = [disk.get("model") or "not reported by this drive",
                      disk.get("size") or ""]
-            if transport:
-                facts.append(transport)
+            if connection:
+                facts.append(connection)
             subtitle = "   ".join(f for f in facts if f)
             # What is already on it, which is the line that stops somebody
             # picking the wrong one of two identical looking drives. The erase
@@ -2425,7 +2432,13 @@ class InstallerWindow(Adw.ApplicationWindow):
                 holds = ("You started this installer from this one"
                          + (f", {holds}" if holds else ""))
             if holds:
-                subtitle += f"\n{holds}"
+                # Capitalised here rather than at the source, because the
+                # source is a fragment meant to sit inside the sentence above
+                # and a capital in the middle of it would read as two sentences
+                # run together. On its own line it started lower case: `files
+                # this installer does not recognise`, under the disk somebody
+                # is choosing to erase.
+                subtitle += f"\n{holds[:1].upper()}{holds[1:]}"
             # How much of its write life the drive says it has spent. Its own
             # line, because what is on a disk and how much life it has left are
             # two different questions and running them together reads as
@@ -2543,7 +2556,7 @@ class InstallerWindow(Adw.ApplicationWindow):
 
         facts = Adw.PreferencesGroup()
         for key, title in (("model", "Model"), ("serial", "Serial"),
-                           ("size", "Size"), ("transport", "Connection")):
+                           ("size", "Size"), ("connection", "Connection")):
             item = Adw.ActionRow(title=title)
             item.set_subtitle("")
             item.add_css_class("aurade-mono")
@@ -2591,8 +2604,18 @@ class InstallerWindow(Adw.ApplicationWindow):
                    f"Erase gate. This erases {self._spell(info['path'])} "
                    f"completely. Type {self._spell(info['token'])} to continue.",
                    urgent=True)
-        for key in ("model", "serial", "size", "transport"):
-            self.widgets[f"gate.{key}"].set_subtitle(info.get(key) or "unknown")
+        # `connection` and not `transport`, which is the key the rows above are
+        # built with, and the words rather than the code.
+        #
+        # And never "unknown", which is the wording this screen used and the
+        # one the disk list already knew not to use. "Unknown" reads as though
+        # the installer failed at something. What actually happened is that a
+        # drive did not answer, and on the screen where somebody is checking a
+        # serial number against a sticker, the difference between those two
+        # sentences is whether they trust the four facts beside it.
+        for key in ("model", "serial", "size", "connection"):
+            self.widgets[f"gate.{key}"].set_subtitle(
+                info.get(key) or "not reported by this drive")
         self.widgets["gate.hint"].set_label(
             f"Type  {self._gate_token}  to continue")
         self.widgets["gate.entry"].set_text("")

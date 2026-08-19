@@ -105,7 +105,12 @@ env AURADE_DISK_TABLE="$TMP/disks" AURADE_DISK_CONTENTS="$TMP/contents" \
 
 grep -Fq 'Windows' "$TMP/screen" ||
   fail 'the disk list does not say which disk has Windows on it'
-grep -Fq 'you started this installer from this one' "$TMP/screen" ||
+# Capitalised, because it is a line of its own on the screen. It is composed
+# from a fragment that `disk_contents` returns for use inside a sentence, and
+# the composition happens before the capital goes on, so the sentence reads
+# `You started this installer from this one, files this installer does not
+# recognise` rather than acquiring a capital in the middle.
+grep -Fq 'You started this installer from this one' "$TMP/screen" ||
   fail 'the disk list does not name the disk the installer is running from'
 # The stick is last on the screen as well as last in the table.
 last=$(grep -o '/dev/[a-z0-9]*' "$TMP/screen" | tail -1)
@@ -207,6 +212,109 @@ env AURADE_DISK_TABLE="$TMP/disks" AURADE_DISK_CONTENTS="$TMP/contents" \
   AURADE_TUI_HEIGHT=40 "$TUI" --render gate 2>/dev/null >"$TMP/gatefine"
 refute grep -Fq 'write life' "$TMP/gatefine"
 refute grep -Fqw 'Wear' "$TMP/gatefine"
+
+
+# --- the connection, in words rather than in kernel ---------------------------
+#
+# `lsblk` reports a transport code and both front ends printed it. On a VMware
+# machine that code is `spi`, so the row under a disk somebody was about to
+# erase read `VMware Virtual S   64G   SPI`. The fact was right and the word
+# was useless: SPI is SCSI Parallel Interface and nobody outside a kernel has
+# met it.
+#
+# It also had two names. The graphical installer called the row `Connection`
+# and the text one called it `Transport`, which is exactly the drift
+# `lib/aurade-copy.sh` was written to stop and which nothing was checking.
+check_label() {
+  local code=$1 want=$2 got
+  got=$(connection_label "$code")
+  [[ $got == "$want" ]] || fail "connection_label $code gave '$got', not '$want'"
+}
+check_label spi 'SCSI'
+check_label SPI 'SCSI'
+check_label nvme 'NVMe'
+check_label sata 'SATA'
+check_label usb 'USB'
+check_label virtio 'Virtual disk'
+# A code nobody has words for prints nothing at all. A row that says the path,
+# the model and the size and stops is a row somebody can read. A row with `NBD`
+# on the end of it is a row with a question on the end of it.
+check_label nbd ''
+check_label '' ''
+
+printf '%s\n' \
+  '/dev/sda|64G|VMware Virtual S|spi|VMware0001' \
+  '/dev/sdb|8G|Weird Device|nbd|X1' \
+  '/dev/sdc|1T||sata|Y2' >"$TMP/odd"
+printf '%s\n' '/dev/sda|files this installer does not recognise' >"$TMP/oddcontents"
+
+env AURADE_DISK_TABLE="$TMP/odd" AURADE_DISK_CONTENTS="$TMP/oddcontents" \
+  AURADE_TUI_HEIGHT=40 "$TUI" --render question-target 2>/dev/null >"$TMP/odddisk"
+grep -Fq 'SCSI' "$TMP/odddisk" || fail 'the disk list does not say how the drive is attached'
+refute grep -Fqw 'SPI' "$TMP/odddisk"
+refute grep -Fqw 'spi' "$TMP/odddisk"
+refute grep -Fqw 'nbd' "$TMP/odddisk"
+refute grep -Fqw 'NBD' "$TMP/odddisk"
+
+# --- and never the word unknown ----------------------------------------------
+#
+# Both front ends carried a fallback to "not reported by this drive" with a
+# comment above it explaining why, and neither could ever reach it: the awk
+# that builds the disk table had already substituted the word `unknown` into
+# the model column, so the field was never empty. The comments described
+# behaviour the code could not produce.
+grep -Fq 'not reported by this drive' "$TMP/odddisk" ||
+  fail 'a drive that reports no model is not described as one that did not report'
+refute grep -Fqiw 'unknown' "$TMP/odddisk"
+
+env AURADE_DISK_TABLE="$TMP/odd" AURADE_DISK_CONTENTS="$TMP/oddcontents" \
+  AURADE_RENDER_TARGET=/dev/sdc AURADE_TUI_HEIGHT=40 \
+  "$TUI" --render gate 2>/dev/null >"$TMP/oddgate"
+grep -Fq 'not reported by this drive' "$TMP/oddgate" ||
+  fail 'the erase gate does not say when a drive reported no model'
+refute grep -Fqiw 'unknown' "$TMP/oddgate"
+# The word both front ends use for the same fact.
+grep -Fq 'Connection' "$TMP/oddgate" ||
+  fail 'the erase gate does not name how the drive is attached'
+refute grep -Fqw 'Transport' "$TMP/oddgate"
+
+# The awk that builds the table, reached through a stubbed lsblk rather than
+# through `AURADE_DISK_TABLE`. The override short circuits `_disk_table_raw`
+# entirely, so every fixture above walks past the code that was substituting
+# the word in the first place, and a mutation that put it back went unnoticed.
+install -d "$TMP/stub"
+cat >"$TMP/stub/lsblk" <<'STUB'
+#!/usr/bin/env bash
+# One whole disk that reports no model at all, which is what a great many
+# virtual and USB bridges do.
+for arg in "$@"; do
+  case $arg in
+    PATH,SIZE,MODEL,TRAN,TYPE,SERIAL)
+      printf 'PATH="/dev/sda" SIZE="64G" MODEL="" TRAN="spi" TYPE="disk" SERIAL="VM0001"\n'
+      exit 0 ;;
+  esac
+done
+exit 0
+STUB
+chmod +x "$TMP/stub/lsblk"
+table=$(env -u AURADE_DISK_TABLE PATH="$TMP/stub:$PATH" bash -c '
+  AURADE_INSTALLER_TUI_LIB=1; export AURADE_INSTALLER_TUI_LIB
+  . "'"$ROOT"'/installer/bin/aurade-installer-tui"
+  _disk_table_raw')
+[[ $table == '/dev/sda|64G||spi|VM0001' ]] ||
+  fail "the disk table filled in a model the drive did not report: '$table'"
+
+# --- what is on it reads as a line, because it is shown as one ---------------
+#
+# `disk_contents` returns a fragment written to sit inside a sentence, and two
+# of the three places it is shown put it on a line of its own. So the line
+# under a disk somebody is choosing to erase began in lower case: `files this
+# installer does not recognise`.
+env AURADE_DISK_TABLE="$TMP/odd" AURADE_DISK_CONTENTS="$TMP/oddcontents" \
+  AURADE_TUI_HEIGHT=40 "$TUI" --render question-target 2>/dev/null >"$TMP/oddholds"
+grep -Fq 'Files this installer does not recognise' "$TMP/oddholds" ||
+  fail 'what is on a disk is shown as a fragment rather than as a line'
+refute grep -Fq " files this installer does not recognise" "$TMP/oddholds"
 
 (( failures == 0 )) || exit 1
 echo 'installer disk identity test: PASS (contents named, boot medium named, removable last, wear reported)'

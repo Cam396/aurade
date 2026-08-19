@@ -135,6 +135,40 @@ stage_explanation() {
 }
 
 # --------------------------------------------------------------------------
+# Disks
+# --------------------------------------------------------------------------
+
+# How a drive is attached, in words somebody has.
+#
+# `lsblk` reports a transport code and both front ends printed it. On a VMware
+# machine that code is `spi`, so the row under a disk somebody is about to
+# erase read `VMware Virtual S   64G   SPI`, and SPI is not a thing anybody
+# outside a kernel has heard of. It is SCSI Parallel Interface, so the fact was
+# right and the word was useless.
+#
+# The list is closed and an unrecognised code prints nothing at all. That is
+# the same rule the cause codes follow and for the same reason: a row that says
+# the path, the model and the size and stops is a row somebody can read, and a
+# row with `NBD` on the end of it is a row with a question on the end of it.
+#
+# The raw code is still what the removable check compares against. This is for
+# the screen and nothing else.
+connection_label() {
+  case ${1,,} in
+    nvme)        printf 'NVMe' ;;
+    sata|ata)    printf 'SATA' ;;
+    usb)         printf 'USB' ;;
+    sas)         printf 'SAS' ;;
+    spi|scsi)    printf 'SCSI' ;;
+    virtio)      printf 'Virtual disk' ;;
+    mmc|sd)      printf 'Card' ;;
+    fc)          printf 'Fibre Channel' ;;
+    iscsi)       printf 'iSCSI' ;;
+    *)           printf '' ;;
+  esac
+}
+
+# --------------------------------------------------------------------------
 # Causes
 # --------------------------------------------------------------------------
 
