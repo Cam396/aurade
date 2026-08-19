@@ -161,31 +161,39 @@ grep -n 'tui_poll_key' "$TUI" | grep -Fq 'AURADE_PROGRESS_TICK' ||
 
 # --- the graphical installer ------------------------------------------------
 #
-# Its timers drive animation, the snake, the tip rotation and the progress
-# poll. None of them may dismiss a dialog or advance a page, which is the same
-# rule stated in the one way it could be broken there.
+# Its timers drive animation, the arcade, the tip rotation, the status area
+# and the progress poll. None of them may dismiss a dialog or advance a page,
+# which is the same rule stated in the one way it could be broken there.
 APP="$ROOT/installer/lib/aurade_gui/app.py"
 while IFS= read -r line; do
   [[ -n $line ]] || continue
   case $line in
-    # The done screen's settle, the aurora, the snake and the tip rotation:
-    # drawing, all four.
-    *SETTLE_DELAY_MS*|*_aurora_source*|*_snake_source*|*_tip_source*) ;;
+    # The done screen's settle, the aurora, whichever game is on the waiting
+    # card and the tip rotation: drawing, all four.
+    *SETTLE_DELAY_MS*|*_aurora_source*|*_arcade_source*|*_tip_source*) ;;
+    # A tile arriving or a counter falling, for the tenth of a second it
+    # takes. It stops itself the moment nothing is moving, and reduce motion
+    # never starts it.
+    *_frame_source*) ;;
     # The gap between the rings of a sound.
     *'index * 150'*) ;;
     # Asking the engine how far along it is, on the one screen with no
     # decision on it to expire.
     *_progress_source*) ;;
+    # The clock, the battery and the network reading in the top bar. It reads
+    # three files and writes three labels. It cannot reach a page or a dialog,
+    # which is asserted below along with everything else here.
+    *_status_source*) ;;
     *)
       echo "an unaccounted graphical timer, which may be a screen that expires: $line" >&2
       exit 1 ;;
   esac
 done < <(grep -n 'GLib.timeout_add' "$APP" || true)
-# All six are still there, so the list above cannot be passing because the
+# All eight are still there, so the list above cannot be passing because the
 # timers it accounts for have gone.
 timers=$(grep -c 'GLib.timeout_add' "$APP")
-[[ $timers -eq 6 ]] ||
-  { echo "the graphical installer has $timers timers, not the 6 accounted for" >&2
+[[ $timers -eq 8 ]] ||
+  { echo "the graphical installer has $timers timers, not the 8 accounted for" >&2
     grep -n 'GLib.timeout_add' "$APP" >&2; exit 1; }
 
 # And nothing anywhere closes a dialog or moves a page on a clock, which is the

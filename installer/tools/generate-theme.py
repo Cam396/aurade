@@ -522,6 +522,44 @@ list.boxed-list {
   outline-offset: 2px;
 }
 
+/* A container is not a control, and a ring around one is a debugging tool.
+
+   `*:focus-visible` above is right for anything somebody can press, type in
+   or choose, and wrong for the boxes those things sit in. The disk page put
+   the initial focus on the list rather than on a row in it, so arriving at
+   the page drew a purple rectangle around every disk on the machine at once.
+   It looked like a debug overlay, which is the most alarming thing an
+   installer can look like on the screen where you choose what to erase.
+
+   The focus placement was fixed as well, and this is the part that stops it
+   coming back from somewhere else. A container that takes focus still takes
+   it; it just does not announce the fact by outlining the page.
+
+   `list` is GTK's node name for a list box, `clamp` and `toolbarview` are
+   libadwaita's. Anything not named here keeps the ring. */
+window:focus-visible,
+box:focus-visible,
+grid:focus-visible,
+stack:focus-visible,
+overlay:focus-visible,
+paned:focus-visible,
+viewport:focus-visible,
+scrolledwindow:focus-visible,
+list:focus-visible,
+flowbox:focus-visible,
+clamp:focus-visible,
+toolbarview:focus-visible,
+banner:focus-visible {
+  outline: none;
+}
+
+/* A row's ring goes inside it. Offset outward, a focused row in a boxed list
+   drew its ring over the separator and over the row above, which reads as two
+   rows being wrong rather than as one row being chosen. */
+row:focus-visible {
+  outline-offset: -2px;
+}
+
 /* The icon tile stops being a coloured disc, because a coloured disc at high
    contrast is a grey disc. */
 .aurade-icon-tile {
@@ -791,6 +829,29 @@ COMPONENT_CSS = r"""
   color: @m3_on_surface_variant;
 }
 
+/* The clock, the battery and the network, top right. One step back from the
+   interface, because they are true all the time and are therefore never the
+   thing being answered. The battery gains the warning colour, and only the
+   battery, and only when it is low and unplugged: everything else in here is
+   a fact rather than a problem. */
+.aurade-status {
+  color: @m3_on_surface_variant;
+}
+
+.aurade-status.warning,
+.aurade-status .warning {
+  color: @m3_warning;
+}
+
+/* What the keys on the waiting card's board do. Below the score and quieter
+   than it, because it is read once per game and the score is read constantly.
+   Thirteen games with thirteen control schemes and no line saying which is
+   this one is the easiest way to build an arcade nobody plays. */
+.aurade-wait-hint {
+  color: @m3_outline;
+  font-size: 8pt;
+}
+
 /* ---- state layers ----------------------------------------------------- */
 /* Material 3 expresses interaction as an opacity layer over the container,
    not as a different colour. Same here, so hover on a primary surface and
@@ -820,6 +881,44 @@ COMPONENT_CSS = r"""
 *:focus-visible {
   outline: 2px solid @m3_primary;
   outline-offset: 2px;
+}
+
+/* A container is not a control, and a ring around one is a debugging tool.
+
+   `*:focus-visible` above is right for anything somebody can press, type in
+   or choose, and wrong for the boxes those things sit in. The disk page put
+   the initial focus on the list rather than on a row in it, so arriving at
+   the page drew a purple rectangle around every disk on the machine at once.
+   It looked like a debug overlay, which is the most alarming thing an
+   installer can look like on the screen where you choose what to erase.
+
+   The focus placement was fixed as well, and this is the part that stops it
+   coming back from somewhere else. A container that takes focus still takes
+   it; it just does not announce the fact by outlining the page.
+
+   `list` is GTK's node name for a list box, `clamp` and `toolbarview` are
+   libadwaita's. Anything not named here keeps the ring. */
+window:focus-visible,
+box:focus-visible,
+grid:focus-visible,
+stack:focus-visible,
+overlay:focus-visible,
+paned:focus-visible,
+viewport:focus-visible,
+scrolledwindow:focus-visible,
+list:focus-visible,
+flowbox:focus-visible,
+clamp:focus-visible,
+toolbarview:focus-visible,
+banner:focus-visible {
+  outline: none;
+}
+
+/* A row's ring goes inside it. Offset outward, a focused row in a boxed list
+   drew its ring over the separator and over the row above, which reads as two
+   rows being wrong rather than as one row being chosen. */
+row:focus-visible {
+  outline-offset: -2px;
 }
 
 /* ---- motion ----------------------------------------------------------- */

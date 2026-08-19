@@ -38,8 +38,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import (a11y as A, bible, brand, flow as F, locales, stage as S,  # noqa: E402
-               tokens as T, wait as W)
+from . import (a11y as A, arcade as ARC, bible, brand, flow as F, locales,  # noqa: E402
+               stage as S, status as ST, tokens as T, wait as W)
 from .bridge import Bridge, BridgeError  # noqa: E402
 
 APP_ID = "org.aurade.Installer"
@@ -55,20 +55,40 @@ PROGRESS_INTERVAL_MS = 400
 #: someone is reading, not an animation anyone should watch.
 AURORA_INTERVAL_MS = 90
 
-#: The arena on the progress page, in cells and pixels. Sized so the card is
-#: the same height whichever face it is showing, which is why the tip lane is
-#: two lines and this is nine rows.
-SNAKE_COLUMNS = 28
-SNAKE_ROWS = 9
-SNAKE_CELL = 16
+#: How tall the waiting card's board is, in pixels.
+#:
+#: Sized for the largest board rather than the smallest, because the card is
+#: one height whichever face is showing and the alternative is a page that
+#: jumps every time somebody changes their mind. A nonogram needs room for
+#: two rows of clues above eight of grid, and a word guess needs six rows, and
+#: those two set the number. The snake, which used to set it at nine rows of
+#: sixteen pixels, is perfectly happy with more.
+ARENA_HEIGHT = 236
 
-#: How often the snake moves. Slower than a redraw, so the game is playable
-#: rather than frantic.
-SNAKE_INTERVAL_MS = 150
+#: The nominal cell, for the two games that choose their own grid rather than
+#: fitting a fixed one. Only Life and the snake ask, and they ask so that a
+#: wider window means a wider arena rather than bigger squares.
+ARENA_CELL = 17
 
-#: The score at which the snake stops being two colours and starts being the
-#: brand gradient. Nobody gets here by accident.
-SNAKE_GRADIENT_AT = 10
+#: The margin between the board and the frame drawn around it.
+ARENA_PAD = 12
+
+#: The download meter on the live step card. Short, because it sits under a
+#: line of text and is a sign of life rather than a chart anybody reads off.
+RATE_HEIGHT = 26
+
+#: One frame of a board in motion: a tile arriving, a counter falling, a
+#: square sliding into a gap. Thirty a second, and only while something is
+#: actually moving, which is a fraction of a second after a key.
+FRAME_MS = 33
+
+#: How often the clock, the battery and the network reading are taken.
+#:
+#: Fifteen seconds, which is the longest a clock showing minutes can be wrong
+#: by and the shortest interval worth waking up for. A battery does not move
+#: faster than this and a cable being pulled out is worth knowing about
+#: inside a quarter of a minute.
+STATUS_INTERVAL_MS = 15000
 
 #: The drawn progress ribbon. Thicker than a stock bar, because it carries a
 #: gradient and a leading cap and both need room to be visible at a glance.
@@ -524,6 +544,83 @@ class CapacityBar(Gtk.DrawingArea):
         A.decorative(self)
 
 
+class DownloadMeter(Gtk.DrawingArea):
+    """How fast the packages are arriving, over the last minute or so.
+
+    `acquire` is the longest stage in the install and the one that reports the
+    least: the engine writes one record when it starts and one when it
+    finishes, and between them is five minutes of a bar that does not move.
+    Somebody watching that has no way to tell a slow mirror from a hung
+    machine, and the honest answer to that question is not a percentage
+    nobody can compute, it is whether bytes are still arriving.
+
+    So this draws what the text installer has drawn for a while: the sampler's
+    last few dozen readings, as a shape. The number beside it is the current
+    one and is the part that means something; the shape is there so that a
+    dip, a stall or a mirror that gave up is visible at a glance rather than
+    needing to be watched for.
+
+    Scaled to its own maximum rather than to any absolute rate, because there
+    is no rate a line could be drawn against: this runs on gigabit fibre and
+    on a hotel connection, and on both of them the useful question is whether
+    it is still going.
+    """
+
+    def __init__(self, window: "InstallerWindow") -> None:
+        super().__init__()
+        self.window = window
+        self.samples: list[int] = []
+        self.set_content_height(RATE_HEIGHT)
+        self.set_draw_func(self._draw)
+        self.set_can_target(False)
+        # The rate is written out in words in the label beside this. A screen
+        # reader announcing a shape is a screen reader announcing nothing.
+        A.decorative(self)
+
+    def set_samples(self, samples: list[int]) -> None:
+        if samples == self.samples:
+            return
+        self.samples = samples
+        self.queue_draw()
+
+    def _draw(self, _area, cr, width, height) -> None:
+        samples = self.samples
+        if len(samples) < 2 or width < 8 or height < 4:
+            return
+        scheme = T.scheme(self.window.dark)
+        peak = max(samples) or 1
+        step = width / (len(samples) - 1)
+        floor = height - 1
+
+        def point(index: int, value: int) -> tuple[float, float]:
+            return index * step, floor - (value / peak) * (height - 3)
+
+        # Filled first, then the line over it. The fill is what makes a
+        # stalled download read as a floor rather than as a missing line.
+        cr.move_to(0, floor)
+        for index, value in enumerate(samples):
+            cr.line_to(*point(index, value))
+        cr.line_to(width, floor)
+        cr.close_path()
+        cr.set_source_rgba(*T.rgb(scheme["primary"]), 0.16)
+        cr.fill()
+
+        cr.set_line_width(1.5)
+        cr.set_line_join(1)
+        cr.move_to(*point(0, samples[0]))
+        for index, value in enumerate(samples[1:], start=1):
+            cr.line_to(*point(index, value))
+        cr.set_source_rgb(*T.rgb(scheme["primary"]))
+        cr.stroke()
+
+        # The latest reading, as a dot, because the right hand end of a line
+        # is where the eye goes and it should find something there.
+        x, y = point(len(samples) - 1, samples[-1])
+        cr.set_source_rgb(*T.rgb(scheme["primary"]))
+        cr.arc(min(x, width - 2), y, 2.4, 0, 6.283185)
+        cr.fill()
+
+
 class SignalArcs(Gtk.DrawingArea):
     """Four arcs. A column of percentages is not a thing anyone reads."""
 
@@ -596,13 +693,21 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.dark = False
         self._progress_source = 0
         # The waiting card. `tips` is read once, from the same file the text
-        # installer reads; `snake` is created the first time somebody asks for
-        # it and never before, because most installs will not.
+        # installer reads; a game is built the first time somebody picks one
+        # and never before, because most installs will not pick any.
         self.tips = W.Tips()
         self.tip_index = 0
         self._tip_source = 0
-        self.snake: W.Snake | None = None
-        self._snake_source = 0
+        #: Whichever of the thirteen is on the card, or None for the tips.
+        self.game: ARC.Game | None = None
+        #: What the picker is showing, which is not always what is on the
+        #: card: choosing the Bible opens a window and leaves the card alone.
+        self._wait_choice = "tips"
+        self._arcade_source = 0
+        self._frame_source = 0
+        self._frame_last = 0
+        self._picker_handler = 0
+        self._status_source = 0
         self._aurora_source = 0
         #: The photograph behind the window, picked once for this run. None
         #: when the set is not installed, when the picture would not decode,
@@ -877,6 +982,13 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.step_label = label("", "m3-label-medium", wrap=False, css="aurade-metric")
         self.step_label.set_valign(Gtk.Align.CENTER)
         top.append(self.step_label)
+        # Furthest right, which is where a status area lives on every desktop
+        # anybody using this has seen. After the step count rather than before
+        # it, so the wizard's own position keeps the place it already had.
+        top.append(self._build_status())
+        self._refresh_status()
+        self._status_source = GLib.timeout_add(STATUS_INTERVAL_MS,
+                                               self._refresh_status)
         frame.append(top)
 
         rule = RibbonRule(self)
@@ -1355,6 +1467,117 @@ class InstallerWindow(Adw.ApplicationWindow):
             # survive the restart into, because by then the install is over.
             self.heartbeat = value == "yes"
             self._heartbeat_at = 0.0
+
+    def _build_status(self) -> Gtk.Widget:
+        """The clock, the battery and the network, in the corner they live in.
+
+        Every other computer this person has used puts these three in a
+        corner, and the installer is the one screen where all three questions
+        are live at once: how long has this been going, is the machine about
+        to lose power in the middle of writing a filesystem, and is the
+        download still connected.
+
+        Drawn as icon and number rather than icon alone. An icon on its own is
+        a guess at a percentage and a guess at a signal strength, and this is
+        a screen where somebody is deciding whether to go and make a cup of
+        tea while their disk is erased.
+
+        Absent rather than apologetic when there is nothing to say: a desktop
+        has no battery reading and should not have a battery icon with a
+        question mark in it.
+        """
+        box = row(10)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_start(18)
+        box.add_css_class("aurade-status")
+        for key, icon in (("network", "network-offline-symbolic"),
+                          ("battery", "battery-good-symbolic")):
+            item = row(5)
+            item.set_valign(Gtk.Align.CENTER)
+            image = Gtk.Image.new_from_icon_name(icon)
+            self.widgets[f"status.{key}.icon"] = image
+            item.append(image)
+            text = label("", "m3-label-medium", wrap=False, css="aurade-metric")
+            text.set_valign(Gtk.Align.CENTER)
+            self.widgets[f"status.{key}.label"] = text
+            item.append(text)
+            item.set_visible(False)
+            self.widgets[f"status.{key}"] = item
+            box.append(item)
+        clock = label("", "m3-label-medium", wrap=False, css="aurade-metric")
+        clock.set_valign(Gtk.Align.CENTER)
+        A.described(clock, F.STATUS_CLOCK)
+        self.widgets["status.clock"] = clock
+        box.append(clock)
+        return box
+
+    def _refresh_status(self) -> bool:
+        """Take the three readings and put them on the screen.
+
+        Every part of this is allowed to be missing. A machine with no
+        battery, a kernel that reports no interfaces and a clock that cannot
+        be read all end up with a shorter status area rather than with an
+        exception on the one screen that must not raise one.
+        """
+        clock = self.widgets.get("status.clock")
+        if clock is None:
+            return GLib.SOURCE_REMOVE
+        now = ST.clock()
+        clock.set_label(now)
+        A.described(clock, F.STATUS_CLOCK, F.STATUS_CLOCK_IS % now)
+
+        power = ST.battery()
+        percent = power.get("percent")
+        item = self.widgets["status.battery"]
+        if isinstance(percent, int):
+            charging = bool(power.get("charging"))
+            self.widgets["status.battery.icon"].set_from_icon_name(
+                ST.battery_icon(percent, charging))
+            self.widgets["status.battery.label"].set_label(f"{percent}%")
+            # Low and not charging is the one state on this screen that is a
+            # warning rather than a fact, because it is the one that can end
+            # an install half way through a filesystem.
+            low = percent < ST.BATTERY_FLOOR and not charging
+            for widget in (item, self.widgets["status.battery.label"]):
+                if low:
+                    widget.add_css_class("warning")
+                else:
+                    widget.remove_css_class("warning")
+            if charging:
+                spoken = F.STATUS_BATTERY_CHARGING % percent
+            elif low:
+                spoken = F.STATUS_BATTERY_LOW % percent
+            else:
+                spoken = F.STATUS_BATTERY % percent
+            A.described(item, F.STATUS_BATTERY_NAME, spoken)
+            item.set_tooltip_text(spoken)
+            item.set_visible(True)
+        else:
+            item.set_visible(False)
+
+        link = ST.network()
+        kind = str(link.get("kind") or "")
+        online = bool(link.get("online"))
+        item = self.widgets["status.network"]
+        self.widgets["status.network.icon"].set_from_icon_name(
+            ST.network_icon(kind, online))
+        if not kind:
+            spoken = F.STATUS_NET_NONE
+        elif not online:
+            spoken = F.STATUS_NET_NO_ROUTE
+        elif kind == "wifi":
+            spoken = F.STATUS_NET_WIFI
+        else:
+            spoken = F.STATUS_NET_WIRED
+        # The word, not the interface name. `wlp3s0` is not an answer to
+        # "am I online", and it is what a status area full of jargon looks
+        # like on a screen aimed at somebody installing their first Linux.
+        self.widgets["status.network.label"].set_label(
+            "" if online and kind else F.STATUS_NET_SHORT)
+        A.described(item, F.STATUS_NET_NAME, spoken)
+        item.set_tooltip_text(spoken)
+        item.set_visible(True)
+        return GLib.SOURCE_CONTINUE
 
     def _build_scheme_toggle(self) -> Gtk.Widget:
         """Light, dark, or whatever the system says.
@@ -2669,6 +2892,24 @@ class InstallerWindow(Adw.ApplicationWindow):
         detail = label("", "m3-body-small", css="dim-label")
         self.widgets["progress.detail"] = detail
         live.append(detail)
+        # The download meter, which is present for one stage and absent for
+        # the other ten. Built here and hidden rather than built on demand,
+        # because a card that gains a widget half way through an install
+        # reflows everything under it at the moment somebody is reading it.
+        meter_row = row(10)
+        meter = DownloadMeter(self)
+        meter.set_hexpand(True)
+        meter.set_valign(Gtk.Align.CENTER)
+        self.widgets["progress.meter"] = meter
+        meter_row.append(meter)
+        rate = label("", "m3-body-small", wrap=False, css="dim-label")
+        rate.add_css_class("aurade-metric")
+        rate.set_valign(Gtk.Align.CENTER)
+        self.widgets["progress.rate"] = rate
+        meter_row.append(rate)
+        meter_row.set_visible(False)
+        self.widgets["progress.meter.row"] = meter_row
+        live.append(meter_row)
         pacing = label("", "m3-body-medium", css="dim-label")
         self.widgets["progress.pacing"] = pacing
         live.append(pacing)
@@ -2708,7 +2949,7 @@ class InstallerWindow(Adw.ApplicationWindow):
     # bridge already sends and a text file, and its keys go to a snake.
 
     def _build_waiting(self):
-        card = column(12)
+        card = column(10)
         card.add_css_class("card")
         card.add_css_class("aurade-waiting")
 
@@ -2729,193 +2970,333 @@ class InstallerWindow(Adw.ApplicationWindow):
             self.widgets[f"progress.tip.{name}"] = face
         self.widgets["progress.tips"] = tips
 
+        # One drawing area for thirteen games, because the alternative is
+        # thirteen widgets that have to be built, sized, focused and hidden in
+        # step with each other. The board is drawn by whichever game is
+        # current and the window never learns what any of them look like.
         arena = Gtk.DrawingArea()
-        arena.set_content_height(SNAKE_CELL * SNAKE_ROWS)
-        arena.set_draw_func(self._draw_snake)
+        arena.set_draw_func(self._draw_arena)
         arena.set_can_focus(True)
         arena.set_focusable(True)
-        # Focusable, so it is reachable, so it has to say what it is. A game
-        # nobody can be told about is a trap for anyone tabbing through.
-        A.described(arena, "Snake",
-                    "A game to pass the time. Arrow keys to steer.",
-                    Gtk.AccessibleRole.APPLICATION)
+        A.described(arena, F.WAIT_ARENA,
+                    F.WAIT_ARENA_IDLE, Gtk.AccessibleRole.APPLICATION)
         keys = Gtk.EventControllerKey()
-        keys.connect("key-pressed", self._on_snake_key)
+        keys.connect("key-pressed", self._on_arena_key)
         arena.add_controller(keys)
         self.widgets["progress.arena"] = arena
 
-        # Tips and game are two faces of one card, so the page does not change
-        # height when somebody switches between them.
+        # Tips and board are two faces of one card, so the page does not
+        # change height when somebody switches between them.
         faces = Gtk.Stack()
         faces.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         faces.set_transition_duration(W.TIP_FADE_MS)
-        # Exactly the arena's height, whichever face is showing, so pressing
-        # Play does not move everything above it. `vexpand` was wrong here: it
+        # Exactly the arena's height, whichever face is showing, so choosing a
+        # game does not move everything above it. `vexpand` was wrong here: it
         # propagates out through the card and takes the rest of the page with
         # it, which is how a two line tip ended up centred in 380 pixels.
-        faces.set_size_request(-1, SNAKE_ROWS * SNAKE_CELL)
+        #
+        # The height is the largest board's, not the smallest: a nonogram
+        # needs room for its clues and a word guess needs six rows. A tip
+        # centred in that much space looked thin until the tip got the same
+        # treatment every other face has, which is to sit in the middle of it.
+        faces.set_size_request(-1, ARENA_HEIGHT)
         faces.add_named(tips, "tips")
         faces.add_named(arena, "game")
         self.widgets["progress.faces"] = faces
         card.append(faces)
 
         footer = row(12)
+        lines = column(0)
+        lines.set_hexpand(True)
+        lines.set_valign(Gtk.Align.CENTER)
         score = label("", "m3-body-small", css="dim-label")
-        score.set_hexpand(True)
         self.widgets["progress.score"] = score
-        footer.append(score)
-        toggle = Gtk.Button(label=F.WAIT_PLAY)
-        toggle.add_css_class("flat")
-        toggle.connect("clicked", self._on_waiting_toggled)
-        self.widgets["progress.play"] = toggle
-        footer.append(toggle)
+        lines.append(score)
+        # What the keys do, under the score, because a board somebody cannot
+        # work out how to touch is a picture. Thirteen games with thirteen
+        # different control schemes and no line saying which is this one is
+        # the single easiest way to make an arcade nobody plays.
+        hint = label("", "m3-body-small", css="dim-label")
+        hint.add_css_class("aurade-wait-hint")
+        self.widgets["progress.hint"] = hint
+        lines.append(hint)
+        footer.append(lines)
+
+        picker = Gtk.DropDown.new_from_strings(
+            [text for _ident, text in ARC.CHOICES])
+        picker.set_valign(Gtk.Align.CENTER)
+        picker.add_css_class("flat")
+        picker.set_tooltip_text(F.WAIT_PICKER)
+        A.described(picker, F.WAIT_PICKER, F.WAIT_PICKER_WHY)
+        self._picker_handler = picker.connect("notify::selected",
+                                              self._on_arcade_chosen)
+        self.widgets["progress.picker"] = picker
+        footer.append(picker)
         card.append(footer)
         return card
 
-    def _on_waiting_toggled(self, _button) -> None:
+    # -- the picker --------------------------------------------------------
+    #
+    # Fifteen entries, in the text installer's order, and the order is the
+    # argument. The two that ask nothing of anybody come first, so somebody
+    # who finds a game on a screen they are anxious about actively stressful
+    # meets them before the thirteen that are games. Nobody should have to
+    # scroll past a snake to reach the Bible.
+
+    def _on_arcade_chosen(self, picker, _param) -> None:
+        index = picker.get_selected()
+        if index < 0 or index >= len(ARC.CHOICES):
+            return
+        ident = ARC.CHOICES[index][0]
+        if ident == "bible":
+            # A reader is a window, not a card. The dialog already exists and
+            # already works, and cramming a chapter of Job into two hundred
+            # pixels would be a worse Bible than the one on the welcome page.
+            # The picker goes back to what was showing, because a menu that
+            # names something not on screen is a menu that is lying.
+            self._select_wait(self._wait_choice)
+            self._open_bible()
+            return
+        self._show_wait(ident)
+
+    def _select_wait(self, ident: str) -> None:
+        """Put the picker on an entry without the picker answering back."""
+        picker = self.widgets.get("progress.picker")
+        if picker is None:
+            return
+        for index, (candidate, _text) in enumerate(ARC.CHOICES):
+            if candidate != ident:
+                continue
+            if picker.get_selected() != index:
+                picker.handler_block(self._picker_handler)
+                picker.set_selected(index)
+                picker.handler_unblock(self._picker_handler)
+            return
+
+    def _show_wait(self, ident: str) -> None:
+        """Put one thing on the card and take the last one down."""
+        self._stop_arcade()
+        self._wait_choice = ident
         faces = self.widgets["progress.faces"]
-        playing = faces.get_visible_child_name() != "game"
-        faces.set_visible_child_name("game" if playing else "tips")
-        self.widgets["progress.play"].set_label(
-            F.WAIT_STOP if playing else F.WAIT_PLAY)
-        if playing:
-            if self.snake is None:
-                self.snake = W.Snake(SNAKE_COLUMNS, SNAKE_ROWS)
-            self.widgets["progress.arena"].grab_focus()
-            if not self._snake_source:
-                self._snake_source = GLib.timeout_add(
-                    SNAKE_INTERVAL_MS, self._snake_tick)
-        else:
-            self._stop_snake()
+        if ident == "tips":
+            self.game = None
+            faces.set_visible_child_name("tips")
+            self.widgets["progress.hint"].set_label("")
+            A.described(self.widgets["progress.arena"], F.WAIT_ARENA,
+                        F.WAIT_ARENA_IDLE)
+            self._refresh_score()
+            self._select_wait(ident)
+            return
+        self.game = ARC.build(ident)
+        if self.game is None:
+            self._show_wait("tips")
+            return
+        faces.set_visible_child_name("game")
+        self.widgets["progress.hint"].set_label(self.game.keys)
+        A.described(self.widgets["progress.arena"], ARC.label_for(ident),
+                    self.game.description)
+        # Focus, so the keys land on the board rather than on whatever the
+        # page last focused. Somebody who chose a game with the keyboard would
+        # otherwise have to find the board with the keyboard as well.
+        self.widgets["progress.arena"].grab_focus()
+        if self.game.tick_ms:
+            self._arcade_source = GLib.timeout_add(self.game.tick_ms,
+                                                   self._arcade_tick)
+        self._select_wait(ident)
         self._refresh_score()
+        self.widgets["progress.arena"].queue_draw()
 
-    def _stop_snake(self) -> None:
-        if self._snake_source:
-            GLib.source_remove(self._snake_source)
-            self._snake_source = 0
+    def _stop_arcade(self) -> None:
+        if self._arcade_source:
+            GLib.source_remove(self._arcade_source)
+            self._arcade_source = 0
+        if self._frame_source:
+            GLib.source_remove(self._frame_source)
+            self._frame_source = 0
 
-    def _snake_tick(self) -> bool:
-        if self.snake is None:
-            self._snake_source = 0
+    def _start_frames(self) -> None:
+        """Run a frame clock, but only while a board is actually moving.
+
+        Reduce motion turns it off entirely, which is the whole reason the
+        motion is separate from the state: with it off, a tile still arrives
+        and a counter still lands, they simply do it at once.
+        """
+        if self._frame_source or self.game is None or not self.animate:
+            return
+        if not self.game.animating():
+            return
+        self._frame_last = GLib.get_monotonic_time()
+        self._frame_source = GLib.timeout_add(FRAME_MS, self._frame_tick)
+
+    def _frame_tick(self) -> bool:
+        if self.game is None:
+            self._frame_source = 0
             return GLib.SOURCE_REMOVE
-        self.snake.step()
+        now = GLib.get_monotonic_time()
+        # Measured rather than assumed. A frame clock that counts its own
+        # ticks runs slow on a machine that is busy installing an operating
+        # system, which is every machine this runs on.
+        self.game.frame(max(0.0, (now - self._frame_last) / 1000000.0))
+        self._frame_last = now
+        self.widgets["progress.arena"].queue_draw()
+        if not self.game.animating():
+            self._frame_source = 0
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _leave_arcade(self) -> None:
+        """Finishing the install interrupts whatever is on screen.
+
+        Being mid 2048 when it completes and not noticing for five minutes is
+        a bug, not a feature, and a timer still running on a page nobody is
+        looking at is worse than that.
+        """
+        self._stop_arcade()
+        if self._wait_choice != "tips" and "progress.faces" in self.widgets:
+            self._show_wait("tips")
+
+    def _arcade_tick(self) -> bool:
+        if self.game is None:
+            self._arcade_source = 0
+            return GLib.SOURCE_REMOVE
+        self.game.tick()
         self.widgets["progress.arena"].queue_draw()
         self._refresh_score()
         return GLib.SOURCE_CONTINUE
 
     def _refresh_score(self) -> None:
-        if self.snake is None or \
-                self.widgets["progress.faces"].get_visible_child_name() != "game":
-            self.widgets["progress.score"].set_label("")
+        score = self.widgets.get("progress.score")
+        if score is None:
             return
-        if self.snake.dead:
-            self.widgets["progress.score"].set_label(
-                F.WAIT_SCORE_OVER % self.snake.score)
-        else:
-            self.widgets["progress.score"].set_label(
-                F.WAIT_SCORE % self.snake.score)
+        if self.game is None or \
+                self.widgets["progress.faces"].get_visible_child_name() != "game":
+            score.set_label("")
+            return
+        score.set_label(self.game.status())
 
-    #: Which keys steer. Arrows and the usual four letters, and nothing else,
-    #: so that no key on this page can do anything to the install.
-    SNAKE_KEYS = {
-        Gdk.KEY_Up: (0, -1), Gdk.KEY_w: (0, -1), Gdk.KEY_W: (0, -1),
-        Gdk.KEY_Down: (0, 1), Gdk.KEY_s: (0, 1), Gdk.KEY_S: (0, 1),
-        Gdk.KEY_Left: (-1, 0), Gdk.KEY_a: (-1, 0), Gdk.KEY_A: (-1, 0),
-        Gdk.KEY_Right: (1, 0), Gdk.KEY_d: (1, 0), Gdk.KEY_D: (1, 0),
+    #: Which keys reach a game, by name rather than by keyval, so that a game
+    #: can be written and tested without GTK on the machine. Everything else
+    #: is handed back to the page, and a game that does not want one of these
+    #: hands it back itself, which is how the snake keeps Return free for the
+    #: page while the word guess needs it.
+    ARENA_KEYS = {
+        Gdk.KEY_Up: "up", Gdk.KEY_KP_Up: "up",
+        Gdk.KEY_Down: "down", Gdk.KEY_KP_Down: "down",
+        Gdk.KEY_Left: "left", Gdk.KEY_KP_Left: "left",
+        Gdk.KEY_Right: "right", Gdk.KEY_KP_Right: "right",
+        Gdk.KEY_space: "space", Gdk.KEY_KP_Space: "space",
+        Gdk.KEY_Return: "enter", Gdk.KEY_KP_Enter: "enter",
+        Gdk.KEY_BackSpace: "backspace",
     }
 
-    def _on_snake_key(self, _controller, keyval, _code, _state) -> bool:
-        if self.snake is None:
+    def _on_arena_key(self, _controller, keyval, _code, state) -> bool:
+        if self.game is None:
             return False
-        if keyval in self.SNAKE_KEYS:
-            self.snake.turn(self.SNAKE_KEYS[keyval])
-            return True
-        if self.snake.dead:
-            self.snake.reset()
-            self.widgets["progress.arena"].queue_draw()
-            self._refresh_score()
-            return True
-        return False
+        # A modifier means the keystroke belongs to the window, not to a
+        # board. Nothing in this arcade is a chord, and one that swallowed
+        # Ctrl+Q would be a game holding an installer hostage.
+        if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+            return False
+        name = self.ARENA_KEYS.get(keyval)
+        if name is None:
+            point = Gdk.keyval_to_unicode(keyval)
+            if not point:
+                return False
+            name = chr(point)
+            if not name.isprintable():
+                return False
+        if not self.game.press(name):
+            return False
+        self.widgets["progress.arena"].queue_draw()
+        self._refresh_score()
+        self._start_frames()
+        return True
 
-    def _draw_snake(self, area, cr, width, height) -> None:
-        """The arena, sized to the card it is in.
+    def _draw_arena(self, area, cr, width, height) -> None:
+        """The playfield, and whichever board is on it.
 
-        The cell is fixed and the column count comes from the width, rather
-        than the other way round. Fixing the columns left a 448 pixel board
-        floating in a 570 pixel card with no edge drawn round it, so the only
-        thing visible was a few loose squares and it did not read as a game at
-        all.
+        The frame is drawn here rather than by the game, for the same reason
+        the text installer draws it: the walls are the rule in one of these
+        games and the edge of the picture in the other twelve, and an edge
+        that moves between games reads as a bug in whichever one you play
+        second.
         """
-        dark = self.dark
-        scheme = T.scheme(dark)
-        cell = SNAKE_CELL
-        columns = max(10, int(width // cell))
-        board_w = cell * columns
-        board_h = cell * SNAKE_ROWS
+        scheme = T.scheme(self.dark)
+        # A board grows and shrinks with the card, and the two games with a
+        # grid of their own choosing are told the size rather than guessing
+        # it. Everything else fits itself.
+        if self.game is not None:
+            resize = getattr(self.game, "resize", None)
+            if resize is not None:
+                resize(max(10, int((width - ARENA_PAD * 2) // ARENA_CELL)),
+                       max(6, int((height - ARENA_PAD * 2) // ARENA_CELL)))
+
+        # The frame hugs the board rather than filling the card.
+        #
+        # It used to be the whole card, and a four by four grid in the middle
+        # of a five hundred pixel white field did not read as a board at all;
+        # it read as a small picture somebody had failed to centre. The board
+        # says what shape it is and how large a cell may get, the same sum is
+        # done here as in the painter, and the frame is that plus a margin.
+        avail_w = max(1.0, width - ARENA_PAD * 2)
+        avail_h = max(1.0, height - ARENA_PAD * 2)
+        shape = getattr(self.game, "grid", None) if self.game else None
+        # A shape has to be two positive numbers or it is not a shape. This
+        # is here because it was once a list of ones and zeroes, from a game
+        # whose own board was called the same thing, and the card went blank.
+        if not (isinstance(shape, tuple) and len(shape) == 2
+                and shape[0] > 0 and shape[1] > 0):
+            shape = None
+        if shape:
+            cell = min(avail_w / shape[0], avail_h / shape[1],
+                       self.game.max_cell)
+            board_w, board_h = cell * shape[0], cell * shape[1]
+        else:
+            board_w, board_h = avail_w, avail_h
         left = (width - board_w) / 2
         top = (height - board_h) / 2
 
-        # The playfield, as an object with an edge. Without it the pieces are
-        # loose on the card and there is nothing to tell you where the walls
-        # are, which matters in a game whose only rule is that walls are walls.
-        radius = 10
         cr.new_path()
-        cr.arc(left + radius, top + radius, radius, 3.141593, 4.712389)
-        cr.arc(left + board_w - radius, top + radius, radius, 4.712389, 0)
-        cr.arc(left + board_w - radius, top + board_h - radius, radius,
-               0, 1.570796)
-        cr.arc(left + radius, top + board_h - radius, radius,
-               1.570796, 3.141593)
-        cr.close_path()
-        cr.set_source_rgb(*T.rgb(scheme["surface_container_lowest" if not dark
-                                        else "surface_container_high"]))
+        ARC.rounded(cr, left - ARENA_PAD + 0.5, top - ARENA_PAD + 0.5,
+                    board_w + ARENA_PAD * 2 - 1, board_h + ARENA_PAD * 2 - 1, 12)
+        cr.set_source_rgb(*T.rgb(scheme[
+            "surface_container_high" if self.dark else "surface_container_lowest"]))
         cr.fill_preserve()
-        # A hairline, so the playfield has an edge rather than being a lighter
-        # patch. The walls are the only rule in this game.
         cr.set_source_rgba(*T.rgb(scheme["outline_variant"]), 0.9)
         cr.set_line_width(1)
         cr.stroke()
 
-        if self.snake is None:
+        if self.game is None:
             return
-        # The arena follows the card. A window that is resized mid game starts
-        # a new one rather than leaving the snake outside its own walls.
-        if self.snake.width != columns:
-            self.snake = W.Snake(columns, SNAKE_ROWS)
-        if self.snake.food is not None:
-            cr.set_source_rgb(*T.rgb(scheme["tertiary"]))
-            fx, fy = self.snake.food
-            cr.arc(left + (fx + 0.5) * cell, top + (fy + 0.5) * cell,
-                   cell * 0.32, 0, 6.2832)
-            cr.fill()
-        # The head in the primary accent and the body a step back from it, so
-        # the direction of travel is readable without watching it move.
-        #
-        # Past ten, the body runs the brand gradient from head to tail instead.
-        # Ten is far enough in that nobody arrives there by accident and near
-        # enough that somebody who decides to try will get there before the
-        # install finishes.
-        earned = self.snake.score >= SNAKE_GRADIENT_AT
-        head_rgb = T.rgb(scheme["primary"])
-        tail_rgb = T.rgb(scheme["tertiary"])
-        length = max(1, len(self.snake.body) - 1)
-        for index, (x, y) in enumerate(self.snake.body):
-            if index == 0:
-                cr.set_source_rgba(*head_rgb, 1.0)
-            elif earned:
-                blend = (index - 1) / length
-                cr.set_source_rgba(*(
-                    head + (tail - head) * blend
-                    for head, tail in zip(head_rgb, tail_rgb)), 1.0)
-            else:
-                # The accent, fading along the length. The container tone was
-                # nearly white on a white playfield, so the snake was a head
-                # with nothing behind it.
-                cr.set_source_rgba(*head_rgb,
-                                   0.85 - 0.45 * ((index - 1) / length))
-            cr.rectangle(left + x * cell + 1, top + y * cell + 1,
-                         cell - 2, cell - 2)
-            cr.fill()
+        ink = {
+            "board": T.rgb(scheme["surface_container" if not self.dark
+                                  else "surface_container_highest"]),
+            "edge": T.rgb(scheme["surface_variant" if not self.dark
+                                 else "surface_container_low"]),
+            "ink": T.rgb(scheme["on_surface"]),
+            "dim": T.rgb(scheme["on_surface_variant"]),
+            # Three colours a board can use, and they are three because two
+            # is not enough to tell a counter from a target from a mine and
+            # four starts to look like a toy. The brand accent, the teal it
+            # already pairs with, and the amber the rest of the product uses
+            # for "look at this". Every one of them has a matching ink for
+            # anything written on top of it, because a label in the wrong one
+            # of these is unreadable rather than untidy.
+            "accent": T.rgb(scheme["primary"]),
+            "accent2": T.rgb(scheme["secondary"]),
+            "warm": T.rgb(scheme["warning"]),
+            "good": T.rgb(scheme["tertiary"]),
+            "on_accent": T.rgb(scheme["on_primary"]),
+            "on_warm": T.rgb(scheme["on_warning"]),
+            "on_good": T.rgb(scheme["on_tertiary"]),
+            "bad": T.rgb(scheme["error"]),
+        }
+        cr.save()
+        cr.translate(left, top)
+        try:
+            self.game.paint(cr, board_w, board_h, ink)
+        finally:
+            cr.restore()
 
     def _draw_progress(self, report: dict) -> None:
         steps = self.widgets["progress.steps"]
@@ -2998,6 +3379,20 @@ class InstallerWindow(Adw.ApplicationWindow):
             bar.set_fraction(wanted)
         self.widgets["progress.detail"].set_label(
             detail or report.get("position", ""))
+
+        # The download meter. Only while the packages are being fetched, and
+        # only once there are two readings: one sample is a dot, and a dot
+        # says nothing the percentage did not.
+        samples = [value for value in report.get("rate", [])
+                   if isinstance(value, int) and value >= 0]
+        meter_row = self.widgets["progress.meter.row"]
+        if report.get("active") == "acquire" and len(samples) >= 2:
+            self.widgets["progress.meter"].set_samples(samples)
+            self.widgets["progress.rate"].set_label(
+                F.PROGRESS_DOWNLOAD % F.rate_label(samples[-1]))
+            meter_row.set_visible(True)
+        else:
+            meter_row.set_visible(False)
 
         # The ribbon is drawn, so without this it is a rectangle with no value
         # in it. Kept current on every refresh rather than set once, because a
@@ -3498,6 +3893,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.forward_button.set_label(forward or "")
         if state != F.PROGRESS:
             self.secondary_button.set_visible(False)
+            # Whatever was being played is over, because the thing it was
+            # filling is over. A game left running on a page nobody is looking
+            # at is a timer nobody turned off.
+            self._leave_arcade()
         if state == F.GATE:
             self.forward_button.add_css_class("destructive-action")
             self.forward_button.remove_css_class("suggested-action")
@@ -3598,6 +3997,18 @@ class InstallerWindow(Adw.ApplicationWindow):
             candidate = self.widgets.get("gate.entry")
         if candidate is None:
             candidate = self.forward_button
+        # A list is not a thing to focus; the first row in it is.
+        #
+        # `grab_focus` on a `GtkListBox` focuses the box, which drew a ring
+        # around every disk on the machine at once and read as a debug
+        # overlay on the one page where that is least welcome. It was also
+        # the wrong thing to say out loud: a screen reader announced "list"
+        # where the useful sentence is the first disk's name, its size and
+        # what is on it.
+        if isinstance(candidate, Gtk.ListBox):
+            row = candidate.get_selected_row() or candidate.get_row_at_index(0)
+            if row is not None:
+                candidate = row
         candidate.grab_focus()
         return GLib.SOURCE_REMOVE
 

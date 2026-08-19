@@ -34,7 +34,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from aurade_gui import flow as F  # noqa: E402
+from aurade_gui import arcade as ARC, flow as F  # noqa: E402
 from aurade_gui.app import InstallerWindow  # noqa: E402
 from aurade_gui.bridge import Bridge, find_bridge  # noqa: E402
 
@@ -403,49 +403,93 @@ def run(window: InstallerWindow) -> None:
     second_text = window.widgets[f"progress.tip.{second_face}"].get_label()
     check(second_text != first_text, "the tip rotation repeated itself")
 
-    # The game. It has to actually start, actually move, and actually be
-    # steerable, and none of that is visible from the source.
+    # The arcade. Every game has to build, take its keys, tick if it ticks,
+    # and draw, and none of that is visible from the source. Thirteen boards
+    # is thirteen chances for one of them to raise inside a draw handler,
+    # which GTK swallows into a blank card.
     faces = window.widgets["progress.faces"]
+    picker = window.widgets["progress.picker"]
     check(faces.get_visible_child_name() == "tips",
-          "the waiting card started on the game rather than the tips")
-    window._on_waiting_toggled(window.widgets["progress.play"])
-    pump(2)
-    check(faces.get_visible_child_name() == "game",
-          "asking to play did not show the game")
-    check(window.snake is not None, "asking to play did not start a game")
-    check(window.widgets["progress.play"].get_label() != F.WAIT_PLAY,
-          "the play button still offers to play while the game is up")
-    before = list(window.snake.body)
-    window._snake_tick()
-    check(list(window.snake.body) != before, "a tick did not move the snake")
-    check("Score" in window.widgets["progress.score"].get_label(),
-          "the game is up and the score is not")
+          "the waiting card started on a game rather than the tips")
+    check(picker.get_model().get_n_items() == len(ARC.CHOICES),
+          "the picker does not offer everything the arcade has")
 
-    # Arrow keys steer. Everything else is refused, which is what keeps the
-    # least recoverable screen in the product free of bound keys.
-    window.snake.direction = (1, 0)
-    handled = window._on_snake_key(None, Gdk.KEY_Up, 0, 0)
-    check(handled, "the up arrow was not accepted by the game")
-    check(window.snake.pending == (0, -1), "the up arrow did not turn the snake")
-    check(not window._on_snake_key(None, Gdk.KEY_Return, 0, 0),
-          "the game swallowed Return, which belongs to the page")
-
-    # The drawing area draws, including once the snake has earned its gradient.
     arena = window.widgets["progress.arena"]
-    for score in (0, 12):
-        window.snake.score = score
+    named = {"up": Gdk.KEY_Up, "down": Gdk.KEY_Down, "left": Gdk.KEY_Left,
+             "right": Gdk.KEY_Right, "space": Gdk.KEY_space,
+             "enter": Gdk.KEY_Return, "backspace": Gdk.KEY_BackSpace}
+    for index, (ident, text) in enumerate(ARC.CHOICES):
+        if ident in ARC.NOT_GAMES:
+            continue
+        picker.set_selected(index)
+        pump(2)
+        check(faces.get_visible_child_name() == "game",
+              f"choosing {ident} did not put a board on the card")
+        check(window.game is not None and window.game.ident == ident,
+              f"choosing {ident} started {getattr(window.game, 'ident', None)}")
+        check(window.widgets["progress.hint"].get_label() == window.game.keys,
+              f"{ident} is on the card without saying what its keys do")
+        # A board that says it is a shape has to say a shape the window can
+        # divide by. This is the check that a game whose own state shadowed
+        # the contract would have failed, which is how it was found.
+        shape = getattr(window.game, "grid", None)
+        check(shape is None or (isinstance(shape, tuple) and len(shape) == 2
+                                and shape[0] > 0 and shape[1] > 0),
+              f"{ident} reports a board shape the window cannot use: {shape!r}")
+        if window.game.tick_ms:
+            check(window._arcade_source != 0,
+                  f"{ident} moves on its own and nothing is moving it")
+            window._arcade_tick()
+        else:
+            check(window._arcade_source == 0,
+                  f"{ident} does not move on its own and something is ticking")
+        for key in ("up", "down", "left", "right", "space", "enter",
+                    "backspace"):
+            window._on_arena_key(None, named[key], 0, 0)
+        for letter in "sa1":
+            window._on_arena_key(None, Gdk.unicode_to_keyval(ord(letter)), 0, 0)
+        check(bool(window.game.status()) or ident == "life",
+              f"{ident} has nothing to say beside its board")
         try:
             snapshot = Gtk.Snapshot()
             arena.do_snapshot(arena, snapshot)
         except Exception as exc:  # noqa: BLE001
-            FAILURES.append(f"drawing the arena at score {score} raised: {exc!r}")
+            FAILURES.append(f"drawing {ident} raised: {exc!r}")
 
-    window._on_waiting_toggled(window.widgets["progress.play"])
+    # Ctrl and Alt belong to the window, whatever is on the card. A game that
+    # swallowed Ctrl+Q would be a game holding an installer hostage.
+    window._show_wait("2048")
+    pump(1)
+    check(not window._on_arena_key(None, Gdk.KEY_q, 0,
+                                   Gdk.ModifierType.CONTROL_MASK),
+          "a game swallowed a keystroke with Ctrl held")
+
+    # The Bible is in the picker and opens a window rather than taking the
+    # card, and the picker goes back to saying what is actually on screen.
+    bible_at = [i for i, (ident, _t) in enumerate(ARC.CHOICES)
+                if ident == "bible"][0]
+    before = window._wait_choice
+    picker.set_selected(bible_at)
+    pump(2)
+    check(window._wait_choice == before,
+          "choosing the Bible took the card away from what was on it")
+    check(picker.get_selected() != bible_at,
+          "the picker is still naming the Bible, which is not on the card")
+
+    # Finishing the install interrupts whatever is being played. Being mid
+    # 2048 when it completes and not noticing for five minutes is a bug.
+    window._show_wait("2048")
+    pump(1)
+    window.flow.state = F.DONE
+    window.refresh()
     pump(2)
     check(faces.get_visible_child_name() == "tips",
-          "leaving the game did not go back to the tips")
-    check(window._snake_source == 0,
-          "the game kept ticking after it was put away")
+          "the install finished and the game was left on the screen")
+    check(window._arcade_source == 0,
+          "the game kept ticking after the install finished")
+    window.flow.state = F.PROGRESS
+    window.refresh()
+    pump(1)
 
     # -- the word ----------------------------------------------------------
     #

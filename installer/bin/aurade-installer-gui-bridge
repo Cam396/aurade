@@ -781,6 +781,11 @@ gb_progress() {
           [[ $pct =~ ^[0-9]+$ ]] || pct=0
           weight_active=$(stage_weight "$stage")
           active_pct=$pct
+          # The step that is running gets a clock too, measured from its own
+          # first record. Without this the only stage with no time against it
+          # was the one being watched, and a five minute download with a
+          # still bar and no clock is indistinguishable from a hang.
+          elapsed=$(journal_running_ms "$stage")
           ;;
         ok)
           elapsed=$(json_field elapsed_ms "$record")
@@ -840,7 +845,30 @@ gb_progress() {
     ' "$JOURNAL_FILE" 2>/dev/null || printf '0')
     [[ $total_ms =~ ^[0-9]+$ ]] || total_ms=0
   fi
-  _gb_emit "{\"ok\":true,\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"elapsed_ms\":${total_ms},\"overall\":${overall},\"reversible\":${reversible},\"can_stop\":${can_stop}}"
+  # How fast the download is going, when something is measuring it.
+  #
+  # `aurade-rate-sampler` watches the package cache grow and writes one bytes
+  # per second figure per line. The text installer has drawn a sparkline from
+  # it for a while; this is the same numbers, handed to the graphical one, so
+  # that the stage which takes the longest and reports the least is not five
+  # minutes of a bar that does not move.
+  #
+  # Bounded and filtered here rather than trusted: this file is written by a
+  # background process and read by a front end, and a line that is not a
+  # number has no business reaching a JSON document.
+  local rate='[]' rate_sep='' rate_line rate_count=0
+  if [[ -n ${RATE_FILE:-} && -r ${RATE_FILE:-} ]]; then
+    rate='['
+    while IFS= read -r rate_line; do
+      [[ $rate_line =~ ^[0-9]+$ ]] || continue
+      rate+="${rate_sep}${rate_line}"
+      rate_sep=','
+      rate_count=$(( rate_count + 1 ))
+      (( rate_count < 96 )) || break
+    done <"$RATE_FILE"
+    rate+=']'
+  fi
+  _gb_emit "{\"ok\":true,\"rate\":${rate},\"stages\":$out,\"active\":$(_gb_str "$active"),\"running\":$running,\"position\":$(_gb_str "$(stage_position "$active")"),\"elapsed_ms\":${total_ms},\"overall\":${overall},\"reversible\":${reversible},\"can_stop\":${can_stop}}"
 }
 
 # Stop a run that has not written anything yet.

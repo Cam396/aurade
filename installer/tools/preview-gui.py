@@ -55,7 +55,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from aurade_gui import flow as F  # noqa: E402
+from aurade_gui import arcade as ARC, flow as F  # noqa: E402
 from aurade_gui.app import InstallerWindow  # noqa: E402
 from aurade_gui.bridge import Bridge, find_bridge  # noqa: E402
 
@@ -136,7 +136,55 @@ PROGRESS_REPORT = {
 }
 
 
-def goto(window: InstallerWindow, name: str, playing: bool = False) -> None:
+#: A few keys per game, so a render shows a board somebody has been playing
+#: rather than an opening position. Nothing here is a rule of any game; it is
+#: the shortest sequence that makes each board look inhabited.
+DEMO_KEYS = {
+    "2048": ("left", "up", "left", "up", "right", "down", "left", "up"),
+    "mines": ("space", "right", "right", "down", "space", "f", "left", "up"),
+    "lights": ("space", "right", "space", "down", "down"),
+    "fifteen": ("left", "up", "left", "down", "right"),
+    "nono": ("space", "right", "space", "right", "space", "down", "space"),
+    "soko": ("right", "right", "down", "left"),
+    "c4": ("space", "right", "space", "left", "space"),
+    "maze": ("right", "right", "down", "right"),
+    "word": tuple("crane") + ("enter",) + tuple("solid") + ("enter",) + tuple("st"),
+    "type": tuple("The quick brown fx"),
+    "snake": ("down", "right", "right", "up"),
+}
+
+
+def play_a_little(window: InstallerWindow, ident: str) -> None:
+    """Press the keys in `DEMO_KEYS`, through the window's own handler."""
+    from gi.repository import Gdk  # noqa: PLC0415
+
+    named = {"up": Gdk.KEY_Up, "down": Gdk.KEY_Down, "left": Gdk.KEY_Left,
+             "right": Gdk.KEY_Right, "space": Gdk.KEY_space,
+             "enter": Gdk.KEY_Return, "backspace": Gdk.KEY_BackSpace}
+    game = getattr(window, "game", None)
+    for key in DEMO_KEYS.get(ident, ()):
+        keyval = named.get(key) or Gdk.unicode_to_keyval(ord(key))
+        window._on_arena_key(None, keyval, 0, 0)
+        # A game that moves on its own is stepped between keys, or the snake
+        # renders as three squares that never left the corner.
+        if game is not None and game.tick_ms:
+            for _ in range(3):
+                window._arcade_tick()
+    if game is not None and game.tick_ms and ident not in DEMO_KEYS:
+        for _ in range(24):
+            window._arcade_tick()
+    # Motion is run to its end rather than caught half way. A still of a tile
+    # at forty percent of its size is a render of a bug, not of a board, and
+    # these files are looked at side by side against the last set.
+    if game is not None:
+        for _ in range(120):
+            if not game.animating():
+                break
+            game.frame(0.016)
+    window.widgets["progress.arena"].queue_draw()
+
+
+def goto(window: InstallerWindow, name: str, playing: str = "") -> None:
     """Put the window on one page or state, through the flow's own methods."""
     if name in F.PAGES_BY_NAME:
         window.flow.state = "pages"
@@ -152,19 +200,10 @@ def goto(window: InstallerWindow, name: str, playing: bool = False) -> None:
     window._draw_progress(PROGRESS_REPORT)
     window.tip_index = 0
     window._rotate_tip()
-    if playing:
-        window._on_waiting_toggled(window.widgets["progress.play"])
-        # Play it a little, and steer, so the render shows a game in progress
-        # rather than a snake that walked into the right wall unattended.
-        from gi.repository import Gdk  # noqa: PLC0415
-        window.widgets["progress.arena"].queue_draw()
+    if playing and playing != "tips":
+        window._show_wait(playing)
         pump(2)
-        for turn, steps in ((Gdk.KEY_Down, 3), (Gdk.KEY_Right, 5),
-                            (Gdk.KEY_Up, 2), (Gdk.KEY_Right, 4)):
-            window._on_snake_key(None, turn, 0, 0)
-            for _ in range(steps):
-                window._snake_tick()
-        window.snake.score = 4
+        play_a_little(window, playing)
 
 
 def main() -> int:
@@ -177,9 +216,12 @@ def main() -> int:
                         help="render in the dark scheme")
     parser.add_argument("--size", default="1440x900",
                         help="window size, when the compositor allows one")
-    parser.add_argument("--playing", action="store_true",
-                        help="on the progress page, show the game rather than "
-                             "the tips")
+    parser.add_argument("--playing", nargs="?", const="snake", default="",
+                        help="on the progress page, show this game rather "
+                             "than the tips; 'all' renders one file per game")
+    parser.add_argument("--focus", action="store_true",
+                        help="place the initial focus and draw its ring, for "
+                             "reviewing what a keyboard user sees")
     parser.add_argument("--expand", action="store_true",
                         help="open every disclosure before drawing, so folded "
                              "content can be reviewed too")
@@ -228,17 +270,31 @@ def main() -> int:
         pump(60)
         suffix = "-dark" if args.dark else ""
         for name in names:
-            try:
-                goto(window, name, args.playing)
-            except Exception as exc:  # noqa: BLE001 - a tool, not the product
-                print(f"preview-gui: {name}: {exc}", file=sys.stderr)
-                continue
-            if args.expand:
-                expand_all(window)
-            pump()
-            path = os.path.join(args.out, f"{name}{suffix}.png")
-            if snapshot(window, path):
-                written.append(path)
+            # `--playing all` turns one progress render into one per game,
+            # which is the only way to look at thirteen boards without
+            # thirteen runs of a headless compositor.
+            plays: list[str] = [args.playing]
+            if args.playing == "all" and name == F.PROGRESS:
+                plays = [ident for ident, _text in ARC.CHOICES
+                         if ident not in ARC.NOT_GAMES]
+            elif args.playing == "all":
+                plays = [""]
+            for playing in plays:
+                try:
+                    goto(window, name, playing)
+                except Exception as exc:  # noqa: BLE001 - a tool, not the product
+                    print(f"preview-gui: {name}: {exc}", file=sys.stderr)
+                    continue
+                if args.expand:
+                    expand_all(window)
+                if args.focus:
+                    window.set_focus_visible(True)
+                    window._focus_first()
+                pump()
+                tail = f"-{playing}" if len(plays) > 1 else ""
+                path = os.path.join(args.out, f"{name}{tail}{suffix}.png")
+                if snapshot(window, path):
+                    written.append(path)
         window.close()
         application.quit()
 

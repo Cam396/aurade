@@ -676,6 +676,42 @@ journal_last_for_stage() {
   ' "$JOURNAL_FILE"
 }
 
+# When a stage started, in epoch seconds, from its first `running` record.
+#
+# Every record carries `t`, so the start of a stage is knowable without the
+# engine writing a second field for it, and a running stage can therefore show
+# a clock instead of a blank. The first record rather than the last: a stage
+# that reports progress writes a running record per percent, and the last one
+# is a second ago.
+journal_stage_started() {
+  local stage=$1 record moment
+  [[ -r $JOURNAL_FILE ]] || return 0
+  record=$(awk -v want="\"stage\":\"${stage}\"" '
+    index($0, want) && index($0, "\"status\":\"running\"") { print; exit }
+  ' "$JOURNAL_FILE")
+  [[ -n $record ]] || return 0
+  moment=$(json_field t "$record")
+  [[ -n $moment ]] || return 0
+  # A timestamp this cannot parse is a timestamp nothing is drawn from,
+  # rather than a stage row that says 1970.
+  date -u -d "$moment" +%s 2>/dev/null || true
+}
+
+# How long the stage now running has been running, in milliseconds.
+#
+# Milliseconds, and not seconds, because `format_elapsed` takes milliseconds
+# and the finished stages next to this one are drawn from a field that is in
+# milliseconds. One unit through the whole path is one fewer place to divide
+# by a thousand and forget.
+journal_running_ms() {
+  local stage=$1 started now
+  started=$(journal_stage_started "$stage")
+  [[ $started =~ ^[0-9]+$ ]] || return 0
+  now=$(date +%s)
+  (( now >= started )) || return 0
+  printf '%s' $(( (now - started) * 1000 ))
+}
+
 journal_last_failed() {
   [[ -r $JOURNAL_FILE ]] || return 0
   awk '/"status":"failed"/ { record = $0 } END { if (record) print record }' "$JOURNAL_FILE"
@@ -1882,7 +1918,13 @@ screen_progress() {
                done_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")") ;;
       running) token=cyan; active=$stage
                weight_active=$(stage_weight "$stage")
-               live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" '' "$token")")
+               # The clock runs on the step that is running, which is the one
+               # step somebody is actually watching. It used to be blank here
+               # and filled in only once the stage finished, so the longest
+               # step in the install was the one with no time against it and
+               # a five minute download looked like nothing happening.
+               elapsed=$(format_elapsed "$(journal_running_ms "$stage")")
+               live_rows+=("$(printf ' %s %-50s %8s\t%s' "$mark" "$label" "$elapsed" "$token")")
                pct=$(json_field pct "$record")
                detail=$(json_field message "$record")
                [[ $pct =~ ^[0-9]+$ ]] || pct=0

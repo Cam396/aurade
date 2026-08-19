@@ -509,10 +509,75 @@ def progress_steps(done: int, pending: int) -> str:
 
 
 #: The card underneath, which is either something to read or something to do.
-WAIT_PLAY = "Play something"
-WAIT_STOP = "Back to the tips"
-WAIT_SCORE = "Score %d"
-WAIT_SCORE_OVER = "Score %d. Any key to start again."
+#:
+#: The line beside each board is the board's own, and lives with the game in
+#: `arcade.py` rather than here. A score is not copy about installing AuraDE;
+#: it is a game saying what just happened, and putting fourteen of those in
+#: this file would bury the twenty strings that are about the install.
+#: The status area, top right. Three facts every other computer puts in a
+#: corner and this one did not have anywhere.
+#:
+#: Each has a spoken form as well as a drawn one, and the spoken form is a
+#: sentence rather than the same glyph read out: "82 percent, on battery" is
+#: an answer, and "battery, 82 percent" is a label being read to somebody.
+STATUS_CLOCK = "The time"
+STATUS_CLOCK_IS = "The time is %s."
+STATUS_BATTERY_NAME = "Battery"
+STATUS_BATTERY = "%d percent, on battery."
+STATUS_BATTERY_CHARGING = "%d percent, plugged in and charging."
+STATUS_BATTERY_LOW = (
+    "%d percent, on battery, and low. Installing takes about ten minutes, "
+    "and losing power part way through leaves a disk that is neither the old "
+    "system nor the new one. Plug it in."
+)
+STATUS_NET_NAME = "Network"
+STATUS_NET_WIRED = "Connected by cable."
+STATUS_NET_WIFI = "Connected by Wi-Fi."
+STATUS_NET_NO_ROUTE = (
+    "A network is attached but there is no route out, so nothing can be "
+    "downloaded yet."
+)
+STATUS_NET_NONE = "Not connected to any network."
+#: Beside the icon when there is no connection. Two characters rather than a
+#: sentence, because it sits next to a clock in a top bar, and the sentence is
+#: what the tooltip and the screen reader get.
+STATUS_NET_SHORT = "off"
+
+#: The download meter, during the one stage that takes minutes and reports
+#: almost nothing. Word for word what the text installer says in plain mode,
+#: because the two front ends are watching the same file.
+PROGRESS_DOWNLOAD = "Downloading at %s"
+
+
+def rate_label(per_second: int) -> str:
+    """Bytes per second, in the units a person would use.
+
+    The same three tiers and the same one decimal place as `tui_rate` in
+    `lib/aurade-tui.sh`, and deliberately the same rounding: this number is
+    drawn beside the same sparkline in both front ends, and one of them saying
+    4.2 MB/s while the other says 4.3 is two products.
+    """
+    if not isinstance(per_second, int) or per_second < 0:
+        return ""
+    if per_second >= 1048576:
+        whole, tenth = divmod(per_second, 1048576)
+        return f"{whole}.{tenth * 10 // 1048576} MB/s"
+    if per_second >= 1024:
+        whole, tenth = divmod(per_second, 1024)
+        return f"{whole}.{tenth * 10 // 1024} kB/s"
+    return f"{per_second} B/s"
+
+
+WAIT_PICKER = "What to do while this runs"
+WAIT_PICKER_WHY = (
+    "Something to read, something to watch, or one of thirteen games. "
+    "Nothing here affects the installation."
+)
+WAIT_ARENA = "The waiting card"
+WAIT_ARENA_IDLE = (
+    "Nothing is playing. The list beside this has things to read and games "
+    "to play while the installation runs."
+)
 
 DONE_TITLE = "You are all set"
 DONE_BODY = (
