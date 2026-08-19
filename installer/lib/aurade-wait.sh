@@ -946,7 +946,8 @@ aurade_mines_rows() {
 # disk is being written and large enough to be a picture.
 # One picture per line, a row of the grid between each colon, so that the
 # pictures are legible in the source. A wall of dots on one line is not, and
-# the whole point of these is that somebody drew them.
+# the whole point of these is that somebody drew them. The set is deliberately
+# small enough that every picture can be recognized at eight by eight.
 AURADE_NONO_ART=(
   'heart:.##..##.:########:########:########:.######.:..####..:...##...:........'
   'cat:#......#:##....##:########:#.#..#.#:########:.######.:..#..#..:........'
@@ -954,6 +955,12 @@ AURADE_NONO_ART=(
   'up:...##...:..####..:.######.:########:...##...:...##...:...##...:...##...'
   'wave:........:..##....:.####.#.:########:########:.######.:..####..:........'
   'die:########:#......#:#.##...#:#......#:#...##.#:#......#:#......#:########'
+  'sun:...##...:..####..:.######.:########:.######.:..####..:...##...:........'
+  'house:....#...:...###..:..#####.:########:##..#..#:##..#..#:########:........'
+  'smile:.######.:#......#:#.#..#.#:#......#:#.#..#.#:#..##..#:.#....#.:..####..'
+  'flower:...##...:...##...:..####..:.######.:...##...:..####..:.#....#.:#......#'
+  'rocket:...##...:..####..:..####..:.######.:########:...##...:..#..#..:.#....#.'
+  'star:...#....:..###...:.#####..:#######.:.#####..:..###...:...#....:........'
 )
 AURADE_NONO_W=8
 AURADE_NONO_H=8
