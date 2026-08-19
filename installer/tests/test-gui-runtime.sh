@@ -28,7 +28,10 @@ skip() { echo "installer GUI runtime test: SKIP ($1)"; exit 0; }
 
 command -v python3 >/dev/null 2>&1 || skip 'python3 not available'
 command -v weston >/dev/null 2>&1 || skip 'no headless compositor (weston)'
-python3 - <<'PY' 2>/dev/null || skip 'GTK 4 and libadwaita are not usable here'
+# A broken or partially installed GI stack can block while probing a display
+# backend instead of returning an import error. The runtime test must never
+# turn that environmental problem into an unbounded full-suite run.
+timeout 10s python3 - <<'PY' 2>/dev/null || skip 'GTK 4 and libadwaita are not usable here'
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
