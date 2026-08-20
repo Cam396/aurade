@@ -1552,7 +1552,7 @@ write_target_file /etc/sudoers.d/10-aurade-wheel 0440 '%wheel ALL=(ALL:ALL) ALL\
 run arch-chroot "$MOUNTPOINT" passwd --lock root
 
 run arch-chroot "$MOUNTPOINT" systemctl enable \
-  NetworkManager.service bluetooth.service systemd-timesyncd.service \
+  NetworkManager.service shill-nm-adapter.service bluetooth.service systemd-timesyncd.service \
   seatd.service aurade-powerd.service aurade-host-bridge.service aurade-greetd.service
 run arch-chroot "$MOUNTPOINT" systemctl set-default graphical.target
 
@@ -1746,7 +1746,7 @@ else
   fi
   arch-chroot "$MOUNTPOINT" pacman -Q aurade chromiumos-ash >/dev/null || \
     die 'post-install verification failed: expected AuraDE packages are not installed'
-  arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service seatd.service aurade-greetd.service >/dev/null || \
+  arch-chroot "$MOUNTPOINT" systemctl is-enabled NetworkManager.service shill-nm-adapter.service seatd.service aurade-greetd.service >/dev/null || \
     die 'post-install verification failed: required services are not enabled'
   root_state=$(arch-chroot "$MOUNTPOINT" passwd -S root | awk '{print $2}')
   [[ $root_state == L* ]] || die 'post-install verification failed: installed root account is not locked'
