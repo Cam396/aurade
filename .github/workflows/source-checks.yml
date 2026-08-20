@@ -83,6 +83,9 @@ jobs:
       - name: Run runtime-risk source guard
         run: ci/tests/runtime-risk-source-test.sh
 
+      - name: Run Chromium network client configuration guard
+        run: ci/tests/chromium-network-config-test.sh
+
       - name: Run session error fixture
         run: bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
 

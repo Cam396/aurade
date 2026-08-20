@@ -223,6 +223,16 @@ build() {
         google_default_client_secret = \"${google_client_secret_arg}\"
     "
 
+    # Fail closed if the generated build does not carry the real D-Bus client
+    # define. Without this check a successful compile can still publish the
+    # desktop fake network services, which look like real connections in Ash.
+    local toolchain_ninja="${out_dir}/toolchain.ninja"
+    if [[ ! -r "${toolchain_ninja}" ]] ||
+       ! grep -Fq -- '-DUSE_REAL_DBUS_CLIENTS' "${toolchain_ninja}"; then
+        echo 'ERROR: generated Chromium build is missing real D-Bus clients' >&2
+        return 1
+    fi
+
     # Build the chrome target and its setuid sandbox helper.
     ninja -C "${out_dir}" -j"$(nproc)" chrome chrome_sandbox
 }
