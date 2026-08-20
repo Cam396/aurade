@@ -47,6 +47,7 @@ pacman -Qip "${package_files[@]}" >/dev/null
 pacman -Qlp "${package_files[@]}" >/dev/null
 python -B -m py_compile "${REPO_ROOT}/shill-nm-adapter/shill_nm_adapter.py"
 python -B "${REPO_ROOT}/shill-nm-adapter/test_shill_nm_adapter.py"
+bash -n "${REPO_ROOT}/shill-nm-adapter/shill-nm-adapter.install"
 python -B -m py_compile \
   "${REPO_ROOT}/aurade-power/aurade-powerd" \
   "${REPO_ROOT}/aurade-host-bridge/aurade_host_bridge_core.py" \
