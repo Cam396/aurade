@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 
 TESTS = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.normpath(os.path.join(TESTS, "..", ".."))
@@ -260,6 +262,49 @@ def run(window: InstallerWindow) -> None:
                   f"the gate accepted {near!r}, which is not the token")
         entry.set_text("")
         pump()
+
+        # Starting the privileged engine can be slow on a small eMMC machine.
+        # The page must move before the model replies, and no second command
+        # may use the one-line bridge while the execute request is in flight.
+        # A delayed fake makes both properties observable without touching a
+        # real disk or starting the fixture engine.
+        saved_execute = window.model.execute
+        saved_progress = window.model.progress
+        release_execute = threading.Event()
+        execute_started = threading.Event()
+
+        def delayed_execute(_token: str) -> dict:
+            execute_started.set()
+            release_execute.wait(2)
+            return {"ok": True, "started": True}
+
+        window.model.execute = delayed_execute
+        window.model.progress = lambda: {"running": True, "stages": []}
+        window.flow.state = F.GATE
+        window.refresh()
+        entry.set_text(token)
+        window._start_execute()
+        check(window.flow.state == F.PROGRESS,
+              "the GUI stayed on the erase gate while execute started")
+        check(execute_started.wait(1),
+              "the execute worker did not start promptly")
+        check(window._progress_source == 0,
+              "progress polling raced the in-flight execute request")
+        release_execute.set()
+        deadline = time.monotonic() + 2
+        while window._execute_thread is not None and time.monotonic() < deadline:
+            pump()
+            time.sleep(0.01)
+        pump(4)
+        check(window._execute_thread is None,
+              "the execute worker did not return to the GTK loop")
+        check(window._progress_source != 0,
+              "progress polling did not start after execute was accepted")
+        if window._progress_source:
+            GLib.source_remove(window._progress_source)
+            window._progress_source = 0
+        window.model.execute = saved_execute
+        window.model.progress = saved_progress
         window.flow.state = "pages"
         window.flow.jump_to_page("disk")
         window.refresh()

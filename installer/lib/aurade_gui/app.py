@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 
 import gi
 
@@ -715,6 +716,12 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.failure_cause = ""
         self.dark = False
         self._progress_source = 0
+        #: The bridge starts the engine in the background, but the reply can
+        #: still take a long time on a small eMMC machine while the shell
+        #: prepares its journal and secret files. Keep that pipe operation off
+        #: GTK's main loop so the page can say that work has started.
+        self._execute_pending = False
+        self._execute_thread: threading.Thread | None = None
         # The waiting card. `tips` is read once, from the same file the text
         # installer reads; a game is built the first time somebody picks one
         # and never before, because most installs will not pick any.
@@ -4463,16 +4470,57 @@ class InstallerWindow(Adw.ApplicationWindow):
         if typed != self._gate_token:
             self._toast("The confirmation did not match the disk.")
             return
-        try:
-            result = self.model.execute(typed)
-        except BridgeError as exc:
-            self._fatal(str(exc))
+        if self._execute_pending:
             return
-        if not result.get("ok"):
-            self._toast(result.get("error", "The installation could not start."))
-            return
+
+        # Move first. The old synchronous call left the erase page painted for
+        # the entire startup of the privileged engine. On a low-memory eMMC
+        # machine that can be minutes, even though the engine has already
+        # begun doing useful work. The model pipe remains single threaded: no
+        # progress call is scheduled until this worker has returned its one
+        # response.
+        self._execute_pending = True
+        self.forward_button.set_sensitive(False)
         self.flow.confirmed()
         self.refresh()
+        self._execute_thread = threading.Thread(
+            target=self._execute_worker,
+            args=(typed,),
+            name="aurade-execute-start",
+            daemon=True,
+        )
+        self._execute_thread.start()
+
+    def _execute_worker(self, token: str) -> None:
+        try:
+            result = self.model.execute(token)
+        except BridgeError as exc:
+            GLib.idle_add(self._finish_execute, None, str(exc))
+            return
+        GLib.idle_add(self._finish_execute, result, "")
+
+    def _finish_execute(self, result: dict | None, error: str) -> bool:
+        """Handle the execute reply on GTK's thread.
+
+        A failed start has not crossed the destructive boundary: the bridge
+        rejects it before spawning the engine. Returning to the gate preserves
+        the old safe retry behaviour while successful starts begin polling only
+        after the pipe is free again.
+        """
+        self._execute_pending = False
+        self._execute_thread = None
+        if error:
+            self.flow.state = F.GATE
+            self.refresh()
+            self._fatal(error)
+            return GLib.SOURCE_REMOVE
+        if not result or not result.get("ok"):
+            self.flow.state = F.GATE
+            self.refresh()
+            self._toast((result or {}).get(
+                "error", "The installation could not start."))
+            return GLib.SOURCE_REMOVE
+
         self._progress_source = GLib.timeout_add(
             PROGRESS_INTERVAL_MS, self._poll_progress)
         if self.tips and not self._tip_source:
@@ -4483,6 +4531,7 @@ class InstallerWindow(Adw.ApplicationWindow):
             if self.animate:
                 self._tip_source = GLib.timeout_add(
                     W.TIP_INTERVAL_MS, self._rotate_tip)
+        return GLib.SOURCE_REMOVE
 
     def _fatal(self, message: str) -> None:
         dialog = Adw.AlertDialog(
