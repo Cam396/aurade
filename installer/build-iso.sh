@@ -103,8 +103,9 @@ rm -rf -- "$STAGE" "$BUILD_WORK"
 install -d -m 0755 "$STAGE" "$OUTPUT_DIR" "$BUILD_WORK"
 cp -a "$ROOT/archiso/." "$STAGE/"
 if (( GUI_RELEASE )); then
-  ROOT="$(cd "$ROOT/.." && pwd -P)" python3 "$ROOT/../ci/verify-gui-release-manifest.py" \
-    "$ROOT/gui-release-manifest.json"
+  REPO_ROOT=$(cd -- "$ROOT/.." && pwd -P)
+  ROOT="$REPO_ROOT" python3 "$REPO_ROOT/ci/verify-gui-release-manifest.py" \
+    "$REPO_ROOT/installer/gui-release-manifest.json"
 fi
 install -Dm0755 "$ROOT/bin/aurade-install" "$STAGE/airootfs/usr/local/sbin/aurade-install"
 install -Dm0755 "$ROOT/bin/aurade-secure-boot-sign" "$STAGE/airootfs/usr/local/sbin/aurade-secure-boot-sign"
