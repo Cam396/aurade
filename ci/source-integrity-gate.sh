@@ -75,6 +75,7 @@ bad_tracked=$(git -C "${REPO_ROOT}" ls-files | grep -E -n -- '(^|/)(__pycache__/
 git -C "${REPO_ROOT}" diff --check || fail 'whitespace errors are present'
 [[ -x ${REPO_ROOT}/installer/build-iso.sh ]] || fail 'installer/build-iso.sh is not executable'
 [[ -x ${REPO_ROOT}/ci/public-release-leak-gate.sh ]] || fail 'public leak gate is not executable'
+[[ -x ${REPO_ROOT}/ci/public-docs-gate.sh ]] || fail 'public docs gate is not executable'
 [[ -r ${REPO_ROOT}/installer/archiso/efiboot/loader/loader.conf ]] || fail 'ISO loader configuration is missing'
 grep -Fxq 'editor no' "${REPO_ROOT}/installer/archiso/efiboot/loader/loader.conf" ||
   fail 'ISO loader editor policy is not locked down'
