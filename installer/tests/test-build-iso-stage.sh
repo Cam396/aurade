@@ -49,6 +49,33 @@ fi
 grep -Fq 'build-iso: AURADE_MAX_ISO_BYTES must be a positive integer' "$TMP/invalid_max_bytes.out"
 [[ ! -e $TMP/work_invalid ]]
 
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_GUI_RELEASE=2 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_invalid_gui" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/invalid_gui.out" 2>&1; then
+  echo 'invalid AURADE_GUI_RELEASE unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' "$TMP/invalid_gui.out"
+[[ ! -e $TMP/work_invalid_gui ]]
+
+if env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_GUI_RELEASE=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_gui_development" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/gui_development.out" 2>&1; then
+  echo 'development-channel GUI release unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'build-iso: GUI releases require candidate or public AURADE_RELEASE_CHANNEL' \
+  "$TMP/gui_development.out"
+[[ ! -e $TMP/work_gui_development ]]
+
 # A release build must not silently claim provenance when signatures are
 # required.  Stage-only mode still validates this policy before touching the
 # work directory, so this is safe to exercise without mkarchiso or a keyring.
