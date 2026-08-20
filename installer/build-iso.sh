@@ -129,6 +129,14 @@ for _asset in aurade-mark.png aurade-wordmark.png; do
   install -Dm0644 "$ROOT/assets/${_asset}" \
     "$STAGE/airootfs/usr/share/plymouth/themes/aurade/${_asset}"
 done
+# These three files arrive through the profile copy above. Install them again
+# so a checkout with group-write bits cannot change the mode of a root-owned
+# boot theme in the image.
+for _theme_asset in aurade.plymouth aurade.script dot.png; do
+  install -Dm0644 \
+    "$ROOT/archiso/airootfs/usr/share/plymouth/themes/aurade/${_theme_asset}" \
+    "$STAGE/airootfs/usr/share/plymouth/themes/aurade/${_theme_asset}"
+done
 # The wallpapers, and the manifest that indexes them.
 #
 # The manifest first and by name, because the front end finds the set by
