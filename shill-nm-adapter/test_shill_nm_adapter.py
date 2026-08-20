@@ -267,6 +267,74 @@ def main() -> None:
           "a disconnected Wi-Fi device did not expose a ready AP")
     check(listed._props[adapter.PROP_IS_CONNECTED] is False,
           "a disconnected Wi-Fi AP remained marked connected")
+
+    # A passphrase entered for a new network must not leave a failed profile
+    # behind. The next boot would otherwise show the same broken row again and
+    # NetworkManager could retry it without the user asking. Existing profiles
+    # take a separate path and are intentionally not deleted here.
+    class FailingConnection:
+        def __init__(self):
+            self.deleted = False
+
+        def GetSettings(self):
+            return {"connection": {"type": "802-11-wireless"},
+                    "802-11-wireless": {"ssid": b"Other WiFi"}}
+
+        def Delete(self):
+            self.deleted = True
+
+    class FailingSettings:
+        def __init__(self, connection):
+            self.connection = connection
+            self.added = False
+
+        def ListConnections(self):
+            return []
+
+        def AddConnection(self, _settings):
+            self.added = True
+            return "/nm/connection/new"
+
+    class FailingNM:
+        def ActivateConnection(self, *_args):
+            raise adapter.dbus.exceptions.DBusException("activation failed")
+
+    failing_connection = FailingConnection()
+    failing_settings = FailingSettings(failing_connection)
+
+    class FailingBus:
+        def get_object(self, _service, path):
+            if path == adapter.NM_SETTINGS_PATH:
+                return failing_settings
+            if path == "/nm/connection/new":
+                return failing_connection
+            raise KeyError(path)
+
+    failed_monitor = object.__new__(adapter.NetworkManagerMonitor)
+    failed_monitor._bus = FailingBus()
+    failed_monitor._nm_iface = FailingNM()
+    failed_monitor._device = lambda _path: object()
+    failed_monitor._shill = fake_shill
+    failed_service = adapter.Service(
+        object(), "/service/failing", fake_shill, adapter.SHILL_TYPE_WIFI,
+        "wlan0", "failing", monitor=failed_monitor, nm_device_path="/dev/wlan0",
+        ssid=b"Other WiFi", record={
+            "name": "Other WiFi", "hex_ssid": "4f746865722057694669",
+            "security": "psk", "security_name": "WPA2",
+        },
+    )
+    failed_service.set_property(adapter.PROP_PASSPHRASE, "temporary-passphrase")
+    try:
+        failed_monitor.connect_service(failed_service)
+    except adapter.dbus.exceptions.DBusException:
+        pass
+    else:
+        raise AssertionError("a failed NetworkManager activation unexpectedly succeeded")
+    check(failing_settings.added, "the new NetworkManager profile was not created")
+    check(failing_connection.deleted,
+          "a failed new Wi-Fi profile was not deleted")
+    check(failed_service._props[adapter.PROP_STATE] == adapter.SHILL_STATE_IDLE,
+          "a failed Wi-Fi activation did not return to idle")
     print("shill adapter translation test: PASS")
 
 

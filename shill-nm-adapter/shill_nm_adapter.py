@@ -1245,6 +1245,8 @@ class NetworkManagerMonitor:
             service.set_state(SHILL_STATE_READY)
             return
         service.set_state(SHILL_STATE_ASSOCIATION)
+        connection_path = None
+        created_connection = False
         try:
             settings_obj = self._bus.get_object(NM_SERVICE, NM_SETTINGS_PATH)
             settings = dbus.Interface(settings_obj, NM_SETTINGS_IFACE)
@@ -1252,6 +1254,7 @@ class NetworkManagerMonitor:
             if connection_path is None:
                 nm_settings = self._connection_settings(service)
                 connection_path = settings.AddConnection(nm_settings)
+                created_connection = True
             elif service._passphrase:
                 # A selected network may already have a saved profile. Only
                 # update its secrets when Ash supplied a new passphrase; a
@@ -1270,9 +1273,30 @@ class NetworkManagerMonitor:
             log.info("Requested NetworkManager activation for %s", service._props.get(PROP_NAME))
             del active
         except dbus.exceptions.DBusException:
+            # A newly entered passphrase belongs to this one attempt. If
+            # activation fails, remove the profile we just created so the
+            # installed system does not retain a broken connection that Ash
+            # will keep offering or retrying. Never delete an existing saved
+            # profile: a failed reconnect must not destroy user state.
+            if created_connection and connection_path is not None:
+                try:
+                    dbus.Interface(
+                        self._bus.get_object(NM_SERVICE, connection_path),
+                        NM_CONNECTION_IFACE,
+                    ).Delete()
+                except Exception as exc:
+                    log.debug("Cannot remove failed NetworkManager profile: %s", exc)
             service.set_state(SHILL_STATE_IDLE)
             raise
         except Exception as exc:
+            if created_connection and connection_path is not None:
+                try:
+                    dbus.Interface(
+                        self._bus.get_object(NM_SERVICE, connection_path),
+                        NM_CONNECTION_IFACE,
+                    ).Delete()
+                except Exception as delete_exc:
+                    log.debug("Cannot remove failed NetworkManager profile: %s", delete_exc)
             service._set_properties({
                 PROP_STATE: SHILL_STATE_IDLE,
                 PROP_ERROR: "operation-failed",
