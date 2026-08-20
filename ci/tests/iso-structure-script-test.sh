@@ -36,8 +36,11 @@ for helper in aurade-installer aurade-install aurade-recovery aurade-installer-s
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
 install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
-for module in __init__ app bridge flow; do
+for module in __init__ a11y arcade app bible brand bridge flow locales stage status tokens wait; do
   printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
+done
+for sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css; do
+  printf '%s\n' "$sheet" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$sheet"
 done
 printf '%s\n' enabled >"$TMP/squash/etc/aurade-installer/gui-enabled"
 python3 - "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" <<'PY'
@@ -49,15 +52,24 @@ paths = [
     "installer/bin/aurade-installer-gui",
     "installer/bin/aurade-installer-gui-bridge",
     "installer/bin/aurade-installer-start",
-    "installer/lib/aurade-probe.sh",
-    "installer/lib/aurade-questions.sh",
-    "installer/lib/aurade-validate.sh",
-    "installer/lib/aurade-journal.sh",
-    "installer/lib/aurade-tui.sh",
     "installer/lib/aurade_gui/__init__.py",
+    "installer/lib/aurade_gui/a11y.py",
+    "installer/lib/aurade_gui/arcade.py",
     "installer/lib/aurade_gui/app.py",
+    "installer/lib/aurade_gui/bible.py",
+    "installer/lib/aurade_gui/brand.py",
     "installer/lib/aurade_gui/bridge.py",
     "installer/lib/aurade_gui/flow.py",
+    "installer/lib/aurade_gui/locales.py",
+    "installer/lib/aurade_gui/stage.py",
+    "installer/lib/aurade_gui/status.py",
+    "installer/lib/aurade_gui/tokens.py",
+    "installer/lib/aurade_gui/wait.py",
+    "installer/lib/aurade_gui/theme.css",
+    "installer/lib/aurade_gui/theme-dark.css",
+    "installer/lib/aurade_gui/theme-hc.css",
+    "installer/lib/aurade_gui/theme-dark-hc.css",
+    "installer/lib/aurade_gui/theme-oled.css",
 ]
 manifest = {
     "schema": 1,

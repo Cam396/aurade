@@ -73,6 +73,22 @@ required = {
 if not required.issubset(seen):
     fail(f"required GUI payload is missing: {sorted(required - seen)}")
 
+gui_source_dir = root / "installer" / "lib" / "aurade_gui"
+expected_gui_payload = {
+    "installer/bin/aurade-installer-gui",
+    "installer/bin/aurade-installer-gui-bridge",
+    "installer/bin/aurade-installer-start",
+}
+expected_gui_payload.update(
+    str(path.relative_to(root))
+    for path in sorted(gui_source_dir.iterdir())
+    if path.suffix in {".py", ".css"}
+)
+if seen != expected_gui_payload:
+    missing = sorted(expected_gui_payload - seen)
+    extra = sorted(seen - expected_gui_payload)
+    fail(f"GUI payload coverage mismatch: missing={missing}, unexpected={extra}")
+
 packages = data.get("runtime_packages")
 expected_packages = {
     "cage",

@@ -198,12 +198,13 @@ if (( FULL )); then
       echo 'verify-iso-structure: embedded GUI manifest digest does not match build-info' >&2
       exit 1
     }
-    python3 - "$manifest_file" <<'PY'
+    python3 - "$manifest_file" "$contents" <<'PY'
 import json
 import pathlib
 import sys
 
 manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+contents = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 if not isinstance(manifest, dict):
     raise SystemExit("verify-iso-structure: embedded GUI manifest is not an object")
 if manifest.get("schema") != 1 or manifest.get("release") != "0.2.0":
@@ -216,15 +217,24 @@ expected_payload = {
     "installer/bin/aurade-installer-gui",
     "installer/bin/aurade-installer-gui-bridge",
     "installer/bin/aurade-installer-start",
-    "installer/lib/aurade-probe.sh",
-    "installer/lib/aurade-questions.sh",
-    "installer/lib/aurade-validate.sh",
-    "installer/lib/aurade-journal.sh",
-    "installer/lib/aurade-tui.sh",
     "installer/lib/aurade_gui/__init__.py",
+    "installer/lib/aurade_gui/a11y.py",
+    "installer/lib/aurade_gui/arcade.py",
     "installer/lib/aurade_gui/app.py",
+    "installer/lib/aurade_gui/bible.py",
+    "installer/lib/aurade_gui/brand.py",
     "installer/lib/aurade_gui/bridge.py",
     "installer/lib/aurade_gui/flow.py",
+    "installer/lib/aurade_gui/locales.py",
+    "installer/lib/aurade_gui/stage.py",
+    "installer/lib/aurade_gui/status.py",
+    "installer/lib/aurade_gui/tokens.py",
+    "installer/lib/aurade_gui/wait.py",
+    "installer/lib/aurade_gui/theme.css",
+    "installer/lib/aurade_gui/theme-dark.css",
+    "installer/lib/aurade_gui/theme-hc.css",
+    "installer/lib/aurade_gui/theme-dark-hc.css",
+    "installer/lib/aurade_gui/theme-oled.css",
 }
 payload = manifest.get("payload")
 if not isinstance(payload, list):
@@ -232,6 +242,16 @@ if not isinstance(payload, list):
 payload_paths = {entry.get("path") for entry in payload if isinstance(entry, dict)}
 if not expected_payload.issubset(payload_paths):
     raise SystemExit("verify-iso-structure: embedded GUI manifest omits required source payload")
+for entry in payload:
+    path = entry.get("path")
+    if path.startswith("installer/bin/"):
+        staged = "squashfs-root/usr/local/sbin/" + path.removeprefix("installer/bin/")
+    elif path.startswith("installer/lib/"):
+        staged = "squashfs-root/usr/local/lib/aurade/" + path.removeprefix("installer/lib/")
+    else:
+        raise SystemExit(f"verify-iso-structure: unsupported GUI payload path: {path}")
+    if staged not in contents:
+        raise SystemExit(f"verify-iso-structure: GUI payload is not staged: {path}")
 if sorted(manifest.get("runtime_packages", [])) != [
     "cage", "gtk4", "libadwaita", "python-cairo", "python-gobject", "ttf-jetbrains-mono"
 ]:
