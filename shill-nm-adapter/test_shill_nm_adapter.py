@@ -98,6 +98,20 @@ def check(condition: bool, message: str) -> None:
 
 
 def main() -> None:
+    # A Wi-Fi-only machine must not inherit the old static Ethernet entry.
+    # This is deliberately a pure assertion over the publication rules so it
+    # remains testable without a system NetworkManager daemon.
+    wifi_props = adapter._technology_properties(
+        [adapter.SHILL_TYPE_WIFI, adapter.SHILL_TYPE_WIFI],
+        [adapter.SHILL_TYPE_WIFI],
+    )
+    check(wifi_props[adapter.PROP_ENABLED_TECHNOLOGIES] == [adapter.SHILL_TYPE_WIFI],
+          "Wi-Fi-only technology inventory contains a placeholder")
+    check(wifi_props[adapter.PROP_DEFAULT_TECHNOLOGY] == adapter.SHILL_TYPE_WIFI,
+          "Wi-Fi was not selected as the default technology")
+    check(wifi_props[adapter.PROP_CHECK_PORTAL_LIST] == adapter.SHILL_TYPE_WIFI,
+          "portal checks still advertise a missing technology")
+
     secured = adapter._access_point_record({
         "Ssid": b"Home WiFi",
         "HwAddress": "aa:bb:cc:dd:ee:ff",

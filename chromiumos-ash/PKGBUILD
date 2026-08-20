@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=152.1660893
-pkgrel=6
+pkgrel=7
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -175,7 +175,39 @@ build() {
         return
     fi
 
-    # Generate GN args
+    # The AuraDE fallback credentials are shipped as a checked-in config so
+    # the binary can authenticate before a user-level environment exists.
+    # Read that file here rather than duplicating credentials in this recipe;
+    # GN still expands the values into google_apis at compile time.
+    local google_api_config="${srcdir}/google-api.conf"
+    if [[ ! -r "${google_api_config}" ]]; then
+        echo "ERROR: missing ${google_api_config}" >&2
+        exit 1
+    fi
+    # shellcheck disable=SC1090
+    source "${google_api_config}"
+    : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
+    : "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"
+    : "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"
+
+    gn_quote() {
+        local value="${1//\\/\\\\}"
+        value="${value//\"/\\\"}"
+        printf '%s' "${value}"
+    }
+
+    local google_api_key_arg
+    local google_client_id_arg
+    local google_client_secret_arg
+    google_api_key_arg="$(gn_quote "${GOOGLE_API_KEY}")"
+    google_client_id_arg="$(gn_quote "${GOOGLE_DEFAULT_CLIENT_ID}")"
+    google_client_secret_arg="$(gn_quote "${GOOGLE_DEFAULT_CLIENT_SECRET}")"
+
+    # Generate GN args.  AuraDE runs on a normal Linux host with a real Shill
+    # compatibility service, so Chromium must not select its desktop fake
+    # clients.  Those fakes intentionally publish demo Ethernet, cellular,
+    # and Wi-Fi services and are the source of the placeholder networks seen
+    # in the network menu.
     gn gen "${out_dir}" --args="
         target_os = \"chromeos\"
         is_debug = false
@@ -186,6 +218,11 @@ build() {
         ozone_platform_wayland = true
         use_system_minigbm = true
         enable_rust = true
+        use_real_dbus_clients = true
+        use_official_google_api_keys = false
+        google_api_key = \"${google_api_key_arg}\"
+        google_default_client_id = \"${google_client_id_arg}\"
+        google_default_client_secret = \"${google_client_secret_arg}\"
     "
 
     # Build the chrome target and its setuid sandbox helper.

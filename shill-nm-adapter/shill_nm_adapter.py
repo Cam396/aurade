@@ -142,6 +142,21 @@ def _security_class(flags: int, wpa_flags: int, rsn_flags: int) -> str:
     return "wep"
 
 
+def _technology_properties(available: list[str], connected: list[str]) -> dict:
+    """Return manager technology fields derived only from real NM devices."""
+    available = list(dict.fromkeys(available))
+    connected = list(dict.fromkeys(connected))
+    enabled = list(available)
+    default = connected[0] if connected else (enabled[0] if enabled else "")
+    return {
+        PROP_ENABLED_TECHNOLOGIES: enabled,
+        PROP_AVAILABLE_TECHNOLOGIES: available,
+        PROP_CONNECTED_TECHNOLOGIES: connected,
+        PROP_DEFAULT_TECHNOLOGY: default,
+        PROP_CHECK_PORTAL_LIST: ",".join(enabled),
+    }
+
+
 def _access_point_record(props: dict) -> dict | None:
     """Normalize one NetworkManager access point for the Shill layer.
 
@@ -397,18 +412,19 @@ class Manager(ShillObject):
             PROP_DEVICES: dbus.Array([], signature="o"),
             PROP_SERVICES: dbus.Array([], signature="o"),
             PROP_SERVICE_COMPLETE_LIST: dbus.Array([], signature="o"),
-            PROP_ENABLED_TECHNOLOGIES: dbus.Array(
-                [SHILL_TYPE_ETHERNET, SHILL_TYPE_WIFI], signature="s"
-            ),
+            # Do not advertise technologies merely because the Shill API knows
+            # their names.  Ash treats EnabledTechnologies as a real device
+            # inventory and renders a row for every entry.  The old static
+            # ethernet plus wifi list therefore created an Ethernet control on
+            # Wi-Fi-only machines before NetworkManager had reported devices.
+            PROP_ENABLED_TECHNOLOGIES: dbus.Array([], signature="s"),
             PROP_PROFILES: dbus.Array(
                 [dbus.ObjectPath(SHALLOW_PROFILE_PATH)], signature="o"
             ),
-            PROP_AVAILABLE_TECHNOLOGIES: dbus.Array(
-                [SHILL_TYPE_ETHERNET], signature="s"
-            ),
+            PROP_AVAILABLE_TECHNOLOGIES: dbus.Array([], signature="s"),
             PROP_CONNECTED_TECHNOLOGIES: dbus.Array([], signature="s"),
-            PROP_DEFAULT_TECHNOLOGY: SHILL_TYPE_ETHERNET,
-            PROP_CHECK_PORTAL_LIST: SHILL_TYPE_ETHERNET,
+            PROP_DEFAULT_TECHNOLOGY: "",
+            PROP_CHECK_PORTAL_LIST: "",
             PROP_ARP_GATEWAY: dbus.Boolean(False),
         }
 
@@ -451,10 +467,23 @@ class Manager(ShillObject):
                 if state >= NM_DEVICE_STATE_ACTIVATED:
                     connected.append(SHILL_TYPE_WIFI)
 
+        # EnabledTechnologies is consumed as an inventory by Ash, not as a
+        # capability bitmask.  Keep it in lockstep with actual NM devices so
+        # an absent Ethernet controller or cellular modem cannot become a
+        # placeholder row in the network menu.
+        technology_props = _technology_properties(available, connected)
         self._set_properties({
-            PROP_AVAILABLE_TECHNOLOGIES: dbus.Array(available, signature="s"),
-            PROP_CONNECTED_TECHNOLOGIES: dbus.Array(connected, signature="s"),
-            PROP_DEFAULT_TECHNOLOGY: connected[0] if connected else SHILL_TYPE_ETHERNET,
+            PROP_ENABLED_TECHNOLOGIES: dbus.Array(
+                technology_props[PROP_ENABLED_TECHNOLOGIES], signature="s"
+            ),
+            PROP_AVAILABLE_TECHNOLOGIES: dbus.Array(
+                technology_props[PROP_AVAILABLE_TECHNOLOGIES], signature="s"
+            ),
+            PROP_CONNECTED_TECHNOLOGIES: dbus.Array(
+                technology_props[PROP_CONNECTED_TECHNOLOGIES], signature="s"
+            ),
+            PROP_DEFAULT_TECHNOLOGY: technology_props[PROP_DEFAULT_TECHNOLOGY],
+            PROP_CHECK_PORTAL_LIST: technology_props[PROP_CHECK_PORTAL_LIST],
         })
 
     # -- Manager methods --
