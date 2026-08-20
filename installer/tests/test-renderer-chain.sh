@@ -467,4 +467,32 @@ AURADE_RENDERER_DRI_DIR="$TMP/dri" AURADE_RENDERER_DRM_DIR="$TMP/drm" \
 grep -q 'WLR_RENDERER=gles2 WLR_DRM_DEVICES=' "$TMP/real.plan" ||
   { echo 'test-renderer-chain: a real graphics card was skipped as though it had no 3D' >&2; exit 1; }
 
+# VMware's vmwgfx driver can expose a working DRM device while its accelerated
+# Wayland buffer path fails after the first GTK window maps. The launcher must
+# show the software page first on that known adapter, instead of making a user
+# wait through the accelerated matrix, while keeping those candidates available
+# below as fallbacks.
+install -d "$TMP/vm-dri" "$TMP/vm-drm/card0/device" "$TMP/vm-drm/card0-Virtual-1"
+: >"$TMP/vm-dri/card0"
+printf 'DRIVER=vmwgfx\n' >"$TMP/vm-drm/card0/device/uevent"
+printf 'connected\n' >"$TMP/vm-drm/card0-Virtual-1/status"
+
+AURADE_RENDERER_DRI_DIR="$TMP/vm-dri" AURADE_RENDERER_DRM_DIR="$TMP/vm-drm" \
+  bash -c '. "'"$ROOT"'/installer/lib/aurade-renderers.sh"; aurade_renderer_plan' \
+  >"$TMP/vm.plan"
+vm_first=$(head -n 1 "$TMP/vm.plan")
+[[ $vm_first == *WLR_RENDERER=pixman* ]] ||
+  { echo 'test-renderer-chain: vmwgfx did not get the software-first compositor path' >&2; exit 1; }
+grep -q 'WLR_RENDERER=gles2 WLR_DRM_DEVICES=' "$TMP/vm.plan" ||
+  { echo 'test-renderer-chain: vmwgfx lost its accelerated fallback' >&2; exit 1; }
+
+AURADE_RENDERER_DRI_DIR="$TMP/vm-dri" AURADE_RENDERER_DRM_DIR="$TMP/vm-drm" \
+  bash -c '. "'"$ROOT"'/installer/lib/aurade-renderers.sh"; aurade_renderer_client_plan' \
+  >"$TMP/vm.clients"
+vm_client_first=$(head -n 1 "$TMP/vm.clients")
+[[ $vm_client_first == *GSK_RENDERER=cairo* ]] ||
+  { echo 'test-renderer-chain: vmwgfx did not get the software-first client path' >&2; exit 1; }
+grep -q 'GTK hardware drawing' "$TMP/vm.clients" ||
+  { echo 'test-renderer-chain: vmwgfx lost its accelerated client fallback' >&2; exit 1; }
+
 echo 'installer renderer chain test: PASS'
