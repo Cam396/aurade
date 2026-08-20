@@ -35,7 +35,7 @@ included in any 0.1.0 release artifact.
   machine data.
 - [Troubleshooting](TROUBLESHOOTING.md) covers common build and installation
   problems.
-- [Hardware validation](AURADE_HARDWARE_VALIDATION.md) records the public
+- [Hardware validation](docs/hardware-validation.md) records the public
   qualification matrix.
 - [Contributing](CONTRIBUTING.md) describes review and test expectations.
 - [Security](SECURITY.md) explains how to report a vulnerability privately.
