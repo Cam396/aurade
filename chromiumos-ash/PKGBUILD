@@ -182,7 +182,9 @@ build() {
     fi
     # shellcheck disable=SC1090
     source "${google_api_config}"
-    : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
+    # OAuth sign-in does not require a Google API key.  Some sanctioned
+    # Chromium configurations intentionally leave it empty, so only the
+    # client identity and secret are required to make a usable build.
     : "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"
     : "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"
 

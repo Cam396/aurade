@@ -4,9 +4,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="${SCRIPT_DIR}/chromiumos-ash.sh"
+PKGBUILD="${SCRIPT_DIR}/PKGBUILD"
 TMP_DIR="$(mktemp -d "${SCRIPT_DIR}/.google-api-test.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 chmod 777 "${TMP_DIR}"
+
+# The sanctioned OAuth configuration may leave GOOGLE_API_KEY empty.  Guard
+# the package recipe here so a future refactor does not make valid OAuth
+# credentials impossible to build with.
+if grep -Fq ': "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"' "${PKGBUILD}"; then
+    echo "OAuth config test: API key must remain optional" >&2
+    exit 1
+fi
+grep -Fq ': "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"' "${PKGBUILD}"
+grep -Fq ': "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"' "${PKGBUILD}"
 
 mkdir -p "${TMP_DIR}/home" "${TMP_DIR}/config"
 DEFAULT_ID='fixture-default-id'
