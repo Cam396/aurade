@@ -32,6 +32,7 @@ STAGE=$WORK_ROOT/profile
 BUILD_WORK=$WORK_ROOT/work
 REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
+RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
@@ -48,6 +49,13 @@ export SOURCE_DATE_EPOCH
   echo 'build-iso: AURADE_REQUIRE_ISO_SIGNATURE must be 0 or 1' >&2
   exit 2
 }
+case $RELEASE_CHANNEL in
+  development|soak|candidate|public) ;;
+  *)
+    echo 'build-iso: AURADE_RELEASE_CHANNEL must be development, soak, candidate, or public' >&2
+    exit 2
+    ;;
+esac
 
 if [[ -n $ISO_SIGNING_KEY || $REQUIRE_ISO_SIGNATURE == 1 ]]; then
   command -v gpg >/dev/null || { echo 'build-iso: gpg is required for ISO signatures' >&2; exit 1; }
@@ -350,6 +358,8 @@ sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
     printf 'iso_signing_fingerprint=not-set\n'
   fi
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
-  (cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock)
+  printf 'release_channel=%s\n' "$RELEASE_CHANNEL"
+  packages_lock_sha256=$(cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock | awk '{print $1}')
+  printf 'packages_lock_sha256=%s\n' "$packages_lock_sha256"
 } >"$iso.build-info"
 printf '%s\n' "$iso"

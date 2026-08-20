@@ -97,6 +97,9 @@ grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/bu
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
 grep -Fq 'package_count=' "$ROOT/installer/build-iso.sh"
 grep -Fq 'package_bytes=' "$ROOT/installer/build-iso.sh"
+grep -Fq 'RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}' "$ROOT/installer/build-iso.sh"
+grep -Fq "printf 'release_channel=%s\\n' \"\$RELEASE_CHANNEL\"" "$ROOT/installer/build-iso.sh"
+grep -Fq 'packages_lock_sha256=' "$ROOT/installer/build-iso.sh"
 grep -Fxq 'LocalFileSigLevel = Required' "$ROOT/installer/archiso/pacman.conf"
 grep -Fxq 'LocalFileSigLevel = Required' \
   "$ROOT/installer/archiso/airootfs/etc/pacman.conf"
