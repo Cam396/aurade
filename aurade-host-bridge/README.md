@@ -82,7 +82,7 @@ aurade-hostctl storage format \
 aurade-hostctl --pretty pacman updates
 aurade-hostctl pacman upgrade
 aurade-hostctl pacman job JOB_ID
-aurade-hostctl mime open /home/example/Documents/report.pdf
+aurade-hostctl mime open "$HOME/Documents/report.pdf"
 aurade-hostctl events
 ```
 

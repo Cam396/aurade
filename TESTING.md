@@ -1,119 +1,57 @@
 # Testing AuraDE
 
-AuraDE's supported validation path is a running VMware guest checked over SSH.
-QEMU is not the project validation target. Physical laptop testing remains a
-separate qualification step.
+The test suite is split into cheap source checks, package checks, installer
+fixtures, and runtime checks. A green source suite is useful evidence, but it
+is not a substitute for booting the exact ISO on a disposable machine.
 
-## Boot the ISO
+## Source and package checks
 
-The live ISO opens an automatic root console on tty1. The live `root` account
-has an empty password for console recovery and does not create `auratest`. Run
-`aurade-installer` from that console to choose the installed username and
-password. The live root session is for installation and recovery only, not a
-shipped desktop login.
+Run these before asking someone else to test an image:
 
-## Start the VM
+~~~bash
+git diff --check
+ci/source-integrity-gate.sh
+ci/public-release-leak-gate.sh
+bash installer/tests/run.sh
+~~~
 
-Use the host's `vmrun` operation and wait for the guest to finish booting:
+The installer suite covers the GUI and text flows, journal rules, refusal
+paths, graphics fallback, package staging, recovery fixtures, and public
+contracts. A test that skips a runtime dependency must say SKIP; do not report
+it as a pass.
 
-```bash
-vmrun -T ws start "/path/to/aurade.vmx" nogui
-```
+## Disposable VM pass
 
-For VMware guests, enable **Accelerate 3D graphics** (the VMX equivalent is
-`mks.enable3d = "TRUE"`) before testing the installed desktop. Without it,
-AuraDE's render preflight now stops before Weston and records an actionable
-error under `~/.local/state/aurade/session-error.txt`. Older packages may still
-allow Weston to start without a usable render device, after which Chromium may
-abort after authentication and look like a black screen followed by a return to
-the greeter. That is a graphics-capability failure, not evidence that the
-account password was rejected.
+Use a VM that can be erased and recreated. Start it through the host
+hypervisor, attach only the candidate ISO and a disposable virtual disk, and
+record the exact image checksum.
 
-Do not run the smoke script against a guest that is still booting. The script
-does not start or restart the desktop session for you.
+Check the following separately:
 
-## Run the smoke matrix
+1. UEFI boot and the text fallback.
+2. The graphical installer with hardware rendering.
+3. The graphical installer with software rendering.
+4. A plain Btrfs installation.
+5. A LUKS2 installation.
+6. Reboot, login, session startup, and shutdown.
+7. Factory and manual rollback when Btrfs snapshots are selected.
+8. Failure export and cleanup after an interrupted run.
 
-Set the guest address and run the cheap session/core checks first:
+Never use a host disk, a production key, or a private account in this pass.
+QEMU is useful for ISO structure and boot-menu checks; the runtime gate is a
+VM or real machine with a visible display.
 
-```bash
-export AURADE_VM_HOST=<guest-ip-or-hostname>
-export AURADE_VM_USER=root
-export AURADE_TEST_USER=auratest
+## Hardware pass
 
-ci/vm-smoke.sh \
-  --open-core-apps \
-  --open-audio-settings \
-  --session-lifecycle-smoke \
-  --release-package-smoke
-```
+For each laptop, record only the model family, firmware mode, and result. Test
+display, audio, Wi-Fi, Ethernet, Bluetooth, keyboard, touchpad, suspend,
+resume, USB, reboot, recovery, and encrypted boot. Low-memory and eMMC
+systems deserve a separate row because they expose timing and swap problems
+that a fast desktop hides.
 
-Run the state-changing application checks in a disposable VM or snapshot:
+## Reporting
 
-```bash
-ci/vm-smoke.sh \
-  --files-ops-smoke \
-  --files-archive-smoke \
-  --terminal-smoke \
-  --accessibility-smoke
-```
-
-`--files-ops-smoke`, `--files-archive-smoke`, and `--terminal-smoke` create
-temporary test state as the desktop user and remove it when the check passes.
-Use a snapshot when investigating a failure.
-
-If the package contains a known Chromium binary, verify it too:
-
-```bash
-ci/vm-smoke.sh \
-  --expected-chrome-sha <sha256> \
-  --open-core-apps \
-  --session-lifecycle-smoke \
-  --release-package-smoke
-```
-
-The full option list is available with `ci/vm-smoke.sh --help`.
-
-If the interactive installer stops, it shows the failed journal stage/cause
-without dumping raw package output. The failure view offers `e` to export the
-mode-0600 journal/log, `c` to collect a redacted hardware bundle, `s` for a
-diagnostic shell, `r` for an explicitly confirmed reboot, and `q` to return.
-Review exported hardware archives before sharing them.
-
-For a run that must survive the live session or a reboot, set
-`AURADE_FAILURE_JOURNAL_DIR` to an absolute directory on a mounted,
-disk-backed volume before starting the engine. On an unexpected exit AuraDE
-copies only the mode-0600 structured JSONL journal there; package caches,
-temporary keyrings, passphrase files, and the raw command log are never
-copied. This is evidence preservation, not resume support: the execute-path
-contract still requires a fresh disposable run to prove recovery after a
-post-wipe failure.
-
-The execute-path boundary and the assertions needed for a beta install are
-defined in [installer/EXECUTE_PATH_CONTRACT.md](installer/EXECUTE_PATH_CONTRACT.md).
-The source tests intentionally do not claim to prove partitioning, LUKS,
-pacstrap, bootctl, first boot, or power-loss recovery.
-
-The major GUI/TUI installer follow-up is finish-gated and documented in
-[GUI_TUI_HANDOFF.md](GUI_TUI_HANDOFF.md); it must preserve these
-validation boundaries rather than bypass them.
-
-## Physical laptop qualification
-
-VM results do not qualify hardware. On each laptop, test graphics, audio
-input/output, Wi-Fi, Bluetooth, touchpad, brightness, battery, lid close,
-suspend/resume, display hotplug, lock, sign-out, reboot, shutdown, USB storage,
-and recovery. Use [AURADE_HARDWARE_TEST_PACKET.md](AURADE_HARDWARE_TEST_PACKET.md)
-for the report fields and safety warnings.
-
-## Report a failure
-
-Include:
-
-- AuraDE commit and immutable Chromium source revision.
-- Exact package versions and SHA-256 values.
-- VM or laptop model and firmware details.
-- The exact command and smoke flags used.
-- Relevant `journalctl`, `coredumpctl`, SSH, and smoke-log output.
-
-Redact passwords, API keys, private URLs, and unredacted hardware reports.
+A useful report says what image was used, what hardware family was tested, the
+first failing action, and whether it repeats. Redact serial numbers, IP
+addresses, user names, passwords, keys, raw coredumps, and private paths.
+Attach a checksum and a short log excerpt rather than a whole home directory.
