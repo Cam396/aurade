@@ -45,9 +45,10 @@ page=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=24 \
 [[ $page == *'Chapter 117'* ]] ||
   { echo 'test-bible: the reading screen does not name its chapter' >&2; exit 1; }
 # Both verse numbers, so a chapter that drew its first line and stopped fails.
-# Verse numbers start at column one on the reading page, so assert the line
-# boundary rather than requiring a space before the number.
-[[ $page == *$'\n1 '* && $page == *$'\n2 '* ]] ||
+# The frame may put a border and padding before the number, so match a
+# whitespace boundary rather than assuming a particular renderer layout.
+printf '%s\n' "$page" | grep -Eq '(^|[[:space:]])1 ' &&
+printf '%s\n' "$page" | grep -Eq '(^|[[:space:]])2 ' ||
   { echo 'test-bible: the reading screen did not draw both verses' >&2; exit 1; }
 # And nothing that came out of a markup language. A backslash on this screen
 # is a converter that missed something, which is exactly what happened once.
