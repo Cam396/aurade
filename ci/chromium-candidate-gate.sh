@@ -37,7 +37,8 @@ symbol_level = 0
 use_ozone = true
 ozone_platform_wayland = true
 use_system_minigbm = true
-enable_rust = true'
+enable_rust = true
+use_real_dbus_clients = true'
     ;;
   targeted)
     read -r -a targets <<<"${AURADE_TARGETED_NINJA_TARGETS:-chromeos/dbus/power:power chromeos/ash/components/disks:disks ui/ozone/platform/wayland:wayland content/browser:browser ash}"

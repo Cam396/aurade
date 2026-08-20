@@ -108,6 +108,21 @@ arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/bash -lc '
     cd /build/chromium-src
     if [[ "${AURADE_SKIP_GN_GEN}" != 1 ]]; then
+      # Keep the clean release path identical to the normal package path:
+      # real Shill clients are required on AuraDE Linux, and the checked-in
+      # OAuth defaults must be compiled into this binary as well.
+      source /build/chromium-clean-package-src/google-api.conf
+      : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
+      : "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"
+      : "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"
+      gn_quote() {
+        local value="${1//\\/\\\\}"
+        value="${value//\"/\\\"}"
+        printf "%s" "${value}"
+      }
+      google_api_key_arg="$(gn_quote "${GOOGLE_API_KEY}")"
+      google_client_id_arg="$(gn_quote "${GOOGLE_DEFAULT_CLIENT_ID}")"
+      google_client_secret_arg="$(gn_quote "${GOOGLE_DEFAULT_CLIENT_SECRET}")"
       gn gen /build/chromium-clean-out/Ash --root=/build/chromium-src --args="
         target_os = \"chromeos\"
         is_debug = false
@@ -118,6 +133,11 @@ arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
         ozone_platform_wayland = true
         use_system_minigbm = true
         enable_rust = true
+        use_real_dbus_clients = true
+        use_official_google_api_keys = false
+        google_api_key = \"${google_api_key_arg}\"
+        google_default_client_id = \"${google_client_id_arg}\"
+        google_default_client_secret = \"${google_client_secret_arg}\"
       "
     fi
     ninja -C /build/chromium-clean-out/Ash -j"$(nproc)" chrome chrome_sandbox
