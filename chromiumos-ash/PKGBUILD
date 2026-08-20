@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=152.1660893
-pkgrel=5
+pkgrel=6
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -117,6 +117,7 @@ source=(
     'chromiumos-ash.desktop'
     'chromiumos-ash-wayland.desktop'
     'aurade.features.conf'
+    'google-api.conf'
     'google-api.conf.example'
     'aurade-session-manager-shim.py'
     'aurade-session-manager.service'
@@ -135,6 +136,7 @@ sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
             'f8c199d491d42a562e573592dd4f3fc66306f27e95c901e85fdd7360842fe821'
             '7c149f0add02dbed69c642bb8a057d9d921e8b4fc4effd85123ffb30f43a7d23'
             '84ea9c1d5108606f8db4ff4664847628bb9510a3e1b0d54adf49aad0143bd017'
+            'b7c42110b54a362f9af73428ede848cc97798e3640626fefb0ef071e6bd1f5b7'
             '2f2adfd446b67048ec9f753bd4257fc01a604159f9ef4c74d1ff7c91b51940b5'
             '8506d6044acd85b1ba6e72a6aff3452ea2955b1c14feb000718e02a2ecc641fc'
             'fa70439a19399b9fd27ae402f62a8259c10132b5a259750d6849bd7b30f01480'
@@ -143,10 +145,11 @@ sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
             '15499a4411d0d86862989f909c1cbb0546353c029943052bc68350ce146a172b'
             'faf6afb84f522cedf3ea7e707e14177470001cc87be757466af172a79635d0d2'
             'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
-backup=('etc/aurade/features.conf')
+backup=('etc/aurade/features.conf' 'etc/aurade/google-api.conf')
 
 check() {
     bash "${srcdir}/test-session-error.sh" "${srcdir}/aurade-session-error"
+    bash "${srcdir}/test-google-api-config.sh"
 }
 
 build() {
@@ -337,6 +340,8 @@ EOF
     # Install feature defaults.
     install -Dm644 "${srcdir}/aurade.features.conf" \
         "${pkgdir}/etc/aurade/features.conf"
+    install -Dm644 "${srcdir}/google-api.conf" \
+        "${pkgdir}/etc/aurade/google-api.conf"
     install -Dm644 "${srcdir}/google-api.conf.example" \
         "${pkgdir}/usr/share/doc/${pkgname}/google-api.conf.example"
 

@@ -249,8 +249,12 @@ export AURADE_DISABLE_ARC_FEATURES
 export AURADE_USE_FLOSS_STUBS
 export AURADE_ALLOW_GPU_COMPOSITING_FALLBACK
 
-aurade_apply_google_api_config "${AURADE_GOOGLE_API_CONF}"
+# Apply the user file first so it really is an override.  The system file is
+# still read afterwards to fill values the user did not specify.  Environment
+# variables remain highest priority because aurade_apply_google_api_config
+# never replaces a non-empty value.
 aurade_apply_google_api_config "${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/google-api.conf"
+aurade_apply_google_api_config "${AURADE_GOOGLE_API_CONF}"
 export GOOGLE_API_KEY
 export GOOGLE_DEFAULT_CLIENT_ID
 export GOOGLE_DEFAULT_CLIENT_SECRET

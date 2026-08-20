@@ -1,10 +1,11 @@
 # Optional AuraDE Google API/OAuth configuration.
 #
-# Do not ship real values in public packages or source control. This file is
-# only a template for local developer testing or private deployments.
+# The package includes a public fallback OAuth client for unbranded Chromium.
+# This file documents the same variables without copying the fallback values.
+# A per-user file at ~/.config/aurade/google-api.conf overrides the package
+# defaults, and environment variables take precedence over both files.
 #
-# Chromium/Ash reads these environment variables at startup. A user override may
-# be placed at ~/.config/aurade/google-api.conf.
+# Chromium/Ash reads these environment variables at startup.
 
 GOOGLE_API_KEY=
 GOOGLE_DEFAULT_CLIENT_ID=

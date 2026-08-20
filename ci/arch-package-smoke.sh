@@ -46,6 +46,7 @@ namcap "${package_files[@]}"
 pacman -Qip "${package_files[@]}" >/dev/null
 pacman -Qlp "${package_files[@]}" >/dev/null
 python -B -m py_compile "${REPO_ROOT}/shill-nm-adapter/shill_nm_adapter.py"
+python -B "${REPO_ROOT}/shill-nm-adapter/test_shill_nm_adapter.py"
 python -B -m py_compile \
   "${REPO_ROOT}/aurade-power/aurade-powerd" \
   "${REPO_ROOT}/aurade-host-bridge/aurade_host_bridge_core.py" \
@@ -63,6 +64,7 @@ fi
 if [[ "${AURADE_VERIFY_CHROMIUMOS_ASH:-1}" = "1" ]]; then
   (
     cd "${REPO_ROOT}/chromiumos-ash"
+    bash ./test-google-api-config.sh
     makepkg --verifysource --noconfirm
     namcap PKGBUILD
   )
