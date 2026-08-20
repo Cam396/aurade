@@ -18,9 +18,16 @@ package_source="${ARCHROOT}/build/chromium-clean-package-src"
 package_dest="${ARCHROOT}/build/clean-arch-package"
 reuse_clean_output="${AURADE_REUSE_CLEAN_OUTPUT:-0}"
 skip_gn_gen="${AURADE_SKIP_GN_GEN:-0}"
+private_config_guest="${ARCHROOT}/build/aurade-private/google-api.conf"
 mounted_source=0
 mounted_root=0
 mounted_output=0
+
+[[ -n "${AURADE_GOOGLE_API_CONFIG:-}" &&
+  -r "${AURADE_GOOGLE_API_CONFIG}" ]] || {
+  echo "AURADE_GOOGLE_API_CONFIG must name a readable private OAuth config." >&2
+  exit 2
+}
 
 for command in arch-chroot mount mountpoint rsync runuser; do
   command -v "${command}" >/dev/null 2>&1 || {
@@ -63,6 +70,8 @@ runuser -u "${chrome_owner}" -- /usr/bin/env \
   "${SCRIPT_DIR}/refresh-bootstrap-series.sh" --check
 
 cleanup() {
+  rm -f -- "${private_config_guest}" 2>/dev/null || true
+  rmdir -- "$(dirname -- "${private_config_guest}")" 2>/dev/null || true
   if [[ "${mounted_output}" == 1 ]]; then
     umount "${arch_source}/out/Ash"
   fi
@@ -97,11 +106,14 @@ rsync -a --exclude pkg --exclude src \
 chown -R "${arch_build_uid}:${arch_build_gid}" \
   "${ARCHROOT}/build/chromium-clean-out" \
   "${package_source}" "${package_dest}"
+install -D -o "${arch_build_uid}" -g "${arch_build_gid}" -m 600 \
+  "${AURADE_GOOGLE_API_CONFIG}" "${private_config_guest}"
 
 # The quoted script intentionally expands nproc inside the Arch root.
 # shellcheck disable=SC2016
 arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/env \
+  AURADE_GOOGLE_API_CONFIG=/build/aurade-private/google-api.conf \
   AURADE_SKIP_GN_GEN="${skip_gn_gen}" \
   PATH=/build/chromium-src/buildtools/linux64:/build/chromium-src/third_party/ninja:/usr/local/sbin:/usr/local/bin:/usr/bin \
   /usr/bin/nice -n "${AURADE_BUILD_NICE:-15}" \
@@ -111,8 +123,7 @@ arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
       # Keep the clean release path identical to the normal package path:
       # real Shill clients are required on AuraDE Linux, and the checked-in
       # OAuth defaults must be compiled into this binary as well.
-      source /build/chromium-clean-package-src/google-api.conf
-      : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
+      source "${AURADE_GOOGLE_API_CONFIG}"
       : "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"
       : "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"
       gn_quote() {
@@ -149,6 +160,7 @@ mounted_output=1
 arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/env \
   CHROME_SRC=/build/chromium-src \
+  AURADE_GOOGLE_API_CONFIG=/build/aurade-private/google-api.conf \
   AURADE_SKIP_CHROMIUM_BUILD=1 \
   BUILDDIR=/build/chromium-clean-package-src/build \
   PKGDEST=/build/clean-arch-package \

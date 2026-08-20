@@ -7,6 +7,12 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CHROME_SRC="${CHROME_SRC:-/mnt/build/aurade-work/chromium-bootstrap/src}"
 WORKDIR="${AURADE_WORKDIR:-/mnt/build/aurade-work/current-package}"
 PACKAGE_SRC="${WORKDIR}/chromiumos-ash"
+AURADE_GOOGLE_API_CONFIG="${AURADE_GOOGLE_API_CONFIG:-}"
+
+[[ -n "${AURADE_GOOGLE_API_CONFIG}" && -r "${AURADE_GOOGLE_API_CONFIG}" ]] || {
+  echo "AURADE_GOOGLE_API_CONFIG must name a readable private OAuth config." >&2
+  exit 2
+}
 
 for command in rsync makepkg; do
   command -v "${command}" >/dev/null 2>&1 || {
@@ -30,6 +36,7 @@ rsync -a --exclude pkg --exclude src \
   "${REPO_ROOT}/chromiumos-ash/" "${PACKAGE_SRC}/"
 
 export CHROME_SRC
+export AURADE_GOOGLE_API_CONFIG
 export BUILDDIR="${WORKDIR}/build"
 export PKGDEST="${WORKDIR}/pkgdest"
 export SRCDEST="${WORKDIR}/srcdest"
