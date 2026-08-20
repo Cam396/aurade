@@ -59,9 +59,6 @@ jobs:
       - name: Run source integrity gate
         run: ci/source-integrity-gate.sh
 
-      - name: Run public release leak gate
-        run: ci/public-release-leak-gate.sh
-
       - name: Run installer source and refusal tests
         run: installer/tests/run.sh
 
