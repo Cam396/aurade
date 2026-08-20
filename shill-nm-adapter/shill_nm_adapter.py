@@ -41,13 +41,22 @@ NM_SERVICE = "org.freedesktop.NetworkManager"
 NM_PATH = "/org/freedesktop/NetworkManager"
 NM_IFACE = "org.freedesktop.NetworkManager"
 NM_DEVICE_IFACE = "org.freedesktop.NetworkManager.Device"
+NM_DEVICE_WIRED_IFACE = "org.freedesktop.NetworkManager.Device.Wired"
+NM_DEVICE_WIFI_IFACE = "org.freedesktop.NetworkManager.Device.Wireless"
+NM_ACCESS_POINT_IFACE = "org.freedesktop.NetworkManager.AccessPoint"
+NM_SETTINGS_PATH = "/org/freedesktop/NetworkManager/Settings"
+NM_SETTINGS_IFACE = "org.freedesktop.NetworkManager.Settings"
+NM_CONNECTION_IFACE = "org.freedesktop.NetworkManager.Settings.Connection"
 NM_IP4CONFIG_IFACE = "org.freedesktop.NetworkManager.IP4Config"
 NM_IP6CONFIG_IFACE = "org.freedesktop.NetworkManager.IP6Config"
 NM_ACTIVE_CONNECTION = "org.freedesktop.NetworkManager.Connection.Active"
 NM_STATE_CONNECTED_GLOBAL = 70
+NM_DEVICE_STATE_UNAVAILABLE = 20
+NM_DEVICE_STATE_DISCONNECTED = 30
 NM_DEVICE_STATE_ACTIVATED = 100
 NM_DEVICE_TYPE_ETHERNET = 1
 NM_DEVICE_TYPE_WIFI = 2
+NM_AP_FLAGS_PRIVACY = 1
 
 # Property names
 PROP_DEVICES = "Devices"
@@ -78,6 +87,21 @@ PROP_METHOD = "Method"
 PROP_POWER_SAVE = "PowerSave"
 PROP_NAME_SERVERS = "NameServers"
 
+# Wi-Fi service properties.  They are kept as constants because Ash uses the
+# exact Shill spelling and a typo silently turns a real access point into an
+# unselectable row.
+PROP_PASSPHRASE = "Passphrase"
+PROP_WIFI_BSSID = "WiFi.BSSID"
+PROP_WIFI_HEX_SSID = "WiFi.HexSSID"
+PROP_WIFI_SSID = "WiFi.SSID"
+PROP_WIFI_SECURITY = "Security"
+PROP_SECURITY_CLASS = "SecurityClass"
+PROP_WIFI_HIDDEN = "WiFi.HiddenSSID"
+PROP_WIFI_MODE = "Mode"
+PROP_IS_CONNECTED = "IsConnected"
+PROP_ERROR = "Error"
+PROP_ERROR_DETAILS = "ErrorDetails"
+
 SHILL_STATE_ONLINE = "online"
 SHILL_STATE_READY = "ready"
 SHILL_STATE_IDLE = "idle"
@@ -92,6 +116,59 @@ SHILL_TYPE_CELLULAR = "cellular"
 SHILL_TYPE_VPN = "vpn"
 
 SHALLOW_PROFILE_PATH = "/profile/default"
+
+
+def _as_bytes(value) -> bytes:
+    """Return a D-Bus byte array as bytes without leaking it to logs."""
+    if value is None:
+        return b""
+    try:
+        return bytes(value)
+    except (TypeError, ValueError):
+        return b""
+
+
+def _ssid_text(raw_ssid: bytes) -> str:
+    """Make an arbitrary 802.11 SSID safe for Shill's UTF-8 Name field."""
+    return raw_ssid.decode("utf-8", "replace")
+
+
+def _security_class(flags: int, wpa_flags: int, rsn_flags: int) -> str:
+    """Map NetworkManager AP security flags to Shill's coarse classes."""
+    if not (flags & NM_AP_FLAGS_PRIVACY) and not (wpa_flags or rsn_flags):
+        return "none"
+    if wpa_flags or rsn_flags:
+        return "psk"
+    return "wep"
+
+
+def _access_point_record(props: dict) -> dict | None:
+    """Normalize one NetworkManager access point for the Shill layer.
+
+    Empty SSIDs are hidden networks.  They are deliberately not exposed as a
+    fake visible row because Ash would render an empty network and then send
+    credentials to it.  A hidden network can still be requested explicitly
+    through Manager.GetService using WiFi.HexSSID.
+    """
+    raw_ssid = _as_bytes(props.get("Ssid"))
+    if not raw_ssid:
+        return None
+    flags = int(props.get("Flags", 0))
+    wpa_flags = int(props.get("WpaFlags", 0))
+    rsn_flags = int(props.get("RsnFlags", 0))
+    return {
+        "raw_ssid": raw_ssid,
+        "name": _ssid_text(raw_ssid),
+        "hex_ssid": raw_ssid.hex(),
+        "bssid": str(props.get("HwAddress", "")),
+        "strength": max(0, min(100, int(props.get("Strength", 0)))),
+        "security": _security_class(flags, wpa_flags, rsn_flags),
+        "security_name": (
+            "WPA2" if rsn_flags else "WPA" if wpa_flags else
+            "WEP" if flags & NM_AP_FLAGS_PRIVACY else "none"
+        ),
+        "frequency": int(props.get("Frequency", 0)),
+    }
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -158,6 +235,30 @@ class ShillDBus:
     @property
     def ipconfigs(self) -> dict[str, "IPConfig"]:
         return self._ipconfigs
+
+    def update_service_lists(self) -> None:
+        """Publish the real visible and complete service sets.
+
+        The old bridge published a synthetic interface service even when no
+        network had been discovered.  Ash treats that object as a real network
+        and renders dummy rows.  Keep the two Shill lists derived from the
+        objects that the monitor actually observed instead.
+        """
+        if self._manager is None:
+            return
+        all_paths = list(self._services.keys())
+        visible_paths = [
+            path for path in all_paths
+            if bool(self._services[path]._props.get(PROP_VISIBLE, True))
+        ]
+        self._manager._set_properties({
+            PROP_SERVICES: dbus.Array(
+                [dbus.ObjectPath(path) for path in visible_paths], signature="o"
+            ),
+            PROP_SERVICE_COMPLETE_LIST: dbus.Array(
+                [dbus.ObjectPath(path) for path in all_paths], signature="o"
+            ),
+        })
 
     def acquire_name(self) -> None:
         """Request ownership of ``org.chromium.flimflam`` on the system bus."""
@@ -287,6 +388,7 @@ class Manager(ShillObject):
         self._shill = shill
         self._nm_iface: dbus.Interface | None = None
         self._nm_props: dbus.Interface | None = None
+        self._monitor: "NetworkManagerMonitor | None" = None
         super().__init__(conn, path)
         self._init_properties()
 
@@ -316,6 +418,9 @@ class Manager(ShillObject):
         # Trigger an initial state refresh
         self._refresh_technologies()
 
+    def set_monitor(self, monitor: "NetworkManagerMonitor") -> None:
+        self._monitor = monitor
+
     def _refresh_technologies(self) -> None:
         """Update connected/available technologies from NM state."""
         try:
@@ -343,6 +448,8 @@ class Manager(ShillObject):
             elif dtype == NM_DEVICE_TYPE_WIFI:
                 if SHILL_TYPE_WIFI not in available:
                     available.append(SHILL_TYPE_WIFI)
+                if state >= NM_DEVICE_STATE_ACTIVATED:
+                    connected.append(SHILL_TYPE_WIFI)
 
         self._set_properties({
             PROP_AVAILABLE_TECHNOLOGIES: dbus.Array(available, signature="s"),
@@ -361,34 +468,64 @@ class Manager(ShillObject):
         """Find or create a service matching *args*."""
         for path, svc in self._shill.services.items():
             props = svc._props
-            if args.get(PROP_TYPE, props.get(PROP_TYPE)) == props.get(PROP_TYPE):
+            match = True
+            for key in (
+                PROP_TYPE,
+                PROP_GUID,
+                PROP_DEVICE,
+                PROP_WIFI_HEX_SSID,
+                PROP_WIFI_SSID,
+                PROP_NAME,
+            ):
+                if key in args and str(args[key]) != str(props.get(key, "")):
+                    match = False
+                    break
+            if match:
                 return dbus.ObjectPath(path)
         # No match — create a new one
+        if self._monitor is not None:
+            requested = self._monitor.create_requested_service(args)
+            if requested is not None:
+                return requested
         return self._create_service(args)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="a{sv}", out_signature="o")
     def ConfigureService(self, args: dict) -> dbus.ObjectPath:
+        if args.get(PROP_TYPE) == SHILL_TYPE_WIFI and self._monitor is not None:
+            requested = self._monitor.create_requested_service(args)
+            if requested is not None:
+                return requested
         return self._create_service(args)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="oa{sv}", out_signature="o")
     def ConfigureServiceForProfile(self, profile_path: dbus.ObjectPath, args: dict) -> dbus.ObjectPath:
+        if args.get(PROP_TYPE) == SHILL_TYPE_WIFI and self._monitor is not None:
+            requested = self._monitor.create_requested_service(args)
+            if requested is not None:
+                return requested
         return self._create_service(args)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="", out_signature="")
     def ScanAndConnectToBestServices(self) -> None:
-        log.info("ScanAndConnectToBestServices called (no-op)")
+        if self._monitor is not None:
+            self._monitor.request_scan(SHILL_TYPE_WIFI)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="s", out_signature="")
     def RequestScan(self, type_str: str) -> None:
-        log.info("RequestScan(%s) called (no-op)", type_str)
+        if self._monitor is not None:
+            self._monitor.request_scan(type_str)
+        else:
+            log.warning("RequestScan(%s) before NetworkManager monitor is ready", type_str)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="s", out_signature="")
     def EnableTechnology(self, type_str: str) -> None:
-        log.info("EnableTechnology(%s)", type_str)
+        if self._monitor is not None:
+            self._monitor.set_technology_enabled(type_str, True)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="s", out_signature="")
     def DisableTechnology(self, type_str: str) -> None:
-        log.info("DisableTechnology(%s) — ignored", type_str)
+        if self._monitor is not None:
+            self._monitor.set_technology_enabled(type_str, False)
 
     @dbus.service.method(SHILL_MANAGER_IFACE, in_signature="a{sv}", out_signature="o")
     def FindMatchingService(self, args: dict) -> dbus.ObjectPath:
@@ -407,6 +544,14 @@ class Manager(ShillObject):
 
     def _create_service(self, props: dict) -> dbus.ObjectPath:
         svc_type = props.get(PROP_TYPE, SHILL_TYPE_ETHERNET)
+        if svc_type == SHILL_TYPE_WIFI and self._monitor is not None:
+            requested = self._monitor.create_requested_service(props)
+            if requested is not None:
+                return requested
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.InvalidArguments",
+                "A Wi-Fi service needs WiFi.HexSSID",
+            )
         iface_name = props.get(PROP_NAME, "eth0")
         guid = props.get(PROP_GUID, _generate_guid())
         path = f"/org/chromium/flimflam/Service/{guid}"
@@ -420,12 +565,7 @@ class Manager(ShillObject):
                 guid,
             )
             self._shill.services[path] = svc
-            # Update manager lists
-            svc_paths = list(self._shill.services.keys())
-            self._set_properties({
-                PROP_SERVICES: dbus.Array([dbus.ObjectPath(p) for p in svc_paths], signature="o"),
-                PROP_SERVICE_COMPLETE_LIST: dbus.Array([dbus.ObjectPath(p) for p in svc_paths], signature="o"),
-            })
+            self._shill.update_service_lists()
             log.info("Created service %s (%s)", path, iface_name)
         return dbus.ObjectPath(path)
 
@@ -445,25 +585,48 @@ class Service(ShillObject):
         svc_type: str,
         iface_name: str,
         guid: str,
+        monitor: "NetworkManagerMonitor | None" = None,
+        nm_device_path: str | None = None,
+        ssid: bytes | None = None,
+        record: dict | None = None,
+        visible: bool = True,
     ):
         self._interface_name = SHILL_SERVICE_IFACE
         self._shill = shill
+        self._monitor = monitor
         self._svc_type = svc_type
         self._iface_name = iface_name
         self._guid = guid
+        self._nm_device_path = nm_device_path
+        self._nm_connection_path: str | None = None
+        self._ssid = ssid or b""
+        self._passphrase: str | None = None
+        self._record = record or {}
         super().__init__(conn, path)
         self._props = {
             PROP_TYPE: svc_type,
             PROP_GUID: guid,
-            PROP_NAME: iface_name,
-            PROP_STATE: SHILL_STATE_ONLINE,
+            PROP_NAME: (record or {}).get("name", iface_name),
+            PROP_STATE: SHILL_STATE_IDLE,
             PROP_CONNECTABLE: dbus.Boolean(True),
             PROP_PROFILE: dbus.ObjectPath(SHALLOW_PROFILE_PATH),
             PROP_DEVICE: dbus.ObjectPath(f"/org/chromium/flimflam/Device/{iface_name}"),
-            PROP_STRENGTH: dbus.Int32(0),
-            PROP_AUTO_CONNECT: dbus.Boolean(True),
-            PROP_VISIBLE: dbus.Boolean(True),
+            PROP_STRENGTH: dbus.Byte(0),
+            PROP_AUTO_CONNECT: dbus.Boolean(False),
+            PROP_VISIBLE: dbus.Boolean(visible),
         }
+        if svc_type == SHILL_TYPE_WIFI:
+            self._props.update({
+                PROP_WIFI_SSID: (record or {}).get("name", iface_name),
+                PROP_WIFI_HEX_SSID: self._ssid.hex(),
+                PROP_WIFI_BSSID: str(self._record.get("bssid", "")),
+                PROP_SECURITY_CLASS: str(self._record.get("security", "none")),
+                PROP_WIFI_SECURITY: str(self._record.get("security_name", "none")),
+                PROP_WIFI_MODE: "managed",
+                PROP_WIFI_HIDDEN: dbus.Boolean(not bool(self._ssid)),
+                PROP_IS_CONNECTED: dbus.Boolean(False),
+            })
+            self.update_access_point(self._record, False)
 
     # -- Service methods --
 
@@ -473,24 +636,91 @@ class Service(ShillObject):
 
     @dbus.service.method(SHILL_SERVICE_IFACE, in_signature="a{sv}", out_signature="")
     def SetProperties(self, props: dict) -> None:
-        self._set_properties(props)
+        for name, value in props.items():
+            self.set_property(name, value)
+
+    @dbus.service.method(SHILL_SERVICE_IFACE, in_signature="sv", out_signature="")
+    def SetProperty(self, name: str, value) -> None:
+        self.set_property(name, value)
+
+    @dbus.service.method(
+        dbus.PROPERTIES_IFACE,
+        in_signature="ssv",
+        out_signature="",
+    )
+    def Set(self, interface: str, name: str, value) -> None:
+        if interface != self._interface_name:
+            raise dbus.exceptions.DBusException(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                f"No such interface: {interface}",
+            )
+        self.set_property(name, value)
+
+    @dbus.service.method(SHILL_SERVICE_IFACE, in_signature="s", out_signature="")
+    def ClearProperty(self, name: str) -> None:
+        if name == PROP_PASSPHRASE:
+            self._passphrase = None
+            return
+        self._props.pop(name, None)
+
+    def set_property(self, name: str, value) -> None:
+        # Never put a passphrase in _props.  GetProperties is consumed by UI
+        # code and logs, while the secret is only needed for one NM activation.
+        if name in (PROP_PASSPHRASE, "WiFi.Passphrase"):
+            self._passphrase = str(value)
+            return
+        self._set_property(name, value)
 
     @dbus.service.method(SHILL_SERVICE_IFACE, out_signature="")
     def Connect(self) -> None:
-        log.info("Service.Connect() called for %s (no-op)", self._props.get(PROP_GUID))
+        if self._monitor is None:
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.OperationFailed",
+                "NetworkManager monitor is not ready",
+            )
+        self._monitor.connect_service(self)
 
     @dbus.service.method(SHILL_SERVICE_IFACE, out_signature="")
     def Disconnect(self) -> None:
-        log.info("Service.Disconnect() called for %s (no-op)", self._props.get(PROP_GUID))
+        if self._monitor is not None:
+            self._monitor.disconnect_service(self)
 
     @dbus.service.method(SHILL_SERVICE_IFACE, out_signature="")
     def Remove(self) -> None:
-        log.info("Service.Remove() called for %s (no-op)", self._props.get(PROP_GUID))
+        if self._monitor is not None:
+            self._monitor.remove_service(self)
+
+    @dbus.service.method(SHILL_SERVICE_IFACE, out_signature="s")
+    def GetWiFiPassphrase(self) -> str:
+        if self._svc_type != SHILL_TYPE_WIFI or self._passphrase is None:
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.NotSupported",
+                "No saved Wi-Fi passphrase",
+            )
+        return self._passphrase
 
     # -- public mutators --
 
     def set_state(self, state: str) -> None:
-        self._set_property(PROP_STATE, state)
+        self._set_properties({
+            PROP_STATE: state,
+            PROP_IS_CONNECTED: dbus.Boolean(state == SHILL_STATE_ONLINE),
+        })
+
+    def update_access_point(self, record: dict, connected: bool) -> None:
+        """Refresh one real AP sighting without creating synthetic rows."""
+        if self._svc_type != SHILL_TYPE_WIFI:
+            return
+        self._record = record
+        self._set_properties({
+            PROP_NAME: record.get("name", self._props.get(PROP_NAME, "")),
+            PROP_WIFI_SSID: record.get("name", self._props.get(PROP_WIFI_SSID, "")),
+            PROP_WIFI_BSSID: str(record.get("bssid", "")),
+            PROP_STRENGTH: dbus.Byte(int(record.get("strength", 0))),
+            PROP_SECURITY_CLASS: str(record.get("security", "none")),
+            PROP_WIFI_SECURITY: str(record.get("security_name", "none")),
+            PROP_IS_CONNECTED: dbus.Boolean(connected),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -565,8 +795,9 @@ class IPConfig(ShillObject):
 class Profile(ShillObject):
     """Implements ``org.chromium.flimflam.Profile`` (stub)."""
 
-    def __init__(self, conn: dbus.bus.BusConnection, path: str):
+    def __init__(self, conn: dbus.bus.BusConnection, path: str, shill: ShillDBus):
         self._interface_name = SHILL_PROFILE_IFACE
+        self._shill = shill
         self._props = {
             PROP_NAME: "default",
         }
@@ -597,7 +828,7 @@ class Profile(ShillObject):
 # ---------------------------------------------------------------------------
 
 class NetworkManagerMonitor:
-    """Subscribes to NM signals and updates the Shill object tree."""
+    """Subscribe to NetworkManager and expose only real Shill services."""
 
     def __init__(self, bus: dbus.Bus, shill: ShillDBus):
         self._bus = bus
@@ -605,189 +836,520 @@ class NetworkManagerMonitor:
         self._nm_obj = bus.get_object(NM_SERVICE, NM_PATH)
         self._nm_iface = dbus.Interface(self._nm_obj, NM_IFACE)
         self._nm_props = dbus.Interface(self._nm_obj, dbus.PROPERTIES_IFACE)
-
-        # Current mapping of NM device path → Shill service path
         self._nm_devices: dict[str, str] = {}
+        self._services_by_device: dict[str, set[str]] = {}
+        self._service_keys: dict[tuple[str, str, str], str] = {}
+        self._service_meta: dict[str, dict] = {}
+        self._watched_devices: set[str] = set()
+        self._watched_wifi: set[str] = set()
+        self._scan_source = 0
 
     def start(self) -> None:
         self._shill.manager.set_nm_proxy(self._nm_iface, self._nm_props)
-        # Sync initial state
+        self._shill.manager.set_monitor(self)
         self._sync_devices()
-        # Subscribe to NM signals
         self._nm_obj.connect_to_signal(
             "DeviceAdded", self._on_device_added, dbus_interface=NM_IFACE
         )
         self._nm_obj.connect_to_signal(
             "DeviceRemoved", self._on_device_removed, dbus_interface=NM_IFACE
         )
-        # Also watch NMState (connectivity changes)
         self._nm_props.connect_to_signal(
             "PropertiesChanged", self._on_nm_properties_changed
         )
-        # Watch for device property changes (state, etc.)
-        dev_paths = self._nm_devices.copy()
-        for dev_path in dev_paths:
-            self._watch_device(dev_path)
-
-        log.info(
-            "NM monitor started — %d device(s) tracked",
-            len(self._nm_devices),
-        )
         self._shill.manager._refresh_technologies()
+        self._shill.update_service_lists()
+        log.info("NM monitor started - %d device(s) tracked", len(self._nm_devices))
+
+    def _device(self, dev_path: str):
+        return self._bus.get_object(NM_SERVICE, dev_path)
+
+    def _device_props(self, dev_path: str):
+        return dbus.Interface(self._device(dev_path), dbus.PROPERTIES_IFACE)
 
     def _watch_device(self, dev_path: str) -> None:
-        """Subscribe to property changes on a specific NM device."""
+        if dev_path in self._watched_devices:
+            return
         try:
-            dev_obj = self._bus.get_object(NM_SERVICE, dev_path)
-            dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
+            dev_props = self._device_props(dev_path)
             dev_props.connect_to_signal(
                 "PropertiesChanged",
                 lambda iface, changed, invalid: self._on_device_props_changed(
                     dev_path, changed
                 ),
             )
+            self._watched_devices.add(dev_path)
         except Exception as exc:
             log.warning("Cannot watch device %s: %s", dev_path, exc)
 
     def _sync_devices(self) -> None:
-        """Build the initial device→service mapping from NM state."""
         try:
             nm_dev_paths = self._nm_iface.GetDevices()
-        except Exception:
+        except Exception as exc:
+            log.warning("Cannot enumerate NetworkManager devices: %s", exc)
             nm_dev_paths = []
-
         for dev_path in nm_dev_paths:
-            self._add_device(dev_path)
+            self._add_device(str(dev_path))
 
     def _add_device(self, dev_path: str) -> None:
-        """Create Shill Device+Service for an NM device."""
+        """Add a device and then derive services from NM state.
+
+        Wi-Fi devices are not themselves networks.  The previous code exposed
+        one always-online service for the interface, which is the source of
+        the dummy rows seen in the ChromeOS network menu.
+        """
         try:
-            dev_obj = self._bus.get_object(NM_SERVICE, dev_path)
-            dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
-            dtype = dev_props.Get(NM_DEVICE_IFACE, "DeviceType")
-            state = dev_props.Get(NM_DEVICE_IFACE, "State")
-            iface = dev_props.Get(NM_DEVICE_IFACE, "Interface")
-            mac = dev_props.Get(NM_DEVICE_IFACE, "HwAddress")
+            dev_props = self._device_props(dev_path)
+            dtype = int(dev_props.Get(NM_DEVICE_IFACE, "DeviceType"))
+            state = int(dev_props.Get(NM_DEVICE_IFACE, "State"))
+            iface = str(dev_props.Get(NM_DEVICE_IFACE, "Interface"))
+            mac = str(dev_props.Get(NM_DEVICE_IFACE, "HwAddress"))
         except Exception as exc:
             log.warning("Cannot read NM device %s: %s", dev_path, exc)
             return
+        if dtype not in (NM_DEVICE_TYPE_ETHERNET, NM_DEVICE_TYPE_WIFI):
+            return
 
-        if dtype == NM_DEVICE_TYPE_ETHERNET:
-            shill_type = SHILL_TYPE_ETHERNET
-        elif dtype == NM_DEVICE_TYPE_WIFI:
-            shill_type = SHILL_TYPE_WIFI
-        else:
-            return  # Skip cellular, VPN, etc.
-
-        # Create Shill device
+        self._nm_devices[dev_path] = iface
+        self._services_by_device.setdefault(dev_path, set())
         dev_shill_path = f"/org/chromium/flimflam/Device/{iface}"
         if dev_shill_path not in self._shill.devices:
-            dev = Device(
+            self._shill.devices[dev_shill_path] = Device(
                 self._bus.get_connection(),  # type: ignore[arg-type]
                 dev_shill_path,
                 self._shill,
                 iface,
-                shill_type,
+                SHILL_TYPE_ETHERNET if dtype == NM_DEVICE_TYPE_ETHERNET else SHILL_TYPE_WIFI,
                 mac,
             )
-            self._shill.devices[dev_shill_path] = dev
-            log.info("Added device %s (%s)", dev_shill_path, iface)
-
-            # Update manager Devices list
-            manager = self._shill.manager
-            manager._set_property(
+            self._shill.manager._set_property(
                 PROP_DEVICES,
                 dbus.Array(
-                    [dbus.ObjectPath(p) for p in self._shill.devices.keys()],
-                    signature="o",
+                    [dbus.ObjectPath(p) for p in self._shill.devices], signature="o"
                 ),
             )
         self._watch_device(dev_path)
+        if dtype == NM_DEVICE_TYPE_WIFI:
+            self._watch_wifi(dev_path)
+            self._sync_wifi_services(dev_path)
+        else:
+            self._sync_ethernet_service(dev_path, state, iface)
 
-        # Create Shill service for this device
-        nm_state = self._nm_to_shill_state(state)
-        guid = _generate_guid()
+    def _new_service(
+        self,
+        dev_path: str,
+        svc_type: str,
+        iface: str,
+        guid: str,
+        *,
+        record: dict | None = None,
+        visible: bool = True,
+    ) -> Service:
+        raw_ssid = (record or {}).get("raw_ssid", b"")
         svc_path = f"/org/chromium/flimflam/Service/{guid}"
-        if svc_path not in self._shill.services:
-            svc = Service(
-                self._bus.get_connection(),  # type: ignore[arg-type]
-                svc_path,
-                self._shill,
-                shill_type,
-                iface,
-                guid,
-            )
-            svc.set_state(nm_state)
-            self._shill.services[svc_path] = svc
-            # Update manager service lists
-            manager = self._shill.manager
-            service_paths = list(self._shill.services.keys())
-            manager._set_properties({
-                PROP_SERVICES: dbus.Array(
-                    [dbus.ObjectPath(p) for p in service_paths], signature="o"
-                ),
-                PROP_SERVICE_COMPLETE_LIST: dbus.Array(
-                    [dbus.ObjectPath(p) for p in service_paths], signature="o"
-                ),
-            })
-            log.info(
-                "Added service %s (%s, state=%s)", svc_path, iface, nm_state
-            )
+        svc = Service(
+            self._bus.get_connection(),  # type: ignore[arg-type]
+            svc_path,
+            self._shill,
+            svc_type,
+            iface,
+            guid,
+            monitor=self,
+            nm_device_path=dev_path,
+            ssid=raw_ssid,
+            record=record,
+            visible=visible,
+        )
+        self._shill.services[svc_path] = svc
+        self._services_by_device.setdefault(dev_path, set()).add(svc_path)
+        self._service_meta[svc_path] = {"device": dev_path, "hidden": not visible}
+        return svc
 
-        self._nm_devices[dev_path] = svc_path
+    def _sync_ethernet_service(self, dev_path: str, state: int, iface: str) -> None:
+        key = (dev_path, "ethernet", "")
+        svc_path = self._service_keys.get(key)
+        if svc_path is None:
+            svc = self._new_service(
+                dev_path, SHILL_TYPE_ETHERNET, iface, _generate_guid()
+            )
+            svc_path = f"/org/chromium/flimflam/Service/{svc._guid}"
+            self._service_keys[key] = svc_path
+        svc = self._shill.services[svc_path]
+        svc.set_state(self._nm_to_shill_state(state))
+        self._shill.update_service_lists()
+
+    def _wifi_access_points(self, dev_path: str) -> list[dict]:
+        try:
+            wifi = dbus.Interface(self._device(dev_path), NM_DEVICE_WIFI_IFACE)
+            ap_paths = wifi.GetAccessPoints()
+        except Exception as exc:
+            log.warning("Cannot enumerate Wi-Fi access points on %s: %s", dev_path, exc)
+            return []
+        records: dict[tuple[str, str], dict] = {}
+        for ap_path in ap_paths:
+            try:
+                ap_obj = self._bus.get_object(NM_SERVICE, ap_path)
+                props = dbus.Interface(ap_obj, dbus.PROPERTIES_IFACE).GetAll(
+                    NM_ACCESS_POINT_IFACE
+                )
+            except Exception as exc:
+                log.debug("Cannot read Wi-Fi access point %s: %s", ap_path, exc)
+                continue
+            record = _access_point_record(props)
+            if record is None:
+                continue
+            key = (record["hex_ssid"], record["security"])
+            if key not in records or record["strength"] > records[key]["strength"]:
+                record["ap_path"] = str(ap_path)
+                records[key] = record
+        return list(records.values())
+
+    def _watch_wifi(self, dev_path: str) -> None:
+        if dev_path in self._watched_wifi:
+            return
+        try:
+            wifi = dbus.Interface(self._device(dev_path), NM_DEVICE_WIFI_IFACE)
+            wifi.connect_to_signal(
+                "AccessPointAdded",
+                lambda _path: self._sync_wifi_services(dev_path),
+            )
+            wifi.connect_to_signal(
+                "AccessPointRemoved",
+                lambda _path: self._sync_wifi_services(dev_path),
+            )
+            self._watched_wifi.add(dev_path)
+        except Exception as exc:
+            log.debug("Cannot watch Wi-Fi access points on %s: %s", dev_path, exc)
+
+    def _sync_wifi_services(self, dev_path: str) -> None:
+        iface = self._nm_devices.get(dev_path, "wlan0")
+        try:
+            dev_props = self._device_props(dev_path)
+            state = int(dev_props.Get(NM_DEVICE_IFACE, "State"))
+            # ActiveAccessPoint belongs to NetworkManager's wireless device
+            # interface, not the common device interface. Reading it from the
+            # latter silently falls into the disconnected path, so a network
+            # that is actually carrying the session appears idle in Ash.
+            active_ap = str(dev_props.Get(NM_DEVICE_WIFI_IFACE, "ActiveAccessPoint"))
+        except Exception:
+            state = NM_DEVICE_STATE_DISCONNECTED
+            active_ap = "/"
+        seen: set[tuple[str, str]] = set()
+        for record in self._wifi_access_points(dev_path):
+            key = (record["hex_ssid"], record["security"])
+            seen.add(key)
+            service_key = (dev_path, key[0], key[1])
+            svc_path = self._service_keys.get(service_key)
+            if svc_path is None:
+                svc = self._new_service(
+                    dev_path, SHILL_TYPE_WIFI, iface, _generate_guid(), record=record
+                )
+                svc_path = f"/org/chromium/flimflam/Service/{svc._guid}"
+                self._service_keys[service_key] = svc_path
+            svc = self._shill.services[svc_path]
+            connected = state >= NM_DEVICE_STATE_ACTIVATED and (
+                active_ap != "/" and active_ap == record.get("ap_path")
+            )
+            svc.update_access_point(record, connected)
+            svc.set_state(
+                SHILL_STATE_ONLINE if connected else (
+                    SHILL_STATE_READY
+                    if state >= NM_DEVICE_STATE_DISCONNECTED
+                    else SHILL_STATE_IDLE
+                )
+            )
+        # A scan can make a previously visible AP disappear.  Remove only
+        # discovered rows; hidden configured services remain available.
+        for svc_path in list(self._services_by_device.get(dev_path, ())):
+            meta = self._service_meta.get(svc_path, {})
+            if meta.get("hidden"):
+                continue
+            svc = self._shill.services.get(svc_path)
+            if svc is None or svc._svc_type != SHILL_TYPE_WIFI:
+                continue
+            svc_key = (
+                dev_path,
+                str(svc._props.get(PROP_WIFI_HEX_SSID, "")),
+                str(svc._props.get(PROP_SECURITY_CLASS, "none")),
+            )
+            if (svc_key[1], svc_key[2]) not in seen:
+                self._remove_service_path(svc_path)
+                self._service_keys.pop(svc_key, None)
+        self._shill.update_service_lists()
+
+    def create_requested_service(self, args: dict) -> dbus.ObjectPath | None:
+        """Create a hidden Wi-Fi service only when Ash asks for one."""
+        if args.get(PROP_TYPE) != SHILL_TYPE_WIFI:
+            return None
+        hex_ssid = str(args.get(PROP_WIFI_HEX_SSID, ""))
+        if not hex_ssid and args.get(PROP_WIFI_SSID):
+            hex_ssid = _as_bytes(str(args[PROP_WIFI_SSID]).encode("utf-8")).hex()
+        if not hex_ssid:
+            return None
+        try:
+            raw_ssid = bytes.fromhex(hex_ssid)
+        except ValueError:
+            return None
+        dev_path = next(
+            (path for path in self._nm_devices
+             if self._device_type(path) == NM_DEVICE_TYPE_WIFI),
+            None,
+        )
+        if dev_path is None:
+            return None
+        security = str(args.get(PROP_SECURITY_CLASS, "psk"))
+        record = {
+            "raw_ssid": raw_ssid,
+            "name": _ssid_text(raw_ssid),
+            "hex_ssid": hex_ssid,
+            "bssid": "",
+            "strength": 0,
+            "security": security,
+            "security_name": "WPA2" if security == "psk" else security,
+        }
+        key = (dev_path, hex_ssid, security)
+        if key in self._service_keys:
+            return dbus.ObjectPath(self._service_keys[key])
+        iface = self._nm_devices[dev_path]
+        svc = self._new_service(
+            dev_path,
+            SHILL_TYPE_WIFI,
+            iface,
+            str(args.get(PROP_GUID, _generate_guid())),
+            record=record,
+            visible=False,
+        )
+        svc_path = f"/org/chromium/flimflam/Service/{svc._guid}"
+        self._service_keys[key] = svc_path
+        self._shill.update_service_lists()
+        return dbus.ObjectPath(svc_path)
+
+    def request_scan(self, type_str: str) -> None:
+        if type_str not in (SHILL_TYPE_WIFI, "wifi", ""):
+            return
+        for dev_path in self._nm_devices:
+            if self._device_type(dev_path) != NM_DEVICE_TYPE_WIFI:
+                continue
+            try:
+                dbus.Interface(self._device(dev_path), NM_DEVICE_WIFI_IFACE).RequestScan({})
+            except Exception as exc:
+                log.warning("Wi-Fi scan request failed on %s: %s", dev_path, exc)
+        if self._scan_source:
+            GLib.source_remove(self._scan_source)
+        self._scan_source = GLib.timeout_add(1500, self._finish_scan)
+
+    def _finish_scan(self) -> bool:
+        self._scan_source = 0
+        for dev_path in self._nm_devices:
+            if self._device_type(dev_path) == NM_DEVICE_TYPE_WIFI:
+                self._sync_wifi_services(dev_path)
+        return False
+
+    def set_technology_enabled(self, type_str: str, enabled: bool) -> None:
+        if type_str not in (SHILL_TYPE_WIFI, "wifi"):
+            return
+        try:
+            self._nm_props.Set(
+                NM_IFACE,
+                "WirelessEnabled",
+                dbus.Boolean(enabled),
+            )
+        except Exception as exc:
+            log.warning("Cannot set Wi-Fi radio state to %s: %s", enabled, exc)
+
+    def _find_nm_connection(self, service: Service):
+        try:
+            settings_obj = self._bus.get_object(NM_SERVICE, NM_SETTINGS_PATH)
+            settings = dbus.Interface(settings_obj, NM_SETTINGS_IFACE)
+            for connection_path in settings.ListConnections():
+                connection = dbus.Interface(
+                    self._bus.get_object(NM_SERVICE, connection_path),
+                    NM_CONNECTION_IFACE,
+                )
+                values = connection.GetSettings()
+                cprops = values.get("connection", {})
+                wifi = values.get("802-11-wireless", {})
+                if cprops.get("type") != "802-11-wireless":
+                    continue
+                if _as_bytes(wifi.get("ssid")) == service._ssid:
+                    return connection_path
+        except Exception as exc:
+            log.debug("Cannot inspect saved NetworkManager connections: %s", exc)
+        return None
+
+    def _connection_settings(self, service: Service) -> dict:
+        security = str(service._props.get(PROP_SECURITY_CLASS, "none"))
+        settings = {
+            "connection": {
+                "id": service._props.get(PROP_NAME, service._iface_name),
+                "type": "802-11-wireless",
+                "uuid": str(uuid.uuid4()),
+                "interface-name": service._iface_name,
+            },
+            "802-11-wireless": {
+                "ssid": dbus.ByteArray(service._ssid),
+                "mode": "infrastructure",
+            },
+            "ipv4": {"method": "auto"},
+            "ipv6": {"method": "auto"},
+        }
+        if security == "none":
+            return settings
+        if security == "wep":
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.NotSupported",
+                "WEP networks are not supported by AuraDE yet",
+            )
+        if not service._passphrase:
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.InvalidPassphrase",
+                "This Wi-Fi network needs a passphrase",
+            )
+        settings["802-11-wireless-security"] = {
+            "key-mgmt": "wpa-psk",
+            "psk": service._passphrase,
+        }
+        return settings
+
+    def connect_service(self, service: Service) -> None:
+        if service._svc_type != SHILL_TYPE_WIFI:
+            service.set_state(SHILL_STATE_READY)
+            return
+        service.set_state(SHILL_STATE_ASSOCIATION)
+        try:
+            settings_obj = self._bus.get_object(NM_SERVICE, NM_SETTINGS_PATH)
+            settings = dbus.Interface(settings_obj, NM_SETTINGS_IFACE)
+            connection_path = self._find_nm_connection(service)
+            if connection_path is None:
+                nm_settings = self._connection_settings(service)
+                connection_path = settings.AddConnection(nm_settings)
+            elif service._passphrase:
+                # A selected network may already have a saved profile. Only
+                # update its secrets when Ash supplied a new passphrase; a
+                # normal reconnect must not ask the UI to reveal one again.
+                nm_settings = self._connection_settings(service)
+                dbus.Interface(
+                    self._bus.get_object(NM_SERVICE, connection_path),
+                    NM_CONNECTION_IFACE,
+                ).Update(nm_settings)
+            active = self._nm_iface.ActivateConnection(
+                connection_path,
+                dbus.ObjectPath(service._nm_device_path),
+                dbus.ObjectPath("/"),
+            )
+            service._nm_connection_path = str(connection_path)
+            log.info("Requested NetworkManager activation for %s", service._props.get(PROP_NAME))
+            del active
+        except dbus.exceptions.DBusException:
+            service.set_state(SHILL_STATE_IDLE)
+            raise
+        except Exception as exc:
+            service._set_properties({
+                PROP_STATE: SHILL_STATE_IDLE,
+                PROP_ERROR: "operation-failed",
+                PROP_ERROR_DETAILS: "NetworkManager could not activate this network",
+            })
+            raise dbus.exceptions.DBusException(
+                "org.chromium.flimflam.Error.OperationFailed",
+                "NetworkManager could not activate this network",
+            ) from exc
+
+    def disconnect_service(self, service: Service) -> None:
+        try:
+            dbus.Interface(self._device(service._nm_device_path), NM_DEVICE_IFACE).Disconnect()
+        except Exception as exc:
+            log.debug("NetworkManager disconnect failed for %s: %s", service._iface_name, exc)
+        service.set_state(SHILL_STATE_IDLE)
+
+    def remove_service(self, service: Service) -> None:
+        if service._nm_connection_path:
+            try:
+                dbus.Interface(
+                    self._bus.get_object(NM_SERVICE, service._nm_connection_path),
+                    NM_CONNECTION_IFACE,
+                ).Delete()
+            except Exception as exc:
+                log.debug("Cannot delete NetworkManager profile: %s", exc)
+        svc_path = f"/org/chromium/flimflam/Service/{service._guid}"
+        self._remove_service_path(svc_path)
+        self._shill.update_service_lists()
+
+    def _remove_service_path(self, svc_path: str) -> None:
+        svc = self._shill.services.pop(svc_path, None)
+        if svc is None:
+            return
+        for paths in self._services_by_device.values():
+            paths.discard(svc_path)
+        self._service_meta.pop(svc_path, None)
+        for key, path in list(self._service_keys.items()):
+            if path == svc_path:
+                self._service_keys.pop(key, None)
+        try:
+            svc.remove_from_connection()
+        except Exception:
+            pass
 
     def _remove_device(self, dev_path: str) -> None:
-        svc_path = self._nm_devices.pop(dev_path, None)
-        if svc_path and svc_path in self._shill.services:
-            del self._shill.services[svc_path]
-            log.info("Removed service %s", svc_path)
-            manager = self._shill.manager
-            service_paths = list(self._shill.services.keys())
-            manager._set_properties({
-                PROP_SERVICES: dbus.Array(
-                    [dbus.ObjectPath(p) for p in service_paths], signature="o"
+        for svc_path in list(self._services_by_device.pop(dev_path, ())):
+            self._remove_service_path(svc_path)
+        iface = self._nm_devices.pop(dev_path, None)
+        self._watched_devices.discard(dev_path)
+        self._watched_wifi.discard(dev_path)
+        if iface:
+            device_path = f"/org/chromium/flimflam/Device/{iface}"
+            device = self._shill.devices.pop(device_path, None)
+            if device is not None:
+                try:
+                    device.remove_from_connection()
+                except Exception:
+                    pass
+            self._shill.manager._set_property(
+                PROP_DEVICES,
+                dbus.Array(
+                    [dbus.ObjectPath(p) for p in self._shill.devices], signature="o"
                 ),
-                PROP_SERVICE_COMPLETE_LIST: dbus.Array(
-                    [dbus.ObjectPath(p) for p in service_paths], signature="o"
-                ),
-            })
+            )
+        self._shill.update_service_lists()
 
     def _on_device_added(self, dev_path: str) -> None:
         log.info("NM device added: %s", dev_path)
-        self._add_device(dev_path)
+        self._add_device(str(dev_path))
         self._shill.manager._refresh_technologies()
 
     def _on_device_removed(self, dev_path: str) -> None:
         log.info("NM device removed: %s", dev_path)
-        self._remove_device(dev_path)
+        self._remove_device(str(dev_path))
         self._shill.manager._refresh_technologies()
 
     def _on_device_props_changed(self, dev_path: str, changed: dict) -> None:
-        if "State" in changed:
-            new_state = changed["State"]
-            shill_state = self._nm_to_shill_state(new_state)
-            svc_path = self._nm_devices.get(dev_path)
-            if svc_path and svc_path in self._shill.services:
-                self._shill.services[svc_path].set_state(shill_state)
-                log.debug("Device %s → Shill state %s", dev_path, shill_state)
-            self._shill.manager._refresh_technologies()
+        if "State" not in changed and "ActiveAccessPoint" not in changed:
+            return
+        if self._device_type(dev_path) == NM_DEVICE_TYPE_WIFI:
+            self._sync_wifi_services(dev_path)
+        else:
+            iface = self._nm_devices.get(dev_path, "eth0")
+            self._sync_ethernet_service(dev_path, int(changed.get("State", 30)), iface)
+        self._shill.manager._refresh_technologies()
 
-    def _on_nm_properties_changed(
-        self, iface: str, changed: dict, invalid: list
-    ) -> None:
-        log.debug("NM properties changed: %s", changed)
+    def _on_nm_properties_changed(self, iface: str, changed: dict, invalid: list) -> None:
+        if "WirelessEnabled" in changed:
+            for dev_path in self._nm_devices:
+                if self._device_type(dev_path) == NM_DEVICE_TYPE_WIFI:
+                    self._sync_wifi_services(dev_path)
+
+    def _device_type(self, dev_path: str) -> int:
+        try:
+            return int(self._device_props(dev_path).Get(NM_DEVICE_IFACE, "DeviceType"))
+        except Exception:
+            return 0
 
     @staticmethod
     def _nm_to_shill_state(nm_state: int) -> str:
-        """Map NM device state → Shill state string."""
-        if nm_state >= 100:  # NM_DEVICE_STATE_ACTIVATED
-            # Check NM connectivity for "online" vs "ready"
-            # For simplicity, assume "online" (the connectivity check is async)
+        if nm_state >= NM_DEVICE_STATE_ACTIVATED:
             return SHILL_STATE_ONLINE
-        elif nm_state >= 50:  # CONNECTING
+        if nm_state >= 50:
             return SHILL_STATE_ASSOCIATION
-        else:
-            return SHILL_STATE_IDLE
+        return SHILL_STATE_IDLE
 
 
 # ---------------------------------------------------------------------------
@@ -810,7 +1372,7 @@ def main() -> None:
     shill.manager = mgr
 
     # Create a default profile
-    Profile(bus.get_connection(), SHALLOW_PROFILE_PATH)
+    Profile(bus.get_connection(), SHALLOW_PROFILE_PATH, shill)
 
     # Start NM monitor (connects to NM and syncs devices)
     monitor = NetworkManagerMonitor(bus, shill)
