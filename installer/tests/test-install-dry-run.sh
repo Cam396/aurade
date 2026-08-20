@@ -325,6 +325,17 @@ command -v mkfs.xfs >/dev/null 2>&1 && { echo 'could not stage a host without mk
 refuses 'required command not found: mkfs.xfs' --filesystem xfs
 PATH=$saved_path
 
+# A Btrfs swap file needs the native mkswapfile helper. An older btrfs-progs
+# can still provide the btrfs command while lacking that subcommand, which is
+# exactly how a plan can look valid and then produce a copy-on-write swap file.
+# Refuse that image before the confirmation boundary instead.
+printf '#!/usr/bin/env bash\nexit 1\n' >"$TMP/fsbin/btrfs"
+chmod +x "$TMP/fsbin/btrfs"
+PATH="$TMP/fsbin:$saved_path"
+refuses 'required btrfs-progs does not support filesystem mkswapfile' \
+  --swap file --swap-size 4G
+PATH=$saved_path
+
 # Installing alongside must not wipe, must not zap, and must not reformat the
 # EFI system partition it was asked to share.
 plan alongside --layout alongside

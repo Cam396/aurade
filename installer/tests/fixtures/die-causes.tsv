@@ -59,6 +59,7 @@ installer_error	refusing to install a repository secret key
 installer_error	repo-add is required to prepare the offline Arch package set
 installer_error	repository key fingerprint does not match --repo-fingerprint
 installer_error	repository public key could not be parsed
+installer_error	required command not found: btrfs
 installer_error	required command not found: cryptsetup
 installer_error	required command not found: fallocate
 installer_error	required command not found: mkfs.ext4
@@ -90,6 +91,7 @@ secure_boot_error	this image is too old to enroll Secure Boot keys automatically
 storage_error	--filesystem must be btrfs, ext4 or xfs
 storage_error	--mountpoint must be an absolute non-root path
 storage_error	post-install verification failed: a rollback entry exists on a filesystem with no factory snapshot
+storage_error	required btrfs-progs does not support filesystem mkswapfile
 target_error	--target is required
 target_error	--target must be an absolute /dev path
 target_error	loop targets require --allow-loop

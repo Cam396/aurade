@@ -981,6 +981,11 @@ require_shape_tools() {
   esac
   if [[ $SWAP == file ]]; then
     command -v mkswap >/dev/null || die 'required command not found: mkswap'
+    if [[ $FILESYSTEM == btrfs ]]; then
+      command -v btrfs >/dev/null || die 'required command not found: btrfs'
+      btrfs filesystem mkswapfile --help >/dev/null 2>&1 || \
+        die 'required btrfs-progs does not support filesystem mkswapfile'
+    fi
     [[ $FILESYSTEM != ext4 ]] || command -v fallocate >/dev/null || \
       die 'required command not found: fallocate'
   fi
