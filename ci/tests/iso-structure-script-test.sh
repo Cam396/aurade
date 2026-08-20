@@ -30,10 +30,56 @@ install -d \
   "$TMP/squash/usr/local/sbin" \
   "$TMP/squash/usr/local/lib/aurade" \
   "$TMP/squash/etc/aurade-installer"
-for helper in aurade-installer aurade-install aurade-recovery; do
+for helper in aurade-installer aurade-install aurade-recovery aurade-installer-start \
+  aurade-installer-gui aurade-installer-gui-bridge; do
   printf '%s\n' helper >"$TMP/squash/usr/local/sbin/$helper"
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
+install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
+for module in __init__ app bridge flow; do
+  printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
+done
+printf '%s\n' enabled >"$TMP/squash/etc/aurade-installer/gui-enabled"
+python3 - "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" <<'PY'
+import json
+import pathlib
+import sys
+
+paths = [
+    "installer/bin/aurade-installer-gui",
+    "installer/bin/aurade-installer-gui-bridge",
+    "installer/bin/aurade-installer-start",
+    "installer/lib/aurade-probe.sh",
+    "installer/lib/aurade-questions.sh",
+    "installer/lib/aurade-validate.sh",
+    "installer/lib/aurade-journal.sh",
+    "installer/lib/aurade-tui.sh",
+    "installer/lib/aurade_gui/__init__.py",
+    "installer/lib/aurade_gui/app.py",
+    "installer/lib/aurade_gui/bridge.py",
+    "installer/lib/aurade_gui/flow.py",
+]
+manifest = {
+    "schema": 1,
+    "release": "0.2.0",
+    "status": "candidate",
+    "architectures": ["x86_64"],
+    "payload": [{"path": path, "sha256": "0" * 64} for path in paths],
+    "runtime_packages": [
+        "cage", "gtk4", "libadwaita", "python-cairo", "python-gobject",
+        "ttf-jetbrains-mono",
+    ],
+    "public_release_policy": {
+        "gui_in_0_1_0": False,
+        "artifact_signature_required": True,
+        "full_profile_build_required": True,
+        "physical_accelerated_runtime_required": True,
+    },
+}
+pathlib.Path(sys.argv[1]).write_text(json.dumps(manifest), encoding="utf-8")
+PY
+cp "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" \
+  "$TMP/valid-gui-release-manifest.json"
 printf '%s\n' 2026/07/12 >"$TMP/squash/etc/aurade-installer/snapshot"
 install -d "$TMP/package"
 printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
@@ -55,6 +101,44 @@ printf '%s\n' 'title AuraDE' 'options cow_spacesize=4G' \
   >"$TMP/iso-tree/loader/entries/01-aurade-linux.conf"
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/full.iso" .)
 "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full
+printf 'release_channel=candidate\ngui_release=1\ngui_manifest_sha256=%s\n' \
+  "$(sha256sum "$TMP/valid-gui-release-manifest.json" | awk '{print $1}')" \
+  >"$TMP/full.iso.build-info"
+"$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui
+
+# A GUI payload built on the unsigned development channel is not a releasable
+# 0.2.0 candidate, even when its embedded manifest is otherwise valid.
+sed 's/^release_channel=.*/release_channel=development/' \
+  "$TMP/full.iso.build-info" >"$TMP/dev-gui.iso.build-info"
+if mv "$TMP/dev-gui.iso.build-info" "$TMP/full.iso.build-info" && \
+  "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui \
+    >"$TMP/dev-gui.out" 2>&1; then
+  echo 'development-channel GUI ISO unexpectedly passed the release gate' >&2
+  exit 1
+fi
+grep -Fq 'must use candidate or public build channel' "$TMP/dev-gui.out"
+sed 's/^release_channel=.*/release_channel=candidate/' \
+  "$TMP/full.iso.build-info" >"$TMP/full.iso.build-info.restored"
+mv "$TMP/full.iso.build-info.restored" "$TMP/full.iso.build-info"
+
+# A downgraded embedded manifest must fail the explicit GUI artifact gate.
+printf '%s\n' '{"schema":1,"release":"0.1.0"}' \
+  >"$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
+mksquashfs "$TMP/squash" "$TMP/iso-tree/arch/x86_64/airootfs.sfs" \
+  -noappend -quiet
+(cd "$TMP/iso-tree" && bsdtar -cf "$TMP/bad-gui-manifest.iso" .)
+printf 'release_channel=candidate\ngui_release=1\ngui_manifest_sha256=%s\n' \
+  "$(sha256sum "$TMP/squash/etc/aurade-installer/gui-release-manifest.json" | awk '{print $1}')" \
+  >"$TMP/bad-gui-manifest.iso.build-info"
+if "$ROOT/ci/verify-iso-structure.sh" "$TMP/bad-gui-manifest.iso" \
+    --full --require-gui >"$TMP/bad-gui-manifest.out" 2>&1; then
+  echo 'ISO with a downgraded GUI manifest unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'embedded GUI manifest is not a 0.2.0 candidate' \
+  "$TMP/bad-gui-manifest.out"
+cp "$TMP/valid-gui-release-manifest.json" \
+  "$TMP/squash/etc/aurade-installer/gui-release-manifest.json"
 
 # A changed archive with the old lock digest must fail the final-artifact gate.
 printf '%s\n' changed >"$TMP/package/README"

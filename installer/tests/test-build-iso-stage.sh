@@ -70,6 +70,8 @@ env \
   AURADE_ARCH_SNAPSHOT=2026/07/12 \
   AURADE_REPO_DIR="$TMP/repo" \
   AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_RELEASE_CHANNEL=candidate \
+  AURADE_GUI_RELEASE=1 \
   AURADE_INSTALLER_WORK_ROOT="$TMP/work" \
   "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/stage.out"
 
@@ -92,6 +94,8 @@ grep -Fxq archlinux-keyring "$ROOT/installer/archiso/packages.x86_64"
 for package in gtk4 libadwaita python-gobject cage python-cairo ttf-jetbrains-mono; do
   grep -Fxq "$package" "$ROOT/installer/archiso/packages.x86_64"
 done
+[[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-release-manifest.json ]]
+[[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-enabled ]]
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
@@ -100,6 +104,7 @@ grep -Fq 'package_bytes=' "$ROOT/installer/build-iso.sh"
 grep -Fq 'RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}' "$ROOT/installer/build-iso.sh"
 grep -Fq "printf 'release_channel=%s\\n' \"\$RELEASE_CHANNEL\"" "$ROOT/installer/build-iso.sh"
 grep -Fq 'packages_lock_sha256=' "$ROOT/installer/build-iso.sh"
+grep -Fq 'GUI_RELEASE=${AURADE_GUI_RELEASE:-0}' "$ROOT/installer/build-iso.sh"
 grep -Fxq 'LocalFileSigLevel = Required' "$ROOT/installer/archiso/pacman.conf"
 grep -Fxq 'LocalFileSigLevel = Required' \
   "$ROOT/installer/archiso/airootfs/etc/pacman.conf"
@@ -115,6 +120,29 @@ grep -Fxq 'xfsprogs' "$ROOT/installer/archiso/packages.x86_64" || {
   echo 'test-build-iso-stage: the image cannot make an xfs root, so the installer cannot offer one' >&2
   exit 1
 }
+
+# The default profile is intentionally text-only. This second stage catches a
+# future change that makes the graphical payload or its runtime closure leak
+# into a routine development build.
+env \
+  AURADE_ARCH_SNAPSHOT=2026/07/12 \
+  AURADE_REPO_DIR="$TMP/repo" \
+  AURADE_ALLOW_UNSIGNED=1 \
+  AURADE_INSTALLER_WORK_ROOT="$TMP/work_text_only" \
+  "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/text-only.out"
+text_profile=$TMP/work_text_only/profile
+[[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
+[[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
+[[ ! -e $text_profile/airootfs/etc/aurade-installer/gui-enabled ]]
+[[ ! -e $text_profile/airootfs/etc/aurade-installer/gui-release-manifest.json ]]
+for package in cage gtk4 libadwaita python-cairo python-gobject ttf-jetbrains-mono; do
+  ! grep -Fxq "$package" "$text_profile/packages.x86_64" || {
+    echo "test-build-iso-stage: GUI runtime package $package leaked into text-only profile" >&2
+    exit 1
+  }
+done
+! grep -Fq '/usr/local/sbin/aurade-installer-gui' "$text_profile/profiledef.sh"
+! grep -Fq '/usr/local/lib/aurade/aurade_gui/' "$text_profile/profiledef.sh"
 
 # The two packages the speech boot entry is made of. Same argument as xfsprogs
 # above: without them the entry still appears in the menu, still boots, and

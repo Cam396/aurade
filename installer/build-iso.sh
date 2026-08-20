@@ -33,6 +33,7 @@ BUILD_WORK=$WORK_ROOT/work
 REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}
+GUI_RELEASE=${AURADE_GUI_RELEASE:-0}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
@@ -56,6 +57,14 @@ case $RELEASE_CHANNEL in
     exit 2
     ;;
 esac
+[[ $GUI_RELEASE == 0 || $GUI_RELEASE == 1 ]] || {
+  echo 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' >&2
+  exit 2
+}
+if (( GUI_RELEASE )) && [[ $RELEASE_CHANNEL != candidate && $RELEASE_CHANNEL != public ]]; then
+  echo 'build-iso: GUI releases require candidate or public AURADE_RELEASE_CHANNEL' >&2
+  exit 2
+fi
 
 if [[ -n $ISO_SIGNING_KEY || $REQUIRE_ISO_SIGNATURE == 1 ]]; then
   command -v gpg >/dev/null || { echo 'build-iso: gpg is required for ISO signatures' >&2; exit 1; }
@@ -93,6 +102,10 @@ fi
 rm -rf -- "$STAGE" "$BUILD_WORK"
 install -d -m 0755 "$STAGE" "$OUTPUT_DIR" "$BUILD_WORK"
 cp -a "$ROOT/archiso/." "$STAGE/"
+if (( GUI_RELEASE )); then
+  ROOT="$(cd "$ROOT/.." && pwd -P)" python3 "$ROOT/../ci/verify-gui-release-manifest.py" \
+    "$ROOT/gui-release-manifest.json"
+fi
 install -Dm0755 "$ROOT/bin/aurade-install" "$STAGE/airootfs/usr/local/sbin/aurade-install"
 install -Dm0755 "$ROOT/bin/aurade-secure-boot-sign" "$STAGE/airootfs/usr/local/sbin/aurade-secure-boot-sign"
 install -Dm0644 "$ROOT/secure-boot/90-aurade-secure-boot.hook" \
@@ -110,19 +123,39 @@ install -Dm0644 "$ROOT/units/aurade-first-boot-accessibility.service" "$STAGE/ai
 install -Dm0755 "$ROOT/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics" \
   "$STAGE/airootfs/usr/local/sbin/aurade-network-diagnostics"
 install -Dm0755 "$ROOT/bin/aurade-installer-tui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-tui"
-install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
-install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
 install -Dm0755 "$ROOT/bin/aurade-installer-start" "$STAGE/airootfs/usr/local/sbin/aurade-installer-start"
-for _gui_module in __init__ a11y arcade bible bridge flow app brand locales stage status tokens wait; do
-  install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
-    "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
-done
-# Both stylesheets. GTK's @define-color is global, so the dark scheme is a
-# second sheet the front end swaps in rather than a section of the first.
-for _sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css; do
-  install -Dm0644 "$ROOT/lib/aurade_gui/${_sheet}" \
-    "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_sheet}"
-done
+if (( GUI_RELEASE )); then
+  # The graphical payload is a 0.2.0 candidate surface, not a file that may
+  # quietly leak into the older text-only image. Keep the complete module set
+  # here so a new GUI module cannot be present in source and absent from the
+  # candidate image.
+  install -Dm0755 "$ROOT/bin/aurade-installer-gui" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui"
+  install -Dm0755 "$ROOT/bin/aurade-installer-gui-bridge" "$STAGE/airootfs/usr/local/sbin/aurade-installer-gui-bridge"
+  for _gui_module in __init__ a11y arcade bible bridge flow app brand locales stage status tokens wait; do
+    install -Dm0644 "$ROOT/lib/aurade_gui/${_gui_module}.py" \
+      "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_gui_module}.py"
+  done
+  # Both stylesheets. GTK's @define-color is global, so the dark scheme is a
+  # second sheet the front end swaps in rather than a section of the first.
+  for _sheet in theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css; do
+    install -Dm0644 "$ROOT/lib/aurade_gui/${_sheet}" \
+      "$STAGE/airootfs/usr/local/lib/aurade/aurade_gui/${_sheet}"
+  done
+  install -Dm0644 "$ROOT/gui-release-manifest.json" \
+    "$STAGE/airootfs/etc/aurade-installer/gui-release-manifest.json"
+  printf '%s\n' enabled >"$STAGE/airootfs/etc/aurade-installer/gui-enabled"
+else
+  # A default or development build remains text-only. Remove the graphical
+  # runtime closure and profile ownership entries from the copied profile so a
+  # routine 0.1.x rebuild cannot publish the unreleased GUI by accident.
+  for _gui_package in cage gtk4 libadwaita python-cairo python-gobject ttf-jetbrains-mono; do
+    sed -i "/^${_gui_package}$/d" "$STAGE/packages.x86_64"
+  done
+  sed -i \
+    -e '/aurade-installer-gui/d' \
+    -e '/aurade_gui\//d' \
+    "$STAGE/profiledef.sh"
+fi
 # The mark and the wordmark are drawn from the real artwork rather than
 # redrawn in code, so the installer and the product carry the same logo.
 for _asset in aurade-mark.png aurade-wordmark.png; do
@@ -359,6 +392,10 @@ sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
   fi
   printf 'archiso_version=%s\n' "$(pacman -Q archiso 2>/dev/null || printf unknown)"
   printf 'release_channel=%s\n' "$RELEASE_CHANNEL"
+  printf 'gui_release=%s\n' "$GUI_RELEASE"
+  if (( GUI_RELEASE )); then
+    printf 'gui_manifest_sha256=%s\n' "$(sha256sum "$STAGE/airootfs/etc/aurade-installer/gui-release-manifest.json" | awk '{print $1}')"
+  fi
   packages_lock_sha256=$(cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock | awk '{print $1}')
   printf 'packages_lock_sha256=%s\n' "$packages_lock_sha256"
 } >"$iso.build-info"

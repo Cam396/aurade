@@ -10,15 +10,15 @@
   "payload": [
     {
       "path": "installer/bin/aurade-installer-gui",
-      "sha256": "9c314daf0bd95dfb92c1b9058e737c536424f152fedb5eb242ab71e1d420960c"
+      "sha256": "24cd6807d8ba0704925d3ebf3a0f6ea5aa786bd7c715edb66dbd7b48f19c3dfb"
     },
     {
       "path": "installer/bin/aurade-installer-gui-bridge",
-      "sha256": "321d86e3b4091b1d2206204b368e92092af50c5730839fd0b39577843398f105"
+      "sha256": "f4c76dd7d0b1f3541c6b79303e4652dfb199ec6f0426e7b9bdcd836d7172cee5"
     },
     {
       "path": "installer/bin/aurade-installer-start",
-      "sha256": "6d94d52c0bd0d2826169e9a9d55698ab4648e690c233233936c3c1ec544bbb9d"
+      "sha256": "d0e397d06336937f25f5a77726aa5ee80564b350d00328f5d8d9a21f578c3af3"
     },
     {
       "path": "installer/lib/aurade_gui/__init__.py",
@@ -26,18 +26,25 @@
     },
     {
       "path": "installer/lib/aurade_gui/bridge.py",
-      "sha256": "5852c9834668a42caf112755c86ba5ce9b30beeee0982862c0f036d0540a2a0a"
+      "sha256": "35ee9dc471b3bf2cc94987e69381110258e19235820ff2903ebfbc08369b71e5"
     },
     {
       "path": "installer/lib/aurade_gui/flow.py",
-      "sha256": "556efe391e3f0c92f9e26a43c13bd7744ca7e6172905e6dc7454686893c15ef0"
+      "sha256": "cb109b2a4f1d737ec5c4e3f2ab2756c7d4e08a7b8099ef4c296a9151691c56e6"
     },
     {
       "path": "installer/lib/aurade_gui/app.py",
-      "sha256": "e394aa574e69bfa2cf2ca8e6903b8fb1409f0c0810a4bd596bf0897bc041ac64"
+      "sha256": "07ef8a72abc3795d0fdfe545969e9baa5f056dc5a7d012296d278b1208507e23"
     }
   ],
-  "runtime_packages": ["cage", "gtk4", "libadwaita", "python-gobject"],
+  "runtime_packages": [
+    "cage",
+    "gtk4",
+    "libadwaita",
+    "python-cairo",
+    "python-gobject",
+    "ttf-jetbrains-mono"
+  ],
   "public_release_policy": {
     "gui_in_0_1_0": false,
     "artifact_signature_required": true,

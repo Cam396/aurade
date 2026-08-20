@@ -74,7 +74,14 @@ if not required.issubset(seen):
     fail(f"required GUI payload is missing: {sorted(required - seen)}")
 
 packages = data.get("runtime_packages")
-expected_packages = {"cage", "gtk4", "libadwaita", "python-gobject"}
+expected_packages = {
+    "cage",
+    "gtk4",
+    "libadwaita",
+    "python-cairo",
+    "python-gobject",
+    "ttf-jetbrains-mono",
+}
 if not isinstance(packages, list) or sorted(packages) != sorted(expected_packages):
     fail("runtime package closure is incomplete or contains unexpected entries")
 package_file = root / "installer/archiso/packages.x86_64"
