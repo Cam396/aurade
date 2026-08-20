@@ -117,7 +117,6 @@ source=(
     'chromiumos-ash.desktop'
     'chromiumos-ash-wayland.desktop'
     'aurade.features.conf'
-    'google-api.conf'
     'google-api.conf.example'
     'aurade-session-manager-shim.py'
     'aurade-session-manager.service'
@@ -136,7 +135,6 @@ sha256sums=('6749abf6939dbc2d7006ee24960f7df635fdedd9d3fabcd94ab2807ebc32e36a'
             'f8c199d491d42a562e573592dd4f3fc66306f27e95c901e85fdd7360842fe821'
             '7c149f0add02dbed69c642bb8a057d9d921e8b4fc4effd85123ffb30f43a7d23'
             '84ea9c1d5108606f8db4ff4664847628bb9510a3e1b0d54adf49aad0143bd017'
-            'b7c42110b54a362f9af73428ede848cc97798e3640626fefb0ef071e6bd1f5b7'
             '2f2adfd446b67048ec9f753bd4257fc01a604159f9ef4c74d1ff7c91b51940b5'
             '8506d6044acd85b1ba6e72a6aff3452ea2955b1c14feb000718e02a2ecc641fc'
             'fa70439a19399b9fd27ae402f62a8259c10132b5a259750d6849bd7b30f01480'
@@ -175,11 +173,9 @@ build() {
         return
     fi
 
-    # The AuraDE fallback credentials are shipped as a checked-in config so
-    # the binary can authenticate before a user-level environment exists.
-    # Read that file here rather than duplicating credentials in this recipe;
-    # GN still expands the values into google_apis at compile time.
-    local google_api_config="${srcdir}/google-api.conf"
+    # OAuth credentials are supplied by the private build environment. They
+    # never belong in the source tree or in a public package recipe.
+    local google_api_config="${AURADE_GOOGLE_API_CONFIG:-${srcdir}/google-api.conf.example}"
     if [[ ! -r "${google_api_config}" ]]; then
         echo "ERROR: missing ${google_api_config}" >&2
         exit 1
@@ -377,7 +373,8 @@ EOF
     # Install feature defaults.
     install -Dm644 "${srcdir}/aurade.features.conf" \
         "${pkgdir}/etc/aurade/features.conf"
-    install -Dm644 "${srcdir}/google-api.conf" \
+    local google_api_runtime_config="${AURADE_GOOGLE_API_CONFIG:-${srcdir}/google-api.conf.example}"
+    install -Dm644 "${google_api_runtime_config}" \
         "${pkgdir}/etc/aurade/google-api.conf"
     install -Dm644 "${srcdir}/google-api.conf.example" \
         "${pkgdir}/usr/share/doc/${pkgname}/google-api.conf.example"

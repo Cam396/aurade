@@ -9,6 +9,15 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 chmod 777 "${TMP_DIR}"
 
 mkdir -p "${TMP_DIR}/home" "${TMP_DIR}/config"
+DEFAULT_ID='fixture-default-id'
+DEFAULT_VALUE='fixture-default-value'
+cat >"${TMP_DIR}/default.conf" <<EOF
+GOOGLE_API_KEY=
+GOOGLE_DEFAULT_CLIENT_ID=${DEFAULT_ID}
+GOOGLE_DEFAULT_CLIENT_SECRET=${DEFAULT_VALUE}
+GOOGLE_CLIENT_ID_MAIN=${DEFAULT_ID}
+GOOGLE_CLIENT_SECRET_MAIN=${DEFAULT_VALUE}
+EOF
 cat >"${TMP_DIR}/chrome" <<'EOF'
 #!/bin/bash
 {
@@ -33,7 +42,7 @@ run_launcher() {
         XDG_CONFIG_HOME="${TMP_DIR}/config" \
         AURADE_CHROME="${TMP_DIR}/chrome" \
         AURADE_CHROME_SANDBOX=/bin/false \
-        AURADE_GOOGLE_API_CONF="${SCRIPT_DIR}/google-api.conf" \
+        AURADE_GOOGLE_API_CONF="${TMP_DIR}/default.conf" \
         AURADE_TEST_OUTPUT="${TMP_DIR}/output" \
         AURADE_SKIP_SHILL_CHECK=1 \
         AURADE_ENABLE_PIPEWIRE_AUDIO=0 \
@@ -47,15 +56,15 @@ run_launcher() {
 }
 
 run_launcher
-grep -Fxq 'default_id=77185425430.apps.googleusercontent.com' "${TMP_DIR}/output"
-grep -Fxq 'default_secret=OTJgUOQcT7lO7GsGZq2G4IlT' "${TMP_DIR}/output"
-grep -Fxq 'main_id=77185425430.apps.googleusercontent.com' "${TMP_DIR}/output"
-grep -Fxq 'main_secret=OTJgUOQcT7lO7GsGZq2G4IlT' "${TMP_DIR}/output"
+grep -Fxq "default_id=${DEFAULT_ID}" "${TMP_DIR}/output"
+grep -Fxq "default_secret=${DEFAULT_VALUE}" "${TMP_DIR}/output"
+grep -Fxq "main_id=${DEFAULT_ID}" "${TMP_DIR}/output"
+grep -Fxq "main_secret=${DEFAULT_VALUE}" "${TMP_DIR}/output"
 
 run_launcher $'GOOGLE_DEFAULT_CLIENT_ID=user-id\nGOOGLE_CLIENT_SECRET_MAIN=user-secret'
 grep -Fxq 'default_id=user-id' "${TMP_DIR}/output"
 grep -Fxq 'main_secret=user-secret' "${TMP_DIR}/output"
-grep -Fxq 'default_secret=OTJgUOQcT7lO7GsGZq2G4IlT' "${TMP_DIR}/output"
-grep -Fxq 'main_id=77185425430.apps.googleusercontent.com' "${TMP_DIR}/output"
+grep -Fxq "default_secret=${DEFAULT_VALUE}" "${TMP_DIR}/output"
+grep -Fxq "main_id=${DEFAULT_ID}" "${TMP_DIR}/output"
 
 echo "Chromium OAuth configuration test: PASS"

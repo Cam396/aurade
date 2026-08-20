@@ -1,7 +1,8 @@
 # Optional AuraDE Google API/OAuth configuration.
 #
-# The package includes a public fallback OAuth client for unbranded Chromium.
-# This file documents the same variables without copying the fallback values.
+# The package includes an empty configuration by default. A private build can
+# supply a project configuration through AURADE_GOOGLE_API_CONFIG; values are
+# never stored in this repository.
 # A per-user file at ~/.config/aurade/google-api.conf overrides the package
 # defaults, and environment variables take precedence over both files.
 #
