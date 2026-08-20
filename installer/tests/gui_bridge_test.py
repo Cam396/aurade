@@ -96,6 +96,26 @@ def shell(script: str) -> str:
     ).stdout
 
 
+def raw_protocol(model: Bridge, payload: str) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
+    """Drive a second model with bytes a renderer would never normally send."""
+    process = subprocess.run(
+        [
+            BRIDGE,
+            "--journal",
+            model.journal,
+            "--raw-log",
+            model.raw_log,
+        ],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=model._env,
+    )
+    replies = [json.loads(line) for line in process.stdout.splitlines() if line]
+    return process, replies
+
+
 def answer_everything(model: Bridge) -> None:
     for question, value in (
         ("locale", "en_US.UTF-8"),
@@ -695,6 +715,38 @@ with session() as model:
 
 for haystack in ("\n".join(SEEN), "\n".join(nmcli_calls())):
     check(WIFI_PASSWORD not in haystack, "the Wi-Fi passphrase leaked")
+
+
+# ---------------------------------------------------------------------------
+# The protocol remains bounded when called by something other than the GUI
+# ---------------------------------------------------------------------------
+
+with session() as model:
+    process, replies = raw_protocol(model, "\x01bad\nping\nquit\n")
+    equal(process.returncode, 0, "a malformed command terminated the bridge")
+    equal(len(replies), 2, "a malformed command desynchronised the protocol")
+    check(not replies[0]["ok"], "a control character was accepted as a command")
+    check(replies[0]["error"] == "invalid command",
+          f"the malformed command got an unclear error: {replies[0]}")
+    check(replies[1]["ok"], "the bridge did not recover after malformed input")
+
+with session() as model:
+    oversized = "x" * 65537
+    process, replies = raw_protocol(model, f"ping {oversized}\nquit\n")
+    equal(process.returncode, 0, "an oversized request terminated the bridge")
+    equal(len(replies), 1, "an oversized request emitted an unexpected response")
+    check(replies[0].get("error") == "the request is too large",
+          f"the oversized request got an unclear error: {replies[0]}")
+
+with session() as model:
+    sentinel = "PRIVATE-SENTINEL-" + ("x" * 65537)
+    process, replies = raw_protocol(model, f"secret password\n{sentinel}\nquit\n")
+    equal(process.returncode, 0, "an oversized value terminated the bridge")
+    equal(len(replies), 1, "an oversized value emitted an unexpected response")
+    check(replies[0].get("error") == "the value is too large",
+          f"the oversized value got an unclear error: {replies[0]}")
+    check(sentinel not in process.stdout and sentinel not in process.stderr,
+          "an oversized secret appeared in the bridge output")
 
 
 # ---------------------------------------------------------------------------

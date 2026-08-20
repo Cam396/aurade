@@ -89,6 +89,15 @@ install -d -m 0700 "$(dirname "$RAW_LOG")" 2>/dev/null || true
 GB_PLANNED=0
 GB_ENGINE_PID=
 
+# The renderer is trusted code, but the bridge is the privileged boundary and
+# it must remain bounded when a renderer is broken or an input pipe is
+# corrupted. A normal device path, SSID or passphrase is much smaller than
+# this. Keeping the limit here, before dispatch, prevents a malformed request
+# from consuming memory while it is being split into a command and a value.
+readonly GB_MAX_LINE_LENGTH=65536
+readonly GB_MAX_VALUE_LENGTH=65536
+GB_VALUE=
+
 # --------------------------------------------------------------------------
 # JSON output
 # --------------------------------------------------------------------------
@@ -106,6 +115,20 @@ _gb_emit() { printf '%s\n' "$1"; }
 _gb_ok() { _gb_emit "{\"ok\":true${1:+,$1}}"; }
 
 _gb_err() { _gb_emit "{\"ok\":false,\"error\":$(_gb_str "$1")}"; }
+
+# Read one value line and reject unbounded input before it reaches a model
+# function. EOF remains an empty value, preserving the existing validation
+# error for an incomplete request.
+_gb_read_value() {
+  if ! IFS= read -r GB_VALUE; then
+    GB_VALUE=''
+  fi
+  if (( ${#GB_VALUE} > GB_MAX_VALUE_LENGTH )); then
+    _gb_err 'the value is too large'
+    return 1
+  fi
+  return 0
+}
 
 # --------------------------------------------------------------------------
 # Read-only views
@@ -1071,7 +1094,7 @@ gb_export() {
 # just before a destructive call is one edit away from being consulted after it.
 
 _gb_common() {
-  local command=$1 argument=$2 value
+  local command=$1 argument=$2
   case $command in
     manifest)  gb_manifest ;;
     visible)   gb_visible ;;
@@ -1083,7 +1106,7 @@ _gb_common() {
     wifi-scan) gb_wifi_scan ;;
     wifi-forget) gb_wifi_forget "$argument" ;;
     wifi-radio) gb_wifi_radio "$argument" ;;
-    wifi-connect) IFS= read -r value || value=''; gb_wifi_connect "$argument" "$value" ;;
+    wifi-connect) _gb_read_value || return 0; gb_wifi_connect "$argument" "$GB_VALUE" ;;
     stages)    gb_stages ;;
     enum)      gb_enum "$argument" ;;
     answers)   gb_answers ;;
@@ -1093,8 +1116,8 @@ _gb_common() {
     progress)  gb_progress ;;
     failure)   gb_failure ;;
     get)       gb_get "$argument" ;;
-    set)       IFS= read -r value || value=''; gb_set "$argument" "$value" ;;
-    secret)    IFS= read -r value || value=''; gb_secret "$argument" "$value" ;;
+    set)       _gb_read_value || return 0; gb_set "$argument" "$GB_VALUE" ;;
+    secret)    _gb_read_value || return 0; gb_secret "$argument" "$GB_VALUE" ;;
     plan)      gb_plan ;;
     export)    gb_export "$argument" ;;
     ping)      _gb_ok ;;
@@ -1125,10 +1148,18 @@ GB_DISPATCH=_gb_dispatch_full
 
 while IFS= read -r line; do
   [[ -n $line ]] || continue
+  if (( ${#line} > GB_MAX_LINE_LENGTH )); then
+    _gb_err 'the request is too large'
+    continue
+  fi
   gb_command=${line%% *}
   gb_argument=''
   [[ $gb_command == "$line" ]] || gb_argument=${line#* }
   [[ $gb_command != quit ]] || break
+  if [[ ! $gb_command =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
+    _gb_err 'invalid command'
+    continue
+  fi
   "$GB_DISPATCH" "$gb_command" "$gb_argument"
 done
 
