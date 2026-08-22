@@ -38,7 +38,8 @@ if [[ -d "${CI_DIR}" ]]; then
         "${CI_DIR}/build-clean-arch-chromium-package.sh"
 fi
 
-mkdir -p "${TMP_DIR}/home" "${TMP_DIR}/config"
+mkdir -p "${TMP_DIR}/home" "${TMP_DIR}/config" "${TMP_DIR}/runtime"
+chmod 700 "${TMP_DIR}/runtime"
 DEFAULT_ID='fixture-default-id'
 DEFAULT_VALUE='fixture-default-value'
 cat >"${TMP_DIR}/default.conf" <<EOF
@@ -70,6 +71,7 @@ run_launcher() {
     env \
         HOME="${TMP_DIR}/home" \
         XDG_CONFIG_HOME="${TMP_DIR}/config" \
+        XDG_RUNTIME_DIR="${TMP_DIR}/runtime" \
         AURADE_CHROME="${TMP_DIR}/chrome" \
         AURADE_CHROME_SANDBOX=/bin/false \
         AURADE_GOOGLE_API_CONF="${TMP_DIR}/default.conf" \
