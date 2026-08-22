@@ -4,8 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="${SCRIPT_DIR}/chromiumos-ash.sh"
-PKGBUILD="${SCRIPT_DIR}/PKGBUILD"
-CI_DIR="${SCRIPT_DIR}/../ci"
+# makepkg copies sources into a separate `src/` directory, so the package
+# check needs to walk up one level instead of looking beside the test script.
+PKGBUILD="${AURADE_PKGBUILD_PATH:-${SCRIPT_DIR}/../PKGBUILD}"
+CI_DIR="${AURADE_CI_DIR:-${SCRIPT_DIR}/../ci}"
 TMP_DIR="$(mktemp -d "${SCRIPT_DIR}/.google-api-test.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 chmod 777 "${TMP_DIR}"
@@ -20,19 +22,21 @@ fi
 grep -Fq ': "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"' "${PKGBUILD}"
 grep -Fq ': "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"' "${PKGBUILD}"
 
-for build_script in \
-    build-current-chromiumos-ash-package.sh \
-    build-release-candidate.sh \
-    build-clean-arch-chromium-package.sh; do
-    grep -Fq 'AURADE_GOOGLE_API_CONFIG' "${CI_DIR}/${build_script}"
-done
-if grep -Fq ': "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"' \
-    "${CI_DIR}/build-clean-arch-chromium-package.sh"; then
-    echo "OAuth config test: clean build must not require an API key" >&2
-    exit 1
+if [[ -d "${CI_DIR}" ]]; then
+    for build_script in \
+        build-current-chromiumos-ash-package.sh \
+        build-release-candidate.sh \
+        build-clean-arch-chromium-package.sh; do
+        grep -Fq 'AURADE_GOOGLE_API_CONFIG' "${CI_DIR}/${build_script}"
+    done
+    if grep -Fq ': "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"' \
+        "${CI_DIR}/build-clean-arch-chromium-package.sh"; then
+        echo "OAuth config test: clean build must not require an API key" >&2
+        exit 1
+    fi
+    grep -Fq 'AURADE_GOOGLE_API_CONFIG=/build/aurade-private/google-api.conf' \
+        "${CI_DIR}/build-clean-arch-chromium-package.sh"
 fi
-grep -Fq 'AURADE_GOOGLE_API_CONFIG=/build/aurade-private/google-api.conf' \
-    "${CI_DIR}/build-clean-arch-chromium-package.sh"
 
 mkdir -p "${TMP_DIR}/home" "${TMP_DIR}/config"
 DEFAULT_ID='fixture-default-id'
