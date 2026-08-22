@@ -149,7 +149,9 @@ backup=('etc/aurade/features.conf' 'etc/aurade/google-api.conf')
 
 check() {
     bash "${srcdir}/test-session-error.sh" "${srcdir}/aurade-session-error"
-    bash "${srcdir}/test-google-api-config.sh"
+    AURADE_PKGBUILD_PATH="${startdir}/PKGBUILD" \
+        AURADE_CI_DIR="${startdir}/../ci" \
+        bash "${srcdir}/test-google-api-config.sh"
 }
 
 build() {
