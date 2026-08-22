@@ -1243,11 +1243,15 @@ def main() -> int:
         print("installer GUI runtime test: SKIP (no model)")
         return 0
 
+    # This runtime pass must exercise the confirmation screen and its
+    # asynchronous handoff. It is still safe: the execute method is replaced
+    # with a delayed in-memory fixture below, so no engine or block device is
+    # ever reached. Plan-only mode deliberately cannot enter that screen.
     model = Bridge(
         program=bridge_path,
         journal=os.environ["AURADE_JOURNAL_PATH"],
         raw_log=os.environ["AURADE_JOURNAL_RAW"],
-        plan_only=True,
+        plan_only=False,
     )
     model.start()
     model.ping()
@@ -1256,7 +1260,7 @@ def main() -> int:
     app = Adw.Application(application_id="org.aurade.InstallerRuntimeTest")
 
     def activate(application: Adw.Application) -> None:
-        window = InstallerWindow(application, model, plan_only=True)
+        window = InstallerWindow(application, model, plan_only=False)
         window.set_default_size(1280, 860)
         window.present()
         pump(30)
