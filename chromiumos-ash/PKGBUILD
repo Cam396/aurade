@@ -10,8 +10,8 @@
 pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
-pkgver=152.1660893
-pkgrel=7
+pkgver=154.0.8015.0
+pkgrel=2
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -153,7 +153,10 @@ check() {
 build() {
     # CHROME_SRC must point to a synced+patched ChromiumOS src dir
     local chrome_src="${CHROME_SRC:-${srcdir}/chromiumos-src}"
-    local out_dir="${chrome_src}/out/Ash"
+    # Keep the completed output separate from the source checkout. This lets
+    # a release package the exact verified Chromium build without copying a
+    # multi-gigabyte Ninja tree into the Arch build root.
+    local out_dir="${AURADE_OUT_DIR:-${chrome_src}/out/Ash}"
 
     if [ ! -d "${chrome_src}" ]; then
         echo "ERROR: CHROME_SRC not found at ${chrome_src}"
@@ -239,7 +242,7 @@ build() {
 
 package() {
     local chrome_src="${CHROME_SRC:-${srcdir}/chromiumos-src}"
-    local out_dir="${chrome_src}/out/Ash"
+    local out_dir="${AURADE_OUT_DIR:-${chrome_src}/out/Ash}"
     local gn_bin="gn"
     local runtime_deps="${srcdir}/chromiumos-ash.runtime_deps"
 
