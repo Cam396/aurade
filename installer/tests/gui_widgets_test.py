@@ -43,9 +43,13 @@ GIR_DIRS = [os.environ.get("AURADE_GIR_DIR", ""), "/usr/share/gir-1.0"]
 NAMESPACES = {
     "Gtk": "Gtk-4.0.gir",
     "Adw": "Adw-1.gir",
+    "Gdk": "Gdk-4.0.gir",
+    "Gsk": "Gsk-4.0.gir",
     "Gio": "Gio-2.0.gir",
     "GLib": "GLib-2.0.gir",
     "GObject": "GObject-2.0.gir",
+    "Pango": "Pango-1.0.gir",
+    "PangoCairo": "PangoCairo-1.0.gir",
 }
 
 #: Namespaces without which this test proves nothing worth reporting.
@@ -56,12 +60,27 @@ REQUIRED = ("Gtk", "Adw")
 OURS = {
     # this project's own objects and modules
     "flow", "model", "manifest", "widgets", "enum_values", "probe",
-    "stage_rows", "group_rows", "names",
-    # module aliases: F=flow, T=tokens, plus brand, locales and stdlib
-    "F", "T", "brand", "locales", "tokens", "os", "path",
+    "stage_rows", "group_rows", "names", "game", "aurora", "wallpaper",
+    "tips",
+    # module aliases. F=flow, T=tokens, A=a11y, ARC=arcade, ST=status,
+    # S=stage, W=wait, C=copy.
+    "F", "T", "A", "ARC", "ST", "S", "W", "C",
+    "brand", "locales", "tokens", "arcade", "status", "stage", "wait",
+    "a11y", "bible", "os", "path", "sys", "time", "math", "json",
+    "threading", "subprocess", "shutil", "random", "re",
     # the binding module rather than a namespace it exposes
     "gi",
 }
+
+#: Cairo, which has no introspection data and never will.
+#:
+#: The drawing code uses the toy text and path API through a context handed to
+#: it by a draw function. There is no .gir for cairo, because pycairo is a
+#: hand written C extension rather than a GObject library, so every method
+#: called on a context reads to this test as a name that exists nowhere. The
+#: receiver name is the signal, and it is one name by convention across the
+#: whole widget layer.
+CAIRO_RECEIVERS = {"cr", "cairo", "context"}
 
 #: Python's own methods, called on Python's own objects. Listed rather than
 #: inferred, so a name added here is a deliberate statement that it is not
@@ -70,6 +89,29 @@ PYTHON_METHODS = {
     "index", "items", "keys", "values", "join", "split", "strip", "rstrip",
     "lower", "upper", "startswith", "endswith", "replace", "format", "pop",
     "setdefault", "readline", "flush", "require_version",
+    "isprintable", "isalpha", "isdigit", "partition", "removesuffix",
+    "removeprefix", "casefold", "title", "ljust", "rjust", "zfill",
+    "extend", "insert", "sort", "get", "update", "add", "discard", "copy",
+    "isoformat", "total_seconds", "monotonic", "start", "is_alive",
+}
+
+#: Names PyGObject adds on top of introspection.
+#:
+#: These are real and callable and are not in any .gir, because the binding
+#: layer synthesises them. Listing them is a statement that each was checked
+#: against PyGObject rather than assumed.
+BINDING_NAMES = {
+    "GObject.Property", "GObject.Signal", "GObject.SignalFlags",
+}
+
+#: Methods PyGObject puts on every GObject that the GIR files describe as
+#: plain functions rather than methods, so the loose check cannot see them.
+#: `g_signal_handler_block` is a function taking an instance; the binding
+#: turns it into `instance.handler_block(id)`, and both spellings are correct.
+BINDING_METHODS = {
+    "handler_block", "handler_unblock", "handler_disconnect",
+    "handler_is_connected", "emit", "bind_property", "freeze_notify",
+    "thaw_notify",
 }
 
 FAILURES: list[str] = []
@@ -255,6 +297,8 @@ for node in ast.walk(tree):
     if name not in namespace.types:
         if name in namespace.functions or name in namespace.constants:
             continue
+        if f"{prefix}.{name}" in BINDING_NAMES:
+            continue
         fail(f"{prefix}.{name} does not exist in {NAMESPACES[prefix]}")
         continue
     counts["types"] += 1
@@ -323,7 +367,13 @@ for node in ast.walk(tree):
     receiver = node.func.value
     if isinstance(receiver, ast.Name) and receiver.id in OURS:
         continue
+    if isinstance(receiver, ast.Name) and receiver.id in CAIRO_RECEIVERS:
+        continue
+    if name in BINDING_METHODS:
+        continue
     if isinstance(receiver, ast.Attribute) and receiver.attr in OURS:
+        continue
+    if isinstance(receiver, ast.Attribute) and receiver.attr in CAIRO_RECEIVERS:
         continue
     if isinstance(receiver, ast.Subscript):
         # self.widgets["..."] - a toolkit object, but which one is not tracked.

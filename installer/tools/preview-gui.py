@@ -81,6 +81,15 @@ def snapshot(window: Gtk.Window, path: str) -> bool:
               "running?", file=sys.stderr)
         return False
     paintable = Gtk.WidgetPaintable.new(window)
+    # A frame before it is asked anything.
+    #
+    # A GtkWidgetPaintable does not hold the widget's contents at the moment it
+    # is created. It observes the widget and fills in on the next frame.
+    # Snapshot it immediately and `to_node` returns nothing at all, which is
+    # indistinguishable from a window that drew nothing. It has been getting
+    # away with it here because the pump before this call happened to leave a
+    # frame in flight; that is timing, not a guarantee.
+    pump(8)
     snap = Gtk.Snapshot()
     paintable.snapshot(snap, width, height)
     node = snap.to_node()
