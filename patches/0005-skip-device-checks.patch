@@ -1,8 +1,8 @@
 diff --git a/ash/shell.cc b/ash/shell.cc
-index 545ca602b5..11bd2f9de2 100644
+index fdaeceeb32a120be68aba15abdaf028338284879..505d705f04c4d4621ee621ee98ba41d8d41c3463 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
-@@ -2114,24 +2114,9 @@ void Shell::OnFirstSessionStarted() {
+@@ -2103,24 +2103,9 @@ void Shell::OnFirstSessionStarted() {
  }
  
  void Shell::OnFirstSessionReady() {
@@ -25,16 +25,16 @@ index 545ca602b5..11bd2f9de2 100644
 -        FirmwareUpdateManager::Source::kStartup);
 -  }
 +  // HACK(AuraDE): FirmwareUpdateManager removed for standalone Ash on generic
-+  // Linux. ChromeOS firmware update DBus service doesn't exist on standard PCs.
-+  // TODO: Re-enable with a stub or desktop-appropriate firmware check.
++  // Linux. ChromeOS firmware update DBus service does not exist on standard
++  // PCs. TODO: Re-enable with a stub or desktop-appropriate firmware check.
  }
  
  void Shell::OnSessionStateChanged(session_manager::SessionState state) {
 diff --git a/chromeos/constants/devicetype.cc b/chromeos/constants/devicetype.cc
-index 1bc6746e9b..024b8a6fca 100644
+index be187d587bd562e58a7665b8277051fe9e2221c4..b308d9dd3dc84851d82d70b5a7c2a2cb26898092 100644
 --- a/chromeos/constants/devicetype.cc
 +++ b/chromeos/constants/devicetype.cc
-@@ -39,12 +39,10 @@ DeviceType GetDeviceType() {
+@@ -41,12 +41,10 @@ DeviceType GetDeviceType() {
      return DeviceType::kChromebit;
    if (value == "CHROMEBOX")
      return DeviceType::kChromebox;
@@ -46,8 +46,8 @@ index 1bc6746e9b..024b8a6fca 100644
 -  return DeviceType::kUnknown;
 +  // AuraDE compatibility: Default to Chromebook for generic Linux so Ash UI
 +  // remains active. ChromeOS normally reads the device type from ChromeOS
-+  // firmware/BIOS, which doesn't exist on standard Linux hardware.
++  // firmware/BIOS, which does not exist on standard Linux hardware.
 +  return DeviceType::kChromebook;
  }
  
- }  // namespace chromeos
+ bool DeviceSupportsSubpixelFontRendering() {

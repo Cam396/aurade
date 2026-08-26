@@ -1,5 +1,5 @@
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index a05587a4fd..6c7740bcdd 100644
+index da7a1d238d765da5a60614b6a54584cef165c67a..b810fb9f732e8367ac5b0ed29fbaad945d2ccbb4 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -1099,6 +1099,9 @@ Style notes:
@@ -13,7 +13,7 @@ index a05587a4fd..6c7740bcdd 100644
          Restart
        </message>
 diff --git a/ash/system/update/update_notification_controller.cc b/ash/system/update/update_notification_controller.cc
-index c96270e59b..a4c8eafb57 100644
+index c96270e59b68aed9940374f9d26d2223d8f8fb84..a4c8eafb57408f5227e667ccf09dc0acd231db81 100644
 --- a/ash/system/update/update_notification_controller.cc
 +++ b/ash/system/update/update_notification_controller.cc
 @@ -23,6 +23,7 @@
@@ -39,7 +39,7 @@ index c96270e59b..a4c8eafb57 100644
      return l10n_util::GetStringFUTF16(IDS_UPDATE_NOTIFICATION_MESSAGE_SLOW_BOOT,
                                        update_text);
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index a37bde4ecd..0a4019b31e 100644
+index 4f79057f321099e1264df45457ac1748bb7c7729..710304177bc6790b357c59f965d3a445c0ff1bf4 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -13,6 +13,7 @@
@@ -50,7 +50,7 @@ index a37bde4ecd..0a4019b31e 100644
  #include "base/path_service.h"
  #include "base/strings/stringprintf.h"
  #include "base/system/sys_info.h"
-@@ -129,41 +130,48 @@ void OverrideStubPathsIfNeeded() {
+@@ -127,41 +128,48 @@ void OverrideStubPathsIfNeeded() {
  
  DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
  
@@ -117,7 +117,7 @@ index a37bde4ecd..0a4019b31e 100644
    }
    g_aurade_uses_linux_bluez = false;
  }
-@@ -259,7 +267,11 @@ void InitializeDBus() {
+@@ -256,7 +264,11 @@ void InitializeDBus() {
    InitializeDBusClient<chromeos::TpmManagerClient>(bus);
    InitializeDBusClient<TypecdClient>(bus);
    InitializeDBusClient<chromeos::U2FClient>(bus);
@@ -130,7 +130,7 @@ index a37bde4ecd..0a4019b31e 100644
    InitializeDBusClient<UserDataAuthClient>(bus);
    InitializeDBusClient<UpstartClient>(bus);
    InitializeDBusClient<VirtualFileProviderClient>(bus);
-@@ -367,8 +379,6 @@ void ShutdownDBus() {
+@@ -363,8 +375,6 @@ void ShutdownDBus() {
    } else {
      bluez::BluezDBusManager::Shutdown();
    }
@@ -139,7 +139,7 @@ index a37bde4ecd..0a4019b31e 100644
    // Depends on `DlcserviceClient`.
    language_packs::LanguagePackManager::Shutdown();
  
-@@ -379,6 +389,7 @@ void ShutdownDBus() {
+@@ -374,6 +384,7 @@ void ShutdownDBus() {
    UpstartClient::Shutdown();
    UserDataAuthClient::Shutdown();
    UpdateEngineClient::Shutdown();
@@ -148,7 +148,7 @@ index a37bde4ecd..0a4019b31e 100644
    TypecdClient::Shutdown();
    chromeos::TpmManagerClient::Shutdown();
 diff --git a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
-index c18bae1d14..4d9c487b80 100644
+index c18bae1d144b904fb43f7ebbc7a9d57c6ca116be..4d9c487b8046667f96add8ccab8ab3098b273dd0 100644
 --- a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
 +++ b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
 @@ -12,6 +12,7 @@
@@ -187,7 +187,7 @@ index c18bae1d14..4d9c487b80 100644
  }
  
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
-index 3552ef1d29..e221755af1 100644
+index 3552ef1d29258448b6fcf4e9b9fc53e8f7f7943f..e221755af1fb4b1e1c2a209ce2e6c4503b157faf 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 @@ -7,18 +7,28 @@
@@ -745,7 +745,7 @@ index 3552ef1d29..e221755af1 100644
  FakeUpdateEngineClient* UpdateEngineClient::InitializeFakeForTest() {
    auto* client = new FakeUpdateEngineClient();
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.h b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
-index d84d7036be..39ec4ab79d 100644
+index d84d7036be2e2d432d66e76f71846676982fb346..39ec4ab79d333458398c7a93c739488c3cf04e01 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.h
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
 @@ -77,6 +77,11 @@ class COMPONENT_EXPORT(ASH_DBUS_UPDATE_ENGINE) UpdateEngineClient

@@ -1,5 +1,5 @@
 diff --git a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
-index 2bbd60b291..21845fb98a 100644
+index 2bbd60b291184626bb7da21f73a89a0cc02dc3a0..21845fb98ae48630cabd4455b9307ae8996bcdda 100644
 --- a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
 +++ b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
 @@ -46,8 +46,9 @@ bool GetEventNodeId(base::FilePath path, int* id) {
@@ -221,7 +221,7 @@ index 2bbd60b291..21845fb98a 100644
    if (!keyboard_observers_.contains(id)) {
      LOG(ERROR) << "Couldn't find keyboard observer with ID " << id
 diff --git a/ash/webui/diagnostics_ui/backend/input/input_data_provider.h b/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
-index bf64c5212e..c36d9f23d5 100644
+index bf64c5212e9b4e62d70801eb588e4e43717c980a..c36d9f23d5b690b030c1c94461ac5e3fa5d98189 100644
 --- a/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
 +++ b/ash/webui/diagnostics_ui/backend/input/input_data_provider.h
 @@ -204,6 +204,11 @@ class InputDataProvider : public mojom::InputDataProvider,
@@ -237,7 +237,7 @@ index bf64c5212e..c36d9f23d5 100644
    mojo::RemoteSet<mojom::ConnectedDevicesObserver> connected_devices_observers_;
  
 diff --git a/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc b/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
-index 53a448c9a6..b77268ba8c 100644
+index 53a448c9a635df052792d298be1dd729d90375d5..b77268ba8c8739e880ff2e50375b23653ddcc35d 100644
 --- a/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
 +++ b/ash/webui/diagnostics_ui/backend/system/system_data_provider.cc
 @@ -4,8 +4,20 @@
@@ -1514,7 +1514,7 @@ index 53a448c9a6..b77268ba8c 100644
    if (!probe_service_ || !probe_service_.is_connected()) {
      cros_healthd::ServiceConnection::GetInstance()->BindProbeService(
 diff --git a/ash/webui/diagnostics_ui/backend/system/system_data_provider.h b/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
-index 92f78cac67..f32c8aa560 100644
+index 92f78cac6729b2ea7714d4fb461fd0b77522cda3..f32c8aa56016a73f3817ba8fdccf7b2b633aa208 100644
 --- a/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
 +++ b/ash/webui/diagnostics_ui/backend/system/system_data_provider.h
 @@ -7,6 +7,7 @@
@@ -1592,7 +1592,7 @@ index 92f78cac67..f32c8aa560 100644
    base::WeakPtrFactory<SystemDataProvider> weak_factory_{this};
  };
 diff --git a/ash/webui/diagnostics_ui/diagnostics_ui.cc b/ash/webui/diagnostics_ui/diagnostics_ui.cc
-index 4b37888313..5616053049 100644
+index 4b378883130d4b07d96a3636724db39caf4cd169..561605304969e91830db5fd7932e0616d4017689 100644
 --- a/ash/webui/diagnostics_ui/diagnostics_ui.cc
 +++ b/ash/webui/diagnostics_ui/diagnostics_ui.cc
 @@ -361,6 +361,7 @@ void AddDiagnosticsStrings(content::WebUIDataSource* html_source) {
@@ -1604,7 +1604,7 @@ index 4b37888313..5616053049 100644
    html_source->UseStringsJs();
  }
 diff --git a/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom b/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
-index cc0471d2b9..028483fa99 100644
+index cc0471d2b923a72aa68866ef4a6a5d9c5bc33f74..028483fa993f88ae71f0e46b48b8c70b51e9f840 100644
 --- a/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
 +++ b/ash/webui/diagnostics_ui/mojom/system_data_provider.mojom
 @@ -66,6 +66,59 @@ struct BatteryHealth {
@@ -1705,7 +1705,7 @@ index cc0471d2b9..028483fa99 100644
 +  ObserveSensorInfo(pending_remote<SensorInfoObserver> observer);
  };
 diff --git a/ash/webui/diagnostics_ui/resources/BUILD.gn b/ash/webui/diagnostics_ui/resources/BUILD.gn
-index 1ff9d17772..626f874281 100644
+index 1ff9d17772c8747490bccb9c2cff5b7781fa18c9..626f8742818c601b6dd0462e9585a2f97cbdef3f 100644
 --- a/ash/webui/diagnostics_ui/resources/BUILD.gn
 +++ b/ash/webui/diagnostics_ui/resources/BUILD.gn
 @@ -26,6 +26,7 @@ build_webui("build") {
@@ -1725,7 +1725,7 @@ index 1ff9d17772..626f874281 100644
      "text_badge.ts",
      "touchpad_tester.ts",
 diff --git a/ash/webui/diagnostics_ui/resources/diagnostics_app.ts b/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
-index 0c1ecf1873..fe46d5dd34 100644
+index 481658d29a06a766a5edd031c9bb4020f3488793..15c8f1ead0968cc28f02f0f3bbc737ee57fb75a0 100644
 --- a/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
 +++ b/ash/webui/diagnostics_ui/resources/diagnostics_app.ts
 @@ -10,6 +10,7 @@ import './diagnostics_sticky_banner.js';
@@ -1736,7 +1736,7 @@ index 0c1ecf1873..fe46d5dd34 100644
  import '/strings.m.js';
  import './system_page.js';
  
-@@ -168,6 +169,9 @@ export class DiagnosticsAppElement extends DiagnosticsAppElementBase {
+@@ -171,6 +172,9 @@ export class DiagnosticsAppElement extends DiagnosticsAppElementBase {
        this.$.navigationPanel.createSelectorItem(
            loadTimeData.getString('connectivityText'), 'network-list',
            getNavigationIcon('ethernet'), 'connectivity'),
@@ -1747,7 +1747,7 @@ index 0c1ecf1873..fe46d5dd34 100644
  
      pages.push(this.createInputSelector());
 diff --git a/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts b/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
-index bad97b10af..247a46393b 100644
+index bad97b10af7c23ac8d948625d2315d04aa6fecba..247a46393bbaefec43e43613e2eca2ab0c6918ce 100644
 --- a/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
 +++ b/ash/webui/diagnostics_ui/resources/diagnostics_utils.ts
 @@ -49,6 +49,8 @@ export function getNavigationViewForPageId(id: string): NavigationView {
@@ -1760,7 +1760,7 @@ index bad97b10af..247a46393b 100644
        assertNotReached();
    }
 diff --git a/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts b/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
-index 3bbb2986f7..20decfd84d 100644
+index 3bbb2986f71625ab5cf6e02c6c2a4093ecd805f1..20decfd84d9aca63d3b9642680617568c89b5043 100644
 --- a/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
 +++ b/ash/webui/diagnostics_ui/resources/fake_system_data_provider.ts
 @@ -6,7 +6,7 @@ import {FakeMethodResolver} from 'chrome://resources/ash/common/fake_method_reso
@@ -1896,7 +1896,7 @@ index 3bbb2986f7..20decfd84d 100644
    // Disables all observers and resets provider to its initial state.
 diff --git a/ash/webui/diagnostics_ui/resources/gpu_card.html b/ash/webui/diagnostics_ui/resources/gpu_card.html
 new file mode 100644
-index 0000000000..f2320277c9
+index 0000000000000000000000000000000000000000..f2320277c9c6bf6a70b20241db6d36c2e1f84f31
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/gpu_card.html
 @@ -0,0 +1,86 @@
@@ -1988,7 +1988,7 @@ index 0000000000..f2320277c9
 +</diagnostics-card>
 diff --git a/ash/webui/diagnostics_ui/resources/gpu_card.ts b/ash/webui/diagnostics_ui/resources/gpu_card.ts
 new file mode 100644
-index 0000000000..e2aaf52df5
+index 0000000000000000000000000000000000000000..e2aaf52df5615fc95785120a5960a16b40b9c81d
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/gpu_card.ts
 @@ -0,0 +1,186 @@
@@ -2179,7 +2179,7 @@ index 0000000000..e2aaf52df5
 +
 +customElements.define(GpuCardElement.is, GpuCardElement);
 diff --git a/ash/webui/diagnostics_ui/resources/icons.html b/ash/webui/diagnostics_ui/resources/icons.html
-index fc4702f942..df8102aec9 100644
+index fc4702f94273d9716bbaf710ee4fa706737b111c..df8102aec9f254e4f06fada09a1c59f4accd7d3b 100644
 --- a/ash/webui/diagnostics_ui/resources/icons.html
 +++ b/ash/webui/diagnostics_ui/resources/icons.html
 @@ -69,6 +69,14 @@
@@ -2199,7 +2199,7 @@ index fc4702f942..df8102aec9 100644
        <path d="M6 15V13H4V15.375C4 16.2688 4.73125 17 5.625 17H14.375C15.2688 17 16 16.2688 16 15.375V13H14V15H6Z" />
 diff --git a/ash/webui/diagnostics_ui/resources/sensors_page.html b/ash/webui/diagnostics_ui/resources/sensors_page.html
 new file mode 100644
-index 0000000000..406162a7bf
+index 0000000000000000000000000000000000000000..406162a7bf77cc050eb7e974be61b6bb3d35b3e1
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/sensors_page.html
 @@ -0,0 +1,70 @@
@@ -2275,7 +2275,7 @@ index 0000000000..406162a7bf
 +</div>
 diff --git a/ash/webui/diagnostics_ui/resources/sensors_page.ts b/ash/webui/diagnostics_ui/resources/sensors_page.ts
 new file mode 100644
-index 0000000000..1e4f969ff4
+index 0000000000000000000000000000000000000000..1e4f969ff4348fa7b5075f7ced5610f6c1f25773
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/sensors_page.ts
 @@ -0,0 +1,168 @@
@@ -2448,7 +2448,7 @@ index 0000000000..1e4f969ff4
 +
 +customElements.define(SensorsPageElement.is, SensorsPageElement);
 diff --git a/ash/webui/diagnostics_ui/resources/system_page.html b/ash/webui/diagnostics_ui/resources/system_page.html
-index 9bf06ba6de..8afe37f560 100644
+index 9bf06ba6de36bbe777db040c216dd9330b4c105a..8afe37f56018c41f1859ea6a228182aa9fdfd9ef 100644
 --- a/ash/webui/diagnostics_ui/resources/system_page.html
 +++ b/ash/webui/diagnostics_ui/resources/system_page.html
 @@ -69,6 +69,9 @@
@@ -2462,7 +2462,7 @@ index 9bf06ba6de..8afe37f560 100644
    <cr-toast id="toast" duration="2500">
      <span>[[toastText]]</span>
 diff --git a/ash/webui/diagnostics_ui/resources/system_page.ts b/ash/webui/diagnostics_ui/resources/system_page.ts
-index b58efa01b9..4b71f1e6f8 100644
+index 0bef92570c72d7ed183f1ea691cdf78fda2b8fde..37600c2f4f31419f46f81daeec99bf78ce2154b7 100644
 --- a/ash/webui/diagnostics_ui/resources/system_page.ts
 +++ b/ash/webui/diagnostics_ui/resources/system_page.ts
 @@ -9,6 +9,7 @@ import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';

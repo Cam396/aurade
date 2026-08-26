@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/external_metrics/external_metrics.cc b/chrome/browser/ash/external_metrics/external_metrics.cc
-index 3661765def..2021e36f3e 100644
+index 3661765def31f194bf561c50dc7454d3f32c0f8f..2021e36f3eecf319971e6aa1abd5874724178e91 100644
 --- a/chrome/browser/ash/external_metrics/external_metrics.cc
 +++ b/chrome/browser/ash/external_metrics/external_metrics.cc
 @@ -8,11 +8,13 @@
@@ -43,7 +43,7 @@ index 3661765def..2021e36f3e 100644
  }
  
 diff --git a/chrome/browser/metrics/chromeos_system_profile_provider.cc b/chrome/browser/metrics/chromeos_system_profile_provider.cc
-index e182942bbc..84f2c40865 100644
+index e182942bbcde7a01f3e77e97f677dbab93cff966..84f2c4086501a738eee135980d15e7801488b031 100644
 --- a/chrome/browser/metrics/chromeos_system_profile_provider.cc
 +++ b/chrome/browser/metrics/chromeos_system_profile_provider.cc
 @@ -8,6 +8,7 @@
@@ -103,13 +103,13 @@ index e182942bbc..84f2c40865 100644
        base::BindOnce(&ChromeOSSystemProfileProvider::OnArcFeaturesParsed,
                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 diff --git a/chrome/browser/metrics/per_user_state_manager_chromeos.cc b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
-index b8b94a9c24..f06ede1167 100644
+index 8a095aa132a47c4ac5abafa59b8259e9df18f3c0..03c539e90f751b78b96f59faf2ea3a0aab257000 100644
 --- a/chrome/browser/metrics/per_user_state_manager_chromeos.cc
 +++ b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
-@@ -6,8 +6,10 @@
- 
+@@ -7,8 +7,10 @@
  #include "ash/constants/ash_login_pref_names.h"
  #include "base/callback_list.h"
+ #include "base/files/file.h"
 +#include "base/files/file_path.h"
  #include "base/files/file_util.h"
  #include "base/metrics/histogram_functions.h"
@@ -163,8 +163,8 @@ index b8b94a9c24..f06ede1167 100644
  // Keep in sync with PerUserDaemonStoreFail enum.
  // These values are persisted to logs. Entries should not be renumbered and
  // numeric values should never be reused
-@@ -74,9 +115,12 @@ void RecordIdReset(IdResetType id_type) {
-   base::UmaHistogramEnumeration("UMA.CrosPerUser.IdReset", id_type);
+@@ -84,9 +125,12 @@ bool WriteFileNoFollow(const base::FilePath& path, std::string_view data) {
+   return file.IsValid() && file.WriteAndCheck(0, base::as_byte_span(data));
  }
  
 -void WriteDaemonStore(base::FilePath path, bool user_choice) {
@@ -172,24 +172,24 @@ index b8b94a9c24..f06ede1167 100644
 +                      base::FilePath out_of_cryptohome_path,
 +                      bool user_choice) {
    const std::string file_contents = user_choice ? "1" : "0";
--  if (!base::WriteFile(path, file_contents)) {
+-  if (!WriteFileNoFollow(path, file_contents)) {
 +  if (!EnsureAuraDEParentDirectory(path) ||
-+      !base::WriteFile(path, file_contents)) {
++      !WriteFileNoFollow(path, file_contents)) {
      LOG(ERROR) << "Failed to persist consent change " << file_contents
                 << " to daemon-store. State on disk will be inaccurate!";
      base::UmaHistogramEnumeration(kWriteFileFailMetric,
-@@ -84,8 +128,8 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+@@ -94,8 +138,8 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
                                        ? DaemonStoreFailType::kFailedEnabling
                                        : DaemonStoreFailType::kFailedDisabling);
    }
--  if (!base::WriteFile(base::FilePath(kOutOfCryptohomeConsent),
--                       file_contents)) {
+-  if (!WriteFileNoFollow(base::FilePath(kOutOfCryptohomeConsent),
+-                         file_contents)) {
 +  if (!EnsureAuraDEParentDirectory(out_of_cryptohome_path) ||
-+      !base::WriteFile(out_of_cryptohome_path, file_contents)) {
++      !WriteFileNoFollow(out_of_cryptohome_path, file_contents)) {
      LOG(ERROR) << "Failed to write out-of-cryptohome consent change: "
                 << file_contents;
      base::UmaHistogramEnumeration(kWriteFileFailMetric,
-@@ -96,7 +140,7 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+@@ -106,7 +150,7 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
  }
  
  void RemoveGlobalMetricsConsent() {
@@ -198,7 +198,7 @@ index b8b94a9c24..f06ede1167 100644
      LOG(ERROR) << "failed to remove out-of-cryptohome consent file";
      base::UmaHistogramEnumeration(kWriteFileFailMetric,
                                    DaemonStoreFailType::kFailedDeletingBoot);
-@@ -296,14 +340,13 @@ void PerUserStateManagerChromeOS::SetReportingState(bool user_choice) {
+@@ -304,14 +348,13 @@ void PerUserStateManagerChromeOS::SetReportingState(bool user_choice) {
    GetCurrentUserPrefs()->SetBoolean(prefs::kMetricsUserConsent, user_choice);
  
    std::string hash = user_manager_->GetActiveUser()->username_hash();
@@ -219,7 +219,7 @@ index b8b94a9c24..f06ede1167 100644
  }
  
 diff --git a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
-index a77e46fcf8..37a9925e42 100644
+index a77e46fcf81ab7944531299cb8fc13259d2679d6..37a9925e42755f5536a5b563d0498929508e024f 100644
 --- a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
 +++ b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
 @@ -5,7 +5,10 @@
@@ -260,7 +260,7 @@ index a77e46fcf8..37a9925e42 100644
        base::FilePath(kExternalMetricsDir),
        GetExternalMetricsCollectionInterval(),
 diff --git a/chrome/browser/metrics/structured/cros_events_processor.cc b/chrome/browser/metrics/structured/cros_events_processor.cc
-index aee8ad3f8b..a9b1c8d82a 100644
+index aee8ad3f8b6b8e3640bca9168724210f0d67814f..a9b1c8d82a5f315560d4e98b41aea50f9b0b3c3e 100644
 --- a/chrome/browser/metrics/structured/cros_events_processor.cc
 +++ b/chrome/browser/metrics/structured/cros_events_processor.cc
 @@ -4,6 +4,11 @@
@@ -314,7 +314,7 @@ index aee8ad3f8b..a9b1c8d82a 100644
  }
  CrOSEventsProcessor::~CrOSEventsProcessor() = default;
 diff --git a/chrome/browser/metrics/structured/key_data_provider_ash.cc b/chrome/browser/metrics/structured/key_data_provider_ash.cc
-index d7b3c43cc5..a14696cc9d 100644
+index d7b3c43cc5f1ab55c81f6d782cc15b57c7c07420..a14696cc9dbd34d3bdc0bec2e783764673ff1419 100644
 --- a/chrome/browser/metrics/structured/key_data_provider_ash.cc
 +++ b/chrome/browser/metrics/structured/key_data_provider_ash.cc
 @@ -4,6 +4,11 @@
@@ -357,7 +357,7 @@ index d7b3c43cc5..a14696cc9d 100644
  KeyDataProviderAsh::KeyDataProviderAsh(const base::FilePath& device_key_path,
                                         base::TimeDelta write_delay)
 diff --git a/chrome/browser/metrics/structured/storage_manager_impl.cc b/chrome/browser/metrics/structured/storage_manager_impl.cc
-index b803332908..666bd5599e 100644
+index b803332908670bcc56c602ee831d1293c9d8fc79..666bd5599e70d92f8e9a14aa4a2d205bae31ba10 100644
 --- a/chrome/browser/metrics/structured/storage_manager_impl.cc
 +++ b/chrome/browser/metrics/structured/storage_manager_impl.cc
 @@ -4,9 +4,14 @@

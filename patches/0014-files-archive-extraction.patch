@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/file_manager/extract_io_task.cc b/chrome/browser/ash/file_manager/extract_io_task.cc
-index 8beb61dde7..3c8dfa9bc5 100644
+index 8beb61dde7539d1931aa2e9fdfe2165812457178..f8583d09b9b9fed7050f558a6b362883a063bff3 100644
 --- a/chrome/browser/ash/file_manager/extract_io_task.cc
 +++ b/chrome/browser/ash/file_manager/extract_io_task.cc
 @@ -7,6 +7,7 @@
@@ -310,7 +310,7 @@ index 8beb61dde7..3c8dfa9bc5 100644
    cancellation_chain_ = base::DoNothing();
  }
 diff --git a/chrome/browser/ash/file_manager/extract_io_task.h b/chrome/browser/ash/file_manager/extract_io_task.h
-index 6cab465e3e..64fdaba178 100644
+index 6cab465e3ea055a91f77b5cf5ff53e4796caef75..64fdaba1785ea41ea378c9a850560b14e4be697f 100644
 --- a/chrome/browser/ash/file_manager/extract_io_task.h
 +++ b/chrome/browser/ash/file_manager/extract_io_task.h
 @@ -45,9 +45,24 @@ enum class ExtractStatus {

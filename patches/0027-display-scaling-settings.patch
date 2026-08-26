@@ -1,5 +1,5 @@
 diff --git a/ash/display/cros_display_config.cc b/ash/display/cros_display_config.cc
-index 3030aeb672..49efc4ee00 100644
+index 3030aeb6723c10b426bdae0256250cfdeee63e3d..49efc4ee00ed53ad743b32e918c8082ae6c4c10e 100644
 --- a/ash/display/cros_display_config.cc
 +++ b/ash/display/cros_display_config.cc
 @@ -24,6 +24,7 @@
@@ -60,7 +60,7 @@ index 3030aeb672..49efc4ee00 100644
  
    // Set the display mode. Note: if this returns an error, other properties
 diff --git a/ash/display/cursor_window_controller.cc b/ash/display/cursor_window_controller.cc
-index c0f8a80560..7e8833e7fe 100644
+index 48b9c13cf7974355f7ba24ec9f7d24ea520ca762..379387f6065ee5d4e15f85addceafed1fc55c999 100644
 --- a/ash/display/cursor_window_controller.cc
 +++ b/ash/display/cursor_window_controller.cc
 @@ -23,6 +23,7 @@
@@ -71,7 +71,7 @@ index c0f8a80560..7e8833e7fe 100644
  #include "components/prefs/pref_service.h"
  #include "third_party/skia/include/core/SkColor.h"
  #include "ui/accessibility/accessibility_features.h"
-@@ -417,26 +418,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
+@@ -418,26 +419,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
    large_cursor_size_in_dip =
        std::max(large_cursor_size_in_dip, kMinLargeCursorSize);
  
@@ -106,7 +106,7 @@ index c0f8a80560..7e8833e7fe 100644
  }
  
  void CursorWindowController::SetCursorInverted(bool inverted) {
-@@ -489,8 +494,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+@@ -490,8 +495,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
      return true;
    }
  
@@ -117,7 +117,7 @@ index c0f8a80560..7e8833e7fe 100644
  
    PrefService* prefs = shell->session_controller()->GetActivePrefService();
    if (!prefs) {
-@@ -525,16 +531,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+@@ -526,16 +532,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
  }
  
  void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
@@ -140,7 +140,7 @@ index c0f8a80560..7e8833e7fe 100644
  }
  
  void CursorWindowController::UpdateContainer() {
-@@ -543,8 +552,9 @@ void CursorWindowController::UpdateContainer() {
+@@ -544,8 +553,9 @@ void CursorWindowController::UpdateContainer() {
      display::Display display =
          screen->GetDisplayNearestPoint(screen->GetCursorScreenPoint());
      DCHECK(display.is_valid());
@@ -151,7 +151,7 @@ index c0f8a80560..7e8833e7fe 100644
    } else {
      SetContainer(nullptr);
    }
-@@ -572,8 +582,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
+@@ -573,8 +583,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
    last_updated_.reset();
  
    aura::Window* root_window = Shell::GetRootWindowForDisplayId(display.id());
@@ -162,7 +162,7 @@ index c0f8a80560..7e8833e7fe 100644
  
    if (!is_cursor_compositing_enabled_) {
      return;
-@@ -638,8 +649,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
+@@ -639,8 +650,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
  }
  
  void CursorWindowController::SetCursor(gfx::NativeCursor cursor) {
@@ -173,7 +173,7 @@ index c0f8a80560..7e8833e7fe 100644
    cursor_ = cursor;
    UpdateCursorImage();
    UpdateCursorVisibility();
-@@ -838,15 +850,19 @@ void CursorWindowController::UpdateCursorImage() {
+@@ -839,15 +851,19 @@ void CursorWindowController::UpdateCursorImage() {
  void CursorWindowController::UpdateCursorVisibility() {
    bool visible = (visible_ && cursor_.type() != ui::mojom::CursorType::kNone);
    if (visible) {
@@ -197,7 +197,7 @@ index c0f8a80560..7e8833e7fe 100644
    }
  }
  
-@@ -883,6 +899,13 @@ const gfx::ImageSkia& CursorWindowController::GetCursorImageForTest() const {
+@@ -884,6 +900,13 @@ const gfx::ImageSkia& CursorWindowController::GetCursorImageForTest() const {
  }
  
  bool CursorWindowController::ShouldUseFastInk() const {
@@ -212,7 +212,7 @@ index c0f8a80560..7e8833e7fe 100644
    // support the inverted cursor feature.
    if (::features::IsAccessibilityInvertedMouseCursorEnabled() && is_inverted_) {
 diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
-index f010b52a70..d6f0fa28c9 100644
+index f010b52a70897fb8f03344e7f8a82fd50cc35cb1..d6f0fa28c91c80aa742cb35c0faaadb1f1dc836a 100644
 --- a/ash/display/display_configuration_controller.cc
 +++ b/ash/display/display_configuration_controller.cc
 @@ -52,6 +52,9 @@ display::DisplayPositionInUnifiedMatrix GetUnifiedModeShelfCellPosition() {
@@ -226,7 +226,7 @@ index f010b52a70..d6f0fa28c9 100644
  
    NOTREACHED();
 diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
-index 050fea7d42..ddf94619fc 100644
+index 050fea7d427c4539020242d87f1f397b3b770d05..ddf94619fc8907a93f59d56e1a9cd720159e1646 100644
 --- a/ash/display/root_window_transformers.cc
 +++ b/ash/display/root_window_transformers.cc
 @@ -106,6 +106,18 @@ class AshRootWindowTransformer : public RootWindowTransformer {
@@ -279,7 +279,7 @@ index 050fea7d42..ddf94619fc 100644
      // |screen_bounds| is the unified desktop logical bounds.
      // Calculate the unified height scale value, and apply the same scale on the
 diff --git a/ash/display/window_tree_host_manager.cc b/ash/display/window_tree_host_manager.cc
-index 72e5b3599f..2bd3ee56ed 100644
+index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb101a63b6 100644
 --- a/ash/display/window_tree_host_manager.cc
 +++ b/ash/display/window_tree_host_manager.cc
 @@ -30,12 +30,16 @@
@@ -311,7 +311,7 @@ index 72e5b3599f..2bd3ee56ed 100644
 @@ -93,6 +99,85 @@ constexpr int kUICompositorMemoryLimitDisplaySizeThreshold = 3500;
  // configure the compositor to use a higher memory limit.
  constexpr base::ByteSize kUICompositorMemoryLimitRamCapacityThreshold =
-     base::GiBU(16);
+     base::GiB(16);
 +constexpr char kAuraDisplayScaleEnv[] = "AURADE_DISPLAY_SCALE";
 +constexpr float kAuraDisplayScaleDefault = 1.f;
 +constexpr float kAuraDisplayScaleMin = 1.f;
@@ -394,31 +394,7 @@ index 72e5b3599f..2bd3ee56ed 100644
  
  // An UMA signal for the current effective resolution/dpi is sent at this rate.
  // This keeps track of the effective resolution/dpi most used on
-@@ -269,17 +354,20 @@ class FocusActivationStore {
-       focus_client_ = aura::client::GetFocusClient(root);
-     }
-     focused_ = focus_client_->GetFocusedWindow();
--    if (focused_)
-+    if (focused_) {
-       tracker_.Add(focused_);
-+    }
-     active_ = activation_client_->GetActiveWindow();
--    if (active_ && focused_ != active_)
-+    if (active_ && focused_ != active_) {
-       tracker_.Add(active_);
-+    }
- 
-     // Deactivate the window to close menu / bubble windows. Deactivating by
-     // setting active window to nullptr to avoid side effects of activating an
-     // arbitrary window, such as covering |active_| before Restore().
--    if (clear_focus && active_)
-+    if (clear_focus && active_) {
-       activation_client_->ActivateWindow(nullptr);
-+    }
- 
-     // Release capture if any.
-     capture_client_->SetCapture(nullptr);
-@@ -288,8 +376,9 @@ class FocusActivationStore {
+@@ -291,8 +376,9 @@ class FocusActivationStore {
      // window may be deleted when losing focus (fullscreen flash for
      // example).  If the focused window is still alive after move, it'll
      // be re-focused below.
@@ -429,22 +405,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    }
  
    void Restore() {
-@@ -299,10 +388,12 @@ class FocusActivationStore {
-     } else if (active_ && tracker_.Contains(active_)) {
-       activation_client_->ActivateWindow(active_);
-     }
--    if (focused_)
-+    if (focused_) {
-       tracker_.Remove(focused_);
--    if (active_)
-+    }
-+    if (active_) {
-       tracker_.Remove(active_);
-+    }
-     focused_ = nullptr;
-     active_ = nullptr;
-   }
-@@ -382,16 +473,18 @@ void WindowTreeHostManager::Shutdown() {
+@@ -377,16 +463,18 @@ void WindowTreeHostManager::Shutdown() {
    for (aura::Window::Windows::iterator iter = root_windows.begin();
         iter != root_windows.end(); ++iter) {
      RootWindowController* rwc = RootWindowController::ForWindow(*iter);
@@ -466,7 +427,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    delete primary_rwc;
  }
  
-@@ -439,8 +532,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
+@@ -434,8 +522,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
  aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
    // If |primary_tree_host_for_replace_| is set, it means |primary_display_id|
    // is kInvalidDisplayId.
@@ -477,7 +438,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    return GetRootWindowForDisplayId(primary_display_id);
  }
  
-@@ -452,8 +546,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
+@@ -447,8 +536,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
  AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
      int64_t display_id) {
    const auto host = window_tree_hosts_.find(display_id);
@@ -488,7 +449,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    return mirror_window_controller_->GetAshWindowTreeHostForDisplayId(
        display_id);
  }
-@@ -463,8 +558,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
+@@ -458,8 +548,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
    for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
         it != window_tree_hosts_.end(); ++it) {
      DCHECK(it->second);
@@ -499,7 +460,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    }
    return windows;
  }
-@@ -476,8 +572,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
+@@ -471,8 +562,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
         it != window_tree_hosts_.end(); ++it) {
      RootWindowController* controller =
          RootWindowController::ForWindow(GetWindow(it->second));
@@ -510,7 +471,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    }
    return controllers;
  }
-@@ -585,8 +682,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
+@@ -580,8 +672,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
          display_info.bounds_in_native());
      SetDisplayPropertiesOnHost(ash_host, display);
    } else {
@@ -521,7 +482,7 @@ index 72e5b3599f..2bd3ee56ed 100644
      DCHECK(!window_tree_hosts_.empty());
      AshWindowTreeHost* ash_host =
          AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
-@@ -609,8 +707,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
+@@ -604,8 +697,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
    // Delete most of root window related objects, but don't delete
    // root window itself yet because the stack may be using it.
    controller->Shutdown(primary_root_after_host_deletion);
@@ -532,7 +493,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    DCHECK_EQ(primary_root_after_host_deletion, Shell::GetPrimaryRootWindow());
    if (Shell::GetRootWindowForNewWindows() == root_being_deleted) {
      Shell::SetRootWindowForNewWindows(primary_root_after_host_deletion);
-@@ -773,8 +872,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
+@@ -768,8 +862,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
        display::Screen::Get()->GetDisplayNearestWindow(host->window());
  
    display::DisplayManager* display_manager = GetDisplayManager();
@@ -547,7 +508,7 @@ index 72e5b3599f..2bd3ee56ed 100644
      mirror_window_controller_->UpdateWindow();
      cursor_window_controller_->UpdateContainer();
    }
-@@ -790,8 +893,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
+@@ -785,8 +883,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
                                                            bool secure) {
    AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(display_id);
    // No host for internal display in docked mode.
@@ -558,7 +519,7 @@ index 72e5b3599f..2bd3ee56ed 100644
  
    ui::Compositor* compositor = host->AsWindowTreeHost()->compositor();
    if (compositor->output_is_secure() == secure) {
-@@ -820,8 +924,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
+@@ -815,8 +914,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
    // display is drawn through compositor mirroring). Therefore, it's
    // unnecessary to handle the cursor_window at all. See:
    // http://crbug.com/412910
@@ -569,7 +530,7 @@ index 72e5b3599f..2bd3ee56ed 100644
  }
  
  void WindowTreeHostManager::PreDisplayConfigurationChange(bool clear_focus) {
-@@ -868,8 +973,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
+@@ -888,8 +988,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
    LOG_IF(ERROR, !non_primary_host)
        << "Unknown display is requested in SetPrimaryDisplay: id="
        << new_primary_id;
@@ -581,7 +542,7 @@ index 72e5b3599f..2bd3ee56ed 100644
    display::Display old_primary_display =
        display::Screen::Get()->GetPrimaryDisplay();
 diff --git a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
-index 1d523840e2..c30a3a2b39 100644
+index 1d523840e28de86c44af57235e5e2f9ecf6f406c..c30a3a2b39ca724c0bd043d037550296d7763f33 100644
 --- a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
 @@ -103,6 +103,32 @@ export interface ExternalStorage {
@@ -667,7 +628,7 @@ index 1d523840e2..c30a3a2b39 100644
      chrome.send('updateStorageInfo');
    }
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.html b/chrome/browser/resources/ash/settings/device_page/display.html
-index a65b096ea3..43867417f6 100644
+index a65b096ea31076b5a3ff697c26042db3d065d43b..43867417f65294d6dcec594ceb99277f846af258 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.html
 +++ b/chrome/browser/resources/ash/settings/device_page/display.html
 @@ -57,6 +57,20 @@
@@ -787,7 +748,7 @@ index a65b096ea3..43867417f6 100644
    <template is="dom-if"
        if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
-index ef08f9927d..ad779e8e9e 100644
+index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bcc9271393 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/display.ts
 @@ -8,6 +8,7 @@
@@ -905,7 +866,7 @@ index ef08f9927d..ad779e8e9e 100644
 @@ -306,6 +395,16 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
    ]);
  
-   private readonly ambientColorAvailable_: boolean;
+   declare private readonly ambientColorAvailable_: boolean;
 +  private auraDisplayApplyInProgress_: boolean;
 +  private auraDisplayAvailable_: boolean;
 +  private auraDisplayModeOptions_: DropdownMenuOptionList;
@@ -917,18 +878,18 @@ index ef08f9927d..ad779e8e9e 100644
 +  private auraFeatureProfilePref_: chrome.settingsPrivate.PrefObject;
 +  private auraFeatureProfileStatus_: string;
    private browserProxy_: DevicePageBrowserProxy;
-   private brightnessSliderMax_: number;
-   private brightnessSliderMin_: number;
+   declare private brightnessSliderMax_: number;
+   declare private brightnessSliderMin_: number;
 @@ -337,6 +436,11 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
-   private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
-   private readonly unifiedDesktopAvailable_: boolean;
-   private unifiedDesktopMode_: boolean;
+   declare private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
+   declare private readonly unifiedDesktopAvailable_: boolean;
+   declare private unifiedDesktopMode_: boolean;
 +  private auraDisplayScaleApplyInProgress_: boolean;
 +  private auraDisplayScaleAvailable_: boolean;
 +  private auraDisplayScaleOptions_: SliderTick[];
 +  private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
 +  private auraDisplayScaleStatus_: string;
-   private zoomValues_: SliderTick[];
+   declare private zoomValues_: SliderTick[];
  
    constructor() {
 @@ -395,6 +499,8 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
@@ -1161,7 +1122,7 @@ index ef08f9927d..ad779e8e9e 100644
      if (!displays.length) {
        return;
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
-index 1764a9516f..5fe3499233 100644
+index 1764a9516fc42616e211f0f2bb3973b7b81fb080..5fe3499233c6361acf485b17c6e331fdd9767ec9 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 @@ -4,16 +4,663 @@
@@ -2016,7 +1977,7 @@ index 1764a9516f..5fe3499233 100644
 +
  }  // namespace ash::settings
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
-index ed34140842..c35d9d8f9a 100644
+index ed341408420e3619a06129a55ea7690657e26502..c35d9d8f9a41725f90ed3cee10b8c3b9dbf597f7 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
 @@ -5,7 +5,10 @@
@@ -2061,10 +2022,10 @@ index ed34140842..c35d9d8f9a 100644
  
  }  // namespace ash::settings
 diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
-index 71ada86bca..b5d2d23080 100644
+index 26b59f719f8dfe2422ad45f9dda9bc39901a47c1..7571a75d86f4df7e120f15c9a59a3f38427eb0e1 100644
 --- a/ui/display/manager/display_manager.cc
 +++ b/ui/display/manager/display_manager.cc
-@@ -777,8 +777,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
+@@ -782,8 +782,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
      display_info_list.emplace_back(info);
    }
  
@@ -2075,7 +2036,7 @@ index 71ada86bca..b5d2d23080 100644
  }
  
  bool DisplayManager::SetDisplayMode(int64_t display_id,
-@@ -1899,6 +1900,13 @@ void DisplayManager::ClearTouchCalibrationData(
+@@ -1904,6 +1905,13 @@ void DisplayManager::ClearTouchCalibrationData(
  void DisplayManager::UpdateZoomFactor(int64_t display_id, float zoom_factor) {
    DCHECK(zoom_factor > 0);
    DCHECK_NE(display_id, kInvalidDisplayId);

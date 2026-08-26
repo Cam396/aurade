@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
-index e2fb247193..fd55ce0d80 100644
+index 5df73ce587fee7fd5c5820e5883bb0d43ea32dfb..e35a724eccdb209aa0f11f926474c0cd03fe26a0 100644
 --- a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
 +++ b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
 @@ -13,7 +13,9 @@
@@ -46,8 +46,8 @@ index e2fb247193..fd55ce0d80 100644
    return !suppress_modifier_key_rewrites_;
  }
  
-@@ -106,6 +125,13 @@ bool EventRewriterDelegateImpl::TopRowKeysAreFunctionKeys(int device_id) const {
-     }
+@@ -104,6 +123,13 @@ bool EventRewriterDelegateImpl::TopRowKeysAreFunctionKeys(int device_id) const {
+     return true;
    }
  
 +  if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -60,7 +60,7 @@ index e2fb247193..fd55ce0d80 100644
    // If we really don't know what device this is, fall back to respecting the
    // global preference.
    const PrefService* pref_service = GetPrefService();
-@@ -158,8 +184,9 @@ bool EventRewriterDelegateImpl::IsExtensionCommandRegistered(
+@@ -156,8 +182,9 @@ bool EventRewriterDelegateImpl::IsExtensionCommandRegistered(
  
  bool EventRewriterDelegateImpl::IsSearchKeyAcceleratorReserved() const {
    // |activation_client_| can be null in test.
@@ -71,7 +71,7 @@ index e2fb247193..fd55ce0d80 100644
  
    aura::Window* active_window = activation_client_->GetActiveWindow();
    return active_window &&
-@@ -281,8 +308,9 @@ bool EventRewriterDelegateImpl::NotifyDeprecatedSixPackKeyRewrite(
+@@ -275,8 +302,9 @@ bool EventRewriterDelegateImpl::NotifyDeprecatedSixPackKeyRewrite(
  }
  
  PrefService* EventRewriterDelegateImpl::GetPrefService() const {
@@ -83,7 +83,7 @@ index e2fb247193..fd55ce0d80 100644
        session_manager::SessionManager::Get()->GetActiveSession();
    if (!active_session) {
 diff --git a/chrome/browser/ash/system/fake_input_device_settings.cc b/chrome/browser/ash/system/fake_input_device_settings.cc
-index 36d87c724b..5aea06041f 100644
+index 36d87c724bf05342de4c67d466ee29eec537e1f2..5aea06041facc9824c8bc98060b563727fae9bf0 100644
 --- a/chrome/browser/ash/system/fake_input_device_settings.cc
 +++ b/chrome/browser/ash/system/fake_input_device_settings.cc
 @@ -4,13 +4,173 @@
@@ -283,7 +283,7 @@ index 36d87c724b..5aea06041f 100644
  void FakeInputDeviceSettings::ReapplyPointingStickSettings() {}
  
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
-index 5fe3499233..a304ddd8bc 100644
+index 5fe3499233c6361acf485b17c6e331fdd9767ec9..a304ddd8bca3d0a1da3fa2c8e62b126754c81ee8 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 @@ -213,8 +213,7 @@ std::string GetDefaultAuraFeatureProfile() {
@@ -502,7 +502,7 @@ index 5fe3499233..a304ddd8bc 100644
        output.push_back(std::string());
      }
 diff --git a/ui/events/ash/keyboard_capability.cc b/ui/events/ash/keyboard_capability.cc
-index 1d062c6e57..75997f2cb0 100644
+index 93b3f1848e95f68ab8e9a971a7c9f8bd710d2f78..fe8c3ea9fc751408080f71550b7dadaf0c5008ea 100644
 --- a/ui/events/ash/keyboard_capability.cc
 +++ b/ui/events/ash/keyboard_capability.cc
 @@ -22,6 +22,7 @@
@@ -619,7 +619,7 @@ index 1d062c6e57..75997f2cb0 100644
    }
  
 diff --git a/ui/ozone/platform/wayland/common/wayland_object.cc b/ui/ozone/platform/wayland/common/wayland_object.cc
-index e29910a05b..66cd81f57c 100644
+index 743ff65d17ad647d7afac8bf35d87af4c0dcb92f..c8d0f6c4ba4de850c007494e578a2282f6493cb0 100644
 --- a/ui/ozone/platform/wayland/common/wayland_object.cc
 +++ b/ui/ozone/platform/wayland/common/wayland_object.cc
 @@ -228,6 +228,7 @@ IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_locked_pointer_v1)
@@ -631,7 +631,7 @@ index e29910a05b..66cd81f57c 100644
  IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_manager_v1)
  IMPLEMENT_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_v1)
 diff --git a/ui/ozone/platform/wayland/common/wayland_object.h b/ui/ozone/platform/wayland/common/wayland_object.h
-index dd46b63c0e..3c6e5ac036 100644
+index 3842fcc71403114aa844e1d12e9e07b7f814facd..b94f65f80194179935d520a24db0be306e51cf8e 100644
 --- a/ui/ozone/platform/wayland/common/wayland_object.h
 +++ b/ui/ozone/platform/wayland/common/wayland_object.h
 @@ -193,6 +193,7 @@ DECLARE_WAYLAND_OBJECT_TRAITS(zwp_locked_pointer_v1)
@@ -643,10 +643,10 @@ index dd46b63c0e..3c6e5ac036 100644
  DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_manager_v1)
  DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_v1)
 diff --git a/ui/ozone/platform/wayland/host/wayland_event_source.cc b/ui/ozone/platform/wayland/host/wayland_event_source.cc
-index c96f1e87fb..cb718d8e4d 100644
+index 396e22974c77a75bd7272e2fdfd970c16af2b82e..1330824fb051ee081a1aa460894cfd49418ff6e6 100644
 --- a/ui/ozone/platform/wayland/host/wayland_event_source.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_event_source.cc
-@@ -871,6 +871,26 @@ const WaylandWindow* WaylandEventSource::GetTouchTarget(PointerId id) const {
+@@ -896,6 +896,26 @@ const WaylandWindow* WaylandEventSource::GetTouchTarget(PointerId id) const {
    return it == touch_points_.end() ? nullptr : it->second->window.get();
  }
  
@@ -674,10 +674,10 @@ index c96f1e87fb..cb718d8e4d 100644
                                        const gfx::Vector2dF& delta,
                                        base::TimeTicks timestamp,
 diff --git a/ui/ozone/platform/wayland/host/wayland_event_source.h b/ui/ozone/platform/wayland/host/wayland_event_source.h
-index 610771d044..045abd8dd7 100644
+index 04fce496547c9a9aed9294ee14d4f8667d2a42fd..b3abbaa5de8ed013d5874bf6dde62abb129525ec 100644
 --- a/ui/ozone/platform/wayland/host/wayland_event_source.h
 +++ b/ui/ozone/platform/wayland/host/wayland_event_source.h
-@@ -172,6 +172,11 @@ class WaylandEventSource : public PlatformEventSource,
+@@ -173,6 +173,11 @@ class WaylandEventSource : public PlatformEventSource,
    const WaylandWindow* GetTouchTarget(PointerId id) const override;
  
    // WaylandZwpPointerGesture::Delegate:
@@ -690,7 +690,7 @@ index 610771d044..045abd8dd7 100644
                      const gfx::Vector2dF& delta,
                      base::TimeTicks timestamp,
 diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
-index c41e15d5c1..f14809cd12 100644
+index c41e15d5c1f47fa54202975eff08385a9ca7542f..f14809cd12718a3a35b8b90f91c898e08896d508 100644
 --- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.cc
 @@ -69,6 +69,15 @@ void WaylandZwpPointerGestures::Init() {
@@ -759,7 +759,7 @@ index c41e15d5c1..f14809cd12 100644
  void WaylandZwpPointerGestures::OnPinchBegin(
      void* data,
 diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
-index 294f40e247..8491fe92e2 100644
+index 294f40e247f3d10cfbca484fd09fed7fb60e3868..8491fe92e26e5cc941b1d46dfa1598bc546f7d25 100644
 --- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
 +++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures.h
 @@ -50,6 +50,27 @@ class WaylandZwpPointerGestures
@@ -819,7 +819,7 @@ index 294f40e247..8491fe92e2 100644
    // |event_type| is one of EventType::kGesturePinch### members.
    // |delta| is empty on the BEGIN and END, and shows the movement of the centre
 diff --git a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
-index 8cf409ac4f..066cae2e02 100644
+index 8cf409ac4f201d342687894cdc0a3d7663b9edc0..066cae2e02c1bd8c92cf68aa7a1a9237c3c7fbed 100644
 --- a/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_zwp_pointer_gestures_unittest.cc
 @@ -41,8 +41,9 @@ class PinchEventScaleRecorder : public PlatformEventObserver {
@@ -880,7 +880,7 @@ index 8cf409ac4f..066cae2e02 100644
  TEST_F(WaylandPointerGesturesTest, HoldEventCancelsFling) {
    // Enter cursor to surface.
 diff --git a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
-index b521b68a81..efde02f0b8 100644
+index b521b68a8165740604971193b74278d038be0d34..efde02f0b8652e674d66570b3ba0e302457399a4 100644
 --- a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
 +++ b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.cc
 @@ -14,6 +14,8 @@ namespace wl {
@@ -922,7 +922,7 @@ index b521b68a81..efde02f0b8 100644
 +
  }  // namespace wl
 diff --git a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
-index 1c24f761b2..c641376e2f 100644
+index 1c24f761b2c3ecf5e605e4ab57b7826858b3e0da..c641376e2ffbaeee8983abf60da725cf90353272 100644
 --- a/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
 +++ b/ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h
 @@ -14,6 +14,14 @@ struct wl_resource;

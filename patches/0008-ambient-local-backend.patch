@@ -1,5 +1,5 @@
 diff --git a/ash/ambient/backdrop/ambient_backend_controller_impl.cc b/ash/ambient/backdrop/ambient_backend_controller_impl.cc
-index eb34dd7ea8..9201e69380 100644
+index eb34dd7ea81659e6a31cfbf911c367678990be29..9201e693809d33d01e346f6a404668b3d766e6bb 100644
 --- a/ash/ambient/backdrop/ambient_backend_controller_impl.cc
 +++ b/ash/ambient/backdrop/ambient_backend_controller_impl.cc
 @@ -29,12 +29,16 @@
@@ -201,7 +201,7 @@ index eb34dd7ea8..9201e69380 100644
        /*num_callbacks=*/2,
        base::BindOnce(&AmbientBackendControllerImpl::OnSettingsAndAlbumsFetched,
 diff --git a/ash/ambient/backdrop/ambient_backend_controller_impl.h b/ash/ambient/backdrop/ambient_backend_controller_impl.h
-index 49bb640848..bc75405b90 100644
+index 49bb6408485a2506b9923f247b2cc5baaf97b0d3..bc75405b90442c03342e5162c4bacbc7d29edcbd 100644
 --- a/ash/ambient/backdrop/ambient_backend_controller_impl.h
 +++ b/ash/ambient/backdrop/ambient_backend_controller_impl.h
 @@ -125,6 +125,8 @@ class AmbientBackendControllerImpl : public AmbientBackendController {
@@ -214,7 +214,7 @@ index 49bb640848..bc75405b90 100644
  
    base::WeakPtrFactory<AmbientBackendControllerImpl> weak_factory_{this};
 diff --git a/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc b/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
-index d0fea22d14..91adbf2224 100644
+index d0fea22d14cf44d133c29479bab1ed87242764ee..91adbf22244f097c087e95fd320ae4564f186fbe 100644
 --- a/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
 +++ b/ash/public/cpp/ambient/fake_ambient_backend_controller_impl.cc
 @@ -13,6 +13,7 @@
@@ -393,7 +393,7 @@ index d0fea22d14..91adbf2224 100644
  }
  
 diff --git a/chrome/browser/ash/ambient/ambient_client_impl.cc b/chrome/browser/ash/ambient/ambient_client_impl.cc
-index 5fd199cae1..2038552059 100644
+index 5fd199cae1f5828734eadd7eb616268ef931927c..2038552059bc0e881e8ce18b0e54eb1261489010 100644
 --- a/chrome/browser/ash/ambient/ambient_client_impl.cc
 +++ b/chrome/browser/ash/ambient/ambient_client_impl.cc
 @@ -12,6 +12,7 @@

@@ -1,5 +1,5 @@
 diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
-index 5a982b1a91..afe97aac31 100644
+index acf00041e6dba91d35ee89a50e643294ae934d39..1e095cc15d5aed6c4e22d1915543aa87cd9beab5 100644
 --- a/ash/app_list/app_list_controller_impl.cc
 +++ b/ash/app_list/app_list_controller_impl.cc
 @@ -1329,13 +1329,24 @@ bool AppListControllerImpl::HasValidProfile() const {
@@ -28,7 +28,7 @@ index 5a982b1a91..afe97aac31 100644
    if (hide == is_hidden)
      return;
 diff --git a/ash/multi_user/multi_user_window_manager.cc b/ash/multi_user/multi_user_window_manager.cc
-index 68e6e1ee77..1254eb0650 100644
+index 68e6e1ee7787ead16863ef088f586e28e4d1495b..1254eb0650922c9acff7b09c1c773d3c6ebd9c1b 100644
 --- a/ash/multi_user/multi_user_window_manager.cc
 +++ b/ash/multi_user/multi_user_window_manager.cc
 @@ -175,9 +175,15 @@ void MultiUserWindowManager::SetWindowOwner(aura::Window* window,
@@ -67,7 +67,7 @@ index 68e6e1ee77..1254eb0650 100644
    }
  }
 diff --git a/ash/style/dark_light_mode_controller_impl.cc b/ash/style/dark_light_mode_controller_impl.cc
-index 07fb3943a3..dd55b29141 100644
+index 07fb3943a3b38bd441842018221a10b28bb4d748..dd55b291419a73926db35de453e996ff9bfd4491 100644
 --- a/ash/style/dark_light_mode_controller_impl.cc
 +++ b/ash/style/dark_light_mode_controller_impl.cc
 @@ -15,6 +15,7 @@
@@ -99,7 +99,7 @@ index 07fb3943a3..dd55b29141 100644
                                          !IsDarkModeEnabled());
    active_user_pref_service_->CommitPendingWrite();
 diff --git a/ash/wm/desks/desks_controller.cc b/ash/wm/desks/desks_controller.cc
-index 8cdfe53ebd..2f7aa7b11c 100644
+index 8cdfe53ebd3cadbdbce8758fcef4488a10a2108a..2f7aa7b11c9ef98161ea3e1f40bdffcfaef06d0d 100644
 --- a/ash/wm/desks/desks_controller.cc
 +++ b/ash/wm/desks/desks_controller.cc
 @@ -625,7 +625,11 @@ void DesksController::NewDesk(DesksCreationRemovalSource source,
@@ -116,10 +116,10 @@ index 8cdfe53ebd..2f7aa7b11c 100644
        source != DesksCreationRemovalSource::kFloatingWorkspace) {
      auto* shell = Shell::Get();
 diff --git a/ash/wm/desks/templates/saved_desk_util.cc b/ash/wm/desks/templates/saved_desk_util.cc
-index 2d38380c16..5963685dca 100644
+index e9e02ad67769d9540bea099790603ea222c09977..2a83ab1ffb9c248d295e0a326d79646699092f6f 100644
 --- a/ash/wm/desks/templates/saved_desk_util.cc
 +++ b/ash/wm/desks/templates/saved_desk_util.cc
-@@ -38,6 +38,11 @@ bool IsGuestSession() {
+@@ -39,6 +39,11 @@ bool IsGuestSession() {
    const UserIndex user_index = 0;
    const UserSession* const user_session =
        Shell::Get()->session_controller()->GetUserSession(user_index);
@@ -132,7 +132,7 @@ index 2d38380c16..5963685dca 100644
  }
  
 diff --git a/ash/wm/overview/birch/birch_bar_controller.cc b/ash/wm/overview/birch/birch_bar_controller.cc
-index 2215e8c6db..dfa200fdb6 100644
+index 2215e8c6db5c23276b72fe1cd902b8331fb0f9aa..dfa200fdb681548308b3d2adcbabca836815f328 100644
 --- a/ash/wm/overview/birch/birch_bar_controller.cc
 +++ b/ash/wm/overview/birch/birch_bar_controller.cc
 @@ -68,26 +68,32 @@ std::string GetPrefNameFromSuggestionType(BirchSuggestionType type) {
@@ -209,7 +209,7 @@ index 2215e8c6db..dfa200fdb6 100644
  
  bool BirchBarController::IsDataLoading() const {
 diff --git a/chrome/browser/ash/magic_boost/magic_boost_state.cc b/chrome/browser/ash/magic_boost/magic_boost_state.cc
-index 3cc16db436..e5c493546a 100644
+index 3cc16db4366bf35ef96a0bc1432998f240dd90ff..e5c493546a495b81630a2e69dd3015dbf5e09d6e 100644
 --- a/chrome/browser/ash/magic_boost/magic_boost_state.cc
 +++ b/chrome/browser/ash/magic_boost/magic_boost_state.cc
 @@ -87,11 +87,14 @@ MagicBoostState::MagicBoostState(
@@ -231,7 +231,7 @@ index 3cc16db436..e5c493546a 100644
  }
  
 diff --git a/chrome/browser/ash/net/vpn_list_forwarder.cc b/chrome/browser/ash/net/vpn_list_forwarder.cc
-index 53a95491eb..e7f3fbc206 100644
+index 53a95491eb84d1be80938672913fc2a422797e0b..e7f3fbc20645396d09ccd4d7b56303ab3237f5fe 100644
 --- a/chrome/browser/ash/net/vpn_list_forwarder.cc
 +++ b/chrome/browser/ash/net/vpn_list_forwarder.cc
 @@ -170,10 +170,17 @@ void VpnListForwarder::AttachToPrimaryUserProfile() {
@@ -272,7 +272,7 @@ index 53a95491eb..e7f3fbc206 100644
    if (arc_vpn_provider_manager_)
      arc_vpn_provider_manager_->AddObserver(this);
 diff --git a/chrome/browser/ash/privacy_hub/privacy_hub_util.cc b/chrome/browser/ash/privacy_hub/privacy_hub_util.cc
-index 4e1a0e0ecd..5371488bd7 100644
+index eabd9f86c8481fd178437a854142ad18c60111e0..9cc9c73815dad754c9470fec7f07a5e37c18bb45 100644
 --- a/chrome/browser/ash/privacy_hub/privacy_hub_util.cc
 +++ b/chrome/browser/ash/privacy_hub/privacy_hub_util.cc
 @@ -302,7 +302,12 @@ void SetAppAccessNotifier(AppAccessNotifier* app_access_notifier) {
@@ -290,7 +290,7 @@ index 4e1a0e0ecd..5371488bd7 100644
        app_access_notifier ? std::make_unique<Wrapper>(app_access_notifier)
                            : nullptr);
 diff --git a/chrome/browser/extensions/system_display/display_info_provider_chromeos.cc b/chrome/browser/extensions/system_display/display_info_provider_chromeos.cc
-index 60c4766168..9f952e444a 100644
+index 60c476616845111827708aae48a47fbf8a481382..9f952e444a26f6f8a2eb240a1051225a9eec4bb4 100644
 --- a/chrome/browser/extensions/system_display/display_info_provider_chromeos.cc
 +++ b/chrome/browser/extensions/system_display/display_info_provider_chromeos.cc
 @@ -121,7 +121,6 @@ ash::DisplayRotationOptions GetDisplayRotationOptions(int rotation_value) {
@@ -302,10 +302,10 @@ index 60c4766168..9f952e444a 100644
  }
  
 diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
-index 746d4e9442..9778c08f01 100644
+index 083365cff1a3e04e88a2b4e920c02205fda535be..3007f1735f682d0d5c40f9b51cba14bf8b5e5a48 100644
 --- a/chrome/browser/profiles/profile_manager.cc
 +++ b/chrome/browser/profiles/profile_manager.cc
-@@ -666,7 +666,10 @@ Profile* ProfileManager::GetPrimaryUserProfile(
+@@ -661,7 +661,10 @@ Profile* ProfileManager::GetPrimaryUserProfile(
  
      if (user->is_profile_created()) {
        // Note: The ProfileHelper will take care of guest profiles.
@@ -318,7 +318,7 @@ index 746d4e9442..9778c08f01 100644
  
      LOG(ERROR) << "ProfileManager::GetPrimaryUserProfile is called when "
 diff --git a/chrome/browser/profiles/profile_selections.cc b/chrome/browser/profiles/profile_selections.cc
-index 25b1540866..70d6768b2a 100644
+index 25b15408665dc95702e7f1382fb8e7c0bb493599..70d6768b2a93552a60560be36c3175e1d7c0b169 100644
 --- a/chrome/browser/profiles/profile_selections.cc
 +++ b/chrome/browser/profiles/profile_selections.cc
 @@ -147,7 +147,7 @@ ProfileSelection ProfileSelections::GetProfileSelection(
@@ -331,47 +331,50 @@ index 25b1540866..70d6768b2a 100644
  
  void ProfileSelections::SetProfileSelectionForRegular(
 diff --git a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-index 36efaed3eb..121aa2efd8 100644
+index 391b29c3fb7050f99c8ab06662becc04b9bb14b5..c2df477df0bb72b7db9111b48c94dc75f1af629d 100644
 --- a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
 +++ b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-@@ -825,14 +825,24 @@ void ChromeCaptureModeDelegate::DeleteRemoteFile(
-   ash::cloud_upload::OdfsFileDeleter::Delete(path, std::move(callback));
- }
- 
-+// HACK(AuraDE): Null-safe version of ActiveUserDefaultSearchProviderIsGoogle.
-+// Ash calls this during Shell::Init() (via SunfishScannerFeatureWatcher) before
-+// the user session and profile are fully initialized. The original CHECK would
-+// crash in standalone Ash mode since we bypass the normal login flow.
-+// TODO: Remove null checks once local account/profile init is properly ordered.
- bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
+@@ -829,10 +829,18 @@ bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
      const {
    const user_manager::User* const active_user =
        user_manager::UserManager::Get()->GetActiveUser();
 -  CHECK(active_user);
++  // HACK(AuraDE): Capture mode can be queried before local account startup
++  // has selected an active user. Treat that as no Google provider instead of
++  // crashing the standalone Ash session.
 +  if (!active_user) {
 +    return false;
 +  }
  
-   Profile* profile = Profile::FromBrowserContext(
-       ash::BrowserContextHelper::Get()->GetBrowserContextByUser(active_user));
-+  if (!profile) {
+   TemplateURLService* template_url_service =
+       ash::TemplateURLServiceProvider::Get().Find(active_user->GetAccountId());
++  if (!template_url_service) {
 +    return false;
 +  }
-   TemplateURLService* template_url_service =
-       TemplateURLServiceFactory::GetForProfile(profile);
    DCHECK(template_url_service);
-@@ -1045,6 +1055,9 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
-   // image search.
-   Profile* profile = Profile::FromBrowserContext(
-       ash::BrowserContextHelper::Get()->GetBrowserContextByUser(active_user));
-+  if (!profile) {
+ 
+   return search::DefaultSearchProviderIsGoogle(template_url_service);
+@@ -1037,12 +1045,17 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
+   TemplateURLRef::PostContent post_content;
+   const user_manager::User* const active_user =
+       user_manager::UserManager::Get()->GetActiveUser();
+-  CHECK(active_user);
++  if (!active_user) {
 +    return;
 +  }
+ 
+   // Get the search provider (must be Google) so we can get the base URL for
+   // image search.
    TemplateURLService* template_url_service =
-       TemplateURLServiceFactory::GetForProfile(profile);
+       ash::TemplateURLServiceProvider::Get().Find(active_user->GetAccountId());
++  if (!template_url_service) {
++    return;
++  }
    DCHECK(template_url_service);
+   CHECK(search::DefaultSearchProviderIsGoogle(template_url_service));
+   const TemplateURL* const default_provider =
 diff --git a/chrome/browser/ui/ash/desks/desks_client.cc b/chrome/browser/ui/ash/desks/desks_client.cc
-index 11c0354af1..0e23fea744 100644
+index 11c0354af1977992ad2da15fdf8ad0d252e881f8..0e23fea744cf362f962c978cf421364163d6ff56 100644
 --- a/chrome/browser/ui/ash/desks/desks_client.cc
 +++ b/chrome/browser/ui/ash/desks/desks_client.cc
 @@ -504,6 +504,16 @@ void DesksClient::LaunchAppsFromTemplate(
@@ -392,7 +395,7 @@ index 11c0354af1..0e23fea744 100644
    // disabled or 2) Desk Templates and Floating workspace are disabled. If we
    // are unable to get the desk sync service or its bridge, then we default to
 diff --git a/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc b/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
-index 3efa5d15ae..9f588d3b12 100644
+index 3efa5d15aeef19a0f021f3e92a5961261535fbb6..9f588d3b1296eab1e5c742c66d72dfbd198fe904 100644
 --- a/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
 +++ b/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
 @@ -37,11 +37,14 @@ QuickAnswersStateAsh::QuickAnswersStateAsh() {
@@ -413,50 +416,8 @@ index 3efa5d15ae..9f588d3b12 100644
    }
  }
  
-diff --git a/ui/base/clipboard/clipboard_data.cc b/ui/base/clipboard/clipboard_data.cc
-index 5f29b414de..bc3360195e 100644
---- a/ui/base/clipboard/clipboard_data.cc
-+++ b/ui/base/clipboard/clipboard_data.cc
-@@ -128,9 +128,13 @@ std::optional<size_t> ClipboardData::CalculateSize(
-     size_t image_size;
-     if (maybe_png_.has_value()) {
-       image_size = maybe_png_.value().size();
--    } else {
--      DCHECK(maybe_bitmap_.has_value());
-+    } else if (maybe_bitmap_.has_value()) {
-       image_size = maybe_bitmap_.value().computeByteSize();
-+    } else {
-+      // HACK(AuraDE): Guard against empty optional when kPng format bit is
-+      // set but neither maybe_png_ nor maybe_bitmap_ contain data. This can
-+      // happen in edge cases on linux-chromeos builds.
-+      image_size = 0;
-     }
-     if (format.has_value() && *format == ClipboardInternalFormat::kPng)
-       return image_size;
-
-diff --git a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
-index 28409f4..76f1c68 100644
---- a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
-+++ b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
-@@ -126,8 +126,14 @@ bool MakoBubbleCoordinator::IsShowingUI() const {
- }
- 
- void MakoBubbleCoordinator::CacheContextCaretBounds() {
--  const ui::InputMethod* input_method =
--      IMEBridge::Get()->GetInputContextHandler()->GetInputMethod();
-+  auto* input_context_handler = IMEBridge::Get()->GetInputContextHandler();
-+  // AuraDE compatibility: generic-Linux sessions can legitimately have no
-+  // ChromeOS text-input target; IMEBridge documents this state as nullable.
-+  if (!input_context_handler) {
-+    return;
-+  }
-+
-+  const ui::InputMethod* input_method = input_context_handler->GetInputMethod();
-   if (input_method && input_method->GetTextInputClient()) {
-     context_caret_bounds_ =
-         input_method->GetTextInputClient()->GetCaretBounds();
 diff --git a/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc b/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
-index 38adc28..9f98042 100644
+index 38adc28ef03bde12e150edc20f63b8424218c14b..9f9804282293a853f4a66f85f021262355763ea3 100644
 --- a/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
 +++ b/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
 @@ -8,10 +8,12 @@
@@ -601,3 +562,44 @@ index 38adc28..9f98042 100644
  class ReadWriteCardsManagerImplWithAndWithoutMahiTest
      : public ReadWriteCardsManagerImplTest,
        public testing::WithParamInterface<bool> {
+diff --git a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
+index 28409f4a3d2af0022a94002ffa3094fdd5b0bb23..76f1c680fe29fdc4862618feaf12e4230ac0ae19 100644
+--- a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
++++ b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
+@@ -126,8 +126,14 @@ bool MakoBubbleCoordinator::IsShowingUI() const {
+ }
+ 
+ void MakoBubbleCoordinator::CacheContextCaretBounds() {
+-  const ui::InputMethod* input_method =
+-      IMEBridge::Get()->GetInputContextHandler()->GetInputMethod();
++  auto* input_context_handler = IMEBridge::Get()->GetInputContextHandler();
++  // AuraDE compatibility: generic-Linux sessions can legitimately have no
++  // ChromeOS text-input target; IMEBridge documents this state as nullable.
++  if (!input_context_handler) {
++    return;
++  }
++
++  const ui::InputMethod* input_method = input_context_handler->GetInputMethod();
+   if (input_method && input_method->GetTextInputClient()) {
+     context_caret_bounds_ =
+         input_method->GetTextInputClient()->GetCaretBounds();
+diff --git a/ui/base/clipboard/clipboard_data.cc b/ui/base/clipboard/clipboard_data.cc
+index 5f29b414ded4c897006c7035807a647d1a462c1a..bc3360195e4c2d23d5d0d314c274fc3b0d55b4c4 100644
+--- a/ui/base/clipboard/clipboard_data.cc
++++ b/ui/base/clipboard/clipboard_data.cc
+@@ -128,9 +128,13 @@ std::optional<size_t> ClipboardData::CalculateSize(
+     size_t image_size;
+     if (maybe_png_.has_value()) {
+       image_size = maybe_png_.value().size();
+-    } else {
+-      DCHECK(maybe_bitmap_.has_value());
++    } else if (maybe_bitmap_.has_value()) {
+       image_size = maybe_bitmap_.value().computeByteSize();
++    } else {
++      // HACK(AuraDE): Guard against empty optional when kPng format bit is
++      // set but neither maybe_png_ nor maybe_bitmap_ contain data. This can
++      // happen in edge cases on linux-chromeos builds.
++      image_size = 0;
+     }
+     if (format.has_value() && *format == ClipboardInternalFormat::kPng)
+       return image_size;

@@ -1,5 +1,5 @@
 diff --git a/ash/session/session_controller_impl.cc b/ash/session/session_controller_impl.cc
-index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8efd0cea7e9 100644
+index fcce446d5cb593ae131c6f2e9ca86a88d267a5e4..447d64c8e16d7d1b57dfeee19ff7a7c70c95cbad 100644
 --- a/ash/session/session_controller_impl.cc
 +++ b/ash/session/session_controller_impl.cc
 @@ -26,9 +26,14 @@
@@ -37,7 +37,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
  }  // namespace
  
  class SessionControllerImpl::ScopedScreenLockBlockerImpl
-@@ -295,6 +313,10 @@ bool SessionControllerImpl::ShouldDisplayManagedUI() const {
+@@ -295,11 +313,19 @@ bool SessionControllerImpl::ShouldDisplayManagedUI() const {
  }
  
  void SessionControllerImpl::LockScreen() {
@@ -48,8 +48,6 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
    if (client_)
      client_->RequestLockScreen();
  }
-@@ -305,6 +327,10 @@ void SessionControllerImpl::HideLockScreen() {
- }
  
  void SessionControllerImpl::RequestSignOut() {
 +  if (!base::SysInfo::IsRunningOnChromeOS() &&
@@ -59,7 +57,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
    if (client_) {
      client_->RequestSignOut();
    }
-@@ -317,11 +343,19 @@ void SessionControllerImpl::RequestRestartForUpdate() {
+@@ -312,11 +338,19 @@ void SessionControllerImpl::RequestRestartForUpdate() {
  }
  
  void SessionControllerImpl::AttemptRestartChrome() {
@@ -79,7 +77,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
    if (client_)
      client_->SwitchActiveUser(account_id);
  }
-@@ -332,6 +366,10 @@ void SessionControllerImpl::CycleActiveUser(CycleUserDirection direction) {
+@@ -327,6 +361,10 @@ void SessionControllerImpl::CycleActiveUser(CycleUserDirection direction) {
  }
  
  void SessionControllerImpl::ShowMultiProfileLogin() {
@@ -90,7 +88,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
    if (client_)
      client_->ShowMultiProfileLogin();
  }
-@@ -399,42 +437,8 @@ void SessionControllerImpl::SetClient(SessionControllerClient* client) {
+@@ -394,42 +432,8 @@ void SessionControllerImpl::SetClient(SessionControllerClient* client) {
  }
  
  void SessionControllerImpl::SetSessionInfo(const SessionInfo& info) {
@@ -134,7 +132,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
      return;
    }
    can_lock_ = info.can_lock_screen;
-@@ -457,8 +461,18 @@ void SessionControllerImpl::UpdateUserSession(const UserSession& user_session) {
+@@ -452,8 +456,18 @@ void SessionControllerImpl::UpdateUserSession(const UserSession& user_session) {
      return;
    }
  
@@ -153,7 +151,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
    UpdateLoginStatus();
  }
  
-@@ -830,6 +844,17 @@ void SessionControllerImpl::MaybeNotifyOnActiveUserPrefServiceChanged() {
+@@ -825,6 +839,17 @@ void SessionControllerImpl::MaybeNotifyOnActiveUserPrefServiceChanged() {
    DCHECK(last_active_user_prefs_);
  
    if (!signin_screen_prefs_obtained_) {
@@ -172,7 +170,7 @@ index 94a800fa9c6476931c7ea5e22f01ccde64e207c5..212c52bd21708e30873eabdd1328c8ef
      // before OnActiveUserPrefServiceChanged(), so defer notifying the
      // observers until the sign in prefs are received.
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac0143797a 100644
+index 7419bb65d4e8fe67713c8291a502008f80308d07..c2a20f3a39337069c2eb47f3b18f94b13e514738 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -4,13 +4,19 @@
@@ -195,7 +193,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
  #include "build/config/chromebox_for_meetings/buildflags.h"  // PLATFORM_CFM
  #include "build/config/cuttlefish/buildflags.h"  // PLATFORM_CUTTLEFISH
  #include "build/config/squid/buildflags.h"       // PLATFORM_SQUID
-@@ -95,6 +101,7 @@
+@@ -93,6 +99,7 @@
  #include "device/bluetooth/floss/floss_dbus_client.h"
  #include "device/bluetooth/floss/floss_dbus_manager.h"
  #include "device/bluetooth/floss/floss_features.h"
@@ -203,7 +201,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
  
  #if BUILDFLAG(PLATFORM_CFM)
  #include "chromeos/ash/components/chromebox_for_meetings/features.h"
-@@ -122,6 +129,45 @@ void OverrideStubPathsIfNeeded() {
+@@ -120,6 +127,45 @@ void OverrideStubPathsIfNeeded() {
  
  DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
  
@@ -249,7 +247,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
  }  // namespace
  
  DBusHelperObserverForTest::~DBusHelperObserverForTest() = default;  // IN-TEST
-@@ -197,7 +243,10 @@ void InitializeDBus() {
+@@ -194,7 +240,10 @@ void InitializeDBus() {
    InitializeDBusClient<ResourcedClient>(bus);
    InitializeDBusClient<RuntimeProbeClient>(bus);
    InitializeDBusClient<SeneschalClient>(bus);
@@ -261,7 +259,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
    InitializeDBusClient<SmbProviderClient>(bus);
    InitializeDBusClient<SpacedClient>(bus);
    InitializeDBusClient<SwapManagementClient>(bus);
-@@ -237,7 +286,8 @@ void InitializeFeatureListDependentDBus() {
+@@ -233,7 +282,8 @@ void InitializeFeatureListDependentDBus() {
    // feature list is initialized.
    InitializeDBusClient<chromeos::MissiveClient>(bus);
  
@@ -271,7 +269,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
      InitializeDBusClient<floss::FlossDBusManager>(bus);
      if (bus) {
        int active_adapter =
-@@ -252,7 +302,11 @@ void InitializeFeatureListDependentDBus() {
+@@ -248,7 +298,11 @@ void InitializeFeatureListDependentDBus() {
        FlossMediaClient::InitializeFake();
      }
    } else {
@@ -284,7 +282,7 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
    }
  #if BUILDFLAG(PLATFORM_CFM)
    if (base::FeatureList::IsEnabled(cfm::features::kMojoServices)) {
-@@ -303,12 +357,13 @@ void ShutdownDBus() {
+@@ -299,12 +353,13 @@ void ShutdownDBus() {
      CfmHotlineClient::Shutdown();
    }
  #endif
@@ -300,10 +298,10 @@ index e810d605db6a4e044ec1525c9980cae75f8e8900..e84b5741a07a5e9a9c935897b6d90aac
    // Depends on `DlcserviceClient`.
    language_packs::LanguagePackManager::Shutdown();
 diff --git a/chrome/browser/ash/login/session/user_session_manager.cc b/chrome/browser/ash/login/session/user_session_manager.cc
-index d4d6916bcd45e88dc21177aaa8195fe24b156bf8..5d5fc53aac0ef732df1112a3ef54b7d696e47606 100644
+index dc8403f76799c9c44052f4e3ace3987448e2fa55..9ba2714d1c560abbf9a4ae03146a66773f2c32af 100644
 --- a/chrome/browser/ash/login/session/user_session_manager.cc
 +++ b/chrome/browser/ash/login/session/user_session_manager.cc
-@@ -448,6 +448,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
+@@ -461,6 +461,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
           user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML;
  }
  
@@ -325,7 +323,7 @@ index d4d6916bcd45e88dc21177aaa8195fe24b156bf8..5d5fc53aac0ef732df1112a3ef54b7d6
  // Stores the information about the challenge-response keys, that were used for
  // authentication, persistently in the known_user database for future
  // authentication attempts.
-@@ -1213,8 +1228,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
+@@ -1231,8 +1246,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
    // Otherwise, auth token dependent code would be in an invalid state.
    // Important piece such as policy code might be broken because of this and
    // subject to an exploit. See http://crbug.com/41292933.
@@ -337,7 +335,7 @@ index d4d6916bcd45e88dc21177aaa8195fe24b156bf8..5d5fc53aac0ef732df1112a3ef54b7d6
      SYSLOG(ERROR)
          << "Session restore failed for online sign-in, terminating session.";
      session_manager::SessionManager::Get()->RequestSignOut();
-@@ -1539,7 +1556,8 @@ void UserSessionManager::InitProfilePreferences(
+@@ -1558,7 +1575,8 @@ void UserSessionManager::InitProfilePreferences(
      }
    }
  
@@ -347,7 +345,7 @@ index d4d6916bcd45e88dc21177aaa8195fe24b156bf8..5d5fc53aac0ef732df1112a3ef54b7d6
      // Get the Gaia ID from the user context. This may not be available when
      // unlocking a previously opened profile, or when creating a supervised
      // user. However, in these cases the gaia_id should be already available in
-@@ -1849,7 +1867,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
+@@ -1868,7 +1886,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
    TRACE_EVENT0("login", "UserSessionManager::FinalizePrepareProfile");
    user_manager::UserManager* user_manager = user_manager::UserManager::Get();
    user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
@@ -358,10 +356,10 @@ index d4d6916bcd45e88dc21177aaa8195fe24b156bf8..5d5fc53aac0ef732df1112a3ef54b7d6
      if (auth_flow == UserContext::AUTH_FLOW_GAIA_WITH_SAML ||
          auth_flow == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML) {
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 28c69a39b6b10a2caa49ee8caab2328e7d7fe773..2a82e767538d1a2f6990762e858f40f1aed3f15f 100644
+index 227cdb5974e747430ac57cfb00f954aad3bb0c0b..3b2ccdd690cac6c365a504706875d04033f4d40b 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -331,12 +331,6 @@ void ApplySigninProfileModifications(Profile* profile) {
+@@ -333,12 +333,6 @@ void ApplySigninProfileModifications(Profile* profile) {
  }
  
  #if !defined(USE_REAL_DBUS_CLIENTS)
@@ -374,7 +372,7 @@ index 28c69a39b6b10a2caa49ee8caab2328e7d7fe773..2a82e767538d1a2f6990762e858f40f1
  chromeos::FakePowerManagerClient* FakePowerManagerClient() {
    chromeos::FakePowerManagerClient* fake_power_manager_client =
        chromeos::FakePowerManagerClient::Get();
-@@ -351,8 +345,12 @@ void FakeShutdownSignal() {
+@@ -353,8 +347,12 @@ void FakeShutdownSignal() {
  }
  
  void InstallFakeShutdownCalls() {
@@ -551,7 +549,7 @@ index 38168d864386d3be6b557531bc4f47a8e6c961b5..34fecb1d2e521c0a0a004f9637e047b5
  
  void DeviceSettingsService::RunPendingOwnershipStatusCallbacks() {
 diff --git a/chrome/browser/sessions/exit_type_service.cc b/chrome/browser/sessions/exit_type_service.cc
-index 6cb424d78d9c8438b93d8c328ef9f7be8ccc90fe..d4ec738c7aad2ffe523fca3b24cab80ee841fa27 100644
+index 2dd2f0605d9a71beb4158c4867db4aafc4701c83..d5158a134b3625b6066eae9ad3b76b506ea413d4 100644
 --- a/chrome/browser/sessions/exit_type_service.cc
 +++ b/chrome/browser/sessions/exit_type_service.cc
 @@ -5,8 +5,10 @@
@@ -583,7 +581,7 @@ index 6cb424d78d9c8438b93d8c328ef9f7be8ccc90fe..d4ec738c7aad2ffe523fca3b24cab80e
  }  // namespace
  
  // Responsible for notifying ExitTypeService when a browser or tab is created
-@@ -194,11 +207,22 @@ void ExitTypeService::AddCrashAckCallback(base::OnceClosure callback) {
+@@ -193,11 +206,22 @@ void ExitTypeService::AddCrashAckCallback(base::OnceClosure callback) {
  
  ExitTypeService::ExitTypeService(Profile* profile)
      : profile_(profile),
@@ -610,7 +608,7 @@ index 6cb424d78d9c8438b93d8c328ef9f7be8ccc90fe..d4ec738c7aad2ffe523fca3b24cab80e
    profile_->GetPrefs()->SetString(prefs::kSessionExitType,
                                    kPrefExitTypeCrashed);
 diff --git a/chromeos/ash/components/dbus/session_manager/session_manager_client.cc b/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
-index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2ed803d3f 100644
+index 4391db27044eb9d8b6535100b836af7710095b41..5568c8b3a6c3015f885bc1893d8eadce2b340358 100644
 --- a/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
 +++ b/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
 @@ -30,6 +30,7 @@
@@ -685,8 +683,8 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
 +  }
  
    // SessionManagerClient overrides:
-   void SetStubDelegate(StubDelegate* delegate) override {
-@@ -202,8 +223,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
+   void AddObserver(Observer* observer) override {
+@@ -198,8 +219,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
    void EmitLoginPromptVisible() override {
      SimpleMethodCallToSessionManager(
          login_manager::kSessionManagerEmitLoginPromptVisible);
@@ -697,7 +695,7 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
    }
  
    void EmitAshInitialized() override {
-@@ -726,6 +748,24 @@ class SessionManagerClientImpl : public SessionManagerClient {
+@@ -722,6 +744,24 @@ class SessionManagerClientImpl : public SessionManagerClient {
                         weak_ptr_factory_.GetWeakPtr()));
    }
  
@@ -722,7 +720,7 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
   private:
    // Makes a method call to the session manager with no arguments and no
    // response.
-@@ -943,8 +983,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
+@@ -939,8 +979,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
      }
      const bool success = base::StartsWith(result_string, "success",
                                            base::CompareCase::INSENSITIVE_ASCII);
@@ -733,7 +731,7 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
    }
  
    // Called when the property change complete signal is received.
-@@ -957,20 +998,23 @@ class SessionManagerClientImpl : public SessionManagerClient {
+@@ -953,20 +994,23 @@ class SessionManagerClientImpl : public SessionManagerClient {
      }
      const bool success = base::StartsWith(result_string, "success",
                                            base::CompareCase::INSENSITIVE_ASCII);
@@ -760,7 +758,7 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
    }
  
    void ArcInstanceStoppedReceived(dbus::Signal* signal) {
-@@ -1155,6 +1199,8 @@ class SessionManagerClientImpl : public SessionManagerClient {
+@@ -1151,6 +1195,8 @@ class SessionManagerClientImpl : public SessionManagerClient {
    }
  
    raw_ptr<dbus::ObjectProxy> session_manager_proxy_ = nullptr;
@@ -769,7 +767,7 @@ index ccb251f1429f58537e04793fbc13c1e10748eeef..c74c7c4e1b07de3b0fbcbd45479c26c2
    std::unique_ptr<chromeos::BlockingMethodCaller> blocking_method_caller_;
    base::ObserverList<Observer> observers_{
        SessionManagerClient::kObserverListPolicy};
-@@ -1179,8 +1225,18 @@ SessionManagerClient::~SessionManagerClient() {
+@@ -1175,8 +1221,18 @@ SessionManagerClient::~SessionManagerClient() {
  
  // static
  void SessionManagerClient::Initialize(dbus::Bus* bus) {

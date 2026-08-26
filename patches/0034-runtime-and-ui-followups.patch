@@ -1,3 +1,5 @@
+diff --git a/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc b/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
+index 35f50e679cbc4da54e47457deb7ac0a9ae18d757..42e3ea80ae8575c688e3d82d0ae69e7aaca990da 100644
 --- a/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
 +++ b/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
 @@ -5,6 +5,7 @@
@@ -8,7 +10,7 @@
  #include "chrome/browser/ash/bluetooth/debug_logs_manager.h"
  #include "chrome/browser/ash/profiles/profile_helper.h"
  #include "chrome/browser/profiles/profile.h"
-@@ -41,8 +42,9 @@
+@@ -41,8 +42,9 @@ class DebugLogsManagerService : public KeyedService {
  
  // static
  DebugLogsManager* DebugLogsManagerFactory::GetForProfile(Profile* profile) {
@@ -19,7 +21,7 @@
  
    DebugLogsManagerService* service = static_cast<DebugLogsManagerService*>(
        GetInstance()->GetServiceForBrowserContext(profile, true));
-@@ -76,11 +78,19 @@
+@@ -76,11 +78,19 @@ DebugLogsManagerFactory::~DebugLogsManagerFactory() = default;
  std::unique_ptr<KeyedService>
  DebugLogsManagerFactory::BuildServiceInstanceForBrowserContext(
      content::BrowserContext* context) const {
@@ -40,9 +42,11 @@
  
    return std::make_unique<DebugLogsManagerService>(profile);
  }
+diff --git a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
+index 73fe634d5a31555b794eea9ff1c5cbaa32c2c9d3..7e8c9ce75346a44020f6215c4ddf2d272c282639 100644
 --- a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
 +++ b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
-@@ -587,6 +587,15 @@
+@@ -587,6 +587,15 @@ export class OsAboutPageElement extends OsAboutPageBase {
          return this.i18nAdvanced('aboutUpdateToRollbackVersionDisallowed');
        case UpdateStatus.DEFERRED:
          return this.i18nAdvanced('aboutUpgradeNotUpToDate');
@@ -58,9 +62,11 @@
        default:
          let result = '';
          const message = this.currentUpdateStatusEvent_.message;
+diff --git a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
+index a0d01bf1968a509ad00b3ae36a09c30452feca16..370a1b128b15a6d0fd34a992c8856e220773c419 100644
 --- a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
 +++ b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
-@@ -54,8 +54,14 @@
+@@ -54,8 +54,14 @@ namespace chromeos::editor_menu {
  namespace {
  
  ui::TextInputClient* GetCurrentTextInputClient() {
@@ -77,7 +83,7 @@
  
    return input_method != nullptr ? input_method->GetTextInputClient() : nullptr;
  }
-@@ -260,6 +266,12 @@
+@@ -260,6 +266,12 @@ void EditorMenuControllerImpl::LogEditorMode(const EditorMode& editor_mode) {
  void EditorMenuControllerImpl::GetEditorMenuCardContext(
      base::OnceCallback<void(const EditorMenuCardContext&)> callback) {
    if (card_session_ == nullptr) {
@@ -90,9 +96,11 @@
      return;
    }
  
+diff --git a/chrome/browser/ui/ash/read_write_cards/BUILD.gn b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
+index d8ffa567a7c2c56414f0a6f70f582233d3e88d79..3715d63f441af93f56e213b3ef489f5d737424cf 100644
 --- a/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 +++ b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
-@@ -59,6 +59,7 @@
+@@ -59,6 +59,7 @@ source_set("unit_tests") {
      ":read_write_cards",
      ":read_write_cards_manager",
      "//ash:test_support",
@@ -100,7 +108,7 @@
      "//base/test:test_support",
      "//chrome/browser:global_features",
      "//chrome/browser/ash/magic_boost",
-@@ -77,6 +78,7 @@
+@@ -77,6 +78,7 @@ source_set("unit_tests") {
      "//chromeos/constants",
      "//content/public/browser",
      "//ui/base",
@@ -108,6 +116,8 @@
      "//ui/gfx/geometry",
      "//ui/views",
    ]
+diff --git a/chrome/browser/ui/webui/help/version_updater_chromeos.cc b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
+index e64eb19cb598d2ca6718295be4ba2c59828b0e0f..244979ce6ac0b080a50c674e0a99055516487c5d 100644
 --- a/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 +++ b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 @@ -15,6 +15,7 @@
@@ -118,7 +128,7 @@
  #include "chrome/browser/ash/login/startup_utils.h"
  #include "chrome/browser/ash/login/wizard_controller.h"
  #include "chrome/browser/ash/ownership/owner_settings_service_ash.h"
-@@ -166,8 +167,13 @@
+@@ -166,8 +167,13 @@ void VersionUpdaterCros::GetUpdateStatus(StatusCallback callback) {
  void VersionUpdaterCros::ApplyDeferredUpdateAdvanced() {
    UpdateEngineClient* update_engine_client = UpdateEngineClient::Get();
  
@@ -134,7 +144,7 @@
  
    update_engine_client->ApplyDeferredUpdateAdvanced(
        /*shutdown_after_update=*/false, base::DoNothing());
-@@ -368,6 +374,10 @@
+@@ -368,6 +374,10 @@ void VersionUpdaterCros::UpdateStatusChanged(
                   static_cast<int32_t>(
                       update_engine::ErrorCode::kDownloadTransferError)) {
          my_status = FAILED_DOWNLOAD;
@@ -145,6 +155,8 @@
        }
        break;
      case update_engine::Operation::CHECKING_FOR_UPDATE:
+diff --git a/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc b/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
+index f6483434ca6c5982f3b4419a709ef693b3ad4118..432fbe6e5eb96977b2ce3fd94a0563e8bd0cd6e4 100644
 --- a/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
 +++ b/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
 @@ -13,6 +13,8 @@
@@ -156,7 +168,7 @@
  #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
  #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
  #include "chromeos/ash/components/dbus/shill/shill_service_client.h"
-@@ -328,4 +330,81 @@
+@@ -328,4 +330,81 @@ TEST_F(VersionUpdaterCrosTest, ApplyDeferredUpdateAdvanced) {
              fake_update_engine_client_->apply_deferred_update_advanced_count());
  }
  
@@ -238,9 +250,11 @@
 +}
 +
  }  // namespace chromeos
+diff --git a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
+index 9e48bbb95e2918fcb5d3672ecd4d1d3037c0515a..8a18f21d57b0a69d1a2d885ffecf1618c4d2b2d0 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
-@@ -239,6 +239,7 @@
+@@ -226,6 +226,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -248,7 +262,7 @@
      };
  
      const minVolumePercentFakeAudioSystemProperties:
-@@ -254,6 +255,7 @@
+@@ -241,6 +242,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -256,7 +270,7 @@
      };
  
      const mutedByUserFakeAudioSystemProperties:
-@@ -271,6 +273,7 @@
+@@ -258,6 +260,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -264,7 +278,7 @@
      };
  
      const mutedByPolicyFakeAudioSystemProperties:
-@@ -288,6 +291,7 @@
+@@ -275,6 +278,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -272,7 +286,7 @@
      };
  
      const mutedExternallyFakeAudioSystemProperties:
-@@ -305,6 +309,7 @@
+@@ -292,6 +296,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -280,7 +294,7 @@
      };
  
      const emptyOutputDevicesFakeAudioSystemProperties:
-@@ -319,6 +324,7 @@
+@@ -306,6 +311,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -288,7 +302,7 @@
      };
  
      const emptyInputDevicesFakeAudioSystemProperties:
-@@ -334,6 +340,7 @@
+@@ -321,6 +327,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -296,7 +310,7 @@
      };
  
      const activeSpeakerFakeAudioSystemProperties:
-@@ -349,6 +356,7 @@
+@@ -336,6 +343,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -304,7 +318,7 @@
      };
  
      const effectNoneAudioSystemProperties:
-@@ -363,6 +371,7 @@
+@@ -350,6 +358,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -312,7 +326,7 @@
      };
  
      const effectNoiseCancellationAudioSystemProperties:
-@@ -377,6 +386,7 @@
+@@ -364,6 +373,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceNC,
@@ -320,7 +334,7 @@
      };
  
      const effectStyleTransferAudioSystemProperties:
-@@ -391,6 +401,7 @@
+@@ -378,6 +388,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceST,
@@ -328,7 +342,7 @@
      };
  
      const effectBeamformingAudioSystemProperties:
-@@ -405,6 +416,7 @@
+@@ -392,6 +403,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceBF,
@@ -336,7 +350,7 @@
      };
  
      const effectModeOptionsAudioSystemProperties:
-@@ -419,6 +431,7 @@
+@@ -406,6 +418,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceEffectMode,
@@ -344,7 +358,7 @@
      };
  
      const effectFallbackMessageAudioSystemProperties:
-@@ -433,6 +446,7 @@
+@@ -420,6 +433,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceFallback,
@@ -352,7 +366,7 @@
      };
  
      const hfpMicSrSupportedAudioSystemProperties:
-@@ -448,6 +462,7 @@
+@@ -435,6 +449,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -360,7 +374,7 @@
      };
  
      const muteByHardwareAudioSystemProperties:
-@@ -462,6 +477,7 @@
+@@ -449,6 +464,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -368,7 +382,7 @@
      };
  
      setup(async () => {
-@@ -1371,6 +1387,7 @@
+@@ -1408,6 +1424,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -376,7 +390,7 @@
      };
  
      const spatialAudioNotSupportedAudioSystemProperties:
-@@ -1385,6 +1402,7 @@
+@@ -1422,6 +1439,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -384,9 +398,11 @@
      };
  
      setup(async () => {
+diff --git a/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
+index 6bb6f96d3ad6bc61378b283d23516aa469c47279..602cdd0a83bdedc2908635344a7f152f5e19522f 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
-@@ -58,6 +58,7 @@
+@@ -58,6 +58,7 @@ suite('FakeCrosAudioConfig', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.MIN_VALUE,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -394,7 +410,7 @@
      };
      crosAudioConfig.setAudioSystemProperties(updatedProperties);
  
-@@ -71,6 +72,7 @@
+@@ -71,6 +72,7 @@ suite('FakeCrosAudioConfig', () => {
      const updatedVolumeProperties:
          crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -402,7 +418,7 @@
        outputVolumePercent: outputVolumePercentExpected,
      };
      onPropertiesUpdated.addExpectation(updatedVolumeProperties);
-@@ -84,6 +86,7 @@
+@@ -84,6 +86,7 @@ suite('FakeCrosAudioConfig', () => {
          const updateActiveOutputDevice:
              crosAudioConfigMojom.AudioSystemProperties = {
            ...defaultProperties,
@@ -410,7 +426,7 @@
            outputDevices: [
              fakeCrosAudioConfig.createAudioDevice(
                  fakeCrosAudioConfig.defaultFakeSpeaker, /*isActive=*/ true),
-@@ -102,6 +105,7 @@
+@@ -102,6 +105,7 @@ suite('FakeCrosAudioConfig', () => {
      const updateActiveInputDevice:
          crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -418,7 +434,7 @@
        inputDevices: [
          fakeCrosAudioConfig.createAudioDevice(
              fakeCrosAudioConfig.fakeInternalFrontMic, /*isActive=*/ false),
-@@ -119,6 +123,7 @@
+@@ -119,6 +123,7 @@ suite('FakeCrosAudioConfig', () => {
      const propertiesOutputMutedByUser:
          crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -426,7 +442,7 @@
        outputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
      };
      onPropertiesUpdated.addExpectation(propertiesOutputMutedByUser);
-@@ -128,6 +133,7 @@
+@@ -128,6 +133,7 @@ suite('FakeCrosAudioConfig', () => {
  
      const propertiesOutputUnmute: crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -434,7 +450,7 @@
        outputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
      };
      onPropertiesUpdated.addExpectation(propertiesOutputUnmute);
-@@ -143,6 +149,7 @@
+@@ -142,6 +148,7 @@ suite('FakeCrosAudioConfig', () => {
  
      const updateInputGainMuted: crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -442,7 +458,7 @@
        inputMuteState: crosAudioConfigMojom.MuteState.kMutedByUser,
      };
      onPropertiesUpdated.addExpectation(updateInputGainMuted);
-@@ -163,6 +170,7 @@
+@@ -162,6 +169,7 @@ suite('FakeCrosAudioConfig', () => {
      const expectedGainPercent = 32;
      const updatedProperties: crosAudioConfigMojom.AudioSystemProperties = {
        ...defaultProperties,
@@ -450,7 +466,7 @@
        inputGainPercent: expectedGainPercent,
      };
      onPropertiesUpdated.addExpectation(updatedProperties);
-@@ -182,6 +190,7 @@
+@@ -181,6 +189,7 @@ suite('FakeCrosAudioConfig', () => {
          const defaultNoiseCancellation:
              crosAudioConfigMojom.AudioSystemProperties = {
            ...defaultProperties,
@@ -458,7 +474,7 @@
            inputDevices: [ncSupportedNotEnabled],
          };
          crosAudioConfig.setAudioSystemProperties(defaultNoiseCancellation);
-@@ -198,6 +207,7 @@
+@@ -197,6 +206,7 @@ suite('FakeCrosAudioConfig', () => {
          const enabledNoiseCancellation:
              crosAudioConfigMojom.AudioSystemProperties = {
            ...defaultNoiseCancellation,
@@ -466,7 +482,7 @@
            inputDevices: [ncSupportedEnabled],
          };
          assertDeepEquals(
-@@ -219,6 +229,7 @@
+@@ -218,6 +228,7 @@ suite('FakeCrosAudioConfig', () => {
          const noNoiseCancellation:
              crosAudioConfigMojom.AudioSystemProperties = {
            ...defaultProperties,
@@ -474,9 +490,11 @@
            inputDevices: [ncNotSupported],
          };
          crosAudioConfig.setAudioSystemProperties(noNoiseCancellation);
+diff --git a/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts b/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
+index cb7a6bc37fa28c518979c9a6782ae42682172c68..71aa5eea2dd45f25c133b531d43142b73e25fca8 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
-@@ -7,10 +7,39 @@
+@@ -7,10 +7,39 @@ import {assert} from 'chrome://resources/js/assert.js';
  import {webUIListenerCallback} from 'chrome://resources/js/cr.js';
  import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
  
@@ -516,7 +534,7 @@
    lastHighlightedDisplayId = '-1';
    lidClosedBehavior: LidClosedBehavior|undefined;
    powerSourceId = '-1';
-@@ -29,12 +58,17 @@
+@@ -29,12 +58,17 @@ export class TestDevicePageBrowserProxy extends TestBrowserProxy implements
  
    constructor() {
      super([
@@ -534,7 +552,7 @@
        'setOptimizedCharging',
        'showPlayStore',
        'updatePowerStatus',
-@@ -147,6 +181,31 @@
+@@ -147,6 +181,31 @@ export class TestDevicePageBrowserProxy extends TestBrowserProxy implements
  
    dragDisplayDelta() {}
  
@@ -566,9 +584,11 @@
    openMyFiles() {}
  
    openBrowsingDataSettings() {}
+diff --git a/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts b/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
+index 69cb791ed3996bf4ed24ea8539ae915b25d5739a..8fb7e5745515fb7e8c7e101ff08abbda7aad3f5a 100644
 --- a/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
-@@ -162,7 +162,9 @@
+@@ -162,7 +162,9 @@ suite('<os-about-page> AllBuilds', () => {
          fireStatusChanged(UpdateStatus.FAILED);
          assertNull(updateRowIcon.src);
          assertEquals('os-settings:about-update-error', updateRowIcon.icon);
@@ -579,9 +599,11 @@
  
          fireStatusChanged(UpdateStatus.DISABLED);
          assertNull(updateRowIcon.src);
+diff --git a/chromeos/ash/components/dbus/BUILD.gn b/chromeos/ash/components/dbus/BUILD.gn
+index 29e241e55fad15966acd879304b1d1f6203cc684..24c1052cf354a30582e766c6f521913c41ea9722 100644
 --- a/chromeos/ash/components/dbus/BUILD.gn
 +++ b/chromeos/ash/components/dbus/BUILD.gn
-@@ -73,6 +73,7 @@
+@@ -73,6 +73,7 @@ source_set("unit_tests") {
      "//chromeos/ash/components/dbus/session_manager:unit_tests",
      "//chromeos/ash/components/dbus/shill:test_support",
      "//chromeos/ash/components/dbus/system_clock:unit_tests",
@@ -589,9 +611,11 @@
      "//chromeos/ash/components/dbus/userdataauth",
      "//chromeos/ash/components/dbus/userdataauth:userdataauth_proto",
      "//chromeos/ash/components/install_attributes:test_support",
+diff --git a/chromeos/ash/components/dbus/update_engine/BUILD.gn b/chromeos/ash/components/dbus/update_engine/BUILD.gn
+index 2c9533d3d074e3f351d0b57ccd24d17fb39bdbd4..4201ffb83bfa67c400c72f2070e779c7dde92ab7 100644
 --- a/chromeos/ash/components/dbus/update_engine/BUILD.gn
 +++ b/chromeos/ash/components/dbus/update_engine/BUILD.gn
-@@ -25,6 +25,20 @@
+@@ -25,6 +25,20 @@ component("update_engine") {
    ]
  }
  
@@ -612,9 +636,11 @@
  proto_library("proto") {
    sources =
        [ "//third_party/cros_system_api/dbus/update_engine/update_engine.proto" ]
+diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
+index e221755af1fb4b1e1c2a209ce2e6c4503b157faf..9df5c3215b93586b8ee4f99f59a7beb733cc71ce 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
-@@ -424,8 +424,9 @@
+@@ -424,8 +424,9 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
      }
  
      last_status_ = status;
@@ -625,7 +651,7 @@
    }
  
    // Called when a response for SetReleaseChannel() is received.
-@@ -580,8 +581,9 @@
+@@ -580,8 +581,9 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
      }
  
      last_status_ = status;
@@ -636,7 +662,7 @@
    }
  
    // Called when the status update signal is initially connected.
-@@ -684,10 +686,11 @@
+@@ -684,10 +686,11 @@ class UpdateEngineClientDesktopFake : public UpdateEngineClient {
                    GetChannelCallback callback) override {
      VLOG(1) << "Requesting to get channel, get_current_channel="
              << get_current_channel;
@@ -650,7 +676,7 @@
    }
  
    void GetEolInfo(GetEolInfoCallback callback) override {
-@@ -765,8 +768,9 @@
+@@ -765,8 +768,9 @@ class UpdateEngineClientDesktopFake : public UpdateEngineClient {
          NOTREACHED();
      }
      last_status_.set_current_operation(next_operation);
@@ -661,7 +687,7 @@
      if (last_status_.current_operation() != update_engine::Operation::IDLE) {
        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
            FROM_HERE,
-@@ -970,9 +974,11 @@
+@@ -970,9 +974,11 @@ class UpdateEngineClientAura : public UpdateEngineClient {
      const base::DictValue& root = envelope->GetDict();
      if (!root.FindBool("ok").value_or(false)) {
        const base::DictValue* error = root.FindDict("error");
@@ -674,7 +700,7 @@
                   << (message ? *message : "host bridge operation failed");
        return std::nullopt;
      }
-@@ -1054,6 +1060,11 @@
+@@ -1054,6 +1060,11 @@ class UpdateEngineClientAura : public UpdateEngineClient {
    }
  
    void PublishStatus(update_engine::Operation operation, double progress) {
@@ -686,7 +712,7 @@
      last_status_.set_current_operation(operation);
      last_status_.set_progress(progress);
      last_status_.set_last_checked_time(base::Time::Now().ToTimeT());
-@@ -1069,6 +1080,28 @@
+@@ -1069,6 +1080,28 @@ class UpdateEngineClientAura : public UpdateEngineClient {
      }
    }
  
@@ -715,7 +741,7 @@
    void CheckForDeferredUpdates() {
      if (check_in_flight_ || update_job_running_ || updates_available_ ||
          last_status_.current_operation() ==
-@@ -1123,7 +1156,7 @@
+@@ -1123,7 +1156,7 @@ class UpdateEngineClientAura : public UpdateEngineClient {
                         std::optional<base::DictValue> data) {
      check_in_flight_ = false;
      if (!data) {
@@ -724,7 +750,7 @@
        if (callback) {
          std::move(callback).Run(UPDATE_RESULT_FAILED);
        }
-@@ -1132,7 +1165,7 @@
+@@ -1132,7 +1165,7 @@ class UpdateEngineClientAura : public UpdateEngineClient {
  
      const base::ListValue* packages = data->FindList("packages");
      if (!packages) {
@@ -733,7 +759,7 @@
        if (callback) {
          std::move(callback).Run(UPDATE_RESULT_FAILED);
        }
-@@ -1183,7 +1216,7 @@
+@@ -1183,7 +1216,7 @@ class UpdateEngineClientAura : public UpdateEngineClient {
      const std::string* job_id = data ? data->FindString("job_id") : nullptr;
      if (!job_id || job_id->empty()) {
        update_job_running_ = false;
@@ -742,7 +768,7 @@
        if (failure_callback) {
          std::move(failure_callback).Run();
        }
-@@ -1216,7 +1249,7 @@
+@@ -1216,7 +1249,7 @@ class UpdateEngineClientAura : public UpdateEngineClient {
      if (!state) {
        update_job_running_ = false;
        update_job_id_.clear();
@@ -751,7 +777,7 @@
        return;
      }
  
-@@ -1230,7 +1263,7 @@
+@@ -1230,7 +1263,7 @@ class UpdateEngineClientAura : public UpdateEngineClient {
      update_job_running_ = false;
      update_job_id_.clear();
      if (*state != "succeeded") {
@@ -760,204 +786,9 @@
        return;
      }
  
---- a/chromeos/ash/components/disks/disk_mount_manager.cc
-+++ b/chromeos/ash/components/disks/disk_mount_manager.cc
-@@ -43,8 +43,8 @@
- #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
- #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
- #include "chromeos/ash/components/disks/disk.h"
--#include "dbus/bus.h"
- #include "chromeos/ash/components/disks/suspend_unmount_manager.h"
-+#include "dbus/bus.h"
- #include "dbus/message.h"
- #include "dbus/object_path.h"
- #include "dbus/object_proxy.h"
-@@ -791,7 +791,12 @@
-     }
-     OnMountCompleted(
-         {source_path, resolved_mount_path, type, error, 100, read_only});
--    RefreshAuraDeStorage();
-+    // AuraDE compatibility: a failed mount is already reflected in local
-+    // DiskMountManager state. Refreshing immediately would re-announce the
-+    // same unmounted disk and cause VolumeManager to retry without bound.
-+    if (error == MountError::kSuccess) {
-+      RefreshAuraDeStorage();
-+    }
-   }
- 
-   void OnAuraDeUnmount(UnmountPathCallback callback,
-@@ -866,7 +871,7 @@
-     std::optional<base::Value> event =
-         base::JSONReader::Read(json, base::JSON_PARSE_RFC);
-     if (!event || !event->is_dict() ||
--        ReadAuraDeString(event->GetDict(), "domain") != "storage") {
-+        ReadAuraDeString(event->GetDict(), "source") != "storage") {
-       return;
-     }
-     aurade_refresh_timer_.Start(
-@@ -1262,8 +1267,16 @@
-       DCHECK(disk_it != disks_.end());
-       disk->set_is_first_mount(false);
-       if (!want_to_keep) {
--        VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
--        disks_.erase(disk_it);
-+        if (aurade_host_bridge_proxy_) {
-+          // AuraDE compatibility: keep the enumerated disk after a transient
-+          // bridge or authorization failure. Removing it here would make the
-+          // next host refresh announce the same device as DISK_ADDED and start
-+          // another automatic mount instead of preserving the error state.
-+          VLOG(1) << "Kept unmounted Disk '" << disk->device_path() << "'";
-+        } else {
-+          VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
-+          disks_.erase(disk_it);
-+        }
-       }
-     }
-   }
---- a/components/history_embeddings/content/history_embeddings_service.cc
-+++ b/components/history_embeddings/content/history_embeddings_service.cc
-@@ -16,6 +16,7 @@
- #include "base/strings/string_number_conversions.h"
- #include "base/strings/string_split.h"
- #include "base/strings/string_util.h"
-+#include "base/system/sys_info.h"
- #include "base/task/sequenced_task_runner.h"
- #include "base/task/task_traits.h"
- #include "base/task/thread_pool.h"
-@@ -840,7 +841,8 @@
- 
-   if (!is_visibility_model_available || scored_url_rows.empty()) {
-     OnPassageVisibilityCalculated(std::move(callback), std::move(result),
--                                  std::move(scored_url_rows), {});
-+                                  std::move(scored_url_rows),
-+                                  is_visibility_model_available, {});
-     return;
-   }
- 
-@@ -852,7 +854,8 @@
-   page_content_annotations_service_->BatchAnnotate(
-       base::BindOnce(&HistoryEmbeddingsService::OnPassageVisibilityCalculated,
-                      weak_ptr_factory_.GetWeakPtr(), std::move(callback),
--                     std::move(result), std::move(scored_url_rows)),
-+                     std::move(result), std::move(scored_url_rows),
-+                     is_visibility_model_available),
-       std::move(inputs),
-       page_content_annotations::AnnotationType::kContentVisibility);
- }
-@@ -861,10 +864,16 @@
-     SearchResultCallback callback,
-     SearchResult result,
-     std::vector<ScoredUrlRow> scored_url_rows,
-+    bool visibility_model_available,
-     const std::vector<page_content_annotations::BatchAnnotationResult>&
-         annotation_results) {
-   if (annotation_results.empty()) {
--    scored_url_rows.clear();
-+    // AuraDE compatibility: generic-Linux local embeddings are already
-+    // filtered by the local search path when Chrome's proprietary visibility
-+    // model is unavailable. Preserve ChromeOS's fail-closed behavior.
-+    if (visibility_model_available || base::SysInfo::IsRunningOnChromeOS()) {
-+      scored_url_rows.clear();
-+    }
-   } else {
-     CHECK_EQ(scored_url_rows.size(), annotation_results.size());
- 
---- a/components/history_embeddings/content/history_embeddings_service.h
-+++ b/components/history_embeddings/content/history_embeddings_service.h
-@@ -276,6 +276,7 @@
-       SearchResultCallback callback,
-       SearchResult result,
-       std::vector<ScoredUrlRow> scored_url_rows,
-+      bool visibility_model_available,
-       const std::vector<page_content_annotations::BatchAnnotationResult>&
-           annotation_results);
- 
---- a/components/history_embeddings/content/history_embeddings_service_unittest.cc
-+++ b/components/history_embeddings/content/history_embeddings_service_unittest.cc
-@@ -12,10 +12,12 @@
- #include "base/path_service.h"
- #include "base/run_loop.h"
- #include "base/strings/string_number_conversions.h"
-+#include "base/system/sys_info.h"
- #include "base/task/cancelable_task_tracker.h"
- #include "base/task/sequenced_task_runner.h"
- #include "base/test/bind.h"
- #include "base/test/metrics/histogram_tester.h"
-+#include "base/test/scoped_chromeos_version_info.h"
- #include "base/test/scoped_feature_list.h"
- #include "base/test/task_environment.h"
- #include "base/test/test_future.h"
-@@ -106,6 +108,7 @@
-   using HistoryEmbeddingsService::Storage;
- 
-   using HistoryEmbeddingsService::OnPassagesEmbeddingsComputed;
-+  using HistoryEmbeddingsService::OnPassageVisibilityCalculated;
-   using HistoryEmbeddingsService::OnSearchCompleted;
-   using HistoryEmbeddingsService::QueryIsFiltered;
-   using HistoryEmbeddingsService::RebuildAbsentEmbeddings;
-@@ -332,6 +335,62 @@
-   EXPECT_FALSE(future.Take().session_id.empty());
- }
- 
-+TEST_F(HistoryEmbeddingsServiceTest,
-+       MissingVisibilityModelKeepsResultsOnGenericLinux) {
-+  base::test::ScopedChromeOSVersionInfo version_info(/*lsb_release=*/"",
-+                                                     base::Time());
-+  ASSERT_FALSE(base::SysInfo::IsRunningOnChromeOS());
-+  AddTestHistoryPage("http://test.com");
-+  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
-+  row.url_data.passages.add_passages("A locally filtered passage.");
-+  row.scores.push_back(1.0);
-+  std::vector<ScoredUrlRow> rows;
-+  rows.push_back(std::move(row));
-+
-+  base::test::TestFuture<SearchResult> future;
-+  service_->OnPassageVisibilityCalculated(
-+      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
-+      /*visibility_model_available=*/false, {});
-+
-+  EXPECT_EQ(future.Take().scored_url_rows.size(), 1u);
-+}
-+
-+TEST_F(HistoryEmbeddingsServiceTest,
-+       MissingVisibilityModelRemainsFailClosedOnChromeOS) {
-+  base::test::ScopedChromeOSVersionInfo version_info(
-+      "CHROMEOS_RELEASE_NAME=Chrome OS\nCHROMEOS_RELEASE_VERSION=1",
-+      base::Time::Now());
-+  ASSERT_TRUE(base::SysInfo::IsRunningOnChromeOS());
-+  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
-+  row.url_data.passages.add_passages("A locally filtered passage.");
-+  row.scores.push_back(1.0);
-+  std::vector<ScoredUrlRow> rows;
-+  rows.push_back(std::move(row));
-+
-+  base::test::TestFuture<SearchResult> future;
-+  service_->OnPassageVisibilityCalculated(
-+      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
-+      /*visibility_model_available=*/false, {});
-+
-+  EXPECT_TRUE(future.Take().scored_url_rows.empty());
-+}
-+
-+TEST_F(HistoryEmbeddingsServiceTest,
-+       AvailableVisibilityModelWithNoAnnotationsFailsClosed) {
-+  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
-+  row.url_data.passages.add_passages("A locally filtered passage.");
-+  row.scores.push_back(1.0);
-+  std::vector<ScoredUrlRow> rows;
-+  rows.push_back(std::move(row));
-+
-+  base::test::TestFuture<SearchResult> future;
-+  service_->OnPassageVisibilityCalculated(
-+      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
-+      /*visibility_model_available=*/true, {});
-+
-+  EXPECT_TRUE(future.Take().scored_url_rows.empty());
-+}
-+
- TEST_F(HistoryEmbeddingsServiceTest, SearchCallsCallbackWithAnswer) {
-   OverrideVisibilityScoresForTesting({
-       {"A passage with five words.", 1},
+diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa0105f1ab0e8d2736e828310e507f1b75a0e67a
 --- /dev/null
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc
 @@ -0,0 +1,306 @@
@@ -1267,3 +1098,209 @@
 +}  // namespace
 +
 +}  // namespace ash
+diff --git a/chromeos/ash/components/disks/disk_mount_manager.cc b/chromeos/ash/components/disks/disk_mount_manager.cc
+index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc98ec6fe9 100644
+--- a/chromeos/ash/components/disks/disk_mount_manager.cc
++++ b/chromeos/ash/components/disks/disk_mount_manager.cc
+@@ -43,8 +43,8 @@
+ #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
+ #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
+ #include "chromeos/ash/components/disks/disk.h"
+-#include "dbus/bus.h"
+ #include "chromeos/ash/components/disks/suspend_unmount_manager.h"
++#include "dbus/bus.h"
+ #include "dbus/message.h"
+ #include "dbus/object_path.h"
+ #include "dbus/object_proxy.h"
+@@ -791,7 +791,12 @@ class DiskMountManagerImpl : public DiskMountManager,
+     }
+     OnMountCompleted(
+         {source_path, resolved_mount_path, type, error, 100, read_only});
+-    RefreshAuraDeStorage();
++    // AuraDE compatibility: a failed mount is already reflected in local
++    // DiskMountManager state. Refreshing immediately would re-announce the
++    // same unmounted disk and cause VolumeManager to retry without bound.
++    if (error == MountError::kSuccess) {
++      RefreshAuraDeStorage();
++    }
+   }
+ 
+   void OnAuraDeUnmount(UnmountPathCallback callback,
+@@ -866,7 +871,7 @@ class DiskMountManagerImpl : public DiskMountManager,
+     std::optional<base::Value> event =
+         base::JSONReader::Read(json, base::JSON_PARSE_RFC);
+     if (!event || !event->is_dict() ||
+-        ReadAuraDeString(event->GetDict(), "domain") != "storage") {
++        ReadAuraDeString(event->GetDict(), "source") != "storage") {
+       return;
+     }
+     aurade_refresh_timer_.Start(
+@@ -1262,8 +1267,16 @@ class DiskMountManagerImpl : public DiskMountManager,
+       DCHECK(disk_it != disks_.end());
+       disk->set_is_first_mount(false);
+       if (!want_to_keep) {
+-        VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
+-        disks_.erase(disk_it);
++        if (aurade_host_bridge_proxy_) {
++          // AuraDE compatibility: keep the enumerated disk after a transient
++          // bridge or authorization failure. Removing it here would make the
++          // next host refresh announce the same device as DISK_ADDED and start
++          // another automatic mount instead of preserving the error state.
++          VLOG(1) << "Kept unmounted Disk '" << disk->device_path() << "'";
++        } else {
++          VLOG(1) << "Removed Disk '" << disk->device_path() << "'";
++          disks_.erase(disk_it);
++        }
+       }
+     }
+   }
+diff --git a/components/history_embeddings/content/history_embeddings_service.cc b/components/history_embeddings/content/history_embeddings_service.cc
+index f42c3c00ec9da7ac19430d17ec3e9f516445568f..4e53cd10ec49561a2758755add6329092810b562 100644
+--- a/components/history_embeddings/content/history_embeddings_service.cc
++++ b/components/history_embeddings/content/history_embeddings_service.cc
+@@ -16,6 +16,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+@@ -840,7 +841,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
+ 
+   if (!is_visibility_model_available || scored_url_rows.empty()) {
+     OnPassageVisibilityCalculated(std::move(callback), std::move(result),
+-                                  std::move(scored_url_rows), {});
++                                  std::move(scored_url_rows),
++                                  is_visibility_model_available, {});
+     return;
+   }
+ 
+@@ -852,7 +854,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
+   page_content_annotations_service_->BatchAnnotate(
+       base::BindOnce(&HistoryEmbeddingsService::OnPassageVisibilityCalculated,
+                      weak_ptr_factory_.GetWeakPtr(), std::move(callback),
+-                     std::move(result), std::move(scored_url_rows)),
++                     std::move(result), std::move(scored_url_rows),
++                     is_visibility_model_available),
+       std::move(inputs),
+       page_content_annotations::AnnotationType::kContentVisibility);
+ }
+@@ -861,10 +864,16 @@ void HistoryEmbeddingsService::OnPassageVisibilityCalculated(
+     SearchResultCallback callback,
+     SearchResult result,
+     std::vector<ScoredUrlRow> scored_url_rows,
++    bool visibility_model_available,
+     const std::vector<page_content_annotations::BatchAnnotationResult>&
+         annotation_results) {
+   if (annotation_results.empty()) {
+-    scored_url_rows.clear();
++    // AuraDE compatibility: generic-Linux local embeddings are already
++    // filtered by the local search path when Chrome's proprietary visibility
++    // model is unavailable. Preserve ChromeOS's fail-closed behavior.
++    if (visibility_model_available || base::SysInfo::IsRunningOnChromeOS()) {
++      scored_url_rows.clear();
++    }
+   } else {
+     CHECK_EQ(scored_url_rows.size(), annotation_results.size());
+ 
+diff --git a/components/history_embeddings/content/history_embeddings_service.h b/components/history_embeddings/content/history_embeddings_service.h
+index 85aa57b15d4a692dd8c8d1fb40a7c4b0fea9b8c3..491b14258eeb7a4e0dde3fbfdf4241d9e06d26c6 100644
+--- a/components/history_embeddings/content/history_embeddings_service.h
++++ b/components/history_embeddings/content/history_embeddings_service.h
+@@ -276,6 +276,7 @@ class HistoryEmbeddingsService
+       SearchResultCallback callback,
+       SearchResult result,
+       std::vector<ScoredUrlRow> scored_url_rows,
++      bool visibility_model_available,
+       const std::vector<page_content_annotations::BatchAnnotationResult>&
+           annotation_results);
+ 
+diff --git a/components/history_embeddings/content/history_embeddings_service_unittest.cc b/components/history_embeddings/content/history_embeddings_service_unittest.cc
+index 2560987fd48e242427170f496aeb4c3e4d82b634..30858845391d920c4837c8cdb6e4a1764d16091a 100644
+--- a/components/history_embeddings/content/history_embeddings_service_unittest.cc
++++ b/components/history_embeddings/content/history_embeddings_service_unittest.cc
+@@ -12,10 +12,12 @@
+ #include "base/path_service.h"
+ #include "base/run_loop.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
+ #include "base/task/cancelable_task_tracker.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/test/bind.h"
+ #include "base/test/metrics/histogram_tester.h"
++#include "base/test/scoped_chromeos_version_info.h"
+ #include "base/test/scoped_feature_list.h"
+ #include "base/test/task_environment.h"
+ #include "base/test/test_future.h"
+@@ -106,6 +108,7 @@ class HistoryEmbeddingsServicePublic : public HistoryEmbeddingsService {
+   using HistoryEmbeddingsService::Storage;
+ 
+   using HistoryEmbeddingsService::OnPassagesEmbeddingsComputed;
++  using HistoryEmbeddingsService::OnPassageVisibilityCalculated;
+   using HistoryEmbeddingsService::OnSearchCompleted;
+   using HistoryEmbeddingsService::QueryIsFiltered;
+   using HistoryEmbeddingsService::RebuildAbsentEmbeddings;
+@@ -330,6 +333,62 @@ TEST_F(HistoryEmbeddingsServiceTest, SearchSetsValidSessionId) {
+   EXPECT_FALSE(future.Take().session_id.empty());
+ }
+ 
++TEST_F(HistoryEmbeddingsServiceTest,
++       MissingVisibilityModelKeepsResultsOnGenericLinux) {
++  base::test::ScopedChromeOSVersionInfo version_info(/*lsb_release=*/"",
++                                                     base::Time());
++  ASSERT_FALSE(base::SysInfo::IsRunningOnChromeOS());
++  AddTestHistoryPage("http://test.com");
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/false, {});
++
++  EXPECT_EQ(future.Take().scored_url_rows.size(), 1u);
++}
++
++TEST_F(HistoryEmbeddingsServiceTest,
++       MissingVisibilityModelRemainsFailClosedOnChromeOS) {
++  base::test::ScopedChromeOSVersionInfo version_info(
++      "CHROMEOS_RELEASE_NAME=Chrome OS\nCHROMEOS_RELEASE_VERSION=1",
++      base::Time::Now());
++  ASSERT_TRUE(base::SysInfo::IsRunningOnChromeOS());
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/false, {});
++
++  EXPECT_TRUE(future.Take().scored_url_rows.empty());
++}
++
++TEST_F(HistoryEmbeddingsServiceTest,
++       AvailableVisibilityModelWithNoAnnotationsFailsClosed) {
++  ScoredUrlRow row(ScoredUrl(1, 1, {}, 1.0, 0.0));
++  row.url_data.passages.add_passages("A locally filtered passage.");
++  row.scores.push_back(1.0);
++  std::vector<ScoredUrlRow> rows;
++  rows.push_back(std::move(row));
++
++  base::test::TestFuture<SearchResult> future;
++  service_->OnPassageVisibilityCalculated(
++      future.GetRepeatingCallback(), SearchResult(), std::move(rows),
++      /*visibility_model_available=*/true, {});
++
++  EXPECT_TRUE(future.Take().scored_url_rows.empty());
++}
++
+ TEST_F(HistoryEmbeddingsServiceTest, SearchCallsCallbackWithAnswer) {
+   OverrideVisibilityScoresForTesting({
+       {"A passage with five words.", 1},

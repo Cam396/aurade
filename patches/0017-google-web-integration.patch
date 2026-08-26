@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
-index 9cbe27a2f2..6587d7f2e6 100644
+index 9cbe27a2f20bfe7a97dc20c7afd98b4c13e8fed6..6587d7f2e67844292dbb514e42a5a3f994ad7dec 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 @@ -16,6 +16,7 @@
@@ -58,7 +58,7 @@ index 9cbe27a2f2..6587d7f2e6 100644
  }
  
 diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
-index cca031f22b..b946c1ec2e 100644
+index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f91e23aff4 100644
 --- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 @@ -11,12 +11,19 @@
@@ -88,7 +88,7 @@ index cca031f22b..b946c1ec2e 100644
 +#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  
  #if BUILDFLAG(IS_CHROMEOS)
- #include "ash/constants/web_app_id_constants.h"
+ #include "ash/constants/ash_extension_constants.h"
 @@ -45,8 +53,6 @@
  #include "google_apis/gaia/gaia_auth_util.h"
  #endif  // BUILDFLAG(IS_CHROMEOS)
@@ -270,7 +270,7 @@ index cca031f22b..b946c1ec2e 100644
      if (options.gate_on_feature &&
          !IsPreinstalledAppInstallFeatureEnabled(*options.gate_on_feature)) {
 diff --git a/components/signin/core/browser/signin_header_helper.cc b/components/signin/core/browser/signin_header_helper.cc
-index 1a352d3b9d..640cf8576c 100644
+index 1a352d3b9d47148153f9d11349ab0448213965f2..640cf8576c06da2ab356b963d4df176c9ce6910f 100644
 --- a/components/signin/core/browser/signin_header_helper.cc
 +++ b/components/signin/core/browser/signin_header_helper.cc
 @@ -14,6 +14,7 @@

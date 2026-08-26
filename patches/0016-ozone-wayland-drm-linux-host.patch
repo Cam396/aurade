@@ -1,5 +1,5 @@
 diff --git a/components/exo/wayland/wl_compositor.cc b/components/exo/wayland/wl_compositor.cc
-index 2fa9819b6c..d32c90c2a8 100644
+index 2fa9819b6c2f7db5f81c42265cd5253ddcdf9bd2..d32c90c2a8a5ed7a5f9253e2244d53d1d673d1ba 100644
 --- a/components/exo/wayland/wl_compositor.cc
 +++ b/components/exo/wayland/wl_compositor.cc
 @@ -182,6 +182,15 @@ void surface_set_buffer_scale(wl_client* client,
@@ -29,7 +29,7 @@ index 2fa9819b6c..d32c90c2a8 100644
  ////////////////////////////////////////////////////////////////////////////////
  // wl_compositor_interface:
 diff --git a/components/exo/wayland/wl_compositor.h b/components/exo/wayland/wl_compositor.h
-index cc553e800c..832faebf68 100644
+index cc553e800cba2b7a0ed1c0eb860435d5f5854480..832faebf68ec1ef46a3e7822af7231db05d42d93 100644
 --- a/components/exo/wayland/wl_compositor.h
 +++ b/components/exo/wayland/wl_compositor.h
 @@ -12,7 +12,7 @@
@@ -42,7 +42,7 @@ index cc553e800c..832faebf68 100644
  void bind_compositor(wl_client* client,
                       void* data,
 diff --git a/components/viz/service/display_embedder/output_surface_provider_impl.cc b/components/viz/service/display_embedder/output_surface_provider_impl.cc
-index 0a1c0ebd23..3fd14a02c2 100644
+index c15bbfb0938d65b1f5482fbb936f23d86c26682b..64dacc7ca2eec7afd3aed526a546ae3011b295b1 100644
 --- a/components/viz/service/display_embedder/output_surface_provider_impl.cc
 +++ b/components/viz/service/display_embedder/output_surface_provider_impl.cc
 @@ -4,11 +4,14 @@
@@ -60,7 +60,7 @@ index 0a1c0ebd23..3fd14a02c2 100644
  #include "base/feature_list.h"
  #include "base/functional/bind.h"
  #include "base/functional/callback_helpers.h"
-@@ -128,7 +131,19 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
+@@ -127,7 +130,19 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
        // GPU compositing is expected to always work on Chrome OS and Cast
        // devices, so we should never encounter fatal context error. This could
        // be an unrecoverable hardware error or a bug.
@@ -82,7 +82,7 @@ index 0a1c0ebd23..3fd14a02c2 100644
        gpu_service_impl_->DisableGpuCompositing();
  #endif
 diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper.cc b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
-index abe91d0a04..0b4aba839e 100644
+index abe91d0a0498a336e0eb6e774ef41fb3435e0f4d..0b4aba839e6c049a2074f86765b4f2bf0b16bde9 100644
 --- a/gpu/command_buffer/service/shared_memory_region_wrapper.cc
 +++ b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
 @@ -4,6 +4,8 @@
@@ -178,7 +178,7 @@ index abe91d0a04..0b4aba839e 100644
  
    return true;
 diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
-index fee2b968f2..98a0ed9738 100644
+index fee2b968f29c311ec9a3b9c08eb12a6ec4a4dd68..98a0ed97388f58f9a2e75e2f08d64010cfd39645 100644
 --- a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
 +++ b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
 @@ -4,6 +4,7 @@
@@ -216,7 +216,7 @@ index fee2b968f2..98a0ed9738 100644
    constexpr gfx::Size size(100, 100);
    constexpr viz::SharedImageFormat format = viz::MultiPlaneFormat::kNV12;
 diff --git a/ui/base/clipboard/BUILD.gn b/ui/base/clipboard/BUILD.gn
-index 3c7a17dbee..5f3212fa83 100644
+index 3c7a17dbeedc842c9d1073b0857af82e3afe3256..5f3212fa83997229111f015fed5a4d15863a9eae 100644
 --- a/ui/base/clipboard/BUILD.gn
 +++ b/ui/base/clipboard/BUILD.gn
 @@ -65,7 +65,7 @@ component("clipboard_types") {
@@ -229,7 +229,7 @@ index 3c7a17dbee..5f3212fa83 100644
      sources = [
        "clipboard_util_linux.cc",
 diff --git a/ui/base/ime/linux/BUILD.gn b/ui/base/ime/linux/BUILD.gn
-index aa6e9f2437..919d01bbbf 100644
+index aa6e9f2437a14beabc9db3f5f36568f6533ec1e6..919d01bbbff08e6aa4eed35b18f8755779cee6c9 100644
 --- a/ui/base/ime/linux/BUILD.gn
 +++ b/ui/base/ime/linux/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -242,10 +242,10 @@ index aa6e9f2437..919d01bbbf 100644
  component("linux") {
    output_name = "ui_base_ime_linux"
 diff --git a/ui/linux/BUILD.gn b/ui/linux/BUILD.gn
-index 267de0acba..0e0a8534c4 100644
+index eaee77fb50333c7b18a6bfdca8f4cae378fd65f5..f0eab1504aa61f63ada10e43581680071865826d 100644
 --- a/ui/linux/BUILD.gn
 +++ b/ui/linux/BUILD.gn
-@@ -5,7 +5,7 @@
+@@ -6,7 +6,7 @@ import("//build/config/features.gni")
  import("//build/config/linux/gtk/gtk.gni")
  import("//ui/qt/qt.gni")
  
@@ -255,7 +255,7 @@ index 267de0acba..0e0a8534c4 100644
  component("linux_ui") {
    defines = [ "IS_LINUX_UI_IMPL" ]
 diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-index e523e4e393..18abdf7416 100644
+index e523e4e393119950d553a5902b8c75d01cb7b56c..18abdf74162a89c46fe38d826d683860dee1ff18 100644
 --- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
 +++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
 @@ -350,7 +350,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
@@ -271,7 +271,7 @@ index e523e4e393..18abdf7416 100644
  }
  
 diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
-index 8e2d305163..4f5b35db59 100644
+index bb9b85116b00b7e38e6ce72cca358a87cf03d0f1..f6ca60f1b25e73169537e0e04b270384f49d4c6a 100644
 --- a/ui/ozone/platform/wayland/BUILD.gn
 +++ b/ui/ozone/platform/wayland/BUILD.gn
 @@ -9,7 +9,7 @@ import("//gpu/vulkan/features.gni")
@@ -293,7 +293,7 @@ index 8e2d305163..4f5b35db59 100644
        "host/org_gnome_mutter_idle_monitor.cc",
        "host/org_gnome_mutter_idle_monitor.h",
 diff --git a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
-index c553d6503a..744ce36a04 100644
+index c553d6503acebbea02942ab6fd6755f1be13bda1..744ce36a0435485515c3b07bac08f9dcb62afe4c 100644
 --- a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
 +++ b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
 @@ -5,6 +5,7 @@
@@ -324,7 +324,7 @@ index c553d6503a..744ce36a04 100644
    }
    native_display_ = gl::EGLDisplayPlatform(
 diff --git a/ui/ozone/platform/wayland/host/wayland_screen.cc b/ui/ozone/platform/wayland/host/wayland_screen.cc
-index b0bb41f423..8521b1cdd2 100644
+index 8cbed4597afcd18d3d8aed05a7cf4682964a922f..6ad9a265bb52c97f062a365b3b431645c11ce6e0 100644
 --- a/ui/ozone/platform/wayland/host/wayland_screen.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_screen.cc
 @@ -42,7 +42,7 @@
@@ -336,7 +336,7 @@ index b0bb41f423..8521b1cdd2 100644
  #include "ui/ozone/platform/wayland/host/org_gnome_mutter_idle_monitor.h"
  #endif
  
-@@ -482,7 +482,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+@@ -487,7 +487,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
        return *idle_time;
    }
  
@@ -345,7 +345,7 @@ index b0bb41f423..8521b1cdd2 100644
    // Try the org.gnome.Mutter.IdleMonitor D-Bus service (Mutter).
    if (!org_gnome_mutter_idle_monitor_)
      org_gnome_mutter_idle_monitor_ =
-@@ -490,7 +490,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+@@ -495,7 +495,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
    const auto idle_time = org_gnome_mutter_idle_monitor_->GetIdleTime();
    if (idle_time)
      return *idle_time;
@@ -355,10 +355,10 @@ index b0bb41f423..8521b1cdd2 100644
    NOTIMPLEMENTED_LOG_ONCE();
  
 diff --git a/ui/ozone/platform/wayland/host/wayland_screen.h b/ui/ozone/platform/wayland/host/wayland_screen.h
-index 9850170783..d122eea255 100644
+index fb137875b78b137c49fb13552cc3cb801287a7ab..10ee3e24cf39d0476fd1ff5233c1123bc95c237b 100644
 --- a/ui/ozone/platform/wayland/host/wayland_screen.h
 +++ b/ui/ozone/platform/wayland/host/wayland_screen.h
-@@ -132,7 +132,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
+@@ -133,7 +133,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
    std::optional<viz::SharedImageFormat> image_format_no_alpha_;
    std::optional<viz::SharedImageFormat> image_format_hdr_;
  
@@ -368,7 +368,7 @@ index 9850170783..d122eea255 100644
        org_gnome_mutter_idle_monitor_;
  #endif
 diff --git a/ui/platform_window/platform_window_delegate.cc b/ui/platform_window/platform_window_delegate.cc
-index 52d4ae6242..60f71edc1e 100644
+index 52d4ae6242ad1b71e8e5768cc2769be277d242f5..60f71edc1e2fcf0c9bec374938071db750560e06 100644
 --- a/ui/platform_window/platform_window_delegate.cc
 +++ b/ui/platform_window/platform_window_delegate.cc
 @@ -58,7 +58,7 @@ gfx::Insets PlatformWindowDelegate::CalculateInsetsInDIP(
@@ -381,7 +381,7 @@ index 52d4ae6242..60f71edc1e 100644
      WindowTiledEdges new_tiled_edges) {}
  #endif
 diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
-index 2ba67bf9f9..9c873c48f6 100644
+index 2ba67bf9f9f836dac61d590a788169f16b550a64..9c873c48f6ed7fdde386f5463ccd4155712e4ec1 100644
 --- a/ui/platform_window/platform_window_delegate.h
 +++ b/ui/platform_window/platform_window_delegate.h
 @@ -146,7 +146,7 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {

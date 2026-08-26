@@ -21,18 +21,17 @@ index f5ff2a32b9122313396942bfa6a1634fe79db062..621b70c6d249234d20cb22485a391558
  # Insert chromium mojom path to beginning to make sure we prefer this one.
  # https://crbug.com/1422422
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980be2e59aca 100644
+index cca1fc040aba8ec8e9f02d806ceb947266c35163..f3a15feefa6bddd8932e884f67e3432464cd62ca 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
-@@ -200,6 +200,16 @@ struct AvailableLocalesTraits
- base::LazyInstance<std::vector<std::string>, AvailableLocalesTraits>
-     g_available_locales = LAZY_INSTANCE_INITIALIZER;
+@@ -92,6 +92,15 @@ void AdjustParagraphDirectionality(std::u16string* paragraph) {
+ #endif
+ }
  
 +bool ShouldRelaxPlaceholderDChecksForAuraDE() {
-+  // HACK(AuraDE): AuraDE standalone Linux builds can enable ChromeOS shell
-+  // surfaces whose generated/localized strings are not always placeholder-
-+  // compatible with the exact Ash caller. Do not crash the shell on debug
-+  // placeholder validation when AuraDE is explicitly launched.
++  // AuraDE compatibility: standalone Linux sessions can enable ChromeOS
++  // surfaces whose generated strings do not always match every Ash caller.
++  // Keep debug startup alive when AuraDE explicitly selects this mode.
 +  return base::CommandLine::InitializedForCurrentProcess() &&
 +         base::CommandLine::ForCurrentProcess()->HasSwitch(
 +             "aurade-enable-local-accounts");
@@ -40,13 +39,13 @@ index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980b
 +
  }  // namespace
  
- namespace l10n_util {
-@@ -625,23 +635,26 @@ std::u16string FormatString(const std::u16string& format_string,
+ std::string_view GetLanguage(std::string_view locale) {
+@@ -405,23 +414,26 @@ std::u16string FormatString(const std::u16string& format_string,
                              const std::vector<std::u16string>& replacements,
                              std::vector<size_t>* offsets) {
  #if DCHECK_IS_ON()
--  // Make sure every replacement string is being used, so we don't just silently
--  // fail to insert one.
+-  // Make sure every replacement string is being used, so one is not inserted
+-  // silently.
 -  //
 -  // $9 is the highest allowed placeholder.
 -  for (size_t i = 0; i < 9; ++i) {
@@ -63,8 +62,8 @@ index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980b
 -          << " Unexpectedly found a " << placeholder << " placeholder in "
 -          << format_string;
 +  if (!ShouldRelaxPlaceholderDChecksForAuraDE()) {
-+    // Make sure every replacement string is being used, so we don't just
-+    // silently fail to insert one.
++    // Make sure every replacement string is being used, so one is not inserted
++    // silently.
 +    //
 +    // $9 is the highest allowed placeholder.
 +    for (size_t i = 0; i < 9; ++i) {
@@ -85,7 +84,7 @@ index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980b
      }
    }
  #endif
-@@ -736,8 +749,12 @@ std::u16string GetStringFUTF16(int message_id,
+@@ -516,8 +528,12 @@ std::u16string GetStringFUTF16(int message_id,
    std::vector<size_t> offsets;
    std::vector<std::u16string> replacements = {a};
    std::u16string result = GetStringFUTF16(message_id, replacements, &offsets);
@@ -101,10 +100,10 @@ index d84e795cadc609c31e4542db945d0c3bf1288259..aa7ede101a7407a59135df123dcc980b
  }
  
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index 73e2f1e74967f6f71062363adb7d48e17c21cfe6..495f1b0d7722ed597f4114de47b2b8b372e66d3a 100644
+index d1ee6814618c7cdcdb7fda0faa57a94a75dd7c98..9ba8c3d486d93f8f30b5cf4dd2b9d4b6d179ade9 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
-@@ -34,6 +34,7 @@
+@@ -35,6 +35,7 @@
  #include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
  #include "base/synchronization/lock.h"
@@ -112,7 +111,7 @@ index 73e2f1e74967f6f71062363adb7d48e17c21cfe6..495f1b0d7722ed597f4114de47b2b8b3
  #include "base/trace_event/typed_macros.h"
  #include "build/build_config.h"
  #include "net/filter/gzip_header.h"
-@@ -1124,6 +1125,15 @@ void ResourceBundle::InitDefaultFontList() {
+@@ -1133,6 +1134,15 @@ void ResourceBundle::InitDefaultFontList() {
    // font list doesn't need to be overridden by variations.
    std::string font_family =
        base::UTF16ToUTF8(GetLocalizedStringImpl(IDS_UI_FONT_FAMILY_CROS));

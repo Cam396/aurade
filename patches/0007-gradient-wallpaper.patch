@@ -1,5 +1,5 @@
 diff --git a/ash/wallpaper/views/wallpaper_view.cc b/ash/wallpaper/views/wallpaper_view.cc
-index fe58433703..d5eb78810f 100644
+index 995a6a80816482d3b1402e39d1938c9e766950a1..160dbe67b9f65c0a978cf16daeb576bb8223c8b7 100644
 --- a/ash/wallpaper/views/wallpaper_view.cc
 +++ b/ash/wallpaper/views/wallpaper_view.cc
 @@ -86,8 +86,14 @@ class WallpaperWidgetDelegate : public views::WidgetDelegateView {
@@ -31,7 +31,7 @@ index fe58433703..d5eb78810f 100644
      parent()->AddChildViewAt(shield_view_.get(), 0);
      shield_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
 diff --git a/ash/wallpaper/views/wallpaper_widget_controller.cc b/ash/wallpaper/views/wallpaper_widget_controller.cc
-index 56be1cc47e..8c5d0c9016 100644
+index 787e0fec07af62bc8efaaf010d75520936ea2ea1..25ec394cb4c5c0f95950028c8e61c7911f3a99a7 100644
 --- a/ash/wallpaper/views/wallpaper_widget_controller.cc
 +++ b/ash/wallpaper/views/wallpaper_widget_controller.cc
 @@ -17,6 +17,7 @@
@@ -42,7 +42,7 @@ index 56be1cc47e..8c5d0c9016 100644
  #include "ui/views/widget/widget.h"
  #include "ui/views/widget/widget_observer.h"
  #include "ui/wm/core/window_util.h"
-@@ -35,6 +36,7 @@ WallpaperWidgetController::~WallpaperWidgetController() {
+@@ -39,6 +40,7 @@ ui::Layer* WallpaperWidgetController::wallpaper_underlay_layer() {
  void WallpaperWidgetController::Init(bool locked) {
    widget_ = CreateWallpaperWidget(root_window_, wallpaper_constants::kClear,
                                    locked, &wallpaper_view_);
@@ -50,7 +50,7 @@ index 56be1cc47e..8c5d0c9016 100644
    CreateWallpaperUnderlayLayer();
  }
  
-@@ -125,9 +127,7 @@ void WallpaperWidgetController::OnDisplayMetricsChanged(
+@@ -129,9 +131,7 @@ void WallpaperWidgetController::OnDisplayMetricsChanged(
      return;
    }
  
@@ -61,7 +61,7 @@ index 56be1cc47e..8c5d0c9016 100644
  }
  
  void WallpaperWidgetController::OnColorProviderChanged() {
-@@ -158,6 +158,22 @@ void WallpaperWidgetController::CreateWallpaperUnderlayLayer() {
+@@ -161,6 +161,22 @@ void WallpaperWidgetController::CreateWallpaperUnderlayLayer() {
    wallpaper_underlay_layer_->SetVisible(false);
  }
  
@@ -85,10 +85,10 @@ index 56be1cc47e..8c5d0c9016 100644
    std::list<base::OnceClosure> callbacks;
    animation_end_callbacks_.swap(callbacks);
 diff --git a/ash/wallpaper/views/wallpaper_widget_controller.h b/ash/wallpaper/views/wallpaper_widget_controller.h
-index 08a3142c3a..5a9d057abb 100644
+index f1deba80fc682db5a1670c1f2e89d492fdd23aaf..25b7fe97327d1cecd34c0696886ba120ec4e4ce7 100644
 --- a/ash/wallpaper/views/wallpaper_widget_controller.h
 +++ b/ash/wallpaper/views/wallpaper_widget_controller.h
-@@ -101,6 +101,8 @@ class ASH_EXPORT WallpaperWidgetController
+@@ -100,6 +100,8 @@ class ASH_EXPORT WallpaperWidgetController
    }
  
   private:
@@ -98,7 +98,7 @@ index 08a3142c3a..5a9d057abb 100644
  
    // Runs callbacks in |animation_end_callbacks_|.
 diff --git a/ash/wallpaper/wallpaper_controller_impl.cc b/ash/wallpaper/wallpaper_controller_impl.cc
-index a068a6d94a..4a4d080c6d 100644
+index a068a6d94ad100251e5ea502411e7447968a6d53..4a4d080c6d830f21814c986c04c80b89314c91c7 100644
 --- a/ash/wallpaper/wallpaper_controller_impl.cc
 +++ b/ash/wallpaper/wallpaper_controller_impl.cc
 @@ -137,6 +137,36 @@ gfx::ImageSkia CreateSolidColorWallpaper(SkColor color) {
@@ -153,10 +153,10 @@ index a068a6d94a..4a4d080c6d 100644
    } else {
      wallpaper_metrics_manager_->LogWallpaperResult(
 diff --git a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
-index a4ca49aa88..1ac7ca3131 100644
+index 5062d8ba0bc35254d8f6bcb5054309380dd40217..263990ebc3c6fcaca3cea1401cebb1b9f6556b38 100644
 --- a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
 +++ b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
-@@ -376,28 +376,43 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
+@@ -375,37 +375,62 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
  
  void WallpaperControllerClientImpl::MakeTransparent(
      content::WebContents* web_contents) {
@@ -192,22 +192,17 @@ index a4ca49aa88..1ac7ca3131 100644
 +  }
  
    // Turn off the web contents background.
-+  BrowserView* browser_view =
-+      BrowserView::GetBrowserViewForNativeWindow(top_level_window);
-+  if (!browser_view) {
-+    VLOG(1) << "Skipping wallpaper transparency for non-BrowserView window.";
+-  ash::BrowserController::GetInstance()
+-      ->GetBrowserForTab(web_contents)
+-      ->SetContentsBackgroundVisible(false);
++  auto* browser =
++      ash::BrowserController::GetInstance()->GetBrowserForTab(web_contents);
++  if (!browser) {
++    VLOG(1) << "Skipping wallpaper transparency for non-Browser window.";
 +    return;
 +  }
-+
-   std::vector<ContentsWebView*> contents_views =
--      BrowserView::GetBrowserViewForNativeWindow(
--          web_contents->GetTopLevelNativeWindow())
--          ->GetAllVisibleContentsWebViews();
-+      browser_view->GetAllVisibleContentsWebViews();
-   for (ContentsWebView* contents_view : contents_views) {
-     contents_view->SetBackgroundVisible(false);
-   }
-@@ -405,13 +420,28 @@ void WallpaperControllerClientImpl::MakeTransparent(
++  browser->SetContentsBackgroundVisible(false);
+ }
  
  void WallpaperControllerClientImpl::MakeOpaque(
      content::WebContents* web_contents) {
@@ -215,27 +210,22 @@ index a4ca49aa88..1ac7ca3131 100644
 +    return;
 +  }
 +
-+  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
-+  if (!top_level_window) {
-+    return;
-+  }
-+
-   // Reversing `contents_web_view` is sufficient to make the view opaque,
-   // as `window_backdrop`, `top_level_window` and `web_contents` are not
+   // Making the contents background visible is sufficient to make the view
+   // opaque, as `window_backdrop`, `top_level_window` and `web_contents` are not
    // highly impactful to the animated theme change effect.
-+  BrowserView* browser_view =
-+      BrowserView::GetBrowserViewForNativeWindow(top_level_window);
-+  if (!browser_view) {
-+    top_level_window->SetTransparent(false);
-+    VLOG(1) << "Skipping wallpaper opacity restore for non-BrowserView window.";
+-  ash::BrowserController::GetInstance()
+-      ->GetBrowserForTab(web_contents)
+-      ->SetContentsBackgroundVisible(true);
++  auto* browser =
++      ash::BrowserController::GetInstance()->GetBrowserForTab(web_contents);
++  if (browser) {
++    browser->SetContentsBackgroundVisible(true);
 +    return;
 +  }
 +
-   std::vector<ContentsWebView*> contents_views =
--      BrowserView::GetBrowserViewForNativeWindow(
--          web_contents->GetTopLevelNativeWindow())
--          ->GetAllVisibleContentsWebViews();
-+      browser_view->GetAllVisibleContentsWebViews();
-   for (ContentsWebView* contents_view : contents_views) {
-     contents_view->SetBackgroundVisible(true);
-   }
++  if (aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow()) {
++    top_level_window->SetTransparent(false);
++  }
+ }
+ 
+ void WallpaperControllerClientImpl::OnVolumeMounted(

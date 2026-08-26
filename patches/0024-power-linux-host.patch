@@ -1,5 +1,5 @@
 diff --git a/ash/public/cpp/ash_view_ids.h b/ash/public/cpp/ash_view_ids.h
-index 3e4c704124..83b4865d37 100644
+index 3e4c70412444eb56f8d0e88b01fe3a97cd5422de..83b4865d373066cbf4944dd3c5a48eaa40e1a240 100644
 --- a/ash/public/cpp/ash_view_ids.h
 +++ b/ash/public/cpp/ash_view_ids.h
 @@ -93,6 +93,7 @@ enum ViewID {
@@ -11,7 +11,7 @@ index 3e4c704124..83b4865d37 100644
    VIEW_ID_QS_POWER_SIGNOUT_MENU_BUTTON,
    VIEW_ID_QS_SETTINGS_BUTTON,
 diff --git a/ash/shutdown_controller_impl.cc b/ash/shutdown_controller_impl.cc
-index 6ad26996dd..e4ba6ad800 100644
+index 6ad26996dd9d63cfb4389df43545e02f984ebed3..e4ba6ad800d4fc42558f7ab51306e040ca4aa13a 100644
 --- a/ash/shutdown_controller_impl.cc
 +++ b/ash/shutdown_controller_impl.cc
 @@ -9,7 +9,12 @@
@@ -76,7 +76,7 @@ index 6ad26996dd..e4ba6ad800 100644
    }
  
 diff --git a/ash/system/unified/power_button.cc b/ash/system/unified/power_button.cc
-index 5a6c9e40f0..04ec2f0330 100644
+index 4ecd6b702c8bd079353d555e2fc9b0ee59b577b2..f792fda51e8160974b764845015996de031a6974 100644
 --- a/ash/system/unified/power_button.cc
 +++ b/ash/system/unified/power_button.cc
 @@ -216,6 +216,11 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
@@ -105,7 +105,7 @@ index 5a6c9e40f0..04ec2f0330 100644
            VIEW_ID_QS_POWER_SIGNOUT_MENU_BUTTON,
            l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SIGN_OUT),
 diff --git a/ash/wm/lock_state_controller.cc b/ash/wm/lock_state_controller.cc
-index 91d3a7254f..5a435537a0 100644
+index 90fd668da4149dca09bc2e834ce0feed055e0497..b26fa546f0b3b0aaf0d408ab3acd0dfbf67f0157 100644
 --- a/ash/wm/lock_state_controller.cc
 +++ b/ash/wm/lock_state_controller.cc
 @@ -37,6 +37,7 @@
@@ -113,10 +113,10 @@ index 91d3a7254f..5a435537a0 100644
  #include "ash/wm/workspace_controller.h"
  #include "base/containers/span.h"
 +#include "base/command_line.h"
- #include "base/debug/crash_logging.h"
  #include "base/debug/dump_without_crashing.h"
  #include "base/files/file_path.h"
-@@ -50,6 +51,8 @@
+ #include "base/files/file_util.h"
+@@ -49,6 +50,8 @@
  #include "base/metrics/histogram_macros.h"
  #include "base/metrics/user_metrics.h"
  #include "base/notreached.h"
@@ -125,7 +125,7 @@ index 91d3a7254f..5a435537a0 100644
  #include "base/strings/string_util.h"
  #include "base/system/sys_info.h"
  #include "base/task/bind_post_task.h"
-@@ -112,6 +115,32 @@ constexpr base::TimeDelta kShutdownRequestDelay = base::Milliseconds(50);
+@@ -111,6 +114,32 @@ constexpr base::TimeDelta kShutdownRequestDelay = base::Milliseconds(50);
  // duration.
  constexpr base::TimeDelta kTakeScreenshotFailTimeout = base::Milliseconds(800);
  
@@ -158,7 +158,7 @@ index 91d3a7254f..5a435537a0 100644
  // Records the given `duration` to the given `pref_name` so it can be recorded
  // as an UMA metric on the next startup.
  void SaveInformedRestoreScreenshotDuration(PrefService* local_state,
-@@ -1086,6 +1115,11 @@ void LockStateController::OnInformedRestoreImageSaved(
+@@ -1077,6 +1106,11 @@ void LockStateController::OnInformedRestoreImageSaved(
  
  void LockStateController::DoRestart(power_manager::RequestRestartReason reason,
                                      const std::string& description) {
@@ -171,7 +171,7 @@ index 91d3a7254f..5a435537a0 100644
  }
  
 diff --git a/chromeos/dbus/power/fake_power_manager_client.cc b/chromeos/dbus/power/fake_power_manager_client.cc
-index 0b7693dcf5..fc28f28c25 100644
+index 0b7693dcf5cac9fe8ce7a13eac2a7f0942669452..fc28f28c2575098166936772d7e9ca7882b084fd 100644
 --- a/chromeos/dbus/power/fake_power_manager_client.cc
 +++ b/chromeos/dbus/power/fake_power_manager_client.cc
 @@ -4,18 +4,31 @@
@@ -851,7 +851,7 @@ index 0b7693dcf5..fc28f28c25 100644
      power_manager::UserActivityType type) {
    if (user_activity_callback_)
 diff --git a/chromeos/dbus/power/fake_power_manager_client.h b/chromeos/dbus/power/fake_power_manager_client.h
-index 69eb73ec26..8193b8bc20 100644
+index 69eb73ec26e686a4092069ef7fbb14f6e9efed3a..8193b8bc207ba4dd7ff6d0bf391ac0a5516a50e5 100644
 --- a/chromeos/dbus/power/fake_power_manager_client.h
 +++ b/chromeos/dbus/power/fake_power_manager_client.h
 @@ -29,6 +29,7 @@

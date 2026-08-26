@@ -17,7 +17,7 @@ index c0beef7153bdfbdf8a07b60096fb67708c675d79..1f7d79575cad37a2c6feb623ab82c947
    return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
  }
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 6c3b589124bdb774df0830cb5cbc353d39a509ec..a05587a4fd62d5cf406e61a370729040323923a6 100644
+index 7ee10e62ba7d3e1c3d936f06c521191e312b55ea..da7a1d238d765da5a60614b6a54584cef165c67a 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -282,6 +282,9 @@ Style notes:
@@ -204,7 +204,7 @@ index 57aedbf21bda386804114021ceda65d844fb2499..08d09609b09b491d2a64b137c9e784f9
  ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorAlways[];
  ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorNever[];
 diff --git a/ash/public/cpp/shelf_types.cc b/ash/public/cpp/shelf_types.cc
-index a0f19b7435f9d909372cde65cd2bf9881f70237d..cf98b9763381fd9f8531cf2bd2e36fa7c1196837 100644
+index d843e45944c3749c075aab7353033b57bd88ad14..95c8206f0c6ab6e01e2a5f8bde6fd1d058b4f409 100644
 --- a/ash/public/cpp/shelf_types.cc
 +++ b/ash/public/cpp/shelf_types.cc
 @@ -28,6 +28,8 @@ std::ostream& operator<<(std::ostream& out, ShelfAlignment alignment) {
@@ -217,7 +217,7 @@ index a0f19b7435f9d909372cde65cd2bf9881f70237d..cf98b9763381fd9f8531cf2bd2e36fa7
  }
  
 diff --git a/ash/public/cpp/shelf_types.h b/ash/public/cpp/shelf_types.h
-index 91ce054fb1a831020e2e477caa0e3e22213b14e9..2d9abd08c6700d1ad346afb192f7c6fcddc1b266 100644
+index 620246e153d6bb09464c798ab44ed97d6e21c204..6595e7d8454f14cdbe51d02c267c8ffbe075a92c 100644
 --- a/ash/public/cpp/shelf_types.h
 +++ b/ash/public/cpp/shelf_types.h
 @@ -17,7 +17,7 @@ enum class ShelfAlignment {
@@ -230,10 +230,10 @@ index 91ce054fb1a831020e2e477caa0e3e22213b14e9..2d9abd08c6700d1ad346afb192f7c6fc
    // The locked alignment is set temporarily and not saved to preferences.
    kBottomLocked,
 diff --git a/ash/shelf/home_button.cc b/ash/shelf/home_button.cc
-index 32bb05266b11210ccb0f2369a159d207c3bd0b02..a3edaba1da5902b281baec5cd103649b3ada6759 100644
+index a8f8005993847aae221ca3f49a30ec98232ce9e2..5e76c204ee51e0a922eaf777d0a4af1dc17ed445 100644
 --- a/ash/shelf/home_button.cc
 +++ b/ash/shelf/home_button.cc
-@@ -809,11 +809,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
+@@ -812,11 +812,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
    gfx::PointF bounce_up_point = shelf()->SelectValueForShelfAlignment(
        gfx::PointF(0, -kAnimationBounceUpOffset),
        gfx::PointF(kAnimationBounceUpOffset, 0),
@@ -250,7 +250,7 @@ index 32bb05266b11210ccb0f2369a159d207c3bd0b02..a3edaba1da5902b281baec5cd103649b
    gfx::Transform move_up;
    move_up.Translate(bounce_up_point.x(), bounce_up_point.y());
 diff --git a/ash/shelf/hotseat_widget.cc b/ash/shelf/hotseat_widget.cc
-index 4acc5f2de72b37fe448f0e9bd17039bc79778edd..54eabcc974446cb49c88a0521a9470af6f988892 100644
+index 1ea5906c4a1e76b3de53bb2451521997b4013f24..d073cc3819f5356d2cf14fe92af59290c49f4059 100644
 --- a/ash/shelf/hotseat_widget.cc
 +++ b/ash/shelf/hotseat_widget.cc
 @@ -4,6 +4,7 @@
@@ -414,10 +414,10 @@ index de7315c0a3ecd877fcf655fb0c3c1512b6780b55..42b8001cfad8ea20dd3aab23e78634ee
  
    gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
 diff --git a/ash/shelf/shelf_bubble.cc b/ash/shelf/shelf_bubble.cc
-index 3c43d0b8b557267fd97c40dab87bb4e25c973633..e8b4bf300a52649800b3fcb868388907c54d4abe 100644
+index d54514e3f18d4607968cbe7c40ab475997d871d8..b9bf5565eb2f56bf11c82b94335a0c440a471c5d 100644
 --- a/ash/shelf/shelf_bubble.cc
 +++ b/ash/shelf/shelf_bubble.cc
-@@ -50,6 +50,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
+@@ -29,6 +29,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
        return views::BubbleBorder::LEFT_CENTER;
      case ash::ShelfAlignment::kRight:
        return views::BubbleBorder::RIGHT_CENTER;
@@ -917,10 +917,10 @@ index e7cf6b4954d5b7b88811b42638b34fa275f68808..30ba33ec02ffdf83e0c5c16beca3acfa
          return drag_amount_ < 0;
        return drag_amount_ > 0;
 diff --git a/ash/shelf/shelf_view.cc b/ash/shelf/shelf_view.cc
-index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9610cb752 100644
+index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87a2435105 100644
 --- a/ash/shelf/shelf_view.cc
 +++ b/ash/shelf/shelf_view.cc
-@@ -1284,7 +1284,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
+@@ -1281,7 +1281,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
                                  shelf_->SelectValueForShelfAlignment(
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
@@ -930,7 +930,7 @@ index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9
                              SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
  }
  
-@@ -2000,6 +2001,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
+@@ -1997,6 +1998,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
      case ShelfAlignment::kRight:
        origin = gfx::Point(shelf_bounds_in_screen.x(), location.y());
        break;
@@ -940,7 +940,7 @@ index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9
    }
    return gfx::Rect(origin, gfx::Size());
  }
-@@ -2017,6 +2021,9 @@ void ShelfView::AnnounceShelfAlignment() {
+@@ -2014,6 +2018,9 @@ void ShelfView::AnnounceShelfAlignment() {
      case ShelfAlignment::kRight:
        announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_RIGHT);
        break;
@@ -950,7 +950,7 @@ index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9
    }
    announcement_view_->GetViewAccessibility().AnnounceText(announcement);
  }
-@@ -2672,9 +2679,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
+@@ -2668,9 +2675,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
  
  int ShelfView::CalculateShelfDistance(const gfx::Point& coordinate) const {
    const gfx::Rect bounds = GetBoundsInScreen();
@@ -964,7 +964,7 @@ index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9
  }
  
 diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
-index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e372766ad1 100644
+index 9876d5f93e83a0b7f798728e808138e87497d31d..c5153b1cfa74b5d2202b2cc0c904883a298d964c 100644
 --- a/ash/shelf/shelf_widget.cc
 +++ b/ash/shelf/shelf_widget.cc
 @@ -34,6 +34,7 @@
@@ -975,7 +975,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
  #include "ash/system/status_area_widget.h"
  #include "ash/wm/overview/overview_controller.h"
  #include "ash/wm/tablet_mode/tablet_mode_controller.h"
-@@ -138,10 +139,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -139,10 +140,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
      corner_radius_ = radius;
  
      layer()->SetRoundedCornerRadius({
@@ -990,7 +990,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
      });
  
      if (needs_paint) {
-@@ -173,7 +174,7 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -174,7 +175,7 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
      if (corner_radius_ > 0) {
        views::HighlightBorder::PaintBorderToCanvas(
            canvas, *owner_view_, gfx::Rect(layer()->size()),
@@ -999,7 +999,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
      } else {
        // If the shelf corners are not rounded, only paint the highlight border
        // on the inner edge of the shelf to separate the shelf and the work area.
-@@ -231,6 +232,12 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -232,6 +233,12 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
          start_point.Offset(half_thickness, 0);
          end_point.Offset(half_thickness, 0);
          break;
@@ -1012,7 +1012,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
      }
  
      // Draw the outer line.
-@@ -250,6 +257,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -251,6 +258,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
          start_point.Offset(border_thickness, 0);
          end_point.Offset(border_thickness, 0);
          break;
@@ -1023,7 +1023,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
      }
  
      // Draw the inner line.
-@@ -360,6 +371,8 @@ class ShelfWidgetDelegateView
+@@ -361,6 +372,8 @@ class ShelfWidgetDelegateView
    // Cache the state of the background blur so that it can be updated only
    // when necessary.
    bool background_is_currently_blurred_ = false;
@@ -1032,7 +1032,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
  };
  
  ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
-@@ -389,6 +402,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
+@@ -387,6 +400,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
    animating_drag_handle_.SetRoundedCornerRadius(
        {kDragHandleCornerRadius, kDragHandleCornerRadius,
         kDragHandleCornerRadius, kDragHandleCornerRadius});
@@ -1042,7 +1042,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
  }
  
  ShelfWidgetDelegateView::~ShelfWidgetDelegateView() = default;
-@@ -505,10 +521,14 @@ void ShelfWidgetDelegateView::UpdateOpaqueBackground() {
+@@ -503,10 +519,14 @@ void ShelfWidgetDelegateView::UpdateOpaqueBackground() {
    // We can easily round only 2 corners out of 4 which means we don't need as
    // much extra shelf height.
    const int safety_margin = kShelfMaxOvershootHeight;
@@ -1060,7 +1060,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
    opaque_back_ground_layer->SetBounds(opaque_background_bounds);
  
    // Do not show rounded corners when the background is in maximized mode (app
-@@ -835,11 +855,13 @@ void ShelfWidget::CalculateTargetBounds() {
+@@ -833,11 +853,13 @@ void ShelfWidget::CalculateTargetBounds() {
    const int shelf_primary_position = shelf_->SelectValueForShelfAlignment(
        available_bounds.bottom() - shelf_in_screen_portion,
        available_bounds.x() - shelf_size + shelf_in_screen_portion,
@@ -1076,7 +1076,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
  
    target_bounds_ =
        gfx::Rect(shelf_origin.x(), shelf_origin.y(), shelf_width, shelf_height);
-@@ -941,14 +963,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
+@@ -939,14 +961,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
    // 3. in RMA state - shelf should be hidden to avoid blocking the RMA app
    // controls or intercepting UI events; or
    // 4. on secondary screens in states other than ACTIVE.
@@ -1095,7 +1095,7 @@ index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e3
      hotseat_transition_animator_->SetAnimationsEnabledInSessionState(
          show_hotseat);
 diff --git a/ash/system/holding_space/holding_space_tray_bubble.cc b/ash/system/holding_space/holding_space_tray_bubble.cc
-index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df72a29431 100644
+index 891d8661be58c28842c15f15ba36a0125993824e..2da7246fdd2d513ebf1503b35b3278e5fb850e03 100644
 --- a/ash/system/holding_space/holding_space_tray_bubble.cc
 +++ b/ash/system/holding_space/holding_space_tray_bubble.cc
 @@ -4,6 +4,7 @@
@@ -1106,7 +1106,7 @@ index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df
  #include <map>
  #include <vector>
  
-@@ -411,12 +412,23 @@ HoldingSpaceTrayBubble::GetHoldingSpaceItemViews() {
+@@ -410,12 +411,23 @@ HoldingSpaceTrayBubble::GetHoldingSpaceItemViews() {
  }
  
  int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
@@ -1133,7 +1133,7 @@ index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df
            : work_area->user_work_area_bounds().bottom();
  
    const int free_space_height_above_anchor =
-@@ -426,7 +438,7 @@ int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
+@@ -425,7 +437,7 @@ int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
        GetTrayBubbleInsets(holding_space_tray_->GetBubbleWindowContainer());
    const int bubble_vertical_margin = insets.top() + insets.bottom();
  
@@ -1143,7 +1143,7 @@ index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df
  
  int HoldingSpaceTrayBubble::CalculateChildBubbleContainerMaxHeight() const {
 diff --git a/ash/system/holding_space/holding_space_tray_icon_preview.cc b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-index 7d10cc4c57f286e54c44b271de51c9b1194cc74a..d064c350d52761b4cce0004c2edcaa2fa6865d61 100644
+index 4540fbc9b2bae1e01887217180f677470e520070..e18dbcd5e522d888131fded40297eaab3f87cd4d 100644
 --- a/ash/system/holding_space/holding_space_tray_icon_preview.cc
 +++ b/ash/system/holding_space/holding_space_tray_icon_preview.cc
 @@ -115,6 +115,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
@@ -1255,7 +1255,7 @@ index 622af2358dce8817f32916fc5d47b72935f088a1..5cb07b8afbab0254246d1eaac791ca48
  
    bubble_->bubble_view()->ChangeAnchorRect(anchor_rect);
 diff --git a/ash/system/toast/anchored_nudge.cc b/ash/system/toast/anchored_nudge.cc
-index a7e9957060ee723bbac6b22847b6940143215b36..daf33fbaf7266a32692178480f1685f83ae33c92 100644
+index a7bb13b5a6aacbbff57ed4deb0157f04073a5555..557bf32c14142cdacf1aeee1a5144bd85e852490 100644
 --- a/ash/system/toast/anchored_nudge.cc
 +++ b/ash/system/toast/anchored_nudge.cc
 @@ -350,11 +350,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
@@ -1273,7 +1273,7 @@ index a7e9957060ee723bbac6b22847b6940143215b36..daf33fbaf7266a32692178480f1685f8
  }
  
 diff --git a/ash/system/tray/tray_background_view.cc b/ash/system/tray/tray_background_view.cc
-index 35fbd3d74b7ad29bfa7747e553b7f68020c004f6..5fa04dc922b17ecc1392a97fb6bff47820942a03 100644
+index dd2a2ad94d57b3ca0f590449608300c94e714e62..52948fd6f825097fc5230ee97d96a4bc2656c661 100644
 --- a/ash/system/tray/tray_background_view.cc
 +++ b/ash/system/tray/tray_background_view.cc
 @@ -579,6 +579,9 @@ void TrayBackgroundView::ShowContextMenuForViewImpl(
@@ -1287,7 +1287,7 @@ index 35fbd3d74b7ad29bfa7747e553b7f68020c004f6..5fa04dc922b17ecc1392a97fb6bff478
  
    context_menu_runner_->RunMenuAt(
 diff --git a/ash/system/tray/tray_bubble_view.cc b/ash/system/tray/tray_bubble_view.cc
-index 3e50e045be1002cc9fd477e1e18c03f90637efd6..0990e947e41495dd8a9ffb9143268302699e35db 100644
+index 3402fb3e6c6394bef060ee799f938d41c18e31bc..9bd09c6a6be10b681bebddfe48fb008eb4d37b7c 100644
 --- a/ash/system/tray/tray_bubble_view.cc
 +++ b/ash/system/tray/tray_bubble_view.cc
 @@ -82,6 +82,9 @@ BubbleBorder::Arrow GetArrowAlignment(ash::ShelfAlignment alignment) {
@@ -1410,7 +1410,7 @@ index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6b
  }
  
 diff --git a/ash/wm/desks/desk_bar_view.cc b/ash/wm/desks/desk_bar_view.cc
-index b01341ef8b4e907338ac62dd99724f6127786d1b..be3146fed5abab1dd38a4c7ace317b7d69232f98 100644
+index 353c238afed632d728723fab7c2850dcc51b6470..2a80ec716f0dde8deddf11989accc594ef40f642 100644
 --- a/ash/wm/desks/desk_bar_view.cc
 +++ b/ash/wm/desks/desk_bar_view.cc
 @@ -124,6 +124,11 @@ gfx::Rect DeskBarView::GetAvailableBounds() const {
@@ -1436,10 +1436,10 @@ index b01341ef8b4e907338ac62dd99724f6127786d1b..be3146fed5abab1dd38a4c7ace317b7d
    GetWidget()->SetBounds(new_bounds);
  }
 diff --git a/ash/wm/window_animations.cc b/ash/wm/window_animations.cc
-index 13163f0ba8b2ce374ed698bd79240fd2cd1872c3..c15947ce2e217aa08cb15255aef4992544b0d750 100644
+index 3308b2d26c12141e5dcd63904c220f70eb1067b1..630f141c0ba84702532dbce9eba91e981e7d8feb 100644
 --- a/ash/wm/window_animations.cc
 +++ b/ash/wm/window_animations.cc
-@@ -790,6 +790,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+@@ -736,6 +736,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
          item_rect.set_x(shelf_bounds.right());
        else if (shelf->alignment() == ShelfAlignment::kRight)
          item_rect.set_x(shelf_bounds.x());
@@ -1448,7 +1448,7 @@ index 13163f0ba8b2ce374ed698bd79240fd2cd1872c3..c15947ce2e217aa08cb15255aef49925
        else
          item_rect.set_y(shelf_bounds.y());
        return item_rect;
-@@ -810,6 +812,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+@@ -756,6 +758,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
        return gfx::Rect(work_area.x(), work_area.y(), 0, 0);
      case ShelfAlignment::kRight:
        return gfx::Rect(work_area.right(), work_area.y(), 0, 0);
@@ -1458,10 +1458,10 @@ index 13163f0ba8b2ce374ed698bd79240fd2cd1872c3..c15947ce2e217aa08cb15255aef49925
    NOTREACHED();
  }
 diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-index 3a167e3cbb7071db44b6379bb628068e01db5069..447401f98743e9e50b351bd2ed3fd41769dbb87b 100644
+index 7f16953d7dceeec4362e9807f4f8e029100f702d..e81b19158f98232fc80d0ccb1e654cc52351aaa9 100644
 --- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
 +++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-@@ -3535,6 +3535,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
+@@ -3486,6 +3486,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
      case ash::ShelfAlignment::kRight:
        alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
        break;
@@ -1471,7 +1471,7 @@ index 3a167e3cbb7071db44b6379bb628068e01db5069..447401f98743e9e50b351bd2ed3fd417
      case ash::ShelfAlignment::kBottomLocked:
        // ShelfAlignment::kBottomLocked not supported by
        // shelf_prefs.cc
-@@ -3573,10 +3576,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
+@@ -3524,10 +3527,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
      case api::autotest_private::ShelfAlignmentType::kRight:
        alignment = ash::ShelfAlignment::kRight;
        break;
@@ -1488,7 +1488,7 @@ index 3a167e3cbb7071db44b6379bb628068e01db5069..447401f98743e9e50b351bd2ed3fd417
    int64_t display_id;
    if (!base::StringToInt64(params->display_id, &display_id)) {
 diff --git a/chrome/common/extensions/api/autotest_private.webidl b/chrome/common/extensions/api/autotest_private.webidl
-index 044ee45dc6f82cae375487b87ccd1947c75c2841..2022de306562291e8f3d983b800758893b7bab88 100644
+index 986a364925c0584d02bdab3fa26c99848a249e67..f96e6969ac58c82e2aa1a041fc7b3323dcad65e7 100644
 --- a/chrome/common/extensions/api/autotest_private.webidl
 +++ b/chrome/common/extensions/api/autotest_private.webidl
 @@ -9,7 +9,8 @@ enum ShelfAlignmentType {

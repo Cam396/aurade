@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
-index 2552cbdc17..7a0c9f4e0d 100644
+index ef3b886d3ab6b1803ed77588b021b658b17333ad..3d48da0d6c142e90d94cae8549ae37dbe3f7ad7f 100644
 --- a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 +++ b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 @@ -15,8 +15,11 @@
@@ -112,10 +112,10 @@ index 2552cbdc17..7a0c9f4e0d 100644
        ChromeShelfController::instance()->OnUserProfileReadyToSwitch(profile);
      }
 diff --git a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
-index 62a89cfaa6..01f29c2e03 100644
+index 37115f2b088fc1eb1c7e7fa7e06808698211f4eb..87424fe087ce039c288a571c5ee772eabf0049e2 100644
 --- a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
 +++ b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
-@@ -305,7 +305,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,
+@@ -304,7 +304,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,
        profile = profile->GetOriginalProfile();
      }
    }
@@ -123,7 +123,7 @@ index 62a89cfaa6..01f29c2e03 100644
    // All profile relevant settings get bound to the current profile.
    AttachProfile(profile);
    DCHECK_EQ(profile, profile_);
-@@ -807,6 +806,16 @@ void ChromeShelfController::SetShelfIDForBrowserWindowContents(
+@@ -788,6 +787,16 @@ void ChromeShelfController::SetShelfIDForBrowserWindowContents(
  void ChromeShelfController::OnUserProfileReadyToSwitch(Profile* profile) {
    if (user_switch_observer_.get()) {
      user_switch_observer_->OnUserProfileReadyToSwitch(profile);

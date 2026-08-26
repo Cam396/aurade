@@ -1,5 +1,5 @@
 diff --git a/ash/login/ui/login_expanded_public_account_view.cc b/ash/login/ui/login_expanded_public_account_view.cc
-index 048498be212ea6d59670622ddd67c1a12a7eb1a2..7fe95dccceae37119019c59a1d77279a317583da 100644
+index 9e5414fee1bdd9572be8a45db18de683cbda42a3..4b0bf455c4354a0861cd7a32a36787ed5aeb4a1d 100644
 --- a/ash/login/ui/login_expanded_public_account_view.cc
 +++ b/ash/login/ui/login_expanded_public_account_view.cc
 @@ -436,14 +436,19 @@ class RightPaneView : public NonAccessibleView {
@@ -26,13 +26,13 @@ index 048498be212ea6d59670622ddd67c1a12a7eb1a2..7fe95dccceae37119019c59a1d77279a
  
      learn_more_label_->SetProperty(
 diff --git a/chrome/browser/ash/login/auth/chrome_login_performer.cc b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-index 9ff57a12de7bc74e9d47e907334b7da26d948850..5bc62d509da9bd6d4417db3c3032cbda51000a39 100644
+index 583eb57c09c48f247418998c708b93eb237db660..da0b5dda9a5ae8bc650c250225f3987425163d29 100644
 --- a/chrome/browser/ash/login/auth/chrome_login_performer.cc
 +++ b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-@@ -7,8 +7,11 @@
- #include <memory>
- 
+@@ -10,8 +10,11 @@
  #include "ash/constants/ash_paths.h"
+ #include "base/check.h"
+ #include "base/check_deref.h"
 +#include "base/files/file_util.h"
  #include "base/functional/bind.h"
  #include "base/path_service.h"
@@ -41,7 +41,7 @@ index 9ff57a12de7bc74e9d47e907334b7da26d948850..5bc62d509da9bd6d4417db3c3032cbda
  #include "base/task/task_traits.h"
  #include "base/task/thread_pool.h"
  #include "chrome/browser/ash/login/helper.h"
-@@ -136,6 +139,11 @@ void ChromeLoginPerformer::LoadAndApplyEarlyPrefs(
+@@ -144,6 +147,11 @@ void ChromeLoginPerformer::LoadAndApplyEarlyPrefs(
        base::PathService::Get(ash::DIR_HOMEDIR_MOUNT, &early_prefs_dir);
    CHECK(success);
    early_prefs_dir = early_prefs_dir.Append(context->GetUserIDHash());
@@ -54,7 +54,7 @@ index 9ff57a12de7bc74e9d47e907334b7da26d948850..5bc62d509da9bd6d4417db3c3032cbda
    // Use TaskPriority::HIGHEST as this operation blocks
    // user login flow.
 diff --git a/chrome/browser/ash/login/existing_user_controller.cc b/chrome/browser/ash/login/existing_user_controller.cc
-index b5285a37b1d5247ef8c450ae5048305baace1a80..5f5f135a5f62fd3f8ef0ba287d6ea11d9baba498 100644
+index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c58cb93795 100644
 --- a/chrome/browser/ash/login/existing_user_controller.cc
 +++ b/chrome/browser/ash/login/existing_user_controller.cc
 @@ -26,16 +26,19 @@
@@ -353,7 +353,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
  
    user_manager::KnownUser known_user(&local_state);
 diff --git a/chrome/browser/ash/login/signin/auth_error_observer.cc b/chrome/browser/ash/login/signin/auth_error_observer.cc
-index 3df5f56d1696674f60819502d15f8fe386b9e743..453bfdfc1fb464b822f2037c9ae68ec21cf48e1d 100644
+index 5e3e445d62acf3a7a74db1887f77ac2271e6fd15..f776640978b17b9b3956fe5e793176d4a3d64ae5 100644
 --- a/chrome/browser/ash/login/signin/auth_error_observer.cc
 +++ b/chrome/browser/ash/login/signin/auth_error_observer.cc
 @@ -8,6 +8,7 @@
@@ -364,7 +364,7 @@ index 3df5f56d1696674f60819502d15f8fe386b9e743..453bfdfc1fb464b822f2037c9ae68ec2
  #include "chrome/browser/ash/login/reauth_stats.h"
  #include "chrome/browser/ash/login/signin/signin_error_notifier.h"
  #include "chrome/browser/ash/profiles/profile_helper.h"
-@@ -20,12 +21,23 @@
+@@ -19,12 +20,23 @@
  #include "components/user_manager/user_manager.h"
  
  namespace ash {
@@ -388,8 +388,8 @@ index 3df5f56d1696674f60819502d15f8fe386b9e743..453bfdfc1fb464b822f2037c9ae68ec2
 +  return user && user->HasGaiaAccount() && !IsAuraLocalAccount(user);
  }
  
- AuthErrorObserver::AuthErrorObserver(PrefService* local_state, Profile* profile)
-@@ -83,6 +95,9 @@ void AuthErrorObserver::HandleAuthError(
+ AuthErrorObserver::AuthErrorObserver(PrefService* local_state,
+@@ -84,6 +96,9 @@ void AuthErrorObserver::HandleAuthError(
      const GoogleServiceAuthError& auth_error) {
    const user_manager::User* const user =
        ProfileHelper::Get()->GetUserByProfile(profile_);
@@ -437,7 +437,7 @@ index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e
    signin_scoped_device_id_ = signin_scoped_device_id;
    auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
 diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a4430e056 100644
+index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460f6fbd4f1 100644
 --- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
 +++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
 @@ -14,8 +14,10 @@
@@ -451,7 +451,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
  #include "base/strings/utf_string_conversions.h"
  #include "build/build_config.h"
  #include "chrome/browser/ash/account_manager/account_manager_util.h"
-@@ -63,6 +65,9 @@ namespace {
+@@ -60,6 +62,9 @@ namespace {
  
  constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
  constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
@@ -461,7 +461,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
  
  bool g_ignore_sync_errors_for_test_ = false;
  
-@@ -83,6 +88,12 @@ bool AreAllAccountsMigrated(
+@@ -80,6 +85,12 @@ bool AreAllAccountsMigrated(
    return true;
  }
  
@@ -474,7 +474,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
  // Returns true if the child user has migrated at least one of their
  // secondary edu accounts to ARC++.
  bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
-@@ -214,7 +225,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -211,7 +222,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
    error_controller_->AddObserver(this);
    const AccountId account_id =
        multi_user_util::GetAccountIdFromProfile(profile_);
@@ -484,7 +484,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
        !token_handle_store_->IsRecentlyChecked(account_id)) {
      token_handle_store_->IsReauthRequired(
          account_id, profile->GetURLLoaderFactory(),
-@@ -227,6 +239,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -224,6 +236,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
  void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
                                               const std::string& token,
                                               bool reauth_required) {
@@ -495,7 +495,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
    if (ash::features::IsUseTokenHandleStoreEnabled()) {
      account_manager::AccountManager* account_manager =
          AccountManagerFactory::Get()->GetAccountManager(
-@@ -281,8 +297,28 @@ void SigninErrorNotifier::Shutdown() {
+@@ -278,8 +294,28 @@ void SigninErrorNotifier::Shutdown() {
  }
  
  void SigninErrorNotifier::OnErrorChanged() {
@@ -525,7 +525,7 @@ index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a
  
    if (!error_controller_->HasError()) {
      NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
-@@ -328,8 +364,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
+@@ -325,8 +361,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
    // to a Family Link Supervised account, then suppress the notification.
    supervised_user::SupervisedUserService* service =
        supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);

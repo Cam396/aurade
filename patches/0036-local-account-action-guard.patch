@@ -1,0 +1,28 @@
+--- a/chrome/browser/ash/login/screens/aura_local_account_screen.cc
++++ b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+@@ -121,6 +121,11 @@
+ void AuraLocalAccountScreen::HideImpl() {}
+ 
+ void AuraLocalAccountScreen::OnUserAction(const base::ListValue& args) {
++  // AuraDE compatibility: malformed WebUI actions must be ignored instead of
++  // indexing an empty list and crashing the OOBE process.
++  if (args.empty() || !args[0].is_string()) {
++    return;
++  }
+   const std::string& action_id = args[0].GetString();
+   if (action_id == kUserActionBack) {
+     exit_callback_.Run(Result::BACK);
+--- a/chrome/browser/ash/login/screens/user_creation_screen.cc
++++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
+@@ -153,6 +153,11 @@
+ }
+ 
+ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
++  // AuraDE compatibility: ignore malformed WebUI actions instead of reaching
++  // BaseScreen::OnUserAction, whose diagnostic check assumes one argument.
++  if (args.empty() || !args[0].is_string()) {
++    return;
++  }
+   const std::string& action_id = args[0].GetString();
+   if (action_id == kUserActionLocalAccount) {
+     context()->sign_in_as_child = false;

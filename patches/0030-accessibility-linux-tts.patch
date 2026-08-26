@@ -1,8 +1,8 @@
 diff --git a/ash/accessibility/accessibility_controller.cc b/ash/accessibility/accessibility_controller.cc
-index 8d48a7d092..98039430d2 100644
+index eb252cf24cfaa9729826dc5cce448785727cdf48..20f092b84681fb9973a993566e313a924230a6a6 100644
 --- a/ash/accessibility/accessibility_controller.cc
 +++ b/ash/accessibility/accessibility_controller.cc
-@@ -81,6 +81,7 @@
+@@ -82,6 +82,7 @@
  #include "base/metrics/histogram_macros.h"
  #include "base/metrics/user_metrics.h"
  #include "base/strings/string_number_conversions.h"
@@ -10,7 +10,7 @@ index 8d48a7d092..98039430d2 100644
  #include "base/time/time.h"
  #include "chromeos/ash/components/audio/cras_audio_handler.h"
  #include "chromeos/ash/components/audio/sounds.h"
-@@ -1423,7 +1424,11 @@ void AccessibilityController::RegisterProfilePrefs(
+@@ -1424,7 +1425,11 @@ void AccessibilityController::RegisterProfilePrefs(
        user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
    registry->RegisterBooleanPref(
        prefs::kAccessibilityEnhancedNetworkVoicesInSelectToSpeakAllowed,
@@ -24,10 +24,10 @@ index 8d48a7d092..98039430d2 100644
    registry->RegisterBooleanPref(
        prefs::kAccessibilitySelectToSpeakBackgroundShading,
 diff --git a/ash/accessibility/accessibility_controller_unittest.cc b/ash/accessibility/accessibility_controller_unittest.cc
-index d3973602e4..cd496d11ab 100644
+index 80293cb9f6d8cc20f1a60f7efc6537eb1ffb5a34..3452ae83fc3b50f37f3f1ee045d0de4ae33a598f 100644
 --- a/ash/accessibility/accessibility_controller_unittest.cc
 +++ b/ash/accessibility/accessibility_controller_unittest.cc
-@@ -47,6 +47,7 @@
+@@ -48,6 +48,7 @@
  #include "base/run_loop.h"
  #include "base/scoped_observation.h"
  #include "base/strings/utf_string_conversions.h"
@@ -35,7 +35,7 @@ index d3973602e4..cd496d11ab 100644
  #include "base/test/bind.h"
  #include "base/test/metrics/histogram_tester.h"
  #include "base/test/scoped_feature_list.h"
-@@ -328,6 +329,9 @@ TEST_F(AccessibilityControllerTest, PrefsAreRegistered) {
+@@ -329,6 +330,9 @@ TEST_F(AccessibilityControllerTest, PrefsAreRegistered) {
        prefs()->FindPreference(prefs::kAccessibilityVirtualKeyboardEnabled));
    EXPECT_TRUE(prefs()->FindPreference(
        prefs::kAccessibilityEnhancedNetworkVoicesInSelectToSpeakAllowed));
