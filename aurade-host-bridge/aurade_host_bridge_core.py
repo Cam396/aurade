@@ -420,6 +420,361 @@ class CommandRunner:
         return CommandResult(completed.returncode, completed.stdout[-262144:], completed.stderr[-262144:])
 
 
+#: Units pacman prints sizes in, with LANG pinned to C.UTF-8 by the runner.
+SIZE_UNITS = {"B": 1, "KiB": 1024, "MiB": 1024 ** 2, "GiB": 1024 ** 3,
+              "TiB": 1024 ** 4, "PiB": 1024 ** 5}
+
+
+def parse_size(text: str) -> int:
+    """One printed size as bytes, or zero when it is not one.
+
+    Returns zero rather than raising, because a single unreadable line in a
+    long listing should cost that line and not the whole reading.
+    """
+    fields = text.strip().split()
+    if len(fields) < 2:
+        return 0
+    try:
+        amount = float(fields[0].replace(",", ""))
+    except ValueError:
+        return 0
+    return int(amount * SIZE_UNITS.get(fields[1], 0))
+
+
+def parse_btrfs_usage(text: str) -> dict[str, int]:
+    """The real size of the volume, from btrfs rather than from statvfs.
+
+    statvfs on Btrfs does not tell the truth and cannot. Free space depends on
+    the allocation profile, and snapshots do not appear in it at all, so a
+    machine with a rollback snapshot reports space that is not there. `btrfs
+    filesystem usage -b` reports the device's own numbers in bytes.
+    """
+    found: dict[str, int] = {}
+    keys = {"Device size": "total", "Used": "used", "Free (estimated)": "free",
+            "Device allocated": "allocated"}
+    for line in text.splitlines():
+        label, separator, value = line.partition(":")
+        if not separator:
+            continue
+        key = keys.get(label.strip())
+        if key is None or key in found:
+            continue
+        digits = value.strip().split()[0] if value.strip() else ""
+        if digits.isdigit():
+            found[key] = int(digits)
+    return found
+
+
+def parse_btrfs_qgroups(text: str) -> dict[str, dict[str, int]]:
+    """Referenced and exclusive bytes per subvolume.
+
+    Exclusive is the number that answers "how much would I get back if this
+    went away", which is the only honest way to size a snapshot: a snapshot
+    that shares every block with the live system occupies almost nothing, and
+    reporting its referenced size would tell somebody they could reclaim
+    hundreds of gigabytes that do not exist.
+    """
+    found: dict[str, dict[str, int]] = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 3 or "/" not in fields[0]:
+            continue
+        level, _, subvolume = fields[0].partition("/")
+        # Only level zero qgroups are subvolumes. Btrfs also carries higher
+        # level groups for accounting across several subvolumes, and 1/0 is a
+        # perfectly ordinary one of those. Reading it as subvolume 0 puts
+        # somebody else's total on a row with a subvolume's name on it.
+        if level != "0" or not subvolume.isdigit():
+            continue
+        if not fields[1].isdigit() or not fields[2].isdigit():
+            continue
+        found[subvolume] = {"referenced": int(fields[1]), "exclusive": int(fields[2])}
+    return found
+
+
+def parse_btrfs_subvolumes(text: str) -> list[dict[str, str]]:
+    """Subvolume ids and paths, from `btrfs subvolume list -a`.
+
+    The -a form prefixes anything outside the mount point with <FS_TREE>/,
+    which is not part of the path and is stripped here rather than at every
+    place that compares one.
+    """
+    found: list[dict[str, str]] = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 9 or fields[0] != "ID":
+            continue
+        try:
+            path_index = fields.index("path")
+        except ValueError:
+            continue
+        path = " ".join(fields[path_index + 1:])
+        if path.startswith("<FS_TREE>/"):
+            path = path[len("<FS_TREE>/"):]
+        found.append({"id": fields[1], "path": path})
+    return found
+
+
+def parse_installed_size(text: str) -> int:
+    """What pacman thinks it has put on the disk, from `pacman -Qi`."""
+    total = 0
+    for line in text.splitlines():
+        label, separator, value = line.partition(":")
+        if separator and label.strip() == "Installed Size":
+            total += parse_size(value)
+    return total
+
+
+def is_snapshot_path(path: str, snapshot_dir: str) -> bool:
+    """Whether a subvolume is one of the installer's rollback snapshots."""
+    root = snapshot_dir.strip("/")
+    if not root:
+        return False
+    return path == root or path.startswith(root + "/")
+
+
+def storage_breakdown(usage: Mapping[str, int],
+                      qgroups: Mapping[str, Mapping[str, int]],
+                      subvolumes: Sequence[Mapping[str, str]],
+                      package_bytes: int,
+                      *,
+                      home_path: str = "@home",
+                      system_path: str = "@",
+                      snapshot_dir: str = "@snapshots") -> dict[str, Any]:
+    """What is actually on the internal drive, and which parts are measured.
+
+    Two rules this obeys that the ChromeOS storage page does not.
+
+    Every row says whether it was measured or derived. The ChromeOS page
+    computes its System row as everything left over, so each category that
+    silently failed to report is absorbed into System and shown as though
+    somebody had counted it. A row nobody counted is marked here, and the
+    interface can then decline to draw it as if it were a fact.
+
+    Snapshots are sized by exclusive bytes. That is the amount deleting one
+    would return, which is what somebody looking at this page wants to know.
+    Referenced bytes would report a snapshot of a full disk as being the size
+    of the full disk, and offer hundreds of gigabytes that do not exist.
+    """
+    total = int(usage.get("total", 0))
+    used = int(usage.get("used", 0))
+    free = int(usage.get("free", 0))
+
+    by_path = {str(entry.get("path", "")): str(entry.get("id", ""))
+               for entry in subvolumes}
+
+    def exclusive(path: str) -> int:
+        subvolume = by_path.get(path)
+        if subvolume is None:
+            return 0
+        return int(qgroups.get(subvolume, {}).get("exclusive", 0))
+
+    snapshot_bytes = 0
+    snapshot_count = 0
+    for entry in subvolumes:
+        path = str(entry.get("path", ""))
+        if is_snapshot_path(path, snapshot_dir):
+            snapshot_count += 1
+            snapshot_bytes += int(
+                qgroups.get(str(entry.get("id", "")), {}).get("exclusive", 0))
+
+    home_bytes = exclusive(home_path)
+    system_total = exclusive(system_path)
+    packages = min(max(int(package_bytes), 0), system_total) if system_total else max(int(package_bytes), 0)
+    system_rest = max(system_total - packages, 0)
+    counted = system_total + home_bytes + snapshot_bytes
+    shared = max(used - counted, 0)
+
+    rows = [
+        {"key": "packages", "bytes": packages, "measured": True},
+        {"key": "system", "bytes": system_rest, "measured": system_total > 0},
+        {"key": "home", "bytes": home_bytes, "measured": home_path in by_path},
+        {"key": "snapshots", "bytes": snapshot_bytes, "measured": True,
+         "count": snapshot_count},
+        # Blocks more than one subvolume refers to. Real, and belonging to no
+        # single row, so it is its own row rather than being folded into a
+        # category somebody would read as a measurement of that category.
+        {"key": "shared", "bytes": shared, "measured": False},
+    ]
+    return {
+        "total": total,
+        "used": used,
+        "free": free,
+        "rows": rows,
+        "detailed": True,
+    }
+
+
+def plain_breakdown(total: int, free: int) -> dict[str, Any]:
+    """What can be said about a filesystem that is not Btrfs.
+
+    Total, used and free, and no rows at all. A breakdown this cannot measure
+    is not estimated: an invented number on a storage page is worse than an
+    absent one, because somebody deletes files against it.
+    """
+    return {
+        "total": int(total),
+        "used": max(int(total) - int(free), 0),
+        "free": int(free),
+        "rows": [],
+        "detailed": False,
+    }
+
+
+class DiskUsageBackend:
+    """What is on the drive AuraDE was installed to.
+
+    The ChromeOS settings page asks a daemon called spaced for the size of the
+    root device and falls back to statvfs on the home path when it is absent,
+    which it always is here. That fallback is wrong twice over on an AuraDE
+    machine: statvfs measures the filesystem rather than the drive, and on
+    Btrfs it cannot see snapshots at all, so a machine holding a rollback
+    snapshot reports free space it does not have.
+
+    This asks Btrfs, which knows.
+    """
+
+    def __init__(self, runner: CommandRunner, btrfs: str = "/usr/bin/btrfs",
+                 pacman: str = "/usr/bin/pacman", findmnt: str = "/usr/bin/findmnt",
+                 lsblk: str = "/usr/bin/lsblk", mount_point: str = "/",
+                 snapshot_dir: str = "@snapshots"):
+        self.runner = runner
+        self.btrfs = btrfs
+        self.pacman = pacman
+        self.findmnt = findmnt
+        self.lsblk = lsblk
+        self.mount_point = mount_point
+        self.snapshot_dir = snapshot_dir
+
+    # -- the parts ---------------------------------------------------------
+
+    def filesystem(self) -> dict[str, str]:
+        """The device and filesystem type carrying the mount point."""
+        result = self.runner.run(
+            [self.findmnt, "-no", "SOURCE,FSTYPE", "--target", self.mount_point],
+            timeout=30)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise BridgeError("storage_unreadable",
+                              "could not identify the installed filesystem",
+                              {"stderr": result.stderr})
+        fields = result.stdout.split()
+        source = fields[0] if fields else ""
+        # A Btrfs subvolume mount reads as /dev/nvme0n1p2[/@]; the device is
+        # the part before the bracket.
+        device = source.split("[", 1)[0]
+        return {"device": device, "type": fields[1] if len(fields) > 1 else ""}
+
+    def device_size(self, device: str) -> int:
+        """The whole drive, not the partition and not the filesystem.
+
+        This is the number a person means by the size of their disk, and it is
+        the one the storage page should lead with. A 512GB drive with a 400GB
+        root partition is still a 512GB drive, and a page that says 400 has
+        lost the difference somewhere the user cannot see.
+        """
+        result = self.runner.run([self.lsblk, "-bndo", "SIZE", device], timeout=30)
+        if result.returncode != 0:
+            return 0
+        text = result.stdout.strip().splitlines()
+        return int(text[0]) if text and text[0].strip().isdigit() else 0
+
+    def _btrfs(self, *args: str, timeout: int = 60) -> str:
+        result = self.runner.run([self.btrfs, *args], timeout=timeout)
+        if result.returncode != 0:
+            raise BridgeError("storage_unreadable",
+                              "could not read the Btrfs volume",
+                              {"stderr": result.stderr})
+        return result.stdout
+
+    def package_bytes(self) -> int:
+        result = self.runner.run([self.pacman, "-Qi"], timeout=120)
+        if result.returncode != 0:
+            return 0
+        return parse_installed_size(result.stdout)
+
+    # -- the whole reading -------------------------------------------------
+
+    def state(self) -> dict[str, Any]:
+        filesystem = self.filesystem()
+        if filesystem["type"] != "btrfs":
+            free = 0
+            total = self.device_size(filesystem["device"])
+            try:
+                statistics = os.statvfs(self.mount_point)
+                free = statistics.f_bavail * statistics.f_frsize
+                if not total:
+                    total = statistics.f_blocks * statistics.f_frsize
+            except OSError:
+                pass
+            breakdown = plain_breakdown(total, free)
+            breakdown["device"] = filesystem["device"]
+            breakdown["filesystem"] = filesystem["type"]
+            return breakdown
+
+        usage = parse_btrfs_usage(
+            self._btrfs("filesystem", "usage", "-b", self.mount_point))
+        qgroups: dict[str, dict[str, int]] = {}
+        try:
+            qgroups = parse_btrfs_qgroups(
+                self._btrfs("qgroup", "show", "-re", "--raw", self.mount_point))
+        except BridgeError:
+            # Quota groups are off on this volume. Everything else is still
+            # true, so the totals stand and the rows say they were not
+            # measured rather than being filled with a guess.
+            qgroups = {}
+        subvolumes = parse_btrfs_subvolumes(
+            self._btrfs("subvolume", "list", "-a", self.mount_point))
+        breakdown = storage_breakdown(
+            usage, qgroups, subvolumes, self.package_bytes(),
+            snapshot_dir=self.snapshot_dir)
+        device_total = self.device_size(filesystem["device"])
+        if device_total:
+            breakdown["device_total"] = device_total
+        breakdown["device"] = filesystem["device"]
+        breakdown["filesystem"] = filesystem["type"]
+        breakdown["quotas"] = bool(qgroups)
+        if not qgroups:
+            breakdown["detailed"] = False
+            for row in breakdown["rows"]:
+                row["measured"] = False
+        return breakdown
+
+    def snapshots(self) -> dict[str, Any]:
+        """Every rollback snapshot, and what deleting it would return.
+
+        Sized the same way the storage page sizes them, from the same call,
+        because two pages that report different numbers for the same snapshot
+        are two pages nobody can trust.
+        """
+        filesystem = self.filesystem()
+        if filesystem["type"] != "btrfs":
+            return {"snapshots": [], "supported": False}
+        try:
+            qgroups = parse_btrfs_qgroups(
+                self._btrfs("qgroup", "show", "-re", "--raw", self.mount_point))
+        except BridgeError:
+            qgroups = {}
+        subvolumes = parse_btrfs_subvolumes(
+            self._btrfs("subvolume", "list", "-a", self.mount_point))
+        found = []
+        for entry in subvolumes:
+            path = str(entry.get("path", ""))
+            if not is_snapshot_path(path, self.snapshot_dir):
+                continue
+            subvolume = str(entry.get("id", ""))
+            sizes = qgroups.get(subvolume, {})
+            found.append({
+                "id": subvolume,
+                "path": path,
+                "name": path.rsplit("/", 1)[-1],
+                "reclaimable": int(sizes.get("exclusive", 0)),
+                "referenced": int(sizes.get("referenced", 0)),
+                "measured": subvolume in qgroups,
+            })
+        found.sort(key=lambda item: item["name"])
+        return {"snapshots": found, "supported": True, "quotas": bool(qgroups)}
+
+
 class PacmanBackend:
     def __init__(self, runner: CommandRunner, pacman: str = "/usr/bin/pacman",
                  checkupdates: str = "/usr/bin/checkupdates",

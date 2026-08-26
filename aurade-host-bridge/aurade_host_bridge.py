@@ -28,6 +28,7 @@ from aurade_host_bridge_core import (
     BridgeError,
     BluetoothBackend,
     CommandRunner,
+    DiskUsageBackend,
     PacmanBackend,
     StorageBackend,
     UDISKS_ROOT,
@@ -111,6 +112,7 @@ class HostBridge(dbus.service.Object):
         self.bluetooth = BluetoothBackend(self.facade)
         self.storage = StorageBackend(self.facade)
         self.runner = CommandRunner()
+        self.disk = DiskUsageBackend(self.runner)
         self.pacman = PacmanBackend(self.runner)
         self.authorizer = Authorizer(bus)
         self.jobs: dict[str, dict[str, Any]] = {}
@@ -304,6 +306,21 @@ class HostBridge(dbus.service.Object):
         return self._invoke("storage.format", lambda: self._authorized(
             sender, ACTION_FORMAT, lambda: self.storage.format(
                 str(block_path), filesystem, label, confirmation)))
+
+    @dbus.service.method(INTERFACE, in_signature="", out_signature="s")
+    def DiskGetUsage(self) -> str:
+        """What is on the drive this system was installed to.
+
+        Read only, so no authorisation is required: it says how full a disk
+        is, which is a thing the person sitting at the machine can already see
+        by opening a file manager.
+        """
+        return self._invoke("disk_usage", self.disk.state)
+
+    @dbus.service.method(INTERFACE, in_signature="", out_signature="s")
+    def DiskListSnapshots(self) -> str:
+        """Every rollback snapshot, and what deleting one would return."""
+        return self._invoke("disk_snapshots", self.disk.snapshots)
 
     @dbus.service.method(INTERFACE, in_signature="", out_signature="s")
     def PacmanListInstalled(self) -> str:
