@@ -195,6 +195,14 @@ REFUSALS = {
     "SecretsRequired": "That network needs a password.",
     "UnknownDevice": "This computer has no Wi-Fi radio that is switched on.",
     "ConnectionInvalid": "That network could not be joined with those details.",
+    # NetworkManager is not running, or is not on this bus at all. Distinct
+    # from a network that would not join: nothing was attempted, and the
+    # answer is not to try again with a different password.
+    "ServiceUnknown": "NetworkManager is not running on this computer.",
+    "was not provided by any": "NetworkManager is not running on this computer.",
+    "org.freedesktop.DBus.Error.NoReply": (
+        "The network service is not answering."),
+    "Timeout": "The network service is not answering.",
 }
 
 

@@ -40,7 +40,27 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
+from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow  # noqa: E402
+
+
+class NoRadio:
+    """A NetworkManager that is not there.
+
+    The window must build and sign somebody in on a machine with no system
+    bus at all, which is every build host. A greeter that needs a radio to
+    draw is a greeter that fails closed on exactly the machine somebody is
+    trying to rescue.
+    """
+
+    def wifi_device(self):
+        raise NET.NetworkError("no system bus on this machine")
+
+    def networks(self, _path):
+        return []
+
+    def scan(self, _path):
+        return None
 
 FAILURES: list[str] = []
 
@@ -150,6 +170,7 @@ def build(app, replies: list[dict]) -> tuple[GreeterWindow, Greetd]:
     SERVICE = Greetd(replies)
     if WINDOW is None:
         WINDOW = GreeterWindow(app, SERVICE.transport)
+        WINDOW.nm = NoRadio()
         WINDOW.present()
         pump()
     else:
@@ -322,6 +343,31 @@ def test_a_dead_service_says_something_a_person_can_act_on(app) -> None:
 
 
 # --- the things that are only true at runtime -----------------------------
+
+def test_the_status_area_opens_and_says_there_is_no_radio(app) -> None:
+    """A machine with no NetworkManager still has a working login screen.
+
+    The panel is the only way to fix a network from here, so it has to be
+    reachable, and on a machine with no radio it has to say so rather than
+    show an empty list somebody presses at.
+    """
+    window, service = build(app, [])
+    try:
+        check(window.widgets["status"] is not None, "there is no status area")
+        check(window.widgets["panel"] is not None, "the status area opens nothing")
+        window.refresh_networks(scan=False)
+        check(pump_until(lambda: not window._network_busy),  # noqa: SLF001
+              "reading the network never came back")
+        note = window.widgets["panel.note"]
+        check(note.get_visible(), "a machine with no radio said nothing at all")
+        check(bool(note.get_label()), "the note is visible and empty")
+        # And the power controls moved into the panel rather than vanishing.
+        for name in ("power.restart", "power.off"):
+            check(window.widgets[name] is not None,
+                  f"{name} was lost when the corner became a panel")
+    finally:
+        pump()
+
 
 def test_one_session_shows_no_picker(app) -> None:
     window, service = build(app, [])

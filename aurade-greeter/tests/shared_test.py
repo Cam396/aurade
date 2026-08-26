@@ -82,7 +82,7 @@ def test_every_copy_matches_its_original() -> None:
 
 #: This package's own files, which have no original to be compared against.
 OURS = ("__init__.py", "accounts.py", "app.py", "copy.py", "greeter.css",
-        "network.py", "preferences.py", "protocol.py", "sessions.py")
+        "network.py", "nmlive.py", "preferences.py", "protocol.py", "sessions.py")
 
 
 def test_every_file_is_either_ours_or_checked() -> None:

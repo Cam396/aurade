@@ -49,7 +49,7 @@ def scripted(replies: list[dict]) -> P.Transport:
     return P.Transport(ours)
 
 
-def shot(window: Gtk.Window, path: str) -> None:
+def shot(window, path: str) -> None:
     """The widget's own rendering, at its own size.
 
     The paintable gets a frame before it is asked anything. A
@@ -97,6 +97,18 @@ def main() -> int:
         window.present()
         pump(60)
         shot(window, f"{out}-accounts.png")
+        # The status area, open, which is where the network lives.
+        try:
+            window.widgets["status"].popup()
+            pump(60)
+            # A popover lives in its own surface, so snapshotting the window
+            # captures the screen behind it. The panel's own child is the
+            # thing worth looking at.
+            shot(window.widgets["panel"].get_child(), f"{out}-panel.png")
+            window.widgets["panel"].popdown()
+            pump(20)
+        except Exception as exc:  # noqa: BLE001 - a tool, not the product
+            print(f"panel: {exc}")
         if window.accounts:
             window.choose(window.accounts[0])
             pump(80)

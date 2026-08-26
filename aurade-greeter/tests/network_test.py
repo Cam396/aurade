@@ -156,6 +156,25 @@ def test_a_refusal_is_translated_rather_than_repeated() -> None:
     check("password" in wrong.lower(),
           f"a wrong password was not described as one: {wrong!r}")
 
+    # A network service that is not there is not a network that refused.
+    # Nothing was attempted, and the answer is not another password.
+    # Two spellings of the same thing, because D-Bus reports it either way
+    # depending on which layer answers, and each is asserted on its own so
+    # dropping one is not hidden by the other still matching.
+    for text in ("GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown",
+                 "The name org.freedesktop.NetworkManager was not provided "
+                 "by any .service files"):
+        absent = N.refusal_words(text)
+        check("not running" in absent.lower(),
+              f"an absent NetworkManager was described as a network that "
+              f"would not join: {absent!r} for {text[:40]!r}")
+        check("could not be joined" not in absent.lower(),
+              f"an absent NetworkManager was blamed on the network: {absent!r}")
+
+    quiet = N.refusal_words("org.freedesktop.DBus.Error.NoReply: timed out")
+    check("not answering" in quiet.lower(),
+          f"a service that never replied was described as a refusal: {quiet!r}")
+
     unknown = N.refusal_words("something nobody has seen before")
     check(unknown and "could not be joined" in unknown,
           "an unrecognised error produced no sentence at all")

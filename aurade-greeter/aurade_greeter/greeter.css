@@ -29,3 +29,20 @@
 list.boxed-list {
   border-radius: 18px;
 }
+
+/* The status area, bottom right.
+ *
+ * A quiet ground so the cluster reads as a control rather than as text lying
+ * on a photograph, and enough contrast against whichever wallpaper is behind
+ * it that the icons stay legible on a bright sky as well as a dark lake. */
+.aurade-status-area {
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+/* The panel it opens. Wider than a menu because it holds a list of networks,
+ * and a list of networks in a menu width truncates the names people are
+ * choosing between. */
+.aurade-panel list.boxed-list {
+  border-radius: 12px;
+}
