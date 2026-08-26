@@ -56,6 +56,12 @@ jobs:
           set -euo pipefail
           while IFS= read -r package; do test -f "${package}/PKGBUILD"; test -f "${package}/.SRCINFO"; done < installer/expected-packages.txt
 
+      - name: Verify the release identity
+        run: ci/verify-release-identity.sh
+
+      - name: Run release identity fixture
+        run: ci/tests/release-identity-test.sh
+
       - name: Run source integrity gate
         run: ci/source-integrity-gate.sh
 
@@ -88,6 +94,12 @@ jobs:
 
       - name: Run Chromium network client configuration guard
         run: ci/tests/chromium-network-config-test.sh
+
+      - name: Run host bridge tests
+        run: aurade-host-bridge/run-tests.sh
+
+      - name: Run NetworkManager adapter tests
+        run: python3 shill-nm-adapter/test_shill_nm_adapter.py
 
       - name: Run session error fixture
         run: bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
