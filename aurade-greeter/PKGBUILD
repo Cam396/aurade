@@ -9,6 +9,8 @@ url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause')
 depends=(
   'greetd'
+  'networkmanager'
+  'polkit'
   'gtk4'
   'libadwaita'
   'python'
@@ -31,11 +33,13 @@ source=(
   'README.md'
   'LICENSE'
   'run-tests.sh'
+  '49-aurade-greeter-network.rules'
   '__init__.py'
   'accounts.py'
   'app.py'
   'copy.py'
   'greeter.css'
+  'network.py'
   'preferences.py'
   'protocol.py'
   'sessions.py'
@@ -49,6 +53,7 @@ source=(
   'theme-dark-hc.css'
   'theme-oled.css'
   'accounts_test.py'
+  'network_test.py'
   'preferences_test.py'
   'protocol_test.py'
   'runtime_test.py'
@@ -60,12 +65,14 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '7780990b67f130dab31e912bfae8285d8eea239737a07fe7b3224bff2e8fdf5d'
             '0044a4233392d94f74841d4aa99bd5759c5a8560123bfe535c0a8acbdbbf4f5f'
             '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f'
-            'e954fcee6a25cfd88db35d38ea1a12c9a96e9fce248638a9926b21a3d33cd26b'
+            'bc9057bde4b2f0e03dc3eee15de7b2236922d79444ecfef7099a385fb21ade55'
+            'fb48b49dc3e9677c486c06490b1f15577319fe5b538effe85f0241cabecc7b01'
             '71bba0c7a680e8ea9cd2f7e77963be06de372212f1de55102bd5098f87f649e6'
             'b08c83d5e409fbd5d926d9745f673a097ba86b8dd1f7fe87d9463e9da04f7526'
             '71df581f17a2b5bf5d39e985e1190015274b9e0685d12621ae7315c173411a97'
             '1cfd64f6d86d0a7149c068679f36258507cb0c52eef019f68c1e0d2c104d0470'
             'bfde539eca17dc8e92f21ea9ddb78e0037d321c5ffc341f12e4bdf54ee330b4a'
+            '2a2f3a51b53ff827053530e2c7d4d53026b39423d9fc4bea6c158159cbba7788'
             '8fffaf3fb547be207f1e9252e9a7247504429e175570f3c989c091f4976654ab'
             'e230236bb4f62f4ffd345bfde84cd1aead05f30f86192368f5fa34a48399d31b'
             'acfd43d259e0a1c371cfdbd312cef1c45d689ba06ac9408784cac4faddd7d240'
@@ -79,15 +86,16 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             'f106bc2c9f3b4356051d02b991c89ce2f948b47738af174e8daf3e58f803979c'
             '804006f01627e6e6819067797df0d6777df6178053710cc7586f519c2d732e2f'
             'ff88e7a333bc959fb34490215b0efe1e5197c8fb4862dab9db3de2c1a515d676'
+            '06440e485ff0ee63be27400cfe1c598a0867879b9f580020aba0682f7609b78d'
             '8e0d3b8eb011b21c26636f17724b2b63308b5083071f6ede6192d6af57416a3f'
             '1c955b1ac075da99bcf61591e48d9d3ad0c244320ea91a0d481c37b1b48c4478'
             '0eaa8888969e87ebd6543a274cc8734a86200ad52f66c3baa7be0ae2738909ac'
             '449b461c2e077d94ada2808bc50cecf69f4cf2e957759e12e718e318ed9af6a0'
-            '353132b50601cdbeeaa72ebd902ef8f205fe35a7c7e67e7d31097442c89bd704'
+            'be9f8ca21257ad2d6f0f85ddc60d4d5f75ee83a3397d3944268d3bf1b5508edc'
             'e5324b3d0dd84eacfd44981ee24c5af274a176ea1c1738d8bb316d5adfc72a81')
 
-_module=(__init__.py accounts.py app.py copy.py greeter.css preferences.py protocol.py sessions.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
-_test=(accounts_test.py preferences_test.py protocol_test.py runtime_test.py sessions_test.py shared_test.py test-runtime.sh)
+_module=(__init__.py accounts.py app.py copy.py greeter.css network.py preferences.py protocol.py sessions.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
+_test=(accounts_test.py network_test.py preferences_test.py protocol_test.py runtime_test.py sessions_test.py shared_test.py test-runtime.sh)
 
 _stage() {
   # Put the flat sources back into the shape the package imports, so the
@@ -122,6 +130,11 @@ package() {
   # The greeter reads the account list and remembers who signed in last.
   # That state file is the only thing it writes.
   install -dm755 "${pkgdir}/var/lib/aurade-greeter"
+
+  # The rule that lets this screen join a network. Without it every connect
+  # comes back NotAuthorized and the panel can only look.
+  install -Dm644 "${srcdir}/49-aurade-greeter-network.rules" \
+    "${pkgdir}/usr/share/polkit-1/rules.d/49-aurade-greeter-network.rules"
 
   install -Dm644 "${srcdir}/aurade.toml.example" \
     "${pkgdir}/usr/share/aurade-greeter/aurade.toml.example"
