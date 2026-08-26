@@ -28,10 +28,29 @@ skip() { echo "installer GUI runtime test: SKIP ($1)"; exit 0; }
 
 command -v python3 >/dev/null 2>&1 || skip 'python3 not available'
 command -v weston >/dev/null 2>&1 || skip 'no headless compositor (weston)'
-# A broken or partially installed GI stack can block while probing a display
-# backend instead of returning an import error. The runtime test must never
-# turn that environmental problem into an unbounded full-suite run.
-timeout 10s python3 - <<'PY' 2>/dev/null || skip 'GTK 4 and libadwaita are not usable here'
+
+# The environment goes first, before anything imports GTK.
+#
+# This used to sit below the fixtures, and the import probe underneath it was
+# reporting that GTK was unusable on machines where GTK was fine. The cause
+# was DISPLAY. A build host with a stale DISPLAY pointing at an X server that
+# is not listening makes GTK open a TCP connection to nothing, and the kernel
+# spends about two minutes retrying before it gives up. The ten second probe
+# saw a hang, called it a broken toolkit, and skipped the only test in the
+# suite that builds a real widget tree. With DISPLAY unset the same import
+# takes six hundredths of a second.
+#
+# No GPU, no session bus, no input method daemon and no accessibility bus on a
+# build host. Each of these is a hang or a crash if GTK goes looking for it.
+export GSK_RENDERER=cairo LIBGL_ALWAYS_SOFTWARE=1
+export GTK_USE_PORTAL=0 GIO_USE_VFS=local GTK_A11Y=none NO_AT_BRIDGE=1
+export GTK_IM_MODULE=gtk-im-context-simple
+unset DBUS_SESSION_BUS_ADDRESS DISPLAY
+
+# A broken or partially installed GI stack can still block while probing a
+# display backend instead of returning an import error. The runtime test must
+# never turn that environmental problem into an unbounded full-suite run.
+timeout 30s python3 - <<'PY' 2>/dev/null || skip 'GTK 4 and libadwaita are not usable here'
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -77,12 +96,6 @@ export AURADE_ASSET_DIR="$ROOT/installer/assets"
 export AURADE_NM_PROFILE_DIR="$TMP/nm"
 export XDG_RUNTIME_DIR="$TMP/xdg"
 chmod 700 "$XDG_RUNTIME_DIR"
-# No GPU, no session bus, no input method daemon and no accessibility bus on a
-# build host. Each of these is a hang or a crash if GTK goes looking for it.
-export GSK_RENDERER=cairo LIBGL_ALWAYS_SOFTWARE=1
-export GTK_USE_PORTAL=0 GIO_USE_VFS=local GTK_A11Y=none NO_AT_BRIDGE=1
-export GTK_IM_MODULE=gtk-im-context-simple
-unset DBUS_SESSION_BUS_ADDRESS DISPLAY
 
 weston --backend=headless --width=1280 --height=860 --shell=kiosk-shell.so \
   --socket=wl-aurade-test --idle-time=0 >"$TMP/weston.log" 2>&1 &
