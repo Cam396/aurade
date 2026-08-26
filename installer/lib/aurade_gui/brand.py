@@ -134,7 +134,13 @@ def aurora_drift(phase: float, index: int) -> tuple[float, float]:
 
 WALLPAPER_DIRS = [
     os.environ.get("AURADE_WALLPAPER_DIR", ""),
+    # Where the live image stages them, because installation media is not a
+    # package.
     "/usr/local/share/aurade/wallpapers",
+    # Where an installed system keeps them, from aurade-wallpapers. Without
+    # this the set was visible while installing and never again: it shipped on
+    # the media and no package carried it onto the machine.
+    "/usr/share/aurade/wallpapers",
     os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..",
                  "wallpapers"),
 ]
