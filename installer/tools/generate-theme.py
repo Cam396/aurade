@@ -206,8 +206,12 @@ def sample_logo(im) -> dict[str, tuple[int, int, int]]:
 
 #: Tone stops Material 3 reads from a palette, including the extended stops
 #: the surface-container roles need.
-TONES = [0, 4, 6, 10, 12, 17, 20, 22, 24, 30, 40, 50, 60, 70, 80, 87, 90, 92,
-         94, 95, 96, 98, 99, 100]
+#: 8, 15 and 25 are here for the desktop rather than for the installer: the
+#: ChromeOS neutral and secondary ramps read stops nothing else does, and a
+#: stop this generator cannot produce is a build that stops with
+#: "Cannot find color cros.ref.secondary12".
+TONES = [0, 4, 6, 8, 10, 12, 15, 17, 20, 22, 24, 25, 30, 40, 50, 60, 70, 80,
+         87, 90, 92, 94, 95, 96, 98, 99, 100]
 
 
 def build_palettes() -> dict[str, dict[int, str]]:
@@ -226,6 +230,20 @@ def build_palettes() -> dict[str, dict[int, str]]:
         "neutral": ramp(plate_h, 0.010),
         "neutral_variant": ramp(plate_h, 0.022),
         "error": ramp(27.0, 0.170),
+        # The three sparkle ramps, which upstream ChromeOS derives from the
+        # wallpaper and this product derives from the mark, because the mark
+        # is what it is themed on. Upstream sets its analog about sixty
+        # degrees off the primary at a lower chroma, its complement opposite,
+        # and its muted at the primary hue with most of the colour taken out;
+        # the same three relationships, measured off our own primary.
+        #
+        # Analog goes anticlockwise rather than clockwise. Clockwise from the
+        # lilac lands near the error hue at 27, and a decorative accent
+        # sitting on top of the colour that means something has gone wrong is
+        # not a decorative accent.
+        "sparkle_analog": ramp((lilac_h - 45.0) % 360, 0.115),
+        "sparkle_complement": ramp((lilac_h + 180.0) % 360, 0.075),
+        "sparkle_muted": ramp(lilac_h, 0.050),
         # A green, for the one thing the desktop needs and the mark does not
         # contain. Every other ramp here is measured off the artwork; this one
         # is chosen, and it is chosen rather than aliased for the same reason
@@ -1119,10 +1137,28 @@ CROS_REF_RAMPS = {
     # The brand's aqua is the blue this product has. Leaving Google Blue here
     # would put it back on every surface that asks for a blue.
     "blue": "tertiary",
+    # Upstream writes these three with quoted keys because of the hyphen.
+    "sparkle-analog": "sparkle_analog",
+    "sparkle-complement": "sparkle_complement",
+    "sparkle-muted": "sparkle_muted",
 }
 
-#: The stops ChromeOS reads. A subset of ours, so nothing is interpolated.
-CROS_REF_TONES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100]
+#: The stops ChromeOS reads, per ramp, mirroring what upstream defines.
+#:
+#: Not one list. Most ramps carry thirteen stops, `neutral` carries sixteen
+#: and `secondary` fifteen, because `cros_sys_colors.json5` reaches for tones
+#: in those two that nothing else uses. Emitting a single set looks correct
+#: and fails the build with "Cannot find color cros.ref.secondary12", which is
+#: at least a good error.
+CROS_REF_STANDARD = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100]
+CROS_REF_TONES = {
+    "neutral": [0, 8, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100],
+    "secondary": [0, 10, 12, 15, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100],
+}
+
+
+def cros_ref_stops(ramp: str) -> list[int]:
+    return CROS_REF_TONES.get(ramp, CROS_REF_STANDARD)
 
 
 def emit_cros_ref(palettes: dict[str, dict[int, str]]) -> str:
@@ -1135,11 +1171,12 @@ def emit_cros_ref(palettes: dict[str, dict[int, str]]) -> str:
     missing = [our for our in CROS_REF_RAMPS.values() if our not in palettes]
     if missing:
         raise SystemExit(f"generate-theme: no ramp named {missing}")
-    for stop in CROS_REF_TONES:
-        if stop not in TONES:
-            raise SystemExit(
-                f"generate-theme: ChromeOS reads tone {stop} and this "
-                f"generator does not produce it")
+    for theirs in CROS_REF_RAMPS:
+        for stop in cros_ref_stops(theirs):
+            if stop not in TONES:
+                raise SystemExit(
+                    f"generate-theme: ChromeOS reads {theirs} tone {stop} and "
+                    f"this generator does not produce it")
 
     lines = [
         "/* Copyright 2022 The Chromium Authors",
@@ -1172,11 +1209,125 @@ def emit_cros_ref(palettes: dict[str, dict[int, str]]) -> str:
         "  colors: {",
     ]
     for theirs, ours in CROS_REF_RAMPS.items():
-        for stop in CROS_REF_TONES:
-            lines.append(f"    {theirs}{stop}: '{palettes[ours][stop]}',")
+        # A hyphen is not a bare JSON5 key, so those three are quoted, exactly
+        # as upstream writes them.
+        quote = "'" if "-" in theirs else ""
+        for stop in cros_ref_stops(theirs):
+            lines.append(
+                f"    {quote}{theirs}{stop}{quote}: '{palettes[ours][stop]}',")
         lines.append("")
     lines[-1] = "  },"
     lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+#: The desktop's typeface, and why it is not the one Chromium asks for.
+#:
+#: `cros_gm3_typography.json5` asks for Google Sans, then Roboto, then generic
+#: sans. AuraDE cannot ship Google Sans and does not want to, so the chain
+#: lands on Roboto, which `chromiumos-ash` carries as a dependency purely to
+#: satisfy it. The result is a desktop set in Google's typeface reached through
+#: a fallback, while the installer next to it is set in Adwaita Sans with a
+#: scale that was deliberately reworked. Two typefaces in one product, neither
+#: of them chosen for the desktop.
+#:
+#: Adwaita Sans is a variable font and is already on every AuraDE machine,
+#: because gtk4 depends on adwaita-fonts. ChromeOS separates a display family
+#: from a text family; Adwaita has one, so both point at it and the weight in
+#: each typeface does the work the second family was doing.
+CROS_SANS = "'Adwaita Sans', 'Cantarell', sans-serif"
+CROS_MONO = "'JetBrains Mono', 'Adwaita Mono', monospace"
+
+#: ChromeOS's own scale, carried over unchanged for now.
+#:
+#: The three ways this product's type scale departs from Material 3 are
+#: written down where TYPE is defined, and none of them are applied here yet.
+#: Sizes and line heights are not a safe thing to change unseen: Ash lays out
+#: with fixed pixel assumptions in places, and a scale nobody has looked at is
+#: how a label ends up clipped on one surface and nowhere else. The families
+#: are safe, provable and the larger part of the difference, so they go first.
+CROS_TYPEFACES = [
+    ("display_0", "medium", 52, 500, 60),
+    ("display_0-regular", "regular", 52, 400, 60),
+    ("display_1", "medium", 44, 500, 52),
+    ("display_2", "medium", 36, 500, 44),
+    ("display_3", "medium", 32, 500, 40),
+    ("display_3-regular", "regular", 32, 400, 40),
+    ("display_4", "medium", 28, 500, 36),
+    ("display_5", "medium", 24, 500, 32),
+    ("display_6", "medium", 22, 500, 28),
+    ("display_6-regular", "regular", 22, 400, 28),
+    ("display_7", "medium", 18, 500, 24),
+    ("title_1", "text_medium", 16, 500, 24),
+    ("title_2", "text_bold", 13, 700, 20),
+    ("headline_1", "text_medium", 15, 500, 22),
+    ("button_1", "text_medium", 14, 500, 20),
+    ("button_2", "text_medium", 13, 500, 20),
+    ("body_0", "text_regular", 16, 400, 24),
+    ("body_1", "text_regular", 14, 400, 20),
+    ("body_2", "text_regular", 13, 400, 20),
+    ("annotation_1", "text_regular", 12, 400, 18),
+    ("annotation_2", "text_regular", 11, 400, 16),
+    ("label_1", "text_medium", 10, 500, 10),
+    ("label_2", "text_regular", 10, 400, 10),
+]
+
+CROS_FAMILIES = ["regular", "medium", "bold",
+                 "text_regular", "text_medium", "text_bold"]
+
+
+def emit_cros_typography() -> str:
+    """`cros_gm3_typography.json5`, set in the face this product ships."""
+    lines = [
+        "/* Copyright 2023 The Chromium Authors",
+        " * Use of this source code is governed by a BSD_style license that can be",
+        " * found in the LICENSE file. */",
+        "",
+        "/*",
+        " * Chrome OS typography styles for GM3.",
+        " *",
+        " * Generated by installer/tools/generate-theme.py. Do not edit by hand.",
+        " *",
+        " * The families are AuraDE's, which is the same face the installer is set",
+        " * in. Upstream asks for Google Sans and falls through to Roboto, so a",
+        " * machine walked through this product's installer signed into a desktop",
+        " * set in a different typeface.",
+        " *",
+        " * The sizes are still ChromeOS's. See CROS_TYPEFACES for why.",
+        " */",
+        "{",
+        '  "options": {',
+        '    "CSS": {',
+        '      "prefix": "cros"',
+        "    }",
+        "  },",
+        '  "typography": {',
+        '    "font_families": {',
+    ]
+    for name in CROS_FAMILIES:
+        lines.append(f'      font_family_aurade_{name}: "{CROS_SANS}",')
+    lines.append(f'      font_family_aurade_mono: "{CROS_MONO}",')
+    lines += [
+        "    },",
+        # No font_faces block. Upstream declares six @font-face rules pointing
+        # at local Google Sans installations. Adwaita Sans is an ordinary
+        # installed family that fontconfig resolves by name, so declaring
+        # faces for it would be describing a thing that is already there.
+        '    "font_faces": {',
+        "    },",
+        '    "typefaces": {',
+    ]
+    for index, (name, family, size, weight, height) in enumerate(CROS_TYPEFACES):
+        tail = "," if index < len(CROS_TYPEFACES) - 1 else ""
+        lines += [
+            f'      "{name}": {{',
+            f"        \"font_family\": '$font_family_aurade_{family}',",
+            f'        "font_size": {size},',
+            f'        "font_weight": {weight},',
+            f'        "line_height": {height}',
+            f"      }}{tail}",
+        ]
+    lines += ["    }", "  }", "}"]
     return "\n".join(lines) + "\n"
 
 
@@ -1274,6 +1425,8 @@ def main() -> int:
         # prove the two have not drifted.
         os.path.join(ROOT, "patches", "generated",
                      "cros_ref_colors.json5"): emit_cros_ref(palettes),
+        os.path.join(ROOT, "patches", "generated",
+                     "cros_gm3_typography.json5"): emit_cros_typography(),
     }
     os.makedirs(os.path.join(ROOT, "patches", "generated"), exist_ok=True)
     stale = []

@@ -374,26 +374,29 @@ cros_text = open(CROS_REF, encoding="utf-8").read() if os.path.exists(CROS_REF) 
 check(bool(cros_text),
       "patches/generated/cros_ref_colors.json5 has not been generated")
 
-cros_colors = dict(re.findall(r"^\s+([a-z]+[0-9]+): '(#[0-9a-f]{6})',$",
-                              cros_text, re.M))
+# Quoted keys as well as bare ones: upstream quotes the three hyphenated
+# sparkle ramps, and a pattern that only matched bare keys is what let a whole
+# family of colours go missing until the build said so.
+cros_colors = dict(re.findall(
+    r"^\s+'?([a-z][a-z-]*[0-9]+)'?: '(#[0-9a-f]{6})',$", cros_text, re.M))
 # The ramps as this product generates them, to compare against.
 palettes = gen.build_palettes()
 
 # Every ramp ChromeOS reads, at every stop it reads, or a role somewhere in
 # the desktop falls back to whatever Chromium's default is and one surface
 # stays Google's colour while everything around it changed.
+wanted = 0
 for ramp in gen.CROS_REF_RAMPS:
-    for stop in gen.CROS_REF_TONES:
+    for stop in gen.cros_ref_stops(ramp):
+        wanted += 1
         check(f"{ramp}{stop}" in cros_colors,
               f"the desktop palette has no {ramp}{stop}")
-check(len(cros_colors) == len(gen.CROS_REF_RAMPS)
-      * len(gen.CROS_REF_TONES),
-      f"the desktop palette has {len(cros_colors)} colours, expected "
-      f"{len(gen.CROS_REF_RAMPS) * len(gen.CROS_REF_TONES)}")
+check(len(cros_colors) == wanted,
+      f"the desktop palette has {len(cros_colors)} colours, expected {wanted}")
 
 # The ramps come from ours, at the same tone, rather than being written twice.
 for theirs, ours in gen.CROS_REF_RAMPS.items():
-    for stop in gen.CROS_REF_TONES:
+    for stop in gen.cros_ref_stops(theirs):
         check(cros_colors[f"{theirs}{stop}"] == palettes[ours][stop],
               f"{theirs}{stop} is {cros_colors[f'{theirs}{stop}']} and this "
               f"product's {ours} tone {stop} is {palettes[ours][stop]}")
@@ -413,6 +416,19 @@ GOOGLE_KEYS = {
 for value, name in GOOGLE_KEYS.items():
     check(value not in cros_colors.values(),
           f"the desktop palette still contains {name} ({value})")
+
+# The three sparkle ramps are decorative accents upstream derives from the
+# wallpaper and this product derives from the mark. Each has to stay off the
+# colours that mean something: an accent sitting on the error hue is an accent
+# somebody reads as a fault.
+check(cros_colors["sparkle-analog40"] != cros_colors["error40"],
+      "the decorative accent is the same colour as an error")
+check(cros_colors["sparkle-analog40"] != cros_colors["primary40"],
+      "the decorative accent is the same colour as the primary it varies from")
+check(cros_colors["sparkle-complement40"] != cros_colors["green40"],
+      "the complementary accent is the same colour as a success")
+check(cros_colors["sparkle-muted40"] != cros_colors["neutral40"],
+      "the muted accent has no colour left in it at all")
 
 # The two ramps that are chosen rather than measured have to stay distinct
 # from the accent they would otherwise be confused with. A success and an
