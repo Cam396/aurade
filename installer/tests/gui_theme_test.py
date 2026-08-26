@@ -354,6 +354,76 @@ else:
     check(max(bars) <= 1.0, f"a bar ran past its track: {max(bars)}")
 
 
+# -- the desktop's palette is this product's palette -----------------------
+#
+# `patches/generated/cros_ref_colors.json5` replaces the tonal palette the
+# whole ChromeOS desktop resolves through. Every semantic role in
+# `cros_sys_colors.json5` maps onto it and Ash reads the semantic roles, so
+# this one file decides what colour the shelf, the launcher, Settings and
+# every dialog are.
+#
+# Chromium ships it as Google's palette. An installer that derives its whole
+# appearance from the mark, handing over to a desktop painted in another
+# company's blue, is the largest visible seam in this product, and it is the
+# kind of seam that comes back the moment somebody regenerates the file from
+# upstream without noticing.
+
+CROS_REF = os.path.join(ROOT, "patches", "generated", "cros_ref_colors.json5")
+cros_text = open(CROS_REF, encoding="utf-8").read() if os.path.exists(CROS_REF) else ""
+
+check(bool(cros_text),
+      "patches/generated/cros_ref_colors.json5 has not been generated")
+
+cros_colors = dict(re.findall(r"^\s+([a-z]+[0-9]+): '(#[0-9a-f]{6})',$",
+                              cros_text, re.M))
+# The ramps as this product generates them, to compare against.
+palettes = gen.build_palettes()
+
+# Every ramp ChromeOS reads, at every stop it reads, or a role somewhere in
+# the desktop falls back to whatever Chromium's default is and one surface
+# stays Google's colour while everything around it changed.
+for ramp in gen.CROS_REF_RAMPS:
+    for stop in gen.CROS_REF_TONES:
+        check(f"{ramp}{stop}" in cros_colors,
+              f"the desktop palette has no {ramp}{stop}")
+check(len(cros_colors) == len(gen.CROS_REF_RAMPS)
+      * len(gen.CROS_REF_TONES),
+      f"the desktop palette has {len(cros_colors)} colours, expected "
+      f"{len(gen.CROS_REF_RAMPS) * len(gen.CROS_REF_TONES)}")
+
+# The ramps come from ours, at the same tone, rather than being written twice.
+for theirs, ours in gen.CROS_REF_RAMPS.items():
+    for stop in gen.CROS_REF_TONES:
+        check(cros_colors[f"{theirs}{stop}"] == palettes[ours][stop],
+              f"{theirs}{stop} is {cros_colors[f'{theirs}{stop}']} and this "
+              f"product's {ours} tone {stop} is {palettes[ours][stop]}")
+
+# And none of Google's own key colours survived. Named rather than inferred,
+# because the failure this catches is a file regenerated from upstream, which
+# looks like a correct file until somebody looks at the shelf.
+GOOGLE_KEYS = {
+    "#0b57d0": "Google Blue 40",
+    "#1b6ef3": "Google Blue 50",
+    "#a8c7fa": "Google Blue 80",
+    "#d3e3fd": "Google Blue 90",
+    "#b3261e": "Google Red 40",
+    "#146c2e": "Google Green 40",
+    "#e37400": "Google Yellow 40",
+}
+for value, name in GOOGLE_KEYS.items():
+    check(value not in cros_colors.values(),
+          f"the desktop palette still contains {name} ({value})")
+
+# The two ramps that are chosen rather than measured have to stay distinct
+# from the accent they would otherwise be confused with. A success and an
+# ordinary accent in the same colour is not a success.
+check(cros_colors["green40"] != cros_colors["tertiary40"],
+      "the desktop's success colour is the same as its tertiary accent")
+check(cros_colors["yellow40"] != cros_colors["error40"],
+      "the desktop's warning colour is the same as its error colour")
+check(cros_colors["primary40"] != cros_colors["blue40"],
+      "the desktop's primary and blue are the same colour")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"test-gui-theme: {failure}", file=sys.stderr)

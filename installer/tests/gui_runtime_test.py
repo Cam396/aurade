@@ -1263,9 +1263,20 @@ def main() -> int:
         window = InstallerWindow(application, model, plan_only=False)
         window.set_default_size(1280, 860)
         window.present()
-        pump(30)
+        # Waited for, not counted out.
+        #
+        # A fixed number of frames is a guess about how fast the machine is,
+        # and it is wrong on exactly the machine where it matters: this failed
+        # on a host whose cores were all busy compiling, reported that the
+        # compositor never gave the window a size, and passed on its own a
+        # minute later. A test that fails under load is a test somebody labels
+        # flaky and then stops reading.
+        deadline = time.monotonic() + 30.0
+        while window.get_allocated_width() < 2 and time.monotonic() < deadline:
+            pump(30)
         if window.get_allocated_width() < 2:
-            FAILURES.append("the compositor never gave the window a size")
+            FAILURES.append(
+                "the compositor never gave the window a size, after 30 seconds")
         # Whatever happens in here, the loop has to stop.
         #
         # Without the finally, a mistake in an assertion leaves the main loop

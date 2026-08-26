@@ -1691,7 +1691,23 @@ else
   log "filesystem is ${FILESYSTEM}: no factory snapshot and no rollback boot entry"
 fi
 
-run install -d -m 0750 "$MOUNTPOINT/etc/aurade-install" "$MOUNTPOINT/.snapshots/0"
+# 0755, because services that run before anybody signs in have to read what
+# is in here.
+#
+# The accessibility record is written 0644 so the greeter can honour the
+# choices somebody made during the install. It cannot: greetd runs the greeter
+# as its own user, and a directory nobody but root can traverse makes the mode
+# on the file inside it meaningless. Somebody who turned on high contrast to
+# get through an installation then met a login screen without it, silently,
+# which is the exact failure the accessibility record exists to prevent.
+#
+# Nothing in here is a secret. Both files say so in their own comments: the
+# manifest names the disk because the disk is not a secret, and the
+# accessibility record is what somebody reads with `cat` to find out what an
+# install actually did. The snapshot directory beside it keeps 0750, because
+# that one holds a copy of the system.
+run install -d -m 0755 "$MOUNTPOINT/etc/aurade-install"
+run install -d -m 0750 "$MOUNTPOINT/.snapshots/0"
 run cp "$PACKAGE_LOCK" "$MOUNTPOINT/etc/aurade-install/packages.lock"
 run install -Dm0755 "$SELF_DIR/aurade-recovery" "$MOUNTPOINT/usr/local/sbin/aurade-recovery"
 run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/sbin/aurade-hardware-qualify"
