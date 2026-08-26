@@ -52,6 +52,7 @@ CHOICES: tuple[tuple[str, str], ...] = (
     ("life", "Something moving, that needs nothing"),
     ("type", "Test your typing, and your keyboard"),
     ("nono", "Solve a nonogram"),
+    ("sudoku", "Solve a sudoku"),
     ("2048", "Play 2048"),
     ("mines", "Play minesweeper"),
     ("lights", "Play lights out"),
@@ -550,6 +551,14 @@ class Nonogram(Game):
         ("flower", "...##...:...##...:..####..:.######.:...##...:..####..:.#....#.:#......#"),
         ("rocket", "...##...:..####..:..####..:.######.:########:...##...:..#..#..:.#....#."),
         ("star", "...#....:..###...:.#####..:#######.:.#####..:..###...:...#....:........"),
+        ("tree", "...##...:..####..:.######.:########:..####..:.######.:...##...:...##..."),
+        ("mug", "........:######..:#....###:#....#.#:#....###:######..:.####...:........"),
+        ("boat", "....#...:...##...:..###...:.####...:....#...:........:########:.######."),
+        ("bell", "...##...:..####..:..####..:.######.:.######.:########:........:...##..."),
+        ("letter", "........:########:##....##:#.#..#.#:#..##..#:#......#:########:........"),
+        ("anchor", "...##...:...##...:.######.:...##...:#..##..#:#..##..#:##....##:.######."),
+        ("disk", "########:#..##..#:#..##..#:#......#:#.####.#:#.#..#.#:#.####.#:########"),
+        ("battery", "........:...##...:########:##.##.##:##.##.##:##.##.##:########:........"),
     )
     WIDTH = 8
     HEIGHT = 8
@@ -2093,6 +2102,184 @@ class Word(Game):
 # scroll to reach.
 
 
+class Sudoku(Game):
+    """Nine by nine, and the answer is the only one there is.
+
+    The puzzles are data rather than something generated at the moment of
+    play. A generator has to be trusted; a fixed set can be checked, and the
+    test proves on every run that each of these has exactly one solution.
+    That matters more here than in any other game on this card: a sudoku with
+    two answers is a sudoku that tells somebody they are wrong when they are
+    not, which is a worse way to spend an install than not playing at all.
+
+    No solver ships with the game either. Because the answer is unique, a full
+    grid with nothing repeated in any row, column or box is the answer, so the
+    game can say whether somebody has finished without being told beforehand.
+    """
+
+    ident = "sudoku"
+    keys = "Arrows to move. 1 to 9 to write, 0 to rub out."
+    description = ("Sudoku. Arrow keys to move, one to nine to write a "
+                   "number, zero to rub it out.")
+    grid = (9.0, 9.0)
+    max_cell = 34.0
+
+    PUZZLES = (
+        ("gentle1", ".7.9.21..2187..3.4596..47.29.7....4..6.....2..4....8.16.94..5187.4..9236..12.5.7."),
+        ("gentle2", ".7.8..5..5.2..9.76.8.57..348...1....326.8.715....5...323..98.5.16.3..9.8..8..7.2."),
+        ("steady3", "48.......925.4..73.7158.....34....2....756....1....58.....6813.16..9.748.......62"),
+        ("steady4", "...4.1..5.....8317...3.2.84.4.....68..65.31..92.....7.36.7.9...8941.....2..6.4..."),
+        ("steady5", "..6..5.175....19...12...5..2..7....976.2.8.311....4..6..4...19...51....863.9..7.."),
+        ("firm6", "7.35.8..........7.9.5.7.8...47.92.3.....5.....3.61.75...8.6.4.3.6..........2.51.8"),
+        ("firm7", ".81..96..2.3..6....7...5.....7..314...8.5.7...367..9.....8...1....4..5.7..25..38."),
+        ("firm8", "...4..5232.........5...168.3...4..7...6.1.9...9..2...5.781...9.........8931..8..."),
+    )
+    SIZE = 9
+
+    def __init__(self, seed: int | None = None) -> None:
+        self.random = random.Random(seed)
+        self.reset()
+
+    def reset(self) -> None:
+        self.name, text = self.random.choice(self.PUZZLES)
+        self.cells = [0 if ch == "." else int(ch) for ch in text]
+        self.given = [ch != "." for ch in text]
+        self.x = 0
+        self.y = 0
+        self.moves = 0
+        # Start where somebody can actually type, so the first keypress does
+        # something. Landing the cursor on a given and having 5 do nothing
+        # reads as a broken board rather than as a rule.
+        for index, fixed in enumerate(self.given):
+            if not fixed:
+                self.x, self.y = index % self.SIZE, index // self.SIZE
+                break
+
+    # -- the rules ---------------------------------------------------------
+
+    def peers(self, index: int) -> list[int]:
+        """Every square that may not repeat this one's number."""
+        size = self.SIZE
+        row, column = index // size, index % size
+        box_row, box_column = (row // 3) * 3, (column // 3) * 3
+        found = set()
+        for step in range(size):
+            found.add(row * size + step)
+            found.add(step * size + column)
+        for dy in range(3):
+            for dx in range(3):
+                found.add((box_row + dy) * size + box_column + dx)
+        found.discard(index)
+        return sorted(found)
+
+    def conflicts(self) -> set:
+        """Squares repeating a number somewhere they may not.
+
+        Shown rather than prevented. A board that refuses the keypress leaves
+        somebody pressing a key that does nothing and wondering which of the
+        three rules they broke; a board that marks both squares red tells them
+        exactly where the argument is.
+        """
+        bad = set()
+        for index, value in enumerate(self.cells):
+            if not value:
+                continue
+            for peer in self.peers(index):
+                if self.cells[peer] == value:
+                    bad.add(index)
+                    bad.add(peer)
+        return bad
+
+    def won(self) -> bool:
+        return all(self.cells) and not self.conflicts()
+
+    def press(self, key: str) -> bool:
+        size = self.SIZE
+        if key == "up":
+            self.y = max(0, self.y - 1)
+        elif key == "down":
+            self.y = min(size - 1, self.y + 1)
+        elif key == "left":
+            self.x = max(0, self.x - 1)
+        elif key == "right":
+            self.x = min(size - 1, self.x + 1)
+        elif key in ("r", "R"):
+            self.reset()
+        elif key in ("space", "enter") and self.won():
+            self.reset()
+        elif key in ("0", "space", "backspace", "delete"):
+            index = self.y * size + self.x
+            if not self.given[index] and self.cells[index]:
+                self.cells[index] = 0
+                self.moves += 1
+        elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
+            index = self.y * size + self.x
+            if not self.given[index]:
+                value = int(key)
+                # The same number again rubs it out, so one key both writes
+                # and corrects and nobody has to find the other one.
+                self.cells[index] = 0 if self.cells[index] == value else value
+                self.moves += 1
+        else:
+            return False
+        return True
+
+    def status(self) -> str:
+        if self.won():
+            move = "move" if self.moves == 1 else "moves"
+            return f"Solved, in {self.moves} {move}. Space for another."
+        bad = len(self.conflicts())
+        if bad:
+            return f"{bad} squares argue" if bad != 1 else "1 square argues"
+        left = sum(1 for value in self.cells if not value)
+        return f"{left} to place" if left != 1 else "1 to place"
+
+    def paint(self, cr, width, height, ink) -> None:
+        size = self.SIZE
+        cell, left, top = fit(size, size, width, height, self.max_cell)
+        bad = self.conflicts()
+        # One background for the whole board.
+        #
+        # The numbers that came with the puzzle are told apart by their weight
+        # and their colour, not by a tinted square behind them. Shading every
+        # given turns a nine by nine grid into a mosaic and buries the thing
+        # that actually has to be visible, which is the three by three boxes.
+        cr.set_source_rgb(*ink["board"])
+        cr.rectangle(left, top, size * cell, size * cell)
+        cr.fill()
+        for y in range(size):
+            for x in range(size):
+                index = y * size + x
+                value = self.cells[index]
+                if not value:
+                    continue
+                cx, cy = left + x * cell, top + y * cell
+                if index in bad:
+                    colour = ink["bad"]
+                elif self.given[index]:
+                    colour = ink["ink"]
+                else:
+                    colour = ink["accent"]
+                cr.set_source_rgb(*colour)
+                text_at(cr, str(value), cx + cell / 2, cy + cell / 2,
+                        cell * 0.62, bold=self.given[index])
+        # The lines last, so nothing painted into a cell covers them, and the
+        # box boundaries heavier than the rest, because a sudoku whose boxes
+        # are not obvious is nine unrelated puzzles.
+        for step in range(size + 1):
+            heavy = step % 3 == 0
+            cr.set_source_rgb(*(ink["ink"] if heavy
+                                else blend(ink["board"], ink["edge"], 0.55)))
+            cr.set_line_width(2.5 if heavy else 1.0)
+            cr.move_to(left + step * cell, top)
+            cr.line_to(left + step * cell, top + size * cell)
+            cr.stroke()
+            cr.move_to(left, top + step * cell)
+            cr.line_to(left + size * cell, top + step * cell)
+            cr.stroke()
+        cursor(cr, left + self.x * cell, top + self.y * cell, cell, ink)
+
+
 class TicTacToe(Game):
     ident = "ttt"
     keys = "Nothing to press."
@@ -2141,7 +2328,7 @@ class TicTacToe(Game):
 GAMES: dict[str, type[Game]] = {
     "life": Life,
     "type": Typing,
-    "nono": Nonogram,
+    "nono": Nonogram, "sudoku": Sudoku,
     "2048": Twenty48,
     "mines": Minesweeper,
     "lights": LightsOut,

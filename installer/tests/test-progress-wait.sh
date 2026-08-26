@@ -445,10 +445,29 @@ picker=$(env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_TUI_HEIGHT=26 \
 # calls itself a game. The Bible is one of them: it is something to read, not
 # something to win, and somebody who opened this list because a progress bar
 # was making them anxious should not have to walk past six games to find it.
+#
+# Asserted as the rule rather than as one exact list, because the exact list
+# changes every time a game is added and a test that has to be edited for
+# every addition is a test somebody edits without reading. The rule does not
+# change: the five that ask nothing of you come first, in that order, and
+# everything after them is a game.
 order=$(sed 's/^ *[|+]//; s/[|+] *$//' <<<"$picker" |
   sed -n 's/^ *[> ] *\(Read\|Watch\|Something\|Test\|Solve\|Play\).*/\1/p' | tr '\n' ' ')
-[[ $order == 'Read Watch Read Something Test Solve Play Play Play Play Play Play Play Play Play Play ' ]] ||
-  fail "the picker offers its options as '$order', with a game before an ambient one"
+calm='Read Watch Read Something Test '
+[[ $order == "$calm"* ]] ||
+  fail "the picker opens with '$order' rather than the five that ask nothing"
+rest=${order#"$calm"}
+[[ -n $rest ]] || fail 'the picker offers nothing but the calm options'
+for word in $rest; do
+  case $word in
+    Solve|Play) ;;
+    *) fail "the picker offers '$word' after the games, so '$order' walks somebody past a game to reach it" ;;
+  esac
+done
+# And the games stay grouped: every Solve before every Play, so the list does
+# not alternate between two kinds of thing.
+[[ $rest =~ ^(Solve\ )*(Play\ )*$ ]] ||
+  fail "the picker interleaves its games as '$rest'"
 
 # And it opens on the first, which is the one that asks least.
 [[ $picker == *'> Read something'* ]] ||

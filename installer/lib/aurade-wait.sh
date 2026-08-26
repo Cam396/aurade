@@ -948,6 +948,145 @@ aurade_mines_rows() {
 # pictures are legible in the source. A wall of dots on one line is not, and
 # the whole point of these is that somebody drew them. The set is deliberately
 # small enough that every picture can be recognized at eight by eight.
+# --------------------------------------------------------------------------
+# Sudoku
+#
+# The puzzles are data, identical to the graphical installer's, rather than
+# something generated here. A generator has to be trusted; a fixed set can be
+# checked, and the test proves every one of these has exactly one solution.
+# That matters more here than in any other game on this card, because a sudoku
+# with two answers tells somebody they are wrong when they are not.
+#
+# No solver ships with the game. Because the answer is unique, a full grid
+# with nothing repeated in any row, column or box is the answer.
+# --------------------------------------------------------------------------
+
+AURADE_SUDOKU=(
+  'gentle1:.7.9.21..2187..3.4596..47.29.7....4..6.....2..4....8.16.94..5187.4..9236..12.5.7.'
+  'gentle2:.7.8..5..5.2..9.76.8.57..348...1....326.8.715....5...323..98.5.16.3..9.8..8..7.2.'
+  'steady3:48.......925.4..73.7158.....34....2....756....1....58.....6813.16..9.748.......62'
+  'steady4:...4.1..5.....8317...3.2.84.4.....68..65.31..92.....7.36.7.9...8941.....2..6.4...'
+  'steady5:..6..5.175....19...12...5..2..7....976.2.8.311....4..6..4...19...51....863.9..7..'
+  'firm6:7.35.8..........7.9.5.7.8...47.92.3.....5.....3.61.75...8.6.4.3.6..........2.51.8'
+  'firm7:.81..96..2.3..6....7...5.....7..314...8.5.7...367..9.....8...1....4..5.7..25..38.'
+  'firm8:...4..5232.........5...168.3...4..7...6.1.9...9..2...5.781...9.........8931..8...'
+)
+AURADE_SUDOKU_N=9
+AURADE_SUDOKU_CELLS=()
+AURADE_SUDOKU_GIVEN=()
+AURADE_SUDOKU_X=0
+AURADE_SUDOKU_Y=0
+AURADE_SUDOKU_MOVES=0
+AURADE_SUDOKU_NAME=
+
+aurade_sudoku_new() {
+  local entry text ch i
+  entry=${AURADE_SUDOKU[RANDOM % ${#AURADE_SUDOKU[@]}]}
+  AURADE_SUDOKU_NAME=${entry%%:*}
+  text=${entry#*:}
+  AURADE_SUDOKU_CELLS=()
+  AURADE_SUDOKU_GIVEN=()
+  for (( i = 0; i < 81; i++ )); do
+    ch=${text:i:1}
+    if [[ $ch == "." ]]; then
+      AURADE_SUDOKU_CELLS+=(0)
+      AURADE_SUDOKU_GIVEN+=(0)
+    else
+      AURADE_SUDOKU_CELLS+=("$ch")
+      AURADE_SUDOKU_GIVEN+=(1)
+    fi
+  done
+  AURADE_SUDOKU_MOVES=0
+  # Start somewhere the keys do something. A cursor parked on a given makes
+  # the first press look like a broken board rather than like a rule.
+  AURADE_SUDOKU_X=0
+  AURADE_SUDOKU_Y=0
+  for (( i = 0; i < 81; i++ )); do
+    if (( ! AURADE_SUDOKU_GIVEN[i] )); then
+      AURADE_SUDOKU_X=$(( i % 9 ))
+      AURADE_SUDOKU_Y=$(( i / 9 ))
+      break
+    fi
+  done
+  return 0
+}
+
+# Whether this square repeats its number anywhere it may not.
+aurade_sudoku_conflict() {
+  local index=$1 value=${AURADE_SUDOKU_CELLS[$1]}
+  local row=$(( index / 9 )) col=$(( index % 9 )) step peer
+  local box_row=$(( (index / 9 / 3) * 3 )) box_col=$(( (index % 9) / 3 * 3 ))
+  (( value )) || return 1
+  for (( step = 0; step < 9; step++ )); do
+    peer=$(( row * 9 + step ))
+    (( peer == index )) || (( AURADE_SUDOKU_CELLS[peer] != value )) || return 0
+    peer=$(( step * 9 + col ))
+    (( peer == index )) || (( AURADE_SUDOKU_CELLS[peer] != value )) || return 0
+  done
+  local dy dx
+  for (( dy = 0; dy < 3; dy++ )); do
+    for (( dx = 0; dx < 3; dx++ )); do
+      peer=$(( (box_row + dy) * 9 + box_col + dx ))
+      (( peer == index )) || (( AURADE_SUDOKU_CELLS[peer] != value )) || return 0
+    done
+  done
+  return 1
+}
+
+aurade_sudoku_conflicts() {
+  local i count=0
+  for (( i = 0; i < 81; i++ )); do
+    aurade_sudoku_conflict "$i" && count=$(( count + 1 ))
+  done
+  printf '%s' "$count"
+}
+
+aurade_sudoku_left() {
+  local i count=0
+  for (( i = 0; i < 81; i++ )); do
+    (( AURADE_SUDOKU_CELLS[i] )) || count=$(( count + 1 ))
+  done
+  printf '%s' "$count"
+}
+
+aurade_sudoku_won() {
+  local i
+  for (( i = 0; i < 81; i++ )); do
+    (( AURADE_SUDOKU_CELLS[i] )) || return 1
+  done
+  for (( i = 0; i < 81; i++ )); do
+    aurade_sudoku_conflict "$i" && return 1
+  done
+  return 0
+}
+
+aurade_sudoku_move() {
+  case $1 in
+    up)    (( AURADE_SUDOKU_Y > 0 )) && AURADE_SUDOKU_Y=$(( AURADE_SUDOKU_Y - 1 )) || true ;;
+    down)  (( AURADE_SUDOKU_Y < 8 )) && AURADE_SUDOKU_Y=$(( AURADE_SUDOKU_Y + 1 )) || true ;;
+    left)  (( AURADE_SUDOKU_X > 0 )) && AURADE_SUDOKU_X=$(( AURADE_SUDOKU_X - 1 )) || true ;;
+    right) (( AURADE_SUDOKU_X < 8 )) && AURADE_SUDOKU_X=$(( AURADE_SUDOKU_X + 1 )) || true ;;
+  esac
+  return 0
+}
+
+# Writing the same number again rubs it out, so one key both writes and
+# corrects and nobody has to find the other one.
+aurade_sudoku_write() {
+  local value=$1 index=$(( AURADE_SUDOKU_Y * 9 + AURADE_SUDOKU_X ))
+  (( AURADE_SUDOKU_GIVEN[index] )) && return 0
+  if (( value == 0 )); then
+    (( AURADE_SUDOKU_CELLS[index] )) || return 0
+    AURADE_SUDOKU_CELLS[index]=0
+  elif (( AURADE_SUDOKU_CELLS[index] == value )); then
+    AURADE_SUDOKU_CELLS[index]=0
+  else
+    AURADE_SUDOKU_CELLS[index]=$value
+  fi
+  AURADE_SUDOKU_MOVES=$(( AURADE_SUDOKU_MOVES + 1 ))
+  return 0
+}
+
 AURADE_NONO_ART=(
   'heart:.##..##.:########:########:########:.######.:..####..:...##...:........'
   'cat:#......#:##....##:########:#.#..#.#:########:.######.:..#..#..:........'
@@ -961,6 +1100,14 @@ AURADE_NONO_ART=(
   'flower:...##...:...##...:..####..:.######.:...##...:..####..:.#....#.:#......#'
   'rocket:...##...:..####..:..####..:.######.:########:...##...:..#..#..:.#....#.'
   'star:...#....:..###...:.#####..:#######.:.#####..:..###...:...#....:........'
+  'tree:...##...:..####..:.######.:########:..####..:.######.:...##...:...##...'
+  'mug:........:######..:#....###:#....#.#:#....###:######..:.####...:........'
+  'boat:....#...:...##...:..###...:.####...:....#...:........:########:.######.'
+  'bell:...##...:..####..:..####..:.######.:.######.:########:........:...##...'
+  'letter:........:########:##....##:#.#..#.#:#..##..#:#......#:########:........'
+  'anchor:...##...:...##...:.######.:...##...:#..##..#:#..##..#:##....##:.######.'
+  'disk:########:#..##..#:#..##..#:#......#:#.####.#:#.#..#.#:#.####.#:########'
+  'battery:........:...##...:########:##.##.##:##.##.##:##.##.##:########:........'
 )
 AURADE_NONO_W=8
 AURADE_NONO_H=8

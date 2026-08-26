@@ -499,6 +499,228 @@ for _ in range(6):
     ttt.tick()
 check("2048" in ttt.status(), f"the tic-tac-toe never offers 2048: {ttt.status()!r}")
 
+
+# -- sudoku, where the answer has to be the only one -----------------------
+#
+# Every other game here is wrong if it will not finish. This one is wrong if
+# it will finish two ways, because a second answer means the board tells
+# somebody they are mistaken when they are not, and there is no way for them
+# to find out which of us is. So the uniqueness is proved on every run rather
+# than trusted to whatever generated the set.
+
+
+def sudoku_peers(index: int) -> list[int]:
+    row, column = index // 9, index % 9
+    box_row, box_column = (row // 3) * 3, (column // 3) * 3
+    found = set()
+    for step in range(9):
+        found.add(row * 9 + step)
+        found.add(step * 9 + column)
+    for dy in range(3):
+        for dx in range(3):
+            found.add((box_row + dy) * 9 + box_column + dx)
+    found.discard(index)
+    return sorted(found)
+
+
+def sudoku_solutions(cells: list[int], cap: int = 2) -> int:
+    """How many ways this board finishes, counted no further than `cap`."""
+    best, options = None, None
+    for index in range(81):
+        if cells[index]:
+            continue
+        used = {cells[peer] for peer in sudoku_peers(index) if cells[peer]}
+        free = [value for value in range(1, 10) if value not in used]
+        if not free:
+            return 0
+        if options is None or len(free) < len(options):
+            best, options = index, free
+            if len(free) == 1:
+                break
+    if options is None:
+        return 1
+    total = 0
+    for value in options:
+        cells[best] = value
+        total += sudoku_solutions(cells, cap - total)
+        cells[best] = 0
+        if total >= cap:
+            return total
+    return total
+
+
+sudoku_names = set()
+for name, text in A.Sudoku.PUZZLES:
+    check(len(text) == 81, f"sudoku {name} is not eighty one squares")
+    check(set(text) <= set(".123456789"), f"sudoku {name} has a square that is not a number")
+    check(name not in sudoku_names, f"two sudoku puzzles are both called {name}")
+    sudoku_names.add(name)
+    cells = [0 if ch == "." else int(ch) for ch in text]
+    for index, value in enumerate(cells):
+        if value:
+            check(all(cells[peer] != value for peer in sudoku_peers(index)),
+                  f"sudoku {name} contradicts itself before anybody plays it")
+    givens = sum(1 for ch in text if ch != ".")
+    check(17 <= givens <= 60,
+          f"sudoku {name} has {givens} givens, which is not a puzzle")
+    check(sudoku_solutions(list(cells)) == 1,
+          f"sudoku {name} does not have exactly one answer")
+
+check(len(A.Sudoku.PUZZLES) >= 6,
+      f"only {len(A.Sudoku.PUZZLES)} sudoku puzzles, which is one wait's worth")
+
+tui_sudoku = shell_array(WAIT_SH, "AURADE_SUDOKU")
+check(sorted(tui_sudoku) == sorted(f"{name}:{text}" for name, text in A.Sudoku.PUZZLES),
+      f"the sudoku sets differ: {len(tui_sudoku)} there, {len(A.Sudoku.PUZZLES)} here")
+
+# The rules, played rather than read.
+board = A.Sudoku(seed=5)
+check(sum(board.given) == sum(1 for value in board.cells if value),
+      "a square somebody has to fill in is being treated as one that came with the puzzle")
+# Across every puzzle, not just whichever one this seed picked. Two of the
+# eight begin with a number in the top left, and a cursor parked there makes
+# the first keypress look like a broken board rather than like a rule.
+for _seed in range(40):
+    _board = A.Sudoku(seed=_seed)
+    check(not _board.given[_board.y * 9 + _board.x],
+          f"on {_board.name} the cursor starts on a number that cannot be changed")
+check(not board.won(), "a fresh sudoku is already finished")
+check(not board.conflicts(), "a fresh sudoku argues with itself")
+
+# Writing into a given must do nothing at all.
+fixed = next(index for index, given in enumerate(board.given) if given)
+board.x, board.y = fixed % 9, fixed // 9
+before = list(board.cells)
+board.press("5")
+check(board.cells == before, "a number that came with the puzzle was overwritten")
+
+# One key writes and rubs out, and a repeat is marked rather than refused.
+blank = next(index for index, given in enumerate(board.given) if not given)
+board.x, board.y = blank % 9, blank // 9
+peer_value = next(board.cells[peer] for peer in sudoku_peers(blank) if board.cells[peer])
+board.press(str(peer_value))
+check(board.cells[blank] == peer_value,
+      "a number that repeats one nearby was refused instead of marked")
+check(blank in board.conflicts(),
+      "a number repeating one in the same row, column or box was not marked")
+board.press(str(peer_value))
+check(board.cells[blank] == 0, "writing the same number again did not rub it out")
+check(not board.conflicts(), "rubbing out the repeat left the argument behind")
+
+# Each of the three rules on its own.
+#
+# A square shares its row with some peers, its column with others, and its box
+# with a third set that overlaps neither. Testing with whichever peer came to
+# hand proves only that one of the three is wired up, and the other two can be
+# missing entirely while every assertion still passes. So each is found
+# deliberately, and a fixture that cannot find one fails rather than skipping.
+
+
+def only_shares(index: int, peer: int, unit: str) -> bool:
+    same_row = index // 9 == peer // 9
+    same_column = index % 9 == peer % 9
+    same_box = ((index // 9) // 3 == (peer // 9) // 3
+                and (index % 9) // 3 == (peer % 9) // 3)
+    if unit == "row":
+        return same_row and not same_box
+    if unit == "column":
+        return same_column and not same_box
+    return same_box and not same_row and not same_column
+
+
+def unit_of(index: int, peer: int) -> set:
+    """Which of the three rules this pair is related by."""
+    shared = set()
+    if index // 9 == peer // 9:
+        shared.add("row")
+    if index % 9 == peer % 9:
+        shared.add("column")
+    if ((index // 9) // 3 == (peer // 9) // 3
+            and (index % 9) // 3 == (peer % 9) // 3):
+        shared.add("box")
+    return shared
+
+
+for unit in ("row", "column", "box"):
+    found = None
+    for empty in range(81):
+        if board.given[empty] or board.cells[empty]:
+            continue
+        for peer in sudoku_peers(empty):
+            value = board.cells[peer]
+            if not value or not only_shares(empty, peer, unit):
+                continue
+            # And the same number must not already sit in either of the other
+            # two units, or writing it here would be refused by a rule this
+            # round is not testing, and the round would pass with that rule
+            # deleted. Both the row and the box tests did exactly that.
+            elsewhere = any(
+                board.cells[other] == value
+                and unit_of(empty, other) - {unit}
+                for other in sudoku_peers(empty) if other != peer
+            )
+            if elsewhere:
+                continue
+            found = (empty, value)
+            break
+        if found:
+            break
+    check(found is not None,
+          f"no square on this board shares only a {unit} with a filled one, "
+          f"so the {unit} rule is untested")
+    if found is None:
+        continue
+    where, value = found
+    board.x, board.y = where % 9, where // 9
+    board.press(str(value))
+    check(where in board.conflicts(),
+          f"a number repeating one in the same {unit}, and nothing else, was not marked")
+    board.press(str(value))
+    check(not board.conflicts(), f"the {unit} test left an argument behind")
+
+# Filled in from the one answer it has, it is finished.
+solved = list(board.cells)
+free = [index for index in range(81) if not solved[index]]
+sudoku_solutions(solved)  # leaves the board untouched
+answer = [0 if ch == "." else int(ch) for ch in
+          dict(A.Sudoku.PUZZLES)[board.name]]
+
+
+def fill_in(cells: list[int]) -> list[int] | None:
+    for index in range(81):
+        if cells[index]:
+            continue
+        used = {cells[peer] for peer in sudoku_peers(index) if cells[peer]}
+        for value in range(1, 10):
+            if value in used:
+                continue
+            cells[index] = value
+            filled = fill_in(cells)
+            if filled is not None:
+                return filled
+            cells[index] = 0
+        return None
+    return list(cells)
+
+
+complete = fill_in(list(answer))
+check(complete is not None, "the chosen sudoku cannot be finished at all")
+board.cells = list(complete)
+check(board.won(), "a correctly finished sudoku was not reported as finished")
+check(not board.conflicts(), "a correctly finished sudoku still argues with itself")
+
+# Full is not the same as finished. A board that calls any complete grid a
+# win congratulates somebody for filling every square with the wrong numbers.
+wrong = list(complete)
+first_free = next(index for index, given in enumerate(board.given) if not given)
+swap = next(index for index in sudoku_peers(first_free)
+            if not board.given[index] and wrong[index] != wrong[first_free])
+wrong[first_free], wrong[swap] = wrong[swap], wrong[first_free]
+board.cells = wrong
+check(all(board.cells), "the wrong-answer fixture is not a full grid")
+check(board.conflicts(), "the wrong-answer fixture does not actually repeat anything")
+check(not board.won(), "a full grid with the wrong numbers in it was called solved")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"arcade test: {failure}", file=sys.stderr)

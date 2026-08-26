@@ -3177,7 +3177,7 @@ WAIT_CURSOR=0
 #: finds a game on a screen they are anxious about actively stressful should
 #: meet the two options that are not games before the four that are, and
 #: should not have to press past a snake to reach the log.
-WAIT_CHOICES=(tips log bible life type nono 2048 mines lights fifteen soko c4 maze word snake ttt)
+WAIT_CHOICES=(tips log bible life type nono sudoku 2048 mines lights fifteen soko c4 maze word snake ttt)
 declare -A WAIT_LABELS=(
   [tips]='Read something about this system'
   [log]='Watch the install work'
@@ -3185,6 +3185,7 @@ declare -A WAIT_LABELS=(
   [life]='Something moving, that needs nothing'
   [type]='Test your typing, and your keyboard'
   [nono]='Solve a nonogram'
+  [sudoku]='Solve a sudoku'
   [2048]='Play 2048'
   [mines]='Play minesweeper'
   [lights]='Play lights out'
@@ -3529,6 +3530,68 @@ screen_nono() {
   fi
   tui_blank
   tui_footer 'arrows  move    enter  mark    g  choose' 'esc  back'
+}
+
+# Sudoku. Nine by nine, the answer is the only one there is, and the squares
+# that came with the puzzle are told apart from the ones somebody wrote.
+screen_sudoku() {
+  local HELP_KEY=0
+  local x y i value line pad clash left
+  tui_clear
+  tui_header 'Sudoku'
+  tui_blank
+  # Three columns per square, two more between boxes: 9*3 + 2*2 = 31.
+  #
+  # Three rather than two because every state has to be legible without any
+  # colour at all. Plain mode is not a downgrade of this screen, it is the
+  # screen some people read it in, and a board whose only sign of a mistake
+  # is a red digit is a board they cannot play. So the brackets carry it:
+  # square ones for where the cursor is, angle ones when it is sitting on a
+  # number the puzzle came with and typing will not change it, round ones for
+  # a number somebody wrote, exclamation marks for a number that repeats
+  # somewhere it may not.
+  pad=$(( (AURADE_TUI_INNER - 31) / 2 ))
+  (( pad >= 0 )) || pad=0
+  for (( y = 0; y < 9; y++ )); do
+    if (( y > 0 && y % 3 == 0 )); then
+      tui_line "$(printf '%*s%s' "$pad" '' '---------+----------+----------')" dim
+    fi
+    line=$(printf '%*s' "$pad" '')
+    for (( x = 0; x < 9; x++ )); do
+      if (( x > 0 && x % 3 == 0 )); then line+='| '; fi
+      i=$(( y * 9 + x ))
+      value=${AURADE_SUDOKU_CELLS[i]}
+      (( value )) || value='.'
+      if (( x == AURADE_SUDOKU_X && y == AURADE_SUDOKU_Y )); then
+        if (( AURADE_SUDOKU_GIVEN[i] )); then line+=">$value<"; else line+="[$value]"; fi
+      elif aurade_sudoku_conflict "$i"; then
+        line+="!$value!"
+      elif (( AURADE_SUDOKU_GIVEN[i] )); then
+        line+=" $value "
+      elif (( AURADE_SUDOKU_CELLS[i] )); then
+        line+="($value)"
+      else
+        # An empty square is empty. Bracketing the nothing that is there
+        # turns forty one blanks into forty one pieces of punctuation.
+        line+=" $value "
+      fi
+    done
+    tui_line "$line" cyan
+  done
+  tui_blank
+  if aurade_sudoku_won; then
+    tui_wrap "Solved, in $AURADE_SUDOKU_MOVES moves. Press enter for another." ok
+  else
+    clash=$(aurade_sudoku_conflicts)
+    left=$(aurade_sudoku_left)
+    if (( clash )); then
+      tui_wrap "$clash squares repeat a number in their row, column or box, marked between exclamation marks." warn
+    else
+      tui_wrap "$left squares to go. Every row, column and three by three box holds one to nine, once each. Numbers in round brackets are yours. The rest came with the puzzle and cannot be changed." dim
+    fi
+  fi
+  tui_blank
+  tui_footer 'arrows  move    1-9  write    0  rub out    g  choose' 'esc  back'
 }
 
 # Minesweeper. Nine by nine with ten mines, which is the board everybody has
@@ -3932,6 +3995,7 @@ run_engine_with_progress() {
             (( frame % 3 )) || aurade_life_step ;;
       type)    screen_type ;;
       nono)    screen_nono ;;
+      sudoku)  screen_sudoku ;;
       mines)   screen_mines ;;
       lights)  screen_lights ;;
       fifteen) screen_fifteen ;;
@@ -3986,6 +4050,7 @@ run_engine_with_progress() {
                 ttt)  mode=ttt; TTT_FRAMES=0 ;;
                 type)    mode=type; aurade_type_new ;;
                 nono)    mode=nono; aurade_nono_new ;;
+                sudoku)  mode=sudoku; aurade_sudoku_new ;;
                 mines)   mode=mines; aurade_mines_new ;;
                 lights)  mode=lights; aurade_lights_new ;;
                 fifteen) mode=fifteen; aurade_fifteen_new ;;
@@ -4059,6 +4124,19 @@ run_engine_with_progress() {
             d|D) aurade_nono_move right ;;
             enter|space)
               if aurade_nono_won; then aurade_nono_new; else aurade_nono_cycle; fi ;;
+          esac
+          ;;
+        sudoku)
+          case $key in
+            g|G) mode=picker ;;
+            q|Q|esc) WAIT_MODE=tips; mode=progress ;;
+            up|down|left|right) aurade_sudoku_move "$key" ;;
+            # No w a s d here. Those are letters, and every letter on this
+            # board has to stay free for the day somebody wants to type one.
+            1|2|3|4|5|6|7|8|9) aurade_sudoku_write "$key" ;;
+            0|backspace|delete) aurade_sudoku_write 0 ;;
+            enter|space)
+              if aurade_sudoku_won; then aurade_sudoku_new; else aurade_sudoku_write 0; fi ;;
           esac
           ;;
         mines)
@@ -4809,6 +4887,7 @@ if [[ -n $RENDER_ONLY ]]; then
     life)      RANDOM=${AURADE_LIFE_SEED:-13}; screen_life ;;
     lights)    RANDOM=${AURADE_LIGHTS_SEED:-3}; aurade_lights_new; screen_lights ;;
     nono)      RANDOM=${AURADE_NONO_SEED:-4}; aurade_nono_new; screen_nono ;;
+    sudoku)    RANDOM=${AURADE_SUDOKU_SEED:-7}; aurade_sudoku_new; screen_sudoku ;;
     type)      RANDOM=${AURADE_TYPE_SEED:-2}; aurade_type_new; screen_type ;;
     credits)   screen_credits ;;
     mines)     RANDOM=${AURADE_MINES_SEED:-9}; aurade_mines_new
