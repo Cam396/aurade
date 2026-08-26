@@ -127,6 +127,35 @@ def main() -> None:
     check(secured["strength"] == 100, "strength was not clamped to Shill's range")
     check(secured["security"] == "psk", "WPA or RSN was not classified as PSK")
 
+    # WPA3, which needs SAE rather than a pre-shared key. An access point
+    # offering only SAE that is handed a wpa-psk profile does not report a
+    # wrong password, it never associates, and the person is told the network
+    # stopped responding.
+    wpa3 = adapter._access_point_record({
+        "Ssid": b"Modern",
+        "HwAddress": "11:22:33:44:55:66",
+        "Strength": 80,
+        "Flags": 1,
+        "WpaFlags": 0,
+        "RsnFlags": adapter.NM_AP_SEC_KEY_MGMT_SAE,
+    })
+    check(wpa3["security"] == "sae", "a WPA3 access point was classified as WPA2")
+    check(wpa3["security_name"] == "WPA3",
+          f"a WPA3 network is displayed as {wpa3['security_name']}")
+
+    # A transitional access point offers both, and takes the pre-shared key
+    # path so that profiles saved before it was upgraded keep working.
+    both = adapter._access_point_record({
+        "Ssid": b"Mixed",
+        "HwAddress": "11:22:33:44:55:77",
+        "Strength": 70,
+        "Flags": 1,
+        "WpaFlags": 2,
+        "RsnFlags": adapter.NM_AP_SEC_KEY_MGMT_SAE | 0x100,
+    })
+    check(both["security"] == "psk",
+          "a transitional WPA2 and WPA3 access point was forced onto SAE")
+
     open_ap = adapter._access_point_record({
         "Ssid": b"Cafe",
         "HwAddress": "00:11:22:33:44:55",
@@ -335,6 +364,30 @@ def main() -> None:
           "a failed new Wi-Fi profile was not deleted")
     check(failed_service._props[adapter.PROP_STATE] == adapter.SHILL_STATE_IDLE,
           "a failed Wi-Fi activation did not return to idle")
+
+    # And the profile a WPA3 network is given asks for SAE.
+    sae_monitor = object.__new__(adapter.NetworkManagerMonitor)
+    sae_service = adapter.Service(
+        object(), "/service/sae", fake_shill, adapter.SHILL_TYPE_WIFI,
+        "wlan0", "sae", monitor=sae_monitor, nm_device_path="/dev/wlan0",
+        ssid=b"Modern", record={"name": "Modern", "hex_ssid": "4d6f6465726e",
+                                "security": "sae", "security_name": "WPA3"},
+    )
+    sae_service.set_property(adapter.PROP_PASSPHRASE, "a good long passphrase")
+    sae_settings = sae_monitor._connection_settings(sae_service)
+    check(str(sae_settings["802-11-wireless-security"]["key-mgmt"]) == "sae",
+          "a WPA3 network was given a wpa-psk profile, which never associates")
+
+    psk_service = adapter.Service(
+        object(), "/service/psk", fake_shill, adapter.SHILL_TYPE_WIFI,
+        "wlan0", "psk", monitor=sae_monitor, nm_device_path="/dev/wlan0",
+        ssid=b"Home", record={"name": "Home", "hex_ssid": "486f6d65",
+                              "security": "psk", "security_name": "WPA2"},
+    )
+    psk_service.set_property(adapter.PROP_PASSPHRASE, "a good long passphrase")
+    psk_settings = sae_monitor._connection_settings(psk_service)
+    check(str(psk_settings["802-11-wireless-security"]["key-mgmt"]) == "wpa-psk",
+          "a WPA2 network was given an SAE profile")
 
     # ------------------------------------------------------------------
     # What a person is told when the network does not come up

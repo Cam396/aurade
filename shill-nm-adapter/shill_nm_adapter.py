@@ -183,10 +183,26 @@ def _ssid_text(raw_ssid: bytes) -> str:
     return raw_ssid.decode("utf-8", "replace")
 
 
+#: The RSN flag NetworkManager sets for SAE, which is WPA3's handshake.
+NM_AP_SEC_KEY_MGMT_SAE = 0x400
+
+
 def _security_class(flags: int, wpa_flags: int, rsn_flags: int) -> str:
-    """Map NetworkManager AP security flags to Shill's coarse classes."""
+    """Map NetworkManager AP security flags to Shill's coarse classes.
+
+    WPA3 is told apart from WPA2 because the two need different key
+    management: SAE rather than a pre-shared key. An access point advertising
+    only SAE that is handed a wpa-psk profile does not fail with a wrong
+    password, it fails to associate at all, and the person in front of it is
+    told their network stopped responding.
+    """
     if not (flags & NM_AP_FLAGS_PRIVACY) and not (wpa_flags or rsn_flags):
         return "none"
+    # Only when RSN offers SAE and there is no WPA2 fallback advertised. A
+    # transitional access point offers both, and those take the pre-shared
+    # key path so that older saved profiles keep working.
+    if rsn_flags & NM_AP_SEC_KEY_MGMT_SAE and not wpa_flags:
+        return "sae"
     if wpa_flags or rsn_flags:
         return "psk"
     return "wep"
@@ -307,7 +323,8 @@ def _access_point_record(props: dict) -> dict | None:
         "strength": max(0, min(100, int(props.get("Strength", 0)))),
         "security": _security_class(flags, wpa_flags, rsn_flags),
         "security_name": (
-            "WPA2" if rsn_flags else "WPA" if wpa_flags else
+            "WPA3" if (rsn_flags & NM_AP_SEC_KEY_MGMT_SAE and not wpa_flags)
+            else "WPA2" if rsn_flags else "WPA" if wpa_flags else
             "WEP" if flags & NM_AP_FLAGS_PRIVACY else "none"
         ),
         "frequency": int(props.get("Frequency", 0)),
@@ -1403,7 +1420,11 @@ class NetworkManagerMonitor:
                 "This Wi-Fi network needs a passphrase",
             )
         settings["802-11-wireless-security"] = {
-            "key-mgmt": "wpa-psk",
+            # SAE for WPA3, a pre-shared key for everything else. The
+            # passphrase field is the same one either way; it is the key
+            # management that differs, and getting it wrong means the
+            # association never completes rather than being refused.
+            "key-mgmt": "sae" if security == "sae" else "wpa-psk",
             "psk": service._passphrase,
         }
         return settings
