@@ -9,7 +9,11 @@ command -v python3 >/dev/null 2>&1 || {
   echo 'greeter tests: SKIP (python3 not available)'; exit 0; }
 
 status=0
-for test in protocol accounts sessions; do
+for test in protocol accounts sessions shared; do
   python3 "${here}/tests/${test}_test.py" || status=1
 done
+# The window itself, on a headless compositor. Skips loudly rather than
+# failing when the machine has no compositor, and says so in its own line so
+# a run with no runtime coverage cannot be mistaken for a run with it.
+bash "${here}/tests/test-runtime.sh" || status=1
 exit "${status}"

@@ -1,0 +1,31 @@
+/* Greeter only rules, loaded on top of the installer's generated stylesheet.
+ *
+ * Everything the greeter shares with the installer comes from the theme file
+ * next to this one, which is generated and must never be edited by hand.
+ * What is here is the handful of things a login screen needs and an installer
+ * does not: a clock large enough to read across a room, and text that has to
+ * stay legible over a moving background rather than over a page. */
+
+.aurade-greeter-clock {
+  font-size: 76px;
+  font-weight: 200;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -2px;
+}
+
+/* Over the aurora, not over a sheet.
+ *
+ * The installer puts its pages on an opaque ground because they are pages.
+ * The greeter has one short panel and putting a slab behind it would hide the
+ * background it exists to sit on, so the text carries its own shadow instead
+ * and stays readable wherever the aurora happens to be bright. */
+.aurade-greeter-clock,
+.m3-headline-small,
+.m3-title-medium {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* The panel itself, which is a card and should read as one. */
+list.boxed-list {
+  border-radius: 18px;
+}
