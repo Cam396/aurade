@@ -1,0 +1,1 @@
+aurade_greeter/copy.py

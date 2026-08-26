@@ -358,7 +358,7 @@ def test_every_class_the_greeter_uses_is_defined(app) -> None:
     used = set(re.findall(r'add_css_class\("([a-z0-9-]+)"\)', source))
     used |= set(re.findall(r'css="([a-z0-9-]+)"', source))
     defined = set()
-    for name in ("shared/theme-dark.css", "shared/theme.css", "greeter.css"):
+    for name in ("theme-dark.css", "theme.css", "greeter.css"):
         path = os.path.join(PACKAGE, "aurade_greeter", name)
         defined |= set(re.findall(r'\.([a-z0-9-]+)',
                                   open(path, encoding="utf-8").read()))

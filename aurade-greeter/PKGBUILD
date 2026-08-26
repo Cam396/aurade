@@ -1,0 +1,128 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-greeter
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Graphical greeter for AuraDE, on the installer's design system"
+arch=('any')
+url="https://github.com/Cam396/aurade"
+license=('BSD-3-Clause')
+depends=(
+  'greetd'
+  'gtk4'
+  'libadwaita'
+  'python'
+  'python-gobject'
+)
+# tuigreet stays alongside rather than being replaced. It is the way in when
+# this greeter will not start, and a machine whose only greeter is broken
+# needs a rescue disk to log into.
+optdepends=(
+  'greetd-tuigreet: text greeter, kept as the way in if this one will not start'
+  'accountsservice: user pictures and real names on the sign in list'
+)
+checkdepends=('python' 'weston')
+# Basenames, because makepkg resolves every local source to its basename and
+# refuses a path. The repository keeps the real tree; the top level entries
+# are symlinks into it, which is how aurade-host-bridge exposes its test too.
+source=(
+  'aurade-greeter'
+  'aurade.toml.example'
+  'README.md'
+  'LICENSE'
+  'run-tests.sh'
+  '__init__.py'
+  'accounts.py'
+  'app.py'
+  'copy.py'
+  'greeter.css'
+  'protocol.py'
+  'sessions.py'
+  'a11y.py'
+  'brand.py'
+  'status.py'
+  'tokens.py'
+  'theme.css'
+  'theme-dark.css'
+  'theme-hc.css'
+  'theme-dark-hc.css'
+  'theme-oled.css'
+  'accounts_test.py'
+  'protocol_test.py'
+  'runtime_test.py'
+  'sessions_test.py'
+  'shared_test.py'
+  'test-runtime.sh'
+)
+sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
+            '7780990b67f130dab31e912bfae8285d8eea239737a07fe7b3224bff2e8fdf5d'
+            '0044a4233392d94f74841d4aa99bd5759c5a8560123bfe535c0a8acbdbbf4f5f'
+            '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f'
+            '3960c1178f67f8577d83561ca115f067cc4d75aa2262bdd2e5d21f0701ce1040'
+            '71bba0c7a680e8ea9cd2f7e77963be06de372212f1de55102bd5098f87f649e6'
+            'b08c83d5e409fbd5d926d9745f673a097ba86b8dd1f7fe87d9463e9da04f7526'
+            '769761de91868921e6c8171616d650feefc9d4dc4a3f3102b8124a45d401d399'
+            '1cfd64f6d86d0a7149c068679f36258507cb0c52eef019f68c1e0d2c104d0470'
+            'bfde539eca17dc8e92f21ea9ddb78e0037d321c5ffc341f12e4bdf54ee330b4a'
+            'e230236bb4f62f4ffd345bfde84cd1aead05f30f86192368f5fa34a48399d31b'
+            'acfd43d259e0a1c371cfdbd312cef1c45d689ba06ac9408784cac4faddd7d240'
+            'e676e9ce65778365d82745135ca4fd960a7426dcce136a1e4c28e888b847ad62'
+            'd06f9323d26e737422fcf879d691be482f6c42a04de17160d963fcd7c0e06cf6'
+            '48951a6d81d5d42ffd94ddc108d0c0e4924ee3bfebc8eedb1646f01ee541991f'
+            'b51ba87a29153fd6e2cd5f1a7b93cff602d80cf1ed46f5ccbe236aa4bf365f48'
+            'b9a3195458b88de391e37d6176f8bb4d9e3702dafd340589bec4d1e640ddd35c'
+            '96c4c38ded8e50d6bde00c55e02c342bb6c838697b9ee41bcf4d9dbb89554df7'
+            'c5a83dcc7753ceab6adeea03c3a85af2afc934d3acf72a9f511b781e914081e7'
+            'f106bc2c9f3b4356051d02b991c89ce2f948b47738af174e8daf3e58f803979c'
+            '804006f01627e6e6819067797df0d6777df6178053710cc7586f519c2d732e2f'
+            'ff88e7a333bc959fb34490215b0efe1e5197c8fb4862dab9db3de2c1a515d676'
+            '1c955b1ac075da99bcf61591e48d9d3ad0c244320ea91a0d481c37b1b48c4478'
+            '0eaa8888969e87ebd6543a274cc8734a86200ad52f66c3baa7be0ae2738909ac'
+            '449b461c2e077d94ada2808bc50cecf69f4cf2e957759e12e718e318ed9af6a0'
+            'a53b5ef1a364fec8bb2f3df1ee853bd90b6d6049db4c7b4fda938ca2b3478aec'
+            'e5324b3d0dd84eacfd44981ee24c5af274a176ea1c1738d8bb316d5adfc72a81')
+
+_module=(__init__.py accounts.py app.py copy.py greeter.css protocol.py sessions.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
+_test=(accounts_test.py protocol_test.py runtime_test.py sessions_test.py shared_test.py test-runtime.sh)
+
+_stage() {
+  # Put the flat sources back into the shape the package imports, so the
+  # tests run against the layout that ships rather than against the one the
+  # repository happens to have.
+  local name
+  install -d "${srcdir}/staged/aurade_greeter" "${srcdir}/staged/tests"
+  for name in "${_module[@]}"; do
+    install -m644 "${srcdir}/${name}" "${srcdir}/staged/aurade_greeter/${name}"
+  done
+  for name in "${_test[@]}"; do
+    install -m644 "${srcdir}/${name}" "${srcdir}/staged/tests/${name}"
+  done
+  install -m755 "${srcdir}/run-tests.sh" "${srcdir}/staged/run-tests.sh"
+  chmod +x "${srcdir}/staged/tests/test-runtime.sh"
+}
+
+check() {
+  _stage
+  "${srcdir}/staged/run-tests.sh"
+}
+
+package() {
+  install -Dm755 "${srcdir}/aurade-greeter" "${pkgdir}/usr/bin/aurade-greeter"
+
+  local name
+  for name in "${_module[@]}"; do
+    install -Dm644 "${srcdir}/${name}" \
+      "${pkgdir}/usr/lib/aurade-greeter/aurade_greeter/${name}"
+  done
+
+  # The greeter reads the account list and remembers who signed in last.
+  # That state file is the only thing it writes.
+  install -dm755 "${pkgdir}/var/lib/aurade-greeter"
+
+  install -Dm644 "${srcdir}/aurade.toml.example" \
+    "${pkgdir}/usr/share/aurade-greeter/aurade.toml.example"
+  install -Dm644 "${srcdir}/README.md" \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 "${srcdir}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

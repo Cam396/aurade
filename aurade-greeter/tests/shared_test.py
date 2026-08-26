@@ -24,7 +24,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 PACKAGE = os.path.normpath(os.path.join(HERE, ".."))
 ROOT = os.path.normpath(os.path.join(PACKAGE, ".."))
-SHARED = os.path.join(PACKAGE, "aurade_greeter", "shared")
+SHARED = os.path.join(PACKAGE, "aurade_greeter")
 ORIGIN = os.path.join(ROOT, "installer", "lib", "aurade_gui")
 
 #: Everything carried across, and nothing else.
@@ -53,7 +53,20 @@ def digest(path: str) -> str:
         return hashlib.sha256(handle.read()).hexdigest()
 
 
+#: Whether the thing being compared against is here at all.
+#:
+#: This test's whole job is to catch two files in one repository drifting
+#: apart. Inside a package build there is only one of them, because the
+#: installer is not part of this package and never will be, so there is
+#: nothing to compare and nothing that could be caught. It says so rather
+#: than failing, and rather than passing quietly: a run that proved nothing
+#: has to be distinguishable from a run that proved something.
+HAVE_ORIGINALS = os.path.isdir(ORIGIN)
+
+
 def test_every_copy_matches_its_original() -> None:
+    if not HAVE_ORIGINALS:
+        return
     for name in VENDORED:
         copy = os.path.join(SHARED, name)
         original = os.path.join(ORIGIN, name)
@@ -67,19 +80,35 @@ def test_every_copy_matches_its_original() -> None:
               f"{name} in the greeter is no longer the installer's {name}")
 
 
-def test_nothing_extra_was_added_to_the_shared_directory() -> None:
-    """A file that lives here and nowhere else is a file nothing checks."""
-    allowed = set(VENDORED) | {"__init__.py", "__pycache__"}
+#: This package's own files, which have no original to be compared against.
+OURS = ("__init__.py", "accounts.py", "app.py", "copy.py", "greeter.css",
+        "protocol.py", "sessions.py")
+
+
+def test_every_file_is_either_ours_or_checked() -> None:
+    """A carried file that nothing compares is a carried file that drifts."""
+    allowed = set(VENDORED) | set(OURS) | {"__pycache__"}
     for name in sorted(os.listdir(SHARED)):
         check(name in allowed,
-              f"{name} sits in the shared directory with nothing to compare it to")
+              f"{name} is neither this package's own nor compared against an original")
+
+
+def test_the_originals_are_where_this_test_expects_them() -> None:
+    """Named separately so the reason for a quiet run is in the output.
+
+    Without this, a repository whose installer directory had been moved would
+    run this file, compare nothing, and report PASS.
+    """
+    if HAVE_ORIGINALS:
+        return
+    print(f"  nothing to compare against: {ORIGIN} is not here")
 
 
 def test_the_copies_still_work_where_they_landed() -> None:
     """Vendoring must not have broken the relative import inside brand."""
     sys.path.insert(0, PACKAGE)
     try:
-        from aurade_greeter.shared import brand, status, tokens
+        from aurade_greeter import brand, status, tokens
     except Exception as exc:  # noqa: BLE001 - any failure here is the failure
         FAILURES.append(f"the carried modules do not import: {exc!r}")
         return
@@ -100,7 +129,11 @@ def main() -> int:
         for failure in FAILURES:
             print(f"  {failure}")
         return 1
-    print("greeter shared design test: PASS")
+    if not HAVE_ORIGINALS:
+        print("greeter shared design test: NOTHING TO COMPARE "
+              "(the installer tree is not here, so no copy was checked)")
+        return 0
+    print(f"greeter shared design test: PASS ({len(VENDORED)} copies identical)")
     return 0
 
 
