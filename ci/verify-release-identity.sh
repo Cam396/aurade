@@ -31,6 +31,23 @@ read_pin() {
 revision=$(read_pin chromium.sha || true)
 version=$(read_pin chromium.version || true)
 
+# One digest over the whole patch series.
+#
+# The point is not integrity, it is staleness. The record below says a series
+# was checked against a revision; if any patch has changed since, that check
+# no longer covers what is in the tree and the record has to be earned again.
+series_digest() {
+  local dir="${ROOT}/patches"
+  [[ -d ${dir} ]] || { printf 'no-patches'; return; }
+  {
+    cat "${dir}/SERIES" 2>/dev/null
+    while IFS= read -r name; do
+      [[ -n ${name} ]] || continue
+      sha256sum "${dir}/${name}" 2>/dev/null || printf 'missing %s\n' "${name}"
+    done < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "${dir}/SERIES" 2>/dev/null)
+  } | sha256sum | cut -d" " -f1
+}
+
 # --- record mode -----------------------------------------------------------
 #
 # Binding a revision to a version needs the checkout, and most runs do not
@@ -50,9 +67,26 @@ if [[ ${1:-} == --record ]]; then
              END{printf "%s.%s.%s.%s", a, b, c, d}' "${src}/chrome/VERSION"
   )
   tree_revision=$(git -C "${src}" rev-parse HEAD)
+
+  # The series has to apply to the revision being recorded.
+  #
+  # This is the check that was missing. The gate compared the pin against the
+  # package, the documentation and the checkout, and passed for weeks on a
+  # branch whose patch series did not apply to the revision it pinned at all,
+  # because nothing ever asked. An artifact is only traceable to a source if
+  # the source can be rebuilt from what is written down.
+  if [[ -x ${ROOT}/ci/verify-patch-series.sh ]]; then
+    printf 'release identity: checking the series against %s\n' "${tree_revision:0:12}"
+    if ! CHROME_SRC="${src}" "${ROOT}/ci/verify-patch-series.sh" >/dev/null 2>&1; then
+      echo "release identity: the patch series does not apply to ${tree_revision:0:12}; nothing recorded" >&2
+      exit 1
+    fi
+  fi
+
   cat > "${ROOT}/pins/chromium.provenance" <<PROV
 revision=${tree_revision}
 version=${tree_version}
+series=$(series_digest)
 verified=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 PROV
   printf 'release identity: recorded %s at %s\n' "${tree_version}" "${tree_revision:0:12}"
@@ -79,6 +113,13 @@ if [[ -r ${provenance} ]]; then
   fi
   if [[ ${recorded_version} != "${version}" ]]; then
     fail "the pinned version ${version} was never seen on that revision; the record says ${recorded_version}"
+  fi
+  recorded_series=$(sed -n 's/^series=//p' "${provenance}" | head -1)
+  current_series=$(series_digest)
+  if [[ -z ${recorded_series} ]]; then
+    fail "the record predates series checking, so nothing has confirmed the patches apply to this revision"
+  elif [[ ${recorded_series} != "${current_series}" ]]; then
+    fail "the patch series has changed since it was last checked against ${revision:0:12}; re-record with --record"
   fi
 else
   fail "pins/chromium.provenance is missing, so nothing has ever confirmed that this revision carries this version"

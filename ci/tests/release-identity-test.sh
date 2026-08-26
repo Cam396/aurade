@@ -21,8 +21,17 @@ build_fixture() {
   install -d -m 0755 "$TMP/tree/pins" "$TMP/tree/chromiumos-ash"
   printf '%s\n' "$GOOD_REVISION" >"$TMP/tree/pins/chromium.sha"
   printf '%s\n' "$GOOD_VERSION" >"$TMP/tree/pins/chromium.version"
-  printf 'revision=%s\nversion=%s\nverified=2026-08-26T00:00:00Z\n' \
-    "$GOOD_REVISION" "$GOOD_VERSION" >"$TMP/tree/pins/chromium.provenance"
+  # A fixture tree with a series, so the recorded digest is over something.
+  install -d -m 0755 "$TMP/tree/patches"
+  printf '0001-first.patch\n' >"$TMP/tree/patches/SERIES"
+  printf -- '--- a/x\n+++ b/x\n' >"$TMP/tree/patches/0001-first.patch"
+  local digest
+  digest=$( { cat "$TMP/tree/patches/SERIES"
+              sha256sum "$TMP/tree/patches/0001-first.patch"
+            } | sha256sum | cut -d" " -f1 )
+  printf 'revision=%s\nversion=%s\nseries=%s\nverified=2026-08-26T00:00:00Z\n' \
+    "$GOOD_REVISION" "$GOOD_VERSION" "$digest" \
+    >"$TMP/tree/pins/chromium.provenance"
   printf 'pkgname=chromiumos-ash\npkgver=%s\npkgrel=1\n' "$GOOD_VERSION" \
     >"$TMP/tree/chromiumos-ash/PKGBUILD"
   printf 'pkgbase = chromiumos-ash\n\tpkgver = %s\n\tpkgrel = 1\n' "$GOOD_VERSION" \
@@ -61,6 +70,18 @@ refuses 'generated metadata declaring a different version from the pin'
 build_fixture
 rm -f "$TMP/tree/pins/chromium.provenance"
 refuses 'a pin nothing has ever checked against a real tree'
+
+# The failure that went unnoticed for weeks: the gate compared the pin against
+# the package, the documentation and the checkout, and never asked whether the
+# patch series applied to the revision it pinned.
+build_fixture
+printf '0002-added-later.patch\n' >>"$TMP/tree/patches/SERIES"
+printf -- '--- a/y\n+++ b/y\n' >"$TMP/tree/patches/0002-added-later.patch"
+refuses 'a series changed since anybody checked it against the revision'
+
+build_fixture
+sed -i '/^series=/d' "$TMP/tree/pins/chromium.provenance"
+refuses 'a record that never recorded which series was checked'
 
 build_fixture
 printf 'not-a-revision\n' >"$TMP/tree/pins/chromium.sha"
