@@ -335,6 +335,151 @@ def main() -> None:
           "a failed new Wi-Fi profile was not deleted")
     check(failed_service._props[adapter.PROP_STATE] == adapter.SHILL_STATE_IDLE,
           "a failed Wi-Fi activation did not return to idle")
+
+    # ------------------------------------------------------------------
+    # What a person is told when the network does not come up
+    # ------------------------------------------------------------------
+    #
+    # NetworkManager's device states are not a scale. Everything above
+    # ACTIVATED is worse than it, and four places in the adapter used to read
+    # them as though higher were better, so a Wi-Fi network that had just
+    # refused a passphrase reported itself connected.
+    check(adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_ACTIVATED),
+          "an activated device was not treated as connected")
+    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_DEACTIVATING),
+          "a device on its way down was treated as connected")
+    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_FAILED),
+          "a failed device was treated as connected")
+    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_DISCONNECTED),
+          "a disconnected device was treated as connected")
+
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_FAILED)
+          == adapter.SHILL_STATE_NO_CONNECTIVITY,
+          "a failed device did not report a failure state")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_DEACTIVATING)
+          == adapter.SHILL_STATE_IDLE,
+          "a device on its way down did not report idle")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_ACTIVATED)
+          == adapter.SHILL_STATE_ONLINE,
+          "an activated device did not report online")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_NEED_AUTH)
+          == adapter.SHILL_STATE_ASSOCIATION,
+          "a device waiting on a password did not report associating")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_IP_CONFIG)
+          == adapter.SHILL_STATE_CONFIGURATION,
+          "a device getting an address did not report configuring")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_DISCONNECTED)
+          == adapter.SHILL_STATE_READY,
+          "a disconnected device did not report ready")
+    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_UNAVAILABLE)
+          == adapter.SHILL_STATE_IDLE,
+          "an unavailable device did not report idle")
+
+    # The reason is the whole difference between telling somebody their
+    # password was wrong and telling them nothing.
+    token, details, ask = adapter.failure_for_reason(adapter.NM_REASON_NO_SECRETS)
+    check(token == adapter.SHILL_ERROR_BAD_PASSPHRASE,
+          "a refused passphrase was not reported as a refused passphrase")
+    check(ask is True, "a refused passphrase did not ask for the password again")
+    check("password" in details.lower(),
+          f"the sentence for a refused passphrase does not mention it: {details!r}")
+
+    token, _details, ask = adapter.failure_for_reason(
+        adapter.NM_REASON_NO_SECRETS, "wep")
+    check(token == adapter.SHILL_ERROR_BAD_WEP_KEY,
+          "a refused WEP key was reported as a passphrase")
+    check(ask is True, "a refused WEP key did not ask for the key again")
+
+    token, _details, ask = adapter.failure_for_reason(adapter.NM_REASON_SSID_NOT_FOUND)
+    check(token == adapter.SHILL_ERROR_OUT_OF_RANGE,
+          "a network that vanished was not reported as out of range")
+    check(ask is False,
+          "a network out of range asked for the password, which cannot help")
+
+    token, _d, ask = adapter.failure_for_reason(adapter.NM_REASON_DHCP_FAILED)
+    check(token == adapter.SHILL_ERROR_DHCP_FAILED,
+          "a network that gave no address was not reported as such")
+    check(ask is False, "a DHCP failure asked for the password")
+
+    token, _d, ask = adapter.failure_for_reason(adapter.NM_REASON_SUPPLICANT_TIMEOUT)
+    check(token == adapter.SHILL_ERROR_CONNECT_FAILED,
+          "a supplicant timeout was not reported as a connection failure")
+    check(ask is False, "a supplicant timeout asked for the password")
+
+    token, details, ask = adapter.failure_for_reason(adapter.NM_REASON_USER_REQUESTED)
+    check(token == adapter.SHILL_ERROR_NONE,
+          "disconnecting on purpose was reported as a failure")
+    check(details == "", "a deliberate disconnect produced an error sentence")
+
+    token, _d, _a = adapter.failure_for_reason(9999)
+    check(token == adapter.SHILL_ERROR_UNKNOWN,
+          "an unrecognised reason was given a diagnosis nobody checked")
+
+    # And the same thing end to end, through the signal NetworkManager
+    # actually sends.
+    joined = adapter.Service(
+        object(), "/service/joining", fake_shill, adapter.SHILL_TYPE_WIFI,
+        "wlan0", "joining", nm_device_path="/dev/wlan0", ssid=b"Home WiFi",
+        record={"name": "Home WiFi", "hex_ssid": "486f6d652057694669",
+                "security": "psk", "security_name": "WPA2"},
+    )
+    bystander = adapter.Service(
+        object(), "/service/bystander", fake_shill, adapter.SHILL_TYPE_WIFI,
+        "wlan0", "bystander", nm_device_path="/dev/wlan0", ssid=b"Next Door",
+        record={"name": "Next Door", "hex_ssid": "4e65787420446f6f72",
+                "security": "psk", "security_name": "WPA2"},
+    )
+    fake_shill.services["/service/joining"] = joined
+    fake_shill.services["/service/bystander"] = bystander
+    monitor._services_by_device["/dev/wlan0"] = {
+        "/service/joining", "/service/bystander"}
+    joined.set_property(adapter.PROP_PASSPHRASE, "wrong one")
+    joined.set_state(adapter.SHILL_STATE_ASSOCIATION)
+    bystander.set_state(adapter.SHILL_STATE_READY)
+
+    monitor._on_device_state_changed(
+        "/dev/wlan0", adapter.NM_DEVICE_STATE_FAILED,
+        adapter.NM_DEVICE_STATE_CONFIG, adapter.NM_REASON_NO_SECRETS)
+
+    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_BAD_PASSPHRASE,
+          "a wrong passphrase produced no failure on the network being joined")
+    check(joined._props[adapter.PROP_STATE] == adapter.SHILL_STATE_NO_CONNECTIVITY,
+          "a network that just refused a password looks untouched")
+    check(joined._props[adapter.PROP_PASSPHRASE_REQUIRED] is True,
+          "nobody was asked to correct the password that failed")
+    try:
+        held = joined.GetWiFiPassphrase()
+    except adapter.dbus.exceptions.DBusException:
+        held = None
+    check(held in (None, ""),
+          "the passphrase that failed is still held for the next attempt")
+    check(joined._props[adapter.PROP_IS_CONNECTED] is False,
+          "a failed network still reports itself connected")
+    check(bystander._props.get(adapter.PROP_ERROR) in (None, "", adapter.SHILL_ERROR_NONE),
+          "one wrong password marked every other network in the list failed")
+    check(bystander._props[adapter.PROP_STATE] == adapter.SHILL_STATE_READY,
+          "an untouched network changed state because a different one failed")
+
+    # A deliberate disconnect is not a failure and must not leave one behind.
+    joined.set_state(adapter.SHILL_STATE_ONLINE)
+    monitor._on_device_state_changed(
+        "/dev/wlan0", adapter.NM_DEVICE_STATE_FAILED,
+        adapter.NM_DEVICE_STATE_ACTIVATED, adapter.NM_REASON_USER_REQUESTED)
+    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_NONE,
+          "disconnecting on purpose left an error on the network")
+    check(joined._props[adapter.PROP_STATE] == adapter.SHILL_STATE_READY,
+          "a network disconnected on purpose was left looking broken")
+
+    # And a connection that works clears whatever was said last time.
+    joined.set_failure(adapter.SHILL_ERROR_BAD_PASSPHRASE, "old news", True)
+    monitor._on_device_state_changed(
+        "/dev/wlan0", adapter.NM_DEVICE_STATE_ACTIVATED,
+        adapter.NM_DEVICE_STATE_IP_CONFIG, adapter.NM_REASON_NONE)
+    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_NONE,
+          "a network that connected still shows the last failure")
+    check(joined._props[adapter.PROP_ERROR_DETAILS] == "",
+          "a network that connected still shows the last failure sentence")
+
     print("shill adapter translation test: PASS")
 
 

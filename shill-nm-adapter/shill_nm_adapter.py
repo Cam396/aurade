@@ -1,5 +1,5 @@
 #!/usr/bin/python
-"""shill-nm-adapter — Bridge between ChromeOS Shill DBus and NetworkManager.
+"""shill-nm-adapter: bridge between ChromeOS Shill DBus and NetworkManager.
 
 Provides the ``org.chromium.flimflam`` DBus interface that ChromeOS Ash
 expects, translating queries and signals to/from NetworkManager's own DBus
@@ -26,7 +26,7 @@ import dbus.service
 from gi.repository import GLib
 
 # ---------------------------------------------------------------------------
-# Shill DBus constants – mirrors third_party/cros_system_api/dbus/shill/
+# Shill DBus constants, mirroring third_party/cros_system_api/dbus/shill/
 # ---------------------------------------------------------------------------
 
 SHILL_SERVICE = "org.chromium.flimflam"
@@ -53,7 +53,41 @@ NM_ACTIVE_CONNECTION = "org.freedesktop.NetworkManager.Connection.Active"
 NM_STATE_CONNECTED_GLOBAL = 70
 NM_DEVICE_STATE_UNAVAILABLE = 20
 NM_DEVICE_STATE_DISCONNECTED = 30
+NM_DEVICE_STATE_PREPARE = 40
+NM_DEVICE_STATE_CONFIG = 50
+NM_DEVICE_STATE_NEED_AUTH = 60
+NM_DEVICE_STATE_IP_CONFIG = 70
+NM_DEVICE_STATE_IP_CHECK = 80
+NM_DEVICE_STATE_SECONDARIES = 90
 NM_DEVICE_STATE_ACTIVATED = 100
+NM_DEVICE_STATE_DEACTIVATING = 110
+NM_DEVICE_STATE_FAILED = 120
+
+# Why NetworkManager left the state it left.
+#
+# Only the reasons this adapter can say something useful about are named. The
+# rest fall through to a generic connection failure, which is honest: a number
+# nobody has checked against NetworkManager's own enum is worse than no
+# number, because it would be reported to somebody as a diagnosis.
+NM_REASON_NONE = 0
+NM_REASON_UNKNOWN = 1
+NM_REASON_CONFIG_FAILED = 4
+NM_REASON_IP_CONFIG_UNAVAILABLE = 5
+NM_REASON_IP_CONFIG_EXPIRED = 6
+NM_REASON_NO_SECRETS = 7
+NM_REASON_SUPPLICANT_DISCONNECT = 8
+NM_REASON_SUPPLICANT_CONFIG_FAILED = 9
+NM_REASON_SUPPLICANT_FAILED = 10
+NM_REASON_SUPPLICANT_TIMEOUT = 11
+NM_REASON_DHCP_START_FAILED = 15
+NM_REASON_DHCP_ERROR = 16
+NM_REASON_DHCP_FAILED = 17
+NM_REASON_REMOVED = 36
+NM_REASON_SLEEPING = 37
+NM_REASON_CONNECTION_REMOVED = 38
+NM_REASON_USER_REQUESTED = 39
+NM_REASON_CARRIER = 40
+NM_REASON_SSID_NOT_FOUND = 53
 NM_DEVICE_TYPE_ETHERNET = 1
 NM_DEVICE_TYPE_WIFI = 2
 NM_AP_FLAGS_PRIVACY = 1
@@ -101,6 +135,22 @@ PROP_WIFI_MODE = "Mode"
 PROP_IS_CONNECTED = "IsConnected"
 PROP_ERROR = "Error"
 PROP_ERROR_DETAILS = "ErrorDetails"
+PROP_PASSPHRASE_REQUIRED = "PassphraseRequired"
+
+# Shill's own failure tokens, which is what Ash matches on.
+#
+# Ash turns these into the sentence a person reads. A string of its own
+# invention gets no sentence at all, so a wrong passphrase would reach the
+# screen as a network that simply did not connect, with nothing said about
+# why and no prompt to try the password again.
+SHILL_ERROR_NONE = "no-failure"
+SHILL_ERROR_BAD_PASSPHRASE = "bad-passphrase"
+SHILL_ERROR_BAD_WEP_KEY = "bad-wepkey"
+SHILL_ERROR_CONNECT_FAILED = "connect-failed"
+SHILL_ERROR_DHCP_FAILED = "dhcp-failed"
+SHILL_ERROR_OUT_OF_RANGE = "out-of-range"
+SHILL_ERROR_DISCONNECT = "disconnect-failed"
+SHILL_ERROR_UNKNOWN = "unknown"
 
 SHILL_STATE_ONLINE = "online"
 SHILL_STATE_READY = "ready"
@@ -140,6 +190,84 @@ def _security_class(flags: int, wpa_flags: int, rsn_flags: int) -> str:
     if wpa_flags or rsn_flags:
         return "psk"
     return "wep"
+
+
+def nm_state_is_connected(state: int) -> bool:
+    """Whether a NetworkManager device state means a working connection.
+
+    NetworkManager's device states are not a scale where higher is better.
+    Everything above ACTIVATED is worse than it: 110 is deactivating and 120
+    is failed. Four places in this file used to ask `state >= ACTIVATED`, so a
+    Wi-Fi network that had just refused a passphrase reported itself as
+    connected, to the technology list, to the service row, and to the Ash
+    status area at the same time.
+    """
+    return state == NM_DEVICE_STATE_ACTIVATED
+
+
+def nm_state_to_shill(state: int) -> str:
+    """One NetworkManager device state as the Shill state Ash expects."""
+    if state >= NM_DEVICE_STATE_FAILED:
+        return SHILL_STATE_NO_CONNECTIVITY
+    if state >= NM_DEVICE_STATE_DEACTIVATING:
+        return SHILL_STATE_IDLE
+    if state == NM_DEVICE_STATE_ACTIVATED:
+        return SHILL_STATE_ONLINE
+    if state in (NM_DEVICE_STATE_IP_CONFIG, NM_DEVICE_STATE_IP_CHECK,
+                 NM_DEVICE_STATE_SECONDARIES):
+        return SHILL_STATE_CONFIGURATION
+    if state in (NM_DEVICE_STATE_PREPARE, NM_DEVICE_STATE_CONFIG,
+                 NM_DEVICE_STATE_NEED_AUTH):
+        return SHILL_STATE_ASSOCIATION
+    if state >= NM_DEVICE_STATE_DISCONNECTED:
+        return SHILL_STATE_READY
+    return SHILL_STATE_IDLE
+
+
+def failure_for_reason(reason: int, security: str = "none") -> tuple[str, str, bool]:
+    """What to tell somebody when NetworkManager gives up, and whether to ask
+    for the password again.
+
+    Returns the Shill failure token, a sentence for the details field, and
+    whether the passphrase should be requested afresh. The third value is the
+    one that decides whether a person gets another chance to type the password
+    or just watches the network fail to connect for reasons nobody explains.
+
+    The sentences are written for the person in front of the machine, not for
+    the log. Somebody whose Wi-Fi will not connect needs to know which of the
+    two things went wrong, because one is fixed by typing and the other is
+    fixed by walking closer to the router.
+    """
+    if reason in (NM_REASON_NO_SECRETS, NM_REASON_SUPPLICANT_CONFIG_FAILED):
+        if security == "wep":
+            return (SHILL_ERROR_BAD_WEP_KEY,
+                    "That key did not work for this network.", True)
+        return (SHILL_ERROR_BAD_PASSPHRASE,
+                "That password did not work for this network.", True)
+    if reason in (NM_REASON_SUPPLICANT_FAILED, NM_REASON_SUPPLICANT_TIMEOUT,
+                  NM_REASON_SUPPLICANT_DISCONNECT):
+        return (SHILL_ERROR_CONNECT_FAILED,
+                "This network stopped responding while connecting.", False)
+    if reason == NM_REASON_SSID_NOT_FOUND:
+        return (SHILL_ERROR_OUT_OF_RANGE,
+                "This network is no longer in range.", False)
+    if reason in (NM_REASON_DHCP_START_FAILED, NM_REASON_DHCP_ERROR,
+                  NM_REASON_DHCP_FAILED, NM_REASON_IP_CONFIG_UNAVAILABLE,
+                  NM_REASON_IP_CONFIG_EXPIRED):
+        return (SHILL_ERROR_DHCP_FAILED,
+                "This network joined but did not give this computer an "
+                "address.", False)
+    if reason == NM_REASON_CARRIER:
+        return (SHILL_ERROR_CONNECT_FAILED,
+                "The cable is unplugged.", False)
+    if reason in (NM_REASON_USER_REQUESTED, NM_REASON_CONNECTION_REMOVED,
+                  NM_REASON_SLEEPING, NM_REASON_REMOVED, NM_REASON_NONE):
+        return (SHILL_ERROR_NONE, "", False)
+    if reason == NM_REASON_CONFIG_FAILED:
+        return (SHILL_ERROR_CONNECT_FAILED,
+                "This computer could not configure that network.", False)
+    return (SHILL_ERROR_UNKNOWN,
+            "This network could not be joined.", False)
 
 
 def _technology_properties(available: list[str], connected: list[str]) -> dict:
@@ -213,7 +341,7 @@ def _get_mac(iface: str) -> str:
 
 
 def _generate_guid() -> str:
-    return uuid.uuid4().hex  # no hyphens — DBus object paths don't allow them
+    return uuid.uuid4().hex  # no hyphens, because DBus object paths do not allow them
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +424,7 @@ class ShillDBus:
 
 
 # ---------------------------------------------------------------------------
-# Base – Shared convenience for all Shill objects
+# Base: shared convenience for all Shill objects
 # ---------------------------------------------------------------------------
 
 class ShillObject(dbus.service.Object):
@@ -385,7 +513,7 @@ class ShillObject(dbus.service.Object):
             self.PropertiesChanged(self._interface_name, changed, [])
 
     def _export(self) -> None:
-        """Idempotent — dbus.service.Object auto-exports on construction.
+        """Idempotent, because dbus.service.Object auto-exports on construction.
 
         Override if subclass needs deferred export.
         """
@@ -459,12 +587,12 @@ class Manager(ShillObject):
 
             if dtype == NM_DEVICE_TYPE_ETHERNET:
                 available.append(SHILL_TYPE_ETHERNET)
-                if state >= NM_DEVICE_STATE_ACTIVATED:
+                if nm_state_is_connected(int(state)):
                     connected.append(SHILL_TYPE_ETHERNET)
             elif dtype == NM_DEVICE_TYPE_WIFI:
                 if SHILL_TYPE_WIFI not in available:
                     available.append(SHILL_TYPE_WIFI)
-                if state >= NM_DEVICE_STATE_ACTIVATED:
+                if nm_state_is_connected(int(state)):
                     connected.append(SHILL_TYPE_WIFI)
 
         # EnabledTechnologies is consumed as an inventory by Ash, not as a
@@ -511,7 +639,7 @@ class Manager(ShillObject):
                     break
             if match:
                 return dbus.ObjectPath(path)
-        # No match — create a new one
+        # No match, so create a new one
         if self._monitor is not None:
             requested = self._monitor.create_requested_service(args)
             if requested is not None:
@@ -736,6 +864,33 @@ class Service(ShillObject):
             PROP_IS_CONNECTED: dbus.Boolean(state == SHILL_STATE_ONLINE),
         })
 
+    def set_failure(self, token: str, details: str, ask_again: bool) -> None:
+        """Say what went wrong, and whether to ask for the password again.
+
+        The state goes to no-connectivity rather than idle. Idle is what a
+        network looks like when nobody has tried it, and a network somebody
+        just tried and failed to join must not be indistinguishable from one
+        they have never touched.
+        """
+        self._set_properties({
+            PROP_ERROR: str(token),
+            PROP_ERROR_DETAILS: str(details),
+            PROP_STATE: SHILL_STATE_NO_CONNECTIVITY,
+            PROP_IS_CONNECTED: dbus.Boolean(False),
+        })
+        if ask_again:
+            # The saved secret is what failed, so it is not offered again.
+            # Leaving it in place makes the next attempt fail the same way
+            # without anybody being asked to correct it.
+            self._passphrase = None
+            self._set_properties({PROP_PASSPHRASE_REQUIRED: dbus.Boolean(True)})
+
+    def clear_failure(self) -> None:
+        self._set_properties({
+            PROP_ERROR: SHILL_ERROR_NONE,
+            PROP_ERROR_DETAILS: "",
+        })
+
     def update_access_point(self, record: dict, connected: bool) -> None:
         """Refresh one real AP sighting without creating synthetic rows."""
         if self._svc_type != SHILL_TYPE_WIFI:
@@ -853,7 +1008,7 @@ class Profile(ShillObject):
 
 
 # ---------------------------------------------------------------------------
-# NM monitor – watches NetworkManager for state changes
+# NM monitor: watches NetworkManager for state changes
 # ---------------------------------------------------------------------------
 
 class NetworkManagerMonitor:
@@ -905,6 +1060,19 @@ class NetworkManagerMonitor:
                 "PropertiesChanged",
                 lambda iface, changed, invalid: self._on_device_props_changed(
                     dev_path, changed
+                ),
+            )
+            # PropertiesChanged carries the new state and nothing about why.
+            # StateChanged carries the reason, and the reason is the whole
+            # difference between telling somebody their password was wrong and
+            # telling them nothing at all. Without this subscription a refused
+            # passphrase and a router that is switched off are the same event.
+            dbus.Interface(
+                self._device(dev_path), NM_DEVICE_IFACE
+            ).connect_to_signal(
+                "StateChanged",
+                lambda new, old, reason: self._on_device_state_changed(
+                    dev_path, int(new), int(old), int(reason)
                 ),
             )
             self._watched_devices.add(dev_path)
@@ -1076,7 +1244,7 @@ class NetworkManagerMonitor:
                 svc_path = f"/org/chromium/flimflam/Service/{svc._guid}"
                 self._service_keys[service_key] = svc_path
             svc = self._shill.services[svc_path]
-            connected = state >= NM_DEVICE_STATE_ACTIVATED and (
+            connected = nm_state_is_connected(state) and (
                 active_ap != "/" and active_ap == record.get("ap_path")
             )
             svc.update_access_point(record, connected)
@@ -1384,6 +1552,57 @@ class NetworkManagerMonitor:
             self._sync_ethernet_service(dev_path, int(changed.get("State", 30)), iface)
         self._shill.manager._refresh_technologies()
 
+    def _on_device_state_changed(self, dev_path: str, new_state: int,
+                                 old_state: int, reason: int) -> None:
+        """NetworkManager finished, or gave up, and said why."""
+        if new_state == NM_DEVICE_STATE_ACTIVATED:
+            for service in self._services_for_device(dev_path):
+                service.clear_failure()
+        elif new_state == NM_DEVICE_STATE_FAILED:
+            for service in self._attempted_services(dev_path, old_state):
+                token, details, ask_again = failure_for_reason(
+                    reason, str(service._props.get(PROP_SECURITY_CLASS, "none"))
+                )
+                if token == SHILL_ERROR_NONE:
+                    service.clear_failure()
+                    service.set_state(SHILL_STATE_READY)
+                    continue
+                log.info("NetworkManager gave up on %s: reason %d, %s",
+                         service._props.get(PROP_NAME), reason, token)
+                service.set_failure(token, details, ask_again)
+        self._shill.update_service_lists()
+
+    def _services_for_device(self, dev_path: str) -> list["Service"]:
+        found = []
+        for svc_path in self._services_by_device.get(dev_path, ()):
+            service = self._shill.services.get(svc_path)
+            if service is not None:
+                found.append(service)
+        return found
+
+    def _attempted_services(self, dev_path: str, old_state: int) -> list["Service"]:
+        """Only the network somebody was actually trying to join.
+
+        A device carries one service per visible access point. Marking every
+        one of them failed because the device failed turns a single wrong
+        password into a list where nothing works, which is both wrong and
+        alarming.
+        """
+        services = self._services_for_device(dev_path)
+        attempted = [
+            service for service in services
+            if str(service._props.get(PROP_STATE, "")) in (
+                SHILL_STATE_ASSOCIATION, SHILL_STATE_CONFIGURATION,
+                SHILL_STATE_ONLINE)
+        ]
+        if attempted:
+            return attempted
+        # Nothing was mid attempt, which happens when a connected network
+        # drops. The one that was online is the one to report about, and if
+        # none was, there is nobody to tell.
+        return [service for service in services
+                if bool(service._props.get(PROP_IS_CONNECTED))]
+
     def _on_nm_properties_changed(self, iface: str, changed: dict, invalid: list) -> None:
         if "WirelessEnabled" in changed:
             for dev_path in self._nm_devices:
@@ -1398,11 +1617,7 @@ class NetworkManagerMonitor:
 
     @staticmethod
     def _nm_to_shill_state(nm_state: int) -> str:
-        if nm_state >= NM_DEVICE_STATE_ACTIVATED:
-            return SHILL_STATE_ONLINE
-        if nm_state >= 50:
-            return SHILL_STATE_ASSOCIATION
-        return SHILL_STATE_IDLE
+        return nm_state_to_shill(nm_state)
 
 
 # ---------------------------------------------------------------------------
@@ -1431,7 +1646,7 @@ def main() -> None:
     monitor = NetworkManagerMonitor(bus, shill)
     monitor.start()
 
-    log.info("shill-nm-adapter ready — listening on system bus")
+    log.info("shill-nm-adapter ready, listening on system bus")
 
     loop = GLib.MainLoop()
     try:

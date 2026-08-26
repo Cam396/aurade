@@ -7,7 +7,7 @@
 
 pkgname=shill-nm-adapter
 pkgver=0.1.0
-pkgrel=5
+pkgrel=6
 pkgdesc="Shill-to-NetworkManager DBus bridge for ChromeOS Ash"
 install=shill-nm-adapter.install
 arch=('any')
@@ -22,18 +22,31 @@ depends=(
     'networkmanager'
 )
 makedepends=()
+checkdepends=('python')
 source=(
     "shill_nm_adapter.py"
+    "test_shill_nm_adapter.py"
     "shill-nm-adapter.service"
     "shill-nm-adapter.install"
     "org.chromium.flimflam.conf"
     "LICENSE"
 )
-sha256sums=('5118b5ac73d77f72e6b6b8aa5b2a619c72382f0d0a742a791ddafb231acde0a0'
+sha256sums=('5015dbe98da701156e4aa05bb8ff537fef93a49c66c5a343bd5606f85458cb4a'
+            '60c90ef7ae86d70890227b0c66e9674aa1567cc07b00d584b1e6ea3e442e2e5b'
             '7d4df043634a73de04e2b05264e5258d5a404eefb53dda8e2924320299c7558a'
             '9301673420b86b4d2338813f043cd38cbcd4c243b01f34b2faf60962dc559533'
             '102f2ceaa1ace82f86644e226937fdd072e330268de8d27220b9719f4dd181ca'
             '95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10')
+
+check() {
+    # The translation rules, run where the package is built.
+    #
+    # This daemon decides what a person is told when their network does not
+    # come up, and it does that by translating one set of numbers into
+    # another. Nothing about that needs a bus, a NetworkManager, or a radio,
+    # so there is no reason for it to be untested at build time.
+    python3 "${srcdir}/test_shill_nm_adapter.py"
+}
 
 package() {
     # Install the daemon
