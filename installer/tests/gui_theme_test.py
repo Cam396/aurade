@@ -440,6 +440,90 @@ check(cros_colors["yellow40"] != cros_colors["error40"],
 check(cros_colors["primary40"] != cros_colors["blue40"],
       "the desktop's primary and blue are the same colour")
 
+# -- the desktop is set in the face the installer is set in ----------------
+#
+# `patches/generated/cros_gm3_typography.json5` decides the typeface of every
+# label in Ash, the same way cros_ref_colors decides every colour. Upstream
+# asks for Google Sans and falls through to Roboto, so a machine walked
+# through this product's installer signed into a desktop set in a different
+# face. Nothing pinned this file, which meant a regeneration from upstream
+# would have put Google Sans back and no test anywhere would have said so.
+
+CROS_TYPE = os.path.join(ROOT, "patches", "generated", "cros_gm3_typography.json5")
+type_text = open(CROS_TYPE, encoding="utf-8").read() if os.path.exists(CROS_TYPE) else ""
+
+check(bool(type_text),
+      "patches/generated/cros_gm3_typography.json5 has not been generated")
+
+# Every typeface the generator names has to be in the file. A typeface that
+# goes missing does not fail loudly: Ash falls back, and one surface stays in
+# a face nothing else uses.
+matches = re.findall(
+    r"""\"([a-z][a-z0-9_-]*)\": \{\s*\"font_family\": '\$font_family_aurade_([a-z_]+)',"""
+    r"""\s*\"font_size\": (\d+),\s*\"font_weight\": (\d+),\s*\"line_height\": (\d+)""",
+    type_text)
+emitted = {m[0]: (m[1], m[2], m[3], m[4]) for m in matches}
+check(len(emitted) == len(gen.CROS_TYPEFACES),
+      f"the desktop carries {len(emitted)} typefaces, expected "
+      f"{len(gen.CROS_TYPEFACES)}")
+for name, family, size, weight, height in gen.CROS_TYPEFACES:
+    check(name in emitted, f"the desktop has no {name} typeface")
+    if name in emitted:
+        check(emitted[name] == (family, str(size), str(weight), str(height)),
+              f"{name} is {emitted[name]} and the generator says "
+              f"{(family, size, weight, height)}")
+
+# Neither of the faces this product replaced may survive in a declaration.
+# Named rather than inferred, because the failure this catches is a file
+# regenerated from upstream, which looks correct until somebody looks at a
+# label. The comments are excluded on purpose: the header has to be able to
+# say which faces it replaced, and a check that cannot tell prose from a
+# declaration would forbid the file from explaining itself.
+type_decls = re.sub(r"/\*.*?\*/", "", type_text, flags=re.S)
+for face in ("Google Sans", "Roboto"):
+    check(face not in type_decls,
+          f"the desktop typography still declares {face}")
+check("Adwaita Sans" in type_decls,
+      "the desktop typography does not name the face this product ships")
+
+# Every declared family, not just one of them. Upstream declares six, and a
+# single one left pointing at Google Sans is one surface in the wrong face.
+families = re.findall(r"font_family_aurade_[a-z_]+: \"([^\"]+)\"", type_decls)
+check(len(families) == len(gen.CROS_FAMILIES) + 1,
+      f"the desktop declares {len(families)} font families, expected "
+      f"{len(gen.CROS_FAMILIES) + 1}")
+for family in families:
+    check("Adwaita" in family or "JetBrains" in family,
+          f"a declared font family is not one this product ships: {family}")
+
+# The weight departure, asserted as the rule rather than as six numbers, so
+# adding a heading size inside the band cannot quietly skip it. TYPE sets 600
+# from 36px down through 18px; every `medium` typeface in that band has to
+# carry it, and the `-regular` opt outs have to stay light.
+for name, family, size, weight, height in gen.CROS_TYPEFACES:
+    if family == "medium" and 18 <= size <= 36:
+        check(weight == 600,
+              f"{name} is {size}px and weight {weight}, but a heading in that "
+              f"band carries 600")
+    if name.endswith("-regular"):
+        check(weight == 400,
+              f"{name} is the opt out of medium and carries weight {weight}")
+
+# The two largest sizes are deliberately not in the band. If they drift up,
+# the reason they were left alone has been forgotten.
+for name, family, size, weight, height in gen.CROS_TYPEFACES:
+    if family == "medium" and size > 36:
+        check(weight == 500,
+              f"{name} is {size}px and carries weight {weight}; above the "
+              f"heading band the weight stays 500")
+
+# Tracking cannot be carried by this file. The schema has four properties and
+# style_variable_generator has no letter spacing, so a tracking value written
+# here would be silently dropped rather than applied, which is worse than not
+# writing it: it would read like the departure had shipped.
+check("letter_spacing" not in type_text and "letter-spacing" not in type_text,
+      "the desktop typography carries a tracking value that Ash cannot read")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"test-gui-theme: {failure}", file=sys.stderr)

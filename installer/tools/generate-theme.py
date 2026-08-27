@@ -1238,26 +1238,48 @@ def emit_cros_ref(palettes: dict[str, dict[int, str]]) -> str:
 CROS_SANS = "'Adwaita Sans', 'Cantarell', sans-serif"
 CROS_MONO = "'JetBrains Mono', 'Adwaita Mono', monospace"
 
-#: ChromeOS's own scale, carried over unchanged for now.
+#: ChromeOS's scale, with one of the three departures applied.
 #:
 #: The three ways this product's type scale departs from Material 3 are
-#: written down where TYPE is defined, and none of them are applied here yet.
-#: Sizes and line heights are not a safe thing to change unseen: Ash lays out
-#: with fixed pixel assumptions in places, and a scale nobody has looked at is
-#: how a label ends up clipped on one surface and nowhere else. The families
-#: are safe, provable and the larger part of the difference, so they go first.
+#: written down where TYPE is defined. They do not all reach Ash, and the
+#: reasons differ, so each is accounted for here.
+#:
+#: Headings carry weight: APPLIED. TYPE sets 600 from 36px down through 18px
+#: and leaves the two largest sizes at 500, because at 52px and 44px there is
+#: already enough presence and weight only makes it heavy. The same rule is
+#: applied below to the `medium` family at 36, 32, 28, 24, 22 and 18, which is
+#: every ChromeOS display size inside that band. Adwaita Sans carries a real
+#: SemiBold instance, so this is a face the font has and not a synthesised one.
+#: The `-regular` variants are deliberately untouched: upstream provides them
+#: so a surface can opt out of medium, and a surface that wanted lighter still
+#: has somewhere to go.
+#:
+#: Tracking is zero or negative: NOT EXPRESSIBLE HERE. A ChromeOS typeface has
+#: exactly four properties, `font_family`, `font_size`, `font_weight` and
+#: `line_height`, and `tools/style_variable_generator` has no concept of
+#: letter spacing at all. Tracking cannot be carried by this file no matter
+#: what is written in it. Reaching it means changing how Ash builds its font
+#: lists, which is a different patch against different code, and it is not
+#: done by editing tokens.
+#:
+#: Body text a size larger, with real leading: HELD. This is the one that
+#: moves layout in both directions. Ash lays out with fixed pixel assumptions
+#: in places, and a body size nobody has looked at is how a label ends up
+#: clipped on one surface and nowhere else. Weight widens a glyph slightly and
+#: cannot change a line box; size and line height change both. It waits for
+#: eyes on a running desktop.
 CROS_TYPEFACES = [
     ("display_0", "medium", 52, 500, 60),
     ("display_0-regular", "regular", 52, 400, 60),
     ("display_1", "medium", 44, 500, 52),
-    ("display_2", "medium", 36, 500, 44),
-    ("display_3", "medium", 32, 500, 40),
+    ("display_2", "medium", 36, 600, 44),
+    ("display_3", "medium", 32, 600, 40),
     ("display_3-regular", "regular", 32, 400, 40),
-    ("display_4", "medium", 28, 500, 36),
-    ("display_5", "medium", 24, 500, 32),
-    ("display_6", "medium", 22, 500, 28),
+    ("display_4", "medium", 28, 600, 36),
+    ("display_5", "medium", 24, 600, 32),
+    ("display_6", "medium", 22, 600, 28),
     ("display_6-regular", "regular", 22, 400, 28),
-    ("display_7", "medium", 18, 500, 24),
+    ("display_7", "medium", 18, 600, 24),
     ("title_1", "text_medium", 16, 500, 24),
     ("title_2", "text_bold", 13, 700, 20),
     ("headline_1", "text_medium", 15, 500, 22),
@@ -1293,7 +1315,9 @@ def emit_cros_typography() -> str:
         " * machine walked through this product's installer signed into a desktop",
         " * set in a different typeface.",
         " *",
-        " * The sizes are still ChromeOS's. See CROS_TYPEFACES for why.",
+        " * The sizes and line heights are still ChromeOS's. The weights are not:",
+        " * headings from 36px down through 18px are set at 600, which is the",
+        " * difference between a heading and a big sentence. See CROS_TYPEFACES.",
         " */",
         "{",
         '  "options": {',

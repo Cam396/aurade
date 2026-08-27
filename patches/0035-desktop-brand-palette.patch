@@ -1,8 +1,8 @@
 diff --git a/ui/chromeos/styles/cros_gm3_typography.json5 b/ui/chromeos/styles/cros_gm3_typography.json5
-index b3e5db9e0424..3cb2465fb888 100644
+index b3e5db9e0424..668583f90b4a 100644
 --- a/ui/chromeos/styles/cros_gm3_typography.json5
 +++ b/ui/chromeos/styles/cros_gm3_typography.json5
-@@ -4,6 +4,15 @@
+@@ -4,6 +4,17 @@
  
  /*
   * Chrome OS typography styles for GM3.
@@ -14,11 +14,13 @@ index b3e5db9e0424..3cb2465fb888 100644
 + * machine walked through this product's installer signed into a desktop
 + * set in a different typeface.
 + *
-+ * The sizes are still ChromeOS's. See CROS_TYPEFACES for why.
++ * The sizes and line heights are still ChromeOS's. The weights are not:
++ * headings from 36px down through 18px are set at 600, which is the
++ * difference between a heading and a big sentence. See CROS_TYPEFACES.
   */
  {
    "options": {
-@@ -13,156 +22,151 @@
+@@ -13,156 +24,151 @@
    },
    "typography": {
      "font_families": {
@@ -70,14 +72,16 @@ index b3e5db9e0424..3cb2465fb888 100644
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 36,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 44
        },
        "display_3": {
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 32,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 40
        },
        "display_3-regular": {
@@ -91,21 +95,24 @@ index b3e5db9e0424..3cb2465fb888 100644
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 28,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 36
        },
        "display_5": {
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 24,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 32
        },
        "display_6": {
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 22,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 28
        },
        "display_6-regular": {
@@ -119,7 +126,8 @@ index b3e5db9e0424..3cb2465fb888 100644
 -        "font_family": '$font_family_google_sans_medium',
 +        "font_family": '$font_family_aurade_medium',
          "font_size": 18,
-         "font_weight": 500,
+-        "font_weight": 500,
++        "font_weight": 600,
          "line_height": 24
        },
        "title_1": {
