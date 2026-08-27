@@ -39,7 +39,8 @@ export AURADE_GREETER_POWER_COMMAND="/bin/false"
 export AURADE_POWER_DIR="$TMP/power"
 # The pictures, so the screenshot shows the product rather than the
 # fallback the product draws when it cannot find them.
-export AURADE_WALLPAPER_DIR="${AURADE_WALLPAPER_DIR:-/mnt/build/aurade-work/installer-gui-wt/installer/wallpapers}"
+AURADE_WALLPAPER_DIR="${AURADE_WALLPAPER_DIR:-${PACKAGE}/../installer/wallpapers}"
+export AURADE_WALLPAPER_DIR
 export AURADE_SHOT_DIR="${AURADE_SHOT_DIR:-/mnt/build/aurade-work/private-docs/greeter-shot}"
 # The weather, switched on and pointed at somewhere with weather in it. The
 # reading itself is written to the cache by the python side, so this render

@@ -341,3 +341,91 @@ button.aurade-pod.aurade-pod-on:hover {
 .aurade-high-contrast .aurade-weather-caption {
   opacity: 1;
 }
+
+/* The shade, and the accounts arriving from under it.
+ *
+ * A row starts a little low and invisible and settles into place. Ten pixels,
+ * not thirty: this is the difference between a list appearing and a list
+ * arriving, and anything further than that reads as a slide rather than as
+ * the thing having always been nearly there.
+ *
+ * The stagger is not here. It is one timer per row in `_stagger_accounts`,
+ * because CSS has no way to say "and the next one forty milliseconds later"
+ * without writing a rule per row. */
+.aurade-arrive {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.aurade-arrive.aurade-arrived {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms ease-out,
+              transform 280ms cubic-bezier(0.2, 0.75, 0.3, 1);
+}
+
+/* The line that is only there eleven days a year. In the brand, because it is
+ * the one thing on the shade that is not simply the time: an equinox in the
+ * same grey as the date would be a fact nobody notices. */
+.aurade-occasion {
+  color: @accent_color;
+}
+
+/* What the photograph is. The same ground as the pill and the panel, for the
+ * same reason: a caption printed straight onto a photograph is unreadable over
+ * half of them, and a text shadow deep enough to fix that is a text shadow you
+ * can see. */
+.aurade-photo-card {
+  border-radius: 18px;
+  background-color: rgba(16, 17, 22, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top-color: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.32);
+  padding: 15px 17px 16px 17px;
+}
+
+/* Faded out with the shade rather than dropped between two frames. */
+.aurade-photo-card {
+  transition: opacity 220ms ease-out;
+}
+
+.aurade-photo-card.aurade-gone {
+  opacity: 0;
+}
+
+.aurade-light .aurade-photo-card {
+  background-color: rgba(252, 252, 255, 0.78);
+  border-top: 1px solid rgba(255, 255, 255, 0.80);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+}
+
+.aurade-high-contrast .aurade-photo-card {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+/* Stillness is honoured by not moving, never by moving less. */
+.aurade-high-contrast .aurade-arrive,
+.aurade-high-contrast .aurade-arrive.aurade-arrived {
+  transition: none;
+}
+
+/* Secondary text, in high contrast.
+ *
+ * `dim-label` is opacity 0.55, which is the right amount of quiet on an
+ * ordinary screen and is contrast thrown away on a screen somebody turned
+ * high contrast on for. Raised rather than removed: the hierarchy is still
+ * information, and 0.85 keeps the date reading as secondary to the clock
+ * while clearing the contrast the setting was chosen to get. */
+.aurade-high-contrast .dim-label {
+  opacity: 0.85;
+}
+
+/* The accent carries the occasion on an ordinary screen. In high contrast the
+ * ground is stated and the foreground has to be the stated one, because a
+ * mid tone lilac on an opaque dark surface is the one pairing this theme
+ * exists to avoid. */
+.aurade-high-contrast .aurade-occasion {
+  color: @window_fg_color;
+}

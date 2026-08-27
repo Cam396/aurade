@@ -83,6 +83,12 @@ EOF
 export AURADE_GREETER_CONF="$TMP/greeter.conf"
 export AURADE_WEATHER_CACHE="$TMP/weather.json"
 
+# The photographs, from this checkout rather than from wherever the machine
+# happens to keep a copy. Without them the shade has no card to draw and the
+# tests that cover it say so instead of passing quietly.
+WALLPAPERS=$(cd -- "${PACKAGE}/.." 2>/dev/null && pwd -P)/installer/wallpapers
+[[ -d $WALLPAPERS ]] && export AURADE_WALLPAPER_DIR="$WALLPAPERS"
+
 weston --backend=headless --width=1280 --height=860 --shell=kiosk-shell.so \
   --socket=wl-aurade-greeter --idle-time=0 >"$TMP/weston.log" 2>&1 &
 WESTON_PID=$!

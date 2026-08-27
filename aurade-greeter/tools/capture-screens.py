@@ -269,6 +269,14 @@ def main() -> int:
         pump(60)
 
         if WANT == "screens":
+            # The shade first, which is what anybody walking up to the machine
+            # actually sees, and only then the screen behind it.
+            written.append(save(window, "greeter-shade"))
+            window.lift()
+            # Long enough for the staggered arrival to finish. Screenshotting
+            # mid stagger produces a picture of half a list, which looks like
+            # a bug in the product rather than a picture taken too early.
+            pump(90)
             written.append(save(window, "greeter-accounts"))
 
         # The panel, composited where the compositor would put it: anchored to

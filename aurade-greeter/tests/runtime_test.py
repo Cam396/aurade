@@ -42,7 +42,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
 from aurade_greeter import network as NET  # noqa: E402
-from aurade_greeter.app import GreeterWindow  # noqa: E402
+from aurade_greeter.app import GreeterWindow, Wallpaper  # noqa: E402
 from aurade_greeter import weather as WX  # noqa: E402
 
 
@@ -65,6 +65,19 @@ class NoRadio:
         return None
 
 FAILURES: list[str] = []
+
+#: What this run could not check, and why. A skip that is not reported is a
+#: pass that did not happen.
+NOT_COVERED: list[str] = []
+
+#: What the greeter opened on, recorded once, at construction.
+#:
+#: This file reuses one window across every test and resets it between them,
+#: and the reset is now to the shade rather than to the account list. That
+#: reset would mask the very thing the shade is for: an assertion made after
+#: it is an assertion about the reset. So the real starting state is taken
+#: from the window before anything has touched it, and never again.
+OPENED = {"page": None, "lifted": None}
 
 
 def seed_weather() -> None:
@@ -199,7 +212,42 @@ WINDOW: GreeterWindow | None = None
 SERVICE: Greetd | None = None
 
 
-def build(app, replies: list[dict]) -> tuple[GreeterWindow, Greetd]:
+def lower_shade(window) -> None:
+    """Put the window back the way it starts, before a test that lifts it.
+
+    One window is reused by every test in this file, and it used to be handed
+    back with the stack forced to the account list. That is what the greeter
+    opened on at the time, so it was harmless, and it stopped being harmless
+    the moment the shade existed: the assertion that the greeter opens on the
+    account list went on passing, against a page this helper had just set.
+
+    So the reset is to the real initial state, and a test that wants the
+    accounts asks for them the way a person does.
+    """
+    window.shade_up = False
+    window._stop_rotating()  # noqa: SLF001
+    window.stack.set_visible_child_name("shade")
+    for child in _rows(window):
+        child.remove_css_class("aurade-arrived")
+    card = window.widgets.get("card")
+    if card is not None:
+        card.remove_css_class("aurade-gone")
+        window._show_card()  # noqa: SLF001
+
+
+def _rows(window) -> list:
+    listbox = window.widgets.get("accounts.list")
+    if listbox is None:
+        return []
+    found, child = [], listbox.get_first_child()
+    while child is not None:
+        found.append(child)
+        child = child.get_next_sibling()
+    return found
+
+
+def build(app, replies: list[dict],
+          lifted: bool = True) -> tuple[GreeterWindow, Greetd]:
     global WINDOW, SERVICE
     if SERVICE is not None:
         SERVICE.close()
@@ -209,6 +257,8 @@ def build(app, replies: list[dict]) -> tuple[GreeterWindow, Greetd]:
         WINDOW.nm = NoRadio()
         WINDOW.present()
         pump()
+        OPENED["page"] = WINDOW.stack.get_visible_child_name()
+        OPENED["lifted"] = WINDOW.shade_up
     else:
         WINDOW.session = None
         WINDOW.transport = SERVICE.transport
@@ -217,8 +267,13 @@ def build(app, replies: list[dict]) -> tuple[GreeterWindow, Greetd]:
         WINDOW.entry.set_text("")
         WINDOW._clear_error()  # noqa: SLF001
         WINDOW._working(False)  # noqa: SLF001
-        WINDOW.stack.set_visible_child_name("accounts")
         pump()
+    lower_shade(WINDOW)
+    if lifted:
+        WINDOW.lift()
+        # Long enough for the staggered arrival to have finished, so a test
+        # that looks at a row is looking at a row that has arrived.
+        pump(60)
     return WINDOW, SERVICE
 
 
@@ -231,8 +286,10 @@ def test_the_window_has_both_screens(app) -> None:
               "there is no account screen")
         check(window.stack.get_child_by_name("password") is not None,
               "there is no password screen")
+        check(window.stack.get_child_by_name("shade") is not None,
+              "there is no shade")
         equal(window.stack.get_visible_child_name(), "accounts",
-              "the greeter does not open on the account list")
+              "the account list is not what a lifted shade leads to")
     finally:
         pump()
 
@@ -576,6 +633,211 @@ def test_the_weather_panel_opens(app) -> None:
     popover.popdown()
 
 
+# --- the shade -------------------------------------------------------------
+
+def test_high_contrast_draws_no_photograph(app) -> None:
+    """The one surface high contrast cannot make safe by stating its ground.
+
+    Every other translucent thing on this screen goes opaque. A photograph
+    cannot: the clock and the date sit directly on it with a veil between,
+    and a veil is the soft edge high contrast exists to remove. So the picture
+    goes, and the card that describes it goes with it rather than captioning
+    something nobody can see.
+    """
+    window, _ = build(app, [], lifted=False)
+    plain = Wallpaper(True, plain=True)
+    check(not plain.present,
+          "a plain wallpaper still reports a photograph to draw over")
+    ordinary = Wallpaper(True, plain=False)
+    equal(ordinary.present, ordinary.picture is not None,
+          "an ordinary wallpaper disagrees with itself about having a picture")
+
+    # And the card follows the picture. Captioning a photograph that is not
+    # being drawn is a card describing a blank screen.
+    was, card = window.wallpaper, window.widgets["card"]
+    try:
+        window.wallpaper = plain
+        window._show_card()  # noqa: SLF001
+        pump()
+        check(not card.get_visible(),
+              "the card described a photograph that high contrast had removed")
+    finally:
+        window.wallpaper = was
+        window._show_card()  # noqa: SLF001
+
+
+def test_the_greeter_opens_on_the_shade(app) -> None:
+    """Not on the account list. The first thing anybody sees is a photograph.
+
+    Asserted against a window that has been reset to its starting state rather
+    than one the helper has just pointed at a page, which is the whole reason
+    `lower_shade` exists.
+    """
+    window, _ = build(app, [], lifted=False)
+    equal(OPENED["page"], "shade",
+          "the greeter does not open on the shade")
+    equal(OPENED["lifted"], False,
+          "the greeter starts up thinking it has already been lifted")
+    card = window.widgets.get("card")
+    if window.wallpaper.present:
+        check(card is not None and card.get_visible(),
+              "the shade does not say what the photograph is")
+    else:
+        # Said rather than skipped silently. A machine with no picture set has
+        # nothing for the card to identify, and that is the correct behaviour,
+        # but a run that proved it is not a run that proved the card works.
+        check(card is not None and not card.get_visible(),
+              "there is no photograph and the card claimed to identify one")
+        NOT_COVERED.append("the photo card, because this tree has no pictures")
+    check(window.widgets["shade.clock"].get_label(),
+          "the shade has no time on it")
+    check(window.widgets["shade.greeting"].get_label(),
+          "the shade does not greet anybody")
+
+
+def test_lifting_the_shade_brings_the_accounts(app) -> None:
+    window, _ = build(app, [], lifted=False)
+    check(window.lift(), "the shade would not lift")
+    pump(60)
+    equal(window.stack.get_visible_child_name(), "accounts",
+          "lifting the shade did not reach the account list")
+    check(window.shade_up, "the shade lifted and did not say so")
+    check(not window.lift(),
+          "the shade lifted a second time, which would replay the entrance")
+    # Hidden, not merely faded. A widget at zero opacity is still in the
+    # accessibility tree, so a card left behind is a screen reader describing
+    # a photograph to somebody who is being asked to choose an account.
+    card = window.widgets.get("card")
+    check(card is not None and not card.get_visible(),
+          "the card faded out and was left on the accounts page")
+
+
+def test_the_clock_does_not_move_when_the_shade_lifts(app) -> None:
+    """The one measurement that stands for the whole seam.
+
+    Both pages are centred in the same space, so two pages of the same height
+    put their first child, the clock, on the same pixel. When they differed the
+    clock jumped about twenty five pixels on lifting, which is small enough to
+    look like a rendering fault and large enough to see.
+    """
+    window, _ = build(app, [], lifted=False)
+    pump(20)
+    _, shade_high, _, _ = window.widgets["shade.box"].measure(
+        Gtk.Orientation.VERTICAL, -1)
+    _, accounts_high, _, _ = window.widgets["accounts.box"].measure(
+        Gtk.Orientation.VERTICAL, -1)
+    equal(shade_high, accounts_high,
+          "the shade and the account list are different heights, so the clock "
+          "moves when the shade lifts")
+
+
+def test_the_greeting_is_the_same_on_both_pages(app) -> None:
+    window, _ = build(app, [], lifted=False)
+    pump(10)
+    equal(window.widgets["accounts.heading"].get_label(),
+          window.widgets["shade.greeting"].get_label(),
+          "the greeting rewrites itself when the shade lifts")
+
+
+def test_the_clocks_agree(app) -> None:
+    """One reading on both faces, not two calls a millisecond apart."""
+    window, _ = build(app, [], lifted=False)
+    pump(10)
+    equal(window.widgets["shade.clock"].get_label(),
+          window.widgets["clock"].get_label(),
+          "the two clock faces disagree")
+    equal(window.widgets["shade.date"].get_label(),
+          window.widgets["date"].get_label(),
+          "the two date lines disagree")
+
+
+def test_the_accounts_arrive_rather_than_appear(app) -> None:
+    window, _ = build(app, [], lifted=False)
+    rows = _rows(window)
+    check(rows, "there are no rows to arrive")
+    check(all(row.has_css_class("aurade-arrive") for row in rows),
+          "a row is not set up to arrive, so it will simply appear")
+    check(not any(row.has_css_class("aurade-arrived") for row in rows),
+          "a row had already arrived before the shade was lifted")
+    window.lift()
+    # One at a time, in order. Immediately after lifting, the last row cannot
+    # have arrived yet, which is what makes this a stagger rather than a fade.
+    check(not rows[-1].has_css_class("aurade-arrived"),
+          "every row arrived at once, so the list appears rather than arrives")
+    pump(80)
+    check(all(row.has_css_class("aurade-arrived") for row in rows),
+          "a row never arrived, so it is invisible on the account list")
+
+
+def test_stillness_means_the_accounts_are_simply_there(app) -> None:
+    """Honoured by not moving, never by moving less."""
+    settings = Gtk.Settings.get_default()
+    was = settings.get_property("gtk-enable-animations")
+    settings.set_property("gtk-enable-animations", False)
+    try:
+        window, _ = build(app, [], lifted=False)
+        window.lift()
+        # No pump. The whole assertion is that nothing was scheduled: with
+        # animations off the rows are already there on the frame the shade
+        # lifts, and letting a fifth of a second pass would let a stagger
+        # finish and look exactly the same.
+        rows = _rows(window)
+        check(rows and all(row.has_css_class("aurade-arrived") for row in rows),
+              "with animations off the rows still waited their turn to arrive")
+        check(not window._arrivals,  # noqa: SLF001
+              "with animations off the arrival was still put on a timer")
+        card = window.widgets.get("card")
+        check(card is not None and not card.get_visible(),
+              "with animations off the card was still fading rather than gone")
+    finally:
+        settings.set_property("gtk-enable-animations", was)
+
+
+def test_a_press_on_the_pills_does_not_lift_the_shade(app) -> None:
+    """Checking the weather should not require signing in first."""
+    window, _ = build(app, [], lifted=False)
+    shelf = window.widgets.get("shelf")
+    check(shelf is not None, "there is no shelf")
+    if shelf is None:
+        return
+    ok, bounds = shelf.compute_bounds(window)
+    check(ok, "the shelf has no bounds to press inside")
+    if not ok:
+        return
+    window._on_press(  # noqa: SLF001
+        None, 1,
+        bounds.origin.x + bounds.size.width / 2.0,
+        bounds.origin.y + bounds.size.height / 2.0)
+    pump()
+    check(not window.shade_up,
+          "pressing the weather pill signed the machine's shade away")
+    window._on_press(None, 1, 40.0, 40.0)  # noqa: SLF001
+    pump()
+    check(window.shade_up, "pressing the photograph did not lift the shade")
+
+
+def test_the_card_says_only_what_the_manifest_carries(app) -> None:
+    window, _ = build(app, [], lifted=False)
+    card = window.widgets["card"]
+    card.show_picture({"title": "Bagan, Myanmar", "zone": "Asia/Yangon",
+                       "note": "Brick temples in the haze.",
+                       "fact": "Myanmar keeps its clocks half an hour off."})
+    pump()
+    check(card.title.get_visible() and card.note.get_visible()
+          and card.fact.get_visible(),
+          "a picture that is somewhere did not fill the card in")
+    card.show_picture({"title": "A river between hills", "zone": "",
+                       "note": "A river running out of frame.", "fact": ""})
+    pump()
+    check(card.title.get_visible(), "a picture of nowhere lost its title")
+    check(not card.when.get_visible(),
+          "a picture with no time zone was given a time")
+    check(not card.fact.get_visible(),
+          "a picture of nowhere was given a fact about somewhere")
+    check(not card.show_picture(None),
+          "a card with no picture claimed to have something to show")
+
+
 def main() -> int:
     Adw.init()
     app = Adw.Application(application_id="org.aurade.GreeterTest")
@@ -593,6 +855,9 @@ def main() -> int:
         for failure in FAILURES:
             print(f"  {failure}")
         return 1
+    if NOT_COVERED:
+        for missing in sorted(set(NOT_COVERED)):
+            print(f"  not covered: {missing}")
     print("greeter runtime test: PASS")
     return 0
 
