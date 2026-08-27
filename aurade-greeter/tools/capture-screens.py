@@ -179,7 +179,11 @@ def main() -> int:
                 popover.popup()
                 pump(40)
                 ok, bounds = button.compute_bounds(window)
-                child = popover.get_child() or popover
+                # The popover itself, not its child. The bubble's ground,
+                # border and shadow live on the popover's own contents node,
+                # so rendering the child alone produces tiles floating on the
+                # wallpaper and hides exactly the thing being reviewed.
+                child = popover
                 # Natural size, not allocated. A popover that has just been
                 # popped up on a headless compositor may not have been given
                 # its full height yet, and rendering it at the smaller number

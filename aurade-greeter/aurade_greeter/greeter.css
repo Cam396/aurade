@@ -30,19 +30,185 @@ list.boxed-list {
   border-radius: 18px;
 }
 
-/* The status area, bottom right.
+/* The pill, bottom right.
  *
- * A quiet ground so the cluster reads as a control rather than as text lying
- * on a photograph, and enough contrast against whichever wallpaper is behind
- * it that the icons stay legible on a bright sky as well as a dark lake. */
-.aurade-status-area {
-  padding: 6px 12px;
+ * It had this radius before and nothing to apply it to, so it did nothing and
+ * the cluster read as a caption lying on a photograph. A control needs a
+ * ground. The ground is dark and translucent rather than a solid, so the
+ * picture still reads through it, with a hairline along the top edge: light
+ * catches the upper lip of a raised surface and that single line is most of
+ * what makes a flat rectangle look lifted.
+ *
+ * The contrast has to hold over a bright sky as well as a dark lake, which a
+ * text shadow alone does not achieve, which is why this exists at all. */
+menubutton.aurade-status-area > button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 7px 14px;
   border-radius: 999px;
+  min-height: 0;
 }
 
-/* The panel it opens. Wider than a menu because it holds a list of networks,
- * and a list of networks in a menu width truncates the names people are
- * choosing between. */
+menubutton.aurade-status-area {
+  padding: 0;
+  border-radius: 999px;
+  background-color: rgba(16, 17, 22, 0.62);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30);
+  transition: background-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+menubutton.aurade-status-area:hover {
+  background-color: rgba(28, 30, 38, 0.76);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.36);
+}
+
+menubutton.aurade-status-area:active {
+  background-color: rgba(12, 13, 17, 0.80);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.30);
+}
+
+/* The focus ring is this product's, not the platform's. A login screen is
+ * the one surface somebody may be driving entirely from the keyboard.
+ *
+ * `:focus-visible` on the button inside, not `:focus-within` on the
+ * menubutton: focus-within is also true for the whole time the panel is open,
+ * so the ring sat around the pill throughout, which reads as a stuck state
+ * rather than as where the keyboard is. */
+menubutton.aurade-status-area > button:focus-visible {
+  outline: 2px solid @accent_color;
+  outline-offset: -2px;
+}
+
+/* Where the machine stops talking about itself and starts telling the time. */
+.aurade-status-rule {
+  margin: 3px 2px;
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+/* The bubble.
+ *
+ * Translucent for the same reason as the pill: a solid slab on a photograph
+ * looks like a screenshot pasted onto a screenshot. The shadow has real
+ * spread because the bubble floats well above the picture and a tight shadow
+ * reads as a sticker. */
+.aurade-panel > contents {
+  border-radius: 24px;
+  background-color: rgba(22, 23, 29, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 0;
+}
+
+.aurade-panel > arrow {
+  min-width: 0;
+  min-height: 0;
+  background: none;
+  border: none;
+}
+
+/* The tiles. Their own ground so they read as objects sitting in the bubble
+ * rather than as rows of a list, which is the whole difference between quick
+ * settings and a menu. */
+.aurade-pod {
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0;
+  transition: background-color 120ms ease-out;
+}
+
+button.aurade-pod:hover {
+  background-color: rgba(255, 255, 255, 0.11);
+}
+
+button.aurade-pod:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+button.aurade-pod:focus-visible {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+}
+
+/* A tile that only reports never lights up, because nothing happens when it
+ * is pressed and a hover state would promise that something does. */
+.aurade-pod-readout {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+/* The tile for the thing that is currently on, lit in the brand.
+ *
+ * ChromeOS lights the active feature pod in the accent, and this is the
+ * moment the panel stops looking like a component library and starts looking
+ * like this product. */
+.aurade-pod.aurade-pod-on {
+  background-color: alpha(@accent_color, 0.20);
+  border-color: alpha(@accent_color, 0.34);
+}
+
+button.aurade-pod.aurade-pod-on:hover {
+  background-color: alpha(@accent_color, 0.26);
+}
+
+.aurade-panel-rule {
+  margin: 4px 0;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* The list inside the network page. */
 .aurade-panel list.boxed-list {
   border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+
+/* High contrast.
+ *
+ * Everything above trades a little contrast for depth, which is the right
+ * trade on a photograph and the wrong one for somebody who turned high
+ * contrast on. Here the grounds go opaque, the hairlines become real borders,
+ * and the shadows go away, because a shadow is a soft edge and a soft edge is
+ * the thing high contrast exists to remove.
+ *
+ * This is not a dimmer version of the same design. It is the same layout with
+ * every surface stated rather than suggested. */
+.aurade-high-contrast .aurade-status-area {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-status-area:hover {
+  background-color: @window_fg_color;
+  color: @window_bg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-status-rule,
+.aurade-high-contrast .aurade-panel-rule {
+  background-color: @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-panel > contents {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-pod {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-pod.aurade-pod-on {
+  background-color: @accent_color;
+  color: @accent_fg_color;
+  border-color: @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-panel list.boxed-list {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
 }

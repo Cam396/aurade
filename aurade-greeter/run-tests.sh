@@ -9,7 +9,7 @@ command -v python3 >/dev/null 2>&1 || {
   echo 'greeter tests: SKIP (python3 not available)'; exit 0; }
 
 status=0
-for test in protocol accounts sessions preferences network shared; do
+for test in protocol accounts sessions preferences network settings shared; do
   python3 "${here}/tests/${test}_test.py" || status=1
 done
 # The window itself, on a headless compositor. Skips loudly rather than
