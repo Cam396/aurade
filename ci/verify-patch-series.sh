@@ -128,6 +128,9 @@ if [[ -z "${VERIFY_DIR}" ]]; then
 fi
 
 cleanup() {
+  # Set only once the tree-match block runs; empty otherwise, and `rm -f`
+  # is content with that.
+  rm -f -- "${series_paths:-}" "${status_out:-}" "${reported:-}" 2>/dev/null || true
   if [[ "${keep}" == "1" ]]; then
     echo "Keeping patch verification worktree: ${VERIFY_DIR}" >&2
     return
@@ -165,24 +168,92 @@ echo "Patch series applied cleanly: ${applied} patches"
 
 if [[ "${expect_tree_match}" == "1" ]]; then
   echo "==> Checking patched worktree against CHROME_SRC working tree"
+  # What this compares, and what it deliberately does not.
+  #
+  # A Chromium checkout is two things in one directory: a git tree, and a set
+  # of directories gclient puts there. `git status` reports the second kind as
+  # typechanges and untracked directories, because git recorded a file or a
+  # gitlink where a real directory now sits. On this tree that is 134 entries,
+  # none of which any patch touches.
+  #
+  # The old check asked `[[ -f ]]` and called everything that was not a
+  # regular file a working tree delete, so all 134 counted as mismatches and
+  # the gate read FAIL whatever the patches did. It could not distinguish a
+  # patch that failed to reproduce a file from a toolchain directory gclient
+  # had checked out, which means it never answered the question it was asked.
+  #
+  # The status code answers it instead. A typechange or an untracked directory
+  # is gclient's business and is counted, not failed. A regular file has to
+  # byte-match, whether or not the series claims it: a modified file that no
+  # patch records is drift, and catching that is most of the value here. A
+  # delete fails only when the series touches the path, because a file deleted
+  # for unrelated reasons is not the series' problem and a file the series is
+  # supposed to produce going missing is.
   mismatches=0
+  external=0
+  compared=0
+  series_paths="${TMPDIR:-/tmp}/aurade-series-paths.$$"
+  status_out="${TMPDIR:-/tmp}/aurade-series-status.$$"
+  reported="${TMPDIR:-/tmp}/aurade-series-reported.$$"
+  sed -n 's|^+++ b/||p' "${PATCH_DIR}"/*.patch | sort -u >"${series_paths}"
+  # One enumeration. `git status` over a Chromium checkout is not cheap, and
+  # asking it once per patched path would take hours.
+  git -C "${CHROME_SRC}" status --porcelain --untracked-files=all >"${status_out}"
+  cut -c4- "${status_out}" | sort -u >"${reported}"
+
   while IFS= read -r line; do
+    code="${line:0:2}"
     src_file="${line:3}"
+    case "${code}" in
+      *T*)
+        external=$((external + 1))
+        continue
+        ;;
+      *D*)
+        if grep -Fxq -- "${src_file}" "${series_paths}"; then
+          echo "The series touches a file the working tree deleted: ${src_file}" >&2
+          mismatches=$((mismatches + 1))
+        else
+          external=$((external + 1))
+        fi
+        continue
+        ;;
+    esac
+    if [[ -d "${CHROME_SRC}/${src_file}" ]]; then
+      external=$((external + 1))
+      continue
+    fi
     if [[ ! -f "${CHROME_SRC}/${src_file}" ]]; then
-      echo "Working tree deletes are not supported by the series: ${src_file}" >&2
+      echo "Not a regular file and not reported as a delete: ${src_file}" >&2
       mismatches=$((mismatches + 1))
       continue
     fi
+    compared=$((compared + 1))
     if ! cmp -s "${CHROME_SRC}/${src_file}" "${VERIFY_DIR}/${src_file}"; then
       echo "Series does not reproduce working tree file: ${src_file}" >&2
       mismatches=$((mismatches + 1))
     fi
-  done < <(git -C "${CHROME_SRC}" status --porcelain --untracked-files=all)
+  done <"${status_out}"
+
+  # A patch that changes nothing in the tree it is supposed to change is a
+  # patch that has quietly stopped doing its job. The comparison above cannot
+  # see that, because a file nobody modified never reaches `git status` at all.
+  missing=0
+  while IFS= read -r src_file; do
+    [[ -n "${src_file}" ]] || continue
+    echo "The series claims a file the working tree does not carry: ${src_file}" >&2
+    missing=$((missing + 1))
+  done < <(comm -23 "${series_paths}" "${reported}")
+  if (( missing )); then
+    mismatches=$((mismatches + missing))
+  fi
+
   if [[ "${mismatches}" -gt 0 ]]; then
     echo "Series/tree mismatch count: ${mismatches}" >&2
     echo "Scratch worktree: ${VERIFY_DIR}" >&2
     keep=1
     exit 1
   fi
-  echo "Series reproduces the working tree: OK"
+  echo "Series reproduces the working tree: OK" \
+    "(${compared} files compared, ${external} gclient paths skipped)"
 fi
