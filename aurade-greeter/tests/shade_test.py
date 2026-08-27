@@ -31,6 +31,17 @@ os.environ.setdefault("GTK_A11Y", "none")
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..")))
 
+#: Where the pictures are, set before anything is imported.
+#:
+#: `brand` builds its list of candidate directories once, at import, from the
+#: environment. Setting the variable after the import has no effect at all,
+#: which is a quiet way to end up asserting against an empty set and calling
+#: it a pass.
+PICTURES = os.path.normpath(os.path.join(HERE, "..", "..", "installer",
+                                         "wallpapers"))
+if os.path.isdir(PICTURES):
+    os.environ.setdefault("AURADE_WALLPAPER_DIR", PICTURES)
+
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import shade as SH  # noqa: E402
 
@@ -221,6 +232,150 @@ check(SH.card_lines(odd)["when"] == "",
       "an unknown time zone produced a time")
 check(SH.card_lines(odd)["title"] == somewhere["title"],
       "an unknown time zone cost the card its title as well")
+
+# -- which picture suits this hour -------------------------------------------
+
+# Every hour of the day answers to exactly one band on a machine that does not
+# know where it is. A gap would leave the fallback picking at that hour with no
+# explanation.
+for hour in range(24):
+    matched = [part for start, end, part in SH.CLOCK_BANDS if start <= hour < end]
+    check(len(matched) <= 1, f"{hour:02d}:00 falls in {len(matched)} clock bands")
+    said = SH.light_now(at(2026, 8, 27, hour))
+    check(said in ("dawn", "day", "dusk", "night"),
+          f"{hour:02d}:00 was called {said!r}, which is not a kind of light")
+
+# With a coordinate the sun answers instead of the clock, and the two disagree
+# exactly where they should. In Tromso in June the clock says the small hours
+# and the sun is well up, and a screen that put an aurora on the wall there
+# would be the only thing in the room that had not noticed.
+TROMSO = (69.65, 18.96)
+check(SH.light_now(at(2026, 6, 21, 3), *TROMSO) == "day",
+      "the midnight sun was called night")
+check(SH.light_now(at(2026, 6, 21, 3)) == "night",
+      "without a coordinate three in the morning stopped being night")
+# In December the sun there never clears the horizon, so no hour of that day
+# may be called day. Its highest point is about four degrees below, which is
+# real twilight and not night, and calling it night would be as wrong in the
+# other direction.
+december = {SH.light_now(at(2026, 12, 21, hour), *TROMSO) for hour in range(24)}
+check("day" not in december,
+      f"the polar night had daylight in it: {sorted(december)}")
+check(december & {"dawn", "dusk"},
+      "the polar night had no twilight in it, and its noon is four degrees "
+      "below the horizon")
+check("night" in december, "the polar night had no night in it")
+
+ARDSLEY = (41.0126, -73.8437)
+if NEW_YORK is not None:
+    check(SH.light_now(at(2026, 8, 27, 13, NEW_YORK), *ARDSLEY) == "day",
+          "one in the afternoon in August was not day")
+    check(SH.light_now(at(2026, 8, 27, 2, NEW_YORK), *ARDSLEY) == "night",
+          "two in the morning was not night")
+    check(SH.light_now(at(2026, 8, 27, 6, NEW_YORK), *ARDSLEY) == "dawn",
+          "an hour before sunrise was not dawn")
+    check(SH.light_now(at(2026, 8, 27, 20, NEW_YORK), *ARDSLEY) == "dusk",
+          "half an hour after sunset was not dusk")
+    # Dawn and dusk are told apart by which side of the day they are on, not
+    # by the height of the sun, which is the same at both.
+    morning = SH.light_now(at(2026, 8, 27, 6, NEW_YORK), *ARDSLEY)
+    evening = SH.light_now(at(2026, 8, 27, 20, NEW_YORK), *ARDSLEY)
+    check(morning != evening,
+          "the same low sun was called the same thing morning and evening")
+
+# The two rules in `suited` do two different jobs, so they are checked apart.
+SET = [
+    {"file": "night.png", "light": "night", "luminance": 0.04},
+    {"file": "day.png", "light": "day", "luminance": 0.22},
+    {"file": "whiteout.png", "light": "day", "luminance": 0.51},
+    {"file": "untellable.png", "light": "", "luminance": 0.09},
+]
+small = at(2026, 8, 27, 3)
+noon = at(2026, 8, 27, 13)
+
+names = {e["file"] for e in SH.suited(SET, "day", small)}
+check("whiteout.png" not in names,
+      "a white out was offered at three in the morning")
+check("whiteout.png" in {e["file"] for e in SH.suited(SET, "day", noon)},
+      "a bright picture was refused at one in the afternoon")
+check("untellable.png" in {e["file"] for e in SH.suited(SET, "night", noon)},
+      "a picture whose light cannot be told was refused an hour")
+check("untellable.png" in {e["file"] for e in SH.suited(SET, "dusk", noon)},
+      "a picture whose light cannot be told was refused another hour")
+check({e["file"] for e in SH.suited(SET, "night", noon)} == {"night.png", "untellable.png"},
+      "the night band picked up a picture that is not night")
+# Giving way rather than emptying: an hour nothing matches gets everything.
+check(len(SH.suited(SET, "dawn", noon)) >= 1,
+      "an hour with no matching picture was given nothing to draw")
+check(SH.suited([], "day", noon) == [],
+      "an empty set produced a picture out of nowhere")
+# And the cap gives way too, rather than leaving a machine with no wallpaper.
+bright = [{"file": "a.png", "light": "day", "luminance": 0.9}]
+check(SH.suited(bright, "night", small) == bright,
+      "a set where every picture is bright left the screen with none")
+
+# -- against the real set, where there is one --------------------------------
+
+# Guarded on whether the pictures were actually read, not on whether a
+# relative path exists. The path is `../../installer/wallpapers`, which
+# resolves to nothing when this file is run from a copy, and three mutations
+# survived a run that had quietly skipped every assertion below.
+from aurade_greeter import brand  # noqa: E402
+
+every = brand.wallpapers()
+if every:
+    check(len(every) > 10, f"only {len(every)} pictures were read from the set")
+    for entry in every:
+        check(entry["light"] in ("", "dawn", "day", "dusk", "night"),
+              f"{entry['file']} has light {entry['light']!r}, which is not a "
+              f"kind of light")
+        check(0.0 < entry["luminance"] < 1.0,
+              f"{entry['file']} measured {entry['luminance']} luminance")
+
+    # The one that matters: no picture is unreachable. A photograph that no
+    # hour of any season will ever choose is a photograph that was shipped and
+    # cannot be seen, and nothing else in the repository would notice.
+    reachable = set()
+    for month in (1, 4, 7, 10):
+        for hour in range(24):
+            when = at(2026, month, 15, hour)
+            light = SH.light_now(when, *ARDSLEY)
+            for entry in SH.suited(every, light, when):
+                reachable.add(entry["file"])
+    stranded = sorted({e["file"] for e in every} - reachable)
+    check(not stranded, f"these pictures no hour will ever choose: {stranded}")
+
+    # And every band has something in it, so no hour falls back to the whole
+    # set and quietly stops matching at all.
+    for band in ("dawn", "day", "dusk", "night"):
+        have = [e for e in every if e["light"] == band]
+        check(have, f"the set has no {band} picture at all")
+    # And the low light hours are worth having. The obvious thresholds are
+    # civil twilight, plus and minus six degrees, and they leave five of the
+    # twenty eight pictures showing for about an hour a day each end. This is
+    # the assertion that says the wider window is deliberate.
+    hours = {"dawn": 0, "day": 0, "dusk": 0, "night": 0}
+    for month in (1, 4, 7, 10):
+        for hour in range(24):
+            when = at(2026, month, 15, hour)
+            hours[SH.light_now(when, *ARDSLEY)] += 1
+    low = hours["dawn"] + hours["dusk"]
+    check(low >= 14,
+          f"only {low} of 96 sampled hours are low light, so the dawn and dusk "
+          f"pictures barely appear")
+    check(hours["day"] > 20 and hours["night"] > 20,
+          f"the day and night bands are lopsided: {hours}")
+else:
+    print("greeter-shade: not covered: the real picture set is not in this tree",
+          file=sys.stderr)
+
+# A measurement the manifest does not carry, or carries badly. An older
+# manifest has no such column at all, and the honest reading of an absent
+# brightness is that the picture is not known to be bright.
+check(brand._fraction("0.25") == 0.25, "a measurement was not read")
+check(brand._fraction("") == 0.0, "an absent measurement raised or invented")
+check(brand._fraction("bright") == 0.0, "a word was read as a measurement")
+check(brand._fraction(None) == 0.0, "a missing field raised")
 
 if FAILURES:
     for failure in FAILURES:

@@ -46,11 +46,11 @@ export AURADE_SHOT_DIR="${AURADE_SHOT_DIR:-/mnt/build/aurade-work/private-docs/g
 # reading itself is written to the cache by the python side, so this render
 # never touches the network and looks the same on a machine with no network
 # at all.
-cat >"$TMP/greeter.conf" <<'EOF'
+cat >"$TMP/greeter.conf" <<EOF
 weather = on
-weather_place = Ardsley, NY
-weather_latitude = 41.0126
-weather_longitude = -73.8437
+weather_place = ${AURADE_SHOT_PLACE:-Ardsley, NY}
+weather_latitude = ${AURADE_SHOT_LAT:-41.0126}
+weather_longitude = ${AURADE_SHOT_LON:--73.8437}
 weather_units = c
 EOF
 export AURADE_GREETER_CONF="$TMP/greeter.conf"

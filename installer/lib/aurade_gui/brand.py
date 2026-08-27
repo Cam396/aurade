@@ -245,9 +245,31 @@ def wallpapers() -> list[dict[str, str]]:
             # text, because a card showing a literal dash is worse than a card
             # with one fewer line on it.
             "fact": "" if field(7) == "-" else field(7),
+            # The light in the picture, written by hand, and the mean
+            # luminance, measured. They answer different questions and neither
+            # substitutes for the other: an overcast noon at Milford Sound and
+            # an aurora over Lofoten are within a hundredth of each other, so
+            # brightness cannot say which is which, and the login screen wants
+            # a picture whose light matches the light outside.
+            "light": field(8),
+            "luminance": _fraction(field(9)),
             "path": path,
         })
     return _wallpapers
+
+
+def _fraction(value: str) -> float:
+    """A measured number from the manifest, or nothing believable.
+
+    Zero rather than a raise, and zero rather than None, because every use of
+    this is a comparison. A manifest written by an older tool has no such
+    column, and the honest reading of an absent brightness is that this
+    picture is not known to be bright.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def choose_wallpaper(name: str = "") -> dict[str, str] | None:
