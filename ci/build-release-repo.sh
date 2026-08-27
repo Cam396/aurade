@@ -64,7 +64,11 @@ REPO_DIR="${staging}" "${SCRIPT_DIR}/write-release-checksums.sh"
 if [[ -n "${GPGKEY:-}" ]]; then
   export AURADE_REQUIRE_SIGNATURES=1
 fi
-"${SCRIPT_DIR}/verify-release-repo.sh"
+# Metadata-only makepkg calls still validate PKGDEST permissions. Keep the
+# verifier pointed at the writable staging area instead of a package source
+# directory, which is commonly read-only for the unprivileged build user.
+PKGDEST="${staging}" SRCDEST="${staging}" LOGDEST="${staging}" \
+  "${SCRIPT_DIR}/verify-release-repo.sh"
 
 rm -rf "${previous}"
 if [[ -e "${target_repo}" ]]; then

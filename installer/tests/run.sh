@@ -73,6 +73,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-build-iso-stage.sh"
 "$ROOT/test-execute-path-contract.sh"
 "$ROOT/test-execute-path-gate.sh"
+"$ROOT/test-leak-gate.sh"
 "$ROOT/../../ci/tests/runtime-risk-source-test.sh"
 if (( EUID == 0 )); then
   "$ROOT/test-recovery.sh"

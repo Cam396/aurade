@@ -165,39 +165,26 @@ build_chrome() {
 
     cd "${src_dir}"
 
-    local google_api_config="${PKG_DIR}/google-api.conf"
-    if [ ! -r "${google_api_config}" ]; then
-        error "Missing OAuth defaults at ${google_api_config}"
-        exit 1
-    fi
-    # shellcheck disable=SC1090
-    source "${google_api_config}"
-    : "${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}"
-    : "${GOOGLE_DEFAULT_CLIENT_ID:?GOOGLE_DEFAULT_CLIENT_ID is required}"
-    : "${GOOGLE_DEFAULT_CLIENT_SECRET:?GOOGLE_DEFAULT_CLIENT_SECRET is required}"
-
-    gn_quote() {
-        local value="${1//\\/\\\\}"
-        value="${value//\"/\\\"}"
-        printf '%s' "${value}"
-    }
-
     # Configure GN
     info "Configuring GN (target_os=\"chromeos\", Ozone X11/Wayland/DRM)..."
     gn gen "${OUTPUT_DIR}" --args="
         target_os = \"chromeos\"
+        target_cpu = \"x64\"
         is_debug = false
         is_component_build = false
         is_official_build = false
+        is_chrome_branded = false
+        is_chromeos_device = false
         symbol_level = 0
+        use_goma = false
+        use_sysroot = true
         use_ozone = true
         ozone_platform_wayland = true
+        use_system_minigbm = true
         enable_rust = true
+        use_chromium_rust_toolchain = true
         use_real_dbus_clients = true
         use_official_google_api_keys = false
-        google_api_key = \"$(gn_quote "${GOOGLE_API_KEY}")\"
-        google_default_client_id = \"$(gn_quote "${GOOGLE_DEFAULT_CLIENT_ID}")\"
-        google_default_client_secret = \"$(gn_quote "${GOOGLE_DEFAULT_CLIENT_SECRET}")\"
     " 2>&1 | tee -a "${BUILD_LOG}"
 
     # Build chrome binary and setuid sandbox helper.

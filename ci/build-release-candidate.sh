@@ -14,12 +14,6 @@ ARCHROOT="${ARCHROOT:-${WORKDIR}/archroot}"
 CHROME_SRC="${CHROME_SRC:-${WORKDIR}/chromium-bootstrap/src}"
 OUTPUT_REPO="${REPO_DIR:-${WORKDIR}/private-repo}"
 REUSE_CHROMIUM=0
-AURADE_GOOGLE_API_CONFIG="${AURADE_GOOGLE_API_CONFIG:-}"
-
-[[ -n "${AURADE_GOOGLE_API_CONFIG}" && -r "${AURADE_GOOGLE_API_CONFIG}" ]] || {
-  echo "AURADE_GOOGLE_API_CONFIG must name a readable private OAuth config." >&2
-  exit 2
-}
 
 if [[ "${1:-}" == "--reuse-chromium" ]]; then
   REUSE_CHROMIUM=1
@@ -63,7 +57,6 @@ find_chromium_package() {
 if [[ "${REUSE_CHROMIUM}" == 0 ]]; then
   runuser -u "${chrome_owner}" -- env \
     CHROME_SRC="${CHROME_SRC}" AURADE_WORKDIR="${package_workdir}" \
-    AURADE_GOOGLE_API_CONFIG="${AURADE_GOOGLE_API_CONFIG}" \
     nice -n "${AURADE_BUILD_NICE:-10}" \
     "${SCRIPT_DIR}/build-current-chromiumos-ash-package.sh"
 fi

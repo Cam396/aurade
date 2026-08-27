@@ -44,6 +44,25 @@ printf 'connected\n' >"$TMP/drm/card0-eDP-1/status"
 printf 'disconnected\n' >"$TMP/drm/card1-DP-1/status"
 
 export AURADE_RENDERER_DRI_DIR="$TMP/dri" AURADE_RENDERER_DRM_DIR="$TMP/drm"
+
+# A seat this test owns.
+#
+# The launcher will not start a compositor without one, and it accepts either a
+# seatd socket or a logind session. Nothing below stubbed either, so the seat
+# came from whoever ran the test: an interactive shell has XDG_SESSION_ID and
+# passes, and a systemd unit or a CI runner has no session, gets no seat, falls
+# straight through to the text installer and never attempts a renderer at all.
+# Every renderer assertion then failed for a reason that had nothing to do with
+# renderers. So the socket is a real one, created here, and run_launcher drops
+# XDG_SESSION_ID so the host's session can never decide the answer.
+AURADE_TEST_SEAT_SOCKET="$TMP/seat.sock"
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' \
+  "$AURADE_TEST_SEAT_SOCKET"
+[[ -S $AURADE_TEST_SEAT_SOCKET ]] || {
+  echo 'test-renderer-chain: could not create a stand in seat socket' >&2
+  exit 1
+}
+export AURADE_TEST_SEAT_SOCKET
 export AURADE_RENDERER_VULKAN_DIR="$TMP/vulkan"
 
 # shellcheck source=../lib/aurade-renderers.sh
@@ -170,6 +189,8 @@ run_launcher() {
   # and the installation image does not, so without this the whole chain is
   # skipped and every assertion below passes on an empty log.
   env -u DISPLAY -u WAYLAND_DISPLAY -u WLR_RENDERER -u GSK_RENDERER \
+    -u XDG_SESSION_ID \
+    AURADE_SEAT_SOCKET="${AURADE_TEST_CASE_SEAT-$AURADE_TEST_SEAT_SOCKET}" \
     AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
     AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
     AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
@@ -183,6 +204,7 @@ run_launcher() {
 }
 
 reset_case() {
+  unset AURADE_TEST_CASE_SEAT
   AURADE_TEST_WORKING_RENDERER=never
   AURADE_TEST_WORKING_GSK=
   AURADE_TEST_STAGE=
@@ -344,7 +366,8 @@ grep -q 'text installer ran' "$TMP/log" || \
 # the user had to type before any of this existed, and it must still mean what
 # it says.
 : >"$TMP/log"
-env -u DISPLAY -u WAYLAND_DISPLAY WLR_RENDERER=pixman \
+env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_SESSION_ID WLR_RENDERER=pixman \
+  AURADE_SEAT_SOCKET="$AURADE_TEST_SEAT_SOCKET" \
   AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
   AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
   AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
@@ -356,6 +379,31 @@ env -u DISPLAY -u WAYLAND_DISPLAY WLR_RENDERER=pixman \
 grep -q '^cage renderer=pixman' "$TMP/log" || \
   fail 'an explicit WLR_RENDERER was overridden by the chain'
 
+
+# With no seat at all the launcher must say so and put the text installer on
+# the screen. This is the path that had no test, which is why a clean
+# environment could turn every renderer assertion above into a failure with no
+# hint as to the cause. The message is asserted too, because a silent fallback
+# to text is the black screen this file exists to prevent, one step later.
+reset_case
+AURADE_TEST_CASE_SEAT="$TMP/no-such-seat.sock"
+AURADE_TEST_WORKING_RENDERER=pixman
+cat >"$TMP/stub/systemctl" <<'STUB'
+#!/bin/sh
+# The launcher tries to start seatd when it cannot find a seat. On a build host
+# that is a real service on a real machine, so it is stubbed to do nothing.
+exit 1
+STUB
+chmod +x "$TMP/stub/systemctl"
+run_launcher
+rm -f "$TMP/stub/systemctl"
+grep -q 'no seat manager is running' "$TMP/log" || \
+  fail 'the launcher did not say that no seat manager was available'
+grep -q 'text installer ran' "$TMP/log" || \
+  fail 'with no seat the launcher did not fall back to the text installer'
+grep -q 'renderer=' "$TMP/log" && \
+  fail 'with no seat the launcher tried a renderer anyway'
+reset_case
 
 # --- the seat, which is what actually stopped this working -------------------
 #

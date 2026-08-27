@@ -1,0 +1,25 @@
+# AuraDE leak gate: historical blobs already known to match.
+#
+# One line per offending blob: label, blob object id, and the path
+# it was last seen at. Matched values are never recorded. History
+# cannot be edited, so this file marks what is already in it. The
+# gate fails on any blob absent from this list, which is how new
+# offending content is caught. Entries only ever get removed.
+#
+# Rewritten by: public-release-leak-gate.sh --record-history
+personal_paths 135faedfbfcbb2db7d3e2a40f781b00635617030 RELEASE_STATUS.md
+personal_paths 2351ab0183a4052aeb640b866f3ea21726941063 NEXT_STEPS.md
+personal_paths 2a2ad26e8b79a3758b8ac983711b885753cff04a docs/handoff/HANDOFF.md
+personal_paths 2bc0b34df189c27b6fcae33aa975e9e33ce01ab5 NEXT_STEPS.md
+personal_paths 5095c192ec879931f587dcdc503b5601a55c3a34 docs/handoff/HANDOFF.md
+personal_paths 716ccca6ae8c133b4961ae458460e1520b0b6b26 NEXT_STEPS.md
+personal_paths 7f367b1699b2c29eed164a5791951cc6a5f7efd7 NEXT_STEPS.md
+personal_paths 84cd7c5d413a0f05e89a3c5acc363eeca609d550 docs/handoff/HANDOFF.md
+personal_paths 87537a427b6fd00a8e17187f7b0f0c10e9e83824 docs/handoff/HANDOFF.md
+personal_paths 8db6baa1d75e33b725b6a8b47ad3478110cf6e5e RELEASE_STATUS.md
+personal_paths 9abf6b1646385f1f5dacf60c6f43331e04ba5880 docs/handoff/HANDOFF.md
+personal_paths a13b6e200a279015a553bee3998b89795e35e8e2 RELEASE_STATUS.md
+personal_paths a2e5947ba507b13d5e22d28a4f8b2e49832725bb docs/handoff/HANDOFF.md
+personal_paths ac5d15492596954d798aa27b752d7a32e9187e96 RELEASE_STATUS.md
+personal_paths bc74527a4c287c85bfc1fd27a782e5aa0daa9032 RELEASE_STATUS.md
+personal_paths cffe6e8dc3244e4b8951c3a4d083310941e8332f RELEASE_STATUS.md

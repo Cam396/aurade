@@ -62,6 +62,10 @@ need() {
 build_package() {
   local pkgdir="$1"
   local flags=("${makepkg_flags[@]}")
+  local build_root="${AURADE_BUILD_ROOT:-${REPO_ROOT}/.build}"
+  local package_build_dir="${build_root}/${pkgdir}"
+  local package_source_dir="${build_root}/sources/${pkgdir}"
+  local package_log_dir="${build_root}/logs/${pkgdir}"
 
   if is_nodeps_package "${pkgdir}"; then
     flags=()
@@ -79,9 +83,13 @@ build_package() {
   fi
 
   echo "==> Building ${pkgdir}"
+  mkdir -p "${package_build_dir}" "${package_source_dir}" "${package_log_dir}"
   (
     cd "${REPO_ROOT}/${pkgdir}"
-    PKGDEST="${REPO_DIR}" PKGEXT="${PKGEXT:-.pkg.tar.zst}" makepkg "${flags[@]}"
+    BUILDDIR="${package_build_dir}" \
+      SRCDEST="${package_source_dir}" LOGDEST="${package_log_dir}" \
+      PKGDEST="${REPO_DIR}" PKGEXT="${PKGEXT:-.pkg.tar.zst}" \
+      makepkg "${flags[@]}"
   )
 }
 
