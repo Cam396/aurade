@@ -68,6 +68,21 @@ export AURADE_GREETER_SESSION_DIR="$TMP/sessions"
 # Nothing in this test may restart or stop the machine running it.
 export AURADE_GREETER_POWER_COMMAND="/bin/false"
 
+# The weather, switched on, so the pill and the panel behind it are actually
+# built and can be interrogated. The reading itself is written to the cache by
+# the python side before any window exists, and a cache written a moment ago
+# is fresh, so nothing here reaches the network. A runtime test that asked a
+# weather service would fail on a build host with no route out, which is a
+# test reporting on the machine rather than on the product.
+cat >"$TMP/greeter.conf" <<'EOF'
+weather = on
+weather_place = Ardsley, NY
+weather_latitude = 41.0126
+weather_longitude = -73.8437
+EOF
+export AURADE_GREETER_CONF="$TMP/greeter.conf"
+export AURADE_WEATHER_CACHE="$TMP/weather.json"
+
 weston --backend=headless --width=1280 --height=860 --shell=kiosk-shell.so \
   --socket=wl-aurade-greeter --idle-time=0 >"$TMP/weston.log" 2>&1 &
 WESTON_PID=$!

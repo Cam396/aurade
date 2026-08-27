@@ -21,6 +21,7 @@ the next try to collide with.
 from __future__ import annotations
 
 import json
+import datetime
 import os
 import socket
 import struct
@@ -42,6 +43,7 @@ from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
 from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow  # noqa: E402
+from aurade_greeter import weather as WX  # noqa: E402
 
 
 class NoRadio:
@@ -63,6 +65,40 @@ class NoRadio:
         return None
 
 FAILURES: list[str] = []
+
+
+def seed_weather() -> None:
+    """A reading, written before any window exists.
+
+    The greeter paints what it last knew and only asks again once that has
+    gone stale, so a cache written a moment ago is what makes the rest of this
+    file able to look at a filled in weather panel without a network.
+    """
+    where = os.environ.get("AURADE_WEATHER_CACHE")
+    if not where:
+        return
+    start = datetime.datetime.now().astimezone().replace(
+        minute=0, second=0, microsecond=0)
+    report = WX.Report(
+        place="Ardsley, NY", provider="nws", latitude=41.0126,
+        longitude=-73.8437, zone="America/New_York", taken=time.time(),
+        narrative="A chance of showers and thunderstorms before 2pm.",
+        now=WX.Now(temperature=25.0, feels_like=30.3, humidity=77,
+                   dew_point=20.6, wind=19.0, gust=34.0, bearing=163,
+                   pressure=1016.7, visibility=14.5, condition=WX.THUNDER,
+                   daylight=True, summary="Chance Showers And Thunderstorms"),
+        hours=[WX.Hour(at=start + datetime.timedelta(hours=n),
+                       temperature=26.0 - n, condition=WX.RAIN,
+                       precipitation=40 + n, daylight=True)
+               for n in range(12)],
+        days=[WX.Day(date=start.date() + datetime.timedelta(days=n),
+                     high=28.0 - n, low=20.0 - n, condition=WX.THUNDER,
+                     precipitation=50, ultraviolet=6.2)
+              for n in range(7)])
+    WX.save(report, where)
+
+
+seed_weather()
 
 
 def check(condition: bool, message: str) -> None:
@@ -416,6 +452,128 @@ def test_every_class_the_greeter_uses_is_defined(app) -> None:
     missing = sorted(used - defined - builtin)
     check(not missing,
           f"the greeter applies classes the stylesheet does not define: {missing}")
+
+
+def test_the_shelf_holds_the_weather_beside_the_system(app) -> None:
+    """Two pills, not one, and the weather to the left of the system.
+
+    They answer separate questions and so they are separate presses. Folding
+    the temperature into the system panel would mean somebody checking whether
+    to take a coat has to open the menu that also offers to shut the machine
+    down.
+    """
+    window, _ = build(app, [])
+    shelf = window.widgets.get("shelf")
+    check(shelf is not None, "the bottom right corner has no shelf")
+    if shelf is None:
+        return
+    pills = []
+    child = shelf.get_first_child()
+    while child is not None:
+        pills.append(child)
+        child = child.get_next_sibling()
+    equal(len(pills), 2, "the shelf does not hold two pills")
+    check(window.widgets.get("weather") is pills[0],
+          "the weather pill is not the first thing on the shelf")
+    check(window.widgets.get("status") is pills[1],
+          "the system pill is not the last thing on the shelf")
+    for pill in pills:
+        check(pill.has_css_class("aurade-status-area"),
+              "a pill on the shelf has no ground to be a pill with")
+
+
+def test_the_weather_pill_says_what_it_knows(app) -> None:
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None:
+        FAILURES.append("the weather was switched on and no pill was built")
+        return
+    pump()
+    equal(window.widgets["weather.degrees"].get_label(), "25\N{DEGREE SIGN}",
+          "the pill does not show the temperature it was given")
+    mark = window.widgets["weather.mark"]
+    equal(mark.condition, WX.THUNDER, "the pill draws the wrong sky")
+    # The place is on the description rather than the face, because a pill on
+    # a photograph has room for a mark and a number and nothing else.
+    said = window._weather_sentence(window.weather, "c")
+    check("Ardsley" in said,
+          f"the pill never says where the weather is (said {said!r})")
+    check("25" in said, f"the pill never says the temperature (said {said!r})")
+    check("Thunderstorm" in said or "thunder" in said.lower(),
+          f"the pill never says what the sky is doing (said {said!r})")
+    nowhere = WX.Report(taken=time.time(),
+                        now=WX.Now(temperature=4.0, condition=WX.SNOW))
+    check("in " not in window._weather_sentence(nowhere, "c"),
+          "a reading with no place named claimed to be somewhere")
+
+
+def test_the_weather_panel_fills_itself_in(app) -> None:
+    window, _ = build(app, [])
+    panel = window.widgets.get("weather.panel")
+    if panel is None:
+        FAILURES.append("the weather was switched on and no panel was built")
+        return
+    pump()
+    equal(panel.place.get_label(), "Ardsley, NY", "the panel lost the place")
+    equal(panel.degrees.get_label(), "25\N{DEGREE SIGN}",
+          "the panel lost the temperature")
+    equal(panel.source.get_label(), "National Weather Service",
+          "the panel does not credit the service it got the reading from")
+    check(panel.narrative.get_visible(),
+          "the forecaster's own paragraph was hidden")
+    equal(panel.humidity.value.get_label(), "77%", "the humidity tile is empty")
+    check("21" in panel.humidity.note.get_label(),
+          "the dew point never reached its tile")
+    equal(panel.ultraviolet.note.get_label(), "High",
+          "the ultraviolet index was not put into words")
+    check(panel.days.days, "the week never reached the panel")
+    check(panel.hours.hours, "the hours never reached the panel")
+    check("Today" in panel.days.names,
+          "the first row of the week is not called Today")
+    check("Tomorrow" in panel.days.names,
+          "the second row of the week is not called Tomorrow")
+    check(panel.updated.get_label().startswith("Updated"),
+          "the panel does not say how old its reading is")
+
+
+def test_the_weather_panel_survives_knowing_nothing(app) -> None:
+    """The case that happens on a machine with no route out.
+
+    A panel that raises here is a login screen that will not draw, which is
+    the worst outcome available: the weather is the least important thing on
+    this screen and it must never be able to take the rest of it down.
+    """
+    window, _ = build(app, [])
+    panel = window.widgets.get("weather.panel")
+    if panel is None:
+        return
+    panel.show_report(None, "c")
+    pump()
+    equal(panel.degrees.get_label(), "--",
+          "a panel with no reading claimed to have one")
+    check(panel.condition.get_label(),
+          "a panel with no reading said nothing at all about why")
+    empty = WX.Report(taken=time.time())
+    panel.show_report(empty, "c")
+    pump()
+    equal(panel.degrees.get_label(), "--",
+          "a report with no temperature in it was drawn as though it had one")
+
+
+def test_the_weather_panel_opens(app) -> None:
+    window, _ = build(app, [])
+    button = window.widgets.get("weather")
+    if button is None:
+        return
+    popover = button.get_popover()
+    check(popover is not None, "the weather pill opens nothing")
+    if popover is None:
+        return
+    popover.popup()
+    pump_until(popover.get_visible)
+    check(popover.get_visible(), "the weather panel did not open")
+    check(popover.has_css_class("aurade-weather-panel"),
+          "the weather panel is not styled as one")
+    popover.popdown()
 
 
 def main() -> int:

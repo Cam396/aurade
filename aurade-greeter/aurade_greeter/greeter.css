@@ -164,6 +164,77 @@ button.aurade-pod.aurade-pod-on:hover {
 }
 
 
+/* The light scheme.
+ *
+ * Every ground above is stated in white at a low alpha over a dark base,
+ * which is correct for the dark scheme and exactly backwards for the light
+ * one: the text turns dark and the ground stays dark with it, so the pill
+ * reads as a smudge and the panel as a slab with nothing on it.
+ *
+ * GTK stylesheets have no media query, so the window says which scheme it is
+ * in and these key off it, the same way the high contrast overrides below do.
+ * Placed before them deliberately: a machine that is both light and high
+ * contrast carries both classes, the specificity is identical, and the later
+ * block has to be the one that wins.
+ *
+ * These are not the dark values inverted. A translucent light panel over a
+ * bright photograph needs more opacity than a dark one over the same picture,
+ * because dark text on a washed out ground fails long before light text does.
+ */
+.aurade-light menubutton.aurade-status-area {
+  background-color: rgba(252, 252, 255, 0.80);
+  border-top: 1px solid rgba(255, 255, 255, 0.80);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light menubutton.aurade-status-area:hover {
+  background-color: rgba(255, 255, 255, 0.90);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.20);
+}
+
+.aurade-light menubutton.aurade-status-area:active {
+  background-color: rgba(240, 241, 248, 0.92);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light .aurade-status-rule {
+  background-color: rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light .aurade-panel > contents {
+  background-color: rgba(250, 250, 254, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.aurade-light .aurade-weather-panel > contents {
+  background-color: rgba(248, 249, 255, 0.97);
+}
+
+.aurade-light .aurade-pod,
+.aurade-light .aurade-weather-tile {
+  background-color: rgba(20, 22, 34, 0.05);
+  border-color: rgba(20, 22, 34, 0.07);
+}
+
+.aurade-light .aurade-pod-readout {
+  background-color: rgba(20, 22, 34, 0.035);
+}
+
+.aurade-light button.aurade-pod:hover {
+  background-color: rgba(20, 22, 34, 0.09);
+}
+
+.aurade-light button.aurade-pod:active {
+  background-color: rgba(20, 22, 34, 0.13);
+}
+
+.aurade-light .aurade-panel-rule,
+.aurade-light .aurade-panel list.boxed-list {
+  background-color: rgba(20, 22, 34, 0.07);
+}
+
+
 /* High contrast.
  *
  * Everything above trades a little contrast for depth, which is the right
@@ -211,4 +282,62 @@ button.aurade-pod.aurade-pod-on:hover {
 .aurade-high-contrast .aurade-panel list.boxed-list {
   background-color: @window_bg_color;
   border: 2px solid @window_fg_color;
+}
+
+/* The weather panel.
+ *
+ * Wider than the system panel because it is holding charts rather than rows,
+ * and a chart squeezed to the width of a menu stops being a chart.
+ *
+ * The tiles are the same object as the system panel's feature pods at a
+ * different job: same radius, same ground, same rule about reading as
+ * objects sitting in a bubble rather than as a list. Two panels in one
+ * product that solve the same problem two ways is how a design starts to
+ * come apart. */
+/* A shade more opaque than the system panel. That one holds four short rows;
+ * this one holds a paragraph a forecaster wrote and three charts, and text at
+ * that density over a bright photograph needs the extra few percent. */
+.aurade-weather-panel > contents {
+  background-color: rgba(20, 21, 27, 0.94);
+}
+
+.aurade-weather-tile {
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.055);
+  padding: 11px 13px 12px 13px;
+}
+
+/* The caption above each reading. Small, spaced, and quieter than the number
+ * underneath it, because the number is the thing somebody came for and the
+ * caption only has to say which number it is. */
+.aurade-weather-caption {
+  letter-spacing: 0.07em;
+  opacity: 0.72;
+}
+
+/* The scroller inside the bubble. Its own ground would be a second surface
+ * inside a surface, and the undershoot shading GTK draws by default reads as
+ * a rendering fault on a translucent panel. */
+.aurade-weather-panel scrolledwindow,
+.aurade-weather-panel scrolledwindow > viewport {
+  background: none;
+  border: none;
+}
+
+.aurade-weather-panel scrolledwindow undershoot.top,
+.aurade-weather-panel scrolledwindow undershoot.bottom {
+  background: none;
+}
+
+/* High contrast, on the same terms as everything else this pass added: the
+ * ground is stated rather than suggested and the soft edge goes away. The
+ * charts inside are drawn from the theme's own role table, so they follow
+ * without needing anything here. */
+.aurade-high-contrast .aurade-weather-tile {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-weather-caption {
+  opacity: 1;
 }

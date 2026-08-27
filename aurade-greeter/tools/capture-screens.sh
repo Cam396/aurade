@@ -41,16 +41,44 @@ export AURADE_POWER_DIR="$TMP/power"
 # fallback the product draws when it cannot find them.
 export AURADE_WALLPAPER_DIR="${AURADE_WALLPAPER_DIR:-/mnt/build/aurade-work/installer-gui-wt/installer/wallpapers}"
 export AURADE_SHOT_DIR="${AURADE_SHOT_DIR:-/mnt/build/aurade-work/private-docs/greeter-shot}"
+# The weather, switched on and pointed at somewhere with weather in it. The
+# reading itself is written to the cache by the python side, so this render
+# never touches the network and looks the same on a machine with no network
+# at all.
+cat >"$TMP/greeter.conf" <<'EOF'
+weather = on
+weather_place = Ardsley, NY
+weather_latitude = 41.0126
+weather_longitude = -73.8437
+weather_units = c
+EOF
+export AURADE_GREETER_CONF="$TMP/greeter.conf"
+export AURADE_WEATHER_CACHE="$TMP/weather.json"
 
-weston --backend=headless --width=1280 --height=860 --shell=kiosk-shell.so \
-  --socket=wl-aurade-shots --idle-time=0 >"$TMP/weston.log" 2>&1 &
-WESTON_PID=$!
-disown "$WESTON_PID" 2>/dev/null || true
-for _ in $(seq 1 40); do
-  [[ -S $XDG_RUNTIME_DIR/wl-aurade-shots ]] && break
-  sleep 0.25
-done
-[[ -S $XDG_RUNTIME_DIR/wl-aurade-shots ]] || { echo "weston did not start" >&2; exit 1; }
-export WAYLAND_DISPLAY=wl-aurade-shots
+# Two passes, because one of these pictures does not fit on a screen.
+#
+# The login screen itself is shot at a laptop's size, which is the whole point
+# of looking at it. The weather panel is taller than any screen it will ever
+# open on, which is what the scroller inside it is for, and a popover cannot
+# be allocated taller than the window holding it. So the part under the fold
+# is shot again on a compositor tall enough to hold all of it.
+shots() {
+  local height=$1 socket=$2 set=$3
+  weston --backend=headless --width=1280 --height="$height" \
+    --shell=kiosk-shell.so --socket="$socket" --idle-time=0 \
+    >"$TMP/weston-${set}.log" 2>&1 &
+  WESTON_PID=$!
+  disown "$WESTON_PID" 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    [[ -S $XDG_RUNTIME_DIR/$socket ]] && break
+    sleep 0.25
+  done
+  [[ -S $XDG_RUNTIME_DIR/$socket ]] || { echo "weston did not start" >&2; return 1; }
+  WAYLAND_DISPLAY="$socket" AURADE_SHOT_SET="$set" \
+    python3 "${PACKAGE}/tools/capture-screens.py"
+  kill "$WESTON_PID" 2>/dev/null || true
+  WESTON_PID=
+}
 
-python3 "${PACKAGE}/tools/capture-screens.py"
+shots 860 wl-aurade-shots screens
+shots 1600 wl-aurade-tall weather-full
