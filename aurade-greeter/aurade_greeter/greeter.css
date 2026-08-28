@@ -535,3 +535,90 @@ list.aurade-on-glass.boxed-list > row {
   background-image: none;
   border-bottom: 2px solid @window_fg_color;
 }
+
+/* The strip, across the top, while a warning is live.
+ *
+ * Top rather than beside the clock, and in the overlay rather than in the
+ * page, because it must not reflow anything. A strip that pushes the layout
+ * down is a strip that moves the password field out from under a cursor at
+ * the exact moment somebody is trying to sign in and leave. */
+.aurade-warning-strip {
+  border-radius: 999px;
+  padding: 7px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background-color: rgba(146, 88, 6, 0.90);
+}
+
+/* Its own ground and its own ink, rather than a translucent wash over the
+ * theme's. This sits on a photograph that changes every two minutes, and a
+ * strip tinted onto whatever is behind it is a strip that is unreadable over
+ * a snowfield and invisible over a sunset. */
+.aurade-warning-strip label {
+  color: #ffffff;
+}
+
+.aurade-warning-strip label.dim-label {
+  color: #ffffff;
+  opacity: 0.76;
+}
+
+/* Top tier, once it has been dismissed down to here. Red rather than amber,
+ * because this is the same warning that just covered the whole screen and it
+ * must not look like it got less serious by being got past. */
+.aurade-warning-strip-urgent {
+  background-color: rgba(139, 16, 20, 0.93);
+}
+
+/* The screen, given over.
+ *
+ * Red and dark together rather than either alone. Red at a low enough alpha
+ * to read as a tint leaves the photograph legible, and a photograph of a lake
+ * behind the words "Tornado Warning" is the picture arguing with the message. */
+.aurade-warning-screen {
+  background-image: linear-gradient(to bottom,
+                                    rgba(84, 8, 12, 0.955),
+                                    rgba(52, 4, 8, 0.975));
+}
+
+.aurade-warning-screen-middle {
+  padding: 0 48px;
+}
+
+/* Stated in numbers rather than mixed from the theme's error colour.
+ *
+ * The first version was `alpha(mix(@error_color, black, 0.55), 0.93)`, which
+ * came out brown, left the clock legible through it, and read as a rendering
+ * fault rather than as a decision. This screen is the one place in the
+ * product that overrides somebody deliberately, and what it looks like is not
+ * something to inherit from whatever the accent happens to be. */
+.aurade-warning-screen-event,
+.aurade-warning-screen-middle label,
+.aurade-warning-screen-footer {
+  color: #ffffff;
+}
+
+.aurade-warning-screen-footer {
+  opacity: 0.72;
+}
+
+/* The event name, which is the whole message for anybody who reads one line
+ * and moves. Not dimmed, not spaced out, and larger than anything else this
+ * screen ever draws. */
+.aurade-warning-screen-event {
+  font-weight: 700;
+  font-size: 2.15rem;
+  letter-spacing: -0.01em;
+}
+
+/* High contrast takes the tint away and states it. A translucent red over a
+ * photograph is exactly the kind of soft ground high contrast exists to
+ * remove, and this is the one screen where being read matters most. */
+.aurade-high-contrast .aurade-warning-screen {
+  background-color: @window_bg_color;
+  border: 4px solid @error_color;
+}
+
+.aurade-high-contrast .aurade-warning-strip {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}

@@ -37,7 +37,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
@@ -796,10 +796,18 @@ def test_every_class_the_greeter_uses_is_defined(app) -> None:
     """
     import re
 
-    source = open(os.path.join(PACKAGE, "aurade_greeter", "app.py"),
-                  encoding="utf-8").read()
-    used = set(re.findall(r'add_css_class\("([a-z0-9-]+)"\)', source))
-    used |= set(re.findall(r'css="([a-z0-9-]+)"', source))
+    # Every module that draws, not just `app.py`. It read one file until the
+    # warning strip and the takeover arrived in a module of their own wearing
+    # two class names the stylesheet had never heard of, and this test was
+    # green the whole time.
+    used: set[str] = set()
+    where = os.path.join(PACKAGE, "aurade_greeter")
+    for name in sorted(os.listdir(where)):
+        if not name.endswith(".py"):
+            continue
+        source = open(os.path.join(where, name), encoding="utf-8").read()
+        used |= set(re.findall(r'add_css_class\("([a-z0-9-]+)"\)', source))
+        used |= set(re.findall(r'css="([a-z0-9-]+)"', source))
     defined = set()
     for name in ("theme-dark.css", "theme.css", "greeter.css"):
         path = os.path.join(PACKAGE, "aurade_greeter", name)
@@ -885,6 +893,258 @@ def test_the_alert_request_sits_behind_the_switch(app) -> None:
     finally:
         (_app.Worker, _app.ALERTS.fetch, WX.fetch, WX.normal_high,
          WX.save, window.behaviour, window.weather) = kept
+
+
+def _warning(event: str, severity: str, urgency: str, ident: str,
+             motion: str = ""):
+    """One alert, through the real parser and the real gate."""
+    from aurade_greeter import alerts as ALERTS
+
+    when = datetime.datetime.now().astimezone()
+    parameters = {"VTEC": [f"/O.NEW.KEWX.{ident}.0001.260828T1200Z-"
+                           f"260828T1400Z/"]}
+    if motion:
+        parameters["eventMotionDescription"] = [motion]
+    return ALERTS.shown([{"properties": {
+        "event": event, "category": "Met", "severity": severity,
+        "urgency": urgency, "certainty": "Observed", "status": "Actual",
+        "headline": f"{event} for Bexar County",
+        "description": "Radar indicated.",
+        "instruction": "Take shelter in an interior room on the lowest floor.",
+        "response": "Shelter", "areaDesc": "Bexar, TX",
+        "sent": (when - datetime.timedelta(minutes=4)).isoformat(),
+        "onset": None,
+        "expires": (when + datetime.timedelta(hours=1)).isoformat(),
+        "id": ident, "parameters": parameters}, "geometry": None}], when)
+
+
+def test_a_tornado_warning_takes_the_screen(app) -> None:
+    """The loudest tier, drawn, and the strip under it that outlives it.
+
+    Everything here goes through `alerts.shown`, so what reaches the screen is
+    what the gate admitted rather than a record placed on the widget by hand.
+    A test that skips the gate proves the widget draws and nothing about
+    whether the thing that decides would ever have called it.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None or window.weather is None:
+        NOT_COVERED.append("the warning takeover: this build has no weather")
+        return
+    takeover = window.widgets["warning.takeover"]
+    banner = window.widgets["warning.banner"]
+    kept = list(window.weather.alerts or [])
+    takeover.dismissed.clear()
+    try:
+        window.weather.alerts = _warning(
+            "Tornado Warning", "Extreme", "Immediate", "TO.W",
+            "...storm...29.20,-98.70...DEG 45KT 30...")
+        window._paint_weather()
+        check(takeover.get_visible(),
+              "a tornado warning did not take the screen")
+        check(banner.get_visible(),
+              "the strip is not up behind the takeover, so dismissing it "
+              "would leave nothing saying there is a tornado")
+        check("Tornado Warning" in takeover.event.get_label(),
+              f"the takeover says {takeover.event.get_label()!r}")
+        check("Take shelter" in takeover.instruction.get_label(),
+              f"the takeover does not carry the instruction: "
+              f"{takeover.instruction.get_label()!r}")
+        check(takeover.near.get_label(),
+              "the takeover says nothing about where the storm is, and this "
+              "warning came with a tracked cell on it")
+
+        # The way out, and it must not also reach whatever had focus.
+        stopped = window._on_warning_key(None, 0, 0, None)
+        check(stopped == Gdk.EVENT_STOP,
+              "the keystroke that cleared the warning went on to the password "
+              "field as well, so it types a character nobody meant")
+        check(not takeover.get_visible(),
+              "a key press did not clear the warning off the screen")
+        check(banner.get_visible(),
+              "clearing the takeover took the strip with it, so the warning "
+              "is now invisible while it is still in force")
+
+        # And the same storm does not come back. A warning is reissued as it
+        # is extended, and without the identity check the sixth reissue lands
+        # on somebody who has been trying to type a password for ten minutes.
+        window._paint_weather()
+        check(not takeover.get_visible(),
+              "the same warning took the screen again after being dismissed")
+        window.weather.alerts = _warning(
+            "Tornado Warning", "Extreme", "Immediate", "TO.W")
+        window._paint_weather()
+        check(not takeover.get_visible(),
+              "a reissue of the same storm took the screen again, so a "
+              "warning that updates every ten minutes cannot be got past")
+
+        # A different storm is a different decision.
+        window.weather.alerts = _warning(
+            "Flash Flood Warning", "Extreme", "Immediate", "FF.W")
+        window._paint_weather()
+        check(takeover.get_visible(),
+              "a second, different emergency was suppressed by the first "
+              "one having been dismissed")
+        window._on_warning_key(None, 0, 0, None)
+
+        # Nothing live: both go away, and the key stops being swallowed.
+        window.weather.alerts = []
+        window._paint_weather()
+        check(not banner.get_visible(),
+              "the strip stayed up with no warning behind it")
+        check(window._on_warning_key(None, 0, 0, None) == Gdk.EVENT_PROPAGATE,
+              "keystrokes are still being swallowed with nothing on screen, "
+              "so the password field has gone deaf")
+    finally:
+        window.weather.alerts = kept
+        takeover.dismissed.clear()
+        window._paint_weather()
+
+
+def test_a_warning_that_expired_was_never_got_past(app) -> None:
+    """Clearing is not dismissing, and conflating them loses a warning.
+
+    A warning that ended while it was on screen was not read by anybody. If
+    taking it down counted as having been seen, the next issuance of the same
+    storm, which carries the same VTEC identity, would arrive in silence. That
+    is the one case where this feature failing is indistinguishable from it
+    working.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None or window.weather is None:
+        NOT_COVERED.append("the expiry case: this build has no weather")
+        return
+    takeover = window.widgets["warning.takeover"]
+    kept = list(window.weather.alerts or [])
+    takeover.dismissed.clear()
+    try:
+        window.weather.alerts = _warning(
+            "Tornado Warning", "Extreme", "Immediate", "TO.W3")
+        window._paint_weather()
+        check(takeover.get_visible(), "the warning never went up")
+
+        # It ends. Nobody pressed anything.
+        window.weather.alerts = []
+        window._paint_weather()
+        check(not takeover.get_visible(),
+              "a warning that is no longer in force stayed on the screen")
+        check(not takeover.dismissed,
+              f"taking down an expired warning recorded it as dismissed "
+              f"({takeover.dismissed}), so the next issuance of the same "
+              f"storm would never be shown")
+
+        # And the same storm, reissued, is shown again.
+        window.weather.alerts = _warning(
+            "Tornado Warning", "Extreme", "Immediate", "TO.W3")
+        window._paint_weather()
+        check(takeover.get_visible(),
+              "a reissued warning that nobody had ever dismissed was "
+              "suppressed")
+    finally:
+        window.weather.alerts = kept
+        takeover.dismissed.clear()
+        window._paint_weather()
+
+
+def test_an_advisory_stays_in_the_panel(app) -> None:
+    """The quiet tier is not promoted.
+
+    A heat advisory is worth a row somebody can open a panel and read. It is
+    not worth a strip across a login screen, and it is certainly not worth the
+    screen. If this ever fails, San Antonio in August is a permanent banner.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None or window.weather is None:
+        NOT_COVERED.append("the advisory tier: this build has no weather")
+        return
+    takeover = window.widgets["warning.takeover"]
+    banner = window.widgets["warning.banner"]
+    kept = list(window.weather.alerts or [])
+    try:
+        window.weather.alerts = _warning(
+            "Heat Advisory", "Moderate", "Expected", "HT.Y")
+        window._paint_weather()
+        check(not takeover.get_visible(),
+              "a heat advisory took over the login screen")
+        check(not banner.get_visible(),
+              "a heat advisory put a strip across the login screen")
+
+        # And the middle tier, which is the one that decides whether this
+        # feature is usable in a place with weather. A severe thunderstorm
+        # warning gets the strip and must never get the screen: San Antonio
+        # has several a week, and a login screen that goes full red for each
+        # of them is a login screen people learn to hit a key at without
+        # reading, which is the whole failure this design exists to avoid.
+        window.weather.alerts = _warning(
+            "Severe Thunderstorm Warning", "Severe", "Expected", "SV.W")
+        window._paint_weather()
+        check(banner.get_visible(),
+              "a severe thunderstorm warning said nothing at all on the "
+              "screen, so the middle tier has no surface")
+        check(not takeover.get_visible(),
+              "a severe thunderstorm warning took over the whole screen, "
+              "which in a thundery week is a screen nobody reads any more")
+        check("Severe Thunderstorm" in banner.event.get_label(),
+              f"the strip says {banner.event.get_label()!r}")
+    finally:
+        window.weather.alerts = kept
+        window._paint_weather()
+
+
+def test_a_warning_outlives_a_forecast_that_did_not_answer(app) -> None:
+    """Two services, two facts, and one must not swallow the other.
+
+    The panel already had this bug once: `show_report` returns early when
+    there is no temperature, and everything below that return stopped running,
+    including the warnings, which come from a different service entirely. The
+    same early return exists in `_paint_weather`, so the same mistake is
+    available here and this is what stops it being made twice.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None or window.weather is None:
+        NOT_COVERED.append("the dead forecast case: this build has no weather")
+        return
+    takeover = window.widgets["warning.takeover"]
+    kept_alerts = list(window.weather.alerts or [])
+    kept_now = window.weather.now.temperature
+    takeover.dismissed.clear()
+    try:
+        window.weather.now.temperature = None
+        window.weather.alerts = _warning(
+            "Tornado Warning", "Extreme", "Immediate", "TO.W2")
+        window._paint_weather()
+        check(takeover.get_visible(),
+              "the forecast service not answering also swallowed the tornado "
+              "warning, which came from somewhere else entirely")
+    finally:
+        window.weather.now.temperature = kept_now
+        window.weather.alerts = kept_alerts
+        takeover.dismissed.clear()
+        window._paint_weather()
+
+
+def test_the_warning_key_is_read_before_anything_else(app) -> None:
+    """On CAPTURE, so a focused password field does not eat it first.
+
+    Bubbling would mean the first letter somebody types goes into the entry
+    and clears the warning at the same time, and they never find out what it
+    said.
+    """
+    window, _ = build(app, [])
+    # By name, not by looking for any controller in the capture phase. GTK
+    # installs one of its own on the window, so the first version of this
+    # found that one and passed with the phase deleted from ours.
+    guard = None
+    for controller in window.observe_controllers():
+        if controller.get_name() == "aurade-warning-guard":
+            guard = controller
+    check(guard is not None,
+          "the warning's own key controller is not on the window at all")
+    if guard is not None:
+        check(guard.get_propagation_phase() == Gtk.PropagationPhase.CAPTURE,
+              f"the warning key controller runs in "
+              f"{guard.get_propagation_phase().value_nick}, so a focused "
+              f"password field reads the keystroke first and the takeover is "
+              f"cleared by a character nobody meant to spend on it")
 
 
 def test_the_shelf_holds_the_weather_beside_the_system(app) -> None:

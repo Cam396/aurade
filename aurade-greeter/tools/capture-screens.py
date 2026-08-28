@@ -333,6 +333,18 @@ def main() -> int:
             raise SystemExit("the greeter window never appeared")
         pump(60)
 
+        if WANT == "screens" and os.environ.get("AURADE_SHOT_ALERTS"):
+            # The loudest tier first, because it is drawn over everything and
+            # every other picture would otherwise be taken through it. Then it
+            # is dismissed the way a person dismisses it, which is the only
+            # way to get the strip on its own.
+            takeover = window.widgets.get("warning.takeover")
+            if takeover is not None and takeover.get_visible():
+                written.append(save(window, "greeter-takeover"))
+                takeover.dismiss()
+                pump(30)
+                written.append(save(window, "greeter-banner"))
+
         if WANT == "screens":
             # The shade first, which is what anybody walking up to the machine
             # actually sees, and only then the screen behind it.
