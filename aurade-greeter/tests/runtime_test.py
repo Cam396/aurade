@@ -42,6 +42,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
 from aurade_greeter import weatherui as WUI  # noqa: E402
+from aurade_greeter import alertui as AU  # noqa: E402
 from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow, Wallpaper  # noqa: E402
 from aurade_greeter import weather as WX  # noqa: E402
@@ -1115,6 +1116,168 @@ def test_the_warning_clock_does_not_read_the_forecast_clock(app) -> None:
         check(name not in read,
               f"refresh_alerts reads .{name}, so warnings are back on the "
               f"forecast's clock and a fresh reading means no request")
+
+
+def test_the_screen_says_what_a_lockout_is(app) -> None:
+    """Four wrong passwords, and the fourth message is not the first one.
+
+    The stack below locks an account after a few of these. Saying "that
+    password did not work" for the fourth time running describes a broken
+    machine rather than one protecting somebody, and the difference is a
+    sentence built from the policy the machine is actually running.
+    """
+    window, _ = build(app, [])
+    kept = (SET.lockout_policy, window._refusals, window._refused_for)
+    try:
+        SET.lockout_policy = lambda *_a, **_k: (3, 600)
+        window._refusals = 0
+        window._refused_for = ""
+        window.chosen = None
+        window.typed_name = "ada"
+
+        first = window._refusal_words()
+        equal(first, C.WRONG, "the first refusal does not say the plain thing")
+
+        second = window._refusal_words()
+        check(second != first and C.LOCKOUT_SOON in second,
+              f"the attempt before the lockout says {second!r}, so nobody is "
+              f"warned that the next one costs them ten minutes")
+
+        third = window._refusal_words()
+        check(third == C.locked_words(600),
+              f"the attempt that locks the account says {third!r}")
+        check("10" in third,
+              f"the lockout message does not say how long it lasts: {third!r}")
+
+        # And it stays said, rather than reverting to the plain refusal.
+        check(window._refusal_words() == C.locked_words(600),
+              "the message after the lockout went back to saying the "
+              "password was wrong, which is the original bug")
+
+        # A different person starts again. Without this the count carries over
+        # and the screen tells somebody their account is locked when it is not.
+        window.typed_name = "grace"
+        equal(window._refusal_words(), C.WRONG,
+              "the refusal count carried over to a different account")
+    finally:
+        SET.lockout_policy, window._refusals, window._refused_for = kept
+
+
+def test_no_lockout_is_described_where_none_is_configured(app) -> None:
+    """A login screen explaining a rule it invented is worse than a silent one."""
+    window, _ = build(app, [])
+    kept = (SET.lockout_policy, window._refusals, window._refused_for)
+    try:
+        SET.lockout_policy = lambda *_a, **_k: None
+        window._refusals = 0
+        window._refused_for = ""
+        window.chosen = None
+        window.typed_name = "ada"
+        for attempt in range(5):
+            equal(window._refusal_words(), C.WRONG,
+                  f"attempt {attempt + 1} on a machine with no lockout "
+                  f"described one anyway")
+    finally:
+        SET.lockout_policy, window._refusals, window._refused_for = kept
+
+
+def test_the_card_ends_the_shake_where_it_started(app) -> None:
+    """A refusal that moves nothing looks like a screen that did nothing.
+
+    The two margins move against each other so the card never asks the page
+    for room it did not already have, and the curve has to land on zero: a
+    card left one pixel off centre is a card somebody notices for the rest of
+    the session.
+    """
+    steps = 200
+    check(_app.shake_offset(0.0) == 0,
+          f"the shake starts {_app.shake_offset(0.0)} pixels off centre")
+    check(_app.shake_offset(1.0) == 0,
+          f"the shake ends {_app.shake_offset(1.0)} pixels off centre, and "
+          f"stays there")
+    worst = max(abs(_app.shake_offset(n / steps)) for n in range(steps + 1))
+    check(0 < worst <= _app.SHAKE_PIXELS,
+          f"the shake reaches {worst} pixels against a margin of "
+          f"{_app.SHAKE_PIXELS}, so the card asks the page for room it does "
+          f"not have and everything around it moves")
+    # It has to actually go both ways, or it is a lurch rather than a shake.
+    check(min(_app.shake_offset(n / steps) for n in range(steps + 1)) < 0,
+          "the shake only ever moves one way")
+
+    window, _ = build(app, [])
+    card = window.widgets.get("password.card")
+    check(card is not None, "the sign in card is not named, so nothing shakes")
+    if card is not None:
+        equal(card.get_margin_start() + card.get_margin_end(),
+              _app.SHAKE_PIXELS * 2,
+              "the card's margins do not add up to the room the shake needs")
+
+
+def test_reduced_motion_means_none_of_it(app) -> None:
+    """Off is a request for no animation, not for a faster one."""
+    banner = AU.Banner()
+    banner.animate = False
+    banner.set_margin_top(-99)
+    banner.set_opacity(0.0)
+    banner._arrive()
+    equal(banner.get_opacity(), 1.0,
+          "the strip was left transparent on a machine with motion off")
+    equal(banner.get_margin_top(), 14,
+          "the strip was left off its mark on a machine with motion off")
+    check(banner._arrival is None,
+          "the strip built an animation on a machine that asked for none")
+
+    takeover = AU.Takeover()
+    takeover.animate = False
+    takeover.set_opacity(0.0)
+    takeover._arrive()
+    equal(takeover.get_opacity(), 1.0,
+          "the warning screen was left transparent on a machine with motion "
+          "off, which is a red screen nobody can read")
+    # The end state alone proves nothing here. libadwaita skips an animation
+    # on a widget with no frame clock, so an unguarded `_arrive` lands on full
+    # opacity too and the first version of this passed with the guard deleted.
+    # What differs is whether an animation was ever built.
+    check(takeover._arrival is None,
+          "the warning screen built an animation on a machine that asked for "
+          "none, so reduced motion got a fast fade rather than no fade")
+
+    # And with motion on, one is built, or the check above passes by the
+    # animation never existing at all.
+    moving = AU.Takeover()
+    moving.animate = True
+    moving._arrive()
+    check(moving._arrival is not None,
+          "no animation is built even with motion on, so nothing here fades")
+
+
+def test_the_air_tile_appears_only_with_a_reading(app) -> None:
+    """The least important tile on the panel, and an empty one is worse than none."""
+    window, _ = build(app, [])
+    panel = window.widgets.get("weather.panel")
+    if panel is None or window.weather is None:
+        NOT_COVERED.append("the air tile: this build has no weather panel")
+        return
+    kept = (window.weather.air_index, window.weather.air_pm)
+    try:
+        window.weather.air_index = None
+        window._paint_weather()
+        check(not panel.air.get_visible(),
+              "an air quality tile with nothing in it was left on the panel")
+
+        window.weather.air_index = 128
+        window._paint_weather()
+        check(panel.air.get_visible(), "a real air reading drew no tile")
+        equal(panel.air.value.get_label(), "128",
+              "the air tile does not show the index")
+        note = panel.air.note.get_label()
+        check("(" in note and ")" in note,
+              f"the air note does not carry the band's own name: {note!r}")
+        check(note != C.WEATHER_AIR_NOTE,
+              "the air note was never filled in")
+    finally:
+        window.weather.air_index, window.weather.air_pm = kept
+        window._paint_weather()
 
 
 def test_an_advisory_stays_in_the_panel(app) -> None:

@@ -33,10 +33,79 @@ gi.require_version("Pango", "1.0")
 
 from gi.repository import Adw, Gtk, Pango  # noqa: E402
 
+#: How long the strip takes to arrive, and the screen to.
+#:
+#: The takeover is slower on purpose. A red screen that appears between two
+#: frames reads as a fault in the machine, and somebody who thinks the screen
+#: has broken does not read what it says. Arriving over a fifth of a second is
+#: the difference between a crash and a decision.
+BANNER_MS = 260
+TAKEOVER_MS = 240
+
+#: How far the strip falls from, in pixels above where it settles.
+BANNER_DROP = 46
+
 from . import a11y as A  # noqa: E402
 from . import alerts as AL  # noqa: E402
 from . import copy as C  # noqa: E402
 from . import weather as W  # noqa: E402
+
+
+class Mark(Gtk.DrawingArea):
+    """A warning triangle, drawn rather than fetched.
+
+    An icon name would be an icon theme dependency on a screen that runs
+    before anybody has signed in, on a machine whose theme is whatever the
+    installer left. Twenty lines of cairo has no such opinion.
+
+    White on both surfaces, because both of them paint their own dark ground
+    and their own white ink. This mark is never on a photograph.
+    """
+
+    def __init__(self, size: int = 18) -> None:
+        super().__init__()
+        self.set_content_width(size)
+        self.set_content_height(size)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_draw_func(self._draw)
+
+    def _draw(self, _area, cr, width: int, height: int) -> None:
+        side = min(width, height)
+        cr.save()
+        cr.translate((width - side) / 2.0, (height - side) / 2.0)
+        cr.scale(side, side)
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.96)
+
+        # The triangle, with its corners taken off. A hard point at this size
+        # renders as one dark pixel and reads as a defect.
+        radius = 0.10
+        points = ((0.5, 0.055), (0.955, 0.90), (0.045, 0.90))
+        cr.new_path()
+        for index, (x, y) in enumerate(points):
+            before = points[index - 1]
+            after = points[(index + 1) % 3]
+            for other, first in ((before, True), (after, False)):
+                dx, dy = other[0] - x, other[1] - y
+                length = (dx * dx + dy * dy) ** 0.5 or 1.0
+                px, py = x + dx / length * radius, y + dy / length * radius
+                if first:
+                    cr.line_to(px, py)
+                else:
+                    cr.curve_to(x, y, x, y, px, py)
+        cr.close_path()
+        cr.set_line_width(0.105)
+        cr.set_line_join(1)  # round
+        cr.stroke()
+
+        # The bar and the dot, as one stroke each, so they scale together.
+        cr.set_line_cap(1)  # round
+        cr.set_line_width(0.10)
+        cr.move_to(0.5, 0.40)
+        cr.line_to(0.5, 0.615)
+        cr.stroke()
+        cr.arc(0.5, 0.755, 0.001, 0.0, 6.2832)
+        cr.stroke()
+        cr.restore()
 
 
 def _label(words: str, style: str, *, wrap: bool = False,
@@ -102,7 +171,14 @@ class Banner(Gtk.Box):
         self.set_margin_top(14)
         self.set_visible(False)
         self.alert = None
+        #: Set by the window from the accessibility record. Off means every
+        #: animation here is skipped rather than shortened, because reduced
+        #: motion is a request for none of it, not for a faster version.
+        self.animate = True
+        self._arrival = None
 
+        self.mark = Mark(17)
+        self.append(self.mark)
         self.event = _label("", "m3-label-large", centre=False)
         self.append(self.event)
         self.detail = _label("", "m3-body-small", dim=True, centre=False)
@@ -127,7 +203,33 @@ class Banner(Gtk.Box):
         self.detail.set_visible(bool(near or alert.area))
         A.described(self, alert.event,
                     " ".join(part for part in (near, alert.headline) if part))
+        already = self.get_visible()
         self.set_visible(True)
+        if not already:
+            self._arrive()
+
+    def _arrive(self) -> None:
+        """Down from above the edge, once, when the strip first appears.
+
+        Margin rather than a transform, because the strip lives in an overlay
+        and a transform would be clipped by it. Nothing else on the screen
+        moves: it is drawn over the page, not inserted into it.
+        """
+        if not self.animate:
+            self.set_margin_top(14)
+            self.set_opacity(1.0)
+            return
+        self.set_opacity(0.0)
+
+        def step(value, _user=None):
+            self.set_margin_top(int(round(14 - BANNER_DROP * (1.0 - value))))
+            self.set_opacity(value)
+
+        target = Adw.CallbackAnimationTarget.new(step)
+        self._arrival = Adw.TimedAnimation.new(self, 0.0, 1.0, BANNER_MS,
+                                               target)
+        self._arrival.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+        self._arrival.play()
 
 
 class Takeover(Gtk.Overlay):
@@ -153,6 +255,10 @@ class Takeover(Gtk.Overlay):
         self.set_visible(False)
         self.alert = None
 
+        #: Same contract as the strip's.
+        self.animate = True
+        self._arrival = None
+
         ground = Gtk.Box()
         ground.set_hexpand(True)
         ground.set_vexpand(True)
@@ -170,6 +276,10 @@ class Takeover(Gtk.Overlay):
         middle.set_halign(Gtk.Align.CENTER)
         middle.set_valign(Gtk.Align.CENTER)
         middle.add_css_class("aurade-warning-screen-middle")
+
+        self.mark = Mark(58)
+        self.mark.set_halign(Gtk.Align.CENTER)
+        middle.append(self.mark)
 
         self.event = _label("", "m3-display-small", wrap=True)
         self.event.add_css_class("aurade-warning-screen-event")
@@ -225,7 +335,27 @@ class Takeover(Gtk.Overlay):
         self.instruction.set_visible(bool(words))
         A.described(self, alert.event,
                     " ".join(part for part in (near, heading, words) if part))
+        already = self.get_visible()
         self.set_visible(True)
+        if not already:
+            self._arrive()
+
+    def _arrive(self) -> None:
+        """The screen going red, over a fifth of a second rather than at once.
+
+        Fast enough that nobody waits for it and slow enough to read as a
+        decision. A warning that appears between two frames looks like the
+        machine has broken, and somebody who thinks the screen is broken does
+        not read what it says.
+        """
+        if not self.animate:
+            self.set_opacity(1.0)
+            return
+        target = Adw.PropertyAnimationTarget.new(self, "opacity")
+        self._arrival = Adw.TimedAnimation.new(self, 0.0, 1.0, TAKEOVER_MS,
+                                               target)
+        self._arrival.set_easing(Adw.Easing.EASE_OUT_QUAD)
+        self._arrival.play()
 
     def clear(self) -> None:
         """Take it away without recording it as seen.

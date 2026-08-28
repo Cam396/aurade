@@ -571,13 +571,17 @@ class Panel(Gtk.Box):
         self.visibility = Tile(C.WEATHER_VISIBILITY, self.visibility_bar)
         self.moon_disc = self._remember(MoonMark(40))
         self.moon = Tile(C.WEATHER_MOON, self.moon_disc, beside=True)
+        # Last, and that is where it belongs. Air quality matters on the few
+        # days it matters and is noise on the rest, so it goes under the fold
+        # rather than beside the temperature.
+        self.air_bar = self._remember(BarMark("uv"))
+        self.air = Tile(C.WEATHER_AIR, self.air_bar)
 
-        for index, tile in enumerate((self.humidity, self.wind,
-                                      self.ultraviolet, self.pressure,
-                                      self.visibility, self.moon)):
+        order = (self.humidity, self.wind, self.ultraviolet, self.pressure,
+                 self.visibility, self.moon, self.air)
+        for index, tile in enumerate(order):
             grid.attach(tile, index % 2, index // 2, 1, 1)
-        self.tiles = (self.humidity, self.wind, self.ultraviolet,
-                      self.pressure, self.visibility, self.moon)
+        self.tiles = order
         return grid
 
     # -- appearance --------------------------------------------------------
@@ -740,7 +744,8 @@ class Panel(Gtk.Box):
 
         self.pressure_bar.show_value(now.pressure, 960.0, 1050.0, "tertiary")
         self.pressure.say(W.pressure_words(now.pressure, units),
-                          _pressure_note(now.pressure))
+                          _pressure_note(now.pressure,
+                                         W.pressure_trend(report.hours)))
 
         # Twenty kilometres is where every service stops counting, so that is
         # the top of the scale rather than a number picked to look right.
@@ -754,6 +759,16 @@ class Panel(Gtk.Box):
         _, tomorrow, _phase2 = W.moon(here + _dt.timedelta(days=1))
         self.moon_disc.show_moon(lit, tomorrow >= lit)
         self.moon.say(name, C.WEATHER_MOON_LIT.format(percent=int(round(lit * 100))))
+
+        # Scaled to 150, where the band stops being "everybody is fine". A bar
+        # that fills only at 500 reads as empty on every day anybody would
+        # actually want to look at it.
+        self.air_bar.show_value(None if report.air_index is None
+                                else min(11.0, report.air_index / 13.6))
+        self.air.say("--" if report.air_index is None
+                     else str(report.air_index),
+                     _air_note(report.air_index))
+        self.air.set_visible(report.air_index is not None)
 
 
 # -- small conversions the panel needs --------------------------------------
@@ -856,19 +871,46 @@ def day_names(days: list, here: _dt.datetime) -> list[str]:
     return names
 
 
-def _pressure_note(value: float | None) -> str:
+def _air_note(index: int | None) -> str:
+    """What to do about it, then what it is called.
+
+    The same shape as the ultraviolet note, and for the same reason: the band
+    name is a category and a category is not advice, but somebody who heard a
+    number on the radio should still find the words they heard.
+    """
+    if index is None:
+        return ""
+    return C.WEATHER_AIR_NOTE.format(advice=W.air_advice(index),
+                                     band=W.air_words(index))
+
+
+#: Which way the barometer is going, said in words.
+PRESSURE_WAYS = {
+    "falling": C.WEATHER_PRESSURE_FALLING,
+    "rising": C.WEATHER_PRESSURE_RISING,
+    "steady": C.WEATHER_PRESSURE_STEADY,
+}
+
+
+def _pressure_note(value: float | None, trend: str = "") -> str:
     """What a barometer reading means, for the many people who do not know.
 
-    A number with no scale beside it is trivia. These are the standard
-    aviation and marine bands, which is where the numbers come from.
+    A number with no scale beside it is trivia, and a barometer with no
+    direction on it is most of the way to trivia as well: the whole reason
+    people own one is to see which way it is going. The band is the standard
+    aviation and marine one, and the direction comes from the same series and
+    the same threshold the front sentence reads, so the two cannot disagree.
     """
     if value is None:
         return ""
     if value < 1000.0:
-        return C.WEATHER_PRESSURE_LOW
-    if value > 1022.0:
-        return C.WEATHER_PRESSURE_HIGH
-    return C.WEATHER_PRESSURE_NORMAL
+        band = C.WEATHER_PRESSURE_LOW
+    elif value > 1022.0:
+        band = C.WEATHER_PRESSURE_HIGH
+    else:
+        band = C.WEATHER_PRESSURE_NORMAL
+    way = PRESSURE_WAYS.get(trend, "")
+    return f"{band} {way}" if way else band
 
 
 def _visibility_note(value: float | None, units: str) -> str:

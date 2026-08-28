@@ -215,12 +215,26 @@ def fake_weather(path: str) -> None:
             "condition": "thunder", "daylight": True,
             "summary": "Chance Showers And Thunderstorms",
         },
+        # The air, so the tile is in the picture. It hides itself when there
+        # is no reading, which is right on a machine and useless in a review.
+        "air_index": 78,
+        "air_pm": 21.4,
         "hours": [{
             "at": (start + dt.timedelta(hours=index)).isoformat(),
             "temperature": float(shape[index]),
             "condition": marks[index],
             "precipitation": rain[index],
             "daylight": 6 <= (start.hour + index) % 24 <= 19,
+            # A falling barometer and a wind that turns, so the tile has a
+            # direction on it and the sentence has something to say. A review
+            # of a panel where half the readings are absent is a review of a
+            # different panel.
+            "pressure": 1016.7 - index * 0.55,
+            "bearing": (163 + index * 9) % 360,
+            "wind": 19.0 + index,
+            "amount": round(0.4 * max(0, 6 - abs(index - 3)), 1),
+            "rain": round(0.4 * max(0, 6 - abs(index - 3)), 1),
+            "cape": 400.0 + index * 180.0,
         } for index in range(12)],
         "days": [{
             "date": (start.date() + dt.timedelta(days=index)).isoformat(),

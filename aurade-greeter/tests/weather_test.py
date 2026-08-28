@@ -880,6 +880,124 @@ check(len(_keys) == 8,
 check(all(key == key.lower() and " " not in key for key in _keys),
       f"a phase key looks like display text: {sorted(_keys)}")
 
+# -- which way the barometer is going ---------------------------------------
+#
+# The number alone is trivia. Nobody carries the standard sea level pressure
+# around in their head, and the direction is the whole reason a barometer is a
+# thing anybody owns.
+
+
+class _Hour:
+    def __init__(self, pressure):
+        self.pressure = pressure
+
+
+def _series(start, step, count=8):
+    return [_Hour(start + step * n) for n in range(count)]
+
+
+check(W.pressure_trend(_series(1015.0, -0.4)) == "falling",
+      "a falling series was not read as falling")
+check(W.pressure_trend(_series(1005.0, 0.4)) == "rising",
+      "a rising series was not read as rising")
+check(W.pressure_trend(_series(1013.0, 0.0)) == "steady",
+      "a flat series was not read as steady")
+check(W.pressure_trend(_series(1013.0, -0.1)) == "steady",
+      "a drift smaller than the threshold was called a direction, which "
+      "would have the tile announcing weather on a still day")
+check(W.pressure_trend(_series(1013.0, -0.4, 3)) == "",
+      "a series too short to have a direction produced one anyway")
+check(W.pressure_trend([_Hour(None)] * 8) == "",
+      "a series with no readings in it produced a direction")
+
+# The tile and the sentence read the same series and must not disagree in
+# front of somebody, so they read the same number rather than two copies of
+# it that drift apart.
+import aurade_greeter.outlook as _O  # noqa: E402
+
+check(_O.FALLING == W.PRESSURE_MOVE,
+      f"the front sentence moves at {_O.FALLING} and the tile at "
+      f"{W.PRESSURE_MOVE}, so one can say a front is coming while the other "
+      f"says the barometer is steady")
+
+
+# -- the air ----------------------------------------------------------------
+
+check(W.air_words(0) == "Good" and W.air_words(50) == "Good",
+      "the bottom band is not Good all the way to fifty")
+check(W.air_words(51) != W.air_words(50),
+      "the band does not change at fifty one, where the published one does")
+check(W.air_words(500) and W.air_advice(500),
+      "an index off the top of the published scale said nothing at all")
+check(W.air_words(None) == "" and W.air_advice(None) == "",
+      "no reading produced words anyway")
+_bands = {W.air_words(n) for n in (10, 75, 125, 175, 250, 400)}
+check(len(_bands) == 6, f"six bands collapsed into {len(_bands)}: {_bands}")
+
+_reply = {"current": {"us_aqi": 60, "pm2_5": 12.7}}
+check(W.air_quality(1.0, 2.0, get=lambda _u: _reply) == (60, 12.7),
+      "a good air reading was not read")
+check(W.air_quality(1.0, 2.0, get=lambda _u: {"current": {}}) is None,
+      "a reply with no index in it produced one anyway")
+check(W.air_quality(1.0, 2.0, get=lambda _u: {}) is None,
+      "an empty reply produced a reading")
+
+
+def _raises(_url):
+    raise OSError("no route to host")
+
+
+check(W.air_quality(1.0, 2.0, get=_raises) is None,
+      "the air service being down raised out of the worker, which would take "
+      "the temperature down with the least important tile on the panel")
+
+# -- what survives being written down ---------------------------------------
+#
+# The cache kept five of the twelve fields an hour carries, and the effect was
+# invisible: a report read back from disk had no pressure series, so the
+# barometer tile had no direction and the front sentence could never fire, on
+# any machine painting what it last knew rather than what it just fetched.
+# Both of those fail by saying nothing, which is what they say on a quiet day
+# as well.
+#
+# Asserted as a round trip rather than field by field, because a list of
+# fields is a list that stops matching the class. This one cannot: it asks the
+# class what it has.
+
+import dataclasses as _dc  # noqa: E402
+
+_full = W.Report(
+    place="Ardsley, NY", provider="nws", latitude=41.0, longitude=-73.8,
+    zone="America/New_York", taken=time.time(), narrative="something",
+    now=W.Now(temperature=25.0, pressure=1016.0, dew_point=20.0),
+    hours=[W.Hour(at=_dt.datetime(2026, 8, 28, 12 + n // 4, 0),
+                  temperature=26.0 - n * 0.5, condition=W.RAIN,
+                  precipitation=40 + n, daylight=True, amount=0.4 * n,
+                  rain=0.4 * n, snow=0.0, pressure=1016.0 - n * 0.5,
+                  wind=12.0 + n, bearing=180 + n * 8, cape=200.0 * n)
+           for n in range(18)],
+    days=[W.Day(date=_dt.date(2026, 8, 28), high=28.0, low=20.0,
+                condition=W.RAIN, precipitation=60, ultraviolet=6.0)])
+
+_again = W.from_record(W.to_record(_full))
+check(_again is not None, "a report did not survive being written down")
+if _again is not None:
+    _lost = [name.name for name in _dc.fields(W.Hour)
+             if getattr(_full.hours[0], name.name)
+             != getattr(_again.hours[0], name.name)]
+    check(not _lost,
+          f"an hour lost {_lost} on the way through the cache, so the panel "
+          f"drawn from disk is not the panel drawn from the network")
+    check(W.pressure_trend(_again.hours) == W.pressure_trend(_full.hours)
+          == "falling",
+          f"the barometer reads {W.pressure_trend(_again.hours)!r} from the "
+          f"cache and {W.pressure_trend(_full.hours)!r} from the service")
+
+    _here = _dt.datetime(2026, 8, 28, 12, 0)
+    check(_O.front(_again, _here) == _O.front(_full, _here),
+          "the front sentence differs between a cached report and the "
+          "report it was written from")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"greeter-weather: {failure}", file=sys.stderr)
