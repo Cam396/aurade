@@ -80,6 +80,7 @@ SOURCES = [
     # module that formats a phrase is as user facing as one that stores it.
     ("aurade-greeter/aurade_greeter/weather.py", "python"),
     ("aurade-greeter/aurade_greeter/shade.py", "python"),
+    ("aurade-greeter/aurade_greeter/outlook.py", "python"),
     ("aurade-greeter/aurade_greeter/settings.py", "python"),
     # The first words the product says, and the last place anyone reads.
     ("installer/archiso/airootfs/etc/motd", "plain"),

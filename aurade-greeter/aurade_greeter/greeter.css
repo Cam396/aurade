@@ -506,3 +506,13 @@ list.aurade-on-glass.boxed-list > row {
   background-color: @window_bg_color;
   border: 2px solid @window_fg_color;
 }
+
+/* The sentence.
+ *
+ * Slightly larger than the forecaster's paragraph below it and not dimmed,
+ * because it is the headline and that paragraph is the discussion. It was the
+ * other way round, with the only computed thing on the panel sitting under a
+ * wall of grey text nobody reads to the end of. */
+.aurade-outlook {
+  font-weight: 500;
+}

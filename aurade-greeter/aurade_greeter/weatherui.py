@@ -35,6 +35,7 @@ from . import tokens as T  # noqa: E402
 from . import weather as W  # noqa: E402
 from . import weatherdraw as D  # noqa: E402
 from . import alerts as AL  # noqa: E402
+from . import outlook as OUT  # noqa: E402
 
 try:  # pragma: no cover - present on every supported system
     from zoneinfo import ZoneInfo
@@ -438,6 +439,16 @@ class Panel(Gtk.Box):
         A.described(self.alerts, C.WEATHER_ALERTS)
         page.append(self.alerts)
 
+        # The sentence, above the forecaster's paragraph and below the
+        # warnings. It is the only thing on this panel a person could not
+        # have worked out by looking out of the window, and it was sitting
+        # under a paragraph of forecast discussion that is not a headline.
+        self.said = _label("", "m3-body-medium", wrap=True)
+        self.said.add_css_class("aurade-outlook")
+        self.said.set_max_width_chars(34)
+        self.said.set_visible(False)
+        page.append(self.said)
+
         self.narrative = _label("", "m3-label-medium", wrap=True, dim=True)
         # A wrapped label asks for the width of its longest unbroken run, and
         # a forecaster's paragraph is one long run, so without this the label
@@ -575,6 +586,10 @@ class Panel(Gtk.Box):
         self.range.set_label("   ".join(parts))
 
         self._show_alerts(report, here, zone)
+
+        said = OUT.sentence(report, here, units, report.normal)
+        self.said.set_label(said)
+        self.said.set_visible(bool(said))
 
         self.narrative.set_label(report.narrative)
         self.narrative.set_visible(bool(report.narrative))

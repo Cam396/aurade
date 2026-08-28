@@ -84,7 +84,7 @@ def test_every_copy_matches_its_original() -> None:
 OURS = ("__init__.py", "accounts.py", "alerts.py", "app.py", "copy.py",
         "glass.py",
         "glyphs.py",
-        "greeter.css", "network.py", "nmlive.py", "preferences.py",
+        "greeter.css", "network.py", "outlook.py", "nmlive.py", "preferences.py",
         "protocol.py", "sessions.py", "settings.py", "shade.py",
         "weather.py", "weatherdraw.py", "weatherui.py")
 
