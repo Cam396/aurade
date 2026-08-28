@@ -96,6 +96,13 @@ def main() -> int:
         window.set_default_size(1280, 860)
         window.present()
         pump(60)
+        # The shade, which is what the screen is before anybody touches it.
+        # This used to be written as `-accounts.png`, which named the one
+        # state the tool never captured: `choose` goes straight from here to
+        # the password page, so the account list was never in any picture.
+        shot(window, f"{out}-shade.png")
+        window.lift()
+        pump(80)
         shot(window, f"{out}-accounts.png")
         # The status area, open, which is where the network lives.
         try:
