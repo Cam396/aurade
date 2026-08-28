@@ -849,20 +849,6 @@ def test_the_alert_request_sits_behind_the_switch(app) -> None:
 
     asked: list[tuple] = []
 
-    class Immediate:
-        """A Worker without the thread, so the assertion cannot race it."""
-
-        def __init__(self, work, done) -> None:
-            self._work, self._done = work, done
-
-        def start(self) -> "Immediate":
-            try:
-                result, error = self._work(), None
-            except Exception as exc:  # noqa: BLE001 - delivered, not swallowed
-                result, error = None, exc
-            self._done(result, error)
-            return self
-
     kept = (_app.Worker, _app.ALERTS.fetch, WX.fetch, WX.normal_high,
             WX.save, window.behaviour, window.weather)
     here = dict(window.behaviour)
@@ -893,6 +879,21 @@ def test_the_alert_request_sits_behind_the_switch(app) -> None:
     finally:
         (_app.Worker, _app.ALERTS.fetch, WX.fetch, WX.normal_high,
          WX.save, window.behaviour, window.weather) = kept
+
+
+class Immediate:
+    """A Worker without the thread, so an assertion cannot race it."""
+
+    def __init__(self, work, done) -> None:
+        self._work, self._done = work, done
+
+    def start(self) -> "Immediate":
+        try:
+            result, error = self._work(), None
+        except Exception as exc:  # noqa: BLE001 - delivered, not swallowed
+            result, error = None, exc
+        self._done(result, error)
+        return self
 
 
 def _warning(event: str, severity: str, urgency: str, ident: str,
@@ -1043,6 +1044,77 @@ def test_a_warning_that_expired_was_never_got_past(app) -> None:
         window.weather.alerts = kept
         takeover.dismissed.clear()
         window._paint_weather()
+
+
+def test_warnings_are_asked_about_on_their_own_clock(app) -> None:
+    """A forecast that is still fresh must not mean no request for warnings.
+
+    They rode on the weather worker, which returns early while the reading is
+    less than fifteen minutes old, so in that window no request was made at
+    all and a warning issued inside it did not reach the screen until the
+    temperature went stale. On a greeter that had just started with a warm
+    cache it never arrived.
+
+    Found on the hardware, where the takeover appeared only after the weather
+    cache was deleted. The first reading of that was that the takeover did not
+    work, which is the more alarming way to find out.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None or window.weather is None:
+        NOT_COVERED.append("the warning clock: this build has no weather")
+        return
+    asked: list[tuple] = []
+    kept = (_app.Worker, _app.ALERTS.fetch, window.behaviour,
+            window.weather.taken)
+    try:
+        _app.Worker = Immediate
+        _app.ALERTS.fetch = (lambda lat, lon, **_kw:
+                             asked.append((lat, lon)) or [])
+        window.behaviour = dict(window.behaviour, weather="on", alerts="on")
+
+        # Unambiguously fresh, which is exactly the state that used to mean
+        # no request was made.
+        window.weather.taken = time.time()
+        check(window.weather.fresh,
+              "the fixture reading is not fresh, so this test is not in the "
+              "state the bug needed")
+        window._alerts_busy = False
+        window.refresh_alerts()
+        check(asked == [(window.weather.latitude, window.weather.longitude)],
+              f"a warning refresh against a fresh reading asked {asked!r} "
+              f"rather than one question about where the reading came from")
+
+        # And the switch still turns it off.
+        asked.clear()
+        window.behaviour = dict(window.behaviour, alerts="off")
+        window._alerts_busy = False
+        window.refresh_alerts()
+        check(asked == [],
+              "the warning clock keeps asking on a machine where emergency "
+              "alerts are switched off")
+    finally:
+        (_app.Worker, _app.ALERTS.fetch, window.behaviour,
+         window.weather.taken) = kept
+
+
+def test_the_warning_clock_does_not_read_the_forecast_clock(app) -> None:
+    """The shape that caused it, kept out.
+
+    Written on the tree rather than the text because the words `fresh` and
+    `stale` appear in the comments explaining why they are not consulted.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(
+        inspect.getsource(GreeterWindow.refresh_alerts)))
+    read = {node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)}
+    for name in ("fresh", "age"):
+        check(name not in read,
+              f"refresh_alerts reads .{name}, so warnings are back on the "
+              f"forecast's clock and a fresh reading means no request")
 
 
 def test_an_advisory_stays_in_the_panel(app) -> None:
