@@ -748,6 +748,37 @@ else:
               f"being cut off at the edge of the chart")
 
 
+# Which discomfort the apparent temperature is describing.
+#
+# Heat index and wind chill are different formulas meaning different things,
+# and the panel called both of them "feels like", which leaves the number
+# unexplained in exactly the weather where somebody wants to know why it is
+# not the number beside it.
+check(W.felt_because(31.0, 36.0) == "humidity",
+      "a hot day five degrees warmer than it reads was not blamed on humidity")
+check(W.felt_because(2.0, -4.0) == "wind",
+      "a cold day six degrees colder than it reads was not blamed on wind")
+check(W.felt_because(18.0, 18.4) == "",
+      "a mild day was given an explanation it does not need")
+check(W.felt_because(18.0, 22.0) == "",
+      "a mild day was blamed on humidity, which does not apply at eighteen")
+# Inside a band and yet not worth saying, which is the case the band check
+# alone cannot cover: thirty degrees that feels like thirty and a half is
+# thirty degrees, and explaining half a degree is noise.
+check(W.felt_because(30.0, 30.4) == "",
+      "half a degree of difference on a hot day was explained")
+check(W.felt_because(4.0, 3.7) == "",
+      "a third of a degree of difference on a cold day was explained")
+check(W.felt_because(None, 5.0) == "" and W.felt_because(31.0, None) == "",
+      "a missing reading produced an explanation anyway")
+# The band edges, because a rule stated as two numbers is a rule with two
+# places to be off by one.
+check(W.felt_because(W.CHILL_BELOW, W.CHILL_BELOW - 5) == "wind",
+      "the wind chill band excludes its own edge")
+check(W.felt_because(W.INDEX_ABOVE, W.INDEX_ABOVE + 5) == "humidity",
+      "the heat index band excludes its own edge")
+
+
 # The rows of the week, named against what is actually drawn.
 #
 # This is the bug that was on the screen when somebody asked for a picture of

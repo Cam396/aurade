@@ -576,7 +576,11 @@ class Panel(Gtk.Box):
 
         parts = []
         if now.feels_like is not None:
-            parts.append(C.WEATHER_FEELS.format(
+            why = W.felt_because(now.temperature, now.feels_like)
+            words = {"wind": C.WEATHER_FEELS_WIND,
+                     "humidity": C.WEATHER_FEELS_HUMID}.get(
+                         why, C.WEATHER_FEELS)
+            parts.append(words.format(
                 degrees=W.temperature(now.feels_like, units)))
         today = report.days[0] if report.days else None
         if today is not None and today.high is not None and today.low is not None:
