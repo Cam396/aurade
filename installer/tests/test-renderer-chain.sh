@@ -46,6 +46,23 @@ printf 'disconnected\n' >"$TMP/drm/card1-DP-1/status"
 export AURADE_RENDERER_DRI_DIR="$TMP/dri" AURADE_RENDERER_DRM_DIR="$TMP/drm"
 export AURADE_RENDERER_VULKAN_DIR="$TMP/vulkan"
 
+# A seat, because the launcher refuses to start a compositor without one and
+# goes straight to the text installer. That refusal is correct on a real
+# machine and fatal here: it is upstream of every assertion in this file, so
+# without a seat the whole renderer chain is skipped and what gets tested is
+# the fallback. The launcher accepts either a socket or a session id, and both
+# are inherited from whoever runs the suite, which is why this passed in a
+# terminal and failed under a service manager. Neither is inherited now: the
+# socket is ours, and the session id is dropped in `run_launcher` for the same
+# reason DISPLAY is.
+AURADE_SEAT_SOCKET="$TMP/seatd.sock"
+python3 -c 'import socket,sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(sys.argv[1])' "$AURADE_SEAT_SOCKET"
+[[ -S $AURADE_SEAT_SOCKET ]] || \
+  fail 'the test could not make a seat socket to stand in for seatd'
+export AURADE_SEAT_SOCKET
+
 # shellcheck source=../lib/aurade-renderers.sh
 . "$ROOT/installer/lib/aurade-renderers.sh"
 
@@ -170,7 +187,9 @@ run_launcher() {
   # and the installation image does not, so without this the whole chain is
   # skipped and every assertion below passes on an empty log.
   env -u DISPLAY -u WAYLAND_DISPLAY -u WLR_RENDERER -u GSK_RENDERER \
+    -u XDG_SESSION_ID \
     AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
+    AURADE_SEAT_SOCKET="$AURADE_SEAT_SOCKET" \
     AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
     AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
     AURADE_RENDERER_VULKAN_DIR="$AURADE_RENDERER_VULKAN_DIR" \
