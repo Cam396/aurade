@@ -39,6 +39,8 @@ source=(
   'app.py'
   'copy.py'
   'glass.py'
+  'alerts.py'
+  'alerts_test.py'
   'copy_test.py'
   'glass_test.py'
   'glyphs.py'
@@ -86,6 +88,8 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             'c0b5748cbfc55387cba1d42443a6475d3b97bcc7d0ded3b8280cf83da9b9a0ea'
             'eab35d2a1a2daee0fe08b0192f7cbd0a76321b14c126b17b4a9642564bf1ce6d'
             '30f934393f705bbcd5bed2c9e78cf8c65f5c7b842a7850dea3164e5070cd2ff3'
+            '9fd1bdb715547a309ae20bf8f9c64b62783bb6e718fcb6ff78d5ca3777c620f4'
+            'a66d155b501a0eecf8535e5c6c9133fa6a30d501af3602d10cde8e2f8550b8b9'
             '53a748af5bdc966a84dce646cb23c48459937d089306249e8b00e21c0bdaa552'
             '25212421d9e4bd3219b397e7646b800495964472f8f460bebc80ca250e70ef33'
             'b0d891142420b819e06882d0507f91fb5147a640a188f1cc0914df20ab615ade'
@@ -117,13 +121,13 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '449b461c2e077d94ada2808bc50cecf69f4cf2e957759e12e718e318ed9af6a0'
             '95d29ed6a5e69ab4bfb0bebc0050126e219c52df922d07c94b95a50ec0f0da00'
             'aa72c6202330a3febb78dbc0c447021fb8f1c2947da02fae252a296e2667d9f8'
-            '0da5ce012f1f0155ab236e10f5d98e69df1723f83e9648d2f6206f9dce4879ea'
+            '56fded48771140c7f7db9eb42f05bf6124034263a77da2aa7add57ae1a44e23e'
             '52e94a4f1d816eb48179e8c10a862a3773456b9e3b195df16251e740c5ed3f11'
             'c54b8aa486ade825b9671aa1a30e3ae342fb570d0b4b49de084abb1df43c79a8'
             '26f23fa9052590aef44b68bfb81bf7078fcc59199cd64ba702cc9b5530ed8e54')
 
-_module=(__init__.py accounts.py app.py copy.py glass.py glyphs.py greeter.css network.py nmlive.py preferences.py protocol.py sessions.py settings.py shade.py weather.py weatherdraw.py weatherui.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
-_test=(accounts_test.py copy_test.py glass_test.py network_test.py preferences_test.py protocol_test.py runtime_test.py sessions_test.py settings_test.py shade_test.py shared_test.py weather_test.py packaging_test.py test-runtime.sh)
+_module=(__init__.py accounts.py alerts.py app.py copy.py glass.py glyphs.py greeter.css network.py nmlive.py preferences.py protocol.py sessions.py settings.py shade.py weather.py weatherdraw.py weatherui.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
+_test=(accounts_test.py alerts_test.py copy_test.py glass_test.py network_test.py preferences_test.py protocol_test.py runtime_test.py sessions_test.py settings_test.py shade_test.py shared_test.py weather_test.py packaging_test.py test-runtime.sh)
 
 _stage() {
   # Put the flat sources back into the shape the package imports, so the
