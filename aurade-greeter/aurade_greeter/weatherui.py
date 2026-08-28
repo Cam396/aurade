@@ -164,7 +164,7 @@ class DaysChart(Drawn):
                   current: float | None) -> None:
         self.days, self.names = days, names
         self.units, self.current = units, current
-        usable = [d for d in days if d.high is not None and d.low is not None]
+        usable = usable_days(days)
         self.set_content_height(self.ROW * max(1, len(usable)))
         self.queue_draw()
 
@@ -491,8 +491,8 @@ class Panel(Gtk.Box):
         self.narrative.set_visible(bool(report.narrative))
 
         self.hours.show_hours(_from_now(report.hours, here), units, zone)
-        self.days.show_days(report.days, day_names(report.days, here), units,
-                            now.temperature)
+        drawn, named = day_rows(report.days, here)
+        self.days.show_days(drawn, named, units, now.temperature)
         self._show_sun(report, here, zone)
         self._show_tiles(report, here)
         self.updated.set_label(W.since_words(report.age))
@@ -598,6 +598,42 @@ def _from_now(hours: list, here: _dt.datetime) -> list:
         if moment >= edge:
             ahead.append(hour)
     return ahead or hours
+
+
+def day_rows(days: list, here: _dt.datetime) -> tuple[list, list[str]]:
+    """The rows to draw, and the names to write on them. One call, one list.
+
+    These were two calls, and the caller made them against two different
+    lists: the names from everything the service sent, the rows from what
+    could actually be drawn. Every evening the two lists differed by one and
+    the whole week shifted under its own labels.
+
+    They are returned together now so that there is no second list to pass by
+    mistake, and `weather_test.py` holds them to being the same length and to
+    naming the day each row actually carries.
+    """
+    drawn = usable_days(days)
+    return drawn, day_names(drawn, here)
+
+
+def usable_days(days: list) -> list:
+    """The days that can be drawn as a row, which is not all of them.
+
+    A row is a name, a low, a high and a bar between them, so a period with no
+    high cannot be one. The National Weather Service returns exactly that
+    every evening: its first period becomes `Tonight`, which has a low and no
+    high because the high already happened.
+
+    This existed twice, in the two places that need it, and they disagreed
+    about when to apply it. `weatherdraw` dropped the unusable rows before
+    drawing and the panel named the list before dropping them, so from about
+    six in the evening until midnight every row on the panel carried the name
+    of the row above it: Friday's forecast under `Today`, Saturday's under
+    `Tomorrow`, and so on to the bottom. Now there is one filter and the names
+    are taken from what it returns.
+    """
+    return [day for day in days
+            if day.high is not None and day.low is not None]
 
 
 def day_names(days: list, here: _dt.datetime) -> list[str]:

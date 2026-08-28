@@ -604,6 +604,89 @@ check(W.source_words("") == "", "an unknown service was credited anyway")
 check("AuraDE" in W.AGENT and "http" in W.AGENT,
       "the user agent does not identify this product and a way to reach it")
 
+# The rows of the week, named against what is actually drawn.
+#
+# This is the bug that was on the screen when somebody asked for a picture of
+# it. The National Weather Service returns a leading `Tonight` period every
+# evening, with a low and no high, because the high has already happened. The
+# drawing dropped that row and the panel named the list before dropping it, so
+# every remaining row wore the name of the row above it: Friday's forecast
+# under `Today`, Saturday's under `Tomorrow`, all the way down. Confidently
+# wrong, every evening, for six hours at a time.
+#
+# `weatherui` is imported here rather than at the top because it pulls in the
+# toolkit, and a dead DISPLAY makes that import hang for two minutes.
+os.environ.pop("DISPLAY", None)
+try:
+    from aurade_greeter import weatherui as WUI  # noqa: E402
+except Exception as exc:  # noqa: BLE001 - reported, never silently skipped
+    FAILURES.append(f"weatherui would not import, so its rows are unchecked: {exc}")
+else:
+    class _Day:
+        def __init__(self, date, high, low):
+            self.date, self.high, self.low = date, high, low
+            self.name = ""
+            self.condition = "clear"
+            self.precipitation = 0
+            self.ultraviolet = None
+
+    thursday = _dt.date(2026, 8, 27)
+    evening = _dt.datetime(2026, 8, 27, 23, 52)
+    week = [
+        _Day(thursday, None, 26.0),                              # Tonight
+        _Day(thursday + _dt.timedelta(days=1), 38.0, 26.0),      # Friday
+        _Day(thursday + _dt.timedelta(days=2), 37.0, 25.0),      # Saturday
+        _Day(thursday + _dt.timedelta(days=3), 36.0, 25.0),      # Sunday
+    ]
+
+    drawn = WUI.usable_days(week)
+    check(len(drawn) == 3, f"the row with no high was kept, {len(drawn)} rows")
+    check(drawn[0].date == thursday + _dt.timedelta(days=1),
+          "the first drawn row is not the first day that can be drawn")
+
+    # Through the seam the panel actually calls, not the two halves of it.
+    drawn, names = WUI.day_rows(week, evening)
+    check(len(drawn) == 3, f"day_rows drew {len(drawn)} rows")
+    check(len(names) == len(drawn),
+          f"{len(names)} names for {len(drawn)} rows, so they cannot align")
+    # Friday is tomorrow on Thursday evening, and it is the first row drawn.
+    # The bug called it Today, because Today belonged to the row that was
+    # dropped.
+    check(names[0] == "Tomorrow",
+          f"the first drawn row is Friday and it is called {names[0]!r}")
+    check(names[1] == "Saturday",
+          f"the second drawn row is Saturday and it is called {names[1]!r}")
+    check(names[2] == "Sunday",
+          f"the third drawn row is Sunday and it is called {names[2]!r}")
+
+    # And the name goes with the number beside it. Friday's high is 38, and
+    # 38 must never appear on a row called Today.
+    paired = dict(zip(names, drawn))
+    check("Today" not in paired,
+          "a row is called Today on an evening when today has no high left")
+    check(paired["Tomorrow"].high == 38.0,
+          "the row called Tomorrow is not carrying Friday's high")
+
+    # Named before noon, when the leading period does have a high, Today is
+    # correct and must still be produced.
+    morning = _dt.datetime(2026, 8, 27, 9, 0)
+    whole = [_Day(thursday, 38.0, 26.0)] + week[1:]
+    _, day_first = WUI.day_rows(whole, morning)
+    check(day_first[0] == "Today",
+          f"a morning row for today is called {day_first[0]!r}")
+    check(day_first[1] == "Tomorrow",
+          f"the row after today is called {day_first[1]!r}")
+
+    # And the panel has to go through that seam. Two calls to `day_names` in
+    # this module means somebody has a second list again, which is the shape
+    # the bug had.
+    source = open(os.path.join(HERE, "..", "aurade_greeter", "weatherui.py"),
+                  encoding="utf-8").read()
+    check(source.count("day_names(") == 2,
+          f"`day_names` is called {source.count('day_names(') - 1} times "
+          f"outside its own definition, and it should be once, inside "
+          f"`day_rows`")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"greeter-weather: {failure}", file=sys.stderr)

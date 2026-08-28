@@ -551,6 +551,9 @@ def days_chart(cr, width: float, height: float, days: list, units: str,
     temperature right now, so the day in progress is placed inside its own
     forecast rather than sitting above it as an unrelated number.
     """
+    # A guard, not a filter. The caller has already dropped these and
+    # named what is left; if this ever removes a row the names are one
+    # out again, which is the bug it used to cause.
     shown = [d for d in days if d.high is not None and d.low is not None]
     if not shown:
         return
