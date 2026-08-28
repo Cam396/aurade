@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 
@@ -188,6 +189,60 @@ if os.path.isfile(_wrapper):
 else:
     FAILURES.append("aurade-greeter-session is missing, so the example config "
                     "names a file that is not there")
+
+# -- somewhere to write ----------------------------------------------------
+#
+# Every default path a module caches into has to sit in a directory this
+# recipe creates. The weather and the location both wrote into
+# `/var/cache/aurade`, which belongs to no package and is root owned, so on
+# the machine every write failed silently: the forecast was refetched from
+# nothing on every start and the location service was asked every time the
+# greeter came up, which is the one thing its own test says must not happen.
+#
+# Invisible here, because every test passes its own path in, and invisible on
+# the machine, because a cache that never writes just looks like a cold start.
+# Every `/var` path any module names, however it names it. The first version
+# of this looked for `os.environ.get("AURADE_...", "/var/...")` and found two
+# of the three, because `accounts.py` wraps its default in a helper. A scan
+# that quietly covers less than it claims is the same defect as the bug it is
+# here to catch.
+_wanted: dict[str, str] = {}
+for _name in sorted(os.listdir(MODULES)):
+    if not _name.endswith(".py"):
+        continue
+    with open(os.path.join(MODULES, _name), encoding="utf-8") as _handle:
+        _body = _handle.read()
+    for _default in re.findall(r'"(/var/[^"]+)"', _body):
+        _wanted[_default] = _name
+
+with open(RECIPE, encoding="utf-8") as _handle:
+    _recipe = _handle.read()
+_made = set(re.findall(r'install -dm?[0-7]*\s+"\$\{pkgdir\}(/var/[^"]+)"',
+                       _recipe))
+check(_wanted, "no module names a path under /var any more, so this check is "
+               "guarding something that is not there")
+#: Paths under /var that belong to somebody else and are only ever read.
+#:
+#: Named one at a time rather than filtered by a pattern, so that a write path
+#: cannot be exempted by accident. Adding to this list should cost somebody an
+#: argument about whether the greeter really has no business creating it.
+FOREIGN = (
+    "/var/lib/AccountsService/icons",   # accountsservice, read for avatars
+    "/var/lib/AccountsService/users",   # accountsservice, read for real names
+)
+
+_wanted = {path: name for path, name in _wanted.items() if path not in FOREIGN}
+
+check(len(_wanted) >= 3,
+      f"only {len(_wanted)} paths under /var were found across the modules, "
+      f"and there are at least three: the account list's state file and the "
+      f"two caches. The scan has stopped seeing something.")
+for _named, _name in sorted(_wanted.items()):
+    # Either the path is a directory the recipe makes, or its parent is.
+    check(_named in _made or os.path.dirname(_named) in _made,
+          f"{_name} writes to {_named} and the recipe creates neither it nor "
+          f"{os.path.dirname(_named)}, so on a machine that write fails as "
+          f"the greeter user and nothing anywhere says so")
 
 check("aurade-greeter-session" in source,
       "the session wrapper is not in the recipe's sources, so it is not in "

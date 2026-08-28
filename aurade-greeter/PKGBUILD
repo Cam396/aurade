@@ -105,7 +105,7 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '7f1927bb1524dac350cae94ca05ea9467640fb654f1b6c157607aff65ca911ba'
             '20486a33a092260a060e346a2cec8b11957494cf0e2da187b3fb5bd4313f4385'
             '671dd9a1f704a30acf3037dded3f1b4f34c9eec4bf5a90c747af3b21ad0348be'
-            '03fb8d206d7ffbb9efcd1a7adf12130053cb17fc0022fe97f8639602a9f7b21a'
+            '74c98f09805293cf3f7f686162ad0e57455f57c8e52542572bc5ea0ed6f03ff9'
             '200575903d6ea613c759e6f57d70ab2fc4e55c51f7840cbbfe5a41bde6c623d6'
             'ab6f0f926c0937ae1b39711821b01512bacf538ff25b52f7f8ca0d48c2f3d910'
             '8fffaf3fb547be207f1e9252e9a7247504429e175570f3c989c091f4976654ab'
@@ -113,7 +113,7 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             'acfd43d259e0a1c371cfdbd312cef1c45d689ba06ac9408784cac4faddd7d240'
             'a73136a2e58e12ef4046ec0a941e2f859f89b00487ec534325b4c6df2a3b1614'
             '39df9a5872077b9cc570c68926b4de870a6b58eda3581887a9e70ab5e437963e'
-            '576e7f6d07a3dfa167d19a25001bf7a20579ca7cd28aacc6a45518fe853f5655'
+            'e831aa285e9db601d2967d63e3963daf4f24541f49fac8c611f4185a76f538e0'
             '8952ef6064f4c5811f5b2344f1202f603e8ced5ac5bb9c04c7899d1977f85f9b'
             '2f29fddb5a786ce4f39145a8ca22833337d6ae9445259bd453df6823949ce348'
             'e676e9ce65778365d82745135ca4fd960a7426dcce136a1e4c28e888b847ad62'
@@ -136,7 +136,7 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             'f415e15fa40688d8949e131562c0646f5d00730d4fded38554ef11df0ed5c23f'
             '911da23eaf0f3fa513131a807cd37280fb8d12faa09c4e14505f9533afcbb905'
             'dede873a44802093f2de09b34139996b37dd4a706d505436ad272bb382830c15'
-            'fdb7ab31d07b0415e48ea5fe85f9904dfd85b64cd55f1152f93c3a16001f961e'
+            '67ecb77d9922bd0c1ac63c1ab1536bd7dd19656ee10de2081cacbc5a2bdad62d'
             '26f23fa9052590aef44b68bfb81bf7078fcc59199cd64ba702cc9b5530ed8e54')
 
 _module=(__init__.py accounts.py alerts.py alertui.py app.py copy.py glass.py locate.py glyphs.py greeter.css network.py nmlive.py outlook.py preferences.py protocol.py sessions.py settings.py shade.py weather.py weatherdraw.py weatherui.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
@@ -178,8 +178,14 @@ package() {
   done
 
   # The greeter reads the account list and remembers who signed in last.
-  # That state file is the only thing it writes.
   install -dm755 "${pkgdir}/var/lib/aurade-greeter"
+
+  # And it keeps the last reading and the last location here, so a machine
+  # that has just come up paints what it knew before the network answers.
+  # Its own directory rather than the shared `/var/cache/aurade`, which
+  # belongs to no package and is root owned, so writing into it from the
+  # greeter user failed silently on every start.
+  install -dm755 "${pkgdir}/var/cache/aurade-greeter"
 
   # The rule that lets this screen join a network. Without it every connect
   # comes back NotAuthorized and the panel can only look.

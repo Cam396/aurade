@@ -2,12 +2,14 @@
 # this package does not create.
 
 _settle() {
-  # The state directory holds one file: who signed in last. It is packaged
-  # root owned, because the greeter user belongs to greetd and may not exist
-  # when this package is built. A root owned directory means the write fails
-  # silently and the machine forgets the account every single time.
+  # The state and cache directories. Both are packaged root owned, because
+  # the greeter user belongs to greetd and may not exist when this package is
+  # built, and a root owned directory means every write fails silently: the
+  # machine forgets the account, refetches the forecast from nothing on every
+  # start, and asks a stranger where it is every time it comes up.
   if getent passwd greeter >/dev/null 2>&1; then
     chown greeter: /var/lib/aurade-greeter 2>/dev/null || true
+    chown greeter: /var/cache/aurade-greeter 2>/dev/null || true
   fi
 
   # And the seat. weston opens the display and the input devices through
