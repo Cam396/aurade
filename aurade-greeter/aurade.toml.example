@@ -10,10 +10,14 @@
 # Keep greetd-tuigreet installed either way. It is the way in when the
 # graphical greeter will not start, and a machine whose only greeter is broken
 # is a machine that needs a rescue disk to log into.
+#
+# The command is the session wrapper, not the greeter. greetd runs its command
+# on a bare virtual terminal and a GTK4 program cannot draw on one, so the
+# wrapper starts weston first and hands the greeter to it.
 
 [terminal]
 vt = 1
 
 [default_session]
-command = "/usr/bin/aurade-greeter"
+command = "/usr/lib/aurade-greeter/aurade-greeter-session"
 user = "greeter"

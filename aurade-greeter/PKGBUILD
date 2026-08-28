@@ -7,6 +7,7 @@ pkgdesc="Graphical greeter for AuraDE, on the installer's design system"
 arch=('any')
 url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause')
+install='aurade-greeter.install'
 depends=(
   'greetd'
   'networkmanager'
@@ -29,6 +30,7 @@ checkdepends=('python' 'weston')
 # are symlinks into it, which is how aurade-host-bridge exposes its test too.
 source=(
   'aurade-greeter'
+  'aurade-greeter-session'
   'aurade.toml.example'
   'README.md'
   'LICENSE'
@@ -80,7 +82,8 @@ source=(
   'test-runtime.sh'
 )
 sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
-            '7780990b67f130dab31e912bfae8285d8eea239737a07fe7b3224bff2e8fdf5d'
+            '03cdb1bdcfae1d0ca34949716842b9a30161a1e0fb8ca2f6b9bfa75669e23633'
+            '3825e486946fafe6137156aa9a490c640ba296d4f9fef9a5f184e52563c42576'
             '0044a4233392d94f74841d4aa99bd5759c5a8560123bfe535c0a8acbdbbf4f5f'
             '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f'
             '7210430187d72c1d837c33f4ec43505516ce4f094f1c4afb12e4c830f528771a'
@@ -127,7 +130,7 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             'c5feac8136aa0bbff9cd38bb2cb3851f29bb8348ed35e93ec6c9c1dd984c367b'
             '911da23eaf0f3fa513131a807cd37280fb8d12faa09c4e14505f9533afcbb905'
             'dede873a44802093f2de09b34139996b37dd4a706d505436ad272bb382830c15'
-            'c54b8aa486ade825b9671aa1a30e3ae342fb570d0b4b49de084abb1df43c79a8'
+            'fdb7ab31d07b0415e48ea5fe85f9904dfd85b64cd55f1152f93c3a16001f961e'
             '26f23fa9052590aef44b68bfb81bf7078fcc59199cd64ba702cc9b5530ed8e54')
 
 _module=(__init__.py accounts.py alerts.py app.py copy.py glass.py glyphs.py greeter.css network.py nmlive.py outlook.py preferences.py protocol.py sessions.py settings.py shade.py weather.py weatherdraw.py weatherui.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
@@ -156,6 +159,11 @@ check() {
 
 package() {
   install -Dm755 "${srcdir}/aurade-greeter" "${pkgdir}/usr/bin/aurade-greeter"
+
+  # The compositor wrapper, which is what greetd is pointed at. Beside the
+  # package rather than on PATH: it is not a thing to run by hand.
+  install -Dm755 "${srcdir}/aurade-greeter-session" \
+    "${pkgdir}/usr/lib/aurade-greeter/aurade-greeter-session"
 
   local name
   for name in "${_module[@]}"; do

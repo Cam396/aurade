@@ -141,6 +141,58 @@ if os.path.isfile(SRCINFO):
 else:
     FAILURES.append(".SRCINFO is missing, so the AUR has no recipe to read")
 
+# -- the greeter cannot draw on a bare terminal -----------------------------
+#
+# greetd runs its command on a virtual terminal. A GTK4 program has no way to
+# draw on one, so an `aurade.toml` pointing at `/usr/bin/aurade-greeter` gives
+# a login screen that starts, finds no display, exits, and is restarted, on a
+# machine whose only way in is the screen that is not appearing.
+#
+# That is exactly what the shipped example said to do until it was tried on
+# real hardware. It is a one line mistake that reads as correct, so it gets an
+# assertion rather than a comment.
+_example = os.path.join(PACKAGE, "aurade.toml.example")
+_wrapper = os.path.join(PACKAGE, "aurade-greeter-session")
+if os.path.isfile(_example):
+    with open(_example, encoding="utf-8") as handle:
+        _config = handle.read()
+    _command = ""
+    for line in _config.splitlines():
+        if line.strip().startswith("command"):
+            _command = line.split("=", 1)[1].strip().strip('"')
+    check(_command.endswith("aurade-greeter-session"),
+          f"the example greetd config runs {_command!r}, which cannot draw "
+          f"on a bare terminal and will loop forever")
+else:
+    FAILURES.append("aurade.toml.example is missing, so nobody is told how "
+                    "to switch the greeter on")
+
+if os.path.isfile(_wrapper):
+    with open(_wrapper, encoding="utf-8") as handle:
+        _lines = handle.read().splitlines()
+    # Comments stripped, and that is the whole point of this being here. The
+    # first version read the file whole, and the file explains in prose why it
+    # starts weston and what it hands to the greeter. Deleting every line that
+    # does the work left both words sitting in the commentary and both
+    # assertions green.
+    _script = "\n".join(line for line in _lines
+                        if line.strip() and not line.lstrip().startswith("#"))
+    check("weston" in _script,
+          "the session wrapper starts no compositor, so the greeter it runs "
+          "has nothing to draw on")
+    check("/usr/bin/aurade-greeter" in _script,
+          "the session wrapper starts a compositor and never runs the greeter")
+    check("exec " in _script,
+          "the wrapper does not exec, so greetd waits on a shell rather than "
+          "on the compositor and cannot tell when the screen has gone")
+else:
+    FAILURES.append("aurade-greeter-session is missing, so the example config "
+                    "names a file that is not there")
+
+check("aurade-greeter-session" in source,
+      "the session wrapper is not in the recipe's sources, so it is not in "
+      "the package and the example config names nothing")
+
 if FAILURES:
     for failure in FAILURES:
         print(f"greeter-packaging: {failure}", file=sys.stderr)

@@ -1,0 +1,36 @@
+#!/bin/bash
+# The greeter, with the compositor it needs underneath it.
+#
+# greetd runs a command on a virtual terminal. The greeter is a GTK4 program
+# and GTK4 has no way to draw on a bare terminal, so pointing greetd straight
+# at `/usr/bin/aurade-greeter` gives a login screen that starts, fails to find
+# a display, and exits, over and over, on a machine whose only way in is the
+# screen that is not appearing. This is what goes in `aurade.toml`.
+#
+# Weston with the kiosk shell, and the greeter as its only client. When the
+# greeter exits, weston exits with it, which is what tells greetd the
+# conversation is over.
+set -u
+
+# The photographs, where an installed system keeps them. `brand.py` looks here
+# anyway; naming it means a machine that keeps them somewhere else can say so
+# in one place rather than in every unit file.
+export AURADE_WALLPAPER_DIR="${AURADE_WALLPAPER_DIR:-/usr/share/aurade/wallpapers}"
+
+# logind gives the greeter's session one of these. The fallback is for a
+# machine whose PAM stack does not include pam_systemd, where weston would
+# otherwise refuse to start with nothing said about why.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# Weston writes a screenshot into its working directory, and the greeter user's
+# home is `/`. Somewhere writable, and somewhere that already belongs to this
+# package.
+cd /var/lib/aurade-greeter 2>/dev/null || cd /tmp || exit 1
+
+exec weston \
+  --backend=drm \
+  --shell=kiosk-shell.so \
+  --renderer=auto \
+  --idle-time=0 \
+  --continue-without-input \
+  -- /usr/bin/aurade-greeter
