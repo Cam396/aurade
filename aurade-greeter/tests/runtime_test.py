@@ -352,6 +352,91 @@ def test_choosing_somebody_asks_greetd_about_them(app) -> None:
         pump()
 
 
+def test_warnings_reach_the_panel_and_nothing_else_does(app) -> None:
+    """The quiet end of the alerts feature, on screen.
+
+    One row per warning, loudest first, coloured by tier. The row an Amber
+    Alert would have occupied is the point of the assertion: it is not
+    quieter, it is absent, and the panel has no idea it existed.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        panel = window.widgets["weather.panel"]
+        check(not panel.alerts.get_visible(),
+              "the alert strip is showing with no alerts in the report")
+
+        class Fake:
+            def __init__(self, event, category, severity, urgency):
+                self.event, self.category = event, category
+                self.severity, self.urgency = severity, urgency
+                self.status = "Actual"
+                self.headline = f"{event} issued"
+                self.instruction = "Move to an interior room."
+                self.expires = datetime.datetime(
+                    2026, 8, 28, 21, 15, tzinfo=datetime.timezone.utc)
+
+        report = WX.Report(place="Ardsley, NY", provider="nws",
+                           taken=__import__("time").time())
+        report.now.temperature = 21.0
+        report.alerts = [
+            Fake("Tornado Warning", "Met", "Extreme", "Immediate"),
+            Fake("Heat Advisory", "Met", "Moderate", "Expected"),
+        ]
+        panel.show_report(report, "f")
+        pump()
+        check(panel.alerts.get_visible(), "two warnings did not show")
+        rows = []
+        child = panel.alerts.get_first_child()
+        while child is not None:
+            rows.append(child)
+            child = child.get_next_sibling()
+        equal(len(rows), 2, "the panel drew the wrong number of warnings")
+        check(rows[0].has_css_class("aurade-alert-takeover"),
+              "the tornado warning is not marked as the loudest tier")
+        check(rows[1].has_css_class("aurade-alert-line"),
+              "the heat advisory is not marked as the quietest tier")
+
+        # Shown twice must not stack. Counting children rather than reading
+        # visibility, because stale rows left behind are merely hidden and a
+        # visibility check passes over them happily.
+        panel.show_report(report, "f")
+        pump()
+        again = 0
+        child = panel.alerts.get_first_child()
+        while child is not None:
+            again += 1
+            child = child.get_next_sibling()
+        equal(again, 2, "showing the same two warnings twice stacked them")
+
+        # And it clears, because an alert expiring is a row leaving.
+        report.alerts = []
+        panel.show_report(report, "f")
+        pump()
+        check(not panel.alerts.get_visible(),
+              "the strip stayed up after the warnings ended")
+        left = 0
+        child = panel.alerts.get_first_child()
+        while child is not None:
+            left += 1
+            child = child.get_next_sibling()
+        equal(left, 0, "the rows were hidden rather than removed")
+
+        # And they survive the forecast failing, which is the case that
+        # matters most: the warning comes from a different service to the
+        # readings, so a dead forecast must not swallow a tornado.
+        dead = WX.Report(place="", provider="",
+                         taken=__import__("time").time())
+        dead.alerts = [Fake("Tornado Warning", "Met", "Extreme", "Immediate")]
+        panel.show_report(dead, "f")
+        pump()
+        check(panel.alerts.get_visible(),
+              "a warning was dropped because the forecast did not answer")
+        equal(panel.condition.get_label(), C.WEATHER_NO_ANSWER,
+              "the panel stopped saying the forecast is missing")
+    finally:
+        pump()
+
+
 def test_every_person_gets_their_own_face(app) -> None:
     """Three identical purple discs is the default avatar of every greeter.
 

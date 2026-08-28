@@ -34,6 +34,7 @@ from . import copy as C  # noqa: E402
 from . import tokens as T  # noqa: E402
 from . import weather as W  # noqa: E402
 from . import weatherdraw as D  # noqa: E402
+from . import alerts as AL  # noqa: E402
 
 try:  # pragma: no cover - present on every supported system
     from zoneinfo import ZoneInfo
@@ -427,6 +428,16 @@ class Panel(Gtk.Box):
         # The forecaster's paragraph, where there is one. Hidden rather than
         # left empty, so the panel does not carry a blank block on a machine
         # outside the area the National Weather Service covers.
+        # Warnings, above the paragraph, because an advisory in force now
+        # outranks a forecast for this evening. One line each, in the colour
+        # of its tier, and nothing here ever takes over the screen: the
+        # louder tiers are a separate change and this one is deliberately the
+        # quiet end of the feature.
+        self.alerts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.alerts.set_visible(False)
+        A.described(self.alerts, C.WEATHER_ALERTS)
+        page.append(self.alerts)
+
         self.narrative = _label("", "m3-label-medium", wrap=True, dim=True)
         # A wrapped label asks for the width of its longest unbroken run, and
         # a forecaster's paragraph is one long run, so without this the label
@@ -531,6 +542,15 @@ class Panel(Gtk.Box):
             self.degrees.set_label("--")
             self.condition.set_label(C.WEATHER_NO_ANSWER)
             self.updated.set_label("")
+            # Warnings still show, and this is not a detail. They come from a
+            # different service to the readings, so "the forecast is not
+            # answering" and "there is a tornado warning in force" are two
+            # independent facts, and the first one silently swallowing the
+            # second is the worst thing this panel could do.
+            if report is not None:
+                self._show_alerts(report, _dt.datetime.now(), None)
+            else:
+                self._show_alerts(W.Report(), _dt.datetime.now(), None)
             return
 
         zone = _zone_of(report)
@@ -554,6 +574,8 @@ class Panel(Gtk.Box):
                 low=W.temperature(today.low, units)))
         self.range.set_label("   ".join(parts))
 
+        self._show_alerts(report, here, zone)
+
         self.narrative.set_label(report.narrative)
         self.narrative.set_visible(bool(report.narrative))
 
@@ -563,6 +585,45 @@ class Panel(Gtk.Box):
         self._show_sun(report, here, zone)
         self._show_tiles(report, here)
         self.updated.set_label(W.since_words(report.age))
+
+    def _show_alerts(self, report: W.Report, here: _dt.datetime, zone) -> None:
+        """One line per warning, loudest first, in the colour of its tier.
+
+        Rebuilt rather than updated, because the list changes shape rather
+        than changing values: an alert expiring is a row leaving, not a row
+        with different words in it.
+        """
+        child = self.alerts.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self.alerts.remove(child)
+            child = following
+
+        found = list(getattr(report, "alerts", None) or [])
+        self.alerts.set_visible(bool(found))
+        for alert in found:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.add_css_class("aurade-alert")
+            row.add_css_class(f"aurade-alert-{AL.tier(alert)}")
+            words = _label(alert.event, "m3-label-large", wrap=True)
+            words.set_hexpand(True)
+            words.set_xalign(0.0)
+            row.append(words)
+            when = ""
+            if alert.expires is not None:
+                when = C.WEATHER_ALERT_UNTIL.format(
+                    time=_clock(alert.expires, zone))
+            edge = _label(when or C.WEATHER_ALERT_NOW, "m3-label-medium",
+                          dim=True)
+            edge.set_valign(Gtk.Align.CENTER)
+            row.append(edge)
+            # Read out as one sentence rather than as two labels, and the
+            # instruction goes with it: what to do is the half that matters
+            # and it is the half that is not on the face.
+            A.described(row, alert.event,
+                        " ".join(part for part in
+                                 (alert.headline, alert.instruction) if part))
+            self.alerts.append(row)
 
     def _show_sun(self, report: W.Report, here: _dt.datetime, zone) -> None:
         rise, set_ = W.sun_times(report.latitude, report.longitude, here)

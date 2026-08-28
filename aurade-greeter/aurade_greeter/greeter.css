@@ -467,3 +467,42 @@ list.aurade-on-glass.boxed-list > row {
 .aurade-password-card {
   padding: 30px 36px 28px 36px;
 }
+
+/* Weather warnings on the panel.
+ *
+ * The colour is the tier and nothing else, so the same three roles the rest
+ * of the product uses for severity carry it here: an advisory is information
+ * and a tornado warning is not, and a reader should be able to tell which
+ * without reading the words.
+ *
+ * A rail rather than a filled block. A filled red row in a panel somebody
+ * opened to see whether they need a coat is a shout, and the loud tiers of
+ * this feature are the banner and the takeover, neither of which is here. */
+.aurade-alert {
+  border-radius: 8px;
+  border-left: 3px solid @accent_color;
+  background-color: alpha(@accent_color, 0.10);
+  padding: 8px 11px;
+}
+
+.aurade-alert-line {
+  border-left-color: @accent_color;
+  background-color: alpha(@accent_color, 0.10);
+}
+
+.aurade-alert-banner {
+  border-left-color: @warning_color;
+  background-color: alpha(@warning_color, 0.13);
+}
+
+.aurade-alert-takeover {
+  border-left-color: @error_color;
+  background-color: alpha(@error_color, 0.15);
+}
+
+/* High contrast states its grounds rather than suggesting them, so the
+ * translucent fills go and the border carries the whole distinction. */
+.aurade-high-contrast .aurade-alert {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
