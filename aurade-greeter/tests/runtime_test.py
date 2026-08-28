@@ -352,6 +352,60 @@ def test_choosing_somebody_asks_greetd_about_them(app) -> None:
         pump()
 
 
+def test_the_photograph_drifts_and_stops_for_reduced_motion(app) -> None:
+    """Slow enough that nobody catches it, and absent where it is not wanted.
+
+    The drift has to be smaller than the blur the frosted cards are built
+    from, because the glass samples the picture at rest and is not recomputed
+    as it moves. That is the assertion worth keeping: if the drift ever grows
+    past the blur, the ground under a card starts changing underneath a
+    contrast figure that was solved for a different picture.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        paper = window.wallpaper
+        if not paper.present:
+            check(False, "no photograph, so this proved nothing")
+            return
+        check(paper._drifting is not None,
+              "the picture is not drifting on a screen that wants motion")
+        check(0.0 <= paper.drift <= 1.0,
+              f"the drift left its range at {paper.drift}")
+
+        # It moves, and moving redraws.
+        paper._drifted(1.0)
+        pump()
+        equal(paper.drift, 1.0, "the drift did not take")
+
+        # Reduced motion is answered by never starting, so the picture sits
+        # where it started rather than being animated and then stopped.
+        # Asserted against the source, because the guard is at the call site
+        # and a window built without motion is a second harness.
+        import inspect
+        source = inspect.getsource(type(window)._build)
+        check("if self.animate:" in source
+              and "start_drifting" in source.split("if self.animate:")[-1][:200],
+              "the drift is started without asking whether motion is wanted")
+
+        # And it stays inside the overscan, so no edge is ever exposed.
+        margin = max(2, int(paper.get_width() * _app.DRIFT))
+        for value in (0.0, 0.5, 1.0):
+            shift = abs((value - 0.5) * 2.0) * margin
+            check(shift <= margin,
+                  f"a drift of {value} moves {shift} past a {margin} margin")
+
+        # Smaller than the blur it is invisible to. The glass reduces the
+        # image by two to the fifth before sampling it, so anything under
+        # that is genuinely not there as far as the ground is concerned.
+        blur = 2 ** _app.GL.ROUNDS
+        check(margin < blur,
+              f"the drift is {margin}px and the blur reduces by {blur}, so "
+              f"the ground under a card now moves while the tint solved for "
+              f"it does not")
+    finally:
+        pump()
+
+
 def test_the_panel_says_when_it_continues_below(app) -> None:
     """The fold is around the week and everything under it went unread.
 
