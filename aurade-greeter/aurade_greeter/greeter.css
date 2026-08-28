@@ -454,3 +454,16 @@ list.aurade-on-glass.boxed-list {
 list.aurade-on-glass.boxed-list > row {
   background-color: transparent;
 }
+
+/* The password page's ground.
+ *
+ * Padding, not margin: `Frosted` moves a child's margins onto itself, so a
+ * margin here would shrink the glass to the size of the words rather than
+ * put a border of quiet around them.
+ *
+ * Applied whether or not the glass appeared, because a page with no
+ * photograph behind it wants the same breathing room and gets it from the
+ * spacing rather than from a visible card. */
+.aurade-password-card {
+  padding: 30px 36px 28px 36px;
+}

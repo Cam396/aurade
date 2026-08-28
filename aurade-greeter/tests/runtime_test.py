@@ -45,6 +45,10 @@ from aurade_greeter import weatherui as WUI  # noqa: E402
 from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow, Wallpaper  # noqa: E402
 from aurade_greeter import weather as WX  # noqa: E402
+from aurade_greeter import status as ST  # noqa: E402
+from aurade_greeter import settings as SET  # noqa: E402
+from aurade_greeter import tokens as T  # noqa: E402
+from aurade_greeter import app as _app  # noqa: E402
 
 
 class NoRadio:
@@ -344,6 +348,69 @@ def test_choosing_somebody_asks_greetd_about_them(app) -> None:
               "choosing an account did not open exactly one session")
         equal(sent[0]["username"], "ada",
               "the username sent to greetd is not the row that was pressed")
+    finally:
+        pump()
+
+
+def test_every_person_gets_their_own_face(app) -> None:
+    """Three identical purple discs is the default avatar of every greeter.
+
+    It is also the exact moment a screen stops looking like it was made for
+    anybody in particular. The hue comes from the name, so it is stable across
+    reboots and the same on every machine that person signs in to, and it
+    stays inside ninety degrees of the brand so the set still belongs together.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        if len(window.accounts) < 2:
+            check(False, "fewer than two accounts, so this proved nothing")
+            return
+        tint = T.DARK
+        tones = [_app._person_tones(a, tint)[0] for a in window.accounts]
+        check(len(set(tones)) == len(tones),
+              f"two accounts share a face colour: {tones}")
+        # Stable, not random.
+        again = [_app._person_tones(a, tint)[0] for a in window.accounts]
+        equal(tones, again, "the same account got a different colour twice")
+        # And the ink is left alone, so contrast is whatever the theme decided.
+        inks = {_app._person_tones(a, tint)[1] for a in window.accounts}
+        equal(len(inks), 1, "the letter colour moved with the ground")
+    finally:
+        pump()
+
+
+def test_a_refused_password_names_the_keyboard(app) -> None:
+    """The other reason a password that is definitely right is refused.
+
+    Hidden until a password has actually been refused: stated up front it is a
+    fact nobody needs, and stated after a refusal it is the answer.
+    """
+    window, service = build(app, [SECRET, REFUSED, SECRET])
+    try:
+        line = window.widgets.get("password.layout")
+        check(line is not None, "the password page has no layout line")
+        check(not line.get_visible(),
+              "the keyboard layout is announced before anything went wrong")
+        if not window.accounts:
+            check(False, "no accounts, so this proved nothing")
+            return
+        window.choose(window.accounts[0])
+        pump()
+        window.entry.set_text("wrong")
+        window.submit()
+        for _ in range(40):
+            pump()
+            if line.get_visible():
+                break
+        # Only where the machine can say what its layout is. On a host with
+        # none of the three files this stays quiet, and a line reading "This
+        # keyboard is set to" and then nothing would be worse than no line.
+        if SET.keyboard_layout():
+            check(line.get_visible(),
+                  "a refused password did not name the keyboard")
+            check(SET.layout_words(SET.keyboard_layout()) in line.get_label(),
+                  f"the layout line does not name the layout: "
+                  f"{line.get_label()!r}")
     finally:
         pump()
 
