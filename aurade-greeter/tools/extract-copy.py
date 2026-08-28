@@ -25,6 +25,15 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 PACKAGE = os.path.normpath(os.path.join(HERE, ".."))
 COPY = os.path.join(PACKAGE, "aurade_greeter", "copy.py")
+
+#: And the modules that build phrases of their own.
+#:
+#: The first version of this read `copy.py` and stopped there, which left the
+#: condition names, the compass points, the ultraviolet bands and the keyboard
+#: layout names in English forever while the commit message said every word
+#: was translatable. A table of words is product copy wherever it lives.
+ALSO = tuple(os.path.join(PACKAGE, "aurade_greeter", name) for name in
+             ("weather.py", "settings.py", "shade.py", "outlook.py"))
 POT = os.path.join(PACKAGE, "po", "aurade-greeter.pot")
 
 
@@ -107,6 +116,10 @@ def main() -> int:
     args = parser.parse_args()
 
     strings = found()
+    for extra in ALSO:
+        if os.path.isfile(extra):
+            name = os.path.relpath(extra, PACKAGE)
+            strings += [(line, text) for line, text in found(extra)]
     missing = bare()
     if missing:
         for line, name in missing:

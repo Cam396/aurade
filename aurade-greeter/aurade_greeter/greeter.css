@@ -516,3 +516,22 @@ list.aurade-on-glass.boxed-list > row {
 .aurade-outlook {
   font-weight: 500;
 }
+
+/* There is more below.
+ *
+ * A fade to the panel's own ground, so the last visible row is cut by light
+ * rather than by an edge. Nothing here is interactive and `can-target` is
+ * off, so it never eats a click meant for the row underneath it. */
+.aurade-more-below {
+  background-image: linear-gradient(to bottom,
+                                    alpha(@window_bg_color, 0),
+                                    alpha(@window_bg_color, 0.92));
+}
+
+/* High contrast draws a rule instead. A gradient is a soft edge and high
+ * contrast exists to remove those, but "there is more below" is information
+ * and removing it entirely would be the wrong trade. */
+.aurade-high-contrast .aurade-more-below {
+  background-image: none;
+  border-bottom: 2px solid @window_fg_color;
+}

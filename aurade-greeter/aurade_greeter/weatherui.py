@@ -333,7 +333,19 @@ class Tile(Gtk.Box):
         body.set_margin_top(6)
         self.value = _label("--", "m3-title-medium")
         self.note = _label("", "m3-label-medium", dim=True)
-        self.note.set_ellipsize(Pango.EllipsizeMode.END)
+        # Wrapped rather than cut off. The ultraviolet note is a sentence
+        # about how long skin lasts outside, and ellipsised it read "Around
+        # 15 minutes before unpro", which is worse than the band name it
+        # replaced.
+        #
+        # `max-width-chars` is what keeps the wrap from deciding the panel's
+        # width: a wrapped label asks for the width of its longest unbroken
+        # run, and without a cap the longest word in any tile would set how
+        # wide every tile is.
+        self.note.set_wrap(True)
+        self.note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.note.set_max_width_chars(22)
+        self.note.set_xalign(0.0)
 
         if beside and art is not None:
             body.append(art)
@@ -503,7 +515,43 @@ class Panel(Gtk.Box):
         scroller.set_child(page)
         self.scroller = scroller
         self.page = page
-        self.append(scroller)
+
+        # Something saying there is more below.
+        #
+        # The scroller caps at 620 so the panel fits a 768 tall netbook, which
+        # puts the fold around the week and leaves the daylight arc and all
+        # six readings underneath it. GTK's overlay scrollbar fades out when
+        # it is not being used and is invisible in a screenshot, so the panel
+        # looked like it simply ended, and somebody reading it concluded the
+        # data was missing. A person who assumes it ends will not scroll, and
+        # then half of this was written for nobody.
+        #
+        # A fade rather than an arrow or a count. It is the cheapest possible
+        # signal that content continues, it costs no vertical space at a size
+        # where there is none to spare, and it disappears the moment there is
+        # nothing more to see.
+        stack = Gtk.Overlay()
+        stack.set_child(scroller)
+        self.fade = Gtk.Box()
+        self.fade.add_css_class("aurade-more-below")
+        self.fade.set_valign(Gtk.Align.END)
+        self.fade.set_halign(Gtk.Align.FILL)
+        self.fade.set_size_request(-1, 30)
+        self.fade.set_can_target(False)
+        A.decorative(self.fade)
+        stack.add_overlay(self.fade)
+        self.append(stack)
+
+        adjustment = scroller.get_vadjustment()
+        adjustment.connect("value-changed", lambda *_a: self._sync_fade())
+        adjustment.connect("changed", lambda *_a: self._sync_fade())
+        self._sync_fade()
+
+    def _sync_fade(self) -> None:
+        """Show the fade only where there is something under it."""
+        adjustment = self.scroller.get_vadjustment()
+        room = adjustment.get_upper() - adjustment.get_page_size()
+        self.fade.set_visible(adjustment.get_value() < room - 1.0)
 
     def _build_tiles(self) -> Gtk.Widget:
         grid = Gtk.Grid()
@@ -700,10 +748,10 @@ class Panel(Gtk.Box):
         self.visibility.say(W.distance_words(now.visibility, units),
                             _visibility_note(now.visibility, units))
 
-        name, lit = W.moon(here)
+        name, lit, _phase = W.moon(here)
         # Waxing is the first half of the cycle, which is also the half where
         # tomorrow is brighter than today.
-        _, tomorrow = W.moon(here + _dt.timedelta(days=1))
+        _, tomorrow, _phase2 = W.moon(here + _dt.timedelta(days=1))
         self.moon_disc.show_moon(lit, tomorrow >= lit)
         self.moon.say(name, C.WEATHER_MOON_LIT.format(percent=int(round(lit * 100))))
 

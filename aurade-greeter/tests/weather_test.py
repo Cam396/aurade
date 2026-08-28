@@ -504,10 +504,10 @@ check(W.daylight_fraction(None, set_, noon) is None,
 # -- the moon ---------------------------------------------------------------
 
 new = _dt.datetime.fromtimestamp(W.MOON_EPOCH, UTC)
-name, lit = W.moon(new)
+name, lit, _k = W.moon(new)
 check(name == "New moon", f"the known new moon was called {name!r}")
 check(lit < 0.01, f"the known new moon was {lit:.2f} lit")
-name, lit = W.moon(new + _dt.timedelta(seconds=W.SYNODIC / 2))
+name, lit, _k = W.moon(new + _dt.timedelta(seconds=W.SYNODIC / 2))
 check(name == "Full moon", f"half a month after new was called {name!r}")
 check(lit > 0.99, f"half a month after new was only {lit:.2f} lit")
 
@@ -519,7 +519,7 @@ for when, wanted in (
         (_dt.datetime(2026, 3, 19, 1, 23, tzinfo=UTC), "new"),
         (_dt.datetime(2024, 1, 25, 17, 54, tzinfo=UTC), "full"),
         (_dt.datetime(2025, 7, 10, 20, 37, tzinfo=UTC), "full")):
-    words, amount = W.moon(when)
+    words, amount, _k = W.moon(when)
     if wanted == "new":
         check(amount < 0.02,
               f"the new moon of {when:%Y-%m-%d} came out {amount:.2f} lit")
@@ -533,13 +533,13 @@ for when, wanted in (
 
 previous = 0.0
 for step in range(1, 8):
-    _, amount = W.moon(new + _dt.timedelta(seconds=W.SYNODIC * step / 16))
+    _, amount, _k = W.moon(new + _dt.timedelta(seconds=W.SYNODIC * step / 16))
     check(amount > previous, "the moon did not brighten through its first half")
     previous = amount
 for step in range(0, 400, 7):
-    words, amount = W.moon(new + _dt.timedelta(days=step))
+    words, amount, _k = W.moon(new + _dt.timedelta(days=step))
     check(0.0 <= amount <= 1.0, f"the moon was {amount} lit after {step} days")
-    check(words in [w for _, w in W.MOON_PHASES],
+    check(words in [w for _, _key, w in W.MOON_PHASES],
           f"the moon was in no named phase after {step} days")
 
 # -- dew point --------------------------------------------------------------
@@ -861,6 +861,24 @@ else:
           f"`day_names` is called {source.count('day_names(') - 1} times "
           f"outside its own definition, and it should be once, inside "
           f"`day_rows`")
+
+
+# The moon's phase key, which is what code compares against.
+#
+# `shade.py` used to test the display name against the literal "Full moon",
+# which worked exactly as long as nobody translated it. On a French machine
+# the full moon occasion would have stopped appearing, silently, with nothing
+# in a log and no test able to see it. The key never moves.
+_full = W.moon(new + _dt.timedelta(seconds=W.SYNODIC / 2))
+check(_full[2] == "full",
+      f"the middle of the cycle is keyed {_full[2]!r} rather than 'full'")
+check(W.moon(new)[2] == "new",
+      f"the start of the cycle is keyed {W.moon(new)[2]!r}")
+_keys = {key for _edge, key, _words in W.MOON_PHASES}
+check(len(_keys) == 8,
+      f"the eight phases carry {len(_keys)} distinct keys")
+check(all(key == key.lower() and " " not in key for key in _keys),
+      f"a phase key looks like display text: {sorted(_keys)}")
 
 if FAILURES:
     for failure in FAILURES:

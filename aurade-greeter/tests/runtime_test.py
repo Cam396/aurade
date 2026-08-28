@@ -352,6 +352,49 @@ def test_choosing_somebody_asks_greetd_about_them(app) -> None:
         pump()
 
 
+def test_the_panel_says_when_it_continues_below(app) -> None:
+    """The fold is around the week and everything under it went unread.
+
+    The scroller caps at 620 so the panel fits a 768 tall screen, GTK's
+    overlay scrollbar fades out when it is not in use, and the result looked
+    like a panel that simply ended. Somebody reading it concluded the readings
+    were missing, and a person who assumes it ends will not scroll.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        panel = window.widgets["weather.panel"]
+        adjustment = panel.scroller.get_vadjustment()
+
+        # More below than fits: the fade is up.
+        adjustment.set_upper(2000.0)
+        adjustment.set_page_size(600.0)
+        adjustment.set_value(0.0)
+        pump()
+        check(panel.fade.get_visible(),
+              "the panel does not say it continues below the fold")
+
+        # Scrolled to the end: nothing more to promise.
+        adjustment.set_value(1400.0)
+        pump()
+        check(not panel.fade.get_visible(),
+              "the fade stayed up at the bottom of the panel")
+
+        # Short enough to need no scrolling at all.
+        adjustment.set_upper(400.0)
+        adjustment.set_page_size(600.0)
+        adjustment.set_value(0.0)
+        pump()
+        check(not panel.fade.get_visible(),
+              "a panel that fits was told it continues below")
+
+        # And it must never eat a click meant for the row under it.
+        check(not panel.fade.get_can_target(),
+              "the fade takes pointer events, so it would swallow a tap on "
+              "the last visible row")
+    finally:
+        pump()
+
+
 def test_warnings_reach_the_panel_and_nothing_else_does(app) -> None:
     """The quiet end of the alerts feature, on screen.
 
