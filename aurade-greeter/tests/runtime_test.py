@@ -815,6 +815,78 @@ def test_every_class_the_greeter_uses_is_defined(app) -> None:
           f"the greeter applies classes the stylesheet does not define: {missing}")
 
 
+def test_the_alert_request_sits_behind_the_switch(app) -> None:
+    """Off means the machine never asks, not that the answer is drawn quietly.
+
+    What somebody switching emergency alerts off is most likely objecting to
+    is the request itself, so a setting that suppresses the drawing while the
+    request still goes out has lied about what it did.
+
+    This drives the real `refresh_weather`, and the first version of it did
+    not: it read the syntax tree and required every `ALERTS.fetch` to sit
+    under an `if` naming the switch. A mutation to `if warnings is not None:`
+    went straight through. The switch was named, the condition was always
+    true, and the shape was the whole of what the assertion could see.
+    """
+    window, _ = build(app, [])
+    if window.widgets.get("weather") is None:
+        NOT_COVERED.append("the emergency alert switch: this build has no "
+                           "weather pill to hang the request off")
+        return
+    report = window.weather
+    if report is None:
+        NOT_COVERED.append("the emergency alert switch: no seeded reading to "
+                           "answer the request with")
+        return
+
+    asked: list[tuple] = []
+
+    class Immediate:
+        """A Worker without the thread, so the assertion cannot race it."""
+
+        def __init__(self, work, done) -> None:
+            self._work, self._done = work, done
+
+        def start(self) -> "Immediate":
+            try:
+                result, error = self._work(), None
+            except Exception as exc:  # noqa: BLE001 - delivered, not swallowed
+                result, error = None, exc
+            self._done(result, error)
+            return self
+
+    kept = (_app.Worker, _app.ALERTS.fetch, WX.fetch, WX.normal_high,
+            WX.save, window.behaviour, window.weather)
+    here = dict(window.behaviour)
+    here["weather"] = "on"
+    here["weather_latitude"] = "29.4241"
+    here["weather_longitude"] = "-98.4936"
+    try:
+        _app.Worker = Immediate
+        _app.ALERTS.fetch = (lambda lat, lon, **_kw:
+                             asked.append((lat, lon)) or [])
+        WX.fetch = lambda *_a, **_kw: report
+        WX.normal_high = lambda *_a, **_kw: None
+        WX.save = lambda *_a, **_kw: True
+
+        window.behaviour = dict(here, alerts="off")
+        window._weather_busy = False
+        window.refresh_weather(force=True)
+        check(asked == [],
+              f"the alert request went out {len(asked)} times on a machine "
+              f"where emergency alerts are switched off")
+
+        window.behaviour = dict(here, alerts="on")
+        window._weather_busy = False
+        window.refresh_weather(force=True)
+        check(asked == [(report.latitude, report.longitude)],
+              f"the switch was on and the alert request was {asked!r} rather "
+              f"than one question about where the reading came from")
+    finally:
+        (_app.Worker, _app.ALERTS.fetch, WX.fetch, WX.normal_high,
+         WX.save, window.behaviour, window.weather) = kept
+
+
 def test_the_shelf_holds_the_weather_beside_the_system(app) -> None:
     """Two pills, not one, and the weather to the left of the system.
 

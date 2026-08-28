@@ -221,6 +221,48 @@ RECORDS = json.loads(r"""
    }
   },
   "geometry": null
+ },
+ "civil": {
+  "properties": {
+   "event": "Civil Emergency Message",
+   "category": "Safety",
+   "severity": "Extreme",
+   "urgency": "Immediate",
+   "certainty": "Observed",
+   "status": "Actual",
+   "headline": "Level 2 Set Alert",
+   "description": "Owyhee County has issued a civil emergency Level 2 Set Alert for the area around Silver City. Contact Owyhee County at 2 0 8 4 9 5 1 1 5 4 for additional information.",
+   "instruction": null,
+   "response": "Prepare",
+   "areaDesc": "Owyhee County",
+   "sent": "2026-08-25T18:19:24-06:00",
+   "onset": null,
+   "expires": "2026-08-25T20:19:24-06:00",
+   "id": "AS-ID-d4061e4b-4465-40ec-8d3c-16bceb2cb6af",
+   "parameters": {}
+  },
+  "geometry": null
+ },
+ "shelter": {
+  "properties": {
+   "event": "Shelter In Place Warning",
+   "category": "Safety",
+   "severity": "Extreme",
+   "urgency": "Immediate",
+   "certainty": "Observed",
+   "status": "Actual",
+   "headline": "Shelter In Place Warning issued for Harris County",
+   "description": "A chemical release has occurred at a facility in Deer Park. Persons in the affected area should shelter in place.",
+   "instruction": "Go indoors. Close all doors and windows and turn off any ventilation drawing outside air.",
+   "response": "Shelter",
+   "areaDesc": "Harris County",
+   "sent": "2026-08-27T14:02:00-05:00",
+   "onset": null,
+   "expires": "2026-08-27T17:02:00-05:00",
+   "id": "urn:oid:2.49.0.1.840.0.shelter.test",
+   "parameters": {}
+  },
+  "geometry": null
  }
 }
 """)
@@ -229,6 +271,32 @@ TORNADO = A.parse(RECORDS["tornado"])
 SEVERE = A.parse(RECORDS["severe"])
 ADVISORY = A.parse(RECORDS["advisory"])
 AMBER = A.parse(RECORDS["amber"])
+CIVIL = A.parse(RECORDS["civil"])
+SHELTER = A.parse(RECORDS["shelter"])
+
+#: Event names read from `api.weather.gov/alerts/types` on 2026-08-28, which
+#: publishes 111 of them. This is the subset the gate has an opinion about.
+#:
+#: It is a snapshot, so it proves a name is spelled the way the service spells
+#: it and cannot prove the service has not renamed one since. That is the
+#: cheap half of the problem and the half that actually goes wrong: a name
+#: with a lowercase letter in it matches nothing, raises nothing, and looks
+#: exactly like a quiet day.
+VOCABULARY = (
+    "Shelter In Place Warning",
+    "Nuclear Power Plant Warning",
+    "Radiological Hazard Warning",
+    "Hazardous Materials Warning",
+    "Civil Danger Warning",
+    "Civil Emergency Message",
+    "Evacuation Immediate",
+    "Law Enforcement Warning",
+    "Local Area Emergency",
+    "Child Abduction Emergency",
+    "Blue Alert",
+    "911 Telephone Outage",
+    "Tornado Warning",
+)
 
 
 # -- the finding, asserted rather than trusted ------------------------------
@@ -252,10 +320,87 @@ def test_severity_alone_cannot_tell_them_apart() -> None:
     check(AMBER.category == "Rescue", "the abduction record changed category")
 
 
-def test_the_gate_keeps_weather_and_nothing_else() -> None:
-    kept = A.weather_only([TORNADO, SEVERE, ADVISORY, AMBER])
+def test_the_gate_keeps_weather_and_two_named_events() -> None:
+    kept = A.admitted([TORNADO, SEVERE, ADVISORY, AMBER, CIVIL, SHELTER])
     check(AMBER not in kept, "an Amber Alert reached the login screen")
-    check(len(kept) == 3, f"the gate kept {len(kept)} of four weather records")
+    check(SHELTER in kept,
+          "a Shelter In Place Warning was dropped, so the two admitted events "
+          "are not actually getting through")
+    check(CIVIL not in kept,
+          "a Civil Emergency Message reached the login screen, which means "
+          "the gate is admitting a category rather than two names")
+    check(len(kept) == 4,
+          f"the gate kept {len(kept)} of six records rather than four")
+
+
+def test_the_admitted_two_are_spelled_the_way_the_service_spells_them() -> None:
+    """A name that matches nothing fails silently and looks like peace.
+
+    This is the whole risk of an allowlist keyed on a display string, and it
+    is the reason the gate is not simply `category == "Safety"`, so it is
+    worth one assertion against a vocabulary that was read rather than typed
+    from memory.
+    """
+    for name in A.SHELTER:
+        check(name in VOCABULARY,
+              f"{name!r} is not an event the service publishes, so the gate "
+              f"admitting it admits nothing at all")
+    check(len(set(A.SHELTER)) == len(A.SHELTER),
+          "the same event is named twice in SHELTER")
+
+
+def test_the_category_the_two_belong_to_cannot_be_admitted_wholesale() -> None:
+    """Why they are named individually, argued from a live record.
+
+    `Civil Emergency Message` is `Safety`, and the five most recent ones were
+    a wildfire evacuation in Owyhee County, published as Extreme, Immediate
+    and Observed. On those three fields it is a tornado. One of the five says
+    in its own text that it is now concluded.
+
+    So admitting a category would put a full screen takeover on this machine
+    for a message announcing that a thing is over. The two events this screen
+    carries are carried by name, and a third has to be argued for.
+
+    The shelter record below is constructed, because the service has none
+    active and none in its history to read. Its event name is held against the
+    published vocabulary by the test above; its category is not evidence of
+    anything and nothing here asserts against it.
+    """
+    for field in ("severity", "urgency", "certainty"):
+        check(getattr(CIVIL, field) == getattr(TORNADO, field),
+              f"a civil emergency message and a tornado now differ on "
+              f"{field}, so admitting the category would no longer be as "
+              f"dangerous as this test claims")
+    check(A.tier(CIVIL) == A.TAKEOVER,
+          f"a civil emergency message is {A.tier(CIVIL)!r}, so the thing this "
+          f"test says would happen if it got in no longer would")
+    check(CIVIL.category != A.WEATHER,
+          "a civil emergency message is now categorised as weather, which "
+          "means the weather branch admits it and naming events changes "
+          "nothing")
+    check(A.admitted([CIVIL]) == [],
+          "a Civil Emergency Message passed the gate")
+
+
+def test_a_shelter_warning_is_as_loud_as_a_tornado() -> None:
+    """The payoff for `tier` never having read the category.
+
+    Somebody told to stay indoors because of a chemical release needs the
+    same screen a tornado gets, and it works without a line of new code
+    precisely because how loudly was always a separate question from whether
+    at all.
+    """
+    check(A.tier(SHELTER) == A.TAKEOVER,
+          f"a shelter in place warning is {A.tier(SHELTER)!r} rather than a "
+          f"takeover")
+
+
+def test_a_drill_of_an_admitted_event_is_still_a_drill() -> None:
+    """The two exceptions do not get an exception from the status check."""
+    drill = A.parse(RECORDS["shelter"])
+    drill.status = "Exercise"
+    check(A.admitted([drill]) == [],
+          "a Shelter In Place Warning marked Exercise was treated as real")
 
 
 def test_a_test_message_never_reaches_the_screen() -> None:
@@ -266,7 +411,7 @@ def test_a_test_message_never_reaches_the_screen() -> None:
     """
     drill = A.parse(RECORDS["tornado"])
     drill.status = "Test"
-    check(A.weather_only([drill]) == [],
+    check(A.admitted([drill]) == [],
           "a message marked Test was treated as a real emergency")
 
 
@@ -292,10 +437,14 @@ def test_the_two_decisions_stay_separate() -> None:
     check("category" not in source,
           "tier() reads the category, which means the two decisions have been "
           "folded together again")
-    source = inspect.getsource(A.weather_only)
+    source = inspect.getsource(A.admitted)
     check("severity" not in source and "urgency" not in source,
-          "weather_only() reads severity, which means the gate has become "
+          "admitted() reads severity, which means the gate has become "
           "conditional on how loud something is")
+    check("Safety" not in source,
+          "admitted() has grown a category comparison beyond the weather one, "
+          "which is how two named events become every event that shares their "
+          "category")
 
 
 # -- one storm, however many messages it sends ------------------------------
@@ -437,8 +586,9 @@ def test_the_whole_pipeline_in_one_call() -> None:
         records.append(record)
     out = A.shown(records, now)
     check(len(out) == 3, f"the pipeline returned {len(out)} of four records")
-    check(all(a.category == A.WEATHER for a in out),
-          "something that is not weather came out of the pipeline")
+    check(all(a.category == A.WEATHER or a.event in A.SHELTER for a in out),
+          "something that is neither weather nor one of the two named events "
+          "came out of the pipeline")
     check(A.tier(out[0]) == A.TAKEOVER,
           f"the loudest is not first: {[a.event for a in out]}")
 
