@@ -706,7 +706,16 @@ def days_chart(cr, width: float, height: float, days: list, units: str,
     # right for the week somebody happened to test on. "Wednesday" is wider
     # than "Friday" and a cap set for one runs the other into the sky mark.
     name_width = max(48.0, min(112.0, name_width + 6.0))
-    number_width = measure(cr, font, "-88\N{DEGREE SIGN}", 0.94)[0] + 4.0
+    # Measured from the readings in hand, for exactly the reason stated
+    # about the names three lines above. "-88" and "100" are both four
+    # glyphs and the digits are wider than the minus, so a column sized
+    # against the literal fits every temperature except a three digit one,
+    # and San Antonio is three digits for most of the summer. The degree
+    # sign was being sliced in half at the edge of the panel.
+    number_width = max(
+        [measure(cr, font, "-88\N{DEGREE SIGN}", 0.94)[0]]
+        + [measure(cr, font, W.temperature(value, units), 0.94)[0]
+           for day in shown for value in (day.low, day.high)]) + 4.0
     rain_width = measure(cr, font, "100%", 0.80)[0] + 6.0
 
     bar_left = name_width + glyph_size + rain_width + number_width + 22.0

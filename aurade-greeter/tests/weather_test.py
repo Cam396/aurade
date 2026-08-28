@@ -604,6 +604,22 @@ check(W.source_words("") == "", "an unknown service was credited anyway")
 check("AuraDE" in W.AGENT and "http" in W.AGENT,
       "the user agent does not identify this product and a way to reach it")
 
+# Two readings of now, which have to be one reading.
+#
+# The headline came from the station observation and the first column of the
+# hourly chart came from the gridpoint forecast, and on a San Antonio evening
+# they were eight degrees apart on the same panel. Both were right about their
+# own source. The panel was wrong as a whole, and the measurement wins over a
+# prediction of the hour an instrument has already reported.
+observed = W.from_nws(41.0126, -73.8437, get=Service())
+check(observed.hours, "the fixture has no hourly readings to reconcile")
+check(observed.now.temperature is not None,
+      "the fixture has no observation, so this proved nothing")
+check(observed.hours[0].temperature == observed.now.temperature,
+      f"the panel reads {observed.now.temperature} at the top and "
+      f"{observed.hours[0].temperature} in the first column of the chart")
+
+
 # Units, which have to agree across a whole panel or none of it is trusted.
 #
 # The bug this covers was visible on the screen: the panel said 80 degrees
@@ -666,6 +682,70 @@ for index, band in ((1, "Low"), (4, "Moderate"), (7, "High"),
 check(W.ultraviolet_note(None) == "", "no reading produced a sentence anyway")
 check("15 minutes" in W.ultraviolet_note(9),
       "very high did not say how long before skin reddens")
+
+
+# A three digit temperature has to fit inside the chart that draws it.
+#
+# The number column was sized by measuring the literal "-88 degrees". That is
+# four glyphs and so is "100 degrees", but digits are wider than a minus sign,
+# so every temperature fitted except a three digit one and the degree sign was
+# sliced in half at the right edge. San Antonio is three digits for most of
+# the summer.
+#
+# Measured as pixels rather than as arithmetic, because the arithmetic is the
+# thing that was wrong: ink in the final column of the surface is a glyph that
+# ran out of chart.
+try:
+    import cairo
+    from aurade_greeter import weatherdraw as _D
+    from aurade_greeter import tokens as T
+    import gi as _gi
+    _gi.require_version("Pango", "1.0")
+    from gi.repository import Pango as _Pango
+except Exception as exc:  # noqa: BLE001 - reported, never silently skipped
+    FAILURES.append(f"the drawing layer would not import, so the chart is "
+                    f"unchecked: {exc}")
+else:
+    class _Hot:
+        def __init__(self, high, low):
+            self.high, self.low = high, low
+            self.date = _dt.date(2026, 8, 28)
+            self.name = "Today"
+            self.condition = "clear"
+            self.precipitation = 0
+            self.ultraviolet = None
+
+    for label, units, week in (
+            ("Fahrenheit, three digits",
+             "f", [_Hot(37.8, 26.0), _Hot(37.2, 25.0)]),
+            ("Celsius, two digits",
+             "c", [_Hot(37.8, 26.0), _Hot(37.2, 25.0)]),
+            ("below zero, with a minus",
+             "c", [_Hot(-8.0, -21.0), _Hot(-5.0, -18.0)])):
+        wide, tall = 420, 70
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, wide, tall)
+        context = cairo.Context(surface)
+        context.set_source_rgb(0.0, 0.0, 0.0)
+        context.paint()
+        _D.days_chart(context, wide, tall, week, units,
+                      T.scheme(True), _Pango.FontDescription("Sans 11"),
+                      None, ["Today", "Tomorrow"])
+        surface.flush()
+        data = surface.get_data()
+        stride = surface.get_stride()
+        # Ink in the final column is a glyph that ran out of surface. One
+        # pixel of margin is the whole assertion: the point is not that the
+        # number sits comfortably, it is that none of it was thrown away.
+        rightmost = -1
+        for row in range(tall):
+            base = row * stride
+            for column in range(wide):
+                index = base + column * 4
+                if data[index] or data[index + 1] or data[index + 2]:
+                    rightmost = max(rightmost, column)
+        check(0 <= rightmost <= wide - 2,
+              f"{label}: ink reaches x={rightmost} of {wide}, so a glyph is "
+              f"being cut off at the edge of the chart")
 
 
 # The rows of the week, named against what is actually drawn.

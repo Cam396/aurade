@@ -41,6 +41,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
+from aurade_greeter import weatherui as WUI  # noqa: E402
 from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow, Wallpaper  # noqa: E402
 from aurade_greeter import weather as WX  # noqa: E402
@@ -347,6 +348,60 @@ def test_choosing_somebody_asks_greetd_about_them(app) -> None:
         pump()
 
 
+def test_the_field_asks_the_person_by_name(app) -> None:
+    """"Password" is a label on a form. A name is the screen answering you.
+
+    It is also the quickest way to notice the wrong account is selected on a
+    machine with three of them, which is the practical argument rather than
+    the warm one.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        if not window.accounts:
+            check(False, "no accounts, so this proved nothing")
+            return
+        first = window.accounts[0]
+        window.choose(first)
+        pump()
+        placeholder = window.entry.get_property("placeholder-text") or ""
+        given = first.title.split()[0]
+        check(given and given in placeholder,
+              f"the field does not say who it is for: {placeholder!r}")
+        check(placeholder != C.PASSWORD,
+              "the field still says the generic label")
+    finally:
+        pump()
+
+
+def test_only_one_clock_is_on_screen_at_a_time(app) -> None:
+    """The shade and the account list both carry the hour at ninety points.
+
+    So the shelf clock is a second reading of the same thing on two pages out
+    of three, and the corner is the one to lose. It comes back on the password
+    page, which has no clock of its own.
+
+    Keyed off the visible page rather than off whether the shade has lifted:
+    that was the first version and it looked right while still leaving two
+    clocks on the account list.
+    """
+    window, service = build(app, [SECRET, OK])
+    try:
+        clock = window.widgets.get("status.clock")
+        rule = window.widgets.get("status.rule")
+        check(clock is not None and rule is not None,
+              "the shelf has no clock to hide")
+        for page, wanted in (("shade", False), ("accounts", False),
+                             ("password", True)):
+            window.stack.set_visible_child_name(page)
+            pump()
+            equal(clock.get_visible(), wanted,
+                  f"on the {page} page the shelf clock visibility is wrong")
+            equal(rule.get_visible(), wanted,
+                  f"on the {page} page the shelf hairline visibility is wrong")
+    finally:
+        pump()
+
+
 def test_the_password_field_never_shows_the_password(app) -> None:
     window, service = build(app, [SECRET, OK])
     try:
@@ -584,6 +639,30 @@ def test_the_weather_panel_fills_itself_in(app) -> None:
     # number means for somebody standing outside and ends with the official
     # band name in brackets, and pinning the whole sentence here means the
     # copy cannot be improved without a test failure that says nothing.
+    # The drawn charts are the only place the forecast exists, so they
+    # have to say it out loud as well as draw it.
+    #
+    # `Drawn` marks everything PRESENTATION, which is right for a glyph
+    # sitting beside a label that already carries the number and wrong for
+    # a chart. Left that way the barometric pressure was announced and the
+    # entire week was not. The role matters as much as the words: a widget
+    # left as PRESENTATION is skipped whatever properties it carries, so a
+    # description alone would read correct and do nothing.
+    for name, chart in (("hourly", panel.hours), ("week", panel.days),
+                        ("daylight", panel.sun)):
+        check(chart.get_accessible_role() != Gtk.AccessibleRole.PRESENTATION,
+              f"the {name} chart is still marked decorative, so nothing "
+              f"it says will be read out")
+    spoken_hours = panel.hours._spoken()
+    check("\N{DEGREE SIGN}" in spoken_hours,
+          f"the hourly chart says no temperatures: {spoken_hours!r}")
+    check(spoken_hours.count(".") >= 4,
+          f"the hourly chart says almost nothing: {spoken_hours!r}")
+    spoken_days = panel.days._spoken(WUI.usable_days(panel.days.days))
+    for word in ("Today", "\N{DEGREE SIGN}"):
+        check(word in spoken_days,
+              f"the week chart never says {word!r}: {spoken_days!r}")
+
     uv_note = panel.ultraviolet.note.get_label()
     check(uv_note.endswith("(High)"),
           f"the ultraviolet tile lost its official band name, said {uv_note!r}")

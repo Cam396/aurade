@@ -86,6 +86,9 @@ class Drawn(Gtk.DrawingArea):
         else:
             self.set_hexpand(True)
         self.set_can_focus(False)
+        # Decorative by default, which is right for a mark sitting beside a
+        # label that already says the number. It is wrong for a chart, and
+        # `speak` is how the three charts opt out of it.
         self.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
         self._dark = True
         self.colours = T.scheme(True)
@@ -110,6 +113,21 @@ class Drawn(Gtk.DrawingArea):
 
     def render(self, cr, width: float, height: float) -> None:  # pragma: no cover
         raise NotImplementedError
+
+
+    def speak(self, label: str, description: str) -> None:
+        """Stop being decorative and start saying what is drawn.
+
+        The role changes as well as the text: a widget left as PRESENTATION
+        is skipped whatever properties it carries, so setting a description
+        on its own would have been a change that reads correct and does
+        nothing at all.
+        """
+        try:
+            self.set_accessible_role(Gtk.AccessibleRole.IMG)
+        except Exception:  # noqa: BLE001 - decoration, never a traceback
+            pass
+        A.described(self, label, description)
 
 
 class SkyMark(Drawn):
@@ -141,7 +159,34 @@ class HoursChart(Drawn):
 
     def show_hours(self, hours: list, units: str, zone=None) -> None:
         self.hours, self.units, self.zone = hours, units, zone
+        self.speak(C.WEATHER_HOURS_CHART, self._spoken())
         self.queue_draw()
+
+    def _spoken(self) -> str:
+        """The same readings the chart prints, in the order it prints them.
+
+        Every third hour, and both ends of the range whatever falls where,
+        because the coldest hour of the night is the reading somebody is
+        listening for and a fixed stride will skip it about two thirds of the
+        time. This is the rule the drawing uses for its own labels, applied
+        to speech, so the two versions of the chart say the same thing.
+        """
+        rows = [h for h in self.hours if h.temperature is not None]
+        if not rows:
+            return C.WEATHER_SPOKEN_NOTHING
+        keep = {0, len(rows) - 1}
+        keep.add(min(range(len(rows)), key=lambda i: rows[i].temperature))
+        keep.add(max(range(len(rows)), key=lambda i: rows[i].temperature))
+        keep.update(range(0, len(rows), 3))
+        said = [C.WEATHER_SPOKEN_HOUR.format(
+                    time=_clock(rows[index].at, self.zone),
+                    degrees=W.temperature(rows[index].temperature, self.units))
+                for index in sorted(keep)]
+        wet = [h for h in rows if (h.precipitation or 0) >= 40]
+        if wet:
+            said.append(C.WEATHER_SPOKEN_RAIN.format(
+                chance=wet[0].precipitation, time=_clock(wet[0].at, self.zone)))
+        return ". ".join(said)
 
     def render(self, cr, width: float, height: float) -> None:
         D.hours_chart(cr, width, height, self.hours, self.units,
@@ -166,7 +211,26 @@ class DaysChart(Drawn):
         self.units, self.current = units, current
         usable = usable_days(days)
         self.set_content_height(self.ROW * max(1, len(usable)))
+        self.speak(C.WEATHER_DAYS_CHART, self._spoken(usable))
         self.queue_draw()
+
+    def _spoken(self, usable: list) -> str:
+        """Every row, named the way the row is named on the screen.
+
+        Six rows is short enough to read in full, and a summary would leave
+        out the one day somebody is actually planning around.
+        """
+        if not usable:
+            return C.WEATHER_SPOKEN_NOTHING
+        said = []
+        for index, day in enumerate(usable):
+            name = self.names[index] if index < len(self.names) else ""
+            said.append(C.WEATHER_SPOKEN_DAY.format(
+                name=name or "",
+                condition=W.WORDS.get(day.condition, ""),
+                low=W.temperature(day.low, self.units),
+                high=W.temperature(day.high, self.units)))
+        return ". ".join(said)
 
     def render(self, cr, width: float, height: float) -> None:
         D.days_chart(cr, width, height, self.days, self.units, self.colours,
@@ -184,6 +248,9 @@ class SunChart(Drawn):
     def show_sun(self, fraction, rise: str, set_: str, altitude) -> None:
         self.fraction, self.rise, self.set_ = fraction, rise, set_
         self.altitude = altitude
+        ends = [part for part in (rise, set_) if part]
+        self.speak(C.WEATHER_SUN_CHART,
+                   ". ".join(ends) if ends else C.WEATHER_SPOKEN_NOTHING)
         self.queue_draw()
 
     def render(self, cr, width: float, height: float) -> None:
