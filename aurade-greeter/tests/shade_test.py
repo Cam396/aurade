@@ -351,9 +351,9 @@ if every:
         have = [e for e in every if e["light"] == band]
         check(have, f"the set has no {band} picture at all")
     # And the low light hours are worth having. The obvious thresholds are
-    # civil twilight, plus and minus six degrees, and they leave five of the
-    # twenty eight pictures showing for about an hour a day each end. This is
-    # the assertion that says the wider window is deliberate.
+    # civil twilight, plus and minus six degrees, and they leave the seven
+    # dusk pictures showing for about an hour a day each end. This is the
+    # assertion that says the wider window is deliberate.
     hours = {"dawn": 0, "day": 0, "dusk": 0, "night": 0}
     for month in (1, 4, 7, 10):
         for hour in range(24):

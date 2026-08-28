@@ -121,10 +121,10 @@ def aurora_drift(phase: float, index: int) -> tuple[float, float]:
 #   contrast ratio in the theme test is still the ratio that is on the screen.
 #   The photograph is visible around all of it and under none of it.
 #
-#   the aurora stays, at about half strength. Twenty eight pictures with
-#   nothing in common is the whole point of the set, and it is also a way to
-#   make an installer look like twenty eight different products. A wash of the
-#   brand's own light over all of them is what makes them one.
+#   the aurora stays, at about half strength. Forty pictures with nothing in
+#   common is the whole point of the set, and it is also a way to make an
+#   installer look like forty different products. A wash of the brand's own
+#   light over all of them is what makes them one.
 #
 #   it is off wherever the ground is a decision rather than a taste. High
 #   contrast exists so somebody can read, and a photograph is the opposite of
