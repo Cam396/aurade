@@ -429,3 +429,28 @@ button.aurade-pod.aurade-pod-on:hover {
 .aurade-high-contrast .aurade-occasion {
   color: @window_fg_color;
 }
+
+/* A card standing on frosted photograph.
+ *
+ * The ground is drawn by `Frosted`, underneath, because a blur of the picture
+ * that is actually behind this widget is not something a stylesheet can
+ * express. What is left here is taking away the flat ground the card used to
+ * carry, so the two do not stack into a slab.
+ *
+ * Only applied where there is a photograph to frost. High contrast and a
+ * machine with no wallpaper set never get this class, and keep every rule
+ * above exactly as it was. */
+.aurade-on-glass,
+.aurade-on-glass.aurade-photo-card,
+list.aurade-on-glass.boxed-list {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+/* The rows keep their separators. Those are the only thing telling three
+ * people apart once the ground under them has gone. */
+list.aurade-on-glass.boxed-list > row {
+  background-color: transparent;
+}

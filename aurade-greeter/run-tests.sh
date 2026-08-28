@@ -9,9 +9,25 @@ command -v python3 >/dev/null 2>&1 || {
   echo 'greeter tests: SKIP (python3 not available)'; exit 0; }
 
 status=0
-for test in protocol accounts sessions preferences network settings shade weather shared packaging; do
-  python3 "${here}/tests/${test}_test.py" || status=1
+# Enumerated, not listed. A hand written list of test names is a list that
+# stops matching the directory, and when it does the suite goes green on a run
+# that never executed the missing one. That has already happened once in this
+# repository, to three tests at once.
+#
+# `runtime_test.py` is the one exclusion and it is not skipped: it needs a
+# compositor, so `test-runtime.sh` below drives it and says so in its own line.
+mapfile -t suites < <(cd -- "${here}/tests" && ls -1 ./*_test.py | sed 's|^\./||' | sort)
+ran=0
+for test in "${suites[@]}"; do
+  [[ $test == runtime_test.py ]] && continue
+  python3 "${here}/tests/${test}" || status=1
+  ran=$(( ran + 1 ))
 done
+if (( ran + 1 != ${#suites[@]} )); then
+  printf 'greeter tests: %s suites on disk and %s ran\n' \
+    "${#suites[@]}" "$ran" >&2
+  status=1
+fi
 # The window itself, on a headless compositor. Skips loudly rather than
 # failing when the machine has no compositor, and says so in its own line so
 # a run with no runtime coverage cannot be mistaken for a run with it.

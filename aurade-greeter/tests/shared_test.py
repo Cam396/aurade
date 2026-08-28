@@ -81,7 +81,8 @@ def test_every_copy_matches_its_original() -> None:
 
 
 #: This package's own files, which have no original to be compared against.
-OURS = ("__init__.py", "accounts.py", "app.py", "copy.py", "glyphs.py",
+OURS = ("__init__.py", "accounts.py", "app.py", "copy.py", "glass.py",
+        "glyphs.py",
         "greeter.css", "network.py", "nmlive.py", "preferences.py",
         "protocol.py", "sessions.py", "settings.py", "shade.py",
         "weather.py", "weatherdraw.py", "weatherui.py")
