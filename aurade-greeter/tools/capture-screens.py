@@ -36,6 +36,7 @@ PACKAGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PACKAGE)
 
 from aurade_greeter import network as NET  # noqa: E402
+from aurade_greeter import alerts as ALERTS  # noqa: E402
 from aurade_greeter.app import GreeterWindow  # noqa: E402
 
 OUT = os.environ.get("AURADE_SHOT_DIR", "/tmp/greeter-shots")
@@ -44,6 +45,68 @@ OUT = os.environ.get("AURADE_SHOT_DIR", "/tmp/greeter-shots")
 #: it gets its own pass on a taller compositor rather than every other shot
 #: being taken on a screen nobody has.
 WANT = os.environ.get("AURADE_SHOT_SET", "screens")
+
+
+#: Two warnings for one point, put through the real gate.
+#:
+#: One of each kind, because the picture worth reviewing is the one that shows
+#: the gate working: a flood warning and a shelter in place order are drawn,
+#: and the Amber Alert alongside them is not. Hand placing a row would prove
+#: the row draws and nothing else.
+ALERT_FEATURES = [
+    {"properties": {
+        "event": "Flash Flood Warning", "category": "Met",
+        "severity": "Severe", "urgency": "Immediate", "certainty": "Observed",
+        "status": "Actual",
+        "headline": "Flash Flood Warning issued for Westchester County",
+        "description": "At 341 PM, thunderstorms were producing heavy rain "
+                       "across the warned area.",
+        "instruction": "Turn around, do not drown when encountering flooded "
+                       "roads.",
+        "response": "Avoid", "areaDesc": "Westchester, NY",
+        "sent": "", "onset": None, "expires": "",
+        "id": "shot-flood", "parameters": {}}},
+    {"properties": {
+        "event": "Shelter In Place Warning", "category": "Safety",
+        "severity": "Extreme", "urgency": "Immediate", "certainty": "Observed",
+        "status": "Actual",
+        "headline": "Shelter In Place Warning for the area near Ardsley",
+        "description": "A chemical release has occurred at a facility on "
+                       "Saw Mill River Road.",
+        "instruction": "Go indoors. Close all doors and windows and turn off "
+                       "anything drawing outside air.",
+        "response": "Shelter", "areaDesc": "Westchester, NY",
+        "sent": "", "onset": None, "expires": "",
+        "id": "shot-shelter", "parameters": {}}},
+    {"properties": {
+        "event": "Child Abduction Emergency", "category": "Rescue",
+        "severity": "Extreme", "urgency": "Immediate", "certainty": "Observed",
+        "status": "Actual", "headline": "AMBER Alert",
+        "description": "An AMBER alert has been issued.", "instruction": None,
+        "response": None, "areaDesc": "Westchester, NY",
+        "sent": "", "onset": None, "expires": "",
+        "id": "shot-amber", "parameters": {}}},
+]
+
+
+def fake_alerts(window) -> None:
+    """Warnings on the report, the way the worker puts them there.
+
+    They are not in the cache and never will be: a warning read off disk is a
+    warning that may have expired hours ago, so the file holds the reading and
+    the alerts are fetched beside it. This does the same thing without a
+    network, and puts the records through `alerts.shown` rather than around
+    it, so what ends up in the picture is what the gate admitted.
+    """
+    if window.weather is None:
+        return
+    when = dt.datetime.now().astimezone()
+    for feature in ALERT_FEATURES:
+        properties = feature["properties"]
+        properties["sent"] = (when - dt.timedelta(minutes=19)).isoformat()
+        properties["expires"] = (when + dt.timedelta(hours=3)).isoformat()
+    window.weather.alerts = ALERTS.shown(ALERT_FEATURES, when)
+    window._paint_weather()
 
 
 def pump(count: int = 30) -> None:
@@ -263,6 +326,8 @@ def main() -> int:
             fake_weather(cache)
         window = GreeterWindow(app, None)
         window.nm = Radio()
+        if os.environ.get("AURADE_SHOT_ALERTS"):
+            fake_alerts(window)
         window.present()
         if not wait_for(lambda: window.get_mapped() and window.get_width() > 0):
             raise SystemExit("the greeter window never appeared")
