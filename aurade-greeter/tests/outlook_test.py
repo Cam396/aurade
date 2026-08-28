@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..")))
 
 from aurade_greeter import outlook as O  # noqa: E402
 from aurade_greeter import weather as W  # noqa: E402
+from aurade_greeter import copy as C  # noqa: E402
 
 FAILURES: list[str] = []
 CHECKS = 0
@@ -220,6 +221,99 @@ def test_the_whole_sentence_is_ordered_by_how_soon_it_matters() -> None:
 def test_a_report_with_nothing_to_say_says_nothing() -> None:
     check(O.sentence(report(), NOW, "c") == "",
           "an empty report produced a sentence")
+
+
+def _oclock_words(moment) -> str:
+    """The module's own words for an hour, so the test does not write a
+    second copy of them and then hold the module to it."""
+    return O._oclock(moment)
+
+
+def test_rain_that_has_already_started_is_a_sentence() -> None:
+    """"Rain from shortly" is not something a person says.
+
+    Every other value in that hole is a time, and "from" wants a time. The
+    word "shortly" dropped into it read as a machine assembling a sentence out
+    of parts, which is the one thing this whole module exists not to do.
+    """
+    here = _dt.datetime(2026, 8, 28, 14, 30)
+    soon = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(minutes=30 + n * 60),
+               condition=W.RAIN, precipitation=90 if n < 3 else 5,
+               amount=2.0 if n < 3 else 0.0) for n in range(10)])
+    said = O.rain(soon, here)
+    check("from shortly" not in said, f"the sentence still reads {said!r}")
+    check(said.startswith(C.OUTLOOK_RAIN),
+          f"the sentence no longer starts with the kind of weather: {said!r}")
+    check("shortly" not in said.split(".")[0],
+          f"an adverb is still standing where a time belongs: {said!r}")
+
+    # The same case with nothing worth measuring, because the two go through
+    # different templates and the first version of this only ever exercised
+    # the one that carries an amount.
+    trace = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(minutes=30 + n * 60),
+               condition=W.RAIN, precipitation=90 if n < 3 else 5,
+               amount=0.0) for n in range(10)])
+    dry_said = O.rain(trace, here)
+    check(dry_said, "rain likely but unmeasurable said nothing at all")
+    check("from shortly" not in dry_said,
+          f"the sentence with no amount in it still reads {dry_said!r}")
+
+    # A run that starts hours out names the hour rather than the next minute.
+    #
+    # Asserted on the shape it must not use. It was asserted on the digit six
+    # appearing somewhere in the sentence, and six millimetres of rain put a
+    # six in the sentence, so the check passed with the hour deleted entirely.
+    later = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(hours=n),
+               condition=W.RAIN, precipitation=90 if 4 <= n < 7 else 5,
+               amount=2.0 if 4 <= n < 7 else 0.0) for n in range(12)])
+    said = O.rain(later, here)
+    hour = _oclock_words(here + _dt.timedelta(hours=4))
+    check(hour and hour in said,
+          f"rain four hours away lost its hour: {said!r} does not contain "
+          f"{hour!r}")
+    check("within the hour" not in said,
+          f"rain four hours away is described as imminent: {said!r}")
+
+
+def test_the_sky_now_and_when_it_stops() -> None:
+    """The line under the clock, and the silence that is its normal state."""
+    here = _dt.datetime(2026, 8, 28, 14, 0)
+
+    wet = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(hours=n),
+               condition=W.HEAVY_RAIN if n < 3 else W.CLOUDY)
+        for n in range(10)])
+    found = O.spell(wet, here)
+    check(found is not None, "a downpour produced no line at all")
+    if found:
+        kind, words, ends = found
+        check(kind == W.HEAVY_RAIN, f"the spell is {kind!r}")
+        check(words == W.WORDS[W.HEAVY_RAIN],
+              f"the words are {words!r}, and the intensity is meant to be "
+              f"carried by them rather than composed beside them")
+        check(ends == here + _dt.timedelta(hours=3),
+              f"the spell ends at {ends}, which is not the first dry hour")
+
+    dry = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(hours=n), condition=W.PARTLY)
+        for n in range(10)])
+    check(O.spell(dry, here) is None,
+          "a partly cloudy afternoon was announced on the lock screen")
+
+    # Rain that outlasts the forecast has no honest end.
+    forever = W.Report(now=W.Now(temperature=18.0), hours=[
+        W.Hour(at=here + _dt.timedelta(hours=n), condition=W.RAIN)
+        for n in range(10)])
+    found = O.spell(forever, here)
+    check(found is not None and found[2] is None,
+          f"the edge of the forecast was dressed up as a time it stops: "
+          f"{found}")
+
+    check(O.spell(W.Report(), here) is None,
+          "a report with no hours in it produced a spell")
 
 
 def main() -> int:

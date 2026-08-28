@@ -4,7 +4,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: aurade-greeter\n"
-"POT-Creation-Date: 2026-08-28 21:36+0000\n"
+"POT-Creation-Date: 2026-08-28 23:45+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -41,579 +41,651 @@ msgstr ""
 msgid "Choose a different account"
 msgstr ""
 
-#: aurade_greeter/copy.py:75
-msgid "Nothing you type here is stored by this screen."
+#: aurade_greeter/copy.py:76
+msgid "Brightness"
 msgstr ""
 
-#: aurade_greeter/copy.py:76
-msgid "Caps Lock is on."
+#: aurade_greeter/copy.py:77
+msgid "Battery"
 msgstr ""
 
 #: aurade_greeter/copy.py:79
-msgid "This keyboard is set to {layout}."
+msgid "{percent}%"
 msgstr ""
 
-#: aurade_greeter/copy.py:83
-msgid "That password did not work. Try it again, or choose another account."
+#: aurade_greeter/copy.py:84
+msgid "Charging, full in {time}"
 msgstr ""
 
 #: aurade_greeter/copy.py:85
-msgid "This computer has no accounts yet. Start it from the installation media to set one up."
+msgid "Charging"
+msgstr ""
+
+#: aurade_greeter/copy.py:86
+msgid "About {time} left"
+msgstr ""
+
+#: aurade_greeter/copy.py:87
+msgid "Charged"
 msgstr ""
 
 #: aurade_greeter/copy.py:88
-msgid "The login service is not answering. Restarting this computer will bring it back."
+msgid "Plugged in"
 msgstr ""
 
-#: aurade_greeter/copy.py:91
-msgid "That session could not be started. Choose another one, or restart this computer."
+#: aurade_greeter/copy.py:89
+msgid "On battery"
+msgstr ""
+
+#: aurade_greeter/copy.py:93
+msgid "an hour"
 msgstr ""
 
 #: aurade_greeter/copy.py:94
-msgid "This greeter was started on its own, so there is nothing to sign in to."
+msgid "{hours} hours"
+msgstr ""
+
+#: aurade_greeter/copy.py:95
+msgid "an hour and {minutes} minutes"
+msgstr ""
+
+#: aurade_greeter/copy.py:96
+msgid "{hours} hours {minutes} minutes"
 msgstr ""
 
 #: aurade_greeter/copy.py:97
-msgid "Someone else"
+msgid "a minute"
 msgstr ""
 
 #: aurade_greeter/copy.py:98
-msgid "Type the username for an account that is not listed."
-msgstr ""
-
-#: aurade_greeter/copy.py:99
-msgid "Username"
-msgstr ""
-
-#: aurade_greeter/copy.py:102
-msgid "Session"
-msgstr ""
-
-#: aurade_greeter/copy.py:103
-msgid "The desktop this account signs in to."
-msgstr ""
-
-#: aurade_greeter/copy.py:106
-msgid "System"
-msgstr ""
-
-#: aurade_greeter/copy.py:107
-msgid "The network, the battery, and how to restart this computer."
-msgstr ""
-
-#: aurade_greeter/copy.py:113
-msgid "Connected to {name}."
-msgstr ""
-
-#: aurade_greeter/copy.py:114
-msgid "Connected."
-msgstr ""
-
-#: aurade_greeter/copy.py:115
-msgid "Connected to a network with no way out."
-msgstr ""
-
-#: aurade_greeter/copy.py:116
-msgid "Not connected."
-msgstr ""
-
-#: aurade_greeter/copy.py:117
-msgid "Battery {percent} percent."
-msgstr ""
-
-#: aurade_greeter/copy.py:118
-msgid "Battery {percent} percent, charging."
-msgstr ""
-
-#: aurade_greeter/copy.py:121
-msgid "Network"
-msgstr ""
-
-#: aurade_greeter/copy.py:122
-msgid "Accessibility"
-msgstr ""
-
-#: aurade_greeter/copy.py:123
-msgid "Back"
-msgstr ""
-
-#: aurade_greeter/copy.py:124
-msgid "On"
-msgstr ""
-
-#: aurade_greeter/copy.py:125
-msgid "Off"
-msgstr ""
-
-#: aurade_greeter/copy.py:128
-msgid "Opens the list of networks in range."
-msgstr ""
-
-#: aurade_greeter/copy.py:129
-msgid "The accessibility choices made during setup, still in force on this computer."
-msgstr ""
-
-#: aurade_greeter/copy.py:134
-msgid "High contrast"
-msgstr ""
-
-#: aurade_greeter/copy.py:135
-msgid "Larger text"
-msgstr ""
-
-#: aurade_greeter/copy.py:136
-msgid "Reduced motion"
-msgstr ""
-
-#: aurade_greeter/copy.py:141
-msgid "Looking for networks."
-msgstr ""
-
-#: aurade_greeter/copy.py:142
-msgid "No networks in range."
-msgstr ""
-
-#: aurade_greeter/copy.py:143
-msgid "This computer has no Wi-Fi radio switched on."
-msgstr ""
-
-#: aurade_greeter/copy.py:144
-msgid "The login screen cannot reach the network settings."
-msgstr ""
-
-#: aurade_greeter/copy.py:145
-msgid "Look again"
-msgstr ""
-
-#: aurade_greeter/copy.py:146
-msgid "Connected"
-msgstr ""
-
-#: aurade_greeter/copy.py:147
-msgid "Saved"
-msgstr ""
-
-#: aurade_greeter/copy.py:148
-msgid "Needs a password"
-msgstr ""
-
-#: aurade_greeter/copy.py:149
-msgid "Join {name}"
-msgstr ""
-
-#: aurade_greeter/copy.py:150
-msgid "This network needs a password. Nothing you type here is stored by this screen."
+msgid "{minutes} minutes"
 msgstr ""
 
 #: aurade_greeter/copy.py:151
-msgid "Join"
+msgid "{words} until {time}"
 msgstr ""
 
 #: aurade_greeter/copy.py:152
-msgid "Not now"
-msgstr ""
-
-#: aurade_greeter/copy.py:153
-msgid "Joining {name}."
-msgstr ""
-
-#: aurade_greeter/copy.py:154
-msgid "Disconnecting."
+msgid "{words}"
 msgstr ""
 
 #: aurade_greeter/copy.py:155
-msgid "That network could not be joined."
+msgid "Nothing you type here is stored by this screen."
 msgstr ""
 
-#: aurade_greeter/copy.py:158
-msgid "Restart"
+#: aurade_greeter/copy.py:156
+msgid "Caps Lock is on."
 msgstr ""
 
 #: aurade_greeter/copy.py:159
-msgid "Shut down"
-msgstr ""
-
-#: aurade_greeter/copy.py:160
-msgid "Restart this computer?"
-msgstr ""
-
-#: aurade_greeter/copy.py:161
-msgid "Shut down this computer?"
-msgstr ""
-
-#: aurade_greeter/copy.py:162
-msgid "Anything left unsaved in a signed in session will be lost."
+msgid "This keyboard is set to {layout}."
 msgstr ""
 
 #: aurade_greeter/copy.py:163
-msgid "Keep this screen"
+msgid "That password did not work. Try it again, or choose another account."
 msgstr ""
 
-#: aurade_greeter/copy.py:166
-msgid "Sign in as {name}."
-msgstr ""
-
-#: aurade_greeter/copy.py:167
-msgid "Password for {name}."
+#: aurade_greeter/copy.py:165
+msgid "This computer has no accounts yet. Start it from the installation media to set one up."
 msgstr ""
 
 #: aurade_greeter/copy.py:168
-msgid "The desktop {name} signs in to."
+msgid "The login service is not answering. Restarting this computer will bring it back."
 msgstr ""
 
-#: aurade_greeter/copy.py:169
-msgid "Power options for this computer."
+#: aurade_greeter/copy.py:171
+msgid "That session could not be started. Choose another one, or restart this computer."
 msgstr ""
 
-#: aurade_greeter/copy.py:170
-msgid "{name}, signal {bars} of 4."
+#: aurade_greeter/copy.py:174
+msgid "This greeter was started on its own, so there is nothing to sign in to."
 msgstr ""
 
-#: aurade_greeter/copy.py:175
-msgid "Weather"
+#: aurade_greeter/copy.py:177
+msgid "Someone else"
 msgstr ""
 
-#: aurade_greeter/copy.py:176
-msgid "The weather where you are, and the week ahead."
+#: aurade_greeter/copy.py:178
+msgid "Type the username for an account that is not listed."
 msgstr ""
 
 #: aurade_greeter/copy.py:179
-msgid "until {time}"
+msgid "Username"
 msgstr ""
 
-#: aurade_greeter/copy.py:180
-msgid "now in force"
+#: aurade_greeter/copy.py:182
+msgid "Session"
 msgstr ""
 
-#: aurade_greeter/copy.py:181
-msgid "Weather warnings"
+#: aurade_greeter/copy.py:183
+msgid "The desktop this account signs in to."
+msgstr ""
+
+#: aurade_greeter/copy.py:186
+msgid "System"
 msgstr ""
 
 #: aurade_greeter/copy.py:187
-msgid "Rain"
-msgstr ""
-
-#: aurade_greeter/copy.py:188
-msgid "Snow"
-msgstr ""
-
-#: aurade_greeter/copy.py:189
-msgid "shortly"
-msgstr ""
-
-#: aurade_greeter/copy.py:190
-msgid "midnight"
-msgstr ""
-
-#: aurade_greeter/copy.py:191
-msgid "midday"
-msgstr ""
-
-#: aurade_greeter/copy.py:192
-msgid "{hour} in the morning"
+msgid "The network, the battery, and how to restart this computer."
 msgstr ""
 
 #: aurade_greeter/copy.py:193
-msgid "{hour} in the afternoon"
+msgid "Connected to {name}."
 msgstr ""
 
 #: aurade_greeter/copy.py:194
-msgid "{hour} in the evening"
+msgid "Connected."
 msgstr ""
 
 #: aurade_greeter/copy.py:195
-msgid "{kind} from {when}."
+msgid "Connected to a network with no way out."
 msgstr ""
 
 #: aurade_greeter/copy.py:196
-msgid "{kind} from {when}, about {amount}."
+msgid "Not connected."
 msgstr ""
 
 #: aurade_greeter/copy.py:197
-msgid "Clearing by {when}."
+msgid "Battery {percent} percent."
 msgstr ""
 
 #: aurade_greeter/copy.py:198
-msgid "A front comes through: {degrees} colder by {when}, with the wind swinging {direction}."
-msgstr ""
-
-#: aurade_greeter/copy.py:200
-msgid "Muggy."
+msgid "Battery {percent} percent, charging."
 msgstr ""
 
 #: aurade_greeter/copy.py:201
-msgid "The air is unstable, so a storm is possible even where none is forecast."
+msgid "Network"
+msgstr ""
+
+#: aurade_greeter/copy.py:202
+msgid "Accessibility"
 msgstr ""
 
 #: aurade_greeter/copy.py:203
-msgid "{degrees} warmer than usual for the date."
+msgid "Back"
 msgstr ""
 
 #: aurade_greeter/copy.py:204
-msgid "{degrees} colder than usual for the date."
+msgid "On"
 msgstr ""
 
 #: aurade_greeter/copy.py:205
-msgid "Checking the weather"
-msgstr ""
-
-#: aurade_greeter/copy.py:207
-msgid "No answer from the weather service yet."
+msgid "Off"
 msgstr ""
 
 #: aurade_greeter/copy.py:208
-msgid "Check again"
+msgid "Opens the list of networks in range."
 msgstr ""
 
 #: aurade_greeter/copy.py:209
-msgid "Asks the weather service for a new reading."
+msgid "The accessibility choices made during setup, still in force on this computer."
 msgstr ""
 
-#: aurade_greeter/copy.py:213
-msgid "Feels like {degrees}"
+#: aurade_greeter/copy.py:214
+msgid "High contrast"
 msgstr ""
 
-#: aurade_greeter/copy.py:218
-msgid "Feels like {degrees}, from the humidity"
+#: aurade_greeter/copy.py:215
+msgid "Larger text"
 msgstr ""
 
-#: aurade_greeter/copy.py:219
-msgid "Feels like {degrees}, from the wind"
+#: aurade_greeter/copy.py:216
+msgid "Reduced motion"
 msgstr ""
 
-#: aurade_greeter/copy.py:220
-msgid "H {high}   L {low}"
+#: aurade_greeter/copy.py:221
+msgid "Looking for networks."
+msgstr ""
+
+#: aurade_greeter/copy.py:222
+msgid "No networks in range."
+msgstr ""
+
+#: aurade_greeter/copy.py:223
+msgid "This computer has no Wi-Fi radio switched on."
 msgstr ""
 
 #: aurade_greeter/copy.py:224
-msgid "Humidity"
+msgid "The login screen cannot reach the network settings."
 msgstr ""
 
 #: aurade_greeter/copy.py:225
-msgid "Dew point {degrees}"
+msgid "Look again"
 msgstr ""
 
 #: aurade_greeter/copy.py:226
-msgid "Wind"
+msgid "Connected"
 msgstr ""
 
 #: aurade_greeter/copy.py:227
-msgid "Gusting {speed}"
+msgid "Saved"
 msgstr ""
 
 #: aurade_greeter/copy.py:228
-msgid "From the {direction}"
+msgid "Needs a password"
 msgstr ""
 
 #: aurade_greeter/copy.py:229
-msgid "UV index"
+msgid "Join {name}"
 msgstr ""
 
 #: aurade_greeter/copy.py:230
-msgid "Pressure"
+msgid "This network needs a password. Nothing you type here is stored by this screen."
 msgstr ""
 
 #: aurade_greeter/copy.py:231
-msgid "Low, unsettled"
+msgid "Join"
 msgstr ""
 
 #: aurade_greeter/copy.py:232
-msgid "Normal"
+msgid "Not now"
 msgstr ""
 
 #: aurade_greeter/copy.py:233
-msgid "High, settled"
+msgid "Joining {name}."
 msgstr ""
 
 #: aurade_greeter/copy.py:234
-msgid "Visibility"
+msgid "Disconnecting."
 msgstr ""
 
 #: aurade_greeter/copy.py:235
-msgid "Poor"
-msgstr ""
-
-#: aurade_greeter/copy.py:236
-msgid "Reduced"
-msgstr ""
-
-#: aurade_greeter/copy.py:237
-msgid "Clear"
+msgid "That network could not be joined."
 msgstr ""
 
 #: aurade_greeter/copy.py:238
-msgid "Moon"
+msgid "Restart"
 msgstr ""
 
 #: aurade_greeter/copy.py:239
-msgid "{percent} percent lit"
+msgid "Shut down"
+msgstr ""
+
+#: aurade_greeter/copy.py:240
+msgid "Restart this computer?"
+msgstr ""
+
+#: aurade_greeter/copy.py:241
+msgid "Shut down this computer?"
+msgstr ""
+
+#: aurade_greeter/copy.py:242
+msgid "Anything left unsaved in a signed in session will be lost."
 msgstr ""
 
 #: aurade_greeter/copy.py:243
-msgid "{hours}h {minutes}m of daylight"
-msgstr ""
-
-#: aurade_greeter/copy.py:244
-msgid "Sunrise at {time}"
-msgstr ""
-
-#: aurade_greeter/copy.py:245
-msgid "{hours}h {minutes}m until sunset"
+msgid "Keep this screen"
 msgstr ""
 
 #: aurade_greeter/copy.py:246
-msgid "The sun has set"
+msgid "Sign in as {name}."
 msgstr ""
 
 #: aurade_greeter/copy.py:247
-msgid "The sun neither rises nor sets here today"
+msgid "Password for {name}."
 msgstr ""
 
-#: aurade_greeter/copy.py:257
-msgid "Hourly forecast"
+#: aurade_greeter/copy.py:248
+msgid "The desktop {name} signs in to."
 msgstr ""
 
-#: aurade_greeter/copy.py:258
-msgid "The week ahead"
+#: aurade_greeter/copy.py:249
+msgid "Power options for this computer."
+msgstr ""
+
+#: aurade_greeter/copy.py:250
+msgid "{name}, signal {bars} of 4."
+msgstr ""
+
+#: aurade_greeter/copy.py:255
+msgid "Weather"
+msgstr ""
+
+#: aurade_greeter/copy.py:256
+msgid "The weather where you are, and the week ahead."
 msgstr ""
 
 #: aurade_greeter/copy.py:259
-msgid "Daylight"
+msgid "until {time}"
 msgstr ""
 
 #: aurade_greeter/copy.py:260
-msgid "{time}, {degrees}"
+msgid "now in force"
 msgstr ""
 
 #: aurade_greeter/copy.py:261
-msgid "{name}, {condition}, {low} to {high}"
+msgid "Weather warnings"
 msgstr ""
 
-#: aurade_greeter/copy.py:262
-msgid "{chance} percent chance of rain at {time}."
+#: aurade_greeter/copy.py:267
+msgid "Rain"
 msgstr ""
 
-#: aurade_greeter/copy.py:263
-msgid "No reading yet."
+#: aurade_greeter/copy.py:268
+msgid "Snow"
 msgstr ""
 
-#: aurade_greeter/copy.py:265
-msgid "Today"
-msgstr ""
-
-#: aurade_greeter/copy.py:266
-msgid "Tomorrow"
-msgstr ""
-
-#: aurade_greeter/copy.py:270
-msgid "{degrees}, {condition}, in {place}."
-msgstr ""
-
-#: aurade_greeter/copy.py:271
-msgid "{degrees}, {condition}."
+#: aurade_greeter/copy.py:275
+msgid "midnight"
 msgstr ""
 
 #: aurade_greeter/copy.py:276
-msgid "Good {part}"
+msgid "midday"
+msgstr ""
+
+#: aurade_greeter/copy.py:277
+msgid "{hour} in the morning"
+msgstr ""
+
+#: aurade_greeter/copy.py:278
+msgid "{hour} in the afternoon"
+msgstr ""
+
+#: aurade_greeter/copy.py:279
+msgid "{hour} in the evening"
 msgstr ""
 
 #: aurade_greeter/copy.py:280
-msgid "The date is wrong. Nothing has set this machine's clock."
+msgid "{kind} from {when}."
+msgstr ""
+
+#: aurade_greeter/copy.py:281
+msgid "{kind} from {when}, about {amount}."
 msgstr ""
 
 #: aurade_greeter/copy.py:282
-msgid "Press any key, or click, to sign in"
+msgid "{kind} within the hour."
 msgstr ""
 
 #: aurade_greeter/copy.py:283
-msgid "Locked"
+msgid "{kind} within the hour, about {amount}."
 msgstr ""
 
 #: aurade_greeter/copy.py:284
-msgid "Press any key, or click, to choose an account."
+msgid "Clearing by {when}."
 msgstr ""
 
-#: aurade_greeter/copy.py:289
-msgid "About this picture"
+#: aurade_greeter/copy.py:285
+msgid "A front comes through: {degrees} colder by {when}, with the wind swinging {direction}."
+msgstr ""
+
+#: aurade_greeter/copy.py:287
+msgid "Muggy."
+msgstr ""
+
+#: aurade_greeter/copy.py:288
+msgid "The air is unstable, so a storm is possible even where none is forecast."
 msgstr ""
 
 #: aurade_greeter/copy.py:290
-msgid "{there} there, {here} here"
+msgid "{degrees} warmer than usual for the date."
 msgstr ""
 
 #: aurade_greeter/copy.py:291
-msgid "{there} there"
+msgid "{degrees} colder than usual for the date."
 msgstr ""
 
-#: aurade_greeter/copy.py:297
-msgid "Equinox today. Day and night are almost the same length."
+#: aurade_greeter/copy.py:292
+msgid "Checking the weather"
 msgstr ""
 
-#: aurade_greeter/copy.py:298
-msgid "Solstice today. The sun turns back."
+#: aurade_greeter/copy.py:294
+msgid "No answer from the weather service yet."
 msgstr ""
 
-#: aurade_greeter/copy.py:299
-msgid "The longest day of the year."
+#: aurade_greeter/copy.py:295
+msgid "Check again"
+msgstr ""
+
+#: aurade_greeter/copy.py:296
+msgid "Asks the weather service for a new reading."
 msgstr ""
 
 #: aurade_greeter/copy.py:300
-msgid "The shortest day of the year."
+msgid "Feels like {degrees}"
 msgstr ""
 
-#: aurade_greeter/copy.py:301
-msgid "Full moon tonight."
+#: aurade_greeter/copy.py:305
+msgid "Feels like {degrees}, from the humidity"
+msgstr ""
+
+#: aurade_greeter/copy.py:306
+msgid "Feels like {degrees}, from the wind"
+msgstr ""
+
+#: aurade_greeter/copy.py:307
+msgid "H {high}   L {low}"
+msgstr ""
+
+#: aurade_greeter/copy.py:311
+msgid "Humidity"
 msgstr ""
 
 #: aurade_greeter/copy.py:312
-msgid "{miles} miles away, heading this way"
+msgid "Dew point {degrees}"
 msgstr ""
 
 #: aurade_greeter/copy.py:313
-msgid "{miles} miles away. About {minutes} minutes."
+msgid "Wind"
 msgstr ""
 
 #: aurade_greeter/copy.py:314
-msgid "{miles} miles away, moving off"
+msgid "Gusting {speed}"
+msgstr ""
+
+#: aurade_greeter/copy.py:315
+msgid "From the {direction}"
+msgstr ""
+
+#: aurade_greeter/copy.py:316
+msgid "UV index"
 msgstr ""
 
 #: aurade_greeter/copy.py:317
-msgid "Moving {way} at {mph} mph"
+msgid "Pressure"
+msgstr ""
+
+#: aurade_greeter/copy.py:318
+msgid "Low, unsettled"
+msgstr ""
+
+#: aurade_greeter/copy.py:319
+msgid "Normal"
+msgstr ""
+
+#: aurade_greeter/copy.py:320
+msgid "High, settled"
 msgstr ""
 
 #: aurade_greeter/copy.py:321
-msgid "Press any key to continue"
+msgid "Visibility"
 msgstr ""
 
-#: aurade_greeter/copy.py:336
-msgid "One more wrong password will lock this account."
+#: aurade_greeter/copy.py:322
+msgid "Poor"
 msgstr ""
 
-#: aurade_greeter/copy.py:337
-msgid "This account is locked for about {minutes} minutes. Nothing is broken. It unlocks itself."
+#: aurade_greeter/copy.py:323
+msgid "Reduced"
 msgstr ""
 
-#: aurade_greeter/copy.py:339
-msgid "This account is locked for about a minute. Nothing is broken. It unlocks itself."
+#: aurade_greeter/copy.py:324
+msgid "Clear"
+msgstr ""
+
+#: aurade_greeter/copy.py:325
+msgid "Moon"
+msgstr ""
+
+#: aurade_greeter/copy.py:326
+msgid "{percent} percent lit"
+msgstr ""
+
+#: aurade_greeter/copy.py:330
+msgid "{hours}h {minutes}m of daylight"
+msgstr ""
+
+#: aurade_greeter/copy.py:331
+msgid "Sunrise at {time}"
+msgstr ""
+
+#: aurade_greeter/copy.py:332
+msgid "{hours}h {minutes}m until sunset"
+msgstr ""
+
+#: aurade_greeter/copy.py:333
+msgid "The sun has set"
+msgstr ""
+
+#: aurade_greeter/copy.py:334
+msgid "The sun neither rises nor sets here today"
+msgstr ""
+
+#: aurade_greeter/copy.py:344
+msgid "Hourly forecast"
+msgstr ""
+
+#: aurade_greeter/copy.py:345
+msgid "The week ahead"
+msgstr ""
+
+#: aurade_greeter/copy.py:346
+msgid "Daylight"
+msgstr ""
+
+#: aurade_greeter/copy.py:347
+msgid "{time}, {degrees}"
+msgstr ""
+
+#: aurade_greeter/copy.py:348
+msgid "{name}, {condition}, {low} to {high}"
+msgstr ""
+
+#: aurade_greeter/copy.py:349
+msgid "{chance} percent chance of rain at {time}."
+msgstr ""
+
+#: aurade_greeter/copy.py:350
+msgid "No reading yet."
+msgstr ""
+
+#: aurade_greeter/copy.py:352
+msgid "Today"
+msgstr ""
+
+#: aurade_greeter/copy.py:353
+msgid "Tomorrow"
 msgstr ""
 
 #: aurade_greeter/copy.py:357
+msgid "{degrees}, {condition}, in {place}."
+msgstr ""
+
+#: aurade_greeter/copy.py:358
+msgid "{degrees}, {condition}."
+msgstr ""
+
+#: aurade_greeter/copy.py:363
+msgid "Good {part}"
+msgstr ""
+
+#: aurade_greeter/copy.py:367
+msgid "The date is wrong. Nothing has set this machine's clock."
+msgstr ""
+
+#: aurade_greeter/copy.py:369
+msgid "Press any key, or click, to sign in"
+msgstr ""
+
+#: aurade_greeter/copy.py:370
+msgid "Locked"
+msgstr ""
+
+#: aurade_greeter/copy.py:371
+msgid "Press any key, or click, to choose an account."
+msgstr ""
+
+#: aurade_greeter/copy.py:376
+msgid "About this picture"
+msgstr ""
+
+#: aurade_greeter/copy.py:377
+msgid "{there} there, {here} here"
+msgstr ""
+
+#: aurade_greeter/copy.py:378
+msgid "{there} there"
+msgstr ""
+
+#: aurade_greeter/copy.py:384
+msgid "Equinox today. Day and night are almost the same length."
+msgstr ""
+
+#: aurade_greeter/copy.py:385
+msgid "Solstice today. The sun turns back."
+msgstr ""
+
+#: aurade_greeter/copy.py:386
+msgid "The longest day of the year."
+msgstr ""
+
+#: aurade_greeter/copy.py:387
+msgid "The shortest day of the year."
+msgstr ""
+
+#: aurade_greeter/copy.py:388
+msgid "Full moon tonight."
+msgstr ""
+
+#: aurade_greeter/copy.py:399
+msgid "{miles} miles away, heading this way"
+msgstr ""
+
+#: aurade_greeter/copy.py:400
+msgid "{miles} miles away. About {minutes} minutes."
+msgstr ""
+
+#: aurade_greeter/copy.py:401
+msgid "{miles} miles away, moving off"
+msgstr ""
+
+#: aurade_greeter/copy.py:404
+msgid "Moving {way} at {mph} mph"
+msgstr ""
+
+#: aurade_greeter/copy.py:408
+msgid "Press any key to continue"
+msgstr ""
+
+#: aurade_greeter/copy.py:423
+msgid "One more wrong password will lock this account."
+msgstr ""
+
+#: aurade_greeter/copy.py:424
+msgid "This account is locked for about {minutes} minutes. Nothing is broken. It unlocks itself."
+msgstr ""
+
+#: aurade_greeter/copy.py:426
+msgid "This account is locked for about a minute. Nothing is broken. It unlocks itself."
+msgstr ""
+
+#: aurade_greeter/copy.py:444
 msgid "Air quality"
 msgstr ""
 
-#: aurade_greeter/copy.py:360
+#: aurade_greeter/copy.py:447
 msgid "{advice} ({band})"
 msgstr ""
 
-#: aurade_greeter/copy.py:364
+#: aurade_greeter/copy.py:451
 msgid "and falling"
 msgstr ""
 
-#: aurade_greeter/copy.py:365
+#: aurade_greeter/copy.py:452
 msgid "and rising"
 msgstr ""
 
-#: aurade_greeter/copy.py:366
+#: aurade_greeter/copy.py:453
 msgid "and steady"
 msgstr ""
 
@@ -673,183 +745,183 @@ msgstr ""
 msgid "Haze"
 msgstr ""
 
-#: aurade_greeter/copy.py:173
+#: aurade_greeter/copy.py:183
 msgid "north"
 msgstr ""
 
-#: aurade_greeter/copy.py:173
+#: aurade_greeter/copy.py:183
 msgid "north-northeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:173
+#: aurade_greeter/copy.py:183
 msgid "northeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:173
+#: aurade_greeter/copy.py:183
 msgid "east-northeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:174
+#: aurade_greeter/copy.py:184
 msgid "east"
 msgstr ""
 
-#: aurade_greeter/copy.py:174
+#: aurade_greeter/copy.py:184
 msgid "east-southeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:174
+#: aurade_greeter/copy.py:184
 msgid "southeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:174
+#: aurade_greeter/copy.py:184
 msgid "south-southeast"
 msgstr ""
 
-#: aurade_greeter/copy.py:175
+#: aurade_greeter/copy.py:185
 msgid "south"
 msgstr ""
 
-#: aurade_greeter/copy.py:175
+#: aurade_greeter/copy.py:185
 msgid "south-southwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:175
+#: aurade_greeter/copy.py:185
 msgid "southwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:175
+#: aurade_greeter/copy.py:185
 msgid "west-southwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:176
+#: aurade_greeter/copy.py:186
 msgid "west"
 msgstr ""
 
-#: aurade_greeter/copy.py:176
+#: aurade_greeter/copy.py:186
 msgid "west-northwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:176
+#: aurade_greeter/copy.py:186
 msgid "northwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:176
+#: aurade_greeter/copy.py:186
 msgid "north-northwest"
 msgstr ""
 
-#: aurade_greeter/copy.py:1370
+#: aurade_greeter/copy.py:1380
 msgid "Hazardous"
 msgstr ""
 
-#: aurade_greeter/copy.py:1379
+#: aurade_greeter/copy.py:1389
 msgid "Stay indoors"
 msgstr ""
 
-#: aurade_greeter/copy.py:1412
+#: aurade_greeter/copy.py:1422
 msgid "Extreme"
 msgstr ""
 
-#: aurade_greeter/copy.py:163
+#: aurade_greeter/copy.py:173
 msgid "Low"
 msgstr ""
 
-#: aurade_greeter/copy.py:163
+#: aurade_greeter/copy.py:173
 msgid "Moderate"
 msgstr ""
 
-#: aurade_greeter/copy.py:163
+#: aurade_greeter/copy.py:173
 msgid "High"
 msgstr ""
 
-#: aurade_greeter/copy.py:164
+#: aurade_greeter/copy.py:174
 msgid "Very high"
 msgstr ""
 
-#: aurade_greeter/copy.py:189
+#: aurade_greeter/copy.py:199
 msgid "New moon"
 msgstr ""
 
-#: aurade_greeter/copy.py:190
+#: aurade_greeter/copy.py:200
 msgid "Waxing crescent"
 msgstr ""
 
-#: aurade_greeter/copy.py:191
+#: aurade_greeter/copy.py:201
 msgid "First quarter"
 msgstr ""
 
-#: aurade_greeter/copy.py:192
+#: aurade_greeter/copy.py:202
 msgid "Waxing gibbous"
 msgstr ""
 
-#: aurade_greeter/copy.py:193
+#: aurade_greeter/copy.py:203
 msgid "Full moon"
 msgstr ""
 
-#: aurade_greeter/copy.py:194
+#: aurade_greeter/copy.py:204
 msgid "Waning gibbous"
 msgstr ""
 
-#: aurade_greeter/copy.py:195
+#: aurade_greeter/copy.py:205
 msgid "Last quarter"
 msgstr ""
 
-#: aurade_greeter/copy.py:196
+#: aurade_greeter/copy.py:206
 msgid "Waning crescent"
 msgstr ""
 
-#: aurade_greeter/copy.py:1346
+#: aurade_greeter/copy.py:1356
 msgid "Good"
 msgstr ""
 
-#: aurade_greeter/copy.py:1348
+#: aurade_greeter/copy.py:1358
 msgid "Unhealthy for sensitive groups"
 msgstr ""
 
-#: aurade_greeter/copy.py:1349
+#: aurade_greeter/copy.py:1359
 msgid "Unhealthy"
 msgstr ""
 
-#: aurade_greeter/copy.py:1350
+#: aurade_greeter/copy.py:1360
 msgid "Very unhealthy"
 msgstr ""
 
-#: aurade_greeter/copy.py:1356
+#: aurade_greeter/copy.py:1366
 msgid "Fine to be out"
 msgstr ""
 
-#: aurade_greeter/copy.py:1357
+#: aurade_greeter/copy.py:1367
 msgid "Fine for most people"
 msgstr ""
 
-#: aurade_greeter/copy.py:1358
+#: aurade_greeter/copy.py:1368
 msgid "Take it easy outside if your chest is sensitive"
 msgstr ""
 
-#: aurade_greeter/copy.py:1359
+#: aurade_greeter/copy.py:1369
 msgid "Everybody should go easy outside"
 msgstr ""
 
-#: aurade_greeter/copy.py:1360
+#: aurade_greeter/copy.py:1370
 msgid "Stay indoors if you can"
 msgstr ""
 
-#: aurade_greeter/copy.py:1422
+#: aurade_greeter/copy.py:1432
 msgid "Safe outside for most of the day"
 msgstr ""
 
-#: aurade_greeter/copy.py:1423
+#: aurade_greeter/copy.py:1433
 msgid "Unprotected skin burns in about 45 minutes"
 msgstr ""
 
-#: aurade_greeter/copy.py:1424
+#: aurade_greeter/copy.py:1434
 msgid "Unprotected skin burns in about 30 minutes"
 msgstr ""
 
-#: aurade_greeter/copy.py:1425
+#: aurade_greeter/copy.py:1435
 msgid "Unprotected skin burns in about 15 minutes"
 msgstr ""
 
-#: aurade_greeter/copy.py:1444
+#: aurade_greeter/copy.py:1454
 msgid "Unprotected skin burns in under 10 minutes"
 msgstr ""
 

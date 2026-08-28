@@ -43,6 +43,10 @@ from aurade_greeter import copy as C  # noqa: E402
 from aurade_greeter import protocol as P  # noqa: E402
 from aurade_greeter import weatherui as WUI  # noqa: E402
 from aurade_greeter import alertui as AU  # noqa: E402
+from aurade_greeter import weather as _W  # noqa: E402
+
+#: The words for every condition the shade will draw a line for.
+W_WORDS = {_W.WORDS[kind] for kind in _W.SPELLS}
 from aurade_greeter import network as NET  # noqa: E402
 from aurade_greeter.app import GreeterWindow, Wallpaper  # noqa: E402
 from aurade_greeter import weather as WX  # noqa: E402
@@ -1277,6 +1281,46 @@ def test_the_air_tile_appears_only_with_a_reading(app) -> None:
               "the air note was never filled in")
     finally:
         window.weather.air_index, window.weather.air_pm = kept
+        window._paint_weather()
+
+
+def test_the_shade_says_what_the_sky_is_doing(app) -> None:
+    """The faint line under the clock, and only while there is weather.
+
+    Worth a runtime assertion rather than a unit one because the failure it
+    caught was silent in exactly the way a unit test would have missed:
+    `outlook._ahead` skips any hour it cannot compare against the clock it is
+    given, so a naive clock against an aware forecast skips every hour and the
+    line simply never appears. No traceback, no empty row, nothing.
+    """
+    window, _ = build(app, [])
+    line = window.widgets.get("shade.weather")
+    if line is None or window.weather is None:
+        NOT_COVERED.append("the shade weather line: this build has no weather")
+        return
+    words = window.widgets["shade.weather.words"]
+    kept = [hour.condition for hour in window.weather.hours]
+    try:
+        # The seeded reading is rain, which is weather.
+        window._paint_weather()
+        check(line.get_visible(),
+              "the sky is raining and the shade says nothing about it")
+        said = words.get_label()
+        check(said, "the weather line is drawn with nothing written on it")
+        check("until" in said or said in W_WORDS,
+              f"the line reads {said!r}, which is neither a spell with an end "
+              f"on it nor one without")
+
+        # A clear sky is not an event.
+        for hour in window.weather.hours:
+            hour.condition = WX.CLEAR
+        window._paint_weather()
+        check(not line.get_visible(),
+              "a clear sky put a line under the clock, which spends somebody's "
+              "attention on a fact they can get by turning their head")
+    finally:
+        for hour, condition in zip(window.weather.hours, kept):
+            hour.condition = condition
         window._paint_weather()
 
 

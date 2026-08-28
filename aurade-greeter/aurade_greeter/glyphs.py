@@ -213,6 +213,35 @@ class Battery(Glyph):
             cr.set_operator(cairo.OPERATOR_OVER)
 
 
+class Brightness(Glyph):
+    """A sun, for the slider. Not a weather sun: this one is a control.
+
+    Drawn here rather than taken from `weatherdraw`, deliberately. That sun
+    has a warm cast and a soft halo because it is describing a sky, and a sky
+    beside a slider reads as a forecast rather than as a brightness. This one
+    is the interface's own ink and nothing else.
+    """
+
+    def draw(self, cr) -> None:
+        import cairo  # noqa: PLC0415
+
+        cr.set_source_rgb(*self.colour("on_surface_variant"))
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+
+        cr.new_path()
+        cr.arc(12.0, 12.0, 4.1, 0.0, math.tau)
+        cr.fill()
+
+        cr.set_line_width(1.8)
+        for index in range(8):
+            angle = index * math.tau / 8.0
+            cr.move_to(12.0 + math.cos(angle) * 6.6,
+                       12.0 + math.sin(angle) * 6.6)
+            cr.line_to(12.0 + math.cos(angle) * 9.2,
+                       12.0 + math.sin(angle) * 9.2)
+        cr.stroke()
+
+
 class Chevron(Glyph):
     """Points at the page this opens."""
 

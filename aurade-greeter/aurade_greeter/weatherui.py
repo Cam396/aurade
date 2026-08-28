@@ -783,6 +783,22 @@ def _zone_of(report: W.Report):
     return _dt.datetime.now().astimezone().tzinfo
 
 
+#: Public names for the two the shade needs.
+#:
+#: The line under the clock says the same hour, in the same zone, in the same
+#: words as the panel behind it. Two implementations of "half past four" is
+#: two things to keep in step, and they would drift the first time either was
+#: touched.
+
+
+def clock_words(moment, zone) -> str:
+    return _clock(moment, zone)
+
+
+def zone_of(report):
+    return _zone_of(report)
+
+
 def _clock(moment, zone) -> str:
     if moment is None:
         return ""

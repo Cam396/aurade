@@ -828,18 +828,38 @@ def draw_wordmark(cr, x: float, y: float, height: float, colour: str) -> float:
 
 def draw_signal(cr, width: int, height: int, strength: int, colour: str,
                 dim: str) -> None:
-    """Four arcs around a common origin, lit from the inside out."""
+    """A dot and three arcs, lit from the inside out.
+
+    Four elements, so `signal_arcs` still answers the question it always
+    answered, and the same four levels as before.
+
+    It was four arcs and no dot, which is a signal strength meter rather than
+    a wireless mark. Every set a person has already learned, on a phone, on a
+    laptop, on the ChromeOS desktop this sits in front of, is a dot with arcs
+    over it, and the innermost of four arcs at this size renders as a smudge
+    rather than as a thing. The fan is wider than it was for the same reason:
+    a hundred and four degrees reads as pinched beside marks drawn at a
+    hundred and thirty.
+    """
     import cairo  # noqa: PLC0415
 
     lit = signal_arcs(strength)
-    cx, cy = width / 2.0, height * 0.86
-    cr.set_line_width(max(1.6, height * 0.075))
+    cx, cy = width / 2.0, height * 0.83
+    stroke = max(1.6, height * 0.082)
+    cr.set_line_width(stroke)
     cr.set_line_cap(cairo.LINE_CAP_ROUND)
-    for index in range(4):
-        radius = height * (0.18 + index * 0.21)
-        cr.set_source_rgb(*T.rgb(colour if index < lit else dim))
+
+    # The dot, which is the first thing lit and the last thing to go.
+    cr.set_source_rgb(*T.rgb(colour if lit >= 1 else dim))
+    cr.new_path()
+    cr.arc(cx, cy, stroke * 0.62, 0.0, math.tau)
+    cr.fill()
+
+    for index in range(3):
+        radius = height * (0.30 + index * 0.215)
+        cr.set_source_rgb(*T.rgb(colour if index + 2 <= lit else dim))
         cr.new_path()
-        cr.arc(cx, cy, radius, math.radians(218), math.radians(322))
+        cr.arc(cx, cy, radius, math.radians(205), math.radians(335))
         cr.stroke()
 
 
