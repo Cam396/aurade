@@ -604,6 +604,70 @@ check(W.source_words("") == "", "an unknown service was credited anyway")
 check("AuraDE" in W.AGENT and "http" in W.AGENT,
       "the user agent does not identify this product and a way to reach it")
 
+# Units, which have to agree across a whole panel or none of it is trusted.
+#
+# The bug this covers was visible on the screen: the panel said 80 degrees
+# and 29.96 inHg and 10.0 miles, and then the forecast sentence in the middle
+# of it said "a low around 26" and "0.5 cm". The numbers were converted at
+# the point of display and the sentence was not, because a sentence has its
+# units baked in rather than applied at the end.
+check(W.precipitation_words(0.4) == "0.4 mm",
+      "a trace of rain lost its decimal in millimetres")
+check(W.precipitation_words(5.0) == "5 mm",
+      "millimetres kept a decimal it does not need")
+check(W.precipitation_words(0.4, "f") == "0.02 in",
+      "a trace of rain rounded away to nothing in inches")
+check(W.precipitation_words(12.7, "f") == "0.5 in",
+      "half an inch is not half an inch")
+check(W.precipitation_words(25.4, "f") == "1.0 in",
+      "an inch of rain is not an inch")
+check(W.precipitation_words(None) == "--" and
+      W.precipitation_words(None, "f") == "--",
+      "no reading became a number")
+check("mm" not in W.precipitation_words(5.0, "f"),
+      "millimetres reached a reader asking for Fahrenheit")
+check("in" not in W.precipitation_words(5.0, "c"),
+      "inches reached a reader asking for Celsius")
+
+# A period arrives in whichever system was asked for and has to end up on the
+# module's own scale either way.
+check(W._celsius(212.0, "F") == 100.0, "boiling did not come back as 100C")
+check(W._celsius(100.0, "C") == 100.0, "a Celsius reading was converted anyway")
+check(W._celsius(None, "F") is None, "a missing reading became a number")
+
+# And the sentence follows the reader. Same fixture, two requests.
+seen: list[str] = []
+
+
+class Recorder(Service):
+    def __call__(self, url: str):
+        seen.append(url)
+        return super().__call__(url)
+
+
+for asked, expect in (("c", "units=si"), ("f", "units=us")):
+    seen.clear()
+    W.from_nws(41.0126, -73.8437, get=Recorder(), units=asked)
+    daily = [u for u in seen if "/forecast" in u and "hourly" not in u]
+    check(daily and expect in daily[0],
+          f"asked for {asked!r} and the forecast request was {daily[:1]}")
+    hourly = [u for u in seen if "/forecast/hourly" in u]
+    check(hourly and "units=si" in hourly[0],
+          "the hourly request stopped being SI, and nothing in it is a sentence")
+
+# The ultraviolet note leads with what to do and keeps the official name.
+for index, band in ((1, "Low"), (4, "Moderate"), (7, "High"),
+                    (9, "Very high"), (12, "Extreme")):
+    note = W.ultraviolet_note(index)
+    check(note.endswith(f"({band})"),
+          f"UV {index} did not carry its official name, said {note!r}")
+    check(len(note.split(" (")[0]) > len(band),
+          f"UV {index} said nothing before its band name")
+check(W.ultraviolet_note(None) == "", "no reading produced a sentence anyway")
+check("15 minutes" in W.ultraviolet_note(9),
+      "very high did not say how long before skin reddens")
+
+
 # The rows of the week, named against what is actually drawn.
 #
 # This is the bug that was on the screen when somebody asked for a picture of

@@ -580,8 +580,15 @@ def test_the_weather_panel_fills_itself_in(app) -> None:
     equal(panel.humidity.value.get_label(), "77%", "the humidity tile is empty")
     check("21" in panel.humidity.note.get_label(),
           "the dew point never reached its tile")
-    equal(panel.ultraviolet.note.get_label(), "High",
-          "the ultraviolet index was not put into words")
+    # The contract rather than the literal. The note leads with what the
+    # number means for somebody standing outside and ends with the official
+    # band name in brackets, and pinning the whole sentence here means the
+    # copy cannot be improved without a test failure that says nothing.
+    uv_note = panel.ultraviolet.note.get_label()
+    check(uv_note.endswith("(High)"),
+          f"the ultraviolet tile lost its official band name, said {uv_note!r}")
+    check(len(uv_note) > len("(High)") + 8,
+          f"the ultraviolet tile says only its band name, {uv_note!r}")
     check(panel.days.days, "the week never reached the panel")
     check(panel.hours.hours, "the hours never reached the panel")
     check("Today" in panel.days.names,

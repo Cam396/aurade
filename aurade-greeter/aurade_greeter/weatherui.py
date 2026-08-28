@@ -541,7 +541,7 @@ class Panel(Gtk.Box):
         index = today.ultraviolet if today else None
         self.uv_bar.show_value(index)
         self.ultraviolet.say("--" if index is None else f"{index:.0f}",
-                             W.ultraviolet_words(index))
+                             W.ultraviolet_note(index))
 
         self.pressure_bar.show_value(now.pressure, 960.0, 1050.0, "tertiary")
         self.pressure.say(W.pressure_words(now.pressure, units),

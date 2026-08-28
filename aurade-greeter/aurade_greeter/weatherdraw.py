@@ -139,96 +139,212 @@ def measure(cr, font: Pango.FontDescription, words: str, scale: float = 1.0
 # -- the sky ----------------------------------------------------------------
 
 
+def lift(rgb: tuple, amount: float) -> tuple:
+    """A colour moved toward white, for the lit top of a shape."""
+    return tuple(min(1.0, c + (1.0 - c) * amount) for c in rgb)
+
+
+def sink(rgb: tuple, amount: float) -> tuple:
+    """A colour moved toward black, for the shaded underside of one."""
+    return tuple(max(0.0, c * (1.0 - amount)) for c in rgb)
+
+
 def cloud(cr, x: float, y: float, size: float) -> None:
     """A cloud silhouette as a closed path, ready to fill or stroke.
 
-    Three lobes over a flat base, which is the shape everybody draws, because
-    a cloud drawn from observation reads as a smudge at eighteen pixels.
+    Three lobes, and deliberately not three equal ones. The symmetrical
+    version everybody draws is the shape that dates this whole icon set: a
+    cloud with a big lobe left of centre and a smaller one trailing right
+    reads as weather, and the same shape with matched lobes reads as a logo.
+
+    Four lobes was tried and abandoned. The chain between the third and the
+    fourth arc stops being tangential and leaves a notch on the right edge,
+    and a notch reads as a mistake rather than as a cloud.
     """
     unit = size / 24.0
 
     def at(px: float, py: float) -> tuple[float, float]:
         return x + px * unit, y + py * unit
 
-    left_x, left_y = at(7.2, 13.4)
-    top_x, top_y = at(11.6, 11.0)
-    right_x, right_y = at(17.0, 13.2)
+    left_x, left_y = at(6.9, 14.4)
+    top_x, top_y = at(10.9, 10.1)
+    right_x, right_y = at(16.9, 13.7)
     cr.new_sub_path()
-    cr.arc(left_x, left_y, 3.6 * unit, math.radians(90), math.radians(268))
-    cr.arc(top_x, top_y, 4.7 * unit, math.radians(198), math.radians(346))
-    cr.arc(right_x, right_y, 3.8 * unit, math.radians(268), math.radians(90))
+    cr.arc(left_x, left_y, 4.3 * unit, math.radians(90), math.radians(266))
+    cr.arc(top_x, top_y, 5.2 * unit, math.radians(196), math.radians(344))
+    cr.arc(right_x, right_y, 3.4 * unit, math.radians(266), math.radians(90))
     cr.close_path()
 
 
-def sun(cr, x: float, y: float, radius: float, rays: bool = True) -> None:
+def sun(cr, x: float, y: float, radius: float, rays: bool = True,
+        warm: tuple | None = None) -> None:
+    """A disc with a halo, and eight tapered rays rather than eight spokes.
+
+    The spoke sun is the other half of what dates the old set. A ray that is
+    a line of constant width is a diagram of a sun; a ray that narrows as it
+    leaves is light. The halo is what actually sells it, and it costs one
+    radial gradient.
+
+    `warm` is the disc colour as an rgb triple. Without it the source already
+    set by the caller is used and no halo is drawn, which is what the callers
+    that only want a flat disc still get.
+    """
+    import cairo  # noqa: PLC0415
+
+    if warm is not None:
+        halo = cairo.RadialGradient(x, y, radius * 0.72, x, y, radius * 2.5)
+        halo.add_color_stop_rgba(0.0, *warm, 0.40)
+        halo.add_color_stop_rgba(0.55, *warm, 0.12)
+        halo.add_color_stop_rgba(1.0, *warm, 0.0)
+        cr.set_source(halo)
+        cr.arc(x, y, radius * 2.5, 0, math.tau)
+        cr.fill()
     if rays:
         cr.save()
-        cr.set_line_width(radius * 0.30)
-        cr.set_line_cap(1)  # round
+        cr.translate(x, y)
         for index in range(8):
-            angle = math.radians(index * 45.0)
-            inner = radius * 1.52
-            outer = radius * 2.06
-            cr.move_to(x + math.cos(angle) * inner, y + math.sin(angle) * inner)
-            cr.line_to(x + math.cos(angle) * outer, y + math.sin(angle) * outer)
-        cr.stroke()
+            cr.save()
+            cr.rotate(math.radians(index * 45.0 + 22.5))
+            inner = radius * 1.42
+            outer = radius * (2.02 if index % 2 == 0 else 1.76)
+            half = radius * 0.16
+            cr.move_to(inner, -half)
+            cr.line_to(outer, -half * 0.42)
+            cr.line_to(outer, half * 0.42)
+            cr.line_to(inner, half)
+            cr.close_path()
+            if warm is not None:
+                cr.set_source_rgba(*warm, 0.92)
+            cr.fill()
+            cr.restore()
         cr.restore()
+    if warm is not None:
+        disc = cairo.LinearGradient(x, y - radius, x, y + radius)
+        disc.add_color_stop_rgb(0.0, *lift(warm, 0.34))
+        disc.add_color_stop_rgb(1.0, *sink(warm, 0.16))
+        cr.set_source(disc)
     cr.new_sub_path()
     cr.arc(x, y, radius, 0, math.tau)
     cr.fill()
 
 
-def crescent(cr, x: float, y: float, radius: float) -> None:
+def crescent(cr, x: float, y: float, radius: float,
+             cool: tuple | None = None) -> None:
     """The moon as a disc with a bite taken out, cut rather than overdrawn.
 
     Overdrawing the bite in the background colour only works when the mark
-    sits on that colour, and this one sits on a photograph.
+    sits on that colour, and this one sits on a photograph. The group is what
+    makes the bite transparent: clearing straight onto an opaque surface
+    punches to black, which draws a black disc instead of a moon.
+
+    `cool` lights the outer edge. Without it the caller's flat source is used.
     """
     import cairo  # noqa: PLC0415
 
     cr.save()
     cr.push_group()
+    if cool is not None:
+        grad = cairo.LinearGradient(x - radius, y - radius,
+                                    x + radius, y + radius)
+        grad.add_color_stop_rgb(0.0, *lift(cool, 0.42))
+        grad.add_color_stop_rgb(1.0, *sink(cool, 0.12))
+        cr.set_source(grad)
     cr.new_sub_path()
     cr.arc(x, y, radius, 0, math.tau)
     cr.fill()
     cr.set_operator(cairo.OPERATOR_CLEAR)
     cr.new_sub_path()
-    cr.arc(x + radius * 0.62, y - radius * 0.40, radius * 0.92, 0, math.tau)
+    cr.arc(x + radius * 0.60, y - radius * 0.42, radius * 0.94, 0, math.tau)
     cr.fill()
     cr.pop_group_to_source()
     cr.paint()
     cr.restore()
 
 
-def _drops(cr, count: int, y: float, length: float, lean: float = 2.0) -> None:
+def _drops(cr, count: int, y: float, length: float, lean: float = 2.0,
+           wet: tuple | None = None) -> None:
+    """Rain as teardrops rather than as parallel capsules.
+
+    A drop has a point where it left the cloud and a belly where the water
+    gathered. Two line caps of equal width is a pill, and a row of pills is
+    the thing that made the old set look like a 2014 icon font.
+
+    Without `wet` these are stroked with the caller's source, which is the
+    behaviour every caller had before.
+    """
+    import cairo  # noqa: PLC0415
+
     span = 13.0
     step = span / max(1, count - 1) if count > 1 else 0.0
     start = 12.0 - span / 2.0
     for index in range(count):
         x = start + step * index
-        cr.move_to(x + lean, y)
-        cr.line_to(x, y + length)
-    cr.stroke()
+        if wet is None:
+            cr.move_to(x + lean, y)
+            cr.line_to(x, y + length)
+            continue
+        width = length * 0.34
+        cr.save()
+        cr.translate(x + lean * 0.5, y + length * 0.5)
+        cr.rotate(math.atan(lean * 0.16))
+        cr.move_to(0.0, -length * 0.5)
+        cr.curve_to(width * 0.62, -length * 0.02,
+                    width * 0.72, length * 0.16, 0.0, length * 0.5)
+        cr.curve_to(-width * 0.72, length * 0.16,
+                    -width * 0.62, -length * 0.02, 0.0, -length * 0.5)
+        cr.close_path()
+        grad = cairo.LinearGradient(0.0, -length * 0.5, 0.0, length * 0.5)
+        grad.add_color_stop_rgb(0.0, *lift(wet, 0.30))
+        grad.add_color_stop_rgb(1.0, *sink(wet, 0.12))
+        cr.set_source(grad)
+        cr.fill()
+        cr.restore()
+    if wet is None:
+        cr.stroke()
 
 
 def _flakes(cr, count: int, y: float, radius: float,
-            span: float = 13.0) -> None:
+            span: float = 13.0, cold: tuple | None = None) -> None:
     """Six pointed stars, spaced so they stay separate marks.
 
     Three flakes at the size a status pill wants them is already close to the
     point where the arms of one touch the arms of the next and the whole
     thing reads as a blue smear, so the spacing is set from the radius rather
     than chosen.
+
+    With `cold` the arms taper from a small hub, which is what a flake looks
+    like. Without it they are the six crossed strokes the callers drew before.
     """
     step = span / max(1, count - 1) if count > 1 else 0.0
     start = 12.0 - (span if count > 1 else 0.0) / 2.0
     for index in range(count):
         x = start + step * index
-        for arm in range(3):
-            angle = math.radians(arm * 60.0)
-            cr.move_to(x - math.cos(angle) * radius, y - math.sin(angle) * radius)
-            cr.line_to(x + math.cos(angle) * radius, y + math.sin(angle) * radius)
-    cr.stroke()
+        if cold is None:
+            for arm in range(3):
+                angle = math.radians(arm * 60.0)
+                cr.move_to(x - math.cos(angle) * radius,
+                           y - math.sin(angle) * radius)
+                cr.line_to(x + math.cos(angle) * radius,
+                           y + math.sin(angle) * radius)
+            continue
+        cr.save()
+        cr.translate(x, y)
+        cr.set_source_rgba(*lift(cold, 0.24), 0.95)
+        for arm in range(6):
+            cr.save()
+            cr.rotate(math.radians(arm * 60.0))
+            cr.move_to(0.0, 0.0)
+            cr.line_to(radius * 0.17, -radius * 0.55)
+            cr.line_to(0.0, -radius)
+            cr.line_to(-radius * 0.17, -radius * 0.55)
+            cr.close_path()
+            cr.fill()
+            cr.restore()
+        cr.arc(0.0, 0.0, radius * 0.20, 0, math.tau)
+        cr.fill()
+        cr.restore()
+    if cold is None:
+        cr.stroke()
 
 
 def sky(cr, condition: str, daylight: bool, colours: dict,
@@ -259,14 +375,28 @@ def sky(cr, condition: str, daylight: bool, colours: dict,
     def orb(x: float, y: float, radius: float, rays: bool = True) -> None:
         _set(cr, colours, warm)
         if daylight:
-            sun(cr, x, y, radius, rays)
+            sun(cr, x, y, radius, rays, warm=rgb(colours[warm]))
         else:
-            crescent(cr, x, y, radius)
+            crescent(cr, x, y, radius, cool=rgb(colours[warm]))
 
     def body(x: float = 0.0, y: float = 0.0, size: float = 24.0,
              role: str = "") -> None:
-        _set(cr, colours, role or lit)
+        """The cloud, lit from the top.
+
+        A flat fill makes a sticker. The gradient is small, a third toward
+        white at the crown and a quarter toward black at the base, and it is
+        the whole difference between a shape with volume and a shape cut out
+        of paper.
+        """
+        import cairo  # noqa: PLC0415
+
+        base = rgb(colours[role or lit])
+        unit = size / 24.0
+        shade = cairo.LinearGradient(x, y + 5.0 * unit, x, y + 19.0 * unit)
+        shade.add_color_stop_rgb(0.0, *lift(base, 0.30))
+        shade.add_color_stop_rgb(1.0, *sink(base, 0.26))
         cloud(cr, x, y, size)
+        cr.set_source(shade)
         cr.fill()
 
     if condition == W.CLEAR:
@@ -335,24 +465,24 @@ def sky(cr, condition: str, daylight: bool, colours: dict,
     cr.set_line_width(1.9)
 
     if condition == W.DRIZZLE:
-        _drops(cr, 2, 16.6, 3.0, 1.1)
+        _drops(cr, 2, 16.6, 3.6, 1.1, wet=rgb(colours[wet]))
     elif condition == W.RAIN:
-        _drops(cr, 3, 16.2, 4.4, 1.7)
+        _drops(cr, 3, 16.2, 5.0, 1.7, wet=rgb(colours[wet]))
     elif condition == W.HEAVY_RAIN:
         cr.set_line_width(2.1)
-        _drops(cr, 4, 15.4, 6.0, 2.2)
+        _drops(cr, 4, 15.4, 6.2, 2.2, wet=rgb(colours[wet]))
     elif condition == W.SNOW:
         cr.set_line_width(1.5)
-        _flakes(cr, 3, 18.2, 1.9, 13.4)
+        _flakes(cr, 3, 18.2, 2.3, 13.4, cold=rgb(colours[wet]))
     elif condition == W.HEAVY_SNOW:
         cr.set_line_width(1.5)
-        _flakes(cr, 2, 16.4, 1.9, 9.0)
-        _flakes(cr, 3, 21.0, 1.9, 14.0)
+        _flakes(cr, 2, 16.4, 2.2, 9.0, cold=rgb(colours[wet]))
+        _flakes(cr, 3, 21.0, 2.2, 14.0, cold=rgb(colours[wet]))
     elif condition == W.SLEET:
-        _drops(cr, 2, 16.2, 4.0, 1.6)
-        _flakes(cr, 1, 19.4, 2.0)
+        _drops(cr, 2, 16.2, 4.8, 1.6, wet=rgb(colours[wet]))
+        _flakes(cr, 1, 19.4, 2.6, cold=rgb(colours[wet]))
     elif condition == W.FREEZING:
-        _drops(cr, 3, 15.8, 3.4, 1.4)
+        _drops(cr, 3, 15.8, 4.0, 1.4, wet=rgb(colours[wet]))
         _set(cr, colours, dim)
         cr.set_line_width(1.9)
         cr.move_to(6.0, 21.4)
@@ -365,17 +495,26 @@ def sky(cr, condition: str, daylight: bool, colours: dict,
             cr.arc(x, y, 1.5, 0, math.tau)
         cr.fill()
     elif condition == W.THUNDER:
-        _set(cr, colours, "warning")
-        cr.move_to(13.6, 14.2)
-        cr.line_to(9.0, 20.2)
-        cr.line_to(11.9, 20.2)
-        cr.line_to(10.9, 24.0)
-        cr.line_to(15.6, 18.0)
-        cr.line_to(12.6, 18.0)
+        # Wider where it leaves the cloud and narrow where it earths, which
+        # is both what lightning looks like and what stops a bolt reading as
+        # a hazard sign. Same six points, moved, plus a gradient down them.
+        import cairo  # noqa: PLC0415
+
+        hot = rgb(colours["warning"])
+        cr.move_to(14.2, 13.9)
+        cr.line_to(8.7, 20.1)
+        cr.line_to(11.9, 20.3)
+        cr.line_to(10.6, 24.1)
+        cr.line_to(15.8, 17.7)
+        cr.line_to(12.8, 17.5)
         cr.close_path()
+        flash = cairo.LinearGradient(0.0, 13.9, 0.0, 24.1)
+        flash.add_color_stop_rgb(0.0, *lift(hot, 0.45))
+        flash.add_color_stop_rgb(1.0, *sink(hot, 0.12))
+        cr.set_source(flash)
         cr.fill()
     else:
-        _drops(cr, 3, 16.2, 4.4, 1.7)
+        _drops(cr, 3, 16.2, 5.0, 1.7, wet=rgb(colours[wet]))
 
 
 # -- the hourly band --------------------------------------------------------
