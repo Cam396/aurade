@@ -68,6 +68,19 @@ SOURCES = [
     # readiness page verbatim, so it is product copy however much it looks
     # like a sysadmin's checklist.
     ("installer/archiso/airootfs/usr/local/sbin/aurade-network-diagnostics", "shell"),
+    # The login screen, which was reading zero of its strings through this
+    # while fourteen installer files read all of theirs.
+    #
+    # It is the same product and the same rules, and it is arguably the more
+    # exposed half: an installer is read once by somebody who chose to run it,
+    # and a login screen is read every morning by somebody who did not. The
+    # only reason it was not here is that it arrived later.
+    ("aurade-greeter/aurade_greeter/copy.py", "python"),
+    # Not only `copy.py`. These three build sentences of their own, and a
+    # module that formats a phrase is as user facing as one that stores it.
+    ("aurade-greeter/aurade_greeter/weather.py", "python"),
+    ("aurade-greeter/aurade_greeter/shade.py", "python"),
+    ("aurade-greeter/aurade_greeter/settings.py", "python"),
     # The first words the product says, and the last place anyone reads.
     ("installer/archiso/airootfs/etc/motd", "plain"),
 ]
