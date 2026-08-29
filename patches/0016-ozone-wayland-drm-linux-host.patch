@@ -1,395 +1,324 @@
-diff --git a/components/exo/wayland/wl_compositor.cc b/components/exo/wayland/wl_compositor.cc
-index 2fa9819b6c..d32c90c2a8 100644
---- a/components/exo/wayland/wl_compositor.cc
-+++ b/components/exo/wayland/wl_compositor.cc
-@@ -182,6 +182,15 @@ void surface_set_buffer_scale(wl_client* client,
-   GetUserDataAs<Surface>(resource)->SetBufferScale(scale);
- }
- 
-+void surface_damage_buffer(wl_client* client,
-+                           wl_resource* resource,
-+                           int32_t x,
-+                           int32_t y,
-+                           int32_t width,
-+                           int32_t height) {
-+  GetUserDataAs<Surface>(resource)->Damage(gfx::Rect(x, y, width, height));
-+}
-+
- const struct wl_surface_interface surface_implementation = {
-     surface_destroy,
-     surface_attach,
-@@ -191,7 +200,8 @@ const struct wl_surface_interface surface_implementation = {
-     surface_set_input_region,
-     surface_commit,
-     surface_set_buffer_transform,
--    surface_set_buffer_scale};
-+    surface_set_buffer_scale,
-+    surface_damage_buffer};
- 
- ////////////////////////////////////////////////////////////////////////////////
- // wl_compositor_interface:
-diff --git a/components/exo/wayland/wl_compositor.h b/components/exo/wayland/wl_compositor.h
-index cc553e800c..832faebf68 100644
---- a/components/exo/wayland/wl_compositor.h
-+++ b/components/exo/wayland/wl_compositor.h
-@@ -12,7 +12,7 @@
- namespace exo::wayland {
- 
- constexpr uint32_t kWlCompositorVersion =
--    WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION;
-+    WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION;
- 
- void bind_compositor(wl_client* client,
-                      void* data,
-diff --git a/components/viz/service/display_embedder/output_surface_provider_impl.cc b/components/viz/service/display_embedder/output_surface_provider_impl.cc
-index 0a1c0ebd23..3fd14a02c2 100644
---- a/components/viz/service/display_embedder/output_surface_provider_impl.cc
-+++ b/components/viz/service/display_embedder/output_surface_provider_impl.cc
-@@ -4,11 +4,14 @@
- 
- #include "components/viz/service/display_embedder/output_surface_provider_impl.h"
- 
-+#include <atomic>
- #include <memory>
-+#include <optional>
- #include <utility>
- 
- #include "base/command_line.h"
- #include "base/compiler_specific.h"
-+#include "base/environment.h"
- #include "base/feature_list.h"
+From d6f8acc93835c954be73db946251494a2f4a9ec8 Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:12:24 -0500
+Subject: Integrate Google web sign-in and applications
+
+
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
+index 9cbe27a2f20bfe7a97dc20c7afd98b4c13e8fed6..6587d7f2e67844292dbb514e42a5a3f994ad7dec 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
+@@ -16,6 +16,7 @@
  #include "base/functional/bind.h"
- #include "base/functional/callback_helpers.h"
-@@ -128,7 +131,19 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
-       // GPU compositing is expected to always work on Chrome OS and Cast
-       // devices, so we should never encounter fatal context error. This could
-       // be an unrecoverable hardware error or a bug.
--      LOG(FATAL) << "Unexpected fatal context error";
-+      std::optional<std::string> aura_de_fallback =
-+          base::Environment::Create()->GetVar(
-+              "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
-+      if (aura_de_fallback.has_value() && aura_de_fallback.value() != "0") {
-+        static std::atomic_bool logged_aura_de_fallback{false};
-+        if (!logged_aura_de_fallback.exchange(true)) {
-+          LOG(ERROR) << "Unexpected fatal context error; disabling GPU "
-+                        "compositing for AuraDE host session";
-+        }
-+        gpu_service_impl_->DisableGpuCompositing();
-+      } else {
-+        LOG(FATAL) << "Unexpected fatal context error";
-+      }
- #elif !BUILDFLAG(IS_ANDROID)
-       gpu_service_impl_->DisableGpuCompositing();
- #endif
-diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper.cc b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
-index abe91d0a04..0b4aba839e 100644
---- a/gpu/command_buffer/service/shared_memory_region_wrapper.cc
-+++ b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
-@@ -4,6 +4,8 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "base/values.h"
+ #include "chrome/browser/ash/account_manager/account_apps_availability.h"
+ #include "chrome/browser/ash/profiles/profile_helper.h"
+@@ -31,11 +32,15 @@
+ #include "components/signin/public/base/consent_level.h"
+ #include "components/signin/public/identity_manager/tribool.h"
+ #include "components/user_manager/user.h"
++#include "content/public/browser/page_navigator.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui_message_handler.h"
++#include "content/public/common/referrer.h"
+ #include "google_apis/gaia/gaia_id.h"
+ #include "google_apis/gaia/google_service_auth_error.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "ui/base/l10n/l10n_util.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/webui/web_ui_util.h"
+ #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
+@@ -49,6 +54,9 @@ namespace {
+ constexpr char kFamilyLink[] = "Family Link";
+ constexpr char kAccountRemovedToastId[] =
+     "settings_account_manager_account_removed";
++constexpr char kAuraDEGoogleAccountWebSigninUrl[] =
++    "https://accounts.google.com/AccountChooser?"
++    "continue=https%3A%2F%2Fmyaccount.google.com%2F&service=accountsettings";
  
- #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+ ::account_manager::AccountKey GetAccountKeyFromJsCallback(
+     const base::DictValue& dictionary) {
+@@ -384,6 +392,20 @@ base::ListValue AccountManagerUIHandler::GetSecondaryGaiaAccounts(
  
-+#include <algorithm>
+ void AccountManagerUIHandler::HandleAddAccount(const base::ListValue& args) {
+   AllowJavascript();
 +
- #include "base/compiler_specific.h"
- #include "base/logging.h"
- #include "base/numerics/checked_math.h"
-@@ -52,6 +54,30 @@ bool ValidateStride(const gfx::Size size,
-   return true;
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: the ChromeOS add-account dialog requires real GAIA
++    // OS integration. On generic Linux, send users to normal Google web sign-in
++    // so the shared AuraDE browser profile gets web cookies instead.
++    content::OpenURLParams params(
++        GURL(kAuraDEGoogleAccountWebSigninUrl), content::Referrer(),
++        WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
++        /*is_renderer_initiated=*/false);
++    web_ui()->GetWebContents()->OpenURL(params,
++                                        /*navigation_handle_callback=*/{});
++    return;
++  }
++
+   ShowSettingsAddAccountDialog(profile_);
  }
  
-+std::optional<size_t> SharedMemorySizeForStride(viz::SharedImageFormat format,
-+                                                const gfx::Size& size,
-+                                                uint32_t stride) {
-+  if (!format.is_single_plane()) {
-+    return viz::SharedMemorySizeForSharedImageFormat(format, size);
+diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f91e23aff4 100644
+--- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
++++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+@@ -11,12 +11,19 @@
+ #include "base/check_op.h"
+ #include "base/command_line.h"
+ #include "base/feature_list.h"
++#include "base/functional/bind.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "chrome/browser/web_applications/preinstalled_app_install_features.h"
++#include "chrome/browser/web_applications/web_app_helpers.h"
++#include "chrome/browser/web_applications/web_app_install_info.h"
+ #include "chrome/common/chrome_switches.h"
++#include "extensions/common/constants.h"
++#include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
+ 
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ #include "chrome/browser/web_applications/preinstalled_web_apps/gmail.h"
+@@ -26,6 +33,7 @@
+ #include "chrome/browser/web_applications/preinstalled_web_apps/google_sheets.h"
+ #include "chrome/browser/web_applications/preinstalled_web_apps/google_slides.h"
+ #include "chrome/browser/web_applications/preinstalled_web_apps/youtube.h"
++#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/constants/ash_extension_constants.h"
+@@ -45,8 +53,6 @@
+ #include "google_apis/gaia/gaia_auth_util.h"
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+-
+ namespace web_app {
+ namespace {
+ 
+@@ -68,13 +74,13 @@ BASE_FEATURE_PARAM(bool,
+ #if BUILDFLAG(IS_CHROMEOS)
+ bool IsGoogleInternalAccount() {
+   Profile* profile = ProfileManager::GetActiveUserProfile();
+-  if (!profile)
++  if (!profile) {
+     return false;
 +  }
+   return gaia::IsGoogleInternalAccountEmail(profile->GetProfileUserName());
+ }
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+-
+ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
+     Profile& profile,
+     const std::optional<DeviceInfo>& device_info) {
+@@ -125,6 +131,108 @@ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
+ }
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
++#if BUILDFLAG(IS_CHROMEOS)
 +
-+  std::optional<size_t> row_size =
-+      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
-+                                                   size.width());
-+  if (!row_size) {
-+    return std::nullopt;
++ExternalInstallOptions MakeAuraDePwa(const char* install_url,
++                                     const char* start_url,
++                                     const char* scope,
++                                     std::u16string title,
++                                     const char* expected_app_id = nullptr,
++                                     const char* replacement_app_id = nullptr) {
++  GURL app_start_url(start_url);
++  GURL app_scope(scope);
++  ExternalInstallOptions options(GURL(install_url),
++                                 mojom::UserDisplayMode::kStandalone,
++                                 ExternalInstallSource::kExternalDefault);
++  options.user_type_allowlist = {"unmanaged", "managed", "child"};
++  options.load_and_await_service_worker_registration = false;
++  options.is_preferred_app_for_supported_links = true;
++  options.fallback_app_name = base::UTF16ToUTF8(title);
++  options.app_info_factory = base::BindRepeating(
++      [](GURL start_url, GURL scope, std::u16string title) {
++        webapps::ManifestId manifest_id =
++            GenerateManifestIdFromStartUrlOnly(start_url);
++        auto info = std::make_unique<WebAppInstallInfo>(manifest_id, start_url);
++        info->title = std::move(title);
++        info->scope = scope;
++        info->display_mode = blink::mojom::DisplayMode::kStandalone;
++        return info;
++      },
++      app_start_url, app_scope, std::move(title));
++  if (expected_app_id) {
++    options.expected_app_id = webapps::AppId(expected_app_id);
 +  }
-+
-+  base::CheckedNumeric<size_t> checked_size = stride;
-+  checked_size *= std::max(0, size.height() - 1);
-+  checked_size += row_size.value();
-+  if (!checked_size.IsValid()) {
-+    return std::nullopt;
++  if (replacement_app_id) {
++    options.uninstall_and_replace.push_back(webapps::AppId(replacement_app_id));
 +  }
-+
-+  return checked_size.ValueOrDie();
++  return options;
 +}
++
++std::vector<ExternalInstallOptions> GetAuraDeGoogleWebApps() {
++  // AuraDE compatibility: unbranded generic-Linux AuraDE builds do not get the
++  // branded Chrome default-app list, but the desktop shell still needs real
++  // Chrome web apps instead of host .desktop URL launchers.
++  std::vector<ExternalInstallOptions> apps = {
++      MakeAuraDePwa(
++          "https://mail.google.com/mail/installwebapp?usp=chrome_default",
++          "https://mail.google.com/mail/?usp=installed_webapp",
++          "https://mail.google.com/mail/", u"Gmail", ash::kGmailAppId,
++          "pjkljhegncpnkpknbcohdijeoejaedia"),
++      MakeAuraDePwa(
++          "https://drive.google.com/drive/installwebapp?usp=chrome_default",
++          "https://drive.google.com/?lfhs=2", "https://drive.google.com/",
++          u"Google Drive", ash::kGoogleDriveAppId,
++          "apdfllckaahabafndbhieahigkjlhalf"),
++      MakeAuraDePwa("https://calendar.google.com/calendar/"
++                    "installwebapp?usp=chrome_default",
++                    "https://calendar.google.com/calendar/r",
++                    "https://calendar.google.com/calendar/", u"Google Calendar",
++                    ash::kGoogleCalendarAppId,
++                    "ejjicmeblgpmajnghnpcppodonldlgfn"),
++      MakeAuraDePwa(
++          "https://docs.google.com/document/installwebapp?usp=chrome_default",
++          "https://docs.google.com/document/?usp=installed_webapp",
++          "https://docs.google.com/document/", u"Google Docs",
++          ash::kGoogleDocsAppId, "aohghmighlieiainnegkcijnfilokake"),
++      MakeAuraDePwa(
++          "https://docs.google.com/spreadsheets/"
++          "installwebapp?usp=chrome_default",
++          "https://docs.google.com/spreadsheets/?usp=installed_webapp",
++          "https://docs.google.com/spreadsheets/", u"Google Sheets",
++          ash::kGoogleSheetsAppId, "felcaaldnbdncclmgdcncolpebgiejap"),
++      MakeAuraDePwa(
++          "https://docs.google.com/presentation/"
++          "installwebapp?usp=chrome_default",
++          "https://docs.google.com/presentation/?usp=installed_webapp",
++          "https://docs.google.com/presentation/", u"Google Slides",
++          ash::kGoogleSlidesAppId, "aapocclcgogkmnckokdopfmhonfmgoek"),
++      MakeAuraDePwa(
++          "https://www.youtube.com/s/notifications/manifest/cr_install.html",
++          "https://www.youtube.com/?feature=ytca", "https://www.youtube.com/",
++          u"YouTube", ash::kYoutubeAppId, "blpcfgokakmgnkcojhhkbfbldkacnbeo"),
++      MakeAuraDePwa(
++          "https://meet.google.com/download/webapp?usp=chrome_default",
++          "https://meet.google.com/landing?lfhs=2", "https://meet.google.com/",
++          u"Google Meet", ash::kGoogleMeetAppId),
++      MakeAuraDePwa("https://keep.google.com/installwebapp?usp=chrome_default",
++                    "https://keep.google.com/?usp=installed_webapp",
++                    "https://keep.google.com/", u"Google Keep",
++                    ash::kGoogleKeepAppId, extension_misc::kGoogleKeepAppId),
++      MakeAuraDePwa(
++          "https://photos.google.com/installwebapp?usp=chrome_default",
++          "https://photos.google.com/", "https://photos.google.com/",
++          u"Google Photos"),
++  };
++  ExternalInstallOptions gemini =
++      MakeAuraDePwa("https://gemini.google.com/", "https://gemini.google.com/",
++                    "https://gemini.google.com/", u"Gemini", ash::kGeminiAppId);
++  gemini.only_use_app_info_factory = true;
++  apps.push_back(std::move(gemini));
++  return apps;
++}
++
++#endif  // BUILDFLAG(IS_CHROMEOS)
 +
  }  // namespace
  
- SharedMemoryRegionWrapper::SharedMemoryRegionWrapper() = default;
-@@ -78,7 +104,7 @@ bool SharedMemoryRegionWrapper::Initialize(
-   }
- 
-   std::optional<size_t> buffer_size =
--      viz::SharedMemorySizeForSharedImageFormat(format, size);
-+      SharedMemorySizeForStride(format, size, handle.stride);
-   if (!buffer_size) {
-     DLOG(ERROR) << "Invalid GMB size.";
-     return false;
-@@ -110,23 +136,31 @@ bool SharedMemoryRegionWrapper::Initialize(
-   int num_planes = format.NumberOfPlanes();
-   planes_.resize(num_planes);
- 
--  // The offset/stride only make sense when GpuMemoryBufferHandle is for a
--  // single plane. Stride should be set as the expected stride for first plane
--  // and offset should always be zero.
--  DCHECK_EQ(static_cast<size_t>(handle.stride),
--            viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
--                                                         size.width())
--                .value());
--  DCHECK_EQ(handle.offset, 0u);
-+  std::optional<size_t> first_plane_row_size =
-+      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
-+                                                   size.width());
-+  if (!first_plane_row_size) {
-+    return false;
-+  }
-+  if (!format.is_single_plane() &&
-+      static_cast<size_t>(handle.stride) != first_plane_row_size.value()) {
-+    DLOG(ERROR) << "Invalid multi-plane GMB stride.";
-+    return false;
+ DeviceInfo::DeviceInfo() = default;
+@@ -159,11 +267,13 @@ bool PreinstalledWebAppsDisabled() {
+ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
+     Profile& profile,
+     const std::optional<DeviceInfo>& device_info) {
+-  if (g_preinstalled_app_data_for_testing)
++  if (g_preinstalled_app_data_for_testing) {
+     return *g_preinstalled_app_data_for_testing;
 +  }
  
-   for (int plane_index = 0; plane_index < num_planes; ++plane_index) {
-     const size_t plane_offset =
-         viz::SharedMemoryOffsetForSharedImageFormat(format, plane_index, size);
+-  if (PreinstalledWebAppsDisabled())
++  if (PreinstalledWebAppsDisabled()) {
+     return {};
++  }
  
-     planes_[plane_index].offset = memory_offset + plane_offset;
--    planes_[plane_index].stride = viz::SharedMemoryRowSizeForSharedImageFormat(
--                                      format, plane_index, size.width())
--                                      .value();
-+    if (format.is_single_plane()) {
-+      planes_[plane_index].stride = handle.stride;
-+    } else {
-+      planes_[plane_index].stride =
-+          viz::SharedMemoryRowSizeForSharedImageFormat(format, plane_index,
-+                                                       size.width())
-+              .value();
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -178,6 +288,11 @@ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
+ 
+   return GetChromeBrandedApps(profile, device_info);
+ #else
++#if BUILDFLAG(IS_CHROMEOS)
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return GetAuraDeGoogleWebApps();
++  }
++#endif  // BUILDFLAG(IS_CHROMEOS)
+   return {};
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ }
+@@ -202,13 +317,15 @@ std::vector<PreinstalledWebAppMigration> GetPreinstalledWebAppMigrations(
+   std::vector<PreinstalledWebAppMigration> migrations;
+   for (const ExternalInstallOptions& options :
+        GetPreinstalledWebApps(profile)) {
+-    if (!options.expected_app_id)
++    if (!options.expected_app_id) {
+       continue;
 +    }
-   }
  
-   return true;
-diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
-index fee2b968f2..98a0ed9738 100644
---- a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
-+++ b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
-@@ -4,6 +4,7 @@
+     // All entries in the default web app migration had only one Chrome app to
+     // replace.
+-    if (options.uninstall_and_replace.size() != 1)
++    if (options.uninstall_and_replace.size() != 1) {
+       continue;
++    }
  
- #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
- 
-+#include "base/memory/unsafe_shared_memory_region.h"
- #include "components/viz/common/resources/shared_image_format_utils.h"
- #include "gpu/command_buffer/service/shared_image/shared_memory_image_backing_factory.h"
- #include "testing/gtest/include/gtest/gtest.h"
-@@ -28,6 +29,25 @@ TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888) {
-   EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
+     if (options.gate_on_feature &&
+         !IsPreinstalledAppInstallFeatureEnabled(*options.gate_on_feature)) {
+diff --git a/components/signin/core/browser/signin_header_helper.cc b/components/signin/core/browser/signin_header_helper.cc
+index 1a352d3b9d47148153f9d11349ab0448213965f2..640cf8576c06da2ab356b963d4df176c9ce6910f 100644
+--- a/components/signin/core/browser/signin_header_helper.cc
++++ b/components/signin/core/browser/signin_header_helper.cc
+@@ -14,6 +14,7 @@
+ #include "base/notreached.h"
+ #include "base/strings/escape.h"
+ #include "base/strings/string_split.h"
++#include "base/system/sys_info.h"
+ #include "components/google/core/common/google_util.h"
+ #include "components/signin/core/browser/chrome_connected_header_helper.h"
+ #include "components/signin/core/browser/dice_response_params.h"
+@@ -88,6 +89,15 @@ std::string BuildMirrorRequestCookieIfPossible(
+     AccountConsistencyMethod account_consistency,
+     const content_settings::CookieSettings* cookie_settings,
+     int profile_mode_mask) {
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: this binary is built with ChromeOS code paths, but
++  // generic Linux sessions must use normal Google web sign-in. Mirror cookies
++  // make Gaia serve the ChromeOS add-account flow, which requires real CrOS
++  // GAIA integration and dead-ends public AuraDE builds.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return std::string();
++  }
++#endif
+   return ChromeConnectedHeaderHelper::BuildRequestCookieIfPossible(
+       url, gaia_id, account_consistency, cookie_settings, profile_mode_mask);
  }
+@@ -160,6 +170,18 @@ void AppendOrRemoveMirrorRequestHeader(
+   ChromeConnectedHeaderHelper chrome_connected_helper(account_consistency);
+   std::string chrome_connected_header_value;
  
-+TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888PaddedStride) {
-+  constexpr gfx::Size size(696, 100);
-+  constexpr viz::SharedImageFormat format = viz::SinglePlaneFormat::kRGBA_8888;
-+  constexpr uint32_t stride = 2816;
-+
-+  auto shared_memory_region =
-+      base::UnsafeSharedMemoryRegion::Create(stride * size.height());
-+  ASSERT_TRUE(shared_memory_region.IsValid());
-+
-+  gfx::GpuMemoryBufferHandle handle(std::move(shared_memory_region));
-+  handle.type = gfx::SHARED_MEMORY_BUFFER;
-+  handle.offset = 0;
-+  handle.stride = stride;
-+
-+  SharedMemoryRegionWrapper wrapper;
-+  EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
-+  EXPECT_EQ(stride, wrapper.GetStride(0));
-+}
-+
- TEST(SharedMemoryRegionWrapperTest, MultiPlaneY_UV_420) {
-   constexpr gfx::Size size(100, 100);
-   constexpr viz::SharedImageFormat format = viz::MultiPlaneFormat::kNV12;
-diff --git a/ui/base/clipboard/BUILD.gn b/ui/base/clipboard/BUILD.gn
-index 3c7a17dbee..5f3212fa83 100644
---- a/ui/base/clipboard/BUILD.gn
-+++ b/ui/base/clipboard/BUILD.gn
-@@ -65,7 +65,7 @@ component("clipboard_types") {
-   }
- }
- 
--if (is_linux && use_dbus) {
-+if ((is_linux || is_chromeos) && use_dbus) {
-   source_set("clipboard_util_linux") {
-     sources = [
-       "clipboard_util_linux.cc",
-diff --git a/ui/base/ime/linux/BUILD.gn b/ui/base/ime/linux/BUILD.gn
-index aa6e9f2437..919d01bbbf 100644
---- a/ui/base/ime/linux/BUILD.gn
-+++ b/ui/base/ime/linux/BUILD.gn
-@@ -4,7 +4,7 @@
- 
- import("//build/config/linux/pangocairo/pangocairo.gni")
- 
--assert(is_linux)
-+assert(is_linux || is_chromeos)
- 
- component("linux") {
-   output_name = "ui_base_ime_linux"
-diff --git a/ui/linux/BUILD.gn b/ui/linux/BUILD.gn
-index 267de0acba..0e0a8534c4 100644
---- a/ui/linux/BUILD.gn
-+++ b/ui/linux/BUILD.gn
-@@ -5,7 +5,7 @@
- import("//build/config/linux/gtk/gtk.gni")
- import("//ui/qt/qt.gni")
- 
--assert(is_linux)
-+assert(is_linux || is_chromeos)
- 
- component("linux_ui") {
-   defines = [ "IS_LINUX_UI_IMPL" ]
-diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-index e523e4e393..18abdf7416 100644
---- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-+++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-@@ -350,7 +350,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
- }
- 
- void DrmDisplayHostManager::RemoveDelegate(DrmNativeDisplayDelegate* delegate) {
--  DCHECK_EQ(delegate_, delegate);
-+  if (delegate_ != delegate) {
-+    LOG(WARNING) << "Ignoring stale DRM display delegate removal";
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: do not advertise ChromeOS account consistency when
++  // the ChromeOS binary is running as a generic Linux desktop environment.
++  // Without this, Google sign-in redirects into chrome://chrome-signin and the
++  // unsupported crosAddAccount flow instead of setting normal web cookies.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    chrome_connected_helper.AppendOrRemoveRequestHeader(
++        request, redirect_url, kChromeConnectedHeader, std::string());
 +    return;
 +  }
-   delegate_ = nullptr;
- }
- 
-diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
-index 8e2d305163..4f5b35db59 100644
---- a/ui/ozone/platform/wayland/BUILD.gn
-+++ b/ui/ozone/platform/wayland/BUILD.gn
-@@ -9,7 +9,7 @@ import("//gpu/vulkan/features.gni")
- import("//testing/libfuzzer/fuzzer_test.gni")
- import("//ui/ozone/platform/wayland/wayland.gni")
- 
--assert(is_linux)
-+assert(is_linux || is_chromeos)
- 
- source_set("common") {
-   sources = [
-@@ -320,7 +320,7 @@ source_set("wayland") {
-     "//ui/platform_window/wm",
-   ]
- 
--  if (use_dbus) {
-+  if (use_dbus && !is_chromeos) {
-     sources += [
-       "host/org_gnome_mutter_idle_monitor.cc",
-       "host/org_gnome_mutter_idle_monitor.h",
-diff --git a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
-index c553d6503a..744ce36a04 100644
---- a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
-+++ b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
-@@ -5,6 +5,7 @@
- #include "ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.h"
- 
- #include <drm_fourcc.h>
-+#include <fcntl.h>
- 
- #include <algorithm>
- #include <utility>
-@@ -472,11 +473,17 @@ void WaylandBufferManagerGpu::MaybeCreateGbmDevice() {
-     supports_dmabuf_ = false;
-     return;
-   }
-+  if (fcntl(drm_render_node_fd_.get(), F_GETFD) < 0) {
-+    supports_dmabuf_ = false;
-+    PLOG(WARNING) << "DRM render node fd is invalid";
-+    return;
-+  }
-   TRACE_EVENT("gpu,startup", "ui::CreateGbmDevice");
-   gbm_device* device = gbm_create_device(drm_render_node_fd_.get());
-   if (!device) {
-     supports_dmabuf_ = false;
--    LOG(WARNING) << "Failed to initialize gbm device.";
-+    PLOG(WARNING) << "Failed to initialize gbm device for DRM fd "
-+                  << drm_render_node_fd_.get();
-     return;
-   }
-   native_display_ = gl::EGLDisplayPlatform(
-diff --git a/ui/ozone/platform/wayland/host/wayland_screen.cc b/ui/ozone/platform/wayland/host/wayland_screen.cc
-index b0bb41f423..8521b1cdd2 100644
---- a/ui/ozone/platform/wayland/host/wayland_screen.cc
-+++ b/ui/ozone/platform/wayland/host/wayland_screen.cc
-@@ -42,7 +42,7 @@
- #include "ui/ozone/platform/wayland/host/wayland_wp_color_management_output.h"
- #include "ui/ozone/platform/wayland/host/zwp_idle_inhibit_manager.h"
- 
--#if BUILDFLAG(USE_DBUS)
-+#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
- #include "ui/ozone/platform/wayland/host/org_gnome_mutter_idle_monitor.h"
- #endif
- 
-@@ -482,7 +482,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
-       return *idle_time;
-   }
- 
--#if BUILDFLAG(USE_DBUS)
-+#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
-   // Try the org.gnome.Mutter.IdleMonitor D-Bus service (Mutter).
-   if (!org_gnome_mutter_idle_monitor_)
-     org_gnome_mutter_idle_monitor_ =
-@@ -490,7 +490,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
-   const auto idle_time = org_gnome_mutter_idle_monitor_->GetIdleTime();
-   if (idle_time)
-     return *idle_time;
--#endif  // BUILDFLAG(USE_DBUS)
-+#endif  // BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
- 
-   NOTIMPLEMENTED_LOG_ONCE();
- 
-diff --git a/ui/ozone/platform/wayland/host/wayland_screen.h b/ui/ozone/platform/wayland/host/wayland_screen.h
-index 9850170783..d122eea255 100644
---- a/ui/ozone/platform/wayland/host/wayland_screen.h
-+++ b/ui/ozone/platform/wayland/host/wayland_screen.h
-@@ -132,7 +132,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
-   std::optional<viz::SharedImageFormat> image_format_no_alpha_;
-   std::optional<viz::SharedImageFormat> image_format_hdr_;
- 
--#if BUILDFLAG(USE_DBUS)
-+#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
-   mutable std::unique_ptr<OrgGnomeMutterIdleMonitor>
-       org_gnome_mutter_idle_monitor_;
- #endif
-diff --git a/ui/platform_window/platform_window_delegate.cc b/ui/platform_window/platform_window_delegate.cc
-index 52d4ae6242..60f71edc1e 100644
---- a/ui/platform_window/platform_window_delegate.cc
-+++ b/ui/platform_window/platform_window_delegate.cc
-@@ -58,7 +58,7 @@ gfx::Insets PlatformWindowDelegate::CalculateInsetsInDIP(
-   return gfx::Insets();
- }
- 
--#if BUILDFLAG(IS_LINUX)
-+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
- void PlatformWindowDelegate::OnWindowTiledStateChanged(
-     WindowTiledEdges new_tiled_edges) {}
- #endif
-diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
-index 2ba67bf9f9..9c873c48f6 100644
---- a/ui/platform_window/platform_window_delegate.h
-+++ b/ui/platform_window/platform_window_delegate.h
-@@ -146,7 +146,7 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
-   virtual void OnWindowStateChanged(PlatformWindowState old_state,
-                                     PlatformWindowState new_state) = 0;
- 
--#if BUILDFLAG(IS_LINUX)
-+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-   // Notifies the delegate that the tiled state of the window edges has changed.
-   virtual void OnWindowTiledStateChanged(WindowTiledEdges new_tiled_edges);
- #endif
++#endif
++
+ #if BUILDFLAG(IS_CHROMEOS)
+   bool is_secondary_account_addition_disallowed =
+       (profile_mode_mask & PROFILE_MODE_ADD_ACCOUNT_DISABLED) != 0 &&

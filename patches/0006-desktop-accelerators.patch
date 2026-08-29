@@ -1,122 +1,237 @@
-diff --git a/ash/public/cpp/accelerators.h b/ash/public/cpp/accelerators.h
-index 4555a096ff..7dd3d42805 100644
---- a/ash/public/cpp/accelerators.h
-+++ b/ash/public/cpp/accelerators.h
-@@ -51,8 +51,11 @@ ASH_PUBLIC_EXPORT inline constexpr auto kAcceleratorData = std::to_array<
-     {true, ui::VKEY_TAB, ui::EF_ALT_DOWN, AcceleratorAction::kCycleForwardMru},
-     {true, ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
-      AcceleratorAction::kCycleBackwardMru},
--    {true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_NONE,
--     AcceleratorAction::kToggleOverview},
-+    // HACK(AuraDE): Super key opens app list; Super+Shift toggles overview.
-+    // ChromeOS normally uses the Search key (VKEY_BROWSER_SEARCH) for this.
-+    {true, ui::VKEY_LWIN, ui::EF_NONE, AcceleratorAction::kToggleAppList},
-+    {true, ui::VKEY_LWIN, ui::EF_SHIFT_DOWN, AcceleratorAction::kToggleOverview},
-+    {true, ui::VKEY_TAB, ui::EF_COMMAND_DOWN, AcceleratorAction::kToggleOverview},
-     // Historically, the browser search key with and without the shift key can
-     // toggle the app list into different open states. Now the two combinations
-     // are used to toggle the app list in the same way to keep the behavior
-@@ -207,8 +210,10 @@ ASH_PUBLIC_EXPORT inline constexpr auto kAcceleratorData = std::to_array<
-     {true, ui::VKEY_ZOOM, ui::EF_NONE, AcceleratorAction::kToggleFullscreen},
-     {true, ui::VKEY_ZOOM, ui::EF_SHIFT_DOWN,
-      AcceleratorAction::kToggleFullscreen},
--    {true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN | ui::EF_COMMAND_DOWN,
--     AcceleratorAction::kUnpin},
-+    {true, ui::VKEY_ESCAPE, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
-+     AcceleratorAction::kShowTaskManager},
-+    {true, ui::VKEY_N, ui::EF_COMMAND_DOWN,
-+     AcceleratorAction::kToggleMessageCenterBubble},
-     {true, ui::VKEY_S, ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN,
-      AcceleratorAction::kFocusCameraPreview},
-     {true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
-diff --git a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
-index f9f730b72f..59b6bdd08e 100644
---- a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
-+++ b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
-@@ -223,6 +223,14 @@ std::vector<mojom::TextAcceleratorPartPtr> GenerateTextAcceleratorParts(
-   return result;
+From fa4db35f3cc964597d62f05f1b7228425bc7c63d Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:06:35 -0500
+Subject: Provide a resilient AuraDE wallpaper fallback
+
+
+diff --git a/ash/wallpaper/views/wallpaper_view.cc b/ash/wallpaper/views/wallpaper_view.cc
+index 995a6a80816482d3b1402e39d1938c9e766950a1..160dbe67b9f65c0a978cf16daeb576bb8223c8b7 100644
+--- a/ash/wallpaper/views/wallpaper_view.cc
++++ b/ash/wallpaper/views/wallpaper_view.cc
+@@ -86,8 +86,14 @@ class WallpaperWidgetDelegate : public views::WidgetDelegateView {
+     display::Display display =
+         display::Screen::Get()->GetDisplayNearestWindow(window);
+ 
++    const gfx::Size target_size = window->bounds().size();
++    const gfx::Size fallback_size = display.size();
+     for (views::View* child : children()) {
+-      child->SetBounds(0, 0, display.size().width(), display.size().height());
++      child->SetBounds(
++          0, 0,
++          target_size.IsEmpty() ? fallback_size.width() : target_size.width(),
++          target_size.IsEmpty() ? fallback_size.height()
++                                : target_size.height());
+       gfx::Transform transform;
+       // Apply RTL transform explicitly becacuse Views layer code
+       // doesn't handle RTL. crbug.com/458753.
+@@ -117,8 +123,9 @@ void WallpaperView::SetLockShieldEnabled(bool enabled) {
+ 
+   if (enabled) {
+     DCHECK(!shield_view_);
+-    // TODO(crbug.com/374034250): Remove the shield layer once the bug is fixed and
+-    // the compositor can fallback to solid color background for missing tiles.
++    // TODO(crbug.com/374034250): Remove the shield layer once the bug is fixed
++    // and the compositor can fallback to solid color background for missing
++    // tiles.
+     shield_view_ = new views::View();
+     parent()->AddChildViewAt(shield_view_.get(), 0);
+     shield_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
+diff --git a/ash/wallpaper/views/wallpaper_widget_controller.cc b/ash/wallpaper/views/wallpaper_widget_controller.cc
+index 787e0fec07af62bc8efaaf010d75520936ea2ea1..25ec394cb4c5c0f95950028c8e61c7911f3a99a7 100644
+--- a/ash/wallpaper/views/wallpaper_widget_controller.cc
++++ b/ash/wallpaper/views/wallpaper_widget_controller.cc
+@@ -17,6 +17,7 @@
+ #include "ui/compositor/scoped_layer_animation_settings.h"
+ #include "ui/display/screen.h"
+ #include "ui/gfx/animation/tween.h"
++#include "ui/gfx/geometry/rect.h"
+ #include "ui/views/widget/widget.h"
+ #include "ui/views/widget/widget_observer.h"
+ #include "ui/wm/core/window_util.h"
+@@ -39,6 +40,7 @@ ui::Layer* WallpaperWidgetController::wallpaper_underlay_layer() {
+ void WallpaperWidgetController::Init(bool locked) {
+   widget_ = CreateWallpaperWidget(root_window_, wallpaper_constants::kClear,
+                                   locked, &wallpaper_view_);
++  UpdateWallpaperBounds();
+   CreateWallpaperUnderlayLayer();
  }
  
-+mojom::TextAcceleratorPropertiesPtr CreateFallbackTextAcceleratorProperties(
-+    const std::u16string& text) {
-+  std::vector<mojom::TextAcceleratorPartPtr> parts;
-+  parts.push_back(mojom::TextAcceleratorPart::New(
-+      text, mojom::TextAcceleratorPartType::kPlainText));
-+  return mojom::TextAcceleratorProperties::New(std::move(parts));
-+}
-+
- // Hide accelerators if they are either:
- // 1. In the `kHiddenAccelerators` map.
- // 2. Not positionally remapped in the current keyboard layout, but are
-@@ -1489,15 +1497,15 @@ AcceleratorConfigurationProvider::GetDefaultAcceleratorsForId(
- mojom::TextAcceleratorPropertiesPtr
- AcceleratorConfigurationProvider::CreateTextAcceleratorProperties(
-     const NonConfigurableAcceleratorDetails& details) const {
--  DCHECK(details.message_id.has_value());
-+  if (!details.message_id.has_value()) {
-+    return CreateFallbackTextAcceleratorProperties(std::u16string());
-+  }
-+
-   // Ambient accelerators that only contain plain text e.g., Drag the
-   // link to the tab's address bar.
-   if (!details.replacements.has_value() || details.replacements->empty()) {
--    std::vector<mojom::TextAcceleratorPartPtr> parts;
--    parts.push_back(mojom::TextAcceleratorPart::New(
--        l10n_util::GetStringUTF16(details.message_id.value()),
--        mojom::TextAcceleratorPartType::kPlainText));
--    return mojom::TextAcceleratorProperties::New(std::move(parts));
-+    return CreateFallbackTextAcceleratorProperties(
-+        l10n_util::GetStringUTF16(details.message_id.value()));
+@@ -129,9 +131,7 @@ void WallpaperWidgetController::OnDisplayMetricsChanged(
+     return;
    }
  
-   // Contains the start points of the replaced strings.
-@@ -1509,13 +1517,27 @@ AcceleratorConfigurationProvider::CreateTextAcceleratorProperties(
-   const auto replaced_string = l10n_util::GetStringFUTF16(
-       details.message_id.value(), empty_string_replacements, &offsets);
+-  // Bounds have to be in parent. Since these are set on the layer directly, and
+-  // layer bounds are relative to the layer's parent.
+-  wallpaper_underlay_layer_->SetBounds(root_window_->bounds());
++  UpdateWallpaperBounds();
+ }
  
-+  const auto& replacement_parts = details.replacements.value();
-+  // AuraDE compatibility: Advanced feature profiles can expose ChromeOS
-+  // ambient shortcut rows on generic Linux before every localized replacement
-+  // placeholder lines up with the upstream table. Keep the shortcut surface
-+  // best-effort instead of crashing the whole shell in DCHECK builds.
-+  if (offsets.size() != replacement_parts.size() ||
-+      !std::is_sorted(offsets.begin(), offsets.end()) ||
-+      std::ranges::any_of(offsets, [&](size_t offset) {
-+        return offset > replaced_string.size();
-+      })) {
-+    LOG(ERROR) << "Invalid ambient shortcut text accelerator data for message "
-+               << details.message_id.value();
-+    return CreateFallbackTextAcceleratorProperties(replaced_string);
+ void WallpaperWidgetController::OnColorProviderChanged() {
+@@ -161,6 +161,22 @@ void WallpaperWidgetController::CreateWallpaperUnderlayLayer() {
+   wallpaper_underlay_layer_->SetVisible(false);
+ }
+ 
++void WallpaperWidgetController::UpdateWallpaperBounds() {
++  if (!widget_ || !widget_->GetNativeWindow()) {
++    return;
 +  }
 +
-   // Sort the offsets and split the string on the offsets.
--  sort(offsets.begin(), offsets.end());
-+  std::ranges::sort(offsets);
-   const auto plain_text_parts = SplitStringOnOffsets(replaced_string, offsets);
++  const gfx::Rect bounds(root_window_->bounds().size());
++  widget_->SetBounds(bounds);
++  if (wallpaper_underlay_layer_) {
++    wallpaper_underlay_layer_->SetBounds(bounds);
++  }
++  if (wallpaper_view_) {
++    wallpaper_view_->ClearCachedImage();
++    wallpaper_view_->SchedulePaint();
++  }
++}
++
+ void WallpaperWidgetController::RunAnimationEndCallbacks() {
+   std::list<base::OnceClosure> callbacks;
+   animation_end_callbacks_.swap(callbacks);
+diff --git a/ash/wallpaper/views/wallpaper_widget_controller.h b/ash/wallpaper/views/wallpaper_widget_controller.h
+index f1deba80fc682db5a1670c1f2e89d492fdd23aaf..25b7fe97327d1cecd34c0696886ba120ec4e4ce7 100644
+--- a/ash/wallpaper/views/wallpaper_widget_controller.h
++++ b/ash/wallpaper/views/wallpaper_widget_controller.h
+@@ -100,6 +100,8 @@ class ASH_EXPORT WallpaperWidgetController
+   }
  
-   auto text_accelerator_parts = GenerateTextAcceleratorParts(
--      plain_text_parts, details.replacements.value(), offsets,
--      replaced_string.size());
-+      plain_text_parts, replacement_parts, offsets, replaced_string.size());
-   return mojom::TextAcceleratorProperties::New(
-       std::move(text_accelerator_parts));
- }
-diff --git a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
-index c037c63ab8..f377d62610 100644
---- a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
-+++ b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
-@@ -9,13 +9,5 @@
- #include "components/user_manager/user_manager.h"
+  private:
++  void UpdateWallpaperBounds();
++
+   void CreateWallpaperUnderlayLayer();
  
- bool ChromeAcceleratorPrefsDelegate::IsUserEnterpriseManaged() const {
--  // Ensure the user is logged in.
--  if (!user_manager::UserManager::IsInitialized() ||
--      !user_manager::UserManager::Get()->IsUserLoggedIn()) {
--    return false;
--  }
--  // Check if the user is managed.
--  return ProfileManager::GetPrimaryUserProfile()
--      ->GetProfilePolicyConnector()
--      ->IsManaged();
-+  return false;
+   // Runs callbacks in |animation_end_callbacks_|.
+diff --git a/ash/wallpaper/wallpaper_controller_impl.cc b/ash/wallpaper/wallpaper_controller_impl.cc
+index a068a6d94ad100251e5ea502411e7447968a6d53..4a4d080c6d830f21814c986c04c80b89314c91c7 100644
+--- a/ash/wallpaper/wallpaper_controller_impl.cc
++++ b/ash/wallpaper/wallpaper_controller_impl.cc
+@@ -137,6 +137,36 @@ gfx::ImageSkia CreateSolidColorWallpaper(SkColor color) {
+   return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
  }
+ 
++// HACK(AuraDE): Creates a vertical gradient wallpaper as fallback for
++// standalone Ash mode where no ChromeOS wallpaper assets are available.
++// TODO: Replace with proper wallpaper asset loading or user-configurable
++// background once local account support is implemented.
++// FIXME: This should be configurable via right-click context menu.
++gfx::ImageSkia CreateAuraDeGradientWallpaper() {
++  constexpr int kWidth = 1920;
++  constexpr int kHeight = 1080;
++  // Dark teal -> deep navy gradient (similar to ChromeOS default style).
++  constexpr SkColor kTopColor = SkColorSetRGB(0x1a, 0x2a, 0x3a);
++  constexpr SkColor kBottomColor = SkColorSetRGB(0x0d, 0x12, 0x1e);
++  SkBitmap bitmap;
++  bitmap.allocN32Pixels(kWidth, kHeight);
++  for (int y = 0; y < kHeight; ++y) {
++    float t = static_cast<float>(y) / kHeight;
++    SkColor color = SkColorSetARGB(
++        255,
++        static_cast<uint8_t>(SkColorGetR(kTopColor) * (1.0f - t) +
++                              SkColorGetR(kBottomColor) * t),
++        static_cast<uint8_t>(SkColorGetG(kTopColor) * (1.0f - t) +
++                              SkColorGetG(kBottomColor) * t),
++        static_cast<uint8_t>(SkColorGetB(kTopColor) * (1.0f - t) +
++                              SkColorGetB(kBottomColor) * t));
++    for (int x = 0; x < kWidth; ++x) {
++      *bitmap.getAddr32(x, y) = color;
++    }
++  }
++  return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
++}
++
+ // Deletes a list of wallpaper files in |file_list|.
+ void DeleteWallpaperInList(std::vector<base::FilePath> file_list) {
+   for (const base::FilePath& path : file_list) {
+@@ -2266,9 +2296,10 @@ void WallpaperControllerImpl::OnDefaultWallpaperDecoded(
+   if (image.isNull()) {
+     wallpaper_metrics_manager_->LogWallpaperResult(
+         WallpaperType::kDefault, SetWallpaperResult::kDecodingError);
+-    // Create a solid color wallpaper if the default wallpaper decoding fails.
+-    cached_default_wallpaper_.image =
+-        CreateSolidColorWallpaper(kDefaultWallpaperColor);
++    // HACK(AuraDE): Use gradient instead of solid gray for standalone Ash.
++    // Decoding fails because ChromeOS wallpaper assets aren't available on
++    // standard Linux. TODO: Load user-set wallpaper from local config.
++    cached_default_wallpaper_.image = CreateAuraDeGradientWallpaper();
+     cached_default_wallpaper_.file_path.clear();
+   } else {
+     wallpaper_metrics_manager_->LogWallpaperResult(
+diff --git a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
+index 5062d8ba0bc35254d8f6bcb5054309380dd40217..263990ebc3c6fcaca3cea1401cebb1b9f6556b38 100644
+--- a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
++++ b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
+@@ -375,37 +375,62 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
+ 
+ void WallpaperControllerClientImpl::MakeTransparent(
+     content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++
++  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
++  if (!top_level_window) {
++    return;
++  }
++
+   // Disable the window backdrop that creates an opaque layer in tablet mode.
+   ash::WindowBackdrop* window_backdrop =
+-      ash::WindowBackdrop::Get(web_contents->GetTopLevelNativeWindow());
++      ash::WindowBackdrop::Get(top_level_window);
+   window_backdrop->SetBackdropMode(
+       ash::WindowBackdrop::BackdropMode::kDisabled);
+ 
+   // Set transparency on the top level native window and tell the WM not to
+   // change it when window state changes.
+-  aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow();
+   top_level_window->SetProperty(::chromeos::kWindowManagerManagesOpacityKey,
+                                 false);
+   top_level_window->SetTransparent(true);
+ 
+   // Set the background color to transparent.
+-  web_contents->GetRenderWidgetHostView()->SetBackgroundColor(
+-      SK_ColorTRANSPARENT);
++  if (content::RenderWidgetHostView* render_widget_host_view =
++          web_contents->GetRenderWidgetHostView()) {
++    render_widget_host_view->SetBackgroundColor(SK_ColorTRANSPARENT);
++  }
+ 
+   // Turn off the web contents background.
+-  ash::BrowserController::GetInstance()
+-      ->GetBrowserForTab(web_contents)
+-      ->SetContentsBackgroundVisible(false);
++  auto* browser =
++      ash::BrowserController::GetInstance()->GetBrowserForTab(web_contents);
++  if (!browser) {
++    VLOG(1) << "Skipping wallpaper transparency for non-Browser window.";
++    return;
++  }
++  browser->SetContentsBackgroundVisible(false);
+ }
+ 
+ void WallpaperControllerClientImpl::MakeOpaque(
+     content::WebContents* web_contents) {
++  if (!web_contents) {
++    return;
++  }
++
+   // Making the contents background visible is sufficient to make the view
+   // opaque, as `window_backdrop`, `top_level_window` and `web_contents` are not
+   // highly impactful to the animated theme change effect.
+-  ash::BrowserController::GetInstance()
+-      ->GetBrowserForTab(web_contents)
+-      ->SetContentsBackgroundVisible(true);
++  auto* browser =
++      ash::BrowserController::GetInstance()->GetBrowserForTab(web_contents);
++  if (browser) {
++    browser->SetContentsBackgroundVisible(true);
++    return;
++  }
++
++  if (aura::Window* top_level_window = web_contents->GetTopLevelNativeWindow()) {
++    top_level_window->SetTransparent(false);
++  }
+ }
+ 
+ void WallpaperControllerClientImpl::OnVolumeMounted(

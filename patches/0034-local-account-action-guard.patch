@@ -1,0 +1,37 @@
+From f4946810af81a793d6bf700d1dab62c39c7fcafe Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Tue, 25 Aug 2026 01:32:41 -0500
+Subject: Harden AuraDE local account action handling
+
+
+diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.cc b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+index a80a923a013ea3a6d2a36f2a7980017dc1ff8ac1..7582cbd2dd66da93894072204c13352814be73f2 100644
+--- a/chrome/browser/ash/login/screens/aura_local_account_screen.cc
++++ b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+@@ -121,6 +121,11 @@ void AuraLocalAccountScreen::ShowImpl() {
+ void AuraLocalAccountScreen::HideImpl() {}
+ 
+ void AuraLocalAccountScreen::OnUserAction(const base::ListValue& args) {
++  // AuraDE compatibility: malformed WebUI actions must be ignored instead of
++  // indexing an empty list and crashing the OOBE process.
++  if (args.empty() || !args[0].is_string()) {
++    return;
++  }
+   const std::string& action_id = args[0].GetString();
+   if (action_id == kUserActionBack) {
+     exit_callback_.Run(Result::BACK);
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
+index 417c796338b93b8c08d25ef182d3499a8326113f..e7135c2df3cb05b55048adb9087106a3316f465a 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.cc
++++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
+@@ -153,5 +153,10 @@ void UserCreationScreen::SetChildSetupStep() {
+ }
+ 
+ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
++  // AuraDE compatibility: ignore malformed WebUI actions instead of reaching
++  // BaseScreen::OnUserAction, whose diagnostic check assumes one argument.
++  if (args.empty() || !args[0].is_string()) {
++    return;
++  }
+   const std::string& action_id = args[0].GetString();
+   if (action_id == kUserActionLocalAccount) {

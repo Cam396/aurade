@@ -1,795 +1,426 @@
-diff --git a/chrome/browser/ash/app_restore/full_restore_service_factory.cc b/chrome/browser/ash/app_restore/full_restore_service_factory.cc
-index c423f408f391391856155d50ccf7a42002ef7be8..cdaa2a56e39318780777ef048b846511412fcaa6 100644
---- a/chrome/browser/ash/app_restore/full_restore_service_factory.cc
-+++ b/chrome/browser/ash/app_restore/full_restore_service_factory.cc
-@@ -5,6 +5,7 @@
- #include "chrome/browser/ash/app_restore/full_restore_service_factory.h"
+From 30c170e6cafc48462b9f2f2ac3f878b03f202fb3 Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:14:16 -0500
+Subject: Keep metrics state in the AuraDE user profile
+
+
+diff --git a/chrome/browser/ash/external_metrics/external_metrics.cc b/chrome/browser/ash/external_metrics/external_metrics.cc
+index 3661765def31f194bf561c50dc7454d3f32c0f8f..2021e36f3eecf319971e6aa1abd5874724178e91 100644
+--- a/chrome/browser/ash/external_metrics/external_metrics.cc
++++ b/chrome/browser/ash/external_metrics/external_metrics.cc
+@@ -8,11 +8,13 @@
  
- #include "base/no_destructor.h"
-+#include "base/system/sys_info.h"
- #include "base/trace_event/trace_event.h"
- #include "chrome/browser/app_mode/app_mode_utils.h"
- #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
-@@ -22,6 +23,14 @@ namespace ash::full_restore {
- // static
- bool FullRestoreServiceFactory::IsFullRestoreAvailableForProfile(
-     const Profile* profile) {
-+  // AuraDE compatibility: ChromeOS full/informed restore assumes the full
-+  // ChromeOS session stack and currently trips raw_ptr lifetime checks during
-+  // generic Linux startup. Skip it until AuraDE has a native session restore
-+  // contract.
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    return false;
-+  }
-+
-   if (IsRunningInForcedAppMode() || ash::demo_mode::IsDeviceInDemoMode()) {
-     return false;
-   }
-diff --git a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
-index 486516df24744685124ab08d925e4b6480e99563..a73fda2a3271b403f6663ea1c393dc7c5047378c 100644
---- a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
-+++ b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
-@@ -12,6 +12,7 @@
+ #include <map>
+ #include <memory>
++#include <optional>
  #include <string>
  #include <vector>
  
+ #include "ash/constants/ash_switches.h"
+ #include "base/command_line.h"
 +#include "base/environment.h"
- #include "ash/constants/ash_pref_names.h"
- #include "base/containers/queue.h"
+ #include "base/files/dir_reader_posix.h"
  #include "base/functional/bind.h"
-@@ -77,6 +78,14 @@ chaps::KeyPermissions CreateKeyPermissions(bool corporate_usage_allowed,
-   return key_permissions;
- }
+ #include "base/metrics/histogram.h"
+@@ -61,6 +63,14 @@ constexpr base::TimeDelta kDefaultCollectionInterval = base::Seconds(30);
  
-+bool ShouldSkipChapsKeyPermissionUpdatesForAuraDe() {
+ ExternalMetrics* g_instance = nullptr;
+ 
++bool ShouldDisableExternalMetricsForAuraDe() {
 +  std::unique_ptr<base::Environment> environment =
 +      base::Environment::Create();
 +  const std::optional<std::string> value =
-+      environment->GetVar("AURADE_SKIP_CHAPS_KEY_PERMISSION_UPDATES");
++      environment->GetVar("AURADE_DISABLE_EXTERNAL_METRICS");
 +  return value.has_value() && value.value() != "0";
 +}
 +
- void OnArcKeyPermissionsInChapsUpdated(size_t keys_updated,
-                                        Status update_status) {
-   if (update_status == Status::kSuccess) {
-@@ -447,6 +456,10 @@ void KeyPermissionsManagerImpl::UpdateArcKeyPermissionsInChaps() {
-     // This function will always be called after the one-time migration is done.
-     return;
-   }
-+  if (ShouldSkipChapsKeyPermissionUpdatesForAuraDe()) {
-+    VLOG(1) << "Skipping ARC key permissions update in chaps for AuraDE.";
+ }  // namespace
+ 
+ ExternalMetrics::ExternalMetrics()
+@@ -96,6 +106,10 @@ ExternalMetrics* ExternalMetrics::Get() {
+ }
+ 
+ void ExternalMetrics::Start() {
++  if (ShouldDisableExternalMetricsForAuraDe()) {
++    VLOG(1) << "Skipping ChromeOS external metrics collection for AuraDE.";
 +    return;
 +  }
+   ScheduleCollector();
+ }
  
-   key_permissions_in_chaps_updater_ =
-       std::make_unique<KeyPermissionsInChapsUpdater>(
-@@ -461,6 +474,11 @@ void KeyPermissionsManagerImpl::StartOneTimeMigration() {
-   if (!g_one_time_migration_enabled_for_testing) {
-     return;
-   }
-+  if (ShouldSkipChapsKeyPermissionUpdatesForAuraDe()) {
-+    VLOG(1) << "Skipping key permissions migration in chaps for AuraDE.";
-+    OnReadyForQueries();
-+    return;
-+  }
+diff --git a/chrome/browser/metrics/chromeos_system_profile_provider.cc b/chrome/browser/metrics/chromeos_system_profile_provider.cc
+index e182942bbcde7a01f3e77e97f677dbab93cff966..84f2c4086501a738eee135980d15e7801488b031 100644
+--- a/chrome/browser/metrics/chromeos_system_profile_provider.cc
++++ b/chrome/browser/metrics/chromeos_system_profile_provider.cc
+@@ -8,6 +8,7 @@
  
-   VLOG(0) << "One-time key permissions migration started for token: "
-           << static_cast<int>(token_id_) << ".";
-diff --git a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-index c781a2a569d66e798158465d1254b2896aeeff8c..1957ff98538c9f7a44030049505387473104bb77 100644
---- a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-+++ b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-@@ -141,6 +141,7 @@ void ChromeMediaAppUIDelegate::IsFileArcWritableImpl(
-     case VolumeType::VOLUME_TYPE_SMB:
-     case VolumeType::VOLUME_TYPE_SYSTEM_INTERNAL:
-     case VolumeType::VOLUME_TYPE_GUEST_OS:
-+    case VolumeType::VOLUME_TYPE_LOCAL_ROOT:
-       std::move(is_file_arc_writable_callback).Run(false);
-       return;
-     case VolumeType::NUM_VOLUME_TYPE:
-diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
-index a40e8c795b241c2308ec120b82ce8c120901e739..00723a5697564c35736242dee97517219c25905f 100644
---- a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
-+++ b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
-@@ -26,6 +26,7 @@
- #include "base/dcheck_is_on.h"
- #include "base/debug/crash_logging.h"
- #include "base/debug/dump_without_crashing.h"
-+#include "base/environment.h"
- #include "base/feature_list.h"
+ #include "base/barrier_closure.h"
+ #include "base/check_deref.h"
++#include "base/command_line.h"
+ #include "base/files/file_util.h"
  #include "base/functional/bind.h"
- #include "base/location.h"
-@@ -34,6 +35,8 @@
- #include "base/metrics/histogram_functions.h"
- #include "base/one_shot_event.h"
- #include "base/run_loop.h"
-+#include "base/strings/string_util.h"
-+#include "base/system/sys_info.h"
- #include "base/task/single_thread_task_runner.h"
- #include "base/time/time.h"
- #include "base/trace_event/trace_event.h"
-@@ -69,6 +72,7 @@
- #include "chrome/browser/ash/system_web_apps/system_web_app_background_task.h"
- #include "chrome/browser/ash/system_web_apps/system_web_app_icon_checker.h"
- #include "chrome/browser/ash/system_web_apps/system_web_app_manager_factory.h"
-+#include "chrome/browser/ash/profiles/profile_helper.h"
- #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/profiles/profiles_state.h"
- #include "chrome/browser/web_applications/external_install_options.h"
-@@ -105,6 +109,52 @@ namespace ash {
+ #include "base/functional/callback_helpers.h"
+@@ -32,6 +33,9 @@
  
  namespace {
  
-+constexpr char kAuraDeEnableLocalAccountsSwitch[] =
-+    "aurade-enable-local-accounts";
-+constexpr char kAuraDeLocalAccountDomain[] = "@local.aurade";
-+constexpr char kAuraDeLocalProfileDirPrefix[] = "u-local-";
++constexpr char kAuraDeDisableArcFeaturesSwitch[] =
++    "aurade-disable-arc-features";
 +
-+bool IsAuraDeLocalProfile(Profile* profile) {
-+  if (base::SysInfo::IsRunningOnChromeOS() || !profile ||
-+      profile->IsOffTheRecord()) {
-+    return false;
-+  }
-+
-+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-+          kAuraDeEnableLocalAccountsSwitch)) {
-+    return false;
-+  }
-+
-+  if (ProfileHelper::IsSigninProfile(profile) ||
-+      ProfileHelper::IsLockScreenProfile(profile)) {
-+    return false;
-+  }
-+
-+  return base::EndsWith(profile->GetProfileUserName(),
-+                        kAuraDeLocalAccountDomain,
-+                        base::CompareCase::SENSITIVE) ||
-+         base::StartsWith(profile->GetPath().BaseName().value(),
-+                          kAuraDeLocalProfileDirPrefix,
-+                          base::CompareCase::SENSITIVE);
-+}
-+
-+#if !defined(OFFICIAL_BUILD)
-+constexpr char kAuraDeDisableSampleSystemWebAppSwitch[] =
-+    "aurade-disable-sample-system-web-app";
-+
-+bool ShouldDisableSampleSystemWebAppForAuraDe() {
-+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-+          kAuraDeDisableSampleSystemWebAppSwitch)) {
-+    return true;
-+  }
-+
-+  std::unique_ptr<base::Environment> environment = base::Environment::Create();
-+  const std::optional<std::string> value =
-+      environment->GetVar("AURADE_DISABLE_SAMPLE_SYSTEM_WEB_APP");
-+  return value.has_value() && value.value() != "0";
-+}
-+#endif  // !defined(OFFICIAL_BUILD)
-+
- SystemWebAppDelegateMap CreateSystemWebApps(Profile* profile) {
-   std::vector<std::unique_ptr<SystemWebAppDelegate>> info_vec;
-   info_vec.push_back(std::make_unique<CameraSystemAppDelegate>(profile));
-@@ -153,7 +203,9 @@ SystemWebAppDelegateMap CreateSystemWebApps(Profile* profile) {
-   }
+ // Called on a background thread to load cellular device variant
+ // using ConfigFS.
+ std::string GetCellularDeviceVariantOnBackgroundThread() {
+@@ -99,10 +103,11 @@ void ChromeOSSystemProfileProvider::ProvideSystemProfileMetrics(
  
- #if !defined(OFFICIAL_BUILD)
--  info_vec.push_back(std::make_unique<SampleSystemAppDelegate>(profile));
-+  if (!ShouldDisableSampleSystemWebAppForAuraDe()) {
-+    info_vec.push_back(std::make_unique<SampleSystemAppDelegate>(profile));
-+  }
- #endif  // !defined(OFFICIAL_BUILD)
- 
-   SystemWebAppDelegateMap delegate_map;
-@@ -367,6 +419,15 @@ void SystemWebAppManager::Start() {
-   if (should_force_install_apps) {
-     UpdateLastAttemptedInfo();
-   }
-+  const bool use_aurade_retry_policy = IsAuraDeLocalProfile(profile_);
-+  if (use_aurade_retry_policy) {
-+    // AuraDE developer and CI builds are intentionally non-official, so the
-+    // default policy force-installs SWAs every start. Do not let previous
-+    // sign-in/profile bootstrap failures permanently suppress Settings, Files,
-+    // Terminal, or Diagnostics for the real local session.
-+    pref_service_->ClearPref(prefs::kSystemWebAppInstallFailureCount);
-+    pref_service_->CommitPendingWrite();
+   display::Display::TouchSupport has_touch =
+       ui::GetInternalDisplayTouchSupport();
+-  if (has_touch == display::Display::TouchSupport::AVAILABLE)
++  if (has_touch == display::Display::TouchSupport::AVAILABLE) {
+     hardware->set_internal_display_supports_touch(true);
+-  else if (has_touch == display::Display::TouchSupport::UNAVAILABLE)
++  } else if (has_touch == display::Display::TouchSupport::UNAVAILABLE) {
+     hardware->set_internal_display_supports_touch(false);
 +  }
  
-   const auto& disabled_system_apps =
-       provider_->policy_manager().GetDisabledSystemWebApps();
-@@ -377,7 +438,8 @@ void SystemWebAppManager::Start() {
-         app.first, *app.second, should_force_install_apps, is_disabled));
-   }
+   if (tpm_rw_firmware_version_.has_value()) {
+     hardware->set_tpm_rw_firmware_version(*tpm_rw_firmware_version_);
+@@ -123,8 +128,9 @@ void ChromeOSSystemProfileProvider::WriteLinkedAndroidPhoneProto(
+       ash::multidevice_setup::MultiDeviceSetupClientFactory::GetForProfile(
+           cached_profile_->GetMetricsProfile());
  
--  const bool exceeded_retries = CheckAndIncrementRetryAttempts();
-+  const bool exceeded_retries =
-+      !use_aurade_retry_policy && CheckAndIncrementRetryAttempts();
-   if (exceeded_retries) {
-     LOG(ERROR)
-         << "Exceeded SWA install retry attempts.  Skipping installation, will "
-@@ -385,6 +447,15 @@ void SystemWebAppManager::Start() {
-     SCOPED_CRASH_KEY_BOOL("SystemWebAppManager", "broken_icons",
-                           PreviousSessionHadBrokenIcons());
-     base::debug::DumpWithoutCrashing();
-+    // HACK(AuraDE): Signal the event even when giving up. On linux-chromeos
-+    // the sign-in profile's SWA manager may exhaust retries without ever
-+    // reaching OnAppsSynchronized, leaving on_apps_synchronized_ unsignaled.
-+    // LaunchSystemWebAppAsync waits on this event, so any SWA launch hangs
-+    // forever. Signal it here so launchers fail gracefully (app not found)
-+    // instead of blocking indefinitely.
-+    if (!on_apps_synchronized_->is_signaled()) {
-+      on_apps_synchronized_->Signal();
-+    }
+-  if (!client)
++  if (!client) {
      return;
-   }
++  }
  
-diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
-index d530a784337f9fc988f88d3d74dfba47a8c3806c..7e50f93ff996f7cd005c419b1cdc34cb2a68a601 100644
---- a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
-+++ b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
-@@ -5,6 +5,7 @@
- #include "chrome/browser/ash/system_web_apps/system_web_app_manager_factory.h"
+   const ash::multidevice_setup::MultiDeviceSetupClient::HostStatusWithDevice&
+       host_status_with_device = client->GetHostStatus();
+@@ -209,6 +215,12 @@ void ChromeOSSystemProfileProvider::InitTaskWaitForMachineStatisticsLoaded(
  
- #include "ash/constants/ash_pref_names.h"
+ void ChromeOSSystemProfileProvider::InitTaskGetArcFeatures(
+     base::OnceClosure callback) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          kAuraDeDisableArcFeaturesSwitch)) {
++    std::move(callback).Run();
++    return;
++  }
++
+   arc::ArcFeaturesParser::GetArcFeatures(
+       base::BindOnce(&ChromeOSSystemProfileProvider::OnArcFeaturesParsed,
+                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+diff --git a/chrome/browser/metrics/per_user_state_manager_chromeos.cc b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
+index 8a095aa132a47c4ac5abafa59b8259e9df18f3c0..03c539e90f751b78b96f59faf2ea3a0aab257000 100644
+--- a/chrome/browser/metrics/per_user_state_manager_chromeos.cc
++++ b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
+@@ -7,8 +7,10 @@
+ #include "ash/constants/ash_login_pref_names.h"
+ #include "base/callback_list.h"
+ #include "base/files/file.h"
++#include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+ #include "base/metrics/histogram_functions.h"
 +#include "base/system/sys_info.h"
+ #include "base/uuid.h"
+ #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
  #include "chrome/browser/ash/profiles/profile_helper.h"
- #include "chrome/browser/ash/system_web_apps/system_web_app_manager.h"
- #include "chrome/browser/browser_process.h"
-@@ -77,7 +78,23 @@ content::BrowserContext* SystemWebAppManagerFactory::GetBrowserContextToUse(
-     return nullptr;
-   }
- 
--  return web_app::GetBrowserContextForWebApps(context);
-+  content::BrowserContext* web_apps_context =
-+      web_app::GetBrowserContextForWebApps(context);
-+  if (!web_apps_context) {
-+    return nullptr;
-+  }
-+
-+  Profile* profile = Profile::FromBrowserContext(web_apps_context);
-+  if (!base::SysInfo::IsRunningOnChromeOS() && profile &&
-+      (ProfileHelper::IsSigninProfile(profile) ||
-+       ProfileHelper::IsLockScreenProfile(profile))) {
-+    // AuraDE: on generic Linux the sign-in profile can live long enough to
-+    // create keyed services, but SWAs must install against the real local user
-+    // profile. Starting here burns the retry budget before login completes.
-+    return nullptr;
-+  }
-+
-+  return web_apps_context;
+@@ -49,6 +51,45 @@ std::string GenerateUserId() {
+   return base::Uuid::GenerateRandomV4().AsLowercaseString();
  }
  
- void SystemWebAppManagerFactory::RegisterProfilePrefs(
-diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 76e1112d8c58308aa49d5225e3f91ae59fe98232..3de53179d230585b36bfd7be7b3e8abb12502efe 100644
---- a/chrome/browser/chrome_content_browser_client.cc
-+++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -47,6 +47,7 @@
- #include "base/strings/string_util.h"
- #include "base/strings/stringprintf.h"
- #include "base/supports_user_data.h"
-+#include "base/system/sys_info.h"
- #include "base/task/sequenced_task_runner.h"
- #include "base/types/expected.h"
- #include "base/types/expected_macros.h"
-@@ -4719,6 +4720,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
-       TtsExtensionEngine::GetInstance());
- #endif
- #if BUILDFLAG(IS_CHROMEOS)
-+  // AuraDE compatibility: generic Linux sessions should use Chromium's Linux
-+  // speech-dispatcher TTS backend instead of the ChromeOS ARC/component path.
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    return nullptr;
-+  }
-+
-   return TtsPlatformImplChromeOs::GetInstance();
- #else
-   return nullptr;
-diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index e047fdc7812fc2e6ed2d32ee60a0ef9f6e6447e9..05e8562a81c85f757f83292ce8550a3c9c6bfea4 100644
---- a/chrome/browser/extensions/component_loader.cc
-+++ b/chrome/browser/extensions/component_loader.cc
-@@ -407,6 +407,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
- }
- 
- void ComponentLoader::AddGlicExtension() {
-+#if BUILDFLAG(IS_CHROMEOS)
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: the Glic/Gemini component extension depends on
-+    // ChromeOS account and AI service plumbing that AuraDE local sessions do
-+    // not provide yet. Keep the feature tier separate from loading this broken
-+    // component extension.
-+    LOG(WARNING) << "Skipping Glic component extension on generic Linux";
-+    return;
-+  }
-+#endif
-   if (IsApiGlicPrivateEnabled()) {
-     Add(IDR_GLIC_EXTENSION_MANIFEST,
-         base::FilePath(FILE_PATH_LITERAL("glic_extension")));
-@@ -414,6 +424,16 @@ void ComponentLoader::AddGlicExtension() {
- }
- 
- void ComponentLoader::AddContextualTasksExtension() {
-+#if BUILDFLAG(IS_CHROMEOS)
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: contextual tasks currently require the same
-+    // ChromeOS/Google service stack as Glic. Avoid registering a component that
-+    // cannot initialize correctly in local AuraDE sessions.
-+    LOG(WARNING)
-+        << "Skipping contextual tasks component extension on generic Linux";
-+    return;
-+  }
-+#endif
-   if (base::FeatureList::IsEnabled(
-           extensions_features::kApiContextualTasksPrivate)) {
-     Add(IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST,
-@@ -483,6 +503,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
- }
- 
- void ComponentLoader::AddKeyboardApp() {
-+#if BUILDFLAG(IS_CHROMEOS)
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: the ChromeOS virtual keyboard is packaged as an
-+    // Ash component app. Generic Linux should use a native on-screen keyboard
-+    // integration instead of registering a component app that is not currently
-+    // functional in AuraDE sessions.
-+    LOG(WARNING) << "Skipping ChromeOS virtual keyboard component extension on "
-+                    "generic Linux";
-+    return;
-+  }
-+#endif
-   Add(IDR_KEYBOARD_MANIFEST, base::FilePath(FILE_PATH_LITERAL("keyboard")));
- }
- 
-@@ -604,14 +635,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
- 
-   if (!skip_session_components) {
- #if BUILDFLAG(IS_CHROMEOS)
--    Add(IDR_ECHO_MANIFEST,
--        base::FilePath(FILE_PATH_LITERAL("/usr/share/chromeos-assets/echo")));
-+    const bool is_generic_linux = !base::SysInfo::IsRunningOnChromeOS();
-+    if (is_generic_linux) {
-+      // AuraDE compatibility: Echo and QuickOffice are ChromeOS image
-+      // components rooted in /usr/share/chromeos-assets. They are not part of
-+      // the generic Arch runtime and should not register broken component apps.
-+      LOG(WARNING) << "Skipping ChromeOS packaged component extensions on "
-+                      "generic Linux";
-+    } else {
-+      Add(IDR_ECHO_MANIFEST,
-+          base::FilePath(FILE_PATH_LITERAL("/usr/share/chromeos-assets/echo")));
- #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
--    AddComponentFromDirWithManifestFilename(
--        base::FilePath("/usr/share/chromeos-assets/quickoffice"),
--        extension_misc::kQuickOfficeComponentExtensionId,
--        extensions::kManifestFilename, extensions::kManifestFilename, {}, {});
-+      AddComponentFromDirWithManifestFilename(
-+          base::FilePath("/usr/share/chromeos-assets/quickoffice"),
-+          extension_misc::kQuickOfficeComponentExtensionId,
-+          extensions::kManifestFilename, extensions::kManifestFilename, {}, {});
- #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
-+    }
- #endif  // BUILDFLAG(IS_CHROMEOS)
- 
- #if BUILDFLAG(IS_CHROMEOS)
-@@ -630,8 +670,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
-     }
- #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
- 
--    Add(IDR_ARC_SUPPORT_MANIFEST,
--        base::FilePath(FILE_PATH_LITERAL("chromeos/arc_support")));
-+    if (is_generic_linux) {
-+      // AuraDE compatibility: ARC/Play Store is intentionally disabled until
-+      // AuraDE has a Linux-native Android story. Do not load the support app in
-+      // local desktop sessions.
-+      LOG(WARNING) << "Skipping ARC support component extension on generic "
-+                      "Linux";
-+    } else {
-+      Add(IDR_ARC_SUPPORT_MANIFEST,
-+          base::FilePath(FILE_PATH_LITERAL("chromeos/arc_support")));
-+    }
- #endif  // BUILDFLAG(IS_CHROMEOS)
-   }
- 
-@@ -757,14 +805,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
- }
- 
- void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: these component extensions point at ChromeOS image
-+    // assets under /usr/share/chromeos-assets. Generic Linux builds should not
-+    // probe or register them on the startup path; native Linux TTS integration
-+    // can be supplied separately by distro packages.
-+    LOG(WARNING) << "Skipping ChromeOS speech synthesis extensions";
-+    return;
-+  }
-+
-   if (!ExistsOrPendingAdd(extension_misc::kGoogleSpeechSynthesisExtensionId)) {
--    AddComponentFromDir(
-+    const base::FilePath google_tts_path =
-         ::features::IsAccessibilityManifestV3EnabledForGoogleTts()
-             ? base::FilePath(
-                   extension_misc::kGoogleSpeechSynthesisManifestV3ExtensionPath)
-             : base::FilePath(
--                  extension_misc::kGoogleSpeechSynthesisExtensionPath),
--        extension_misc::kGoogleSpeechSynthesisExtensionId,
-+                  extension_misc::kGoogleSpeechSynthesisExtensionPath);
-+    AddComponentFromDir(
-+        google_tts_path, extension_misc::kGoogleSpeechSynthesisExtensionId,
-         base::BindRepeating(
-             &ComponentLoader::FinishLoadSpeechSynthesisExtension,
-             weak_factory_.GetWeakPtr(),
-@@ -772,12 +830,12 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
-   }
- 
-   if (!ExistsOrPendingAdd(extension_misc::kEspeakSpeechSynthesisExtensionId)) {
-+    const base::FilePath espeak_tts_path = base::FilePath(
-+        ::features::IsAccessibilityManifestV3EnabledForEspeakNGTts()
-+            ? extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath
-+            : extension_misc::kEspeakSpeechSynthesisExtensionPath);
-     AddComponentFromDir(
--        base::FilePath(
--            ::features::IsAccessibilityManifestV3EnabledForEspeakNGTts()
--                ? extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath
--                : extension_misc::kEspeakSpeechSynthesisExtensionPath),
--        extension_misc::kEspeakSpeechSynthesisExtensionId,
-+        espeak_tts_path, extension_misc::kEspeakSpeechSynthesisExtensionId,
-         base::BindRepeating(
-             &ComponentLoader::FinishLoadSpeechSynthesisExtension,
-             weak_factory_.GetWeakPtr(),
-diff --git a/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc b/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
-index e285d527d61f489da0d4f5870e141706522de69b..8bdf864f5905ea7b83b5a29b2c66291d1a699286 100644
---- a/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
-+++ b/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
-@@ -6,6 +6,7 @@
- 
- #include <algorithm>
- 
-+#include "base/command_line.h"
- #include "base/functional/bind.h"
- #include "base/memory/ptr_util.h"
- #include "base/metrics/histogram_functions.h"
-@@ -20,6 +21,13 @@ namespace multidevice_setup {
- namespace {
- 
- constexpr base::TimeDelta kHostStatusLoggingPeriod = base::Minutes(30);
-+constexpr char kAuraDeDisableChromeOSConnectedDeviceFeaturesSwitch[] =
-+    "aurade-disable-chromeos-connected-device-features";
-+
-+bool AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe() {
-+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-+      kAuraDeDisableChromeOSConnectedDeviceFeaturesSwitch);
++base::FilePath GetAuraDEMetricsStateDir() {
++  return base::GetHomeDir()
++      .AppendASCII(".local")
++      .AppendASCII("state")
++      .AppendASCII("aurade")
++      .AppendASCII("metrics");
 +}
++
++base::FilePath GetDaemonStoreConsentPath(const std::string& hash) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: generic Linux does not have ChromeOS daemon-store
++    // or cryptohome. Keep the per-user UMA consent marker in normal XDG-style
++    // user state instead of writing to /run/daemon-store.
++    return GetAuraDEMetricsStateDir()
++        .AppendASCII("uma-consent")
++        .Append(hash)
++        .Append(kDaemonStoreFileName);
++  }
++
++  return base::FilePath(kDaemonStorePath)
++      .Append(hash)
++      .Append(kDaemonStoreFileName);
++}
++
++base::FilePath GetOutOfCryptohomeConsentPath() {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: preserve the boot-collector consent signal without
++    // relying on ChromeOS' /home/chronos layout.
++    return GetAuraDEMetricsStateDir().AppendASCII("boot-collect-consent");
++  }
++
++  return base::FilePath(kOutOfCryptohomeConsent);
++}
++
++bool EnsureAuraDEParentDirectory(const base::FilePath& path) {
++  return base::SysInfo::IsRunningOnChromeOS() ||
++         base::CreateDirectory(path.DirName());
++}
++
+ // Keep in sync with PerUserDaemonStoreFail enum.
+ // These values are persisted to logs. Entries should not be renumbered and
+ // numeric values should never be reused
+@@ -84,9 +125,12 @@ bool WriteFileNoFollow(const base::FilePath& path, std::string_view data) {
+   return file.IsValid() && file.WriteAndCheck(0, base::as_byte_span(data));
+ }
  
- }  // namespace
+-void WriteDaemonStore(base::FilePath path, bool user_choice) {
++void WriteDaemonStore(base::FilePath path,
++                      base::FilePath out_of_cryptohome_path,
++                      bool user_choice) {
+   const std::string file_contents = user_choice ? "1" : "0";
+-  if (!WriteFileNoFollow(path, file_contents)) {
++  if (!EnsureAuraDEParentDirectory(path) ||
++      !WriteFileNoFollow(path, file_contents)) {
+     LOG(ERROR) << "Failed to persist consent change " << file_contents
+                << " to daemon-store. State on disk will be inaccurate!";
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+@@ -94,8 +138,8 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+                                       ? DaemonStoreFailType::kFailedEnabling
+                                       : DaemonStoreFailType::kFailedDisabling);
+   }
+-  if (!WriteFileNoFollow(base::FilePath(kOutOfCryptohomeConsent),
+-                         file_contents)) {
++  if (!EnsureAuraDEParentDirectory(out_of_cryptohome_path) ||
++      !WriteFileNoFollow(out_of_cryptohome_path, file_contents)) {
+     LOG(ERROR) << "Failed to write out-of-cryptohome consent change: "
+                << file_contents;
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+@@ -106,7 +150,7 @@ void WriteDaemonStore(base::FilePath path, bool user_choice) {
+ }
  
-@@ -62,6 +70,11 @@ HostStatusProviderImpl::HostStatusProviderImpl(
-       host_verifier_(host_verifier),
-       current_status_and_device_(mojom::HostStatus::kNoEligibleHosts,
-                                  std::nullopt /* host_device */) {
-+  if (AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe()) {
-+    RecordMultiDeviceHostStatus();
+ void RemoveGlobalMetricsConsent() {
+-  if (!base::DeleteFile(base::FilePath(kOutOfCryptohomeConsent))) {
++  if (!base::DeleteFile(GetOutOfCryptohomeConsentPath())) {
+     LOG(ERROR) << "failed to remove out-of-cryptohome consent file";
+     base::UmaHistogramEnumeration(kWriteFileFailMetric,
+                                   DaemonStoreFailType::kFailedDeletingBoot);
+@@ -304,14 +348,13 @@ void PerUserStateManagerChromeOS::SetReportingState(bool user_choice) {
+   GetCurrentUserPrefs()->SetBoolean(prefs::kMetricsUserConsent, user_choice);
+ 
+   std::string hash = user_manager_->GetActiveUser()->username_hash();
+-  base::FilePath daemon_store_consent = base::FilePath(kDaemonStorePath)
+-                                            .Append(hash)
+-                                            .Append(kDaemonStoreFileName);
++  base::FilePath daemon_store_consent = GetDaemonStoreConsentPath(hash);
+   // Do this asynchronously so we don't block in a potentially non-blocking
+   // context.
+-  task_runner_->PostTask(
+-      FROM_HERE,
+-      base::BindOnce(WriteDaemonStore, daemon_store_consent, user_choice));
++  task_runner_->PostTask(FROM_HERE,
++                         base::BindOnce(WriteDaemonStore, daemon_store_consent,
++                                        GetOutOfCryptohomeConsentPath(),
++                                        user_choice));
+   NotifyObservers(user_choice);
+ }
+ 
+diff --git a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
+index a77e46fcf81ab7944531299cb8fc13259d2679d6..37a9925e42755f5536a5b563d0498929508e024f 100644
+--- a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
++++ b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
+@@ -5,7 +5,10 @@
+ #include "chrome/browser/metrics/structured/ash_structured_metrics_recorder.h"
+ 
+ #include <memory>
++#include <optional>
++#include <string>
+ 
++#include "base/environment.h"
+ #include "base/files/file_path.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/metrics/metrics_hashes.h"
+@@ -25,6 +28,14 @@ namespace {
+ // Directory containing serialized event protos to read.
+ constexpr char kExternalMetricsDir[] = "/var/lib/metrics/structured/events";
+ 
++bool ShouldDisableExternalMetricsForAuraDe() {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar("AURADE_DISABLE_EXTERNAL_METRICS");
++  return value.has_value() && value.value() != "0";
++}
++
+ std::unique_ptr<EventStorage<StructuredEventProto>> CreateEventStorage() {
+   StorageManagerConfig config = StorageManagerImpl::GetStorageManagerConfig();
+   return std::make_unique<StorageManagerImpl>(config);
+@@ -146,6 +157,10 @@ void AshStructuredMetricsRecorder::SetExternalMetricsDirForTest(
+ }
+ 
+ void AshStructuredMetricsRecorder::ProfileAdded(const Profile& profile) {
++  if (ShouldDisableExternalMetricsForAuraDe()) {
 +    return;
 +  }
 +
-   host_backend_delegate_observation_.Observe(host_backend_delegate);
-   host_verifier_observation_.Observe(host_verifier);
-   eligible_host_devices_observation_.Observe(eligible_host_devices_provider);
-@@ -136,6 +149,11 @@ void HostStatusProviderImpl::CheckForUpdatedStatusAndNotifyIfChanged(
+   external_metrics_ = std::make_unique<ExternalMetrics>(
+       base::FilePath(kExternalMetricsDir),
+       GetExternalMetricsCollectionInterval(),
+diff --git a/chrome/browser/metrics/structured/cros_events_processor.cc b/chrome/browser/metrics/structured/cros_events_processor.cc
+index aee8ad3f8b6b8e3640bca9168724210f0d67814f..a9b1c8d82a5f315560d4e98b41aea50f9b0b3c3e 100644
+--- a/chrome/browser/metrics/structured/cros_events_processor.cc
++++ b/chrome/browser/metrics/structured/cros_events_processor.cc
+@@ -4,6 +4,11 @@
  
- HostStatusProvider::HostStatusWithDevice
- HostStatusProviderImpl::GetCurrentStatus() {
-+  if (AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe()) {
-+    return HostStatusWithDevice(mojom::HostStatus::kNoEligibleHosts,
-+                                std::nullopt /* host_device */);
-+  }
-+
-   if (host_verifier_->IsHostVerified()) {
-     return HostStatusWithDevice(
-         mojom::HostStatus::kHostVerified,
-diff --git a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
-index 3c7b2b34db396e96d02ea4a0f2ac88053ed359c1..68d10747a780109fbfb8a083c42b59d38cc50322 100644
---- a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
-+++ b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
-@@ -5,8 +5,11 @@
- #include "chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h"
+ #include "chrome/browser/metrics/structured/cros_events_processor.h"
  
- #include <algorithm>
 +#include <memory>
- #include <utility>
- 
-+#include "base/command_line.h"
++#include <optional>
++#include <string>
++
 +#include "base/environment.h"
- #include "base/functional/bind.h"
- #include "base/memory/ptr_util.h"
- #include "base/metrics/histogram_functions.h"
-@@ -19,6 +22,20 @@ namespace {
- constexpr base::TimeDelta kInitialFeatureStateLoggingDelay = base::Seconds(15);
- constexpr base::TimeDelta kRepeatingFeatureStateLoggingPeriod =
-     base::Minutes(30);
-+constexpr char kAuraDeDisableChromeOSConnectedDeviceFeaturesSwitch[] =
-+    "aurade-disable-chromeos-connected-device-features";
-+
-+bool AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe() {
-+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-+          kAuraDeDisableChromeOSConnectedDeviceFeaturesSwitch)) {
-+    return true;
-+  }
-+
-+  std::unique_ptr<base::Environment> environment = base::Environment::Create();
-+  const std::optional<std::string> value =
-+      environment->GetVar("AURADE_DISABLE_CHROMEOS_CONNECTED_DEVICE_FEATURES");
-+  return value.has_value() && value.value() != "0";
-+}
- 
- // Log the feature states in |feature_states_map|. Called 1) on
- // sign-in, 2) when at least one feature state changes, and 3) every 30
-@@ -53,8 +70,9 @@ MultiDeviceSetupClientImpl::Factory*
- std::unique_ptr<MultiDeviceSetupClient>
- MultiDeviceSetupClientImpl::Factory::Create(
-     mojo::PendingRemote<mojom::MultiDeviceSetup> remote_setup) {
--  if (test_factory_)
-+  if (test_factory_) {
-     return test_factory_->CreateInstance(std::move(remote_setup));
-+  }
- 
-   return base::WrapUnique(
-       new MultiDeviceSetupClientImpl(std::move(remote_setup)));
-@@ -72,9 +90,21 @@ MultiDeviceSetupClientImpl::MultiDeviceSetupClientImpl(
-     mojo::PendingRemote<mojom::MultiDeviceSetup> remote_setup)
-     : multidevice_setup_remote_(std::move(remote_setup)),
-       remote_device_cache_(multidevice::RemoteDeviceCache::Factory::Create()),
-+      disable_chromeos_connected_device_features_(
-+          AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe()),
-+      disabled_host_status_with_device_(GenerateDefaultHostStatusWithDevice()),
-+      disabled_feature_states_map_(GenerateDefaultFeatureStatesMap(
-+          mojom::FeatureState::kProhibitedByPolicy)),
-       host_status_with_device_(GenerateDefaultHostStatusWithDevice()),
-       feature_states_map_(GenerateDefaultFeatureStatesMap(
--          mojom::FeatureState::kUnavailableNoVerifiedHost_ClientNotReady)) {
-+          disable_chromeos_connected_device_features_
-+              ? mojom::FeatureState::kProhibitedByPolicy
-+              : mojom::FeatureState::
-+                    kUnavailableNoVerifiedHost_ClientNotReady)) {
-+  if (disable_chromeos_connected_device_features_) {
-+    return;
-+  }
-+
-   multidevice_setup_remote_->AddHostStatusObserver(
-       GenerateHostStatusObserverRemote());
-   multidevice_setup_remote_->AddFeatureStateObserver(
-@@ -113,11 +143,21 @@ MultiDeviceSetupClientImpl::MultiDeviceSetupClientImpl(
- MultiDeviceSetupClientImpl::~MultiDeviceSetupClientImpl() = default;
- 
- void MultiDeviceSetupClientImpl::OnFeatureStateMetricTimerFired() {
--  LogFeatureStates(feature_states_map_);
-+  LogFeatureStates(GetFeatureStates());
-+}
-+
-+bool MultiDeviceSetupClientImpl::ShouldDisableConnectedDeviceFeatures() const {
-+  return disable_chromeos_connected_device_features_ ||
-+         AreChromeOSConnectedDeviceFeaturesDisabledForAuraDe();
- }
- 
- void MultiDeviceSetupClientImpl::GetEligibleHostDevices(
-     GetEligibleHostDevicesCallback callback) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    std::move(callback).Run(multidevice::RemoteDeviceRefList());
-+    return;
-+  }
-+
-   multidevice_setup_remote_->GetEligibleHostDevices(base::BindOnce(
-       &MultiDeviceSetupClientImpl::OnGetEligibleHostDevicesCompleted,
-       base::Unretained(this), std::move(callback)));
-@@ -127,19 +167,31 @@ void MultiDeviceSetupClientImpl::SetHostDevice(
-     const std::string& host_instance_id_or_legacy_device_id,
-     const std::string& auth_token,
-     mojom::MultiDeviceSetup::SetHostDeviceCallback callback) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    std::move(callback).Run(false);
-+    return;
-+  }
-+
-   multidevice_setup_remote_->SetHostDevice(host_instance_id_or_legacy_device_id,
-                                            auth_token, std::move(callback));
- }
- 
- void MultiDeviceSetupClientImpl::RemoveHostDevice() {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    return;
-+  }
-+
-   multidevice_setup_remote_->RemoveHostDevice();
- }
- 
- const MultiDeviceSetupClient::HostStatusWithDevice&
- MultiDeviceSetupClientImpl::GetHostStatus() const {
-+  const HostStatusWithDevice& host_status_with_device =
-+      ShouldDisableConnectedDeviceFeatures() ? disabled_host_status_with_device_
-+                                             : host_status_with_device_;
-   PA_LOG(INFO) << "Responding to GetHostStatus() with the following host = "
--               << HostStatusWithDeviceToString(host_status_with_device_);
--  return host_status_with_device_;
-+               << HostStatusWithDeviceToString(host_status_with_device);
-+  return host_status_with_device;
- }
- 
- void MultiDeviceSetupClientImpl::SetFeatureEnabledState(
-@@ -147,35 +199,62 @@ void MultiDeviceSetupClientImpl::SetFeatureEnabledState(
-     bool enabled,
-     const std::optional<std::string>& auth_token,
-     mojom::MultiDeviceSetup::SetFeatureEnabledStateCallback callback) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    std::move(callback).Run(false);
-+    return;
-+  }
-+
-   multidevice_setup_remote_->SetFeatureEnabledState(
-       feature, enabled, auth_token, std::move(callback));
- }
- 
- const MultiDeviceSetupClient::FeatureStatesMap&
- MultiDeviceSetupClientImpl::GetFeatureStates() const {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    return disabled_feature_states_map_;
-+  }
-+
-   return feature_states_map_;
- }
- 
- void MultiDeviceSetupClientImpl::RetrySetHostNow(
-     mojom::MultiDeviceSetup::RetrySetHostNowCallback callback) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    std::move(callback).Run(false);
-+    return;
-+  }
-+
-   multidevice_setup_remote_->RetrySetHostNow(std::move(callback));
- }
- 
- void MultiDeviceSetupClientImpl::TriggerEventForDebugging(
-     mojom::EventTypeForDebugging type,
-     mojom::MultiDeviceSetup::TriggerEventForDebuggingCallback callback) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    std::move(callback).Run(false);
-+    return;
-+  }
-+
-   multidevice_setup_remote_->TriggerEventForDebugging(type,
-                                                       std::move(callback));
- }
- 
- void MultiDeviceSetupClientImpl::SetQuickStartPhoneInstanceID(
-     const std::string& qs_phone_instance_id) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    return;
-+  }
-+
-   multidevice_setup_remote_->SetQuickStartPhoneInstanceID(qs_phone_instance_id);
- }
- 
- void MultiDeviceSetupClientImpl::OnHostStatusChanged(
-     mojom::HostStatus host_status,
-     const std::optional<multidevice::RemoteDevice>& host_device) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    return;
-+  }
-+
-   if (host_device) {
-     remote_device_cache_->SetRemoteDevices({*host_device});
-     host_status_with_device_ = std::make_pair(
-@@ -193,6 +272,10 @@ void MultiDeviceSetupClientImpl::OnHostStatusChanged(
- 
- void MultiDeviceSetupClientImpl::OnFeatureStatesChanged(
-     const FeatureStatesMap& feature_states_map) {
-+  if (ShouldDisableConnectedDeviceFeatures()) {
-+    return;
-+  }
-+
-   initial_feature_state_metric_logging_timer_.Stop();
-   PA_LOG(INFO) << "Feature states have changed. New feature map: "
-                << FeatureStatesMapToString(feature_states_map);
-diff --git a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
-index a0fad3c05abcea04d0150385736aa1785328c727..0cc24b020c5889fef504c9bdcfcab099dfdea0c4 100644
---- a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
-+++ b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
-@@ -94,6 +94,7 @@ class MultiDeviceSetupClientImpl : public MultiDeviceSetupClient,
-       const multidevice::RemoteDeviceList& eligible_host_devices);
- 
-   void OnFeatureStateMetricTimerFired();
-+  bool ShouldDisableConnectedDeviceFeatures() const;
- 
-   mojo::PendingRemote<mojom::HostStatusObserver>
-   GenerateHostStatusObserverRemote();
-@@ -108,6 +109,9 @@ class MultiDeviceSetupClientImpl : public MultiDeviceSetupClient,
-   mojo::Receiver<mojom::FeatureStateObserver> feature_state_observer_receiver_{
-       this};
-   std::unique_ptr<multidevice::RemoteDeviceCache> remote_device_cache_;
-+  const bool disable_chromeos_connected_device_features_;
-+  const HostStatusWithDevice disabled_host_status_with_device_;
-+  const FeatureStatesMap disabled_feature_states_map_;
- 
-   // We want to delay the initial logging of the feature states map to better
-   // understand the frequency of when the client is not ready, and we are stuck
-diff --git a/components/exo/wayland/server.cc b/components/exo/wayland/server.cc
-index 8197dbab5f6470ce20251c32c1ca7e2a80b8ac13..d074d45d1aff03a7e0e637b008dddf9777148a91 100644
---- a/components/exo/wayland/server.cc
-+++ b/components/exo/wayland/server.cc
-@@ -32,6 +32,7 @@
- #include <xdg-shell-server-protocol.h>
- 
- #include <array>
-+#include <cerrno>
- #include <memory>
- #include <string>
- #include <utility>
-@@ -182,8 +183,19 @@ bool Server::Open() {
-   if (wayland_group_res) {
-     if (HANDLE_EINTR(chown(socket_path.MaybeAsASCII().c_str(), -1,
-                            wayland_group.gr_gid)) < 0) {
--      PLOG(ERROR) << "chown";
--      return false;
-+      const int chown_errno = errno;
-+      // AuraDE compatibility: generic Linux sessions usually run Ash as an
-+      // unprivileged desktop user. The socket is already owned by that user, so
-+      // group ownership is only a cross-user convenience and should not prevent
-+      // the Exo Wayland server from starting.
-+      if (!base::SysInfo::IsRunningOnChromeOS() && chown_errno == EPERM) {
-+        errno = chown_errno;
-+        PLOG(WARNING) << "Ignoring Wayland socket group ownership failure";
-+      } else {
-+        errno = chown_errno;
-+        PLOG(ERROR) << "chown";
-+        return false;
-+      }
-     }
-   } else {
-     LOG(WARNING) << "Group '" << kWaylandSocketGroup << "' not found";
-diff --git a/device/bluetooth/floss/floss_dbus_manager.cc b/device/bluetooth/floss/floss_dbus_manager.cc
-index 3f747c6b760fb29910f86b899d2a2b4d16fee7df..467252812e40dfc082ea9070cc83529bc2221228 100644
---- a/device/bluetooth/floss/floss_dbus_manager.cc
-+++ b/device/bluetooth/floss/floss_dbus_manager.cc
-@@ -6,9 +6,12 @@
- 
- #include <memory>
- 
-+#include "base/command_line.h"
-+#include "base/environment.h"
+ #include "base/files/file_util.h"
  #include "base/logging.h"
- #include "base/memory/ptr_util.h"
- #include "base/message_loop/message_pump_type.h"
-+#include "base/system/sys_info.h"
- #include "base/threading/thread.h"
- #include "build/build_config.h"
- #include "components/device_event_log/device_event_log.h"
-@@ -45,6 +48,23 @@ namespace floss {
  
- namespace {
- FlossDBusManager* g_floss_dbus_manager = nullptr;
-+constexpr char kAuraDeUseFlossStubsSwitch[] = "aurade-use-floss-stubs";
-+
-+bool ShouldUseFlossStubsForAuraDe() {
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    return true;
+@@ -14,13 +19,34 @@ namespace metrics::structured::cros_event {
+ // platform2/metrics/structured/reset_counter_updater.cc
+ const char* kResetCounterPath = "/var/lib/metrics/structured/reset-counter";
+ 
++base::FilePath GetResetCounterPath(const char* reset_counter_path,
++                                   bool* log_missing_path) {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    *log_missing_path = true;
++    return base::FilePath(reset_counter_path);
 +  }
 +
-+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-+          kAuraDeUseFlossStubsSwitch)) {
-+    return true;
-+  }
-+
-+  std::unique_ptr<base::Environment> environment = base::Environment::Create();
-+  const std::optional<std::string> value =
-+      environment->GetVar("AURADE_USE_FLOSS_STUBS");
-+  return value.has_value() && value.value() != "0";
++  *log_missing_path = false;
++  base::FilePath path =
++      base::FilePath(metrics_dir.value()).Append("reset-counter");
++  base::CreateDirectory(path.DirName());
++  return path;
 +}
++
+ CrOSEventsProcessor::CrOSEventsProcessor(const char* reset_counter_path) {
++  bool log_missing_path = true;
++  const base::FilePath path =
++      GetResetCounterPath(reset_counter_path, &log_missing_path);
+   std::string content;
+-  if (base::ReadFileToString(base::FilePath(reset_counter_path), &content)) {
++  if (base::ReadFileToString(path, &content)) {
+     std::stringstream ss(content);
+     ss >> current_reset_counter_;
+-  } else {
+-    LOG(ERROR) << "Failed to read reset_counter file: " << reset_counter_path;
++  } else if (log_missing_path) {
++    LOG(ERROR) << "Failed to read reset_counter file: " << path;
+   }
+ }
+ CrOSEventsProcessor::~CrOSEventsProcessor() = default;
+diff --git a/chrome/browser/metrics/structured/key_data_provider_ash.cc b/chrome/browser/metrics/structured/key_data_provider_ash.cc
+index d7b3c43cc5f1ab55c81f6d782cc15b57c7c07420..a14696cc9dbd34d3bdc0bec2e783764673ff1419 100644
+--- a/chrome/browser/metrics/structured/key_data_provider_ash.cc
++++ b/chrome/browser/metrics/structured/key_data_provider_ash.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/metrics/structured/key_data_provider_ash.h"
+ 
++#include <optional>
++#include <string>
++
++#include "base/environment.h"
++#include "base/files/file_util.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+ #include "components/metrics/structured/key_data_provider_file.h"
+ #include "components/metrics/structured/structured_metrics_validator.h"
+@@ -24,10 +29,25 @@ constexpr char kProfileKeyPath[] = "structured_metrics/keys";
+ // by chronos.
+ constexpr char kDeviceKeyPath[] = "/var/lib/metrics/structured/chromium/keys";
+ 
++base::FilePath GetDeviceKeyPath() {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    return base::FilePath(kDeviceKeyPath);
++  }
++
++  base::FilePath path(metrics_dir.value());
++  path = path.Append("chromium").Append("keys");
++  base::CreateDirectory(path.DirName());
++  return path;
++}
++
  }  // namespace
  
- const int FlossDBusManager::kInvalidAdapter = -1;
-@@ -278,7 +298,7 @@ void FlossDBusManager::Initialize(dbus::Bus* system_bus) {
+ KeyDataProviderAsh::KeyDataProviderAsh()
+-    : KeyDataProviderAsh(base::FilePath(kDeviceKeyPath), kSaveDelay) {}
++    : KeyDataProviderAsh(GetDeviceKeyPath(), kSaveDelay) {}
  
-   VLOG(1) << "FlossDBusManager about to initialize thread manager";
+ KeyDataProviderAsh::KeyDataProviderAsh(const base::FilePath& device_key_path,
+                                        base::TimeDelta write_delay)
+diff --git a/chrome/browser/metrics/structured/storage_manager_impl.cc b/chrome/browser/metrics/structured/storage_manager_impl.cc
+index b803332908670bcc56c602ee831d1293c9d8fc79..666bd5599e70d92f8e9a14aa4a2d205bae31ba10 100644
+--- a/chrome/browser/metrics/structured/storage_manager_impl.cc
++++ b/chrome/browser/metrics/structured/storage_manager_impl.cc
+@@ -4,9 +4,14 @@
  
--  CreateGlobalInstance(system_bus, /*use_stubs=*/false);
-+  CreateGlobalInstance(system_bus, ShouldUseFlossStubsForAuraDe());
- }
+ #include "chrome/browser/metrics/structured/storage_manager_impl.h"
  
- void FlossDBusManager::InitializeFake() {
++#include <memory>
++#include <optional>
++#include <string>
+ #include <vector>
+ 
+ #include "base/byte_size.h"
++#include "base/environment.h"
++#include "base/files/file_util.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/task_traits.h"
+@@ -49,12 +54,40 @@ constexpr char kRootPartitionPath[] = "/var/lib/metrics/structured/";
+ constexpr int64_t kMinBufferSize = 10 * 1024;  // 10 kb
+ constexpr int64_t kMinDiskSize = 50 * 1024;    // 50 kb
+ 
++base::FilePath GetStructuredMetricsPath(const char* first_component,
++                                        const char* second_component,
++                                        const char* third_component,
++                                        const char* fallback_path) {
++  std::unique_ptr<base::Environment> environment =
++      base::Environment::Create();
++  const std::optional<std::string> metrics_dir =
++      environment->GetVar("AURADE_STRUCTURED_METRICS_DIR");
++  if (!metrics_dir.has_value() || metrics_dir.value().empty()) {
++    return base::FilePath(fallback_path);
++  }
++
++  base::FilePath path(metrics_dir.value());
++  path = path.Append(first_component)
++             .Append(second_component)
++             .Append(third_component);
++  base::CreateDirectory(path.DirName());
++  return path;
++}
++
+ }  // namespace
+ 
+ StorageManagerImpl::StorageManagerImpl(const StorageManagerConfig& config)
+     : StorageManagerImpl(config,
+-                         base::FilePath(kArenaProtoDefaultPath),
+-                         base::FilePath(kFlushedEventsDefaultDir)) {}
++                         GetStructuredMetricsPath(
++                             "chromium",
++                             "storage",
++                             "initial-events",
++                             kArenaProtoDefaultPath),
++                         GetStructuredMetricsPath(
++                             "chromium",
++                             "storage",
++                             "flushed",
++                             kFlushedEventsDefaultDir)) {}
+ 
+ StorageManagerImpl::StorageManagerImpl(const StorageManagerConfig& config,
+                                        const base::FilePath& events_path,

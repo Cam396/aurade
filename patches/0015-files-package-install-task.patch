@@ -1,229 +1,401 @@
-diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-index ee23cdd290..5a5bc28124 100644
---- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-+++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-@@ -12,6 +12,7 @@
- #include "chrome/browser/ash/file_manager/file_tasks.h"
- #include "chrome/browser/ash/file_manager/virtual_tasks/drive_upload_virtual_task.h"
- #include "chrome/browser/ash/file_manager/virtual_tasks/install_isolated_web_app_virtual_task.h"
-+#include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
- #include "chrome/browser/ash/file_manager/virtual_tasks/ms365_virtual_task.h"
- #include "chromeos/ash/components/file_manager/app_id.h"
- #include "components/services/app_service/public/cpp/intent_util.h"
-@@ -26,6 +27,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
-   static const base::NoDestructor<std::vector<VirtualTask*>> virtual_tasks(
-       std::initializer_list<VirtualTask*>({
-           new InstallIsolatedWebAppVirtualTask(),
-+          new InstallPackageVirtualTask(),
-           new Ms365VirtualTask(),
-           new DocsUploadVirtualTask(),
-           new SheetsUploadVirtualTask(),
-diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-index 9197de05b4..fd7bf21307 100644
---- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-+++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-@@ -11,6 +11,8 @@ static_library("virtual_tasks") {
-     "id_constants.h",
-     "install_isolated_web_app_virtual_task.cc",
-     "install_isolated_web_app_virtual_task.h",
-+    "install_package_virtual_task.cc",
-+    "install_package_virtual_task.h",
-     "ms365_virtual_task.cc",
-     "ms365_virtual_task.h",
+From 5b8f50680fb1d0ad6b39e9d826a01e4ea1693931 Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:11:36 -0500
+Subject: Harden Linux Wayland and DRM integration
+
+
+diff --git a/components/exo/wayland/wl_compositor.cc b/components/exo/wayland/wl_compositor.cc
+index 2fa9819b6c2f7db5f81c42265cd5253ddcdf9bd2..d32c90c2a8a5ed7a5f9253e2244d53d1d673d1ba 100644
+--- a/components/exo/wayland/wl_compositor.cc
++++ b/components/exo/wayland/wl_compositor.cc
+@@ -182,6 +182,15 @@ void surface_set_buffer_scale(wl_client* client,
+   GetUserDataAs<Surface>(resource)->SetBufferScale(scale);
+ }
+ 
++void surface_damage_buffer(wl_client* client,
++                           wl_resource* resource,
++                           int32_t x,
++                           int32_t y,
++                           int32_t width,
++                           int32_t height) {
++  GetUserDataAs<Surface>(resource)->Damage(gfx::Rect(x, y, width, height));
++}
++
+ const struct wl_surface_interface surface_implementation = {
+     surface_destroy,
+     surface_attach,
+@@ -191,7 +200,8 @@ const struct wl_surface_interface surface_implementation = {
+     surface_set_input_region,
+     surface_commit,
+     surface_set_buffer_transform,
+-    surface_set_buffer_scale};
++    surface_set_buffer_scale,
++    surface_damage_buffer};
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // wl_compositor_interface:
+diff --git a/components/exo/wayland/wl_compositor.h b/components/exo/wayland/wl_compositor.h
+index cc553e800cba2b7a0ed1c0eb860435d5f5854480..832faebf68ec1ef46a3e7822af7231db05d42d93 100644
+--- a/components/exo/wayland/wl_compositor.h
++++ b/components/exo/wayland/wl_compositor.h
+@@ -12,7 +12,7 @@
+ namespace exo::wayland {
+ 
+ constexpr uint32_t kWlCompositorVersion =
+-    WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION;
++    WL_SURFACE_DAMAGE_BUFFER_SINCE_VERSION;
+ 
+ void bind_compositor(wl_client* client,
+                      void* data,
+diff --git a/components/viz/service/display_embedder/output_surface_provider_impl.cc b/components/viz/service/display_embedder/output_surface_provider_impl.cc
+index c15bbfb0938d65b1f5482fbb936f23d86c26682b..64dacc7ca2eec7afd3aed526a546ae3011b295b1 100644
+--- a/components/viz/service/display_embedder/output_surface_provider_impl.cc
++++ b/components/viz/service/display_embedder/output_surface_provider_impl.cc
+@@ -4,11 +4,14 @@
+ 
+ #include "components/viz/service/display_embedder/output_surface_provider_impl.h"
+ 
++#include <atomic>
+ #include <memory>
++#include <optional>
+ #include <utility>
+ 
+ #include "base/command_line.h"
+ #include "base/compiler_specific.h"
++#include "base/environment.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -127,7 +130,19 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
+       // GPU compositing is expected to always work on Chrome OS and Cast
+       // devices, so we should never encounter fatal context error. This could
+       // be an unrecoverable hardware error or a bug.
+-      LOG(FATAL) << "Unexpected fatal context error";
++      std::optional<std::string> aura_de_fallback =
++          base::Environment::Create()->GetVar(
++              "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
++      if (aura_de_fallback.has_value() && aura_de_fallback.value() != "0") {
++        static std::atomic_bool logged_aura_de_fallback{false};
++        if (!logged_aura_de_fallback.exchange(true)) {
++          LOG(ERROR) << "Unexpected fatal context error; disabling GPU "
++                        "compositing for AuraDE host session";
++        }
++        gpu_service_impl_->DisableGpuCompositing();
++      } else {
++        LOG(FATAL) << "Unexpected fatal context error";
++      }
+ #elif !BUILDFLAG(IS_ANDROID)
+       gpu_service_impl_->DisableGpuCompositing();
+ #endif
+diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper.cc b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
+index abe91d0a0498a336e0eb6e774ef41fb3435e0f4d..0b4aba839e6c049a2074f86765b4f2bf0b16bde9 100644
+--- a/gpu/command_buffer/service/shared_memory_region_wrapper.cc
++++ b/gpu/command_buffer/service/shared_memory_region_wrapper.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+ 
++#include <algorithm>
++
+ #include "base/compiler_specific.h"
+ #include "base/logging.h"
+ #include "base/numerics/checked_math.h"
+@@ -52,6 +54,30 @@ bool ValidateStride(const gfx::Size size,
+   return true;
+ }
+ 
++std::optional<size_t> SharedMemorySizeForStride(viz::SharedImageFormat format,
++                                                const gfx::Size& size,
++                                                uint32_t stride) {
++  if (!format.is_single_plane()) {
++    return viz::SharedMemorySizeForSharedImageFormat(format, size);
++  }
++
++  std::optional<size_t> row_size =
++      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
++                                                   size.width());
++  if (!row_size) {
++    return std::nullopt;
++  }
++
++  base::CheckedNumeric<size_t> checked_size = stride;
++  checked_size *= std::max(0, size.height() - 1);
++  checked_size += row_size.value();
++  if (!checked_size.IsValid()) {
++    return std::nullopt;
++  }
++
++  return checked_size.ValueOrDie();
++}
++
+ }  // namespace
+ 
+ SharedMemoryRegionWrapper::SharedMemoryRegionWrapper() = default;
+@@ -78,7 +104,7 @@ bool SharedMemoryRegionWrapper::Initialize(
+   }
+ 
+   std::optional<size_t> buffer_size =
+-      viz::SharedMemorySizeForSharedImageFormat(format, size);
++      SharedMemorySizeForStride(format, size, handle.stride);
+   if (!buffer_size) {
+     DLOG(ERROR) << "Invalid GMB size.";
+     return false;
+@@ -110,23 +136,31 @@ bool SharedMemoryRegionWrapper::Initialize(
+   int num_planes = format.NumberOfPlanes();
+   planes_.resize(num_planes);
+ 
+-  // The offset/stride only make sense when GpuMemoryBufferHandle is for a
+-  // single plane. Stride should be set as the expected stride for first plane
+-  // and offset should always be zero.
+-  DCHECK_EQ(static_cast<size_t>(handle.stride),
+-            viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
+-                                                         size.width())
+-                .value());
+-  DCHECK_EQ(handle.offset, 0u);
++  std::optional<size_t> first_plane_row_size =
++      viz::SharedMemoryRowSizeForSharedImageFormat(format, /*plane=*/0,
++                                                   size.width());
++  if (!first_plane_row_size) {
++    return false;
++  }
++  if (!format.is_single_plane() &&
++      static_cast<size_t>(handle.stride) != first_plane_row_size.value()) {
++    DLOG(ERROR) << "Invalid multi-plane GMB stride.";
++    return false;
++  }
+ 
+   for (int plane_index = 0; plane_index < num_planes; ++plane_index) {
+     const size_t plane_offset =
+         viz::SharedMemoryOffsetForSharedImageFormat(format, plane_index, size);
+ 
+     planes_[plane_index].offset = memory_offset + plane_offset;
+-    planes_[plane_index].stride = viz::SharedMemoryRowSizeForSharedImageFormat(
+-                                      format, plane_index, size.width())
+-                                      .value();
++    if (format.is_single_plane()) {
++      planes_[plane_index].stride = handle.stride;
++    } else {
++      planes_[plane_index].stride =
++          viz::SharedMemoryRowSizeForSharedImageFormat(format, plane_index,
++                                                       size.width())
++              .value();
++    }
+   }
+ 
+   return true;
+diff --git a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
+index fee2b968f29c311ec9a3b9c08eb12a6ec4a4dd68..98a0ed97388f58f9a2e75e2f08d64010cfd39645 100644
+--- a/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
++++ b/gpu/command_buffer/service/shared_memory_region_wrapper_unittest.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "gpu/command_buffer/service/shared_memory_region_wrapper.h"
+ 
++#include "base/memory/unsafe_shared_memory_region.h"
+ #include "components/viz/common/resources/shared_image_format_utils.h"
+ #include "gpu/command_buffer/service/shared_image/shared_memory_image_backing_factory.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+@@ -28,6 +29,25 @@ TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888) {
+   EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
+ }
+ 
++TEST(SharedMemoryRegionWrapperTest, SinglePlaneRGBA_8888PaddedStride) {
++  constexpr gfx::Size size(696, 100);
++  constexpr viz::SharedImageFormat format = viz::SinglePlaneFormat::kRGBA_8888;
++  constexpr uint32_t stride = 2816;
++
++  auto shared_memory_region =
++      base::UnsafeSharedMemoryRegion::Create(stride * size.height());
++  ASSERT_TRUE(shared_memory_region.IsValid());
++
++  gfx::GpuMemoryBufferHandle handle(std::move(shared_memory_region));
++  handle.type = gfx::SHARED_MEMORY_BUFFER;
++  handle.offset = 0;
++  handle.stride = stride;
++
++  SharedMemoryRegionWrapper wrapper;
++  EXPECT_TRUE(wrapper.Initialize(std::move(handle), size, format));
++  EXPECT_EQ(stride, wrapper.GetStride(0));
++}
++
+ TEST(SharedMemoryRegionWrapperTest, MultiPlaneY_UV_420) {
+   constexpr gfx::Size size(100, 100);
+   constexpr viz::SharedImageFormat format = viz::MultiPlaneFormat::kNV12;
+diff --git a/ui/base/clipboard/BUILD.gn b/ui/base/clipboard/BUILD.gn
+index 3c7a17dbeedc842c9d1073b0857af82e3afe3256..5f3212fa83997229111f015fed5a4d15863a9eae 100644
+--- a/ui/base/clipboard/BUILD.gn
++++ b/ui/base/clipboard/BUILD.gn
+@@ -65,7 +65,7 @@ component("clipboard_types") {
+   }
+ }
+ 
+-if (is_linux && use_dbus) {
++if ((is_linux || is_chromeos) && use_dbus) {
+   source_set("clipboard_util_linux") {
+     sources = [
+       "clipboard_util_linux.cc",
+diff --git a/ui/base/ime/linux/BUILD.gn b/ui/base/ime/linux/BUILD.gn
+index aa6e9f2437a14beabc9db3f5f36568f6533ec1e6..919d01bbbff08e6aa4eed35b18f8755779cee6c9 100644
+--- a/ui/base/ime/linux/BUILD.gn
++++ b/ui/base/ime/linux/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/linux/pangocairo/pangocairo.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ component("linux") {
+   output_name = "ui_base_ime_linux"
+diff --git a/ui/linux/BUILD.gn b/ui/linux/BUILD.gn
+index eaee77fb50333c7b18a6bfdca8f4cae378fd65f5..f0eab1504aa61f63ada10e43581680071865826d 100644
+--- a/ui/linux/BUILD.gn
++++ b/ui/linux/BUILD.gn
+@@ -6,7 +6,7 @@ import("//build/config/features.gni")
+ import("//build/config/linux/gtk/gtk.gni")
+ import("//ui/qt/qt.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ component("linux_ui") {
+   defines = [ "IS_LINUX_UI_IMPL" ]
+diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+index e523e4e393119950d553a5902b8c75d01cb7b56c..18abdf74162a89c46fe38d826d683860dee1ff18 100644
+--- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
++++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
+@@ -350,7 +350,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
+ }
+ 
+ void DrmDisplayHostManager::RemoveDelegate(DrmNativeDisplayDelegate* delegate) {
+-  DCHECK_EQ(delegate_, delegate);
++  if (delegate_ != delegate) {
++    LOG(WARNING) << "Ignoring stale DRM display delegate removal";
++    return;
++  }
+   delegate_ = nullptr;
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
+index bb9b85116b00b7e38e6ce72cca358a87cf03d0f1..f6ca60f1b25e73169537e0e04b270384f49d4c6a 100644
+--- a/ui/ozone/platform/wayland/BUILD.gn
++++ b/ui/ozone/platform/wayland/BUILD.gn
+@@ -9,7 +9,7 @@ import("//gpu/vulkan/features.gni")
+ import("//testing/libfuzzer/fuzzer_test.gni")
+ import("//ui/ozone/platform/wayland/wayland.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_chromeos)
+ 
+ source_set("common") {
+   sources = [
+@@ -320,7 +320,7 @@ source_set("wayland") {
+     "//ui/platform_window/wm",
    ]
-diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
-index d6a8b7a844..e4020a50c6 100644
---- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
-+++ b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
-@@ -10,6 +10,8 @@ namespace file_manager::file_tasks {
- inline constexpr char kActionIdInstallIsolatedWebApp[] =
-     "install-isolated-web-app";
  
-+inline constexpr char kActionIdInstallPackage[] = "install-package";
-+
- }  // namespace file_manager::file_tasks
+-  if (use_dbus) {
++  if (use_dbus && !is_chromeos) {
+     sources += [
+       "host/org_gnome_mutter_idle_monitor.cc",
+       "host/org_gnome_mutter_idle_monitor.h",
+diff --git a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
+index c553d6503acebbea02942ab6fd6755f1be13bda1..744ce36a0435485515c3b07bac08f9dcb62afe4c 100644
+--- a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
++++ b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
+@@ -5,6 +5,7 @@
+ #include "ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.h"
  
- #endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_ID_CONSTANTS_H_
-diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
-new file mode 100644
-index 0000000000..88dbf01c0d
---- /dev/null
-+++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
-@@ -0,0 +1,119 @@
-+// Copyright 2024 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
-+
-+#include <string>
-+#include <vector>
-+
-+#include "ash/webui/file_manager/url_constants.h"
-+#include "base/process/launch.h"
-+#include "base/strings/strcat.h"
-+#include "base/strings/string_util.h"
-+#include "base/system/sys_info.h"
-+#include "base/task/thread_pool.h"
-+#include "chrome/browser/ash/file_manager/file_tasks.h"
-+#include "chrome/browser/ash/file_manager/virtual_tasks/id_constants.h"
-+#include "chrome/browser/profiles/profile.h"
-+#include "storage/browser/file_system/file_system_url.h"
-+#include "url/gurl.h"
-+
-+namespace file_manager::file_tasks {
-+
-+namespace {
-+
-+constexpr char kAuraDeSystemHelperPath[] = "/usr/bin/aurade-system-helper";
-+
-+// Returns the extension string for the given file path, including compound
-+// extensions like ".pkg.tar.zst".
-+std::string GetPackageExtension(const base::FilePath& path) {
-+  const std::string name = path.value();
-+  // Check compound Arch extensions first.
-+  if (base::EndsWith(name, ".pkg.tar.zst",
-+                     base::CompareCase::INSENSITIVE_ASCII)) {
-+    return ".pkg.tar.zst";
+ #include <drm_fourcc.h>
++#include <fcntl.h>
+ 
+ #include <algorithm>
+ #include <utility>
+@@ -472,11 +473,17 @@ void WaylandBufferManagerGpu::MaybeCreateGbmDevice() {
+     supports_dmabuf_ = false;
+     return;
+   }
++  if (fcntl(drm_render_node_fd_.get(), F_GETFD) < 0) {
++    supports_dmabuf_ = false;
++    PLOG(WARNING) << "DRM render node fd is invalid";
++    return;
 +  }
-+  if (base::EndsWith(name, ".pkg.tar.xz",
-+                     base::CompareCase::INSENSITIVE_ASCII)) {
-+    return ".pkg.tar.xz";
-+  }
-+  return "";
-+}
-+
-+bool IsSupportedPackage(const base::FilePath& path) {
-+  const std::string extension = GetPackageExtension(path);
-+  return extension == ".pkg.tar.zst" || extension == ".pkg.tar.xz";
-+}
-+
-+// Runs the package install helper on the thread pool (fire-and-forget).
-+void RunPackageInstall(const base::FilePath& path) {
-+  base::LaunchOptions options;
-+  base::LaunchProcess(
-+      {"pkexec", kAuraDeSystemHelperPath, "install-package", path.value()},
-+      options);
-+}
-+
-+}  // namespace
-+
-+InstallPackageVirtualTask::InstallPackageVirtualTask() {
-+  // No extensions registered via matcher_file_extensions_; Matches() is
-+  // overridden to handle compound extensions like .pkg.tar.zst.
-+}
-+
-+bool InstallPackageVirtualTask::IsEnabled(Profile* profile) const {
-+  return !base::SysInfo::IsRunningOnChromeOS();
-+}
-+
-+std::string InstallPackageVirtualTask::id() const {
-+  return base::StrCat({ash::file_manager::kChromeUIFileManagerURL, "?",
-+                       kActionIdInstallPackage});
-+}
-+
-+std::string InstallPackageVirtualTask::title() const {
-+  return "Install Arch package";
-+}
-+
-+GURL InstallPackageVirtualTask::icon_url() const {
-+  return GURL();
-+}
-+
-+bool InstallPackageVirtualTask::IsDlpBlocked(
-+    const std::vector<std::string>& dlp_source_urls) const {
-+  return false;
-+}
-+
-+bool InstallPackageVirtualTask::Matches(
-+    const std::vector<extensions::EntryInfo>& entries,
-+    const std::vector<GURL>& file_urls) const {
-+  if (entries.empty()) {
-+    return false;
-+  }
-+  for (const auto& entry : entries) {
-+    if (!IsSupportedPackage(entry.path)) {
-+      return false;
-+    }
-+  }
-+  return true;
-+}
-+
-+bool InstallPackageVirtualTask::Execute(
-+    Profile* profile,
-+    const TaskDescriptor& task,
-+    const std::vector<storage::FileSystemURL>& file_urls) const {
-+  if (file_urls.empty()) {
-+    return false;
-+  }
-+  for (const auto& file_url : file_urls) {
-+    const base::FilePath path = file_url.path();
-+    if (!IsSupportedPackage(path)) {
-+      continue;
-+    }
-+    base::ThreadPool::PostTask(
-+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-+        base::BindOnce(&RunPackageInstall, path));
-+  }
-+  return true;
-+}
-+
-+}  // namespace file_manager::file_tasks
-diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
-new file mode 100644
-index 0000000000..c06ab759cc
---- /dev/null
-+++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
-@@ -0,0 +1,52 @@
-+// Copyright 2024 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_
-+#define CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_
-+
-+#include <string>
-+#include <vector>
-+
-+#include "chrome/browser/ash/file_manager/virtual_file_tasks.h"
-+
-+class GURL;
-+class Profile;
-+
-+namespace storage {
-+class FileSystemURL;
-+}  // namespace storage
-+
-+namespace file_manager::file_tasks {
-+
-+struct TaskDescriptor;
-+
-+// A task to install native Arch package files through aurade-system-helper.
-+// Enabled only on linux-chromeos builds (non-ChromeOS hardware).
-+class InstallPackageVirtualTask : public VirtualTask {
-+ public:
-+  InstallPackageVirtualTask();
-+
-+  bool IsEnabled(Profile* profile) const override;
-+
-+  std::string id() const override;
-+
-+  std::string title() const override;
-+
-+  GURL icon_url() const override;
-+
-+  bool IsDlpBlocked(
-+      const std::vector<std::string>& dlp_source_urls) const override;
-+
-+  bool Execute(
-+      Profile* profile,
-+      const TaskDescriptor& task,
-+      const std::vector<storage::FileSystemURL>& file_urls) const override;
-+
-+  bool Matches(const std::vector<extensions::EntryInfo>& entries,
-+               const std::vector<GURL>& file_urls) const override;
-+};
-+
-+}  // namespace file_manager::file_tasks
-+
-+#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_INSTALL_PACKAGE_VIRTUAL_TASK_H_
+   TRACE_EVENT("gpu,startup", "ui::CreateGbmDevice");
+   gbm_device* device = gbm_create_device(drm_render_node_fd_.get());
+   if (!device) {
+     supports_dmabuf_ = false;
+-    LOG(WARNING) << "Failed to initialize gbm device.";
++    PLOG(WARNING) << "Failed to initialize gbm device for DRM fd "
++                  << drm_render_node_fd_.get();
+     return;
+   }
+   native_display_ = gl::EGLDisplayPlatform(
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.cc b/ui/ozone/platform/wayland/host/wayland_screen.cc
+index 8cbed4597afcd18d3d8aed05a7cf4682964a922f..6ad9a265bb52c97f062a365b3b431645c11ce6e0 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.cc
++++ b/ui/ozone/platform/wayland/host/wayland_screen.cc
+@@ -42,7 +42,7 @@
+ #include "ui/ozone/platform/wayland/host/wayland_wp_color_management_output.h"
+ #include "ui/ozone/platform/wayland/host/zwp_idle_inhibit_manager.h"
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+ #include "ui/ozone/platform/wayland/host/org_gnome_mutter_idle_monitor.h"
+ #endif
+ 
+@@ -487,7 +487,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+       return *idle_time;
+   }
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+   // Try the org.gnome.Mutter.IdleMonitor D-Bus service (Mutter).
+   if (!org_gnome_mutter_idle_monitor_)
+     org_gnome_mutter_idle_monitor_ =
+@@ -495,7 +495,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
+   const auto idle_time = org_gnome_mutter_idle_monitor_->GetIdleTime();
+   if (idle_time)
+     return *idle_time;
+-#endif  // BUILDFLAG(USE_DBUS)
++#endif  // BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+ 
+   NOTIMPLEMENTED_LOG_ONCE();
+ 
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.h b/ui/ozone/platform/wayland/host/wayland_screen.h
+index fb137875b78b137c49fb13552cc3cb801287a7ab..10ee3e24cf39d0476fd1ff5233c1123bc95c237b 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.h
++++ b/ui/ozone/platform/wayland/host/wayland_screen.h
+@@ -133,7 +133,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
+   std::optional<viz::SharedImageFormat> image_format_no_alpha_;
+   std::optional<viz::SharedImageFormat> image_format_hdr_;
+ 
+-#if BUILDFLAG(USE_DBUS)
++#if BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+   mutable std::unique_ptr<OrgGnomeMutterIdleMonitor>
+       org_gnome_mutter_idle_monitor_;
+ #endif
+diff --git a/ui/platform_window/platform_window_delegate.cc b/ui/platform_window/platform_window_delegate.cc
+index 52d4ae6242ad1b71e8e5768cc2769be277d242f5..60f71edc1e2fcf0c9bec374938071db750560e06 100644
+--- a/ui/platform_window/platform_window_delegate.cc
++++ b/ui/platform_window/platform_window_delegate.cc
+@@ -58,7 +58,7 @@ gfx::Insets PlatformWindowDelegate::CalculateInsetsInDIP(
+   return gfx::Insets();
+ }
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+ void PlatformWindowDelegate::OnWindowTiledStateChanged(
+     WindowTiledEdges new_tiled_edges) {}
+ #endif
+diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
+index 2ba67bf9f9f836dac61d590a788169f16b550a64..9c873c48f6ed7fdde386f5463ccd4155712e4ec1 100644
+--- a/ui/platform_window/platform_window_delegate.h
++++ b/ui/platform_window/platform_window_delegate.h
+@@ -146,7 +146,7 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
+   virtual void OnWindowStateChanged(PlatformWindowState old_state,
+                                     PlatformWindowState new_state) = 0;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   // Notifies the delegate that the tiled state of the window edges has changed.
+   virtual void OnWindowTiledStateChanged(WindowTiledEdges new_tiled_edges);
+ #endif

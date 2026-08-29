@@ -1,1503 +1,2058 @@
-diff --git a/ash/app_list/app_list_bubble_presenter.cc b/ash/app_list/app_list_bubble_presenter.cc
-index c0beef7153bdfbdf8a07b60096fb67708c675d79..1f7d79575cad37a2c6feb623ab82c947a1f16fa3 100644
---- a/ash/app_list/app_list_bubble_presenter.cc
-+++ b/ash/app_list/app_list_bubble_presenter.cc
-@@ -137,6 +137,13 @@ gfx::Rect ComputeBubbleBounds(aura::Window* root_window,
-       x = work_area.right() - padding - bubble_size.width();
-       y = work_area.y() + padding;
-       break;
-+    case ShelfAlignment::kTop:
-+      if (base::i18n::IsRTL())
-+        x = work_area.right() - padding - bubble_size.width();
-+      else
-+        x = work_area.x() + padding;
-+      y = work_area.y() + padding;
-+      break;
-   }
-   return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
- }
-diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 6c3b589124bdb774df0830cb5cbc353d39a509ec..a05587a4fd62d5cf406e61a370729040323923a6 100644
---- a/ash/ash_strings.grd
-+++ b/ash/ash_strings.grd
-@@ -282,6 +282,9 @@ Style notes:
-       <message name="IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_RIGHT" desc="Title of the menu item in the context menu for aligning the shelf to the right of the screen">
-         Right
-       </message>
-+      <message name="IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_TOP" desc="Title of the menu item in the context menu for aligning the shelf to the top of the screen">
-+        Top
-+      </message>
-       <message name="IDS_ASH_SHELF_CONTEXT_MENU_SHOW_DESK_NAME" desc="Title of the menu item in the context menu for showing the desk button">
-         Show desk name
-       </message>
-@@ -291,6 +294,12 @@ Style notes:
-       <message name="IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER" desc="Title of the menu item in the context menu for opening the task manager">
-         Task manager
-       </message>
-+      <message name="IDS_ASH_SHELF_CONTEXT_MENU_ENABLE_COMPACT_MODE" desc="Title of the menu item in the context menu for enabling compact mode (smaller shelf)">
-+        Enable compact mode
-+      </message>
-+      <message name="IDS_ASH_SHELF_CONTEXT_MENU_DISABLE_COMPACT_MODE" desc="Title of the menu item in the context menu for disabling compact mode (restore normal shelf size)">
-+        Disable compact mode
-+      </message>
-       <message name="IDS_ASH_SHELF_ACCESSIBLE_NAME" desc="The accessible name of the shelf.">
-         Shelf
-       </message>
-@@ -306,6 +315,9 @@ Style notes:
-       <message name="IDS_SHELF_ALIGNMENT_RIGHT" desc="Accessibility announcement notifying users that the shelf is now placed on the right of the screen">
-         Shelf on right
-       </message>
-+      <message name="IDS_SHELF_ALIGNMENT_TOP" desc="Accessibility announcement notifying users that the shelf is now placed at the top of the screen">
-+        Shelf on top
-+      </message>
-       <message name="IDS_SHELF_STATE_ALWAYS_SHOWN" desc="Accessibility announcement notifying users that the shelf is now always being shown">
-         Shelf always shown
-       </message>
-@@ -1607,6 +1619,9 @@ You can also use the keyboard shortcut. First, highlight text, then press <ph na
-       <message name="IDS_ASH_STATUS_TRAY_REBOOT" desc="The accessible text for the reboot button.">
-         Restart
-       </message>
-+      <message name="IDS_ASH_STATUS_TRAY_RESTART_AURADE" desc="The accessible text for the AuraDE shell restart button.">
-+        Restart AuraDE
-+      </message>
-       <message name="IDS_ASH_STATUS_TRAY_SHUTDOWN" desc="The accessible text for the shutdown button.">
-         Shut down
-       </message>
-diff --git a/ash/public/cpp/shelf_config.h b/ash/public/cpp/shelf_config.h
-index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f1819e444 100644
---- a/ash/public/cpp/shelf_config.h
-+++ b/ash/public/cpp/shelf_config.h
-@@ -5,6 +5,7 @@
- #ifndef ASH_PUBLIC_CPP_SHELF_CONFIG_H_
- #define ASH_PUBLIC_CPP_SHELF_CONFIG_H_
- 
-+#include <memory>
- #include <optional>
- 
- #include "ash/ash_export.h"
-@@ -22,6 +23,8 @@
- #include "ui/display/display_observer.h"
- #include "ui/gfx/animation/tween.h"
- 
-+class PrefChangeRegistrar;
-+
- namespace base {
- class TimeDelta;
- }
-@@ -73,6 +76,7 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
- 
-   // SessionObserver:
-   void OnSessionStateChanged(session_manager::SessionState state) override;
-+  void OnActiveUserPrefServiceChanged(PrefService* pref_service) override;
- 
-   // DisplayObserver:
-   void OnDisplayMetricsChanged(const display::Display& display,
-@@ -204,6 +208,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
- 
-   bool is_dense() const { return is_dense_; }
- 
-+  bool is_compact_mode_enabled() const { return is_compact_mode_enabled_; }
-+
-   bool is_in_app() const { return is_in_app_; }
- 
-   bool in_split_view_with_overview() const {
-@@ -267,6 +273,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
-   // Updates 'elevate_tablet_mode_app_bar_' for `inline_app_bar_size`.
-   void UpdateShowElevatedAppBar(const gfx::Size& inline_app_bar_size);
- 
-+  void UpdateConfigForCompactMode();
-+
-  private:
-   friend class ShelfConfigTest;
- 
-@@ -316,6 +324,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
-   // Whether shelf is currently standard or dense.
-   bool is_dense_ = false;
- 
-+  // Whether compact mode is enabled.
-+  bool is_compact_mode_enabled_ = false;
-+
-   // Whether the shelf is currently in in-app state.
-   bool is_in_app_ = false;
- 
-@@ -332,8 +343,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
-   // Whether the app list (or home launcher in tablet mode) is visible.
-   bool is_app_list_visible_ = false;
- 
-+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
-+
-   // Size of the icons within shelf buttons.
--  const int shelf_button_icon_size_;
-+  int shelf_button_icon_size_;
-   const int shelf_button_icon_size_median_;
-   const int shelf_button_icon_size_dense_;
- 
-@@ -353,12 +366,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
-   const int shelf_shortcut_teardrop_corner_radius_;
- 
-   // Size allocated for each app button on the shelf.
--  const int shelf_button_size_;
-+  int shelf_button_size_;
-   const int shelf_button_size_median_;
-   const int shelf_button_size_dense_;
- 
-   // Size of the space between buttons on the shelf.
--  const int shelf_button_spacing_;
-+  int shelf_button_spacing_;
- 
-   // The extra padding added to status area tray buttons on the shelf.
-   const int shelf_status_area_hit_region_padding_;
-diff --git a/ash/public/cpp/shelf_prefs.cc b/ash/public/cpp/shelf_prefs.cc
-index 4c68813bfcdda6591fdb8f51db608ae1afd0ffe1..f3434286db2b53a096160cbf9ad3f63ba616725b 100644
---- a/ash/public/cpp/shelf_prefs.cc
-+++ b/ash/public/cpp/shelf_prefs.cc
-@@ -19,6 +19,10 @@
- 
- namespace ash {
- 
-+namespace prefs {
-+const char kShelfCompactMode[] = "ash.shelf.compact_mode";
-+}  // namespace prefs
-+
- const char kShelfAutoHideBehaviorAlways[] = "Always";
- const char kShelfAutoHideBehaviorNever[] = "Never";
- 
-@@ -30,6 +34,7 @@ const char kDeskButtonInShelfHidden[] = "Hidden";
- const char kShelfAlignmentBottom[] = "Bottom";
- const char kShelfAlignmentLeft[] = "Left";
- const char kShelfAlignmentRight[] = "Right";
-+const char kShelfAlignmentTop[] = "Top";
- 
- namespace {
- 
-@@ -95,6 +100,8 @@ ShelfAlignment AlignmentFromPref(const std::string& value) {
-     return ShelfAlignment::kLeft;
-   if (value == kShelfAlignmentRight)
-     return ShelfAlignment::kRight;
-+  if (value == kShelfAlignmentTop)
-+    return ShelfAlignment::kTop;
-   // Default to bottom.
-   return ShelfAlignment::kBottom;
- }
-@@ -107,6 +114,8 @@ const char* AlignmentToPref(ShelfAlignment alignment) {
-       return kShelfAlignmentLeft;
-     case ShelfAlignment::kRight:
-       return kShelfAlignmentRight;
-+    case ShelfAlignment::kTop:
-+      return kShelfAlignmentTop;
-     case ShelfAlignment::kBottomLocked:
-       // This should not be a valid preference option for now. We only want to
-       // lock the shelf during login or when adding a user.
-diff --git a/ash/public/cpp/shelf_prefs.h b/ash/public/cpp/shelf_prefs.h
-index 57aedbf21bda386804114021ceda65d844fb2499..08d09609b09b491d2a64b137c9e784f90790a9c3 100644
---- a/ash/public/cpp/shelf_prefs.h
-+++ b/ash/public/cpp/shelf_prefs.h
-@@ -12,6 +12,10 @@ class PrefService;
- 
- namespace ash {
- 
-+namespace prefs {
-+ASH_PUBLIC_EXPORT extern const char kShelfCompactMode[];
-+}  // namespace prefs
-+
- // Values used for prefs::kShelfAutoHideBehavior.
- ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorAlways[];
- ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorNever[];
-diff --git a/ash/public/cpp/shelf_types.cc b/ash/public/cpp/shelf_types.cc
-index a0f19b7435f9d909372cde65cd2bf9881f70237d..cf98b9763381fd9f8531cf2bd2e36fa7c1196837 100644
---- a/ash/public/cpp/shelf_types.cc
-+++ b/ash/public/cpp/shelf_types.cc
-@@ -28,6 +28,8 @@ std::ostream& operator<<(std::ostream& out, ShelfAlignment alignment) {
-       return out << "Right";
-     case ShelfAlignment::kBottomLocked:
-       return out << "BottomLocked";
-+    case ShelfAlignment::kTop:
-+      return out << "Top";
-   }
- }
- 
-diff --git a/ash/public/cpp/shelf_types.h b/ash/public/cpp/shelf_types.h
-index 91ce054fb1a831020e2e477caa0e3e22213b14e9..2d9abd08c6700d1ad346afb192f7c6fcddc1b266 100644
---- a/ash/public/cpp/shelf_types.h
-+++ b/ash/public/cpp/shelf_types.h
-@@ -17,7 +17,7 @@ enum class ShelfAlignment {
-   kBottom,
-   kLeft,
-   kRight,
--  // Top has never been supported.
-+  kTop,
- 
-   // The locked alignment is set temporarily and not saved to preferences.
-   kBottomLocked,
-diff --git a/ash/shelf/home_button.cc b/ash/shelf/home_button.cc
-index 32bb05266b11210ccb0f2369a159d207c3bd0b02..a3edaba1da5902b281baec5cd103649b3ada6759 100644
---- a/ash/shelf/home_button.cc
-+++ b/ash/shelf/home_button.cc
-@@ -809,11 +809,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
-   gfx::PointF bounce_up_point = shelf()->SelectValueForShelfAlignment(
-       gfx::PointF(0, -kAnimationBounceUpOffset),
-       gfx::PointF(kAnimationBounceUpOffset, 0),
--      gfx::PointF(-kAnimationBounceUpOffset, 0));
-+      gfx::PointF(-kAnimationBounceUpOffset, 0),
-+      gfx::PointF(0, kAnimationBounceUpOffset));
-   gfx::PointF bounce_down_point = shelf()->SelectValueForShelfAlignment(
-       gfx::PointF(0, kAnimationBounceDownOffset),
-       gfx::PointF(-kAnimationBounceDownOffset, 0),
--      gfx::PointF(kAnimationBounceDownOffset, 0));
-+      gfx::PointF(kAnimationBounceDownOffset, 0),
-+      gfx::PointF(0, -kAnimationBounceDownOffset));
- 
-   gfx::Transform move_up;
-   move_up.Translate(bounce_up_point.x(), bounce_up_point.y());
-diff --git a/ash/shelf/hotseat_widget.cc b/ash/shelf/hotseat_widget.cc
-index 4acc5f2de72b37fe448f0e9bd17039bc79778edd..54eabcc974446cb49c88a0521a9470af6f988892 100644
---- a/ash/shelf/hotseat_widget.cc
-+++ b/ash/shelf/hotseat_widget.cc
-@@ -4,6 +4,7 @@
- 
- #include "ash/shelf/hotseat_widget.h"
- 
-+#include <algorithm>
- #include <memory>
- #include <utility>
- 
-@@ -851,6 +852,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
-   DCHECK(shelf_->IsHorizontalAlignment());
-   int hotseat_distance_from_bottom_of_display = 0;
-   const int hotseat_size = GetHotseatSize();
-+  const gfx::Rect shelf_bounds = shelf_->shelf_widget()->GetTargetBounds();
-+  const int target_shelf_size = shelf_bounds.size().height();
-+  const int shelf_y = shelf_bounds.y();
-+
-+  // AuraDE compatibility: the upstream horizontal hotseat math is bottom-edge
-+  // relative. A top shelf needs mirrored positions so the inline hotseat stays
-+  // on the shelf and expanded states open into the work area below it.
-+  if (shelf_->alignment() == ShelfAlignment::kTop) {
-+    switch (hotseat_target_state) {
-+      case HotseatState::kShownClamshell:
-+        return shelf_y + std::min(0, target_shelf_size - hotseat_size);
-+      case HotseatState::kShownHomeLauncher: {
-+        int hotseat_y =
-+            shelf_y + target_shelf_size +
-+            ShelfConfig::Get()->hotseat_bottom_padding();
-+        if (ShelfConfig::Get()->elevate_tablet_mode_app_bar()) {
-+          hotseat_y += hotseat_size +
-+                       ShelfConfig::Get()->GetHomecherElevatedAppBarOffset();
-+        }
-+        return hotseat_y;
-+      }
-+      case HotseatState::kHidden:
-+        return shelf_y - hotseat_size;
-+      case HotseatState::kExtended:
-+        return shelf_y + target_shelf_size +
-+               ShelfConfig::Get()->in_app_shelf_size() +
-+               ShelfConfig::Get()->hotseat_bottom_padding();
-+      case HotseatState::kNone:
-+        NOTREACHED();
-+    }
-+  }
-+
-   switch (hotseat_target_state) {
-     case HotseatState::kShownClamshell:
-       hotseat_distance_from_bottom_of_display = hotseat_size;
-@@ -883,11 +916,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
-     case HotseatState::kNone:
-       NOTREACHED();
-   }
--  const int target_shelf_size =
--      shelf_->shelf_widget()->GetTargetBounds().size().height();
-   const int hotseat_y_in_shelf =
-       -(hotseat_distance_from_bottom_of_display - target_shelf_size);
--  const int shelf_y = shelf_->shelf_widget()->GetTargetBounds().y();
-   return hotseat_y_in_shelf + shelf_y;
- }
- 
-diff --git a/ash/shelf/kiosk_app_instruction_bubble.cc b/ash/shelf/kiosk_app_instruction_bubble.cc
-index 9b4308272f07bdc279c07ddfb0b3626a31c9bdf5..5cbe4c53af9c099044e655e1e248728c958d52a3 100644
---- a/ash/shelf/kiosk_app_instruction_bubble.cc
-+++ b/ash/shelf/kiosk_app_instruction_bubble.cc
-@@ -38,6 +38,8 @@ views::BubbleBorder::Arrow GetArrow(ShelfAlignment alignment) {
-       return views::BubbleBorder::LEFT_TOP;
-     case ShelfAlignment::kRight:
-       return views::BubbleBorder::RIGHT_TOP;
-+    case ShelfAlignment::kTop:
-+      return views::BubbleBorder::TOP_LEFT;
-   }
-   return views::BubbleBorder::Arrow::NONE;
- }
-diff --git a/ash/shelf/shelf.cc b/ash/shelf/shelf.cc
-index f9257db9ce85053b4140b39fae47626767863e87..b651c921c70ec1463e64c719698b362a986b72fd 100644
---- a/ash/shelf/shelf.cc
-+++ b/ash/shelf/shelf.cc
-@@ -550,6 +550,7 @@ bool IsHorizontalAlignment(ShelfAlignment alignment) {
-   switch (alignment) {
-     case ShelfAlignment::kBottom:
-     case ShelfAlignment::kBottomLocked:
-+    case ShelfAlignment::kTop:
-       return true;
-     case ShelfAlignment::kLeft:
-     case ShelfAlignment::kRight:
-@@ -702,6 +703,11 @@ gfx::Rect Shelf::GetSystemTrayAnchorRect() const {
-     case ShelfAlignment::kRight:
-       return gfx::Rect(work_area.right() - kShelfDisplayOffset,
-                        work_area.bottom() - kShelfDisplayOffset, 0, 0);
-+    case ShelfAlignment::kTop:
-+      return gfx::Rect(base::i18n::IsRTL()
-+                           ? work_area.x()
-+                           : work_area.right() - kShelfDisplayOffset,
-+                       work_area.y(), 0, 0);
-   }
-   NOTREACHED();
- }
-diff --git a/ash/shelf/shelf.h b/ash/shelf/shelf.h
-index 1fc09e689e24bbc88d74c28747c2929ab59499ff..24a3b45a9d98e2b87f89772568f970300e4ac763 100644
---- a/ash/shelf/shelf.h
-+++ b/ash/shelf/shelf.h
-@@ -58,7 +58,8 @@ template <typename T>
- T SelectValueByShelfAlignment(ShelfAlignment alignment,
-                               T bottom,
-                               T left,
--                              T right) {
-+                              T right,
-+                              T top) {
-   switch (alignment) {
-     case ShelfAlignment::kBottom:
-     case ShelfAlignment::kBottomLocked:
-@@ -67,10 +68,20 @@ T SelectValueByShelfAlignment(ShelfAlignment alignment,
-       return left;
-     case ShelfAlignment::kRight:
-       return right;
-+    case ShelfAlignment::kTop:
-+      return top;
-   }
-   NOTREACHED();
- }
- 
-+template <typename T>
-+T SelectValueByShelfAlignment(ShelfAlignment alignment,
-+                              T bottom,
-+                              T left,
-+                              T right) {
-+  return SelectValueByShelfAlignment(alignment, bottom, left, right, bottom);
-+}
-+
- bool IsHorizontalAlignment(ShelfAlignment alignment);
- 
- // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
-@@ -181,7 +192,12 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
-   // Returns a value based on shelf alignment.
-   template <typename T>
-   T SelectValueForShelfAlignment(T bottom, T left, T right) const {
--    return SelectValueByShelfAlignment(alignment_, bottom, left, right);
-+    return SelectValueByShelfAlignment(alignment_, bottom, left, right, bottom);
-+  }
-+
-+  template <typename T>
-+  T SelectValueForShelfAlignment(T bottom, T left, T right, T top) const {
-+    return SelectValueByShelfAlignment(alignment_, bottom, left, right, top);
-   }
- 
-   // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
-diff --git a/ash/shelf/shelf_app_button.cc b/ash/shelf/shelf_app_button.cc
-index de7315c0a3ecd877fcf655fb0c3c1512b6780b55..42b8001cfad8ea20dd3aab23e78634ee6041bf61 100644
---- a/ash/shelf/shelf_app_button.cc
-+++ b/ash/shelf/shelf_app_button.cc
-@@ -1043,6 +1043,10 @@ void ShelfAppButton::Layout(PassKey) {
-                                kStatusIndicatorRadiusDip -
-                                status_indicator_offet_from_shelf_edge);
-       break;
-+    case ShelfAlignment::kTop:
-+      indicator_midpoint.set_y(button_bounds.y() + kStatusIndicatorRadiusDip +
-+                               status_indicator_offet_from_shelf_edge);
-+      break;
-   }
- 
-   gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
-diff --git a/ash/shelf/shelf_bubble.cc b/ash/shelf/shelf_bubble.cc
-index 3c43d0b8b557267fd97c40dab87bb4e25c973633..e8b4bf300a52649800b3fcb868388907c54d4abe 100644
---- a/ash/shelf/shelf_bubble.cc
-+++ b/ash/shelf/shelf_bubble.cc
-@@ -50,6 +50,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
-       return views::BubbleBorder::LEFT_CENTER;
-     case ash::ShelfAlignment::kRight:
-       return views::BubbleBorder::RIGHT_CENTER;
-+    case ash::ShelfAlignment::kTop:
-+      return views::BubbleBorder::TOP_CENTER;
-   }
-   return views::BubbleBorder::Arrow::NONE;
- }
-diff --git a/ash/shelf/shelf_config.cc b/ash/shelf/shelf_config.cc
-index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16f902f967 100644
---- a/ash/shelf/shelf_config.cc
-+++ b/ash/shelf/shelf_config.cc
-@@ -6,6 +6,9 @@
- 
- #include <optional>
- 
-+#include "ash/public/cpp/shelf_prefs.h"
-+#include "components/prefs/pref_service.h"
-+
- #include "ash/accessibility/accessibility_controller.h"
- #include "ash/accessibility/accessibility_observer.h"
- #include "ash/app_list/app_list_controller_impl.h"
-@@ -20,6 +23,7 @@
- #include "base/metrics/histogram_functions.h"
- #include "base/scoped_observation.h"
- #include "chromeos/constants/chromeos_features.h"
-+#include "components/prefs/pref_change_registrar.h"
- #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
- #include "ui/display/tablet_state.h"
- 
-@@ -173,6 +177,7 @@ void ShelfConfig::Init() {
- void ShelfConfig::Shutdown() {
-   Shell* const shell = Shell::Get();
- 
-+  pref_change_registrar_.reset();
-   shell->session_controller()->RemoveObserver(this);
-   shell->overview_controller()->RemoveObserver(this);
-   shell->system_tray_model()->virtual_keyboard()->RemoveObserver(this);
-@@ -212,6 +217,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
-   UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
- }
- 
-+void ShelfConfig::OnActiveUserPrefServiceChanged(PrefService* pref_service) {
-+  pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
-+  pref_change_registrar_->Init(pref_service);
-+  pref_change_registrar_->Add(
-+      prefs::kShelfCompactMode,
-+      base::BindRepeating(&ShelfConfig::UpdateConfigForCompactMode,
-+                          base::Unretained(this)));
-+  UpdateConfigForCompactMode();
-+}
-+
- void ShelfConfig::UpdateForTabletMode(bool in_tablet_mode) {
-   in_tablet_mode_ = in_tablet_mode;
-   UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/true);
-@@ -250,7 +265,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
- 
- int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
-   if (is_dense_)
--    return shelf_button_size_dense_;
-+    return shelf_button_size_;  // Updated by UpdateConfig; respects compact mode.
- 
-   switch (density) {
-     case HotseatDensity::kNormal:
-@@ -264,7 +279,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
- 
- int ShelfConfig::GetShelfButtonIconSize(HotseatDensity density) const {
-   if (is_dense_)
--    return shelf_button_icon_size_dense_;
-+    return shelf_button_icon_size_;  // Updated by UpdateConfig; respects compact mode.
- 
-   switch (density) {
-     case HotseatDensity::kNormal:
-@@ -312,6 +327,8 @@ int ShelfConfig::shelf_size() const {
- }
- 
- int ShelfConfig::in_app_shelf_size() const {
-+  if (is_compact_mode_enabled_)
-+    return 32;
-   return is_dense_ ? 36 : 40;
- }
- 
-@@ -337,7 +354,7 @@ int ShelfConfig::button_spacing() const {
- 
- int ShelfConfig::control_size() const {
-   if (!in_tablet_mode_)
--    return 36;
-+    return is_compact_mode_enabled_ ? 28 : 36;
- 
-   return is_dense_ ? 36 : 40;
- }
-@@ -397,12 +414,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
-   const bool new_is_in_app =
-       CalculateIsInApp(new_is_app_list_visible, new_is_virtual_keyboard_shown);
- 
-+  PrefService* pref_service =
-+      Shell::Get()->session_controller()->GetActivePrefService();
-+  const bool new_is_compact_mode_enabled =
-+      pref_service && pref_service->GetBoolean(prefs::kShelfCompactMode);
-+
-   const bool changed =
-       tablet_mode_changed || is_dense_ != new_is_dense ||
-       is_in_app_ != new_is_in_app ||
-       shelf_controls_shown_ != new_shelf_controls_shown ||
-       is_virtual_keyboard_shown_ != new_is_virtual_keyboard_shown ||
--      is_app_list_visible_ != new_is_app_list_visible;
-+      is_app_list_visible_ != new_is_app_list_visible ||
-+      is_compact_mode_enabled_ != new_is_compact_mode_enabled;
- 
-   if (!changed)
-     return;
-@@ -412,14 +435,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
-   is_virtual_keyboard_shown_ = new_is_virtual_keyboard_shown;
-   is_app_list_visible_ = new_is_app_list_visible;
-   is_in_app_ = new_is_in_app;
-+  is_compact_mode_enabled_ = new_is_compact_mode_enabled;
-+
-+  shelf_button_size_ =
-+      is_dense_ ? (is_compact_mode_enabled_ ? 36 : 48) : 56;
-+  shelf_button_icon_size_ =
-+      is_dense_ ? (is_compact_mode_enabled_ ? 28 : 36) : 44;
-+  shelf_button_spacing_ = is_dense_ ? 4 : 8;
- 
-   OnShelfConfigUpdated();
- }
- 
-+void ShelfConfig::UpdateConfigForCompactMode() {
-+  UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
-+}
-+
- int ShelfConfig::GetShelfSize(bool ignore_in_app_state) const {
-   // In clamshell mode, the shelf always has the same size.
-   if (!in_tablet_mode_)
--    return 48;
-+    return is_compact_mode_enabled_ ? 36 : 48;
- 
-   // Use in app shelf when split view is enabled.
-   if (!ignore_in_app_state && (is_in_app_ || in_split_view_with_overview_))
-diff --git a/ash/shelf/shelf_context_menu_model.cc b/ash/shelf/shelf_context_menu_model.cc
-index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71b46cf320 100644
---- a/ash/shelf/shelf_context_menu_model.cc
-+++ b/ash/shelf/shelf_context_menu_model.cc
-@@ -48,6 +48,12 @@ bool IsFullScreenMode(int64_t display_id) {
-   return controller && controller->GetWindowForFullscreenMode();
- }
- 
-+PrefService* GetShelfPrefService() {
-+  auto* session_controller = Shell::Get()->session_controller();
-+  PrefService* prefs = session_controller->GetLastActiveUserPrefService();
-+  return prefs ? prefs : session_controller->GetActivePrefService();
-+}
-+
- }  // namespace
- 
- ShelfContextMenuModel::ShelfContextMenuModel(ShelfItemDelegate* delegate,
-@@ -67,9 +73,9 @@ ShelfContextMenuModel::~ShelfContextMenuModel() = default;
- bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
-   if (command_id == MENU_ALIGNMENT_LEFT ||
-       command_id == MENU_ALIGNMENT_BOTTOM ||
--      command_id == MENU_ALIGNMENT_RIGHT) {
--    PrefService* prefs =
--        Shell::Get()->session_controller()->GetLastActiveUserPrefService();
-+      command_id == MENU_ALIGNMENT_RIGHT ||
-+      command_id == MENU_ALIGNMENT_TOP) {
-+    PrefService* prefs = GetShelfPrefService();
-     const ShelfAlignment alignment = GetShelfAlignmentPref(prefs, display_id_);
-     if (command_id == MENU_ALIGNMENT_LEFT)
-       return alignment == ShelfAlignment::kLeft;
-@@ -79,6 +85,8 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
-     }
-     if (command_id == MENU_ALIGNMENT_RIGHT)
-       return alignment == ShelfAlignment::kRight;
-+    if (command_id == MENU_ALIGNMENT_TOP)
-+      return alignment == ShelfAlignment::kTop;
-   }
- 
-   return SimpleMenuModel::Delegate::IsCommandIdChecked(command_id);
-@@ -87,36 +95,54 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
- void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
-   DCHECK(IsCommandIdEnabled(command_id));
-   Shell* shell = Shell::Get();
--  PrefService* prefs =
--      shell->session_controller()->GetLastActiveUserPrefService();
--  if (!prefs)  // Null during startup.
--    return;
-+
-+  // HACK(AuraDE): Don't bail when prefs is null. On linux-chromeos
-+  // GetLastActiveUserPrefService() returns null because the session_manager
-+  // daemon never calls SetUserSessionOrder. Guard only the pref-dependent
-+  // commands so non-pref ones (Personalization Hub, Task Manager, etc.)
-+  // actually execute. Same root cause as the AddShelfAndWallpaperItems fix.
-+  PrefService* prefs = GetShelfPrefService();
- 
-   // Clamshell mode only options should not activate in tablet mode.
-   const bool is_tablet_mode = display::Screen::Get()->InTabletMode();
-   switch (command_id) {
-     case MENU_AUTO_HIDE:
--      SetShelfAutoHideBehaviorPref(
--          prefs, display_id_,
--          GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
--                  ShelfAutoHideBehavior::kAlways
--              ? ShelfAutoHideBehavior::kNever
--              : ShelfAutoHideBehavior::kAlways);
-+      if (prefs) {
-+        SetShelfAutoHideBehaviorPref(
-+            prefs, display_id_,
-+            GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
-+                    ShelfAutoHideBehavior::kAlways
-+                ? ShelfAutoHideBehavior::kNever
-+                : ShelfAutoHideBehavior::kAlways);
-+      }
-       break;
-     case MENU_ALIGNMENT_LEFT:
-       DCHECK(!is_tablet_mode);
--      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetLeft"));
--      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kLeft);
-+      if (prefs) {
-+        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetLeft"));
-+        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kLeft);
-+      }
-       break;
-     case MENU_ALIGNMENT_RIGHT:
-       DCHECK(!is_tablet_mode);
--      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetRight"));
--      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kRight);
-+      if (prefs) {
-+        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetRight"));
-+        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kRight);
-+      }
-       break;
-     case MENU_ALIGNMENT_BOTTOM:
-       DCHECK(!is_tablet_mode);
--      base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetBottom"));
--      SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kBottom);
-+      if (prefs) {
-+        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetBottom"));
-+        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kBottom);
-+      }
-+      break;
-+    case MENU_ALIGNMENT_TOP:
-+      DCHECK(!is_tablet_mode);
-+      if (prefs) {
-+        base::RecordAction(base::UserMetricsAction("Shelf_AlignmentSetTop"));
-+        SetShelfAlignmentPref(prefs, display_id_, ShelfAlignment::kTop);
-+      }
-       break;
-     case MENU_PERSONALIZATION_HUB:
-       NewWindowDelegate::GetInstance()->OpenPersonalizationHub();
-@@ -130,11 +156,15 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
-       shell->app_list_controller()->SetHideContinueSection(false);
-       break;
-     case MENU_HIDE_DESK_NAME:
--      base::UmaHistogramBoolean(kDeskButtonHiddenHistogramName, true);
--      SetShowDeskButtonInShelfPref(prefs, false);
-+      if (prefs) {
-+        base::UmaHistogramBoolean(kDeskButtonHiddenHistogramName, true);
-+        SetShowDeskButtonInShelfPref(prefs, false);
-+      }
-       break;
-     case MENU_SHOW_DESK_NAME:
--      SetShowDeskButtonInShelfPref(prefs, true);
-+      if (prefs) {
-+        SetShowDeskButtonInShelfPref(prefs, true);
-+      }
-       break;
-     case MENU_TASK_MANAGER:
-       base::RecordAction(
-@@ -142,6 +172,12 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
-       NewWindowDelegate::GetInstance()->ShowTaskManager(
-           /*from_context_menu=*/true);
-       break;
-+    case MENU_COMPACT_MODE:
-+      if (prefs) {
-+        const bool current = prefs->GetBoolean(prefs::kShelfCompactMode);
-+        prefs->SetBoolean(prefs::kShelfCompactMode, !current);
-+      }
-+      break;
-     // Using reorder CommandId in ash/public/cpp/app_menu_constants.h
-     case REORDER_BY_NAME_ALPHABETICAL:
-       AppListModelProvider::Get()->model()->delegate()->RequestAppListSort(
-@@ -164,27 +200,30 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
- }
- 
- void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
--  PrefService* prefs =
--      Shell::Get()->session_controller()->GetLastActiveUserPrefService();
--  if (!prefs)  // Null during startup.
--    return;
--
--  // In fullscreen, the shelf is either hidden or auto-hidden, depending on the
--  // type of fullscreen. Do not show the auto-hide menu item while in fullscreen
--  // because it is confusing when the preference appears not to apply.
-+  PrefService* prefs = GetShelfPrefService();
-+
-+  // HACK(AuraDE): Don't bail when prefs is null. On linux-chromeos the
-+  // session_manager daemon never calls SetUserSessionOrder, so
-+  // last_active_user_prefs_ stays null. The old early return left the
-+  // entire context menu empty. Instead guard each pref-dependent item
-+  // individually so the static items (Personalization Hub, Task Manager)
-+  // always appear. If prefs become available later (from the real user
-+  // profile) they'll work on subsequent right-clicks.
-   const bool is_fullscreen = IsFullScreenMode(display_id_);
--  if (CanUserModifyShelfAutoHide(prefs) && !is_fullscreen) {
--    const bool is_autohide_set =
--        GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
--        ShelfAutoHideBehavior::kAlways;
--    auto string_id = is_autohide_set
--                         ? IDS_ASH_SHELF_CONTEXT_MENU_ALWAYS_SHOW_SHELF
--                         : IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE;
--    AddItemWithStringIdAndIcon(
--        MENU_AUTO_HIDE, string_id,
--        ui::ImageModel::FromVectorIcon(
--            is_autohide_set ? kAlwaysShowShelfIcon : kAutoHideIcon,
--            ui::kColorAshSystemUIMenuIcon));
-+  if (prefs) {
-+    if (CanUserModifyShelfAutoHide(prefs) && !is_fullscreen) {
-+      const bool is_autohide_set =
-+          GetShelfAutoHideBehaviorPref(prefs, display_id_) ==
-+          ShelfAutoHideBehavior::kAlways;
-+      auto string_id = is_autohide_set
-+                           ? IDS_ASH_SHELF_CONTEXT_MENU_ALWAYS_SHOW_SHELF
-+                           : IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE;
-+      AddItemWithStringIdAndIcon(
-+          MENU_AUTO_HIDE, string_id,
-+          ui::ImageModel::FromVectorIcon(
-+              is_autohide_set ? kAlwaysShowShelfIcon : kAutoHideIcon,
-+              ui::kColorAshSystemUIMenuIcon));
-+    }
-   }
- 
-   // Only allow shelf alignment modifications by the logged in Gaia users
-@@ -192,7 +231,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
-   // is not shown.
-   LoginStatus status = Shell::Get()->session_controller()->login_status();
-   const bool in_tablet_mode = display::Screen::Get()->InTabletMode();
--  if ((status == LoginStatus::USER || status == LoginStatus::CHILD) &&
-+  if (prefs && (status == LoginStatus::USER || status == LoginStatus::CHILD) &&
-       !in_tablet_mode &&
-       prefs->FindPreference(prefs::kShelfAlignmentLocal)->IsUserModifiable()) {
-     alignment_submenu_ = std::make_unique<ui::SimpleMenuModel>(this);
-@@ -204,6 +243,8 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
-         MENU_ALIGNMENT_BOTTOM, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_BOTTOM, group);
-     alignment_submenu_->AddRadioItemWithStringId(
-         MENU_ALIGNMENT_RIGHT, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_RIGHT, group);
-+    alignment_submenu_->AddRadioItemWithStringId(
-+        MENU_ALIGNMENT_TOP, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_TOP, group);
- 
-     AddSubMenuWithStringIdAndIcon(
-         MENU_ALIGNMENT_MENU, IDS_ASH_SHELF_CONTEXT_MENU_POSITION,
-@@ -219,7 +260,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
- 
-   // Only add the desk button items if the context menu was spawned on the
-   // shelf, tablet mode is not enabled, and full screen is not enabled.
--  if (!in_tablet_mode && menu_in_shelf_ && !is_fullscreen) {
-+  if (prefs && !in_tablet_mode && menu_in_shelf_ && !is_fullscreen) {
-     // If the button is visible for any reason, show the option to hide it
-     // manually. If it isn't visible show the option to show it.
-     if (GetDeskButtonVisibility(prefs)) {
-@@ -237,6 +278,18 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
- 
-   AddItemWithStringId(MENU_TASK_MANAGER,
-                       IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER);
-+
-+  // Compact mode toggle — only makes sense in clamshell mode.
-+  if (!in_tablet_mode) {
-+    const bool compact_on =
-+        prefs && prefs->GetBoolean(prefs::kShelfCompactMode);
-+    AddItemWithStringIdAndIcon(
-+        MENU_COMPACT_MODE,
-+        compact_on ? IDS_ASH_SHELF_CONTEXT_MENU_DISABLE_COMPACT_MODE
-+                   : IDS_ASH_SHELF_CONTEXT_MENU_ENABLE_COMPACT_MODE,
-+        ui::ImageModel::FromVectorIcon(kAutoHideIcon,
-+                                      ui::kColorAshSystemUIMenuIcon));
-+  }
- }
- 
- }  // namespace ash
-diff --git a/ash/shelf/shelf_context_menu_model.h b/ash/shelf/shelf_context_menu_model.h
-index 2d9c97bbdcefd37d9651ba8a286584756b46cb3d..a8b9ad0e50be4b9f00680a92effb9a0f438b98b9 100644
---- a/ash/shelf/shelf_context_menu_model.h
-+++ b/ash/shelf/shelf_context_menu_model.h
-@@ -42,6 +42,8 @@ class ASH_EXPORT ShelfContextMenuModel : public ui::SimpleMenuModel,
-     MENU_HIDE_DESK_NAME = 509,
-     MENU_SHOW_DESK_NAME = 510,
-     MENU_TASK_MANAGER = 511,
-+    MENU_COMPACT_MODE = 512,
-+    MENU_ALIGNMENT_TOP = 513,
-     MENU_ASH_END
-   };
-   // LINT.ThenChange(//tools/metrics/histograms/metadata/apps/enums.xml:ChromeOSUICommands)
-diff --git a/ash/shelf/shelf_controller.cc b/ash/shelf/shelf_controller.cc
-index 82fdf6bb2d063ff05b977e4640af7976ecfe980f..474161baf795750d95167dbd2e4cd5e9b29ea945 100644
---- a/ash/shelf/shelf_controller.cc
-+++ b/ash/shelf/shelf_controller.cc
-@@ -161,6 +161,7 @@ void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-       prefs::kShowDeskButtonInShelf, std::string(),
-       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
-   registry->RegisterBooleanPref(prefs::kDeviceUsesDesks, false);
-+  registry->RegisterBooleanPref(prefs::kShelfCompactMode, false);
-   registry->RegisterStringPref(
-       prefs::kShelfAlignment, kShelfAlignmentBottom,
-       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
-@@ -190,6 +191,11 @@ void ShelfController::OnActiveUserPrefServiceChanged(
-                               base::BindRepeating(&LayoutShelves));
-   pref_change_registrar_->Add(prefs::kShelfPreferences,
-                               base::BindRepeating(&SetShelfBehaviorsFromPrefs));
-+  pref_change_registrar_->Add(
-+      prefs::kShelfCompactMode,
-+      base::BindRepeating([]() {
-+        ShelfConfig::Get()->UpdateConfigForCompactMode();
-+      }));
- 
-   pref_change_registrar_->Add(
-       prefs::kAppNotificationBadgingEnabled,
-diff --git a/ash/shelf/shelf_layout_manager.cc b/ash/shelf/shelf_layout_manager.cc
-index e7cf6b4954d5b7b88811b42638b34fa275f68808..30ba33ec02ffdf83e0c5c16beca3acfade32f477 100644
---- a/ash/shelf/shelf_layout_manager.cc
-+++ b/ash/shelf/shelf_layout_manager.cc
-@@ -238,7 +238,8 @@ gfx::Insets CalculateShelfInsets(ShelfAlignment alignment,
-   return SelectValueByShelfAlignment(
-       alignment, gfx::Insets::TLBR(0, 0, horizontal_inset, 0),
-       gfx::Insets::TLBR(0, default_shelf_inset, 0, 0),
--      gfx::Insets::TLBR(0, 0, 0, default_shelf_inset));
-+      gfx::Insets::TLBR(0, 0, 0, default_shelf_inset),
-+      gfx::Insets::TLBR(horizontal_inset, 0, 0, 0));
- }
- 
- int GetOffset(int offset, const char* pref_name) {
-@@ -557,11 +558,15 @@ gfx::Rect ShelfLayoutManager::GetIdealBounds() const {
-   const int shelf_size = ShelfConfig::Get()->shelf_size();
-   aura::Window* shelf_window = shelf_widget_->GetNativeWindow();
-   gfx::Rect rect(screen_util::GetDisplayBoundsInParent(shelf_window));
-+  // AuraDE compatibility: top shelf needs an ideal bounds rect on the top
-+  // display edge so work-area reservation and flyout anchoring agree with the
-+  // visible shelf.
-   return shelf_->SelectValueForShelfAlignment(
-       gfx::Rect(rect.x(), rect.bottom() - shelf_size, rect.width(), shelf_size),
-       gfx::Rect(rect.x(), rect.y(), shelf_size, rect.height()),
-       gfx::Rect(rect.right() - shelf_size, rect.y(), shelf_size,
--                rect.height()));
-+                rect.height()),
-+      gfx::Rect(rect.x(), rect.y(), rect.width(), shelf_size));
- }
- 
- gfx::Rect ShelfLayoutManager::GetIdealBoundsForWorkAreaCalculation() const {
-@@ -1038,7 +1043,8 @@ bool ShelfLayoutManager::MaybeHandleShelfFling(
-   int velocity = shelf_->SelectValueForShelfAlignment(
-       event_in_screen.AsGestureEvent()->details().velocity_y(),
-       -event_in_screen.AsGestureEvent()->details().velocity_x(),
--      event_in_screen.AsGestureEvent()->details().velocity_x());
-+      event_in_screen.AsGestureEvent()->details().velocity_x(),
-+      -event_in_screen.AsGestureEvent()->details().velocity_y());
- 
-   const int adjusted_velocity = GetScrollOffsetInAllowedDirection(
-       velocity, Shell::Get()->app_list_controller()->IsVisible(display_.id()));
-@@ -2066,7 +2072,8 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
-   const int baseline = shelf_->SelectValueForShelfAlignment(
-       available_bounds.bottom() - (shelf_hidden_at_start ? 0 : shelf_size),
-       available_bounds.x() - (shelf_hidden_at_start ? shelf_size : 0),
--      available_bounds.right() - (shelf_hidden_at_start ? 0 : shelf_size));
-+      available_bounds.right() - (shelf_hidden_at_start ? 0 : shelf_size),
-+      available_bounds.y() - (shelf_hidden_at_start ? shelf_size : 0));
-   const int shelf_position = baseline + drag_amount_;
- 
-   if (!display::Screen::Get()->InTabletMode()) {
-@@ -2074,11 +2081,12 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
-     // baseline.
-     int shelf_ideal_bound = shelf_->SelectValueForShelfAlignment(
-         available_bounds.bottom() - shelf_size, 0,
--        available_bounds.right() - shelf_size);
-+        available_bounds.right() - shelf_size, available_bounds.y());
-     int adjusted_shelf_position = shelf_->SelectValueForShelfAlignment(
-         std::max(shelf_ideal_bound, static_cast<int>(shelf_position)),
-         std::min(shelf_ideal_bound, static_cast<int>(shelf_position)),
--        std::max(shelf_ideal_bound, static_cast<int>(shelf_position)));
-+        std::max(shelf_ideal_bound, static_cast<int>(shelf_position)),
-+        std::min(shelf_ideal_bound, static_cast<int>(shelf_position)));
-     shelf_->shelf_widget()->UpdateTargetBoundsForGesture(
-         adjusted_shelf_position);
-     shelf_->hotseat_widget()->UpdateTargetBoundsForGesture(
-@@ -2208,7 +2216,8 @@ gfx::Rect ShelfLayoutManager::GetAutoHideShowShelfRegionInScreen() const {
-   gfx::Vector2d offset = shelf_->SelectValueForShelfAlignment(
-       gfx::Vector2d(0, shelf_bounds_in_screen.height()),
-       gfx::Vector2d(-kMaxAutoHideShowShelfRegionSize, 0),
--      gfx::Vector2d(shelf_bounds_in_screen.width(), 0));
-+      gfx::Vector2d(shelf_bounds_in_screen.width(), 0),
-+      gfx::Vector2d(0, -kMaxAutoHideShowShelfRegionSize));
- 
-   gfx::Rect show_shelf_region_in_screen = shelf_bounds_in_screen;
-   show_shelf_region_in_screen += offset;
-@@ -2934,6 +2943,7 @@ bool ShelfLayoutManager::IsSwipingCorrectDirection() {
-         return drag_amount_ > 0;
-       return drag_amount_ < 0;
-     case ShelfAlignment::kLeft:
-+    case ShelfAlignment::kTop:
-       if (drag_auto_hide_state_ == SHELF_AUTO_HIDE_SHOWN)
-         return drag_amount_ < 0;
-       return drag_amount_ > 0;
-diff --git a/ash/shelf/shelf_view.cc b/ash/shelf/shelf_view.cc
-index f04be22ee8393a3352ce73a0a1cab680ef9edea3..2b9bcbb79115bd0be8da4da4a44a8ea9610cb752 100644
---- a/ash/shelf/shelf_view.cc
-+++ b/ash/shelf/shelf_view.cc
-@@ -1284,7 +1284,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
-                                 shelf_->SelectValueForShelfAlignment(
-                                     SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
-                                     SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
--                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT)),
-+                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT,
-+                                    SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM)),
-                             SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
- }
- 
-@@ -2000,6 +2001,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
-     case ShelfAlignment::kRight:
-       origin = gfx::Point(shelf_bounds_in_screen.x(), location.y());
-       break;
-+    case ShelfAlignment::kTop:
-+      origin = gfx::Point(location.x(), shelf_bounds_in_screen.bottom());
-+      break;
-   }
-   return gfx::Rect(origin, gfx::Size());
- }
-@@ -2017,6 +2021,9 @@ void ShelfView::AnnounceShelfAlignment() {
-     case ShelfAlignment::kRight:
-       announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_RIGHT);
-       break;
-+    case ShelfAlignment::kTop:
-+      announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_TOP);
-+      break;
-   }
-   announcement_view_->GetViewAccessibility().AnnounceText(announcement);
- }
-@@ -2672,9 +2679,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
- 
- int ShelfView::CalculateShelfDistance(const gfx::Point& coordinate) const {
-   const gfx::Rect bounds = GetBoundsInScreen();
-+  // AuraDE compatibility: top shelf pointer distance is measured below the
-+  // shelf, not above it like bottom shelf.
-   int distance = shelf_->SelectValueForShelfAlignment(
-       bounds.y() - coordinate.y(), coordinate.x() - bounds.right(),
--      bounds.x() - coordinate.x());
-+      bounds.x() - coordinate.x(), coordinate.y() - bounds.bottom());
-   return distance > 0 ? distance : 0;
- }
- 
-diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
-index 3b1545594d8b61629936de82960a33e12b812c8c..b35b55240d73f4429bcc9d87b5abd4e372766ad1 100644
---- a/ash/shelf/shelf_widget.cc
-+++ b/ash/shelf/shelf_widget.cc
-@@ -34,6 +34,7 @@
- #include "ash/shell.h"
- #include "ash/style/ash_color_id.h"
- #include "ash/style/style_util.h"
-+#include "ash/style/system_shadow.h"
- #include "ash/system/status_area_widget.h"
- #include "ash/wm/overview/overview_controller.h"
+From d51e158109500ab55b61004bc759f7fbf664324d Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:24:41 -0500
+Subject: Add display scaling controls for AuraDE hosts
+
+
+diff --git a/ash/display/cros_display_config.cc b/ash/display/cros_display_config.cc
+index 3030aeb6723c10b426bdae0256250cfdeee63e3d..49efc4ee00ed53ad743b32e918c8082ae6c4c10e 100644
+--- a/ash/display/cros_display_config.cc
++++ b/ash/display/cros_display_config.cc
+@@ -24,6 +24,7 @@
  #include "ash/wm/tablet_mode/tablet_mode_controller.h"
-@@ -138,10 +139,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
-     corner_radius_ = radius;
+ #include "base/functional/bind.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/system/sys_info.h"
+ #include "components/device_event_log/device_event_log.h"
+ #include "ui/display/display.h"
+ #include "ui/display/display_layout.h"
+@@ -291,13 +292,21 @@ DisplayUnitInfo GetDisplayUnitInfo(const display::Display& display,
+     ++display_mode_index;
+   }
  
-     layer()->SetRoundedCornerRadius({
--        shelf_->SelectValueForShelfAlignment(radius, 0.0f, radius),
--        shelf_->SelectValueForShelfAlignment(radius, radius, 0.0f),
--        shelf_->SelectValueForShelfAlignment(0.0f, radius, 0.0f),
--        shelf_->SelectValueForShelfAlignment(0.0f, 0.0f, radius),
-+        shelf_->SelectValueForShelfAlignment(radius, 0.0f, radius, 0.0f),
-+        shelf_->SelectValueForShelfAlignment(radius, radius, 0.0f, 0.0f),
-+        shelf_->SelectValueForShelfAlignment(0.0f, radius, 0.0f, radius),
-+        shelf_->SelectValueForShelfAlignment(0.0f, 0.0f, radius, radius),
-     });
- 
-     if (needs_paint) {
-@@ -173,7 +174,7 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
-     if (corner_radius_ > 0) {
-       views::HighlightBorder::PaintBorderToCanvas(
-           canvas, *owner_view_, gfx::Rect(layer()->size()),
--          gfx::RoundedCornersF(corner_radius_), highlight_border_type_);
-+          layer()->rounded_corner_radii(), highlight_border_type_);
-     } else {
-       // If the shelf corners are not rounded, only paint the highlight border
-       // on the inner edge of the shelf to separate the shelf and the work area.
-@@ -231,6 +232,12 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
-         start_point.Offset(half_thickness, 0);
-         end_point.Offset(half_thickness, 0);
-         break;
-+      case ShelfAlignment::kTop:
-+        start_point = gfx::PointF(pixel_bounds.bottom_left());
-+        end_point = gfx::PointF(pixel_bounds.bottom_right());
-+        start_point.Offset(0, -half_thickness);
-+        end_point.Offset(0, -half_thickness);
-+        break;
-     }
- 
-     // Draw the outer line.
-@@ -250,6 +257,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
-         start_point.Offset(border_thickness, 0);
-         end_point.Offset(border_thickness, 0);
-         break;
-+      case ShelfAlignment::kTop:
-+        start_point.Offset(0, -border_thickness);
-+        end_point.Offset(0, -border_thickness);
-+        break;
-     }
- 
-     // Draw the inner line.
-@@ -360,6 +371,8 @@ class ShelfWidgetDelegateView
-   // Cache the state of the background blur so that it can be updated only
-   // when necessary.
-   bool background_is_currently_blurred_ = false;
-+
-+  std::unique_ptr<SystemShadow> shadow_;
- };
- 
- ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
-@@ -389,6 +402,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
-   animating_drag_handle_.SetRoundedCornerRadius(
-       {kDragHandleCornerRadius, kDragHandleCornerRadius,
-        kDragHandleCornerRadius, kDragHandleCornerRadius});
-+
-+  shadow_ = SystemShadow::CreateShadowOnNinePatchLayerForView(
-+      this, SystemShadow::Type::kElevation4);
- }
- 
- ShelfWidgetDelegateView::~ShelfWidgetDelegateView() = default;
-@@ -505,10 +521,14 @@ void ShelfWidgetDelegateView::UpdateOpaqueBackground() {
-   // We can easily round only 2 corners out of 4 which means we don't need as
-   // much extra shelf height.
-   const int safety_margin = kShelfMaxOvershootHeight;
-+  // AuraDE compatibility: top shelf support must extend overshoot toward the
-+  // top display edge. The three-way helper maps top to bottom, which leaves a
-+  // second-looking strip under the shelf.
-   opaque_background_bounds.Inset(gfx::Insets::TLBR(
--      0, -shelf->SelectValueForShelfAlignment(0, safety_margin, 0),
--      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0),
--      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin)));
-+      -shelf->SelectValueForShelfAlignment(0, 0, 0, safety_margin),
-+      -shelf->SelectValueForShelfAlignment(0, safety_margin, 0, 0),
-+      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0, 0),
-+      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin, 0)));
-   opaque_back_ground_layer->SetBounds(opaque_background_bounds);
- 
-   // Do not show rounded corners when the background is in maximized mode (app
-@@ -835,11 +855,13 @@ void ShelfWidget::CalculateTargetBounds() {
-   const int shelf_primary_position = shelf_->SelectValueForShelfAlignment(
-       available_bounds.bottom() - shelf_in_screen_portion,
-       available_bounds.x() - shelf_size + shelf_in_screen_portion,
--      available_bounds.right() - shelf_in_screen_portion);
-+      available_bounds.right() - shelf_in_screen_portion,
-+      available_bounds.y() - shelf_size + shelf_in_screen_portion);
-   gfx::Point shelf_origin = shelf_->SelectValueForShelfAlignment(
-       gfx::Point(available_bounds.x(), shelf_primary_position),
-       gfx::Point(shelf_primary_position, available_bounds.y()),
--      gfx::Point(shelf_primary_position, available_bounds.y()));
-+      gfx::Point(shelf_primary_position, available_bounds.y()),
-+      gfx::Point(available_bounds.x(), shelf_primary_position));
- 
-   target_bounds_ =
-       gfx::Rect(shelf_origin.x(), shelf_origin.y(), shelf_width, shelf_height);
-@@ -941,14 +963,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
-   // 3. in RMA state - shelf should be hidden to avoid blocking the RMA app
-   // controls or intercepting UI events; or
-   // 4. on secondary screens in states other than ACTIVE.
--  bool hide_for_session_state =
--      state == session_manager::SessionState::UNKNOWN ||
--      state == session_manager::SessionState::RMA;
--  bool hide_on_secondary_screen = shelf_->ShouldHideOnSecondaryDisplay(state);
-+  bool hide_for_session_state = false;
-+  bool hide_on_secondary_screen = false;
-   if (hide_for_session_state || hide_on_secondary_screen) {
-     HideIfShown();
+-  info.display_zoom_factor = display_info.zoom_factor();
+-  if (has_active_mode) {
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: ChromeOS display zoom changes the logical root
++    // display size, which shrinks the visible desktop under a generic
++    // Linux/Wayland host. Keep display zoom pinned to 100% until AuraDE has a
++    // real compositor-backed UI scale path.
++    info.display_zoom_factor = 1.f;
++    info.available_display_zoom_factors.push_back(1.f);
++  } else if (has_active_mode) {
++    info.display_zoom_factor = display_info.zoom_factor();
+     auto zoom_levels = display::GetDisplayZoomFactors(active_mode);
+     info.available_display_zoom_factors.reserve(zoom_levels.size());
+     info.available_display_zoom_factors.assign(zoom_levels.begin(),
+                                                zoom_levels.end());
    } else {
--    bool show_hotseat = (state == session_manager::SessionState::ACTIVE);
-+    bool show_hotseat = true;
-     hotseat_widget()->GetShelfView()->SetVisible(show_hotseat);
-     hotseat_transition_animator_->SetAnimationsEnabledInSessionState(
-         show_hotseat);
-diff --git a/ash/system/holding_space/holding_space_tray_bubble.cc b/ash/system/holding_space/holding_space_tray_bubble.cc
-index f25584f122fe80f54db7a6e532923bd3fde01a87..65965e51fa7b357c43d7a182f5b767df72a29431 100644
---- a/ash/system/holding_space/holding_space_tray_bubble.cc
-+++ b/ash/system/holding_space/holding_space_tray_bubble.cc
-@@ -4,6 +4,7 @@
- 
- #include "ash/system/holding_space/holding_space_tray_bubble.h"
- 
-+#include <algorithm>
- #include <map>
- #include <vector>
- 
-@@ -411,12 +412,23 @@ HoldingSpaceTrayBubble::GetHoldingSpaceItemViews() {
- }
- 
- int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
-+  Shelf* shelf = holding_space_tray_->shelf();
-   const WorkAreaInsets* work_area = WorkAreaInsets::ForWindow(
--      holding_space_tray_->shelf()->GetWindow()->GetRootWindow());
-+      shelf->GetWindow()->GetRootWindow());
-+
-+  if (shelf->alignment() == ShelfAlignment::kTop) {
-+    // AuraDE compatibility: top shelf holding-space bubbles open downward.
-+    const gfx::Insets insets =
-+        GetTrayBubbleInsets(holding_space_tray_->GetBubbleWindowContainer());
-+    const int bubble_vertical_margin = insets.top() + insets.bottom();
-+    return std::max(0, work_area->user_work_area_bounds().bottom() -
-+                           shelf->GetSystemTrayAnchorRect().y() -
-+                           bubble_vertical_margin);
-+  }
- 
-   const int bottom =
--      holding_space_tray_->shelf()->IsHorizontalAlignment()
--          ? holding_space_tray_->shelf()->GetShelfBoundsInScreen().y()
-+      shelf->IsHorizontalAlignment()
-+          ? shelf->GetShelfBoundsInScreen().y()
-           : work_area->user_work_area_bounds().bottom();
- 
-   const int free_space_height_above_anchor =
-@@ -426,7 +438,7 @@ int HoldingSpaceTrayBubble::CalculateTopLevelBubbleMaxHeight() const {
-       GetTrayBubbleInsets(holding_space_tray_->GetBubbleWindowContainer());
-   const int bubble_vertical_margin = insets.top() + insets.bottom();
- 
--  return free_space_height_above_anchor - bubble_vertical_margin;
-+  return std::max(0, free_space_height_above_anchor - bubble_vertical_margin);
- }
- 
- int HoldingSpaceTrayBubble::CalculateChildBubbleContainerMaxHeight() const {
-diff --git a/ash/system/holding_space/holding_space_tray_icon_preview.cc b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-index 7d10cc4c57f286e54c44b271de51c9b1194cc74a..d064c350d52761b4cce0004c2edcaa2fa6865d61 100644
---- a/ash/system/holding_space/holding_space_tray_icon_preview.cc
-+++ b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-@@ -115,6 +115,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
-   switch (shelf_alignment) {
-     case ShelfAlignment::kBottom:
-     case ShelfAlignment::kBottomLocked:
-+    case ShelfAlignment::kTop:
-       return true;
-     case ShelfAlignment::kLeft:
-     case ShelfAlignment::kRight:
-diff --git a/ash/system/notification_center/ash_message_popup_collection.cc b/ash/system/notification_center/ash_message_popup_collection.cc
-index 96a4f3a0254a33a62c32fcebb86b190958e2d848..960e819583f4bd7e11ab50ba5b51c0b4830c5235 100644
---- a/ash/system/notification_center/ash_message_popup_collection.cc
-+++ b/ash/system/notification_center/ash_message_popup_collection.cc
-@@ -105,8 +105,7 @@ void AshMessagePopupCollection::NotifierCollisionHandler::
++    info.display_zoom_factor = display_info.zoom_factor();
+     info.available_display_zoom_factors.push_back(display_info.zoom_factor());
    }
  
-   // If the popups do not fit in the available space, close the bubble.
--  if (popup_collection_->popup_collection_bounds().height() >
--      popup_collection_->GetBaseline()) {
-+  if (!popup_collection_->PopupCollectionFitsAvailableSpace()) {
-     shelf_pod_bubble->CloseBubbleView();
-     popup_collection_->MoveDownPopups();
- 
-@@ -176,8 +175,7 @@ void AshMessagePopupCollection::NotifierCollisionHandler::
- 
-   // If the popup collection does not fit in the available space when opening a
-   // bubble or updating its height, close all popups.
--  if (popup_collection_->popup_collection_bounds().height() >
--      popup_collection_->GetBaseline()) {
-+  if (!popup_collection_->PopupCollectionFitsAvailableSpace()) {
-     popup_collection_->CloseAllPopupsNow();
+@@ -381,8 +390,8 @@ DisplayConfigResult ValidateDisplayProperties(
    }
  
-@@ -319,6 +317,14 @@ int AshMessagePopupCollection::GetBaseline() const {
-           ? notifier_collision_handler_->CalculateBaselineOffset()
-           : 0;
- 
-+  if (GetAlignment() == ShelfAlignment::kTop) {
-+    // AuraDE compatibility: top shelf notifications open downward from the top
-+    // work-area edge. Use a top baseline and push it down when tray surfaces
-+    // such as Quick Settings are already open.
-+    return work_area_.y() + tray_bubble_insets.top() +
-+           notifier_collision_offset + kShelfDisplayOffset;
-+  }
-+
-   // Decrease baseline by `kShelfDisplayOffset` to compensate for the adjustment
-   // of edges in `Shelf::GetSystemTrayAnchorRect()`.
-   return work_area_.bottom() - tray_bubble_insets.bottom() -
-@@ -330,7 +336,9 @@ gfx::Rect AshMessagePopupCollection::GetWorkArea() const {
- }
- 
- bool AshMessagePopupCollection::IsTopDown() const {
--  return false;
-+  // AuraDE compatibility: top shelf popups should appear below the shelf and
-+  // stack downward, matching the top-shelf tray bubble direction.
-+  return GetAlignment() == ShelfAlignment::kTop;
- }
- 
- bool AshMessagePopupCollection::IsFromLeft() const {
-@@ -415,6 +423,18 @@ void AshMessagePopupCollection::NotifyPopupCollectionHeightChanged() {
-   notifier_collision_handler_->OnPopupCollectionHeightChanged();
- }
- 
-+bool AshMessagePopupCollection::PopupCollectionFitsAvailableSpace() {
-+  const int collection_height = popup_collection_bounds().height();
-+
-+  if (GetAlignment() == ShelfAlignment::kTop) {
-+    // AuraDE compatibility: with top-down popups, usable space is below the
-+    // baseline rather than above it.
-+    return collection_height <= work_area_.bottom() - GetBaseline();
-+  }
-+
-+  return collection_height <= GetBaseline();
-+}
-+
- void AshMessagePopupCollection::AnimationStarted() {
-   if (popups_animating_ == 0 && last_pop_up_added_) {
-     // Since all the popup widgets use the same compositor, we only need to set
-diff --git a/ash/system/notification_center/ash_message_popup_collection.h b/ash/system/notification_center/ash_message_popup_collection.h
-index bace01f2a9717432ae14a9bb0c9c78b8929b8f78..3e9e38692b19b0f6c617a94e24c761f49de4beb4 100644
---- a/ash/system/notification_center/ash_message_popup_collection.h
-+++ b/ash/system/notification_center/ash_message_popup_collection.h
-@@ -206,6 +206,10 @@ class ASH_EXPORT AshMessagePopupCollection
-   // Computes the new work area.
-   void UpdateWorkArea();
- 
-+  // Returns whether the current popup collection fits between its baseline and
-+  // the relevant work-area edge.
-+  bool PopupCollectionFitsAvailableSpace();
-+
-   // display::DisplayObserver:
-   void OnDisplayMetricsChanged(const display::Display& display,
-                                uint32_t metrics) override;
-diff --git a/ash/system/palette/palette_tray.cc b/ash/system/palette/palette_tray.cc
-index 622af2358dce8817f32916fc5d47b72935f088a1..5cb07b8afbab0254246d1eaac791ca48bfa97853 100644
---- a/ash/system/palette/palette_tray.cc
-+++ b/ash/system/palette/palette_tray.cc
-@@ -712,6 +712,11 @@ void PaletteTray::OnAutoHideStateChanged(ShelfAutoHideState state) {
-     case ShelfAlignment::kRight:
-       anchor_rect = gfx::Rect(work_area.right(), tray_anchor.bottom(), 0, 0);
-       break;
-+    case ShelfAlignment::kTop:
-+      anchor_rect =
-+          gfx::Rect(base::i18n::IsRTL() ? tray_anchor.x() : tray_anchor.right(),
-+                    work_area.y(), 0, 0);
-+      break;
+   // In Unified mode, the actual zoom factor will be picked by the system.
+-  if (properties.display_zoom_factor >
+-      0) {  // && !display_manager->IsInUnifiedMode()) {
++  if (properties.display_zoom_factor > 0 &&
++      base::SysInfo::IsRunningOnChromeOS()) {
+     display::ManagedDisplayMode current_mode;
+     if (!display_manager->GetActiveModeForDisplayId(id, &current_mode)) {
+       DISPLAY_LOG(ERROR) << "No active mode for display:" << dump_state();
+@@ -769,8 +778,12 @@ DisplayConfigResult CrosDisplayConfigImpl::SetDisplayProperties(
    }
  
-   bubble_->bubble_view()->ChangeAnchorRect(anchor_rect);
-diff --git a/ash/system/toast/anchored_nudge.cc b/ash/system/toast/anchored_nudge.cc
-index a7e9957060ee723bbac6b22847b6940143215b36..daf33fbaf7266a32692178480f1685f83ae33c92 100644
---- a/ash/system/toast/anchored_nudge.cc
-+++ b/ash/system/toast/anchored_nudge.cc
-@@ -350,11 +350,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
-   if (is_corner_anchored_) {
-     SetArrow(shelf->SelectValueForShelfAlignment(
-         views::BubbleBorder::BOTTOM_RIGHT, views::BubbleBorder::LEFT_BOTTOM,
--        views::BubbleBorder::RIGHT_BOTTOM));
-+        views::BubbleBorder::RIGHT_BOTTOM, views::BubbleBorder::TOP_RIGHT));
+   if (properties.display_zoom_factor > 0) {
++    // AuraDE compatibility: clamp ChromeOS logical display zoom on generic
++    // Linux/Wayland hosts; see GetDisplayUnitInfo() above.
+     display_manager->UpdateZoomFactor(display.id(),
+-                                      properties.display_zoom_factor);
++                                      base::SysInfo::IsRunningOnChromeOS()
++                                          ? properties.display_zoom_factor
++                                          : 1.f);
+   }
+ 
+   // Set the display mode. Note: if this returns an error, other properties
+diff --git a/ash/display/cursor_window_controller.cc b/ash/display/cursor_window_controller.cc
+index 48b9c13cf7974355f7ba24ec9f7d24ea520ca762..379387f6065ee5d4e15f85addceafed1fc55c999 100644
+--- a/ash/display/cursor_window_controller.cc
++++ b/ash/display/cursor_window_controller.cc
+@@ -23,6 +23,7 @@
+ #include "ash/session/session_controller_impl.h"
+ #include "ash/shell.h"
+ #include "base/command_line.h"
++#include "base/system/sys_info.h"
+ #include "components/prefs/pref_service.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/accessibility/accessibility_features.h"
+@@ -418,26 +419,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
+   large_cursor_size_in_dip =
+       std::max(large_cursor_size_in_dip, kMinLargeCursorSize);
+ 
+-  if (large_cursor_size_in_dip_ == large_cursor_size_in_dip)
++  if (large_cursor_size_in_dip_ == large_cursor_size_in_dip) {
+     return;
++  }
+ 
+   large_cursor_size_in_dip_ = large_cursor_size_in_dip;
+ 
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ }
+ 
+ void CursorWindowController::SetCursorColor(SkColor cursor_color) {
+-  if (cursor_color_ == cursor_color)
++  if (cursor_color_ == cursor_color) {
+     return;
++  }
+ 
+   cursor_color_ = cursor_color;
+ 
+   // Reset cursor lottie animation cache when new color needs to be applied.
+   wm::ClearCursorAnimationCache();
+ 
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ }
+ 
+ void CursorWindowController::SetCursorInverted(bool inverted) {
+@@ -490,8 +495,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+     return true;
+   }
+ 
+-  if (shell->fullscreen_magnifier_controller()->IsEnabled())
++  if (shell->fullscreen_magnifier_controller()->IsEnabled()) {
+     return true;
++  }
+ 
+   PrefService* prefs = shell->session_controller()->GetActivePrefService();
+   if (!prefs) {
+@@ -526,16 +532,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+ }
+ 
+ void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
+-  if (is_cursor_compositing_enabled_ == enabled)
++  if (is_cursor_compositing_enabled_ == enabled) {
+     return;
++  }
+ 
+   is_cursor_compositing_enabled_ = enabled;
+-  if (display_.is_valid())
++  if (display_.is_valid()) {
+     UpdateCursorImage();
++  }
+ 
+   UpdateContainer();
+-  for (auto& obs : observers_)
++  for (auto& obs : observers_) {
+     obs.OnCursorCompositingStateChanged(is_cursor_compositing_enabled_);
++  }
+ }
+ 
+ void CursorWindowController::UpdateContainer() {
+@@ -544,8 +553,9 @@ void CursorWindowController::UpdateContainer() {
+     display::Display display =
+         screen->GetDisplayNearestPoint(screen->GetCursorScreenPoint());
+     DCHECK(display.is_valid());
+-    if (display.is_valid())
++    if (display.is_valid()) {
+       SetDisplay(display);
++    }
    } else {
-     SetArrow(shelf->SelectValueForShelfAlignment(
-         views::BubbleBorder::BOTTOM_CENTER, views::BubbleBorder::LEFT_CENTER,
--        views::BubbleBorder::RIGHT_CENTER));
-+        views::BubbleBorder::RIGHT_CENTER, views::BubbleBorder::TOP_CENTER));
+     SetContainer(nullptr);
+   }
+@@ -573,8 +583,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
+   last_updated_.reset();
+ 
+   aura::Window* root_window = Shell::GetRootWindowForDisplayId(display.id());
+-  if (!root_window)
++  if (!root_window) {
+     return;
++  }
+ 
+   if (!is_cursor_compositing_enabled_) {
+     return;
+@@ -639,8 +650,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
+ }
+ 
+ void CursorWindowController::SetCursor(gfx::NativeCursor cursor) {
+-  if (cursor_ == cursor)
++  if (cursor_ == cursor) {
+     return;
++  }
+   cursor_ = cursor;
+   UpdateCursorImage();
+   UpdateCursorVisibility();
+@@ -839,15 +851,19 @@ void CursorWindowController::UpdateCursorImage() {
+ void CursorWindowController::UpdateCursorVisibility() {
+   bool visible = (visible_ && cursor_.type() != ui::mojom::CursorType::kNone);
+   if (visible) {
+-    if (cursor_view_widget_)
++    if (cursor_view_widget_) {
+       cursor_view_widget_->Show();
+-    if (cursor_window_)
++    }
++    if (cursor_window_) {
+       cursor_window_->Show();
++    }
+   } else {
+-    if (cursor_view_widget_)
++    if (cursor_view_widget_) {
+       cursor_view_widget_->Hide();
+-    if (cursor_window_)
++    }
++    if (cursor_window_) {
+       cursor_window_->Hide();
++    }
    }
  }
  
-diff --git a/ash/system/tray/tray_background_view.cc b/ash/system/tray/tray_background_view.cc
-index 35fbd3d74b7ad29bfa7747e553b7f68020c004f6..5fa04dc922b17ecc1392a97fb6bff47820942a03 100644
---- a/ash/system/tray/tray_background_view.cc
-+++ b/ash/system/tray/tray_background_view.cc
-@@ -579,6 +579,9 @@ void TrayBackgroundView::ShowContextMenuForViewImpl(
+@@ -884,6 +900,13 @@ const gfx::ImageSkia& CursorWindowController::GetCursorImageForTest() const {
+ }
+ 
+ bool CursorWindowController::ShouldUseFastInk() const {
++  // AuraDE compatibility: generic Linux/Wayland sessions do not provide the
++  // ChromeOS scanout path FastInk expects. Use the standard textured cursor
++  // while composited cursors are active, such as when Night Light is enabled.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
+   // If inverted cursor is enabled, we want to use the aura::Window path to
+   // support the inverted cursor feature.
+   if (::features::IsAccessibilityInvertedMouseCursorEnabled() && is_inverted_) {
+diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
+index f010b52a70897fb8f03344e7f8a82fd50cc35cb1..d6f0fa28c91c80aa742cb35c0faaadb1f1dc836a 100644
+--- a/ash/display/display_configuration_controller.cc
++++ b/ash/display/display_configuration_controller.cc
+@@ -52,6 +52,9 @@ display::DisplayPositionInUnifiedMatrix GetUnifiedModeShelfCellPosition() {
+ 
      case ShelfAlignment::kRight:
-       anchor = views::MenuAnchorPosition::kBubbleLeft;
-       break;
+       return display::DisplayPositionInUnifiedMatrix::kTopRight;
++
 +    case ShelfAlignment::kTop:
-+      anchor = views::MenuAnchorPosition::kBubbleBottomRight;
-+      break;
++      return display::DisplayPositionInUnifiedMatrix::kTopLeft;
    }
  
-   context_menu_runner_->RunMenuAt(
-diff --git a/ash/system/tray/tray_bubble_view.cc b/ash/system/tray/tray_bubble_view.cc
-index 3e50e045be1002cc9fd477e1e18c03f90637efd6..0990e947e41495dd8a9ffb9143268302699e35db 100644
---- a/ash/system/tray/tray_bubble_view.cc
-+++ b/ash/system/tray/tray_bubble_view.cc
-@@ -82,6 +82,9 @@ BubbleBorder::Arrow GetArrowAlignment(ash::ShelfAlignment alignment) {
-       return BubbleBorder::LEFT_BOTTOM;
-     case ash::ShelfAlignment::kRight:
-       return BubbleBorder::RIGHT_BOTTOM;
-+    case ash::ShelfAlignment::kTop:
-+      return base::i18n::IsRTL() ? BubbleBorder::TOP_LEFT
-+                                 : BubbleBorder::TOP_RIGHT;
+   NOTREACHED();
+diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
+index 050fea7d427c4539020242d87f1f397b3b770d05..ddf94619fc8907a93f59d56e1a9cd720159e1646 100644
+--- a/ash/display/root_window_transformers.cc
++++ b/ash/display/root_window_transformers.cc
+@@ -106,6 +106,18 @@ class AshRootWindowTransformer : public RootWindowTransformer {
+     transform_ = insets_and_rotation_transform;
+     insets_and_scale_transform_ = CreateReverseRotatedInsetsTransform(
+         display.panel_rotation(), host_insets_, display.device_scale_factor());
++    if (!base::SysInfo::IsRunningOnChromeOS()) {
++      // AuraDE compatibility: the ChromeOS display stack applies the device
++      // scale factor below Ash. On a generic Linux/Wayland host, Ash still
++      // shrinks the root window bounds to DIP size, but nothing scales that
++      // root layer back up to the native host surface. Apply the same scale to
++      // the visual layer transform and root event transform so shelf,
++      // wallpaper, windows, and hit testing all share one coordinate map.
++      transform_.Scale(display.device_scale_factor(),
++                       display.device_scale_factor());
++      insets_and_scale_transform_.Scale(display.device_scale_factor(),
++                                        display.device_scale_factor());
++    }
+     FullscreenMagnifierController* magnifier =
+         Shell::Get()->fullscreen_magnifier_controller();
+     if (magnifier) {
+@@ -133,14 +145,16 @@ class AshRootWindowTransformer : public RootWindowTransformer {
+     return invert_transform_;
    }
- }
+   gfx::Rect GetRootWindowBounds(const gfx::Size& host_size) const override {
+-    if (base::SysInfo::IsRunningOnChromeOS())
++    if (base::SysInfo::IsRunningOnChromeOS()) {
+       return initial_root_bounds_;
++    }
  
-diff --git a/ash/system/tray/tray_utils.cc b/ash/system/tray/tray_utils.cc
-index 5cc85c10d6ae619b92872a8fbc6465bc7807cc7a..05d41680e2cab7dfd1796e27bcdb1855c90ddef8 100644
---- a/ash/system/tray/tray_utils.cc
-+++ b/ash/system/tray/tray_utils.cc
-@@ -4,6 +4,7 @@
+     // If we're running on linux desktop for dev purpose, the host window
+     // may be updated to new size. Recompute the root window bounds based
+     // on the host size if the host size changed.
+-    if (initial_host_size_ == host_size)
++    if (initial_host_size_ == host_size) {
+       return initial_root_bounds_;
++    }
  
- #include "ash/system/tray/tray_utils.h"
+     gfx::RectF new_bounds = gfx::RectF(gfx::SizeF(host_size));
+     new_bounds.Inset(gfx::InsetsF(host_insets_));
+@@ -317,8 +331,9 @@ class PartialBoundsRootWindowTransformer : public RootWindowTransformer {
+     const bool need_transpose =
+         active_root_rotation == display::Display::ROTATE_90 ||
+         active_root_rotation == display::Display::ROTATE_270;
+-    if (need_transpose)
++    if (need_transpose) {
+       root_bounds_.Transpose();
++    }
  
-+#include <algorithm>
- #include <string>
- 
- #include "ash/bubble/bubble_constants.h"
-@@ -84,6 +85,18 @@ void SetWarningSubText(HoverHighlightView* view, std::u16string subtext) {
- }
- 
- gfx::Insets GetTrayBubbleInsets(aura::Window* window) {
-+  Shelf* shelf = Shelf::ForWindow(window);
-+
-+  if (shelf->alignment() == ShelfAlignment::kTop) {
-+    // AuraDE compatibility: top shelf bubbles open below the shelf. Mirror the
-+    // bottom-shelf display-offset compensation onto the top inset so tray
-+    // bubbles are constrained against the correct screen edge.
-+    return gfx::Insets::TLBR(
-+        kBubbleMenuPadding - kShelfDisplayOffset, kBubbleMenuPadding,
-+        kBubbleMenuPadding,
-+        kBubbleMenuPadding - (base::i18n::IsRTL() ? 0 : kShelfDisplayOffset));
-+  }
-+
-   // Decrease bottom and side insets by `kShelfDisplayOffset` to compensate for
-   // the adjustment of the respective edges in Shelf::GetSystemTrayAnchorRect().
-   gfx::Insets insets = gfx::Insets::TLBR(
-@@ -98,7 +111,6 @@ gfx::Insets GetTrayBubbleInsets(aura::Window* window) {
-     return insets;
-   }
- 
--  Shelf* shelf = Shelf::ForWindow(window);
-   bool is_bottom_alignment =
-       shelf->alignment() == ShelfAlignment::kBottom ||
-       shelf->alignment() == ShelfAlignment::kBottomLocked;
-@@ -142,6 +154,17 @@ gfx::Insets GetInkDropInsets(TrayPopupInkDropStyle ink_drop_style) {
- 
- int CalculateMaxTrayBubbleHeight(aura::Window* window) {
-   Shelf* shelf = Shelf::ForWindow(window);
-+  WorkAreaInsets* work_area =
-+      WorkAreaInsets::ForWindow(shelf->GetWindow()->GetRootWindow());
-+
-+  if (shelf->alignment() == ShelfAlignment::kTop) {
-+    // AuraDE compatibility: top shelf tray bubbles open downward, so their
-+    // available height is below the anchor instead of above it.
-+    const int free_space_height_below_anchor =
-+        work_area->user_work_area_bounds().bottom() -
-+        shelf->GetSystemTrayAnchorRect().y();
-+    return std::max(0, free_space_height_below_anchor - kBubbleMenuPadding * 2);
-+  }
- 
-   // We calculate the available height from the top of the screen to the top of
-   // the bubble's anchor rect. We can not use the bottom of the screen since the
-@@ -149,14 +172,12 @@ int CalculateMaxTrayBubbleHeight(aura::Window* window) {
-   // we're in tablet mode then we also need to subtract out any extra padding
-   // that may be present due to the hotseat.
-   int anchor_rect_top = shelf->GetSystemTrayAnchorRect().y();
--  WorkAreaInsets* work_area =
--      WorkAreaInsets::ForWindow(shelf->GetWindow()->GetRootWindow());
-   int free_space_height_above_anchor =
-       anchor_rect_top - work_area->user_work_area_bounds().y();
-   if (display::Screen::Get()->InTabletMode()) {
-     free_space_height_above_anchor -= GetBubbleInsetHotseatCompensation(window);
-   }
--  return free_space_height_above_anchor - kBubbleMenuPadding * 2;
-+  return std::max(0, free_space_height_above_anchor - kBubbleMenuPadding * 2);
- }
- 
- TrayBubbleView::InitParams CreateInitParamsForTrayBubble(
-diff --git a/ash/system/video_conference/video_conference_tray.cc b/ash/system/video_conference/video_conference_tray.cc
-index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6bdf1959ef 100644
---- a/ash/system/video_conference/video_conference_tray.cc
-+++ b/ash/system/video_conference/video_conference_tray.cc
-@@ -30,6 +30,7 @@
+     // |screen_bounds| is the unified desktop logical bounds.
+     // Calculate the unified height scale value, and apply the same scale on the
+diff --git a/ash/display/window_tree_host_manager.cc b/ash/display/window_tree_host_manager.cc
+index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb101a63b6 100644
+--- a/ash/display/window_tree_host_manager.cc
++++ b/ash/display/window_tree_host_manager.cc
+@@ -30,12 +30,16 @@
+ #include "ash/wm/window_util.h"
+ #include "base/byte_size.h"
+ #include "base/check.h"
++#include "base/environment.h"
  #include "base/functional/bind.h"
  #include "base/memory/raw_ptr.h"
+ #include "base/metrics/histogram.h"
  #include "base/metrics/histogram_functions.h"
-+#include "base/system/sys_info.h"
- #include "components/session_manager/session_manager_types.h"
- #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
- #include "ui/base/l10n/l10n_util.h"
-@@ -230,6 +231,14 @@ void VideoConferenceTrayButton::PaintButtonContents(gfx::Canvas* canvas) {
+ #include "base/notimplemented.h"
+ #include "base/notreached.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/system/sys_info.h"
+@@ -58,6 +62,8 @@
+ #include "ui/display/manager/display_configurator.h"
+ #include "ui/display/manager/display_layout_store.h"
+ #include "ui/display/manager/display_manager.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/manager/util/display_manager_util.h"
+ #include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
+ #include "ui/display/util/display_util.h"
+@@ -93,6 +99,85 @@ constexpr int kUICompositorMemoryLimitDisplaySizeThreshold = 3500;
+ // configure the compositor to use a higher memory limit.
+ constexpr base::ByteSize kUICompositorMemoryLimitRamCapacityThreshold =
+     base::GiB(16);
++constexpr char kAuraDisplayScaleEnv[] = "AURADE_DISPLAY_SCALE";
++constexpr float kAuraDisplayScaleDefault = 1.f;
++constexpr float kAuraDisplayScaleMin = 1.f;
++constexpr float kAuraDisplayScaleMax = 3.f;
++constexpr float kAuraDisplayScaleEpsilon = 0.001f;
++
++float NormalizeAuraDisplayScale(float scale) {
++  if (!std::isfinite(scale)) {
++    return kAuraDisplayScaleDefault;
++  }
++  return std::clamp(scale, kAuraDisplayScaleMin, kAuraDisplayScaleMax);
++}
++
++float GetConfiguredAuraDisplayScale(float fallback_scale) {
++  auto env = base::Environment::Create();
++  std::optional<std::string> configured_scale =
++      env->GetVar(kAuraDisplayScaleEnv);
++  if (!configured_scale || configured_scale->empty()) {
++    return NormalizeAuraDisplayScale(fallback_scale);
++  }
++
++  double parsed_scale = fallback_scale;
++  if (!base::StringToDouble(*configured_scale, &parsed_scale)) {
++    return NormalizeAuraDisplayScale(fallback_scale);
++  }
++  return NormalizeAuraDisplayScale(static_cast<float>(parsed_scale));
++}
++
++bool UpdateLinuxDesktopDisplayModeForHostResize(
++    display::DisplayManager* display_manager,
++    int64_t display_id,
++    const gfx::Rect& host_bounds_in_pixels) {
++  if (base::SysInfo::IsRunningOnChromeOS() || host_bounds_in_pixels.IsEmpty()) {
++    return false;
++  }
++
++  display::ManagedDisplayInfo display_info =
++      display_manager->GetDisplayInfo(display_id);
++  const gfx::Size host_size_in_pixels = host_bounds_in_pixels.size();
++  const float aura_display_scale =
++      GetConfiguredAuraDisplayScale(display_info.device_scale_factor());
++  const display::ManagedDisplayMode current_host_mode(
++      host_size_in_pixels, display_info.refresh_rate(),
++      display_info.is_interlaced(), true, aura_display_scale);
++
++  const bool zoom_already_current =
++      std::abs(display_info.zoom_factor() - 1.f) < 0.001f;
++  const bool scale_already_current =
++      std::abs(display_info.device_scale_factor() - aura_display_scale) <
++      kAuraDisplayScaleEpsilon;
++  const bool already_current =
++      display_info.bounds_in_native() == host_bounds_in_pixels &&
++      display_info.display_modes().size() == 1 &&
++      display_info.display_modes()[0].IsEquivalent(current_host_mode) &&
++      zoom_already_current && scale_already_current;
++  if (already_current) {
++    return false;
++  }
++
++  // AuraDE compatibility: under a generic Linux/Wayland host there is no
++  // ChromeOS display configurator feeding Ash real mode updates. Keep Ash's
++  // synthetic mode list pinned to the host surface, while real output selection
++  // is handled by the AuraDE/Weston display-mode control.
++  display_info.set_device_scale_factor(aura_display_scale);
++  display_info.set_zoom_factor(1.f);
++  display_info.AddZoomFactorForSize(host_size_in_pixels.ToString(), 1.f);
++  display_info.SetBounds(host_bounds_in_pixels);
++  display_info.SetManagedDisplayModes({current_host_mode});
++
++  display::DisplayInfoList display_info_list;
++  for (const display::Display& active_display :
++       display_manager->active_display_list()) {
++    display_info_list.push_back(
++        active_display.id() == display_id
++            ? display_info
++            : display_manager->GetDisplayInfo(active_display.id()));
++  }
++  return display_manager->OnNativeDisplaysChanged(display_info_list);
++}
+ 
+ // An UMA signal for the current effective resolution/dpi is sent at this rate.
+ // This keeps track of the effective resolution/dpi most used on
+@@ -291,8 +376,9 @@ class FocusActivationStore {
+     // window may be deleted when losing focus (fullscreen flash for
+     // example).  If the focused window is still alive after move, it'll
+     // be re-focused below.
+-    if (clear_focus)
++    if (clear_focus) {
+       focus_client_->FocusWindow(nullptr);
++    }
+   }
+ 
+   void Restore() {
+@@ -377,16 +463,18 @@ void WindowTreeHostManager::Shutdown() {
+   for (aura::Window::Windows::iterator iter = root_windows.begin();
+        iter != root_windows.end(); ++iter) {
+     RootWindowController* rwc = RootWindowController::ForWindow(*iter);
+-    if (GetRootWindowSettings(*iter)->display_id == primary_id)
++    if (GetRootWindowSettings(*iter)->display_id == primary_id) {
+       primary_rwc = rwc;
+-    else
++    } else {
+       to_delete.push_back(rwc);
++    }
+   }
+   CHECK(primary_rwc);
+ 
+   Shell::SetRootWindowForNewWindows(nullptr);
+-  for (auto* rwc : to_delete)
++  for (auto* rwc : to_delete) {
+     delete rwc;
++  }
+   delete primary_rwc;
  }
  
- void VideoConferenceTrayButton::UpdateTooltip() {
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: the standalone Linux shell can enable the VC tray
-+    // before all ChromeOS formatted strings are resource-compatible. Keep the
-+    // tray usable with the base localized device label.
-+    SetTooltipText(l10n_util::GetStringUTF16(accessible_name_id_));
+@@ -434,8 +522,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
+ aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
+   // If |primary_tree_host_for_replace_| is set, it means |primary_display_id|
+   // is kInvalidDisplayId.
+-  if (primary_tree_host_for_replace_)
++  if (primary_tree_host_for_replace_) {
+     return GetWindow(primary_tree_host_for_replace_);
++  }
+   return GetRootWindowForDisplayId(primary_display_id);
+ }
+ 
+@@ -447,8 +536,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
+ AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
+     int64_t display_id) {
+   const auto host = window_tree_hosts_.find(display_id);
+-  if (host != window_tree_hosts_.end())
++  if (host != window_tree_hosts_.end()) {
+     return host->second;
++  }
+   return mirror_window_controller_->GetAshWindowTreeHostForDisplayId(
+       display_id);
+ }
+@@ -458,8 +548,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
+   for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
+        it != window_tree_hosts_.end(); ++it) {
+     DCHECK(it->second);
+-    if (RootWindowController::ForWindow(GetWindow(it->second)))
++    if (RootWindowController::ForWindow(GetWindow(it->second))) {
+       windows.push_back(GetWindow(it->second));
++    }
+   }
+   return windows;
+ }
+@@ -471,8 +562,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
+        it != window_tree_hosts_.end(); ++it) {
+     RootWindowController* controller =
+         RootWindowController::ForWindow(GetWindow(it->second));
+-    if (controller)
++    if (controller) {
+       controllers.push_back(controller);
++    }
+   }
+   return controllers;
+ }
+@@ -580,8 +672,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
+         display_info.bounds_in_native());
+     SetDisplayPropertiesOnHost(ash_host, display);
+   } else {
+-    if (primary_display_id == display::kInvalidDisplayId)
++    if (primary_display_id == display::kInvalidDisplayId) {
+       primary_display_id = display.id();
++    }
+     DCHECK(!window_tree_hosts_.empty());
+     AshWindowTreeHost* ash_host =
+         AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
+@@ -604,8 +697,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
+   // Delete most of root window related objects, but don't delete
+   // root window itself yet because the stack may be using it.
+   controller->Shutdown(primary_root_after_host_deletion);
+-  if (primary_tree_host_for_replace_ == host_to_delete)
++  if (primary_tree_host_for_replace_ == host_to_delete) {
+     primary_tree_host_for_replace_ = nullptr;
++  }
+   DCHECK_EQ(primary_root_after_host_deletion, Shell::GetPrimaryRootWindow());
+   if (Shell::GetRootWindowForNewWindows() == root_being_deleted) {
+     Shell::SetRootWindowForNewWindows(primary_root_after_host_deletion);
+@@ -768,8 +862,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
+       display::Screen::Get()->GetDisplayNearestWindow(host->window());
+ 
+   display::DisplayManager* display_manager = GetDisplayManager();
+-  if (display_manager->UpdateDisplayBounds(display.id(),
+-                                           host->GetBoundsInPixels())) {
++  const gfx::Rect host_bounds_in_pixels = host->GetBoundsInPixels();
++
++  if (UpdateLinuxDesktopDisplayModeForHostResize(display_manager, display.id(),
++                                                 host_bounds_in_pixels) ||
++      display_manager->UpdateDisplayBounds(display.id(),
++                                           host_bounds_in_pixels)) {
+     mirror_window_controller_->UpdateWindow();
+     cursor_window_controller_->UpdateContainer();
+   }
+@@ -785,8 +883,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
+                                                           bool secure) {
+   AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(display_id);
+   // No host for internal display in docked mode.
+-  if (!host)
++  if (!host) {
+     return;
++  }
+ 
+   ui::Compositor* compositor = host->AsWindowTreeHost()->compositor();
+   if (compositor->output_is_secure() == secure) {
+@@ -815,8 +914,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
+   // display is drawn through compositor mirroring). Therefore, it's
+   // unnecessary to handle the cursor_window at all. See:
+   // http://crbug.com/412910
+-  if (!cursor_window_controller_->is_cursor_compositing_enabled())
++  if (!cursor_window_controller_->is_cursor_compositing_enabled()) {
+     cursor_window_controller_->UpdateContainer();
++  }
+ }
+ 
+ void WindowTreeHostManager::PreDisplayConfigurationChange(bool clear_focus) {
+@@ -888,8 +988,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
+   LOG_IF(ERROR, !non_primary_host)
+       << "Unknown display is requested in SetPrimaryDisplay: id="
+       << new_primary_id;
+-  if (!non_primary_host)
++  if (!non_primary_host) {
+     return;
++  }
+ 
+   display::Display old_primary_display =
+       display::Screen::Get()->GetPrimaryDisplay();
+diff --git a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+index 1d523840e28de86c44af57235e5e2f9ecf6f406c..c30a3a2b39ca724c0bd043d037550296d7763f33 100644
+--- a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
++++ b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+@@ -103,6 +103,32 @@ export interface ExternalStorage {
+   uuid: string;
+ }
+ 
++export interface AuraDisplayInfo {
++  available: boolean;
++  connector: string;
++  configuredMode: string;
++  currentMode: string;
++  configuredScale: number;
++  currentScale: number;
++  modes: string[];
++  scaleAvailable: boolean;
++  scaleOptions: number[];
++  requiresRestart: boolean;
++  status: string;
++}
++
++export interface AuraFeatureProfileInfo {
++  available: boolean;
++  configured: boolean;
++  configuredProfile: string;
++  currentProfile: string;
++  defaultProfile: string;
++  memoryGb: number;
++  profiles: string[];
++  requiresRestart: boolean;
++  status: string;
++}
++
+ export interface DevicePageBrowserProxy {
+   /** Initializes the mouse and touchpad handler. */
+   initializePointers(): void;
+@@ -206,6 +232,21 @@ export interface DevicePageBrowserProxy {
+    */
+   dragDisplayDelta(displayId: string, deltaX: number, deltaY: number): void;
+ 
++  /** Gets host DRM modes and current AuraDE compositor display config. */
++  getAuraDisplayInfo(): Promise<AuraDisplayInfo>;
++
++  /** Saves the compositor display mode used by the next AuraDE session. */
++  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo>;
++
++  /** Saves and applies the AuraDE UI scale factor. */
++  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo>;
++
++  /** Gets the AuraDE feature profile used for ChromeOS feature gates. */
++  getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo>;
++
++  /** Saves the AuraDE feature profile used by the next AuraDE session. */
++  setAuraFeatureProfile(profile: string): Promise<AuraFeatureProfileInfo>;
++
+   updateStorageInfo(): void;
+ 
+   getStorageEncryptionInfo(): Promise<string>;
+@@ -314,6 +355,26 @@ export class DevicePageBrowserProxyImpl implements DevicePageBrowserProxy {
+     chrome.send('dragDisplayDelta', [displayId, deltaX, deltaY]);
+   }
+ 
++  getAuraDisplayInfo(): Promise<AuraDisplayInfo> {
++    return sendWithPromise('getAuraDisplayInfo');
++  }
++
++  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayMode', mode);
++  }
++
++  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayScale', scale);
++  }
++
++  getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo> {
++    return sendWithPromise('getAuraFeatureProfileInfo');
++  }
++
++  setAuraFeatureProfile(profile: string): Promise<AuraFeatureProfileInfo> {
++    return sendWithPromise('setAuraFeatureProfile', profile);
++  }
++
+   updateStorageInfo(): void {
+     chrome.send('updateStorageInfo');
+   }
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.html b/chrome/browser/resources/ash/settings/device_page/display.html
+index a65b096ea31076b5a3ff697c26042db3d065d43b..43867417f65294d6dcec594ceb99277f846af258 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.html
++++ b/chrome/browser/resources/ash/settings/device_page/display.html
+@@ -57,6 +57,20 @@
+     display: flex;
+     flex-direction: column;
+   }
++
++  #auraDisplayActions,
++  #auraFeatureProfileActions {
++    align-items: center;
++    display: flex;
++    flex-wrap: wrap;
++    gap: 12px;
++    justify-content: flex-end;
++  }
++
++  #auraDisplayModeSelector,
++  #auraFeatureProfileSelector {
++    min-width: 180px;
++  }
+ </style>
+ 
+ <!-- Display Shiny Performance Mode Controller -->
+@@ -201,7 +215,9 @@
+   </template>
+ 
+   <!-- Display zoom selection slider -->
+-  <div class="settings-box indented two-line">
++  <div class="settings-box indented two-line"
++      hidden$="[[shouldHideChromeOsDisplayZoom_(
++          selectedDisplay, auraDisplayScaleAvailable_)]]">
+     <div class="start text-area layout vertical">
+       <div id="displayZoomLabel" aria-hidden="true">
+         $i18n{displayZoomLabel}
+@@ -236,6 +252,83 @@
+     </settings-slider>
+   </div>
+ 
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE UI scale</div>
++      <div class="secondary self-start" id="auraDisplayScaleSublabel">
++        [[auraDisplayScaleStatus_]]
++      </div>
++    </div>
++    <div id="auraDisplayScaleActions">
++      <settings-slider id="auraDisplayScaleSlider"
++          ticks="[[auraDisplayScaleOptions_]]"
++          pref="{{auraDisplayScalePref_}}"
++          label-aria="AuraDE UI scale"
++          label-min="Small"
++          label-max="Large"
++          disabled="[[!auraDisplayScaleAvailable_]]"
++          aria-describedby="auraDisplayScaleSublabel">
++      </settings-slider>
++      <cr-button on-click="onAuraDisplayScaleApplyClick_"
++          disabled$="[[isAuraDisplayScaleApplyDisabled_(
++              auraDisplayScaleAvailable_,
++              auraDisplayScaleApplyInProgress_,
++              auraDisplayScalePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE display mode</div>
++      <div class="secondary self-start" id="auraDisplaySublabel">
++        [[auraDisplayStatus_]]
++      </div>
++    </div>
++    <div id="auraDisplayActions">
++      <settings-dropdown-menu id="auraDisplayModeSelector"
++          pref="{{auraDisplayModePref_}}"
++          disabled="[[!auraDisplayAvailable_]]"
++          label="AuraDE display mode"
++          aria-describedby="auraDisplaySublabel"
++          menu-options="[[auraDisplayModeOptions_]]">
++      </settings-dropdown-menu>
++      <cr-button on-click="onAuraDisplayApplyClick_"
++          disabled$="[[isAuraDisplayApplyDisabled_(
++              auraDisplayAvailable_,
++              auraDisplayApplyInProgress_,
++              auraDisplayModePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
++  <div class="settings-box indented two-line">
++    <div class="start text-area layout vertical" aria-hidden="true">
++      <div>AuraDE feature profile</div>
++      <div class="secondary self-start" id="auraFeatureProfileSublabel">
++        [[auraFeatureProfileStatus_]]
++      </div>
++    </div>
++    <div id="auraFeatureProfileActions">
++      <settings-dropdown-menu id="auraFeatureProfileSelector"
++          pref="{{auraFeatureProfilePref_}}"
++          disabled="[[!auraFeatureProfileAvailable_]]"
++          label="AuraDE feature profile"
++          aria-describedby="auraFeatureProfileSublabel"
++          menu-options="[[auraFeatureProfileOptions_]]">
++      </settings-dropdown-menu>
++      <cr-button on-click="onAuraFeatureProfileApplyClick_"
++          disabled$="[[isAuraFeatureProfileApplyDisabled_(
++              auraFeatureProfileAvailable_,
++              auraFeatureProfileApplyInProgress_,
++              auraFeatureProfilePref_.value)]]">
++        Apply
++      </cr-button>
++    </div>
++  </div>
++
+   <!-- Drop down select menu for resolution -->
+   <template is="dom-if"
+       if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
+index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bcc9271393 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.ts
++++ b/chrome/browser/resources/ash/settings/device_page/display.ts
+@@ -8,6 +8,7 @@
+  */
+ 
+ import 'chrome://resources/ash/common/cr_elements/cr_checkbox/cr_checkbox.js';
++import 'chrome://resources/ash/common/cr_elements/cr_button/cr_button.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_link_row/cr_link_row.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_slider/cr_slider.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_tabs/cr_tabs.js';
+@@ -48,7 +49,11 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+ import type {Route} from '../router.js';
+ import {routes} from '../router.js';
+ 
+-import type {DevicePageBrowserProxy} from './device_page_browser_proxy.js';
++import type {
++  AuraDisplayInfo,
++  AuraFeatureProfileInfo,
++  DevicePageBrowserProxy,
++} from './device_page_browser_proxy.js';
+ import {DevicePageBrowserProxyImpl, getDisplayApi} from './device_page_browser_proxy.js';
+ import {getTemplate} from './display.html.js';
+ import type {SettingsDisplayOverscanDialogElement} from './display_overscan_dialog.js';
+@@ -135,6 +140,90 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         },
+       },
+ 
++      auraDisplayAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraDisplayScaleOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraDisplayScalePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraDisplayScalePref',
++            type: chrome.settingsPrivate.PrefType.NUMBER,
++            value: 1,
++          };
++        },
++      },
++
++      auraDisplayScaleStatus_: String,
++
++      auraDisplayModeOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraDisplayModePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraDisplayModePref',
++            type: chrome.settingsPrivate.PrefType.STRING,
++            value: '',
++          };
++        },
++      },
++
++      auraDisplayStatus_: String,
++
++      auraFeatureProfileAvailable_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraFeatureProfileApplyInProgress_: {
++        type: Boolean,
++        value: false,
++      },
++
++      auraFeatureProfileOptions_: {
++        type: Array,
++        value: [],
++      },
++
++      auraFeatureProfilePref_: {
++        type: Object,
++        value() {
++          return {
++            key: 'fakeAuraFeatureProfilePref',
++            type: chrome.settingsPrivate.PrefType.STRING,
++            value: '',
++          };
++        },
++      },
++
++      auraFeatureProfileStatus_: String,
++
+       displays: Array,
+ 
+       layouts: Array,
+@@ -306,6 +395,16 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+   ]);
+ 
+   declare private readonly ambientColorAvailable_: boolean;
++  private auraDisplayApplyInProgress_: boolean;
++  private auraDisplayAvailable_: boolean;
++  private auraDisplayModeOptions_: DropdownMenuOptionList;
++  private auraDisplayModePref_: chrome.settingsPrivate.PrefObject;
++  private auraDisplayStatus_: string;
++  private auraFeatureProfileApplyInProgress_: boolean;
++  private auraFeatureProfileAvailable_: boolean;
++  private auraFeatureProfileOptions_: DropdownMenuOptionList;
++  private auraFeatureProfilePref_: chrome.settingsPrivate.PrefObject;
++  private auraFeatureProfileStatus_: string;
+   private browserProxy_: DevicePageBrowserProxy;
+   declare private brightnessSliderMax_: number;
+   declare private brightnessSliderMin_: number;
+@@ -337,6 +436,11 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+   declare private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
+   declare private readonly unifiedDesktopAvailable_: boolean;
+   declare private unifiedDesktopMode_: boolean;
++  private auraDisplayScaleApplyInProgress_: boolean;
++  private auraDisplayScaleAvailable_: boolean;
++  private auraDisplayScaleOptions_: SliderTick[];
++  private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
++  private auraDisplayScaleStatus_: string;
+   declare private zoomValues_: SliderTick[];
+ 
+   constructor() {
+@@ -395,6 +499,8 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+     getDisplayApi().onDisplayChanged.addListener(this.displayChangedListener_);
+ 
+     this.getDisplayInfo_();
++    this.refreshAuraDisplayInfo_();
++    this.refreshAuraFeatureProfileInfo_();
+     this.$.displaySizeSlider.updateValueInstantly = false;
+ 
+     const {isTabletMode} = await this.displaySettingsProvider.observeTabletMode(
+@@ -539,6 +645,219 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         (displays: DisplayUnitInfo[]) => this.displayInfoFetched_(displays));
+   }
+ 
++  private refreshAuraDisplayInfo_(): void {
++    this.browserProxy_.getAuraDisplayInfo()
++        .then(info => {
++          this.auraDisplayAvailable_ = info.available;
++          this.auraDisplayModeOptions_ =
++              info.modes.map(mode => ({name: mode, value: mode}));
++          const selectedMode = info.currentMode || info.configuredMode ||
++              (info.modes.length ? info.modes[0] : '');
++          this.set('auraDisplayModePref_.value', selectedMode);
++          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
++          this.auraDisplayScaleOptions_ =
++              info.scaleOptions.map(scale => ({
++                value: scale,
++                ariaValue: Math.round(scale * 100),
++                label: `${Math.round(scale * 100)}%`,
++              }));
++          const selectedScale = info.configuredScale || info.currentScale || 1;
++          this.set('auraDisplayScalePref_.value', selectedScale);
++          this.auraDisplayStatus_ = this.getAuraDisplayStatus_(info);
++          this.auraDisplayScaleStatus_ =
++              this.getAuraDisplayScaleStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to load AuraDE display info', error);
++          this.auraDisplayAvailable_ = false;
++          this.auraDisplayScaleAvailable_ = false;
++          this.auraDisplayStatus_ = 'Display mode controls are unavailable';
++          this.auraDisplayScaleStatus_ =
++              'Display scale controls are unavailable';
++        });
++  }
++
++  private refreshAuraFeatureProfileInfo_(): void {
++    this.browserProxy_.getAuraFeatureProfileInfo()
++        .then(info => {
++          this.auraFeatureProfileAvailable_ = info.available;
++          this.auraFeatureProfileOptions_ = info.profiles.map(profile => ({
++            name: this.getAuraFeatureProfileLabel_(profile),
++            value: profile,
++          }));
++          this.set(
++              'auraFeatureProfilePref_.value',
++              info.configuredProfile || info.currentProfile ||
++                  info.defaultProfile || 'standard');
++          this.auraFeatureProfileStatus_ =
++              this.getAuraFeatureProfileStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to load AuraDE feature profile info', error);
++          this.auraFeatureProfileAvailable_ = false;
++          this.auraFeatureProfileStatus_ =
++              'Feature profile controls are unavailable';
++        });
++  }
++
++  private getAuraFeatureProfileLabel_(profile: string): string {
++    switch (profile) {
++      case 'advanced_plus_ai':
++        return 'Advanced Plus AI';
++      case 'advanced_plus':
++        return 'Advanced Plus';
++      case 'plus':
++        return 'Plus';
++      case 'standard':
++        return 'Standard';
++      default:
++        return profile || 'Standard';
++    }
++  }
++
++  private getAuraFeatureProfileStatus_(info: AuraFeatureProfileInfo): string {
++    if (!info.available) {
++      return info.status || 'Feature profiles are unavailable';
++    }
++
++    const configuredLabel =
++        this.getAuraFeatureProfileLabel_(info.configuredProfile);
++    if (info.requiresRestart) {
++      return `${configuredLabel} - restart AuraDE to apply`;
++    }
++
++    if (info.configuredProfile === 'advanced_plus_ai') {
++      return `${configuredLabel} - experimental local AI features enabled`;
++    }
++
++    if (info.configuredProfile === 'advanced_plus') {
++      return `${configuredLabel} - experimental features enabled`;
++    }
++
++    if (!info.configured) {
++      const memoryText = info.memoryGb > 0 ? ` (${info.memoryGb} GB RAM)` : '';
++      return `Auto: ${configuredLabel}${memoryText}`;
++    }
++
++    return configuredLabel;
++  }
++
++  private onAuraFeatureProfileApplyClick_(): void {
++    const profile = String(this.auraFeatureProfilePref_.value || '');
++    if (!profile || this.auraFeatureProfileApplyInProgress_) {
++      return;
++    }
++
++    this.auraFeatureProfileApplyInProgress_ = true;
++    this.browserProxy_.setAuraFeatureProfile(profile)
++        .then(info => {
++          this.auraFeatureProfileAvailable_ = info.available;
++          this.set(
++              'auraFeatureProfilePref_.value',
++              info.configuredProfile || profile);
++          this.auraFeatureProfileStatus_ =
++              this.getAuraFeatureProfileStatus_(info);
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE feature profile', error);
++          this.auraFeatureProfileStatus_ = 'Could not save feature profile';
++        })
++        .finally(() => {
++          this.auraFeatureProfileApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraFeatureProfileApplyDisabled_(
++      available: boolean, applyInProgress: boolean, profile: string): boolean {
++    return !available || applyInProgress || !profile;
++  }
++
++  private getAuraDisplayStatus_(info: AuraDisplayInfo): string {
++    if (!info.available) {
++      return info.status || 'No DRM display modes found';
++    }
++
++    const connector = info.connector || 'display';
++    const currentMode = info.currentMode || info.configuredMode || 'not set';
++    return `Output ${connector}, configured for ${currentMode}`;
++  }
++
++  private getAuraDisplayScaleStatus_(info: AuraDisplayInfo): string {
++    const configuredScale = info.configuredScale || 1;
++    const currentScale = info.currentScale || configuredScale;
++    const configuredPercent = Math.round(configuredScale * 100);
++    const currentPercent = Math.round(currentScale * 100);
++    if (Math.abs(configuredScale - currentScale) < 0.001) {
++      return `Currently ${currentPercent}%`;
++    }
++    return `Configured ${configuredPercent}%, currently ${currentPercent}%`;
++  }
++
++  private onAuraDisplayApplyClick_(): void {
++    const mode = String(this.auraDisplayModePref_.value || '');
++    if (!mode || this.auraDisplayApplyInProgress_) {
++      return;
++    }
++
++    this.auraDisplayApplyInProgress_ = true;
++    this.browserProxy_.setAuraDisplayMode(mode)
++        .then(info => {
++          this.auraDisplayAvailable_ = info.available;
++          this.set('auraDisplayModePref_.value', info.configuredMode || mode);
++          this.auraDisplayStatus_ =
++              `${this.getAuraDisplayStatus_(info)}. Restart AuraDE to apply.`;
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE display mode', error);
++          this.auraDisplayStatus_ = 'Could not save display mode';
++        })
++        .finally(() => {
++          this.auraDisplayApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraDisplayApplyDisabled_(
++      available: boolean, applyInProgress: boolean, mode: string): boolean {
++    return !available || applyInProgress || !mode;
++  }
++
++  private onAuraDisplayScaleApplyClick_(): void {
++    const scale = Number(this.auraDisplayScalePref_.value || 1);
++    if (!scale || this.auraDisplayScaleApplyInProgress_) {
++      return;
++    }
++
++    this.auraDisplayScaleApplyInProgress_ = true;
++    this.browserProxy_.setAuraDisplayScale(scale)
++        .then(info => {
++          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
++          this.set(
++              'auraDisplayScalePref_.value',
++              info.configuredScale || info.currentScale || scale);
++          this.auraDisplayScaleStatus_ =
++              `${this.getAuraDisplayScaleStatus_(info)}. Applied.`;
++        })
++        .catch(error => {
++          console.warn('Unable to save AuraDE display scale', error);
++          this.auraDisplayScaleStatus_ = 'Could not apply display scale';
++        })
++        .finally(() => {
++          this.auraDisplayScaleApplyInProgress_ = false;
++        });
++  }
++
++  private isAuraDisplayScaleApplyDisabled_(
++      available: boolean, applyInProgress: boolean, scale: number): boolean {
++    return !available || applyInProgress || !scale;
++  }
++
++  private shouldHideChromeOsDisplayZoom_(
++      selectedDisplay: DisplayUnitInfo|undefined,
++      auraDisplayScaleAvailable: boolean): boolean {
++    return auraDisplayScaleAvailable && !!selectedDisplay &&
++        selectedDisplay.availableDisplayZoomFactors.length <= 1;
++  }
++
+   private displayInfoFetched_(displays: DisplayUnitInfo[]): void {
+     if (!displays.length) {
+       return;
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+index 1764a9516fc42616e211f0f2bb3973b7b81fb080..5fe3499233c6361acf485b17c6e331fdd9767ec9 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+@@ -4,16 +4,663 @@
+ 
+ #include "chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h"
+ 
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <optional>
++#include <vector>
++
+ #include "ash/display/cros_display_config.h"
+ #include "ash/shell.h"
+ #include "base/check_deref.h"
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
+ #include "base/values.h"
+ #include "content/public/browser/web_ui.h"
++#include "ui/display/display.h"
++#include "ui/display/manager/display_manager.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
+ 
+ namespace ash::settings {
++namespace {
++
++constexpr char kSysDrmPath[] = "/sys/class/drm";
++constexpr char kWestonConfigPath[] = ".config/weston.ini";
++constexpr char kAuraDisplayConfigPath[] = ".config/aurade/display.conf";
++constexpr char kAuraFeaturesConfigPath[] = ".config/aurade/features.conf";
++constexpr char kAuraDisplayScaleEnv[] = "AURADE_DISPLAY_SCALE";
++constexpr char kAuraFeatureProfileEnv[] = "AURADE_FEATURE_PROFILE";
++constexpr char kAuraFeatureProfileStandard[] = "standard";
++constexpr char kAuraFeatureProfilePlus[] = "plus";
++constexpr char kAuraFeatureProfileAdvancedPlus[] = "advanced_plus";
++constexpr char kAuraFeatureProfileAdvancedPlusAi[] = "advanced_plus_ai";
++constexpr uint64_t kBytesPerGiB = 1024ULL * 1024 * 1024;
++constexpr uint64_t kAuraPlusProfileMinRamBytes = 8ULL * kBytesPerGiB;
++constexpr double kAuraDisplayScaleDefault = 1.0;
++constexpr double kAuraDisplayScaleMin = 1.0;
++constexpr double kAuraDisplayScaleMax = 3.0;
++constexpr std::array<double, 7> kAuraDisplayScaleOptions = {
++    1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0};
++
++struct AuraDisplayState {
++  bool available = false;
++  std::string connector;
++  std::string configured_mode;
++  double configured_scale = kAuraDisplayScaleDefault;
++  double current_scale = kAuraDisplayScaleDefault;
++  std::vector<std::string> modes;
++};
++
++struct AuraFeatureProfileState {
++  bool available = true;
++  bool configured = false;
++  std::string configured_profile;
++  std::string current_profile;
++  std::string default_profile;
++  int memory_gb = 0;
++};
++
++std::string ConnectorNameFromPath(const base::FilePath& path) {
++  const std::string basename = path.BaseName().value();
++  const size_t separator = basename.find('-');
++  if (separator == std::string::npos) {
++    return basename;
++  }
++  return basename.substr(separator + 1);
++}
++
++bool IsValidMode(const std::string& mode) {
++  const std::vector<std::string> parts = base::SplitString(
++      mode, "x", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
++  if (parts.size() != 2) {
++    return false;
++  }
++
++  int width = 0;
++  int height = 0;
++  return base::StringToInt(parts[0], &width) &&
++         base::StringToInt(parts[1], &height) && width > 0 && height > 0 &&
++         width <= 10000 && height <= 10000;
++}
++
++bool IsValidAuraDisplayScale(double scale) {
++  return std::isfinite(scale) && scale >= kAuraDisplayScaleMin &&
++         scale <= kAuraDisplayScaleMax;
++}
++
++double NormalizeAuraDisplayScale(double scale) {
++  if (!std::isfinite(scale)) {
++    return kAuraDisplayScaleDefault;
++  }
++  return std::clamp(scale, kAuraDisplayScaleMin, kAuraDisplayScaleMax);
++}
++
++std::optional<base::FilePath> GetWestonConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kWestonConfigPath);
++}
++
++std::optional<base::FilePath> GetAuraDisplayConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kAuraDisplayConfigPath);
++}
++
++std::optional<base::FilePath> GetAuraFeaturesConfigFile() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> home = env->GetVar("HOME");
++  if (!home || home->empty()) {
++    return std::nullopt;
++  }
++
++  return base::FilePath(*home).Append(kAuraFeaturesConfigPath);
++}
++
++double GetConfiguredAuraDisplayScale() {
++  const std::optional<base::FilePath> config_path = GetAuraDisplayConfigFile();
++  if (!config_path) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (!line.starts_with("scale=")) {
++      continue;
++    }
++
++    double scale = kAuraDisplayScaleDefault;
++    if (base::StringToDouble(line.substr(6), &scale) &&
++        IsValidAuraDisplayScale(scale)) {
++      return scale;
++    }
++  }
++
++  return kAuraDisplayScaleDefault;
++}
++
++bool WriteAuraDisplayScale(double scale) {
++  const std::optional<base::FilePath> config_path = GetAuraDisplayConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  scale = NormalizeAuraDisplayScale(scale);
++  return base::WriteFile(*config_path, "# AuraDE display settings\nscale=" +
++                                           base::NumberToString(scale) + "\n");
++}
++
++std::string NormalizeAuraFeatureProfile(std::string profile) {
++  std::string trimmed_profile;
++  base::TrimWhitespaceASCII(profile, base::TRIM_ALL, &trimmed_profile);
++  profile = std::move(trimmed_profile);
++  if (profile.size() >= 2 &&
++      ((profile.front() == '"' && profile.back() == '"') ||
++       (profile.front() == '\'' && profile.back() == '\''))) {
++    profile = profile.substr(1, profile.size() - 2);
++  }
++
++  profile = base::ToLowerASCII(profile);
++  if (profile == kAuraFeatureProfileStandard ||
++      profile == kAuraFeatureProfilePlus ||
++      profile == kAuraFeatureProfileAdvancedPlus ||
++      profile == kAuraFeatureProfileAdvancedPlusAi) {
++    return profile;
++  }
++  return std::string();
++}
++
++int GetPhysicalMemoryGiB() {
++  const uint64_t memory =
++      base::SysInfo::AmountOfTotalPhysicalMemory().InBytes();
++  if (memory == 0) {
++    return 0;
++  }
++  return static_cast<int>((memory + kBytesPerGiB - 1) / kBytesPerGiB);
++}
++
++std::string GetDefaultAuraFeatureProfile() {
++  const uint64_t memory =
++      base::SysInfo::AmountOfTotalPhysicalMemory().InBytes();
++  return memory >= kAuraPlusProfileMinRamBytes ? kAuraFeatureProfilePlus
++                                               : kAuraFeatureProfileStandard;
++}
++
++std::string GetConfiguredAuraFeatureProfile(bool* configured) {
++  *configured = false;
++  const std::string default_profile = GetDefaultAuraFeatureProfile();
++  const std::optional<base::FilePath> config_path =
++      GetAuraFeaturesConfigFile();
++  if (!config_path) {
++    return default_profile;
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return default_profile;
++  }
++
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (line.starts_with("#")) {
++      continue;
++    }
++
++    const size_t separator = line.find('=');
++    if (separator == std::string::npos) {
++      continue;
++    }
++
++    const std::string key = line.substr(0, separator);
++    if (key != kAuraFeatureProfileEnv && key != "profile") {
++      continue;
++    }
++
++    const std::string profile =
++        NormalizeAuraFeatureProfile(line.substr(separator + 1));
++    if (!profile.empty()) {
++      *configured = true;
++      return profile;
++    }
++  }
++
++  return default_profile;
++}
++
++std::string GetCurrentAuraFeatureProfile(const std::string& fallback) {
++  auto env = base::Environment::Create();
++  std::optional<std::string> profile = env->GetVar(kAuraFeatureProfileEnv);
++  if (!profile || profile->empty()) {
++    return fallback;
++  }
++
++  const std::string normalized = NormalizeAuraFeatureProfile(*profile);
++  return normalized.empty() ? fallback : normalized;
++}
++
++AuraFeatureProfileState GetAuraFeatureProfileState() {
++  AuraFeatureProfileState state;
++  state.default_profile = GetDefaultAuraFeatureProfile();
++  state.memory_gb = GetPhysicalMemoryGiB();
++  state.configured_profile =
++      GetConfiguredAuraFeatureProfile(&state.configured);
++  state.current_profile = GetCurrentAuraFeatureProfile(state.configured_profile);
++  return state;
++}
++
++base::DictValue AuraFeatureProfileStateToValue(
++    const AuraFeatureProfileState& state) {
++  base::ListValue profiles;
++  profiles.Append(kAuraFeatureProfileStandard);
++  profiles.Append(kAuraFeatureProfilePlus);
++  profiles.Append(kAuraFeatureProfileAdvancedPlus);
++  profiles.Append(kAuraFeatureProfileAdvancedPlusAi);
++
++  base::DictValue value;
++  value.Set("available", state.available);
++  value.Set("configured", state.configured);
++  value.Set("configuredProfile", state.configured_profile);
++  value.Set("currentProfile", state.current_profile);
++  value.Set("defaultProfile", state.default_profile);
++  value.Set("memoryGb", state.memory_gb);
++  value.Set("profiles", std::move(profiles));
++  value.Set("requiresRestart",
++            state.configured_profile != state.current_profile);
++  value.Set("status", "Ready");
++  return value;
++}
++
++base::DictValue GetAuraFeatureProfileValueOnBlockingThread() {
++  return AuraFeatureProfileStateToValue(GetAuraFeatureProfileState());
++}
++
++std::string BuildUpdatedAuraFeaturesConfig(const std::string& original,
++                                           const std::string& profile) {
++  if (original.empty()) {
++    return "# AuraDE feature settings\n" +
++           std::string(kAuraFeatureProfileEnv) + "=" + profile + "\n";
++  }
++
++  std::vector<std::string> output;
++  bool wrote_profile = false;
++
++  for (const std::string& line : base::SplitString(
++           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    const size_t separator = trimmed.find('=');
++    const std::string key =
++        separator == std::string::npos ? std::string()
++                                       : trimmed.substr(0, separator);
++    if (key == kAuraFeatureProfileEnv || key == "profile") {
++      output.push_back(std::string(kAuraFeatureProfileEnv) + "=" + profile);
++      wrote_profile = true;
++      continue;
++    }
++    output.push_back(line);
++  }
++
++  if (!wrote_profile) {
++    if (!output.empty() && !output.back().empty()) {
++      output.push_back(std::string());
++    }
++    output.push_back(std::string(kAuraFeatureProfileEnv) + "=" + profile);
++  }
++
++  return base::JoinString(output, "\n") + "\n";
++}
++
++bool WriteAuraFeatureProfile(const std::string& profile) {
++  const std::optional<base::FilePath> config_path =
++      GetAuraFeaturesConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  std::string original;
++  base::ReadFileToString(*config_path, &original);
++  return base::WriteFile(*config_path,
++                         BuildUpdatedAuraFeaturesConfig(original, profile));
++}
++
++base::DictValue SetAuraFeatureProfileOnBlockingThread(
++    std::string requested_profile) {
++  requested_profile = NormalizeAuraFeatureProfile(requested_profile);
++
++  std::string status;
++  bool success = false;
++  if (requested_profile.empty()) {
++    status = "Unsupported feature profile";
++  } else if (!WriteAuraFeatureProfile(requested_profile)) {
++    status = "Unable to save feature profile";
++  } else {
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result =
++      AuraFeatureProfileStateToValue(GetAuraFeatureProfileState());
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++std::string GetConfiguredWestonMode() {
++  const std::optional<base::FilePath> config_path = GetWestonConfigFile();
++  if (!config_path) {
++    return std::string();
++  }
++
++  std::string contents;
++  if (!base::ReadFileToString(*config_path, &contents)) {
++    return std::string();
++  }
++
++  bool in_output_section = false;
++  for (const std::string& line : base::SplitString(
++           contents, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      in_output_section = trimmed == "[output]";
++      continue;
++    }
++    if (!in_output_section || !trimmed.starts_with("mode=")) {
++      continue;
++    }
++
++    const std::string mode = trimmed.substr(5);
++    return IsValidMode(mode) ? mode : std::string();
++  }
++
++  return std::string();
++}
++
++AuraDisplayState GetAuraDisplayState() {
++  AuraDisplayState state;
++
++  base::FileEnumerator drm_outputs(base::FilePath(kSysDrmPath),
++                                   /*recursive=*/false,
++                                   base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath output = drm_outputs.Next(); !output.empty();
++       output = drm_outputs.Next()) {
++    const std::string basename = output.BaseName().value();
++    if (!basename.starts_with("card") ||
++        basename.find('-') == std::string::npos) {
++      continue;
++    }
++
++    std::string modes_text;
++    if (!base::ReadFileToString(output.Append("modes"), &modes_text) ||
++        modes_text.empty()) {
++      continue;
++    }
++
++    state.connector = ConnectorNameFromPath(output);
++    for (std::string mode :
++         base::SplitString(modes_text, "\n", base::TRIM_WHITESPACE,
++                           base::SPLIT_WANT_NONEMPTY)) {
++      if (IsValidMode(mode) && std::find(state.modes.begin(), state.modes.end(),
++                                         mode) == state.modes.end()) {
++        state.modes.push_back(std::move(mode));
++      }
++    }
++    break;
++  }
++
++  state.configured_mode = GetConfiguredWestonMode();
++  state.configured_scale = GetConfiguredAuraDisplayScale();
++  state.current_scale = state.configured_scale;
++  state.available = !state.connector.empty() && !state.modes.empty();
++  return state;
++}
++
++base::DictValue AuraDisplayStateToValue(const AuraDisplayState& state) {
++  base::ListValue modes;
++  for (const std::string& mode : state.modes) {
++    modes.Append(mode);
++  }
++
++  base::DictValue value;
++  value.Set("available", state.available);
++  value.Set("connector", state.connector);
++  value.Set("configuredMode", state.configured_mode);
++  value.Set("currentMode", state.configured_mode);
++  value.Set("configuredScale", state.configured_scale);
++  value.Set("currentScale", state.current_scale);
++  value.Set("scaleAvailable", true);
++  value.Set("requiresRestart", true);
++  value.Set("modes", std::move(modes));
++  base::ListValue scale_options;
++  for (double scale : kAuraDisplayScaleOptions) {
++    scale_options.Append(scale);
++  }
++  value.Set("scaleOptions", std::move(scale_options));
++  value.Set("status", state.available ? "Ready" : "No DRM display modes found");
++  return value;
++}
++
++base::DictValue GetAuraDisplayValueOnBlockingThread() {
++  return AuraDisplayStateToValue(GetAuraDisplayState());
++}
++
++std::string BuildUpdatedWestonConfig(const std::string& original,
++                                     const std::string& connector,
++                                     const std::string& mode) {
++  std::vector<std::string> output;
++  bool in_output_section = false;
++  bool saw_output_section = false;
++  bool wrote_name = false;
++  bool wrote_mode = false;
++
++  auto finish_output_section = [&]() {
++    if (!in_output_section) {
++      return;
++    }
++    if (!wrote_name) {
++      output.push_back("name=" + connector);
++    }
++    if (!wrote_mode) {
++      output.push_back("mode=" + mode);
++    }
++    wrote_name = false;
++    wrote_mode = false;
++  };
++
++  for (const std::string& line : base::SplitString(
++           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("[") && trimmed.ends_with("]")) {
++      finish_output_section();
++      in_output_section = trimmed == "[output]";
++      saw_output_section |= in_output_section;
++      output.push_back(line);
++      continue;
++    }
++
++    if (in_output_section && trimmed.starts_with("name=")) {
++      output.push_back("name=" + connector);
++      wrote_name = true;
++      continue;
++    }
++    if (in_output_section && trimmed.starts_with("mode=")) {
++      output.push_back("mode=" + mode);
++      wrote_mode = true;
++      continue;
++    }
++
++    output.push_back(line);
++  }
++
++  finish_output_section();
++
++  if (!saw_output_section) {
++    if (!output.empty() && !output.back().empty()) {
++      output.push_back(std::string());
++    }
++    output.push_back("[output]");
++    output.push_back("name=" + connector);
++    output.push_back("mode=" + mode);
++  }
++
++  return base::JoinString(output, "\n") + "\n";
++}
++
++bool WriteWestonDisplayMode(const std::string& connector,
++                            const std::string& mode) {
++  const std::optional<base::FilePath> config_path = GetWestonConfigFile();
++  if (!config_path || !base::CreateDirectory(config_path->DirName())) {
++    return false;
++  }
++
++  std::string original;
++  base::ReadFileToString(*config_path, &original);
++  return base::WriteFile(*config_path,
++                         BuildUpdatedWestonConfig(original, connector, mode));
++}
++
++base::DictValue SetAuraDisplayModeOnBlockingThread(std::string requested_mode) {
++  AuraDisplayState state = GetAuraDisplayState();
++  const bool valid_mode = IsValidMode(requested_mode) &&
++                          std::find(state.modes.begin(), state.modes.end(),
++                                    requested_mode) != state.modes.end();
++
++  std::string status;
++  bool success = false;
++  if (!state.available) {
++    status = "No DRM display modes found";
++  } else if (!valid_mode) {
++    status = "Unsupported display mode";
++  } else if (!WriteWestonDisplayMode(state.connector, requested_mode)) {
++    status = "Unable to save display mode";
++  } else {
++    state.configured_mode = requested_mode;
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result = AuraDisplayStateToValue(state);
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++base::DictValue SetAuraDisplayScaleOnBlockingThread(double requested_scale) {
++  AuraDisplayState state = GetAuraDisplayState();
++
++  std::string status;
++  bool success = false;
++  if (!IsValidAuraDisplayScale(requested_scale)) {
++    status = "Unsupported display scale";
++  } else if (!WriteAuraDisplayScale(requested_scale)) {
++    status = "Unable to save display scale";
++  } else {
++    state.configured_scale = NormalizeAuraDisplayScale(requested_scale);
++    state.current_scale = state.configured_scale;
++    status = "Ready";
++    success = true;
++  }
++
++  base::DictValue result = AuraDisplayStateToValue(state);
++  result.Set("success", success);
++  result.Set("status", status);
++  return result;
++}
++
++double GetCurrentAuraDisplayScale() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  const display::Display& primary = display::Screen::Get()->GetPrimaryDisplay();
++  if (primary.id() == display::kInvalidDisplayId) {
++    return kAuraDisplayScaleDefault;
++  }
++
++  return NormalizeAuraDisplayScale(primary.device_scale_factor());
++}
++
++bool ApplyAuraDisplayScale(double scale) {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  scale = NormalizeAuraDisplayScale(scale);
++  auto env = base::Environment::Create();
++  env->SetVar(kAuraDisplayScaleEnv, base::NumberToString(scale));
++
++  display::DisplayManager* display_manager = Shell::Get()->display_manager();
++  if (!display_manager || display_manager->active_display_list().empty()) {
++    return false;
++  }
++
++  const display::Display& primary = display::Screen::Get()->GetPrimaryDisplay();
++  if (primary.id() == display::kInvalidDisplayId) {
++    return false;
++  }
++
++  display::ManagedDisplayInfo display_info =
++      display_manager->GetDisplayInfo(primary.id());
++  gfx::Rect native_bounds = display_info.bounds_in_native();
++  if (native_bounds.IsEmpty()) {
++    native_bounds = gfx::Rect(display_info.size_in_pixel());
++  }
++  if (native_bounds.IsEmpty()) {
++    return false;
++  }
++
++  const display::ManagedDisplayMode scaled_host_mode(
++      native_bounds.size(), display_info.refresh_rate(),
++      display_info.is_interlaced(), true, scale);
++
++  // AuraDE compatibility: use Ash's device scale factor for Linux desktop UI
++  // scaling. Unlike ChromeOS display zoom, this keeps the native host surface
++  // fixed while changing the DIP coordinate space used by shelf, wallpaper,
++  // windows, and web UI.
++  display_info.set_device_scale_factor(scale);
++  display_info.set_zoom_factor(1.f);
++  display_info.SetBounds(native_bounds);
++  display_info.SetManagedDisplayModes({scaled_host_mode});
++  display_info.AddZoomFactorForSize(native_bounds.size().ToString(), 1.f);
++
++  display::DisplayInfoList display_info_list;
++  for (const display::Display& active_display :
++       display_manager->active_display_list()) {
++    display_info_list.push_back(
++        active_display.id() == primary.id()
++            ? display_info
++            : display_manager->GetDisplayInfo(active_display.id()));
++  }
++  display_manager->OnNativeDisplaysChanged(display_info_list);
++  return true;
++}
++
++}  // namespace
+ 
+ DisplayHandler::DisplayHandler()
+     : cros_display_config_(CHECK_DEREF(Shell::Get()->cros_display_config())) {}
+@@ -32,6 +679,31 @@ void DisplayHandler::RegisterMessages() {
+       "dragDisplayDelta",
+       base::BindRepeating(&DisplayHandler::HandleDragDisplayDelta,
+                           base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "getAuraDisplayInfo",
++      base::BindRepeating(&DisplayHandler::HandleGetAuraDisplayInfo,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraDisplayMode",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraDisplayMode,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraDisplayScale",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraDisplayScale,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "getAuraFeatureProfileInfo",
++      base::BindRepeating(&DisplayHandler::HandleGetAuraFeatureProfileInfo,
++                          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
++      "setAuraFeatureProfile",
++      base::BindRepeating(&DisplayHandler::HandleSetAuraFeatureProfile,
++                          base::Unretained(this)));
+ }
+ 
+ void DisplayHandler::HandleHighlightDisplay(const base::ListValue& args) {
+@@ -64,4 +736,154 @@ void DisplayHandler::HandleDragDisplayDelta(const base::ListValue& args) {
+   cros_display_config_->DragDisplayDelta(display_id, delta_x, delta_y);
+ }
+ 
++void DisplayHandler::HandleGetAuraDisplayInfo(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(1U, args.size());
++  std::string callback_id = args[0].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&GetAuraDisplayValueOnBlockingThread),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayInfo,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraDisplayMode(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  std::string requested_mode = args[1].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraDisplayModeOnBlockingThread,
++                     std::move(requested_mode)),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayMode,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraDisplayScale(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  double requested_scale = kAuraDisplayScaleDefault;
++  if (args[1].is_double()) {
++    requested_scale = args[1].GetDouble();
++  } else if (args[1].is_int()) {
++    requested_scale = args[1].GetInt();
++  }
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraDisplayScaleOnBlockingThread, requested_scale),
++      base::BindOnce(&DisplayHandler::ResolveAuraDisplayScale,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleGetAuraFeatureProfileInfo(
++    const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(1U, args.size());
++  std::string callback_id = args[0].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&GetAuraFeatureProfileValueOnBlockingThread),
++      base::BindOnce(&DisplayHandler::ResolveAuraFeatureProfileInfo,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::HandleSetAuraFeatureProfile(const base::ListValue& args) {
++  AllowJavascript();
++
++  CHECK_EQ(2U, args.size());
++  std::string callback_id = args[0].GetString();
++  std::string requested_profile = args[1].GetString();
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&SetAuraFeatureProfileOnBlockingThread,
++                     std::move(requested_profile)),
++      base::BindOnce(&DisplayHandler::ResolveAuraFeatureProfile,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
++}
++
++void DisplayHandler::ResolveAuraDisplayInfo(std::string callback_id,
++                                            base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
 +    return;
 +  }
 +
-   int capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_OFF;
-   if (show_privacy_indicator_) {
-     capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_ON_AND_IN_USE;
-@@ -423,6 +432,8 @@ SkScalar VideoConferenceTray::GetRotationValueForToggleBubbleButton() {
-       return bubble_ ? 270 : 90;
-     case ShelfAlignment::kRight:
-       return bubble_ ? 90 : 270;
-+    case ShelfAlignment::kTop:
-+      return bubble_ ? 0 : 180;
-   }
- }
++  info.Set("currentScale", GetCurrentAuraDisplayScale());
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
++}
++
++void DisplayHandler::ResolveAuraDisplayMode(std::string callback_id,
++                                            base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
++void DisplayHandler::ResolveAuraDisplayScale(std::string callback_id,
++                                             base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  const std::optional<double> scale = result.FindDouble("configuredScale");
++  if (!scale || !ApplyAuraDisplayScale(*scale)) {
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value("Unable to apply display scale"));
++    return;
++  }
++
++  result.Set("currentScale", GetCurrentAuraDisplayScale());
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
++void DisplayHandler::ResolveAuraFeatureProfileInfo(std::string callback_id,
++                                                   base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
++}
++
++void DisplayHandler::ResolveAuraFeatureProfile(std::string callback_id,
++                                               base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  const bool success = result.FindBool("success").value_or(false);
++  if (!success) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
+ }  // namespace ash::settings
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+index ed341408420e3619a06129a55ea7690657e26502..c35d9d8f9a41725f90ed3cee10b8c3b9dbf597f7 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+@@ -5,7 +5,10 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
+ #define CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
  
-diff --git a/ash/wm/desks/desk_bar_view.cc b/ash/wm/desks/desk_bar_view.cc
-index b01341ef8b4e907338ac62dd99724f6127786d1b..be3146fed5abab1dd38a4c7ace317b7d69232f98 100644
---- a/ash/wm/desks/desk_bar_view.cc
-+++ b/ash/wm/desks/desk_bar_view.cc
-@@ -124,6 +124,11 @@ gfx::Rect DeskBarView::GetAvailableBounds() const {
-       bar_size = {0, 0};
-       bar_origin = {0, 0};
-       break;
-+    case ShelfAlignment::kTop:
-+      bar_origin.set_x(shelf_bounds.x() +
-+                       (work_area.width() - bar_size.width()) / 2);
-+      bar_origin.set_y(shelf_bounds.bottom() + kDeskBarShelfAndBarSpacing);
-+      break;
-   }
++#include <string>
++
+ #include "base/memory/raw_ref.h"
++#include "base/memory/weak_ptr.h"
+ #include "content/public/browser/web_ui_message_handler.h"
  
-   return {bar_origin, bar_size};
-@@ -149,6 +154,9 @@ void DeskBarView::UpdateBarBounds() {
-       break;
-     case ShelfAlignment::kBottomLocked:
-       break;
-+    case ShelfAlignment::kTop:
-+      new_bounds.ClampToCenteredSize(preferred_size);
-+      break;
-   }
-   GetWidget()->SetBounds(new_bounds);
- }
-diff --git a/ash/wm/window_animations.cc b/ash/wm/window_animations.cc
-index 13163f0ba8b2ce374ed698bd79240fd2cd1872c3..c15947ce2e217aa08cb15255aef4992544b0d750 100644
---- a/ash/wm/window_animations.cc
-+++ b/ash/wm/window_animations.cc
-@@ -790,6 +790,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
-         item_rect.set_x(shelf_bounds.right());
-       else if (shelf->alignment() == ShelfAlignment::kRight)
-         item_rect.set_x(shelf_bounds.x());
-+      else if (shelf->alignment() == ShelfAlignment::kTop)
-+        item_rect.set_y(shelf_bounds.bottom());
-       else
-         item_rect.set_y(shelf_bounds.y());
-       return item_rect;
-@@ -810,6 +812,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
-       return gfx::Rect(work_area.x(), work_area.y(), 0, 0);
-     case ShelfAlignment::kRight:
-       return gfx::Rect(work_area.right(), work_area.y(), 0, 0);
-+    case ShelfAlignment::kTop:
-+      return gfx::Rect(ltr_adjusted_x, work_area.y(), 0, 0);
-   }
-   NOTREACHED();
- }
-diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-index 3a167e3cbb7071db44b6379bb628068e01db5069..447401f98743e9e50b351bd2ed3fd41769dbb87b 100644
---- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-+++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-@@ -3535,6 +3535,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
-     case ash::ShelfAlignment::kRight:
-       alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
-       break;
-+    case ash::ShelfAlignment::kTop:
-+      alignment_type = api::autotest_private::ShelfAlignmentType::kTop;
-+      break;
-     case ash::ShelfAlignment::kBottomLocked:
-       // ShelfAlignment::kBottomLocked not supported by
-       // shelf_prefs.cc
-@@ -3573,10 +3576,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
-     case api::autotest_private::ShelfAlignmentType::kRight:
-       alignment = ash::ShelfAlignment::kRight;
-       break;
-+    case api::autotest_private::ShelfAlignmentType::kTop:
-+      alignment = ash::ShelfAlignment::kTop;
-+      break;
-     case api::autotest_private::ShelfAlignmentType::kNone:
-       return RespondNow(
--          Error("Invalid None alignment; expected 'Bottom', 'Left', or "
--                "'Right'"));
-+          Error("Invalid None alignment; expected 'Bottom', 'Left', 'Right', or "
-+                "'Top'"));
-   }
-   int64_t display_id;
-   if (!base::StringToInt64(params->display_id, &display_id)) {
-diff --git a/chrome/common/extensions/api/autotest_private.webidl b/chrome/common/extensions/api/autotest_private.webidl
-index 044ee45dc6f82cae375487b87ccd1947c75c2841..2022de306562291e8f3d983b800758893b7bab88 100644
---- a/chrome/common/extensions/api/autotest_private.webidl
-+++ b/chrome/common/extensions/api/autotest_private.webidl
-@@ -9,7 +9,8 @@ enum ShelfAlignmentType {
-   // BottomLocked not supported by shelf_prefs.
-   "Bottom",
-   "Left",
--  "Right"
-+  "Right",
-+  "Top"
+ namespace ash {
+@@ -13,6 +16,7 @@ class CrosDisplayConfig;
+ }  // namespace ash
+ 
+ namespace base {
++class DictValue;
+ class ListValue;
+ }  // namespace base
+ 
+@@ -34,8 +38,21 @@ class DisplayHandler : public content::WebUIMessageHandler {
+  private:
+   void HandleHighlightDisplay(const base::ListValue& args);
+   void HandleDragDisplayDelta(const base::ListValue& args);
++  void HandleGetAuraDisplayInfo(const base::ListValue& args);
++  void HandleSetAuraDisplayMode(const base::ListValue& args);
++  void HandleSetAuraDisplayScale(const base::ListValue& args);
++  void HandleGetAuraFeatureProfileInfo(const base::ListValue& args);
++  void HandleSetAuraFeatureProfile(const base::ListValue& args);
++  void ResolveAuraDisplayInfo(std::string callback_id, base::DictValue info);
++  void ResolveAuraDisplayMode(std::string callback_id, base::DictValue result);
++  void ResolveAuraDisplayScale(std::string callback_id, base::DictValue result);
++  void ResolveAuraFeatureProfileInfo(std::string callback_id,
++                                     base::DictValue info);
++  void ResolveAuraFeatureProfile(std::string callback_id,
++                                 base::DictValue result);
+ 
+   const raw_ref<CrosDisplayConfig> cros_display_config_;
++  base::WeakPtrFactory<DisplayHandler> weak_ptr_factory_{this};
  };
  
- // A mapping of ash::ShelfItemType.
+ }  // namespace ash::settings
+diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
+index 26b59f719f8dfe2422ad45f9dda9bc39901a47c1..7571a75d86f4df7e120f15c9a59a3f38427eb0e1 100644
+--- a/ui/display/manager/display_manager.cc
++++ b/ui/display/manager/display_manager.cc
+@@ -782,8 +782,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
+     display_info_list.emplace_back(info);
+   }
+ 
+-  if (display_property_changed)
++  if (display_property_changed) {
+     UpdateDisplaysWith(display_info_list);
++  }
+ }
+ 
+ bool DisplayManager::SetDisplayMode(int64_t display_id,
+@@ -1904,6 +1905,13 @@ void DisplayManager::ClearTouchCalibrationData(
+ void DisplayManager::UpdateZoomFactor(int64_t display_id, float zoom_factor) {
+   DCHECK(zoom_factor > 0);
+   DCHECK_NE(display_id, kInvalidDisplayId);
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: non-ChromeOS Linux hosts do not have the ChromeOS
++    // native display stack behind Ash. Applying display zoom here changes the
++    // logical root size without changing the host surface, so the shelf and
++    // wallpaper no longer cover the visible desktop.
++    zoom_factor = 1.f;
++  }
+   auto iter = display_info_.find(display_id);
+   if (iter == display_info_.end()) {
+     return;

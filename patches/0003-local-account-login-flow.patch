@@ -1,604 +1,825 @@
-diff --git a/ash/login/ui/login_expanded_public_account_view.cc b/ash/login/ui/login_expanded_public_account_view.cc
-index 048498be212ea6d59670622ddd67c1a12a7eb1a2..7fe95dccceae37119019c59a1d77279a317583da 100644
---- a/ash/login/ui/login_expanded_public_account_view.cc
-+++ b/ash/login/ui/login_expanded_public_account_view.cc
-@@ -436,14 +436,19 @@ class RightPaneView : public NonAccessibleView {
-         0, gfx::Font::FontStyle::NORMAL, gfx::Font::Weight::NORMAL);
-     style.override_color_id =
-         static_cast<ui::ColorId>(cros_tokens::kCrosSysOnSurface);
--    learn_more_label_->AddStyleRange(gfx::Range(0, offset), style);
-+    if (offset > 0 && offset <= text.length()) {
-+      learn_more_label_->AddStyleRange(gfx::Range(0, offset), style);
-+    }
- 
-     views::StyledLabel::RangeStyleInfo link_style =
-         views::StyledLabel::RangeStyleInfo::CreateForLink(on_learn_more_tapped);
-     link_style.override_color_id =
-         static_cast<ui::ColorId>(cros_tokens::kCrosSysPrimary);
--    learn_more_label_->AddStyleRange(gfx::Range(offset, offset + link.length()),
--                                     link_style);
-+    if (!link.empty() && offset < text.length() &&
-+        offset + link.length() <= text.length()) {
-+      learn_more_label_->AddStyleRange(
-+          gfx::Range(offset, offset + link.length()), link_style);
-+    }
-     learn_more_label_->SetAutoColorReadabilityEnabled(false);
- 
-     learn_more_label_->SetProperty(
-diff --git a/chrome/browser/ash/login/auth/chrome_login_performer.cc b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-index 9ff57a12de7bc74e9d47e907334b7da26d948850..5bc62d509da9bd6d4417db3c3032cbda51000a39 100644
---- a/chrome/browser/ash/login/auth/chrome_login_performer.cc
-+++ b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-@@ -7,8 +7,11 @@
- #include <memory>
- 
- #include "ash/constants/ash_paths.h"
-+#include "base/files/file_util.h"
+From 7d6f48e6a340604752cacae3c43faca7b420ce45 Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 21 Aug 2026 14:03:25 -0500
+Subject: Port generic Linux session lifecycle to current Chromium
+
+
+diff --git a/ash/session/session_controller_impl.cc b/ash/session/session_controller_impl.cc
+index fcce446d5cb593ae131c6f2e9ca86a88d267a5e4..447d64c8e16d7d1b57dfeee19ff7a7c70c95cbad 100644
+--- a/ash/session/session_controller_impl.cc
++++ b/ash/session/session_controller_impl.cc
+@@ -26,9 +26,14 @@
+ #include "ash/system/privacy/screen_switch_check_controller.h"
+ #include "ash/wm/lock_state_controller.h"
+ #include "ash/wm/mru_window_tracker.h"
++#include "base/command_line.h"
++#include "base/files/file_path.h"
  #include "base/functional/bind.h"
- #include "base/path_service.h"
-+#include "base/strings/string_util.h"
-+#include "base/system/sys_info.h"
- #include "base/task/task_traits.h"
- #include "base/task/thread_pool.h"
- #include "chrome/browser/ash/login/helper.h"
-@@ -136,6 +139,11 @@ void ChromeLoginPerformer::LoadAndApplyEarlyPrefs(
-       base::PathService::Get(ash::DIR_HOMEDIR_MOUNT, &early_prefs_dir);
-   CHECK(success);
-   early_prefs_dir = early_prefs_dir.Append(context->GetUserIDHash());
-+  if (!base::SysInfo::IsRunningOnChromeOS() &&
-+      base::StartsWith(context->GetUserIDHash(), "local-",
-+                       base::CompareCase::SENSITIVE)) {
-+    base::CreateDirectory(early_prefs_dir);
-+  }
- 
-   // Use TaskPriority::HIGHEST as this operation blocks
-   // user login flow.
-diff --git a/chrome/browser/ash/login/existing_user_controller.cc b/chrome/browser/ash/login/existing_user_controller.cc
-index b5285a37b1d5247ef8c450ae5048305baace1a80..5f5f135a5f62fd3f8ef0ba287d6ea11d9baba498 100644
---- a/chrome/browser/ash/login/existing_user_controller.cc
-+++ b/chrome/browser/ash/login/existing_user_controller.cc
-@@ -26,16 +26,19 @@
- #include "base/check_is_test.h"
- #include "base/command_line.h"
- #include "base/compiler_specific.h"
-+#include "base/environment.h"
- #include "base/functional/bind.h"
- #include "base/functional/callback.h"
- #include "base/functional/callback_helpers.h"
  #include "base/logging.h"
  #include "base/metrics/histogram_functions.h"
- #include "base/scoped_observation.h"
-+#include "base/strings/strcat.h"
- #include "base/strings/string_util.h"
- #include "base/strings/utf_string_conversions.h"
- #include "base/syslog_logging.h"
- #include "base/task/sequenced_task_runner.h"
-+#include "base/time/time.h"
- #include "base/timer/elapsed_timer.h"
- #include "base/values.h"
- #include "base/version.h"
-@@ -89,6 +92,7 @@
- #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
- #include "chromeos/ash/components/demo_mode/utils/demo_session_utils.h"
- #include "chromeos/ash/components/install_attributes/install_attributes.h"
-+#include "chromeos/ash/components/login/auth/public/auth_factors_configuration.h"
- #include "chromeos/ash/components/login/auth/public/auth_failure.h"
- #include "chromeos/ash/components/login/auth/public/key.h"
- #include "chromeos/ash/components/login/session/session_termination_manager.h"
-@@ -122,6 +126,7 @@
- #include "content/public/browser/browser_thread.h"
- #include "content/public/browser/storage_partition.h"
- #include "google_apis/gaia/gaia_auth_util.h"
-+#include "google_apis/gaia/gaia_id.h"
- #include "google_apis/gaia/google_service_auth_error.h"
- #include "services/network/public/mojom/network_context.mojom.h"
- #include "ui/base/l10n/l10n_util.h"
-@@ -150,6 +155,73 @@ const char kAutoLaunchNotifierId[] = "ash.managed_guest_session-auto_launch";
- // Delay for restarting the ui if safe-mode login has failed.
- const long int kSafeModeRestartUiDelayMs = 30000;
- 
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
-+constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
-+constexpr char kAuraTokenHandleStatusPref[] = "TokenHandleStatus";
-+constexpr char kAuraTokenHandleStatusValid[] = "valid";
-+constexpr base::TimeDelta kAuraLocalAuthSessionLifetime = base::Minutes(10);
-+
-+std::string GetAuraLocalLinuxUsername() {
-+  std::unique_ptr<base::Environment> env = base::Environment::Create();
-+  std::optional<std::string> username = env->GetVar("USER");
-+  if (username.has_value() && !username->empty()) {
-+    return *username;
-+  }
-+  username = env->GetVar("LOGNAME");
-+  if (username.has_value() && !username->empty()) {
-+    return *username;
-+  }
-+  return "local";
-+}
-+
-+AccountId GetAuraLocalAccountId() {
-+  const std::string linux_username = GetAuraLocalLinuxUsername();
-+  return AccountId::FromUserEmailGaiaId(
-+      base::StrCat({linux_username, kAuraLocalAccountDomain}),
-+      GaiaId(base::StrCat({kAuraLocalGaiaIdPrefix, linux_username})));
-+}
-+
-+bool IsAuraLocalAccount(const AccountId& account_id) {
-+  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
-+                        base::CompareCase::SENSITIVE) ||
-+         base::StartsWith(account_id.GetGaiaId().ToString(),
-+                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
-+}
-+
-+std::optional<AccountId> GetAuraLocalAccountForAutoStart(
-+    const user_manager::UserList& users,
-+    const PrefService& local_state) {
-+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-+          "aurade-enable-local-accounts")) {
-+    return std::nullopt;
-+  }
-+  if (!StartupUtils::IsOobeCompleted(local_state)) {
-+    return std::nullopt;
-+  }
-+
-+  const AccountId local_account_id = GetAuraLocalAccountId();
-+  for (const user_manager::User* user : users) {
-+    if (user && user->GetAccountId() == local_account_id &&
-+        IsAuraLocalAccount(user->GetAccountId())) {
-+      return local_account_id;
-+    }
-+  }
-+  return std::nullopt;
-+}
-+
-+void MarkAuraLocalAccountOfflineReady(const AccountId& account_id,
-+                                      PrefService* local_state) {
-+  user_manager::UserManager::Get()->SaveForceOnlineSignin(
-+      account_id, /*force_online_signin=*/false);
-+  user_manager::UserManager::Get()->SaveUserOAuthStatus(
-+      account_id, user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
-+
-+  user_manager::KnownUser known_user(local_state);
-+  known_user.SetStringPref(account_id, kAuraTokenHandleStatusPref,
-+                           kAuraTokenHandleStatusValid);
-+  known_user.UpdateReauthReason(account_id, 0);
-+}
-+
- // Makes a call to the policy subsystem to reload the policy when we detect
- // authentication change.
- void RefreshPoliciesOnUIThread(policy::PolicyService& policy_service) {
-@@ -452,6 +524,33 @@ ExistingUserController::ExistingUserController(
- void ExistingUserController::Init(const user_manager::UserList& users) {
-   timer_init_ = std::make_unique<base::ElapsedTimer>();
-   UpdateLoginDisplay(users);
-+  std::optional<AccountId> aura_local_account =
-+      GetAuraLocalAccountForAutoStart(users, local_state_.get());
-+  if (aura_local_account.has_value()) {
-+    VLOG(1) << "Auto-starting AuraDE local session for "
-+            << aura_local_account->GetUserEmail();
-+    MarkAuraLocalAccountOfflineReady(*aura_local_account, &local_state_.get());
-+    UserContext user_context(user_manager::UserType::kRegular,
-+                             *aura_local_account);
-+    user_context.SetAuthFlow(UserContext::AUTH_FLOW_OFFLINE);
-+    user_context.SetIsUsingOAuth(false);
-+    user_context.SetSessionLifetime(base::Time::Now() +
-+                                    kAuraLocalAuthSessionLifetime);
-+    user_context.SetAuthSessionIds(
-+        base::StrCat(
-+            {kAuraLocalGaiaIdPrefix, GetAuraLocalLinuxUsername(), "-session"}),
-+        base::StrCat({kAuraLocalGaiaIdPrefix, GetAuraLocalLinuxUsername(),
-+                      "-broadcast"}));
-+    user_context.SetUserIDHash(
-+        base::StrCat({"local-", GetAuraLocalLinuxUsername()}));
-+    user_context.SetAuthFactorsConfiguration(AuthFactorsConfiguration());
-+    UserSessionManager::GetInstance()->StartSession(
-+        user_context, UserSessionManager::StartSessionType::kPrimary,
-+        false,  // has_auth_cookies
-+        false,  // has_active_session
-+        AsWeakPtr());
-+    return;
-+  }
-   ConfigureAutoLogin();
++#include "base/process/launch.h"
++#include "base/process/process.h"
++#include "base/system/sys_info.h"
+ #include "components/account_id/account_id.h"
+ #include "components/pref_registry/pref_registry_syncable.h"
+ #include "components/prefs/pref_registry_simple.h"
+@@ -74,6 +79,19 @@ void RecordLockEvent(SessionLockEvent event) {
+   base::UmaHistogramEnumeration("Ash.Login.Lock.SessionStateChange", event);
  }
  
-diff --git a/chrome/browser/ash/login/reauth_stats.cc b/chrome/browser/ash/login/reauth_stats.cc
-index 3519a3c37d05564fff61eb6b807fae507dfcb8a8..ef765e1bc69d977357575a6976d822b8c713cea0 100644
---- a/chrome/browser/ash/login/reauth_stats.cc
-+++ b/chrome/browser/ash/login/reauth_stats.cc
-@@ -6,13 +6,25 @@
- 
- #include "base/logging.h"
- #include "base/metrics/histogram_functions.h"
-+#include "base/strings/string_util.h"
- #include "base/syslog_logging.h"
-+#include "components/account_id/account_id.h"
- #include "components/user_manager/known_user.h"
- 
- namespace ash {
- 
- namespace {
- 
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
-+constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
-+
-+bool IsAuraLocalAccount(const AccountId& account_id) {
-+  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
-+                        base::CompareCase::SENSITIVE) ||
-+         base::StartsWith(account_id.GetGaiaId().ToString(),
-+                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++bool LaunchAuraDeSessionControl(const char* command) {
++  base::CommandLine command_line(
++      base::FilePath(FILE_PATH_LITERAL("/usr/bin/aurade-session-control")));
++  command_line.AppendArg(command);
++  base::Process process =
++      base::LaunchProcess(command_line, base::LaunchOptions());
++  if (!process.IsValid()) {
++    LOG(ERROR) << "Failed to launch AuraDE session control: " << command;
++    return false;
++  }
++  return true;
 +}
 +
- ReauthReason GetReauthReason(const user_manager::KnownUser& known_user,
-                              const AccountId& account_id) {
-   return static_cast<ReauthReason>(
-@@ -25,11 +37,13 @@ ReauthReason GetReauthReason(const user_manager::KnownUser& known_user,
- void RecordReauthReason(PrefService& local_state,
-                         const AccountId& account_id,
-                         ReauthReason reason) {
--  if (reason == ReauthReason::kNone)
-+  if (reason == ReauthReason::kNone || IsAuraLocalAccount(account_id)) {
-     return;
-+  }
-   user_manager::KnownUser known_user(&local_state);
--  if (GetReauthReason(known_user, account_id) == reason)
-+  if (GetReauthReason(known_user, account_id) == reason) {
-     return;
-+  }
+ }  // namespace
  
-   SYSLOG(WARNING) << "Reauth reason updated: " << static_cast<int>(reason);
-   known_user.UpdateReauthReason(account_id, static_cast<int>(reason));
-@@ -40,8 +54,9 @@ void SendReauthReason(PrefService& local_state,
-                       bool password_changed) {
-   user_manager::KnownUser known_user(&local_state);
-   ReauthReason reauth_reason = GetReauthReason(known_user, account_id);
--  if (reauth_reason == ReauthReason::kNone)
-+  if (reauth_reason == ReauthReason::kNone) {
-     return;
-+  }
-   if (password_changed) {
-     base::UmaHistogramEnumeration("Login.PasswordChanged.ReauthReason",
-                                   reauth_reason,
-diff --git a/chrome/browser/ash/login/screens/sync_consent_screen.cc b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-index 0b432f298d20de0c989359dee422f474012995f8..54853345d8b3d826a0f4676fa046b488ecde6f24 100644
---- a/chrome/browser/ash/login/screens/sync_consent_screen.cc
-+++ b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-@@ -426,6 +426,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
+ class SessionControllerImpl::ScopedScreenLockBlockerImpl
+@@ -295,11 +313,19 @@ bool SessionControllerImpl::ShouldDisplayManagedUI() const {
+ }
  
- void SyncConsentScreen::SetSyncEverythingEnabled(bool enabled) {
-   syncer::SyncService* sync_service = GetSyncService(profile_);
-+  if (!sync_service) {
+ void SessionControllerImpl::LockScreen() {
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      LaunchAuraDeSessionControl("lock")) {
 +    return;
 +  }
-   syncer::SyncUserSettings* sync_settings = sync_service->GetUserSettings();
-   if (enabled != sync_settings->IsSyncEverythingEnabled()) {
-     syncer::UserSelectableTypeSet empty_set;
-diff --git a/chrome/browser/ash/login/screens/user_selection_screen.cc b/chrome/browser/ash/login/screens/user_selection_screen.cc
-index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a2012198eca4 100644
---- a/chrome/browser/ash/login/screens/user_selection_screen.cc
-+++ b/chrome/browser/ash/login/screens/user_selection_screen.cc
-@@ -26,6 +26,7 @@
- #include "base/logging.h"
- #include "base/memory/raw_ptr.h"
- #include "base/metrics/histogram_macros.h"
-+#include "base/strings/string_util.h"
- #include "base/strings/utf_string_conversions.h"
- #include "base/time/time.h"
- #include "base/trace_event/trace_event.h"
-@@ -87,6 +88,15 @@ namespace {
+   if (client_)
+     client_->RequestLockScreen();
+ }
  
- const char kWakeLockReason[] = "TPMLockedIssue";
- const int kWaitingOvertimeInSeconds = 1;
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
-+constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
+ void SessionControllerImpl::RequestSignOut() {
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      LaunchAuraDeSessionControl("sign-out")) {
++    return;
++  }
+   if (client_) {
+     client_->RequestSignOut();
+   }
+@@ -312,11 +338,19 @@ void SessionControllerImpl::RequestRestartForUpdate() {
+ }
+ 
+ void SessionControllerImpl::AttemptRestartChrome() {
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      LaunchAuraDeSessionControl("restart")) {
++    return;
++  }
+   if (client_)
+     client_->AttemptRestartChrome();
+ }
+ 
+ void SessionControllerImpl::SwitchActiveUser(const AccountId& account_id) {
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      LaunchAuraDeSessionControl("switch-user")) {
++    return;
++  }
+   if (client_)
+     client_->SwitchActiveUser(account_id);
+ }
+@@ -327,6 +361,10 @@ void SessionControllerImpl::CycleActiveUser(CycleUserDirection direction) {
+ }
+ 
+ void SessionControllerImpl::ShowMultiProfileLogin() {
++  if (!base::SysInfo::IsRunningOnChromeOS() &&
++      LaunchAuraDeSessionControl("switch-user")) {
++    return;
++  }
+   if (client_)
+     client_->ShowMultiProfileLogin();
+ }
+@@ -394,42 +432,8 @@ void SessionControllerImpl::SetClient(SessionControllerClient* client) {
+ }
+ 
+ void SessionControllerImpl::SetSessionInfo(const SessionInfo& info) {
+-  auto to_string = [](SessionState type) {
+-    switch (type) {
+-      case SessionState::UNKNOWN:
+-        return "UNKNOWN";
+-      case SessionState::OOBE:
+-        return "OOBE";
+-      case SessionState::LOGIN_PRIMARY:
+-        return "LOGIN_PRIMARY";
+-      case SessionState::LOGGED_IN_NOT_ACTIVE:
+-        return "LOGGED_IN_NOT_ACTIVE";
+-      case SessionState::ACTIVE:
+-        return "ACTIVE";
+-      case SessionState::LOCKED:
+-        return "LOCKED";
+-      case SessionState::LOGIN_SECONDARY:
+-        return "LOGIN_SECONDARY";
+-      case SessionState::RMA:
+-        return "RMA";
+-    }
+-    return "UNKNOWN";
+-  };
+   if (is_chrome_terminating_) {
+-    // TOOD(crbug.com/515743514): Reduce or eliminate the transition during
+-    // shutdown.
+-    bool known_transition_during_shutdown =
+-        (state_ == SessionState::OOBE &&
+-         info.state == SessionState::LOGGED_IN_NOT_ACTIVE) ||
+-        (state_ == SessionState::LOGGED_IN_NOT_ACTIVE &&
+-         info.state == SessionState::ACTIVE) ||
+-        (state_ == SessionState::LOGIN_SECONDARY &&
+-         info.state == SessionState::ACTIVE) ||
+-        (state_ == SessionState::LOCKED && info.state == SessionState::ACTIVE);
+-
+-    DUMP_WILL_BE_CHECK(known_transition_during_shutdown)
+-        << "This state transition not allowed after shutdown started:"
+-        << to_string(state_) << " => " << to_string(info.state);
++    // AuraDE compatibility: ignore transition checks during shutdown.
+     return;
+   }
+   can_lock_ = info.can_lock_screen;
+@@ -452,8 +456,18 @@ void SessionControllerImpl::UpdateUserSession(const UserSession& user_session) {
+     return;
+   }
+ 
++  const bool is_active_session = (*it)->session_id == active_session_id_;
+   *it = std::make_unique<UserSession>(user_session);
+ 
++  if (is_active_session) {
++    PrefService* user_prefs =
++        GetUserPrefServiceForUser(user_session.user_info.account_id);
++    if (user_prefs && last_active_user_prefs_ != user_prefs) {
++      last_active_user_prefs_ = user_prefs;
++      MaybeNotifyOnActiveUserPrefServiceChanged();
++    }
++  }
 +
-+bool IsAuraLocalAccount(const AccountId& account_id) {
-+  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
+   UpdateLoginStatus();
+ }
+ 
+@@ -825,6 +839,17 @@ void SessionControllerImpl::MaybeNotifyOnActiveUserPrefServiceChanged() {
+   DCHECK(last_active_user_prefs_);
+ 
+   if (!signin_screen_prefs_obtained_) {
++    if (!base::SysInfo::IsRunningOnChromeOS()) {
++      // AuraDE can boot directly into a local session without a signin profile.
++      // In that mode there is no signin pref service to order before the
++      // active user's prefs, so notify with the real user prefs immediately.
++      for (auto& observer : observers_) {
++        observer.OnActiveUserPrefServiceChanged(last_active_user_prefs_);
++      }
++      on_active_user_prefs_changed_notify_deferred_ = false;
++      return;
++    }
++
+     // We must guarantee that OnSigninScreenPrefServiceInitialized() is called
+     // before OnActiveUserPrefServiceChanged(), so defer notifying the
+     // observers until the sign in prefs are received.
+diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+index 7419bb65d4e8fe67713c8291a502008f80308d07..c2a20f3a39337069c2eb47f3b18f94b13e514738 100644
+--- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
++++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+@@ -4,13 +4,19 @@
+ 
+ #include "chrome/browser/ash/dbus/ash_dbus_helper.h"
+ 
++#include <memory>
++#include <utility>
++
+ #include "ash/constants/ash_features.h"
+ #include "ash/constants/ash_paths.h"
+ #include "ash/webui/shimless_rma/shimless_rma.h"
++#include "base/check.h"
+ #include "base/files/file_path.h"
++#include "base/memory/scoped_refptr.h"
+ #include "base/path_service.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/system/sys_info.h"
++#include "base/threading/thread.h"
+ #include "build/config/chromebox_for_meetings/buildflags.h"  // PLATFORM_CFM
+ #include "build/config/cuttlefish/buildflags.h"  // PLATFORM_CUTTLEFISH
+ #include "build/config/squid/buildflags.h"       // PLATFORM_SQUID
+@@ -93,6 +99,7 @@
+ #include "device/bluetooth/floss/floss_dbus_client.h"
+ #include "device/bluetooth/floss/floss_dbus_manager.h"
+ #include "device/bluetooth/floss/floss_features.h"
++#include "dbus/bus.h"
+ 
+ #if BUILDFLAG(PLATFORM_CFM)
+ #include "chromeos/ash/components/chromebox_for_meetings/features.h"
+@@ -120,6 +127,45 @@ void OverrideStubPathsIfNeeded() {
+ 
+ DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
+ 
++std::unique_ptr<base::Thread> g_aurade_bluez_dbus_thread;
++scoped_refptr<dbus::Bus> g_aurade_bluez_system_bus;
++bool g_aurade_uses_linux_bluez = false;
++
++dbus::Bus* GetAuraDeBluezSystemBus() {
++  if (g_aurade_bluez_system_bus) {
++    return g_aurade_bluez_system_bus.get();
++  }
++
++  // AuraDE compatibility: target_os=chromeos normally shares the ChromeOS
++  // system bus with every daemon client. Generic Linux keeps those clients
++  // fake, so BlueZ gets a narrowly scoped real bus and D-Bus thread of its own.
++  g_aurade_bluez_dbus_thread =
++      std::make_unique<base::Thread>("AuraDE BlueZ D-Bus thread");
++  base::Thread::Options thread_options;
++  thread_options.message_pump_type = base::MessagePumpType::IO;
++  CHECK(g_aurade_bluez_dbus_thread->StartWithOptions(
++      std::move(thread_options)));
++
++  dbus::Bus::Options bus_options;
++  bus_options.bus_type = dbus::Bus::SYSTEM;
++  bus_options.connection_type = dbus::Bus::PRIVATE;
++  bus_options.dbus_task_runner = g_aurade_bluez_dbus_thread->task_runner();
++  g_aurade_bluez_system_bus = new dbus::Bus(std::move(bus_options));
++  return g_aurade_bluez_system_bus.get();
++}
++
++void ShutdownAuraDeBluezSystemBus() {
++  if (g_aurade_bluez_system_bus) {
++    g_aurade_bluez_system_bus->ShutdownOnDBusThreadAndBlock();
++    g_aurade_bluez_system_bus.reset();
++  }
++  if (g_aurade_bluez_dbus_thread) {
++    g_aurade_bluez_dbus_thread->Stop();
++    g_aurade_bluez_dbus_thread.reset();
++  }
++  g_aurade_uses_linux_bluez = false;
++}
++
+ }  // namespace
+ 
+ DBusHelperObserverForTest::~DBusHelperObserverForTest() = default;  // IN-TEST
+@@ -194,7 +240,10 @@ void InitializeDBus() {
+   InitializeDBusClient<ResourcedClient>(bus);
+   InitializeDBusClient<RuntimeProbeClient>(bus);
+   InitializeDBusClient<SeneschalClient>(bus);
+-  InitializeDBusClient<SessionManagerClient>(bus);
++  // AuraDE compatibility: generic Linux keeps most ChromeOS D-Bus clients fake,
++  // but SessionManagerClient may attach to AuraDE's packaged session-manager
++  // shim even when the global system bus is not enabled.
++  SessionManagerClient::Initialize(bus);
+   InitializeDBusClient<SmbProviderClient>(bus);
+   InitializeDBusClient<SpacedClient>(bus);
+   InitializeDBusClient<SwapManagementClient>(bus);
+@@ -233,7 +282,8 @@ void InitializeFeatureListDependentDBus() {
+   // feature list is initialized.
+   InitializeDBusClient<chromeos::MissiveClient>(bus);
+ 
+-  if (floss::features::IsFlossEnabled()) {
++  g_aurade_uses_linux_bluez = !base::SysInfo::IsRunningOnChromeOS();
++  if (!g_aurade_uses_linux_bluez && floss::features::IsFlossEnabled()) {
+     InitializeDBusClient<floss::FlossDBusManager>(bus);
+     if (bus) {
+       int active_adapter =
+@@ -248,7 +298,11 @@ void InitializeFeatureListDependentDBus() {
+       FlossMediaClient::InitializeFake();
+     }
+   } else {
+-    InitializeDBusClient<bluez::BluezDBusManager>(bus);
++    if (g_aurade_uses_linux_bluez) {
++      bluez::BluezDBusManager::Initialize(GetAuraDeBluezSystemBus());
++    } else {
++      InitializeDBusClient<bluez::BluezDBusManager>(bus);
++    }
+   }
+ #if BUILDFLAG(PLATFORM_CFM)
+   if (base::FeatureList::IsEnabled(cfm::features::kMojoServices)) {
+@@ -299,12 +353,13 @@ void ShutdownDBus() {
+     CfmHotlineClient::Shutdown();
+   }
+ #endif
+-  if (floss::features::IsFlossEnabled()) {
++  if (!g_aurade_uses_linux_bluez && floss::features::IsFlossEnabled()) {
+     FlossMediaClient::Shutdown();
+     floss::FlossDBusManager::Shutdown();
+   } else {
+     bluez::BluezDBusManager::Shutdown();
+   }
++  ShutdownAuraDeBluezSystemBus();
+ 
+   // Depends on `DlcserviceClient`.
+   language_packs::LanguagePackManager::Shutdown();
+diff --git a/chrome/browser/ash/login/session/user_session_manager.cc b/chrome/browser/ash/login/session/user_session_manager.cc
+index dc8403f76799c9c44052f4e3ace3987448e2fa55..9ba2714d1c560abbf9a4ae03146a66773f2c32af 100644
+--- a/chrome/browser/ash/login/session/user_session_manager.cc
++++ b/chrome/browser/ash/login/session/user_session_manager.cc
+@@ -461,6 +461,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
+          user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML;
+ }
+ 
++constexpr char kAuraDeLocalAccountDomain[] = "@local.aurade";
++constexpr char kAuraDeLocalGaiaIdPrefix[] = "aurade-local-";
++
++bool IsAuraDeLocalAccountId(const AccountId& account_id) {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  return base::EndsWith(account_id.GetUserEmail(), kAuraDeLocalAccountDomain,
 +                        base::CompareCase::SENSITIVE) ||
 +         base::StartsWith(account_id.GetGaiaId().ToString(),
-+                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
++                          kAuraDeLocalGaiaIdPrefix,
++                          base::CompareCase::SENSITIVE);
++}
++
+ // Stores the information about the challenge-response keys, that were used for
+ // authentication, persistently in the known_user database for future
+ // authentication attempts.
+@@ -1231,8 +1246,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
+   // Otherwise, auth token dependent code would be in an invalid state.
+   // Important piece such as policy code might be broken because of this and
+   // subject to an exploit. See http://crbug.com/41292933.
++  // HACK(AuraDE): --stub-auth bypass — skip termination when using stub tokens.
+   if (IsOnlineSignin(user_context_) &&
+-      state == OAuth2LoginManager::SESSION_RESTORE_FAILED) {
++      state == OAuth2LoginManager::SESSION_RESTORE_FAILED &&
++      !base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {
+     SYSLOG(ERROR)
+         << "Session restore failed for online sign-in, terminating session.";
+     session_manager::SessionManager::Get()->RequestSignOut();
+@@ -1558,7 +1575,8 @@ void UserSessionManager::InitProfilePreferences(
+     }
+   }
+ 
+-  if (user_manager->IsLoggedInAsUserWithGaiaAccount()) {
++  if (user_manager->IsLoggedInAsUserWithGaiaAccount() &&
++      !IsAuraDeLocalAccountId(user_context.GetAccountId())) {
+     // Get the Gaia ID from the user context. This may not be available when
+     // unlocking a previously opened profile, or when creating a supervised
+     // user. However, in these cases the gaia_id should be already available in
+@@ -1868,7 +1886,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
+   TRACE_EVENT0("login", "UserSessionManager::FinalizePrepareProfile");
+   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+   user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+-  if (user_manager->IsLoggedInAsUserWithGaiaAccount()) {
++  if (user_manager->IsLoggedInAsUserWithGaiaAccount() &&
++      !IsAuraDeLocalAccountId(user_context_.GetAccountId())) {
+     const UserContext::AuthFlow auth_flow = user_context_.GetAuthFlow();
+     if (auth_flow == UserContext::AUTH_FLOW_GAIA_WITH_SAML ||
+         auth_flow == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML) {
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 227cdb5974e747430ac57cfb00f954aad3bb0c0b..3b2ccdd690cac6c365a504706875d04033f4d40b 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -333,12 +333,6 @@ void ApplySigninProfileModifications(Profile* profile) {
+ }
+ 
+ #if !defined(USE_REAL_DBUS_CLIENTS)
+-FakeSessionManagerClient* FakeSessionManagerClient() {
+-  auto* fake_session_manager_client = FakeSessionManagerClient::Get();
+-  DCHECK(fake_session_manager_client);
+-  return fake_session_manager_client;
+-}
+-
+ chromeos::FakePowerManagerClient* FakePowerManagerClient() {
+   chromeos::FakePowerManagerClient* fake_power_manager_client =
+       chromeos::FakePowerManagerClient::Get();
+@@ -353,8 +347,12 @@ void FakeShutdownSignal() {
+ }
+ 
+ void InstallFakeShutdownCalls() {
+-  FakeSessionManagerClient()->set_stop_session_callback(
+-      base::BindOnce(&FakeShutdownSignal));
++  // AuraDE compatibility: generic Linux keeps most ChromeOS D-Bus clients fake,
++  // but may use a real SessionManagerClient backed by the AuraDE shim.
++  if (auto* fake_session_manager_client = FakeSessionManagerClient::Get()) {
++    fake_session_manager_client->set_stop_session_callback(
++        base::BindOnce(&FakeShutdownSignal));
++  }
+   FakePowerManagerClient()->set_restart_callback(
+       base::BindOnce(&FakeShutdownSignal));
+ }
+diff --git a/chrome/browser/ash/settings/device_settings_service.cc b/chrome/browser/ash/settings/device_settings_service.cc
+index 38168d864386d3be6b557531bc4f47a8e6c961b5..34fecb1d2e521c0a0a004f9637e047b5fa092d82 100644
+--- a/chrome/browser/ash/settings/device_settings_service.cc
++++ b/chrome/browser/ash/settings/device_settings_service.cc
+@@ -14,6 +14,7 @@
+ #include "base/location.h"
+ #include "base/logging.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/system/sys_info.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/time/time.h"
+ #include "chrome/browser/ash/policy/off_hours/device_off_hours_controller.h"
+@@ -162,8 +163,9 @@ DeviceSettingsService::DeviceSettingsService() {
+ 
+ DeviceSettingsService::~DeviceSettingsService() {
+   DCHECK(pending_operations_.empty());
+-  for (auto& observer : observers_)
++  for (auto& observer : observers_) {
+     observer.OnDeviceSettingsServiceShutdown();
++  }
+ }
+ 
+ void DeviceSettingsService::StartProcessing(
+@@ -191,8 +193,9 @@ void DeviceSettingsService::StartProcessing(
+ void DeviceSettingsService::StopProcessing() {
+   pending_operations_.clear();
+ 
+-  if (session_manager_client_)
++  if (session_manager_client_) {
+     session_manager_client_->RemoveObserver(this);
++  }
+   session_manager_client_ = nullptr;
+   owner_key_util_.reset();
+ 
+@@ -200,8 +203,9 @@ void DeviceSettingsService::StopProcessing() {
+ }
+ 
+ void DeviceSettingsService::SetDeviceMode(policy::DeviceMode device_mode) {
+-  if (device_mode_ == device_mode)
++  if (device_mode_ == device_mode) {
+     return;
++  }
+ 
+   // Device mode can only change if was not set yet.
+   DCHECK(policy::DEVICE_MODE_PENDING == device_mode_ ||
+@@ -232,8 +236,9 @@ void DeviceSettingsService::LoadIfNotPresent() {
+   // operation is in the queue, then a request to load will be issued soon. If a
+   // store operation is pending, then the policy data is already available and
+   // will be stored soon. In either case, it's not needed to load again.
+-  if (policy_fetch_response_ || !pending_operations_.empty())
++  if (policy_fetch_response_ || !pending_operations_.empty()) {
+     return;
++  }
+ 
+   EnqueueLoad(false);
+ }
+@@ -262,9 +267,10 @@ void DeviceSettingsService::Store(
+ 
+ DeviceSettingsService::OwnershipStatus
+ DeviceSettingsService::GetOwnershipStatus() {
+-  if (public_key_.get())
++  if (public_key_.get()) {
+     return public_key_->is_empty() ? OwnershipStatus::kOwnershipNone
+                                    : OwnershipStatus::kOwnershipTaken;
++  }
+   return OwnershipStatus::kOwnershipUnknown;
+ }
+ 
+@@ -281,8 +287,9 @@ void DeviceSettingsService::GetOwnershipStatusAsync(
+     // the next SessionManagerOperation completes. If no operation is pending,
+     // start a load operation to fetch the key and report the result.
+     pending_ownership_status_callbacks_.push_back(std::move(callback));
+-    if (pending_operations_.empty())
++    if (pending_operations_.empty()) {
+       EnqueueLoad(false);
++    }
+   }
+ }
+ 
+@@ -308,8 +315,9 @@ void DeviceSettingsService::InitOwner(
+         owner_settings_service) {
+   // When InitOwner() is called twice with the same |username| it's
+   // worth to reload settings since owner key may become available.
+-  if (!username_.empty() && username_ != username)
++  if (!username_.empty() && username_ != username) {
+     return;
++  }
+   username_ = username;
+   owner_settings_service_ = owner_settings_service;
+ 
+@@ -373,8 +381,9 @@ void DeviceSettingsService::Enqueue(
+     std::unique_ptr<SessionManagerOperation> operation) {
+   const bool was_empty = pending_operations_.empty();
+   pending_operations_.push_back(std::move(operation));
+-  if (was_empty)
++  if (was_empty) {
+     StartNextOperation();
++  }
+ }
+ 
+ void DeviceSettingsService::EnqueueLoad(bool request_key_load) {
+@@ -385,10 +394,11 @@ void DeviceSettingsService::EnqueueLoad(bool request_key_load) {
+ }
+ 
+ void DeviceSettingsService::EnsureReload(bool request_key_load) {
+-  if (!pending_operations_.empty())
++  if (!pending_operations_.empty()) {
+     pending_operations_.front()->RestartLoad(request_key_load);
+-  else
++  } else {
+     EnqueueLoad(request_key_load);
++  }
+ }
+ 
+ void DeviceSettingsService::StartNextOperation() {
+@@ -439,12 +449,16 @@ void DeviceSettingsService::HandleCompletedOperation(
+     if (device_off_hours_controller_->is_off_hours_mode()) {
+       std::unique_ptr<em::ChromeDeviceSettingsProto> off_device_settings =
+           policy::off_hours::ApplyOffHoursPolicyToProto(*device_settings_);
+-      if (off_device_settings)
++      if (off_device_settings) {
+         device_settings_.swap(off_device_settings);
++      }
+     }
+-  } else if (status != STORE_KEY_UNAVAILABLE) {
+-    LOG(ERROR) << "Session manager operation failed: " << status << " ("
+-               << StatusToString(status) << ")";
++  } else if (status != STORE_KEY_UNAVAILABLE &&
++             !base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: unmanaged Linux sessions may have an empty local
++    // policy store behind the session-manager shim. Keep device settings
++    // usable, but do not mask real ChromeOS policy-store failures.
++    status = STORE_SUCCESS;
+   }
+ 
+   public_key_ = scoped_refptr<PublicKey>(operation->public_key());
+@@ -464,18 +478,21 @@ void DeviceSettingsService::HandleCompletedOperation(
+ 
+   // The completion callback happens after the notification so clients can
+   // filter self-triggered updates.
+-  if (!callback.is_null())
++  if (!callback.is_null()) {
+     std::move(callback).Run();
++  }
+ }
+ 
+ void DeviceSettingsService::NotifyOwnershipStatusChanged() const {
+-  for (auto& observer : observers_)
++  for (auto& observer : observers_) {
+     observer.OwnershipStatusChanged();
++  }
+ }
+ 
+ void DeviceSettingsService::NotifyDeviceSettingsUpdated() const {
+-  for (auto& observer : observers_)
++  for (auto& observer : observers_) {
+     observer.DeviceSettingsUpdated();
++  }
+ }
+ 
+ void DeviceSettingsService::RunPendingOwnershipStatusCallbacks() {
+diff --git a/chrome/browser/sessions/exit_type_service.cc b/chrome/browser/sessions/exit_type_service.cc
+index 2dd2f0605d9a71beb4158c4867db4aafc4701c83..d5158a134b3625b6066eae9ad3b76b506ea413d4 100644
+--- a/chrome/browser/sessions/exit_type_service.cc
++++ b/chrome/browser/sessions/exit_type_service.cc
+@@ -5,8 +5,10 @@
+ #include "chrome/browser/sessions/exit_type_service.h"
+ 
+ #include "base/containers/flat_set.h"
++#include "base/environment.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/system/sys_info.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/lifetime/browser_shutdown.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -54,6 +56,17 @@ std::string ExitTypeToSessionTypePrefValue(ExitType type) {
+   }
+ }
+ 
++bool ShouldIgnorePreviousExitTypeForAuraDe() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  auto environment = base::Environment::Create();
++  const std::optional<std::string> value =
++      environment->GetVar("AURADE_IGNORE_PROFILE_EXIT_TYPE");
++  return value.value_or("1") != "0";
++}
++
+ }  // namespace
+ 
+ // Responsible for notifying ExitTypeService when a browser or tab is created
+@@ -193,11 +206,22 @@ void ExitTypeService::AddCrashAckCallback(base::OnceClosure callback) {
+ 
+ ExitTypeService::ExitTypeService(Profile* profile)
+     : profile_(profile),
+-      last_session_exit_type_(SessionTypePrefValueToExitType(
+-          profile_->GetPrefs()->GetString(prefs::kSessionExitType))),
+-      current_session_exit_type_(ExitType::kCrashed),
++      last_session_exit_type_(
++          ShouldIgnorePreviousExitTypeForAuraDe()
++              ? ExitType::kClean
++              : SessionTypePrefValueToExitType(
++                    profile_->GetPrefs()->GetString(prefs::kSessionExitType))),
++      current_session_exit_type_(ShouldIgnorePreviousExitTypeForAuraDe()
++                                     ? ExitType::kClean
++                                     : ExitType::kCrashed),
+       waiting_for_user_to_ack_crash_(last_session_exit_type_ ==
+                                      ExitType::kCrashed) {
++  if (ShouldIgnorePreviousExitTypeForAuraDe()) {
++    profile_->GetPrefs()->SetString(prefs::kSessionExitType,
++                                    kPrefExitTypeNormal);
++    return;
++  }
++
+   // Mark the session as open.
+   profile_->GetPrefs()->SetString(prefs::kSessionExitType,
+                                   kPrefExitTypeCrashed);
+diff --git a/chromeos/ash/components/dbus/session_manager/session_manager_client.cc b/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
+index 4391db27044eb9d8b6535100b836af7710095b41..5568c8b3a6c3015f885bc1893d8eadce2b340358 100644
+--- a/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
++++ b/chromeos/ash/components/dbus/session_manager/session_manager_client.cc
+@@ -30,6 +30,7 @@
+ #include "base/path_service.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/string_view_util.h"
++#include "base/threading/thread.h"
+ #include "base/unguessable_token.h"
+ #include "chromeos/ash/components/dbus/arc/arc.pb.h"
+ #include "chromeos/ash/components/dbus/cryptohome/rpc.pb.h"
+@@ -71,6 +72,15 @@ const size_t kSharedMemoryDataSizeLimit = 10 * 1024 * 1024;
+ // Copy of values from login_manager::SessionManagerImpl.
+ // TODO(crbug.com/40071048): Move to system_api/dbus/service_constants.h
+ constexpr char kStopping[] = "stopping";
++constexpr char kAuraDeSessionManagerShimPath[] =
++    "/usr/lib/chromiumos-ash/aurade-session-manager-shim.py";
++
++bool IsAuraDeSessionManagerShimPresent() {
++  // AuraDE compatibility: installed Linux packages provide a small
++  // org.chromium.SessionManager D-Bus shim. Source-tree/dev runs keep using the
++  // fake client unless that packaged shim is present.
++  return base::PathExists(base::FilePath(kAuraDeSessionManagerShimPath));
 +}
  
- // Max number of users to show.
- // Please keep synced with one in signin_userlist_unittest.cc.
-@@ -224,6 +234,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
-   const bool is_public_session =
-       user->GetType() == user_manager::UserType::kPublicAccount;
-   const bool has_gaia_account = user->HasGaiaAccount();
-+  const bool is_aura_local_account = IsAuraLocalAccount(user->GetAccountId());
- 
-   if (is_public_session) {
-     return proximity_auth::mojom::AuthType::OFFLINE_PASSWORD;
-@@ -231,7 +242,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
- 
-   // At this point the reason for invalid token should be already set. If not,
-   // this might be a leftover from an old version.
--  if (has_gaia_account &&
-+  if (!is_aura_local_account && has_gaia_account &&
-       token_status == user_manager::User::OAUTH2_TOKEN_STATUS_INVALID) {
-     RecordReauthReason(local_state, user->GetAccountId(), ReauthReason::kOther);
+ // Helper to get the enum type of RetrievePolicyResponseType based on error
+ // name.
+@@ -126,8 +136,9 @@ base::ScopedFD CreateSharedMemoryRegionFDWithData(const std::string& data) {
    }
-@@ -239,16 +250,30 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
-   // We need to force an online signin if the user is marked as requiring it or
-   // if there's an invalid OAUTH token that needs to be refreshed.
-   if (user->force_online_signin()) {
--    VLOG(1) << "Online login forced by user flag";
--    return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
-+    if (is_aura_local_account) {
-+      VLOG(1) << "Clearing online login requirement for AuraDE local user";
-+      user_manager::UserManager::Get()->SaveForceOnlineSignin(
-+          user->GetAccountId(), /*force_online_signin=*/false);
-+    } else {
-+      VLOG(1) << "Online login forced by user flag";
-+      return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
+   auto region = base::WritableSharedMemoryRegion::Create(data.size());
+   base::WritableSharedMemoryMapping mapping = region.Map();
+-  if (!mapping.IsValid())
++  if (!mapping.IsValid()) {
+     return base::ScopedFD();
++  }
+   mapping.GetMemoryAsSpan<uint8_t>().copy_from(base::as_byte_span(data));
+   return base::WritableSharedMemoryRegion::TakeHandleForSerialization(
+              std::move(region))
+@@ -148,15 +159,18 @@ bool ReadSecretFromSharedMemory(base::ScopedFD fd,
+   auto platform_region(base::subtle::PlatformSharedMemoryRegion::Take(
+       std::move(fd), base::subtle::PlatformSharedMemoryRegion::Mode::kReadOnly,
+       secret_size, base::UnguessableToken::Create()));
+-  if (!platform_region.IsValid())
++  if (!platform_region.IsValid()) {
+     return false;
++  }
+   auto region =
+       base::ReadOnlySharedMemoryRegion::Deserialize(std::move(platform_region));
+-  if (!region.IsValid())
++  if (!region.IsValid()) {
+     return false;
++  }
+   base::ReadOnlySharedMemoryMapping mapping = region.Map();
+-  if (!mapping.IsValid())
++  if (!mapping.IsValid()) {
+     return false;
++  }
+   secret->resize(secret_size);
+   base::span<uint8_t>(*secret).copy_from_nonoverlapping(
+       mapping.GetMemoryAsSpan<const uint8_t>());
+@@ -173,7 +187,14 @@ class SessionManagerClientImpl : public SessionManagerClient {
+   SessionManagerClientImpl(const SessionManagerClientImpl&) = delete;
+   SessionManagerClientImpl& operator=(const SessionManagerClientImpl&) = delete;
+ 
+-  ~SessionManagerClientImpl() override = default;
++  ~SessionManagerClientImpl() override {
++    if (owned_system_bus_) {
++      owned_system_bus_->ShutdownOnDBusThreadAndBlock();
++    }
++    if (owned_dbus_thread_) {
++      owned_dbus_thread_->Stop();
++    }
++  }
+ 
+   // SessionManagerClient overrides:
+   void AddObserver(Observer* observer) override {
+@@ -198,8 +219,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
+   void EmitLoginPromptVisible() override {
+     SimpleMethodCallToSessionManager(
+         login_manager::kSessionManagerEmitLoginPromptVisible);
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.EmitLoginPromptVisibleCalled();
 +    }
    }
  
--  if (has_gaia_account &&
-+  if (!is_aura_local_account && has_gaia_account &&
-       (token_status == user_manager::User::OAUTH2_TOKEN_STATUS_INVALID ||
-        token_status == user_manager::User::OAUTH_TOKEN_STATUS_UNKNOWN)) {
-     VLOG(1) << "Online login forced due to invalid OAuth2 token status: "
-             << token_status;
--    return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
+   void EmitAshInitialized() override {
+@@ -722,6 +744,24 @@ class SessionManagerClientImpl : public SessionManagerClient {
+                        weak_ptr_factory_.GetWeakPtr()));
+   }
+ 
++  bool InitWithOwnedBusForAuraDe() {
++    base::Thread::Options thread_options;
++    thread_options.message_pump_type = base::MessagePumpType::IO;
++    owned_dbus_thread_ =
++        std::make_unique<base::Thread>("AuraDE SessionManager D-Bus thread");
++    if (!owned_dbus_thread_->StartWithOptions(std::move(thread_options))) {
++      return false;
++    }
 +
-+    // HACK(AuraDE): Skip online sign-in validation when --stub-auth is
-+    // active, since the stored OAuth2 token from a previous fake-token session
-+    // will always appear invalid. Instead fall through to offline password.
-+    if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {
-+      VLOG(1) << "  --> overridden by --stub-auth, allowing offline password";
-+    } else {
-+      return proximity_auth::mojom::AuthType::ONLINE_SIGN_IN;
++    dbus::Bus::Options system_bus_options;
++    system_bus_options.bus_type = dbus::Bus::SYSTEM;
++    system_bus_options.connection_type = dbus::Bus::PRIVATE;
++    system_bus_options.dbus_task_runner = owned_dbus_thread_->task_runner();
++    owned_system_bus_ = new dbus::Bus(std::move(system_bus_options));
++    Init(owned_system_bus_.get());
++    return true;
++  }
++
+  private:
+   // Makes a method call to the session manager with no arguments and no
+   // response.
+@@ -939,8 +979,9 @@ class SessionManagerClientImpl : public SessionManagerClient {
+     }
+     const bool success = base::StartsWith(result_string, "success",
+                                           base::CompareCase::INSENSITIVE_ASCII);
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.OwnerKeySet(success);
 +    }
    }
  
-   user_manager::KnownUser known_user(&local_state);
-diff --git a/chrome/browser/ash/login/signin/auth_error_observer.cc b/chrome/browser/ash/login/signin/auth_error_observer.cc
-index 3df5f56d1696674f60819502d15f8fe386b9e743..453bfdfc1fb464b822f2037c9ae68ec21cf48e1d 100644
---- a/chrome/browser/ash/login/signin/auth_error_observer.cc
-+++ b/chrome/browser/ash/login/signin/auth_error_observer.cc
-@@ -8,6 +8,7 @@
- #include "base/functional/bind.h"
- #include "base/metrics/user_metrics.h"
- #include "base/metrics/user_metrics_action.h"
-+#include "base/strings/string_util.h"
- #include "chrome/browser/ash/login/reauth_stats.h"
- #include "chrome/browser/ash/login/signin/signin_error_notifier.h"
- #include "chrome/browser/ash/profiles/profile_helper.h"
-@@ -20,12 +21,23 @@
- #include "components/user_manager/user_manager.h"
+   // Called when the property change complete signal is received.
+@@ -953,20 +994,23 @@ class SessionManagerClientImpl : public SessionManagerClient {
+     }
+     const bool success = base::StartsWith(result_string, "success",
+                                           base::CompareCase::INSENSITIVE_ASCII);
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.PropertyChangeComplete(success);
++    }
+   }
  
- namespace ash {
-+namespace {
-+
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
-+
-+bool IsAuraLocalAccount(const user_manager::User* user) {
-+  return user && base::EndsWith(user->GetAccountId().GetUserEmail(),
-+                               kAuraLocalAccountDomain,
-+                               base::CompareCase::SENSITIVE);
-+}
-+
-+}  // namespace
+   void ScreenIsLockedReceived(dbus::Signal* signal) {
+     screen_is_locked_ = true;
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.ScreenLockedStateUpdated();
++    }
+   }
+ 
+   void ScreenIsUnlockedReceived(dbus::Signal* signal) {
+     screen_is_locked_ = false;
+-    for (auto& observer : observers_)
++    for (auto& observer : observers_) {
+       observer.ScreenLockedStateUpdated();
++    }
+   }
+ 
+   void ArcInstanceStoppedReceived(dbus::Signal* signal) {
+@@ -1151,6 +1195,8 @@ class SessionManagerClientImpl : public SessionManagerClient {
+   }
+ 
+   raw_ptr<dbus::ObjectProxy> session_manager_proxy_ = nullptr;
++  std::unique_ptr<base::Thread> owned_dbus_thread_;
++  scoped_refptr<dbus::Bus> owned_system_bus_;
+   std::unique_ptr<chromeos::BlockingMethodCaller> blocking_method_caller_;
+   base::ObserverList<Observer> observers_{
+       SessionManagerClient::kObserverListPolicy};
+@@ -1175,8 +1221,18 @@ SessionManagerClient::~SessionManagerClient() {
  
  // static
- bool AuthErrorObserver::ShouldObserve(Profile* profile) {
-   const user_manager::User* const user =
-       ProfileHelper::Get()->GetUserByProfile(profile);
--  return user && user->HasGaiaAccount();
-+  return user && user->HasGaiaAccount() && !IsAuraLocalAccount(user);
+ void SessionManagerClient::Initialize(dbus::Bus* bus) {
+-  DCHECK(bus);
+-  (new SessionManagerClientImpl)->Init(bus);
++  if (IsAuraDeSessionManagerShimPresent()) {
++    auto* client = new SessionManagerClientImpl;
++    if (bus) {
++      client->Init(bus);
++      return;
++    }
++    if (client->InitWithOwnedBusForAuraDe()) {
++      return;
++    }
++    delete client;
++  }
++  InitializeFake();
  }
  
- AuthErrorObserver::AuthErrorObserver(PrefService* local_state, Profile* profile)
-@@ -83,6 +95,9 @@ void AuthErrorObserver::HandleAuthError(
-     const GoogleServiceAuthError& auth_error) {
-   const user_manager::User* const user =
-       ProfileHelper::Get()->GetUserByProfile(profile_);
-+  if (IsAuraLocalAccount(user)) {
-+    return;
-+  }
-   DCHECK(user->HasGaiaAccount());
+ // static
+diff --git a/device/bluetooth/floss/floss_features.cc b/device/bluetooth/floss/floss_features.cc
+index 14dd8b0bd8480c6f318e7448ac1368cc4478c2e8..0f801c51a8f0d011315748faf7975eef848f9f99 100644
+--- a/device/bluetooth/floss/floss_features.cc
++++ b/device/bluetooth/floss/floss_features.cc
+@@ -40,6 +40,14 @@ static bool IsDeviceLaunchedFloss() {
  
-   if (auth_error.IsPersistentError() && !auth_error.IsScopePersistentError()) {
-diff --git a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
-index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e21748556 100644
---- a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
-+++ b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
-@@ -4,6 +4,7 @@
- 
- #include "chrome/browser/ash/login/signin/oauth2_token_fetcher.h"
- 
-+#include "base/command_line.h"
- #include "base/functional/bind.h"
- #include "base/logging.h"
- #include "base/strings/string_util.h"
-@@ -43,6 +44,24 @@ void OAuth2TokenFetcher::StartExchangeFromAuthCode(
-     const std::string& auth_code,
-     const std::string& signin_scoped_device_id) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-+
-+  // HACK(AuraDE): --stub-auth bypass — return fake OAuth2 tokens so the login
-+  // flow completes without contacting Google's servers. Needed because we
-+  // distribute this build without Chrome API keys.
-+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {
-+    LOG(INFO) << "HACK(AuraDE): --stub-auth detected, returning fake OAuth2 tokens";
-+    delegate_->OnOAuth2TokensAvailable(
-+        GaiaAuthConsumer::ClientOAuthResult(
-+            "fake_refresh_token",       // refresh_token
-+            "fake_access_token",        // access_token
-+            3600,                       // expires_in_secs
-+            false,                      // is_under_advanced_protection
-+            false                       // is_bound_to_key
-+        ));
-+    return;
-+  }
-+  // END HACK(AuraDE)
-+
-   auth_code_ = auth_code;
-   signin_scoped_device_id_ = signin_scoped_device_id;
-   auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
-diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-index 976870feaccae585dd98243e3ac92d796952a5bc..7b43a991f85a4aa61554a7204a21992a4430e056 100644
---- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
-+++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-@@ -14,8 +14,10 @@
- #include "ash/public/cpp/notification_utils.h"
- #include "ash/webui/settings/public/constants/routes.mojom.h"
- #include "base/check_deref.h"
-+#include "base/command_line.h"
- #include "base/functional/bind.h"
- #include "base/logging.h"
-+#include "base/strings/string_util.h"
- #include "base/strings/utf_string_conversions.h"
- #include "build/build_config.h"
- #include "chrome/browser/ash/account_manager/account_manager_util.h"
-@@ -63,6 +65,9 @@ namespace {
- 
- constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
- constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
-+// AuraDE compatibility: local Linux users are represented as synthetic
-+// ChromeOS account ids so the shell can run without GAIA as the OS account.
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
- 
- bool g_ignore_sync_errors_for_test_ = false;
- 
-@@ -83,6 +88,12 @@ bool AreAllAccountsMigrated(
-   return true;
- }
- 
-+bool IsAuraLocalProfile(Profile* profile) {
-+  return base::EndsWith(
-+      multi_user_util::GetAccountIdFromProfile(profile).GetUserEmail(),
-+      kAuraLocalAccountDomain, base::CompareCase::SENSITIVE);
-+}
-+
- // Returns true if the child user has migrated at least one of their
- // secondary edu accounts to ARC++.
- bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
-@@ -214,7 +225,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
-   error_controller_->AddObserver(this);
-   const AccountId account_id =
-       multi_user_util::GetAccountIdFromProfile(profile_);
--  if (token_handle_store_->HasToken(account_id) &&
-+  if (!IsAuraLocalProfile(profile_) &&
-+      token_handle_store_->HasToken(account_id) &&
-       !token_handle_store_->IsRecentlyChecked(account_id)) {
-     token_handle_store_->IsReauthRequired(
-         account_id, profile->GetURLLoaderFactory(),
-@@ -227,6 +239,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
- void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
-                                              const std::string& token,
-                                              bool reauth_required) {
-+  if (IsAuraLocalProfile(profile_)) {
-+    return;
+ bool IsFlossEnabled() {
+ #if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: AuraDE is built with target_os="chromeos" but runs
++  // on generic Linux, where the system Bluetooth service is BlueZ. Keep every
++  // Bluetooth consumer on the BlueZ implementation, even when ChromeOS would
++  // normally enable Floss by board launch status or a feature override.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
 +  }
 +
-   if (ash::features::IsUseTokenHandleStoreEnabled()) {
-     account_manager::AccountManager* account_manager =
-         AccountManagerFactory::Get()->GetAccountManager(
-@@ -281,8 +297,28 @@ void SigninErrorNotifier::Shutdown() {
- }
+   // Default to enable Floss if the feature is not overridden and the device is
+   // launched.
+   if (!base::FeatureList::GetStateIfOverridden(floss::features::kFlossEnabled)
+@@ -55,6 +63,9 @@ bool IsFlossEnabled() {
  
- void SigninErrorNotifier::OnErrorChanged() {
--  if (g_ignore_sync_errors_for_test_)
-+  if (g_ignore_sync_errors_for_test_) {
-+    return;
+ bool IsLLPrivacyAvailable() {
+ #if BUILDFLAG(IS_CHROMEOS)
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
 +  }
-+
-+  // AuraDE compatibility: local Linux accounts intentionally do not have
-+  // ChromeOS GAIA refresh tokens. Keep Google web sign-in separate from the OS
-+  // account and do not show persistent ChromeOS account-manager warnings.
-+  if (IsAuraLocalProfile(profile_)) {
-+    NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
-+        NotificationHandler::Type::TRANSIENT, device_account_notification_id_);
-+    NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
-+        NotificationHandler::Type::TRANSIENT,
-+        secondary_account_notification_id_);
-     return;
-+  }
-+
-+  // HACK(AuraDE): legacy developer stub sessions bypass ChromeOS login and
-+  // therefore cannot satisfy GAIA reauth. Packaged local sessions should be
-+  // handled by the local-account check above.
-+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-config")) {
-+    return;
-+  }
- 
-   if (!error_controller_->HasError()) {
-     NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
-@@ -328,8 +364,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
-   // to a Family Link Supervised account, then suppress the notification.
-   supervised_user::SupervisedUserService* service =
-       supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);
--  if (service->signout_required_after_supervision_enabled())
-+  if (service->signout_required_after_supervision_enabled()) {
-     return;
-+  }
- 
-   // We need to save the flag in the local state because
-   // TokenHandleUtil::IsReauthRequired might fail on the login screen due to
-diff --git a/chrome/browser/ash/login/signin/token_handle_service.cc b/chrome/browser/ash/login/signin/token_handle_service.cc
-index 4bd8e9d1e7986baf2903195d32c9ff4917dcc30f..3d8b893b3fe5ab9ce5b119d4f4027525c0e62e10 100644
---- a/chrome/browser/ash/login/signin/token_handle_service.cc
-+++ b/chrome/browser/ash/login/signin/token_handle_service.cc
-@@ -6,6 +6,7 @@
- 
- #include <string>
- 
-+#include "base/strings/string_util.h"
- #include "chrome/browser/ash/login/signin/token_handle_store_factory.h"
- #include "chrome/browser/ash/profiles/profile_helper.h"
- #include "chrome/browser/profiles/profile.h"
-@@ -28,6 +29,13 @@
- namespace ash {
- namespace {
- 
-+constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
-+
-+bool IsAuraLocalAccount(const AccountId& account_id) {
-+  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
-+                        base::CompareCase::SENSITIVE);
-+}
-+
- account_manager::AccountManager* GetAccountManager(Profile* profile) {
-   return AccountManagerFactory::Get()->GetAccountManager(
-       profile->GetPath().value());
-@@ -62,6 +70,9 @@ void TokenHandleService::StartObserving() {
- void TokenHandleService::MaybeFetchForExistingUser(
-     const AccountId& account_id) {
-   VLOG(1) << "TokenHandleService::MaybeFetchForExistingUser";
-+  if (IsAuraLocalAccount(account_id)) {
-+    return;
-+  }
-   if (account_id.GetAccountType() != AccountType::GOOGLE) {
-     return;
-   }
-@@ -73,6 +84,9 @@ void TokenHandleService::MaybeFetchForNewUser(
-     const std::string& access_token,
-     const std::string& refresh_token_hash) {
-   VLOG(1) << "TokenHandleService::MaybeFetchForNewUser";
-+  if (IsAuraLocalAccount(account_id)) {
-+    return;
-+  }
-   MaybeFetchTokenHandle(account_id, access_token, refresh_token_hash);
- }
- 
-@@ -81,6 +95,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
-   const AccountId& account_id =
-       ProfileHelper::Get()->GetUserByProfile(profile_)->GetAccountId();
- 
-+  if (IsAuraLocalAccount(account_id)) {
-+    return;
-+  }
-   if (account_info.email == account_id.GetUserEmail()) {
-     token_handle_store_->SetTokenHandleStale(account_id);
-   }
-@@ -88,6 +105,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
- 
- void TokenHandleService::FetchAccessToken(const AccountId& account_id) {
-   VLOG(1) << "TokenHandleService::FetchAccessToken";
-+  if (IsAuraLocalAccount(account_id)) {
-+    return;
-+  }
-   if (signin::IdentityManager* const identity_manager =
-           IdentityManagerFactory::GetForProfile(profile_);
-       identity_manager) {
+   return base::FeatureList::IsEnabled(floss::features::kLLPrivacyIsAvailable);
+ #else
+   return false;
