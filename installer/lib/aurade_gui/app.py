@@ -298,11 +298,11 @@ def reveal(widget: Gtk.Widget) -> None:
 class Wallpaper(Gtk.DrawingArea):
     """One photograph, under everything, for as long as the installer runs.
 
-    Under the aurora rather than instead of it. The set is twenty eight
-    pictures with deliberately nothing in common, which is what stops them
-    reading as a theme and would also make the installer look like twenty
-    eight different products; the aurora over the top of them, at half
-    strength, is the thing that makes them one.
+    Under the aurora rather than instead of it. The set is forty pictures
+    with deliberately nothing in common, which is what stops them reading as
+    a theme and would also make the installer look like forty different
+    products; the aurora over the top of them, at half strength, is the
+    thing that makes them one.
 
     Whichever of this and the aurora is actually showing paints the ground.
     Exactly one of them does, always, which is why this paints a plain surface

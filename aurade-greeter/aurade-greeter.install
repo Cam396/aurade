@@ -1,0 +1,38 @@
+# Two things the greeter cannot do for itself, because they are about a user
+# this package does not create.
+
+_settle() {
+  # The state and cache directories. Both are packaged root owned, because
+  # the greeter user belongs to greetd and may not exist when this package is
+  # built, and a root owned directory means every write fails silently: the
+  # machine forgets the account, refetches the forecast from nothing on every
+  # start, and asks a stranger where it is every time it comes up.
+  if getent passwd greeter >/dev/null 2>&1; then
+    chown greeter: /var/lib/aurade-greeter 2>/dev/null || true
+    chown greeter: /var/cache/aurade-greeter 2>/dev/null || true
+  fi
+
+  # And the seat. weston opens the display and the input devices through
+  # seatd, whose socket is root:seat, so a greeter user outside that group
+  # gets a login screen that will not start. Where the machine uses logind
+  # instead this changes nothing, and the group may not exist at all.
+  if getent group seat >/dev/null 2>&1 && getent passwd greeter >/dev/null 2>&1; then
+    gpasswd -a greeter seat >/dev/null 2>&1 || true
+  fi
+}
+
+post_install() {
+  _settle
+  cat <<'NOTE'
+This package does not switch the greeter. To use it:
+
+  cp /usr/share/aurade-greeter/aurade.toml.example /etc/greetd/aurade.toml
+  systemctl restart aurade-greetd
+
+Keep greetd-tuigreet installed. It is the way in if this one will not start.
+NOTE
+}
+
+post_upgrade() {
+  _settle
+}

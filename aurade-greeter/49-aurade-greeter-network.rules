@@ -1,0 +1,34 @@
+/* Let the login screen join a network, and nothing else.
+ *
+ * An account that needs the network to sign in, on a machine whose network is
+ * not up, is a machine nobody can log into: the settings that would fix it
+ * live on the far side of the sign in that needs them. So the greeter is
+ * allowed to scan, to join, and to leave.
+ *
+ * It is allowed nothing else. Not changing the system's saved connections,
+ * not the hostname, not the firewall, not sleep or wake. The list below is
+ * exhaustive on purpose: a rule that returns YES for
+ * org.freedesktop.NetworkManager.* would hand an unauthenticated screen the
+ * whole network stack, and this screen is what an unauthenticated person is
+ * looking at by definition.
+ *
+ * `settings.modify.system` is the one that looks generous and is not
+ * avoidable: joining a network NetworkManager has not seen before means
+ * writing a profile for it, and a login screen that can only rejoin networks
+ * somebody already saved is a login screen that cannot get a new machine onto
+ * Wi-Fi at all.
+ */
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "greeter") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    switch (action.id) {
+        case "org.freedesktop.NetworkManager.network-control":
+        case "org.freedesktop.NetworkManager.wifi.scan":
+        case "org.freedesktop.NetworkManager.enable-disable-wifi":
+        case "org.freedesktop.NetworkManager.settings.modify.own":
+        case "org.freedesktop.NetworkManager.settings.modify.system":
+            return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

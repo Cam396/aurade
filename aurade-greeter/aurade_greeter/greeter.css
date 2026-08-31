@@ -1,0 +1,624 @@
+/* Greeter only rules, loaded on top of the installer's generated stylesheet.
+ *
+ * Everything the greeter shares with the installer comes from the theme file
+ * next to this one, which is generated and must never be edited by hand.
+ * What is here is the handful of things a login screen needs and an installer
+ * does not: a clock large enough to read across a room, and text that has to
+ * stay legible over a moving background rather than over a page. */
+
+.aurade-greeter-clock {
+  font-size: 76px;
+  font-weight: 200;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -2px;
+}
+
+/* Over the aurora, not over a sheet.
+ *
+ * The installer puts its pages on an opaque ground because they are pages.
+ * The greeter has one short panel and putting a slab behind it would hide the
+ * background it exists to sit on, so the text carries its own shadow instead
+ * and stays readable wherever the aurora happens to be bright. */
+.aurade-greeter-clock,
+.m3-headline-small,
+.m3-title-medium {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* The panel itself, which is a card and should read as one. */
+list.boxed-list {
+  border-radius: 18px;
+}
+
+/* The pill, bottom right.
+ *
+ * It had this radius before and nothing to apply it to, so it did nothing and
+ * the cluster read as a caption lying on a photograph. A control needs a
+ * ground. The ground is dark and translucent rather than a solid, so the
+ * picture still reads through it, with a hairline along the top edge: light
+ * catches the upper lip of a raised surface and that single line is most of
+ * what makes a flat rectangle look lifted.
+ *
+ * The contrast has to hold over a bright sky as well as a dark lake, which a
+ * text shadow alone does not achieve, which is why this exists at all. */
+menubutton.aurade-status-area > button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  min-height: 0;
+}
+
+menubutton.aurade-status-area {
+  padding: 0;
+  border-radius: 999px;
+  background-color: rgba(16, 17, 22, 0.62);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30);
+  transition: background-color 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+menubutton.aurade-status-area:hover {
+  background-color: rgba(28, 30, 38, 0.76);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.36);
+}
+
+menubutton.aurade-status-area:active {
+  background-color: rgba(12, 13, 17, 0.80);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.30);
+}
+
+/* The focus ring is this product's, not the platform's. A login screen is
+ * the one surface somebody may be driving entirely from the keyboard.
+ *
+ * `:focus-visible` on the button inside, not `:focus-within` on the
+ * menubutton: focus-within is also true for the whole time the panel is open,
+ * so the ring sat around the pill throughout, which reads as a stuck state
+ * rather than as where the keyboard is. */
+menubutton.aurade-status-area > button:focus-visible {
+  outline: 2px solid @accent_color;
+  outline-offset: -2px;
+}
+
+/* Where the machine stops talking about itself and starts telling the time. */
+.aurade-status-rule {
+  margin: 3px 2px;
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+/* The bubble.
+ *
+ * Translucent for the same reason as the pill: a solid slab on a photograph
+ * looks like a screenshot pasted onto a screenshot. The shadow has real
+ * spread because the bubble floats well above the picture and a tight shadow
+ * reads as a sticker. */
+.aurade-panel > contents {
+  border-radius: 24px;
+  background-color: rgba(22, 23, 29, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 0;
+}
+
+.aurade-panel > arrow {
+  min-width: 0;
+  min-height: 0;
+  background: none;
+  border: none;
+}
+
+/* The tiles. Their own ground so they read as objects sitting in the bubble
+ * rather than as rows of a list, which is the whole difference between quick
+ * settings and a menu. */
+.aurade-pod {
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0;
+  transition: background-color 120ms ease-out;
+}
+
+button.aurade-pod:hover {
+  background-color: rgba(255, 255, 255, 0.11);
+}
+
+button.aurade-pod:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+button.aurade-pod:focus-visible {
+  outline: 2px solid @accent_color;
+  outline-offset: 2px;
+}
+
+/* A tile that only reports never lights up, because nothing happens when it
+ * is pressed and a hover state would promise that something does. */
+.aurade-pod-readout {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+/* The tile for the thing that is currently on, lit in the brand.
+ *
+ * ChromeOS lights the active feature pod in the accent, and this is the
+ * moment the panel stops looking like a component library and starts looking
+ * like this product. */
+.aurade-pod.aurade-pod-on {
+  background-color: alpha(@accent_color, 0.20);
+  border-color: alpha(@accent_color, 0.34);
+}
+
+button.aurade-pod.aurade-pod-on:hover {
+  background-color: alpha(@accent_color, 0.26);
+}
+
+.aurade-panel-rule {
+  margin: 4px 0;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* The list inside the network page. */
+.aurade-panel list.boxed-list {
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+
+/* The light scheme.
+ *
+ * Every ground above is stated in white at a low alpha over a dark base,
+ * which is correct for the dark scheme and exactly backwards for the light
+ * one: the text turns dark and the ground stays dark with it, so the pill
+ * reads as a smudge and the panel as a slab with nothing on it.
+ *
+ * GTK stylesheets have no media query, so the window says which scheme it is
+ * in and these key off it, the same way the high contrast overrides below do.
+ * Placed before them deliberately: a machine that is both light and high
+ * contrast carries both classes, the specificity is identical, and the later
+ * block has to be the one that wins.
+ *
+ * These are not the dark values inverted. A translucent light panel over a
+ * bright photograph needs more opacity than a dark one over the same picture,
+ * because dark text on a washed out ground fails long before light text does.
+ */
+.aurade-light menubutton.aurade-status-area {
+  background-color: rgba(252, 252, 255, 0.80);
+  border-top: 1px solid rgba(255, 255, 255, 0.80);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light menubutton.aurade-status-area:hover {
+  background-color: rgba(255, 255, 255, 0.90);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.20);
+}
+
+.aurade-light menubutton.aurade-status-area:active {
+  background-color: rgba(240, 241, 248, 0.92);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light .aurade-status-rule {
+  background-color: rgba(0, 0, 0, 0.16);
+}
+
+.aurade-light .aurade-panel > contents {
+  background-color: rgba(250, 250, 254, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.aurade-light .aurade-weather-panel > contents {
+  background-color: rgba(248, 249, 255, 0.97);
+}
+
+.aurade-light .aurade-pod,
+.aurade-light .aurade-weather-tile {
+  background-color: rgba(20, 22, 34, 0.05);
+  border-color: rgba(20, 22, 34, 0.07);
+}
+
+.aurade-light .aurade-pod-readout {
+  background-color: rgba(20, 22, 34, 0.035);
+}
+
+.aurade-light button.aurade-pod:hover {
+  background-color: rgba(20, 22, 34, 0.09);
+}
+
+.aurade-light button.aurade-pod:active {
+  background-color: rgba(20, 22, 34, 0.13);
+}
+
+.aurade-light .aurade-panel-rule,
+.aurade-light .aurade-panel list.boxed-list {
+  background-color: rgba(20, 22, 34, 0.07);
+}
+
+
+/* High contrast.
+ *
+ * Everything above trades a little contrast for depth, which is the right
+ * trade on a photograph and the wrong one for somebody who turned high
+ * contrast on. Here the grounds go opaque, the hairlines become real borders,
+ * and the shadows go away, because a shadow is a soft edge and a soft edge is
+ * the thing high contrast exists to remove.
+ *
+ * This is not a dimmer version of the same design. It is the same layout with
+ * every surface stated rather than suggested. */
+.aurade-high-contrast .aurade-status-area {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-status-area:hover {
+  background-color: @window_fg_color;
+  color: @window_bg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-status-rule,
+.aurade-high-contrast .aurade-panel-rule {
+  background-color: @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-panel > contents {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+.aurade-high-contrast .aurade-pod {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-pod.aurade-pod-on {
+  background-color: @accent_color;
+  color: @accent_fg_color;
+  border-color: @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-panel list.boxed-list {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+/* The weather panel.
+ *
+ * Wider than the system panel because it is holding charts rather than rows,
+ * and a chart squeezed to the width of a menu stops being a chart.
+ *
+ * The tiles are the same object as the system panel's feature pods at a
+ * different job: same radius, same ground, same rule about reading as
+ * objects sitting in a bubble rather than as a list. Two panels in one
+ * product that solve the same problem two ways is how a design starts to
+ * come apart. */
+/* A shade more opaque than the system panel. That one holds four short rows;
+ * this one holds a paragraph a forecaster wrote and three charts, and text at
+ * that density over a bright photograph needs the extra few percent. */
+.aurade-weather-panel > contents {
+  background-color: rgba(20, 21, 27, 0.94);
+}
+
+.aurade-weather-tile {
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.055);
+  padding: 11px 13px 12px 13px;
+}
+
+/* The caption above each reading. Small, spaced, and quieter than the number
+ * underneath it, because the number is the thing somebody came for and the
+ * caption only has to say which number it is. */
+.aurade-weather-caption {
+  letter-spacing: 0.07em;
+  opacity: 0.72;
+}
+
+/* The scroller inside the bubble. Its own ground would be a second surface
+ * inside a surface, and the undershoot shading GTK draws by default reads as
+ * a rendering fault on a translucent panel. */
+.aurade-weather-panel scrolledwindow,
+.aurade-weather-panel scrolledwindow > viewport {
+  background: none;
+  border: none;
+}
+
+.aurade-weather-panel scrolledwindow undershoot.top,
+.aurade-weather-panel scrolledwindow undershoot.bottom {
+  background: none;
+}
+
+/* High contrast, on the same terms as everything else this pass added: the
+ * ground is stated rather than suggested and the soft edge goes away. The
+ * charts inside are drawn from the theme's own role table, so they follow
+ * without needing anything here. */
+.aurade-high-contrast .aurade-weather-tile {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+.aurade-high-contrast .aurade-weather-caption {
+  opacity: 1;
+}
+
+/* The shade, and the accounts arriving from under it.
+ *
+ * A row starts a little low and invisible and settles into place. Ten pixels,
+ * not thirty: this is the difference between a list appearing and a list
+ * arriving, and anything further than that reads as a slide rather than as
+ * the thing having always been nearly there.
+ *
+ * The stagger is not here. It is one timer per row in `_stagger_accounts`,
+ * because CSS has no way to say "and the next one forty milliseconds later"
+ * without writing a rule per row. */
+.aurade-arrive {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.aurade-arrive.aurade-arrived {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms ease-out,
+              transform 280ms cubic-bezier(0.2, 0.75, 0.3, 1);
+}
+
+/* The line that is only there eleven days a year. In the brand, because it is
+ * the one thing on the shade that is not simply the time: an equinox in the
+ * same grey as the date would be a fact nobody notices. */
+.aurade-occasion {
+  color: @accent_color;
+}
+
+/* What the photograph is. The same ground as the pill and the panel, for the
+ * same reason: a caption printed straight onto a photograph is unreadable over
+ * half of them, and a text shadow deep enough to fix that is a text shadow you
+ * can see. */
+.aurade-photo-card {
+  border-radius: 18px;
+  background-color: rgba(16, 17, 22, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top-color: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.32);
+  padding: 15px 17px 16px 17px;
+}
+
+/* Faded out with the shade rather than dropped between two frames. */
+.aurade-photo-card {
+  transition: opacity 220ms ease-out;
+}
+
+.aurade-photo-card.aurade-gone {
+  opacity: 0;
+}
+
+.aurade-light .aurade-photo-card {
+  background-color: rgba(252, 252, 255, 0.78);
+  border-top: 1px solid rgba(255, 255, 255, 0.80);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+}
+
+.aurade-high-contrast .aurade-photo-card {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+  box-shadow: none;
+}
+
+/* Stillness is honoured by not moving, never by moving less. */
+.aurade-high-contrast .aurade-arrive,
+.aurade-high-contrast .aurade-arrive.aurade-arrived {
+  transition: none;
+}
+
+/* Secondary text, in high contrast.
+ *
+ * `dim-label` is opacity 0.55, which is the right amount of quiet on an
+ * ordinary screen and is contrast thrown away on a screen somebody turned
+ * high contrast on for. Raised rather than removed: the hierarchy is still
+ * information, and 0.85 keeps the date reading as secondary to the clock
+ * while clearing the contrast the setting was chosen to get. */
+.aurade-high-contrast .dim-label {
+  opacity: 0.85;
+}
+
+/* The accent carries the occasion on an ordinary screen. In high contrast the
+ * ground is stated and the foreground has to be the stated one, because a
+ * mid tone lilac on an opaque dark surface is the one pairing this theme
+ * exists to avoid. */
+.aurade-high-contrast .aurade-occasion {
+  color: @window_fg_color;
+}
+
+/* A card standing on frosted photograph.
+ *
+ * The ground is drawn by `Frosted`, underneath, because a blur of the picture
+ * that is actually behind this widget is not something a stylesheet can
+ * express. What is left here is taking away the flat ground the card used to
+ * carry, so the two do not stack into a slab.
+ *
+ * Only applied where there is a photograph to frost. High contrast and a
+ * machine with no wallpaper set never get this class, and keep every rule
+ * above exactly as it was. */
+.aurade-on-glass,
+.aurade-on-glass.aurade-photo-card,
+list.aurade-on-glass.boxed-list {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+/* The rows keep their separators. Those are the only thing telling three
+ * people apart once the ground under them has gone. */
+list.aurade-on-glass.boxed-list > row {
+  background-color: transparent;
+}
+
+/* The password page's ground.
+ *
+ * Padding, not margin: `Frosted` moves a child's margins onto itself, so a
+ * margin here would shrink the glass to the size of the words rather than
+ * put a border of quiet around them.
+ *
+ * Applied whether or not the glass appeared, because a page with no
+ * photograph behind it wants the same breathing room and gets it from the
+ * spacing rather than from a visible card. */
+.aurade-password-card {
+  padding: 30px 36px 28px 36px;
+}
+
+/* Weather warnings on the panel.
+ *
+ * The colour is the tier and nothing else, so the same three roles the rest
+ * of the product uses for severity carry it here: an advisory is information
+ * and a tornado warning is not, and a reader should be able to tell which
+ * without reading the words.
+ *
+ * A rail rather than a filled block. A filled red row in a panel somebody
+ * opened to see whether they need a coat is a shout, and the loud tiers of
+ * this feature are the banner and the takeover, neither of which is here. */
+.aurade-alert {
+  border-radius: 8px;
+  border-left: 3px solid @accent_color;
+  background-color: alpha(@accent_color, 0.10);
+  padding: 8px 11px;
+}
+
+.aurade-alert-line {
+  border-left-color: @accent_color;
+  background-color: alpha(@accent_color, 0.10);
+}
+
+.aurade-alert-banner {
+  border-left-color: @warning_color;
+  background-color: alpha(@warning_color, 0.13);
+}
+
+.aurade-alert-takeover {
+  border-left-color: @error_color;
+  background-color: alpha(@error_color, 0.15);
+}
+
+/* High contrast states its grounds rather than suggesting them, so the
+ * translucent fills go and the border carries the whole distinction. */
+.aurade-high-contrast .aurade-alert {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
+
+/* The sentence.
+ *
+ * Slightly larger than the forecaster's paragraph below it and not dimmed,
+ * because it is the headline and that paragraph is the discussion. It was the
+ * other way round, with the only computed thing on the panel sitting under a
+ * wall of grey text nobody reads to the end of. */
+.aurade-outlook {
+  font-weight: 500;
+}
+
+/* There is more below.
+ *
+ * A fade to the panel's own ground, so the last visible row is cut by light
+ * rather than by an edge. Nothing here is interactive and `can-target` is
+ * off, so it never eats a click meant for the row underneath it. */
+.aurade-more-below {
+  background-image: linear-gradient(to bottom,
+                                    alpha(@window_bg_color, 0),
+                                    alpha(@window_bg_color, 0.92));
+}
+
+/* High contrast draws a rule instead. A gradient is a soft edge and high
+ * contrast exists to remove those, but "there is more below" is information
+ * and removing it entirely would be the wrong trade. */
+.aurade-high-contrast .aurade-more-below {
+  background-image: none;
+  border-bottom: 2px solid @window_fg_color;
+}
+
+/* The strip, across the top, while a warning is live.
+ *
+ * Top rather than beside the clock, and in the overlay rather than in the
+ * page, because it must not reflow anything. A strip that pushes the layout
+ * down is a strip that moves the password field out from under a cursor at
+ * the exact moment somebody is trying to sign in and leave. */
+.aurade-warning-strip {
+  border-radius: 999px;
+  padding: 7px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background-color: rgba(146, 88, 6, 0.90);
+}
+
+/* Its own ground and its own ink, rather than a translucent wash over the
+ * theme's. This sits on a photograph that changes every two minutes, and a
+ * strip tinted onto whatever is behind it is a strip that is unreadable over
+ * a snowfield and invisible over a sunset. */
+.aurade-warning-strip label {
+  color: #ffffff;
+}
+
+.aurade-warning-strip label.dim-label {
+  color: #ffffff;
+  opacity: 0.76;
+}
+
+/* Top tier, once it has been dismissed down to here. Red rather than amber,
+ * because this is the same warning that just covered the whole screen and it
+ * must not look like it got less serious by being got past. */
+.aurade-warning-strip-urgent {
+  background-color: rgba(139, 16, 20, 0.93);
+}
+
+/* The screen, given over.
+ *
+ * Red and dark together rather than either alone. Red at a low enough alpha
+ * to read as a tint leaves the photograph legible, and a photograph of a lake
+ * behind the words "Tornado Warning" is the picture arguing with the message. */
+.aurade-warning-screen {
+  background-image: linear-gradient(to bottom,
+                                    rgba(84, 8, 12, 0.955),
+                                    rgba(52, 4, 8, 0.975));
+}
+
+.aurade-warning-screen-middle {
+  padding: 0 48px;
+}
+
+/* Stated in numbers rather than mixed from the theme's error colour.
+ *
+ * The first version was `alpha(mix(@error_color, black, 0.55), 0.93)`, which
+ * came out brown, left the clock legible through it, and read as a rendering
+ * fault rather than as a decision. This screen is the one place in the
+ * product that overrides somebody deliberately, and what it looks like is not
+ * something to inherit from whatever the accent happens to be. */
+.aurade-warning-screen-event,
+.aurade-warning-screen-middle label,
+.aurade-warning-screen-footer {
+  color: #ffffff;
+}
+
+.aurade-warning-screen-footer {
+  opacity: 0.72;
+}
+
+/* The event name, which is the whole message for anybody who reads one line
+ * and moves. Not dimmed, not spaced out, and larger than anything else this
+ * screen ever draws. */
+.aurade-warning-screen-event {
+  font-weight: 700;
+  font-size: 2.15rem;
+  letter-spacing: -0.01em;
+}
+
+/* High contrast takes the tint away and states it. A translucent red over a
+ * photograph is exactly the kind of soft ground high contrast exists to
+ * remove, and this is the one screen where being read matters most. */
+.aurade-high-contrast .aurade-warning-screen {
+  background-color: @window_bg_color;
+  border: 4px solid @error_color;
+}
+
+.aurade-high-contrast .aurade-warning-strip {
+  background-color: @window_bg_color;
+  border: 2px solid @window_fg_color;
+}
