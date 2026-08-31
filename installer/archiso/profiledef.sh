@@ -25,6 +25,7 @@ file_permissions=(
   ["/usr/local/sbin/aurade-installer-autostart"]=0:0:755
   ["/etc/systemd/system/aurade-installer-autostart.service"]=0:0:644
   ["/etc/systemd/system/aurade-installer-serial.service"]=0:0:644
+  ["/etc/systemd/system/systemd-firstboot.service.d/aurade-live.conf"]=0:0:644
   ["/root/.bash_profile"]=0:0:644
   ["/usr/local/sbin/aurade-recovery"]=0:0:755
   ["/usr/local/sbin/aurade-hardware-qualify"]=0:0:755
