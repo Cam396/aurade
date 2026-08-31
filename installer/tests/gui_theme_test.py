@@ -65,18 +65,18 @@ check(
 )
 
 # And the boot screen's one drawn asset. Plymouth's script plugin has no
-# drawing primitives, so the dot the splash animates is a PNG in the tree
-# rather than four lines of cairo, and a PNG in the tree with no way to check
-# it is a PNG nobody dares change. This is the way to check it.
-dot = subprocess.run(
+# drawing primitives, so the aurora the splash drifts is three PNGs in the
+# tree rather than a shader, and a PNG in the tree with no way to check it is a
+# PNG nobody dares change. This is the way to check it.
+aurora = subprocess.run(
     [sys.executable,
-     os.path.join(ROOT, "installer", "tools", "make-plymouth-dot.py"), "--check"],
+     os.path.join(ROOT, "installer", "tools", "make-plymouth-aurora.py"), "--check"],
     capture_output=True, text=True,
 )
 check(
-    dot.returncode == 0,
-    "the committed boot screen dot is not what its tool draws; run "
-    f"installer/tools/make-plymouth-dot.py ({dot.stderr.strip()})",
+    aurora.returncode == 0,
+    "the committed boot screen aurora is not what its tool draws; run "
+    f"installer/tools/make-plymouth-aurora.py ({aurora.stderr.strip()})",
 )
 
 from aurade_gui import tokens as T  # noqa: E402

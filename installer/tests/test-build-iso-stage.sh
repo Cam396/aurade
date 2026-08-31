@@ -423,7 +423,8 @@ done < "$ROOT/installer/bible/manifest.tsv"
 # Each of those failing alone produces the same symptom, a boot that quietly
 # scrolls kernel messages instead, which looks like nothing was ever built.
 _theme=$TMP/work/profile/airootfs/usr/share/plymouth/themes/aurade
-for _part in aurade.plymouth aurade.script dot.png aurade-mark.png aurade-wordmark.png; do
+for _part in aurade.plymouth aurade.script field-0.png field-1.png field-2.png \
+             aurade-mark.png aurade-wordmark.png; do
   [[ -r $_theme/$_part ]] ||
     { echo "build-iso.sh does not stage the boot screen's $_part" >&2; exit 1; }
   _mode=$(stat -c '%a' "$_theme/$_part")

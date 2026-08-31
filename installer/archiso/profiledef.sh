@@ -85,7 +85,9 @@ file_permissions=(
   ["/etc/plymouth/plymouthd.conf"]=0:0:644
   ["/usr/share/plymouth/themes/aurade/aurade.plymouth"]=0:0:644
   ["/usr/share/plymouth/themes/aurade/aurade.script"]=0:0:644
-  ["/usr/share/plymouth/themes/aurade/dot.png"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/field-0.png"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/field-1.png"]=0:0:644
+  ["/usr/share/plymouth/themes/aurade/field-2.png"]=0:0:644
   ["/usr/share/plymouth/themes/aurade/aurade-mark.png"]=0:0:644
   ["/usr/share/plymouth/themes/aurade/aurade-wordmark.png"]=0:0:644
 )
