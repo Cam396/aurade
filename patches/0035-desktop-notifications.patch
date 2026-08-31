@@ -1,0 +1,1592 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cameron Payne <cameron.paynevmware@gmail.com>
+Date: Fri, 28 Aug 2026 20:47:00 -0500
+Subject: Route Linux desktop notifications into Ash
+
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index 3b533c76924fa65849ded3cd16adceafc4b9410e..d6fdaf14653c1f316ee264a0b944ca0787dd0924 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -22,6 +22,8 @@ static_library("dbus") {
+     "component_updater_service_provider.h",
+     "cryptohome_key_delegate_service_provider.cc",
+     "cryptohome_key_delegate_service_provider.h",
++    "desktop_notification_service.cc",
++    "desktop_notification_service.h",
+     "dlp_files_policy_service_provider.cc",
+     "dlp_files_policy_service_provider.h",
+     "drive_file_stream_service_provider.cc",
+@@ -192,8 +194,13 @@ static_library("dbus") {
+     "//extensions/common",
+     "//mojo/public/cpp/bindings",
+     "//services/network/public/mojom",
++    "//skia",
+     "//third_party/boringssl",
+     "//ui/aura",
++    "//ui/base",
++    "//ui/gfx",
++    "//ui/gfx/codec",
++    "//ui/message_center",
+     "//url",
+   ]
+ 
+@@ -259,6 +266,7 @@ source_set("unit_tests") {
+     "arc_crosh_service_provider_unittest.cc",
+     "arc_tracing_service_provider_unittest.cc",
+     "chrome_features_service_provider_unittest.cc",
++    "desktop_notification_service_unittest.cc",
+     "dlp_files_policy_service_provider_unittest.cc",
+     "encrypted_reporting_service_provider_unittest.cc",
+     "proxy_resolution_service_provider_unittest.cc",
+@@ -307,6 +315,32 @@ source_set("unit_tests") {
+   ]
+ }
+ 
++executable("desktop_notification_service_tests") {
++  testonly = true
++
++  sources = [
++    "desktop_notification_service.cc",
++    "desktop_notification_service_unittest.cc",
++  ]
++
++  deps = [
++    "//base",
++    "//base/test:run_all_unittests",
++    "//base/test:test_support",
++    "//chromeos/ash/components/dbus/services",
++    "//dbus",
++    "//dbus:test_support",
++    "//skia",
++    "//testing/gmock",
++    "//testing/gtest",
++    "//ui/base",
++    "//ui/gfx",
++    "//ui/gfx/codec",
++    "//ui/message_center",
++    "//url",
++  ]
++}
++
+ source_set("browser_tests") {
+   testonly = true
+ 
+diff --git a/chrome/browser/ash/dbus/desktop_notification_service.cc b/chrome/browser/ash/dbus/desktop_notification_service.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..f67b42d88717df7000ab2fb2a3f7c29ef664d725
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_notification_service.cc
+@@ -0,0 +1,888 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/desktop_notification_service.h"
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <limits>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/check.h"
++#include "base/containers/span.h"
++#include "base/environment.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/numerics/checked_math.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/thread_pool.h"
++#include "base/threading/thread.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "third_party/skia/include/core/SkImageInfo.h"
++#include "third_party/skia/include/core/SkPixmap.h"
++#include "ui/base/models/image_model.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "ui/gfx/image/image.h"
++#include "ui/message_center/message_center.h"
++#include "ui/message_center/public/cpp/notification.h"
++#include "ui/message_center/public/cpp/notification_delegate.h"
++#include "ui/message_center/public/cpp/notification_types.h"
++#include "ui/message_center/public/cpp/notifier_id.h"
++#include "url/gurl.h"
++
++namespace ash {
++namespace {
++
++constexpr char kServiceName[] = "org.freedesktop.Notifications";
++constexpr char kObjectPath[] = "/org/freedesktop/Notifications";
++constexpr char kInterfaceName[] = "org.freedesktop.Notifications";
++constexpr char kNotifyMethod[] = "Notify";
++constexpr char kCloseMethod[] = "CloseNotification";
++constexpr char kCapabilitiesMethod[] = "GetCapabilities";
++constexpr char kServerInformationMethod[] = "GetServerInformation";
++constexpr char kClosedSignal[] = "NotificationClosed";
++constexpr char kActionSignal[] = "ActionInvoked";
++constexpr char kInvalidArgumentsError[] =
++    "org.freedesktop.DBus.Error.InvalidArgs";
++constexpr char kInvalidNotificationError[] =
++    "org.freedesktop.Notifications.InvalidNotificationId";
++constexpr size_t kMaxTextBytes = 64 * 1024;
++constexpr size_t kMaxTotalTextBytes = 256 * 1024;
++constexpr size_t kMaxIconNameBytes = 4096;
++constexpr size_t kMaxHints = 64;
++constexpr size_t kMaxActionStrings = 34;
++constexpr size_t kMaxActionButtons = 16;
++constexpr size_t kMaxImageBytes = 4 * 1024 * 1024;
++constexpr int32_t kMaxImageDimension = 1024;
++constexpr size_t kMaxNotifications = 1024;
++constexpr size_t kMaxPendingIconLoads = 64;
++constexpr base::TimeDelta kDefaultExpiration = base::Seconds(10);
++constexpr uint32_t kClosedExpired = 1;
++constexpr uint32_t kClosedByUser = 2;
++constexpr uint32_t kClosedByRequest = 3;
++
++std::unique_ptr<dbus::Response> InvalidArguments(dbus::MethodCall* method_call,
++                                                 const std::string& message) {
++  return dbus::ErrorResponse::FromMethodCall(method_call,
++                                             kInvalidArgumentsError, message);
++}
++
++bool AddTextSize(const std::string& value, size_t* total) {
++  if (!base::IsStringUTF8(value) || value.size() > kMaxTextBytes ||
++      *total > kMaxTotalTextBytes - value.size()) {
++    return false;
++  }
++  *total += value.size();
++  return true;
++}
++
++std::optional<gfx::Image> ReadRawImage(dbus::MessageReader* variant_reader,
++                                       std::string* error_message) {
++  dbus::MessageReader struct_reader(nullptr);
++  int32_t width = 0;
++  int32_t height = 0;
++  int32_t row_stride = 0;
++  bool has_alpha = false;
++  int32_t bits_per_sample = 0;
++  int32_t channels = 0;
++  base::span<const uint8_t> bytes;
++  if (!variant_reader->PopStruct(&struct_reader) ||
++      !struct_reader.PopInt32(&width) || !struct_reader.PopInt32(&height) ||
++      !struct_reader.PopInt32(&row_stride) ||
++      !struct_reader.PopBool(&has_alpha) ||
++      !struct_reader.PopInt32(&bits_per_sample) ||
++      !struct_reader.PopInt32(&channels) ||
++      !struct_reader.PopArrayOfBytes(&bytes) || struct_reader.HasMoreData() ||
++      variant_reader->HasMoreData()) {
++    *error_message = "The image-data hint has invalid fields.";
++    return std::nullopt;
++  }
++
++  const int32_t expected_channels = has_alpha ? 4 : 3;
++  if (width <= 0 || height <= 0 || width > kMaxImageDimension ||
++      height > kMaxImageDimension || row_stride <= 0 || bits_per_sample != 8 ||
++      channels != expected_channels) {
++    *error_message = "The image-data hint has unsupported dimensions.";
++    return std::nullopt;
++  }
++
++  base::CheckedNumeric<size_t> minimum_row = width;
++  minimum_row *= channels;
++  base::CheckedNumeric<size_t> expected_size = row_stride;
++  expected_size *= height;
++  if (!minimum_row.IsValid() || !expected_size.IsValid() ||
++      static_cast<size_t>(row_stride) < minimum_row.ValueOrDie() ||
++      expected_size.ValueOrDie() != bytes.size() ||
++      bytes.size() > kMaxImageBytes) {
++    *error_message = "The image-data hint is too large or incomplete.";
++    return std::nullopt;
++  }
++
++  std::vector<SkColor> pixels(static_cast<size_t>(width) * height);
++  for (size_t y = 0; y < static_cast<size_t>(height); ++y) {
++    const base::span<const uint8_t> source_row = bytes.subspan(
++        y * static_cast<size_t>(row_stride), minimum_row.ValueOrDie());
++    for (size_t x = 0; x < static_cast<size_t>(width); ++x) {
++      const base::span<const uint8_t> source_pixel = source_row.subspan(
++          x * static_cast<size_t>(channels), static_cast<size_t>(channels));
++      pixels.at(y * static_cast<size_t>(width) + x) =
++          SkPreMultiplyARGB(has_alpha ? source_pixel[3] : 255, source_pixel[0],
++                            source_pixel[1], source_pixel[2]);
++    }
++  }
++
++  const SkImageInfo image_info = SkImageInfo::MakeN32Premul(width, height);
++  const SkPixmap source_pixmap(image_info, pixels.data(),
++                               image_info.minRowBytes());
++  SkBitmap bitmap;
++  if (!bitmap.tryAllocPixels(image_info)) {
++    *error_message = "The image-data hint cannot be allocated.";
++    return std::nullopt;
++  }
++  if (!bitmap.writePixels(source_pixmap)) {
++    *error_message = "The image-data hint cannot be copied.";
++    return std::nullopt;
++  }
++  bitmap.setImmutable();
++  return gfx::Image::CreateFrom1xBitmap(bitmap);
++}
++
++std::vector<base::FilePath> IconSearchDirectories() {
++  std::vector<base::FilePath> roots;
++  auto environment = base::Environment::Create();
++  if (std::optional<std::string> home = environment->GetVar("HOME");
++      home && !home->empty()) {
++    roots.push_back(base::FilePath(*home).AppendASCII(".local/share/icons"));
++    roots.push_back(base::FilePath(*home).AppendASCII(".icons"));
++  }
++  roots.emplace_back("/usr/local/share/icons");
++  roots.emplace_back("/usr/share/icons");
++
++  std::vector<base::FilePath> directories;
++  directories.emplace_back("/usr/local/share/pixmaps");
++  directories.emplace_back("/usr/share/pixmaps");
++  static constexpr std::array<const char*, 3> kThemes = {"hicolor", "Adwaita",
++                                                         "gnome"};
++  static constexpr std::array<const char*, 11> kSizes = {
++      "1024x1024", "512x512", "256x256", "128x128", "96x96", "64x64",
++      "48x48",     "32x32",   "24x24",   "22x22",   "16x16"};
++  static constexpr std::array<const char*, 6> kContexts = {
++      "apps", "status", "actions", "devices", "mimetypes", "places"};
++  for (const base::FilePath& root : roots) {
++    for (const char* theme : kThemes) {
++      for (const char* size : kSizes) {
++        for (const char* context : kContexts) {
++          directories.push_back(
++              root.AppendASCII(theme).AppendASCII(size).AppendASCII(context));
++        }
++      }
++      for (const char* context : kContexts) {
++        directories.push_back(root.AppendASCII(theme)
++                                  .AppendASCII("scalable")
++                                  .AppendASCII(context));
++      }
++    }
++  }
++  return directories;
++}
++
++base::FilePath ResolveNamedIcon(const std::string& icon_name) {
++  if (icon_name.empty() || icon_name.size() > kMaxIconNameBytes ||
++      !base::IsStringUTF8(icon_name)) {
++    return base::FilePath();
++  }
++
++  const base::FilePath input(icon_name);
++  if (input.IsAbsolute()) {
++    return base::ToLowerASCII(input.Extension()) == ".png" &&
++                   base::PathExists(input)
++               ? input
++               : base::FilePath();
++  }
++  if (input.BaseName().value() != icon_name || icon_name == "." ||
++      icon_name == "..") {
++    return base::FilePath();
++  }
++
++  std::vector<std::string> names;
++  if (base::ToLowerASCII(input.Extension()) == ".png") {
++    names.push_back(icon_name);
++  } else if (input.Extension().empty()) {
++    names.push_back(icon_name + ".png");
++  } else {
++    return base::FilePath();
++  }
++
++  for (const base::FilePath& directory : IconSearchDirectories()) {
++    for (const std::string& name : names) {
++      const base::FilePath candidate = directory.AppendASCII(name);
++      if (base::PathExists(candidate)) {
++        return candidate;
++      }
++    }
++  }
++  return base::FilePath();
++}
++
++gfx::Image LoadNamedIconOnBlockingThread(std::string icon_name) {
++  const base::FilePath path = ResolveNamedIcon(icon_name);
++  if (path.empty()) {
++    return gfx::Image();
++  }
++
++  std::string contents;
++  if (!base::ReadFileToStringWithMaxSize(path, &contents, kMaxImageBytes)) {
++    return gfx::Image();
++  }
++  SkBitmap bitmap = gfx::PNGCodec::Decode(base::as_byte_span(contents));
++  if (bitmap.drawsNothing() || bitmap.width() > kMaxImageDimension ||
++      bitmap.height() > kMaxImageDimension) {
++    return gfx::Image();
++  }
++  return gfx::Image::CreateFrom1xBitmap(bitmap);
++}
++
++}  // namespace
++
++struct DesktopNotificationService::NotifyRequest {
++  std::string app_name;
++  uint32_t replaces_id = 0;
++  std::string app_icon;
++  std::string summary;
++  std::string body;
++  std::vector<std::pair<std::string, std::string>> actions;
++  std::string default_action;
++  std::optional<gfx::Image> raw_icon;
++  std::string image_path;
++  std::string desktop_entry;
++  uint8_t urgency = 1;
++  bool resident = false;
++  int32_t expire_timeout = -1;
++};
++
++struct DesktopNotificationService::NotificationRecord {
++  uint32_t id = 0;
++  uint64_t generation = 0;
++  std::string message_center_id;
++  std::vector<std::string> button_action_keys;
++  std::string default_action;
++  bool resident = false;
++  std::optional<uint32_t> pending_close_reason;
++  base::OneShotTimer expiration_timer;
++};
++
++class DesktopNotificationService::NotificationDelegate final
++    : public message_center::NotificationDelegate {
++ public:
++  NotificationDelegate(base::WeakPtr<DesktopNotificationService> service,
++                       uint32_t notification_id)
++      : service_(std::move(service)), notification_id_(notification_id) {}
++
++  void Close(bool by_user) override {
++    if (service_) {
++      service_->OnNotificationClosed(notification_id_, by_user);
++    }
++  }
++
++  void Click(const std::optional<int>& button_index,
++             const std::optional<std::u16string>& reply) override {
++    if (service_) {
++      service_->OnNotificationClicked(notification_id_, button_index);
++    }
++  }
++
++ private:
++  ~NotificationDelegate() override = default;
++
++  base::WeakPtr<DesktopNotificationService> service_;
++  const uint32_t notification_id_;
++};
++
++DesktopNotificationService::DesktopNotificationService() = default;
++
++DesktopNotificationService::~DesktopNotificationService() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  if (message_center::MessageCenter* message_center =
++          message_center::MessageCenter::Get()) {
++    std::vector<std::string> ids;
++    ids.reserve(notifications_.size());
++    for (const auto& [id, record] : notifications_) {
++      ids.push_back(record->message_center_id);
++    }
++    for (const std::string& id : ids) {
++      message_center->RemoveNotification(id, false);
++    }
++  }
++  notifications_.clear();
++}
++
++void DesktopNotificationService::Start(
++    scoped_refptr<dbus::ExportedObject> exported_object) {
++  exported_object_ = std::move(exported_object);
++  exported_object_->ExportMethod(
++      kInterfaceName, kNotifyMethod,
++      base::BindRepeating(&DesktopNotificationService::HandleNotify,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopNotificationService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++  exported_object_->ExportMethod(
++      kInterfaceName, kCloseMethod,
++      base::BindRepeating(&DesktopNotificationService::HandleCloseNotification,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopNotificationService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++  exported_object_->ExportMethod(
++      kInterfaceName, kCapabilitiesMethod,
++      base::BindRepeating(&DesktopNotificationService::HandleGetCapabilities,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopNotificationService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++  exported_object_->ExportMethod(
++      kInterfaceName, kServerInformationMethod,
++      base::BindRepeating(
++          &DesktopNotificationService::HandleGetServerInformation,
++          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopNotificationService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void DesktopNotificationService::OnExported(const std::string& interface_name,
++                                            const std::string& method_name,
++                                            bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE notification service could not export "
++                          << interface_name << "." << method_name;
++}
++
++bool DesktopNotificationService::ParseNotifyRequest(
++    dbus::MethodCall* method_call,
++    NotifyRequest* request,
++    std::string* error_message) {
++  if (method_call->GetSignature() != "susssasa{sv}i") {
++    *error_message = "Notify has invalid arguments.";
++    return false;
++  }
++
++  dbus::MessageReader reader(method_call);
++  std::vector<std::string> action_strings;
++  dbus::MessageReader hints_reader(nullptr);
++  if (!reader.PopString(&request->app_name) ||
++      !reader.PopUint32(&request->replaces_id) ||
++      !reader.PopString(&request->app_icon) ||
++      !reader.PopString(&request->summary) ||
++      !reader.PopString(&request->body) ||
++      !reader.PopArrayOfStrings(&action_strings) ||
++      !reader.PopArray(&hints_reader)) {
++    *error_message = "Notify has invalid arguments.";
++    return false;
++  }
++
++  size_t total_text_bytes = 0;
++  if (!AddTextSize(request->app_name, &total_text_bytes) ||
++      !AddTextSize(request->summary, &total_text_bytes) ||
++      !AddTextSize(request->body, &total_text_bytes) ||
++      request->app_icon.size() > kMaxIconNameBytes ||
++      !base::IsStringUTF8(request->app_icon)) {
++    *error_message = "Notify contains invalid or oversized text.";
++    return false;
++  }
++  if (action_strings.size() % 2 != 0 ||
++      action_strings.size() > kMaxActionStrings) {
++    *error_message = "Notify contains an invalid action list.";
++    return false;
++  }
++
++  size_t action_button_count = 0;
++  for (size_t index = 0; index < action_strings.size(); index += 2) {
++    if (!AddTextSize(action_strings[index], &total_text_bytes) ||
++        !AddTextSize(action_strings[index + 1], &total_text_bytes) ||
++        action_strings[index].empty()) {
++      *error_message = "Notify contains an invalid action.";
++      return false;
++    }
++    if (action_strings[index] == "default") {
++      request->default_action = action_strings[index];
++      continue;
++    }
++    ++action_button_count;
++    request->actions.emplace_back(action_strings[index],
++                                  action_strings[index + 1]);
++  }
++  if (action_button_count > kMaxActionButtons) {
++    *error_message = "Notify contains too many action buttons.";
++    return false;
++  }
++
++  size_t hint_count = 0;
++  while (hints_reader.HasMoreData()) {
++    if (++hint_count > kMaxHints) {
++      *error_message = "Notify contains too many hints.";
++      return false;
++    }
++    dbus::MessageReader entry_reader(nullptr);
++    dbus::MessageReader variant_reader(nullptr);
++    std::string key;
++    if (!hints_reader.PopDictEntry(&entry_reader) ||
++        !entry_reader.PopString(&key) ||
++        !entry_reader.PopVariant(&variant_reader) ||
++        entry_reader.HasMoreData() || !base::IsStringUTF8(key) ||
++        key.size() > 256) {
++      *error_message = "Notify contains an invalid hint.";
++      return false;
++    }
++
++    if (key == "urgency") {
++      if (!variant_reader.PopByte(&request->urgency) ||
++          variant_reader.HasMoreData() || request->urgency > 2) {
++        *error_message = "The urgency hint is invalid.";
++        return false;
++      }
++    } else if (key == "resident") {
++      if (!variant_reader.PopBool(&request->resident) ||
++          variant_reader.HasMoreData()) {
++        *error_message = "The resident hint is invalid.";
++        return false;
++      }
++    } else if (key == "desktop-entry") {
++      if (!variant_reader.PopString(&request->desktop_entry) ||
++          variant_reader.HasMoreData() ||
++          !AddTextSize(request->desktop_entry, &total_text_bytes)) {
++        *error_message = "The desktop-entry hint is invalid.";
++        return false;
++      }
++    } else if (key == "image-path" || key == "image_path") {
++      if (!variant_reader.PopString(&request->image_path) ||
++          variant_reader.HasMoreData() ||
++          request->image_path.size() > kMaxIconNameBytes ||
++          !base::IsStringUTF8(request->image_path)) {
++        *error_message = "The image path hint is invalid.";
++        return false;
++      }
++    } else if (key == "image-data" || key == "image_data" ||
++               key == "icon_data") {
++      std::optional<gfx::Image> image =
++          ReadRawImage(&variant_reader, error_message);
++      if (!image) {
++        return false;
++      }
++      request->raw_icon = std::move(*image);
++    }
++  }
++
++  if (!reader.PopInt32(&request->expire_timeout) || reader.HasMoreData() ||
++      request->expire_timeout < -1) {
++    *error_message = "The expiration timeout is invalid.";
++    return false;
++  }
++  return true;
++}
++
++uint32_t DesktopNotificationService::AllocateNotificationId() {
++  for (size_t attempt = 0; attempt <= notifications_.size(); ++attempt) {
++    const uint32_t candidate = next_notification_id_++;
++    if (next_notification_id_ == 0) {
++      next_notification_id_ = 1;
++    }
++    if (candidate != 0 && !notifications_.contains(candidate)) {
++      return candidate;
++    }
++  }
++  return 0;
++}
++
++void DesktopNotificationService::HandleNotify(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  NotifyRequest request;
++  std::string error_message;
++  if (!ParseNotifyRequest(method_call, &request, &error_message)) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call, error_message));
++    return;
++  }
++
++  message_center::MessageCenter* message_center =
++      message_center::MessageCenter::Get();
++  if (!message_center) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "The notification center is not available."));
++    return;
++  }
++
++  const bool replacing =
++      request.replaces_id != 0 && notifications_.contains(request.replaces_id);
++  if (!replacing && notifications_.size() >= kMaxNotifications) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "The notification limit has been reached."));
++    return;
++  }
++
++  const uint32_t notification_id =
++      replacing ? request.replaces_id : AllocateNotificationId();
++  if (notification_id == 0) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "A notification identifier is not available."));
++    return;
++  }
++
++  std::unique_ptr<NotificationRecord> new_record;
++  NotificationRecord* record = nullptr;
++  if (replacing) {
++    record = notifications_.at(notification_id).get();
++    record->expiration_timer.Stop();
++    record->pending_close_reason.reset();
++    record->button_action_keys.clear();
++  } else {
++    new_record = std::make_unique<NotificationRecord>();
++    record = new_record.get();
++    record->id = notification_id;
++    record->message_center_id =
++        "freedesktop:" + base::NumberToString(notification_id);
++  }
++  record->generation = next_generation_++;
++  record->default_action = request.default_action;
++  record->resident = request.resident;
++
++  message_center::RichNotificationData rich_data;
++  switch (request.urgency) {
++    case 0:
++      rich_data.priority = message_center::LOW_PRIORITY;
++      break;
++    case 2:
++      rich_data.priority = message_center::MAX_PRIORITY;
++      rich_data.never_timeout = true;
++      break;
++    default:
++      rich_data.priority = message_center::DEFAULT_PRIORITY;
++      break;
++  }
++  if (request.expire_timeout == 0) {
++    rich_data.never_timeout = true;
++  }
++  for (const auto& [action_key, label] : request.actions) {
++    record->button_action_keys.push_back(action_key);
++    rich_data.buttons.emplace_back(base::UTF8ToUTF16(label));
++  }
++
++  ui::ImageModel icon;
++  if (request.raw_icon) {
++    icon = ui::ImageModel::FromImage(*request.raw_icon);
++  }
++  const std::string source =
++      !request.app_name.empty()
++          ? request.app_name
++          : (!request.desktop_entry.empty() ? request.desktop_entry
++                                            : "Application");
++  const std::string notifier =
++      !request.desktop_entry.empty() ? request.desktop_entry : source;
++  message_center::NotifierId notifier_id(
++      message_center::NotifierType::APPLICATION, notifier);
++  auto notification = std::make_unique<message_center::Notification>(
++      message_center::NOTIFICATION_TYPE_SIMPLE, record->message_center_id,
++      base::UTF8ToUTF16(request.summary), base::UTF8ToUTF16(request.body), icon,
++      base::UTF8ToUTF16(source), GURL(), notifier_id, rich_data,
++      base::MakeRefCounted<NotificationDelegate>(weak_ptr_factory_.GetWeakPtr(),
++                                                 notification_id));
++
++  if (replacing) {
++    message_center->UpdateNotification(record->message_center_id,
++                                       std::move(notification));
++  } else {
++    notifications_.emplace(notification_id, std::move(new_record));
++    message_center->AddNotification(std::move(notification));
++  }
++
++  ScheduleExpiration(notification_id, request.expire_timeout, request.urgency);
++  if (!request.raw_icon) {
++    const std::string named_icon =
++        !request.image_path.empty() ? request.image_path : request.app_icon;
++    if (!named_icon.empty()) {
++      LoadNamedIcon(notification_id, record->generation, named_icon);
++    }
++  }
++
++  auto response = dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  writer.AppendUint32(notification_id);
++  std::move(response_sender).Run(std::move(response));
++}
++
++void DesktopNotificationService::ScheduleExpiration(uint32_t notification_id,
++                                                    int32_t expire_timeout,
++                                                    uint8_t urgency) {
++  auto iterator = notifications_.find(notification_id);
++  if (iterator == notifications_.end() || expire_timeout == 0 || urgency == 2) {
++    return;
++  }
++  const base::TimeDelta delay = expire_timeout < 0
++                                    ? kDefaultExpiration
++                                    : base::Milliseconds(expire_timeout);
++  iterator->second->expiration_timer.Start(
++      FROM_HERE, delay,
++      base::BindOnce(&DesktopNotificationService::ExpireNotification,
++                     weak_ptr_factory_.GetWeakPtr(), notification_id));
++}
++
++void DesktopNotificationService::ExpireNotification(uint32_t notification_id) {
++  CloseNotification(notification_id, kClosedExpired);
++}
++
++void DesktopNotificationService::HandleCloseNotification(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  if (method_call->GetSignature() != "u") {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "CloseNotification has invalid arguments."));
++    return;
++  }
++  dbus::MessageReader reader(method_call);
++  uint32_t notification_id = 0;
++  if (!reader.PopUint32(&notification_id) || reader.HasMoreData()) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "CloseNotification has invalid arguments."));
++    return;
++  }
++  if (!notifications_.contains(notification_id)) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, kInvalidNotificationError,
++            "The notification is not active."));
++    return;
++  }
++  CloseNotification(notification_id, kClosedByRequest);
++  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
++}
++
++void DesktopNotificationService::HandleGetCapabilities(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  if (!method_call->GetSignature().empty()) {
++    std::move(response_sender)
++        .Run(InvalidArguments(method_call,
++                              "GetCapabilities does not accept arguments."));
++    return;
++  }
++  auto response = dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  writer.AppendArrayOfStrings({"actions", "body", "icon-static"});
++  std::move(response_sender).Run(std::move(response));
++}
++
++void DesktopNotificationService::HandleGetServerInformation(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  if (!method_call->GetSignature().empty()) {
++    std::move(response_sender)
++        .Run(InvalidArguments(
++            method_call, "GetServerInformation does not accept arguments."));
++    return;
++  }
++  auto response = dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  writer.AppendString("AuraDE");
++  writer.AppendString("AuraDE");
++  writer.AppendString("0.2.0");
++  writer.AppendString("1.2");
++  std::move(response_sender).Run(std::move(response));
++}
++
++void DesktopNotificationService::CloseNotification(uint32_t notification_id,
++                                                   uint32_t reason) {
++  auto iterator = notifications_.find(notification_id);
++  if (iterator == notifications_.end()) {
++    return;
++  }
++  iterator->second->pending_close_reason = reason;
++  message_center::MessageCenter* message_center =
++      message_center::MessageCenter::Get();
++  if (message_center && message_center->FindNotificationById(
++                            iterator->second->message_center_id)) {
++    message_center->RemoveNotification(iterator->second->message_center_id,
++                                       reason == kClosedByUser);
++    return;
++  }
++  EmitNotificationClosed(notification_id, reason);
++  notifications_.erase(iterator);
++}
++
++void DesktopNotificationService::OnNotificationClosed(uint32_t notification_id,
++                                                      bool by_user) {
++  auto iterator = notifications_.find(notification_id);
++  if (iterator == notifications_.end()) {
++    return;
++  }
++  const uint32_t reason = iterator->second->pending_close_reason.value_or(
++      by_user ? kClosedByUser : kClosedByRequest);
++  iterator->second->expiration_timer.Stop();
++  EmitNotificationClosed(notification_id, reason);
++  notifications_.erase(iterator);
++}
++
++void DesktopNotificationService::OnNotificationClicked(
++    uint32_t notification_id,
++    const std::optional<int>& button_index) {
++  auto iterator = notifications_.find(notification_id);
++  if (iterator == notifications_.end()) {
++    return;
++  }
++
++  std::string action_key;
++  if (button_index) {
++    if (*button_index < 0 || static_cast<size_t>(*button_index) >=
++                                 iterator->second->button_action_keys.size()) {
++      return;
++    }
++    action_key = iterator->second->button_action_keys[*button_index];
++  } else {
++    action_key = iterator->second->default_action;
++  }
++  if (action_key.empty()) {
++    return;
++  }
++
++  const bool resident = iterator->second->resident;
++  EmitActionInvoked(notification_id, action_key);
++  if (!resident) {
++    CloseNotification(notification_id, kClosedByUser);
++  }
++}
++
++void DesktopNotificationService::EmitNotificationClosed(
++    uint32_t notification_id,
++    uint32_t reason) {
++  if (!exported_object_) {
++    return;
++  }
++  dbus::Signal signal(kInterfaceName, kClosedSignal);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendUint32(notification_id);
++  writer.AppendUint32(reason);
++  exported_object_->SendSignal(&signal);
++}
++
++void DesktopNotificationService::EmitActionInvoked(
++    uint32_t notification_id,
++    const std::string& action_key) {
++  if (!exported_object_) {
++    return;
++  }
++  dbus::Signal signal(kInterfaceName, kActionSignal);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendUint32(notification_id);
++  writer.AppendString(action_key);
++  exported_object_->SendSignal(&signal);
++}
++
++void DesktopNotificationService::LoadNamedIcon(uint32_t notification_id,
++                                               uint64_t generation,
++                                               std::string icon_name) {
++  if (pending_icon_loads_ >= kMaxPendingIconLoads) {
++    return;
++  }
++  ++pending_icon_loads_;
++  if (!base::ThreadPool::PostTaskAndReplyWithResult(
++          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++          base::BindOnce(&LoadNamedIconOnBlockingThread, std::move(icon_name)),
++          base::BindOnce(&DesktopNotificationService::OnNamedIconLoaded,
++                         weak_ptr_factory_.GetWeakPtr(), notification_id,
++                         generation))) {
++    --pending_icon_loads_;
++  }
++}
++
++void DesktopNotificationService::OnNamedIconLoaded(uint32_t notification_id,
++                                                   uint64_t generation,
++                                                   gfx::Image image) {
++  CHECK_GT(pending_icon_loads_, 0u);
++  --pending_icon_loads_;
++  auto iterator = notifications_.find(notification_id);
++  if (iterator == notifications_.end() ||
++      iterator->second->generation != generation || image.IsEmpty()) {
++    return;
++  }
++  if (message_center::MessageCenter* message_center =
++          message_center::MessageCenter::Get()) {
++    message_center->SetNotificationIcon(iterator->second->message_center_id,
++                                        ui::ImageModel::FromImage(image));
++  }
++}
++
++DesktopNotificationServiceHost::DesktopNotificationServiceHost() = default;
++
++DesktopNotificationServiceHost::~DesktopNotificationServiceHost() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  service_.reset();
++  exported_object_.reset();
++  if (bus_) {
++    bus_->ShutdownOnDBusThreadAndBlock();
++    bus_.reset();
++  }
++  if (dbus_thread_) {
++    dbus_thread_->Stop();
++  }
++}
++
++// static
++std::unique_ptr<DesktopNotificationServiceHost>
++DesktopNotificationServiceHost::Create() {
++  auto host = std::unique_ptr<DesktopNotificationServiceHost>(
++      new DesktopNotificationServiceHost());
++  if (!host->Start()) {
++    return nullptr;
++  }
++  return host;
++}
++
++bool DesktopNotificationServiceHost::Start() {
++  dbus_thread_ =
++      std::make_unique<base::Thread>("AuraDE notification D-Bus thread");
++  base::Thread::Options thread_options;
++  thread_options.message_pump_type = base::MessagePumpType::IO;
++  if (!dbus_thread_->StartWithOptions(std::move(thread_options))) {
++    LOG(ERROR) << "AuraDE notification service could not start its D-Bus "
++                  "thread";
++    return false;
++  }
++
++  dbus::Bus::Options bus_options;
++  bus_options.bus_type = dbus::Bus::SESSION;
++  bus_options.connection_type = dbus::Bus::PRIVATE;
++  bus_options.dbus_task_runner = dbus_thread_->task_runner();
++  bus_ = new dbus::Bus(std::move(bus_options));
++  exported_object_ = bus_->GetExportedObject(dbus::ObjectPath(kObjectPath));
++  service_ = std::make_unique<DesktopNotificationService>();
++  service_->Start(exported_object_);
++  bus_->RequestOwnership(
++      kServiceName, dbus::Bus::REQUIRE_PRIMARY_ALLOW_REPLACEMENT,
++      base::BindOnce(&DesktopNotificationServiceHost::OnOwnership,
++                     weak_ptr_factory_.GetWeakPtr()));
++  return true;
++}
++
++void DesktopNotificationServiceHost::OnOwnership(
++    const std::string& service_name,
++    bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not own " << service_name;
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/dbus/desktop_notification_service.h b/chrome/browser/ash/dbus/desktop_notification_service.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..97b03d3625a979fe9b1076e37f2738cc4fb429ac
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_notification_service.h
+@@ -0,0 +1,125 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_DESKTOP_NOTIFICATION_SERVICE_H_
++#define CHROME_BROWSER_ASH_DBUS_DESKTOP_NOTIFICATION_SERVICE_H_
++
++#include <cstddef>
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "chromeos/ash/components/dbus/services/cros_dbus_service.h"
++#include "dbus/exported_object.h"
++#include "ui/gfx/image/image.h"
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class MethodCall;
++class Response;
++}  // namespace dbus
++
++namespace ash {
++
++// Implements the freedesktop.org notification service for Linux applications
++// running in an AuraDE session. Requests stay on the user's session bus and
++// are translated into Ash message center notifications.
++class DesktopNotificationService final
++    : public CrosDBusService::ServiceProviderInterface {
++ public:
++  DesktopNotificationService();
++  DesktopNotificationService(const DesktopNotificationService&) = delete;
++  DesktopNotificationService& operator=(const DesktopNotificationService&) =
++      delete;
++  ~DesktopNotificationService() override;
++
++  // CrosDBusService::ServiceProviderInterface:
++  void Start(scoped_refptr<dbus::ExportedObject> exported_object) override;
++
++ private:
++  class NotificationDelegate;
++  struct NotificationRecord;
++  struct NotifyRequest;
++
++  void HandleNotify(dbus::MethodCall* method_call,
++                    dbus::ExportedObject::ResponseSender response_sender);
++  void HandleCloseNotification(
++      dbus::MethodCall* method_call,
++      dbus::ExportedObject::ResponseSender response_sender);
++  void HandleGetCapabilities(
++      dbus::MethodCall* method_call,
++      dbus::ExportedObject::ResponseSender response_sender);
++  void HandleGetServerInformation(
++      dbus::MethodCall* method_call,
++      dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++
++  bool ParseNotifyRequest(dbus::MethodCall* method_call,
++                          NotifyRequest* request,
++                          std::string* error_message);
++  uint32_t AllocateNotificationId();
++  void ScheduleExpiration(uint32_t notification_id,
++                          int32_t expire_timeout,
++                          uint8_t urgency);
++  void ExpireNotification(uint32_t notification_id);
++  void CloseNotification(uint32_t notification_id, uint32_t reason);
++  void OnNotificationClosed(uint32_t notification_id, bool by_user);
++  void OnNotificationClicked(uint32_t notification_id,
++                             const std::optional<int>& button_index);
++  void EmitNotificationClosed(uint32_t notification_id, uint32_t reason);
++  void EmitActionInvoked(uint32_t notification_id,
++                         const std::string& action_key);
++  void LoadNamedIcon(uint32_t notification_id,
++                     uint64_t generation,
++                     std::string icon_name);
++  void OnNamedIconLoaded(uint32_t notification_id,
++                         uint64_t generation,
++                         gfx::Image image);
++
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  std::map<uint32_t, std::unique_ptr<NotificationRecord>> notifications_;
++  uint32_t next_notification_id_ = 1;
++  uint64_t next_generation_ = 1;
++  size_t pending_icon_loads_ = 0;
++  base::WeakPtrFactory<DesktopNotificationService> weak_ptr_factory_{this};
++};
++
++// Owns the private session bus connection used by the notification service.
++// The service itself remains separate so its parser and message center bridge
++// can be tested without a live D-Bus daemon.
++class DesktopNotificationServiceHost final {
++ public:
++  static std::unique_ptr<DesktopNotificationServiceHost> Create();
++
++  DesktopNotificationServiceHost(const DesktopNotificationServiceHost&) =
++      delete;
++  DesktopNotificationServiceHost& operator=(
++      const DesktopNotificationServiceHost&) = delete;
++  ~DesktopNotificationServiceHost();
++
++ private:
++  DesktopNotificationServiceHost();
++  bool Start();
++  void OnOwnership(const std::string& service_name, bool success);
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  std::unique_ptr<DesktopNotificationService> service_;
++  base::WeakPtrFactory<DesktopNotificationServiceHost> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_NOTIFICATION_SERVICE_H_
+diff --git a/chrome/browser/ash/dbus/desktop_notification_service_unittest.cc b/chrome/browser/ash/dbus/desktop_notification_service_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..12907e59cb95dc33f3212037638e50718cb32aac
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_notification_service_unittest.cc
+@@ -0,0 +1,444 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/desktop_notification_service.h"
++
++#include <dbus/dbus.h>
++
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/functional/bind.h"
++#include "base/scoped_environment_variable_override.h"
++#include "base/test/task_environment.h"
++#include "base/time/time.h"
++#include "dbus/message.h"
++#include "dbus/mock_exported_object.h"
++#include "dbus/object_path.h"
++#include "testing/gmock/include/gmock/gmock.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "ui/message_center/message_center.h"
++#include "ui/message_center/public/cpp/notification.h"
++
++namespace ash {
++namespace {
++
++constexpr char kObjectPath[] = "/org/freedesktop/Notifications";
++constexpr char kInterfaceName[] = "org.freedesktop.Notifications";
++
++struct RawImage {
++  int32_t width = 2;
++  int32_t height = 2;
++  int32_t row_stride = 8;
++  bool has_alpha = true;
++  int32_t bits_per_sample = 8;
++  int32_t channels = 4;
++  std::vector<uint8_t> bytes = {
++      255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
++  };
++};
++
++struct NotifyOptions {
++  std::string app_name = "Test app";
++  std::string icon;
++  std::string summary = "A readable title";
++  std::string body = "A readable message";
++  std::vector<std::string> actions;
++  bool resident = false;
++  std::optional<uint8_t> urgency;
++  std::optional<RawImage> raw_image;
++  int32_t expire_timeout = 0;
++};
++
++void AppendNotifyArguments(dbus::MethodCall* method_call,
++                           const NotifyOptions& options) {
++  dbus::MessageWriter writer(method_call);
++  writer.AppendString(options.app_name);
++  writer.AppendUint32(0);
++  writer.AppendString(options.icon);
++  writer.AppendString(options.summary);
++  writer.AppendString(options.body);
++  writer.AppendArrayOfStrings(options.actions);
++
++  dbus::MessageWriter hints_writer(nullptr);
++  writer.OpenArray("{sv}", &hints_writer);
++  if (options.resident) {
++    dbus::MessageWriter entry_writer(nullptr);
++    dbus::MessageWriter variant_writer(nullptr);
++    hints_writer.OpenDictEntry(&entry_writer);
++    entry_writer.AppendString("resident");
++    entry_writer.OpenVariant("b", &variant_writer);
++    variant_writer.AppendBool(true);
++    entry_writer.CloseContainer(&variant_writer);
++    hints_writer.CloseContainer(&entry_writer);
++  }
++  if (options.urgency) {
++    dbus::MessageWriter entry_writer(nullptr);
++    dbus::MessageWriter variant_writer(nullptr);
++    hints_writer.OpenDictEntry(&entry_writer);
++    entry_writer.AppendString("urgency");
++    entry_writer.OpenVariant("y", &variant_writer);
++    variant_writer.AppendByte(*options.urgency);
++    entry_writer.CloseContainer(&variant_writer);
++    hints_writer.CloseContainer(&entry_writer);
++  }
++  if (options.raw_image) {
++    const RawImage& image = *options.raw_image;
++    dbus::MessageWriter entry_writer(nullptr);
++    dbus::MessageWriter variant_writer(nullptr);
++    dbus::MessageWriter struct_writer(nullptr);
++    hints_writer.OpenDictEntry(&entry_writer);
++    entry_writer.AppendString("image-data");
++    entry_writer.OpenVariant("(iiibiiay)", &variant_writer);
++    variant_writer.OpenStruct(&struct_writer);
++    struct_writer.AppendInt32(image.width);
++    struct_writer.AppendInt32(image.height);
++    struct_writer.AppendInt32(image.row_stride);
++    struct_writer.AppendBool(image.has_alpha);
++    struct_writer.AppendInt32(image.bits_per_sample);
++    struct_writer.AppendInt32(image.channels);
++    struct_writer.AppendArrayOfBytes(image.bytes);
++    variant_writer.CloseContainer(&struct_writer);
++    entry_writer.CloseContainer(&variant_writer);
++    hints_writer.CloseContainer(&entry_writer);
++  }
++  writer.CloseContainer(&hints_writer);
++  writer.AppendInt32(options.expire_timeout);
++}
++
++uint32_t ReadNotificationId(dbus::Response* response) {
++  dbus::MessageReader reader(response);
++  uint32_t notification_id = 0;
++  EXPECT_TRUE(reader.PopUint32(&notification_id));
++  EXPECT_FALSE(reader.HasMoreData());
++  return notification_id;
++}
++
++}  // namespace
++
++class DesktopNotificationServiceTest : public testing::Test {
++ public:
++  DesktopNotificationServiceTest() = default;
++
++  void SetUp() override {
++    message_center::MessageCenter::Initialize();
++    exported_object_ =
++        new dbus::MockExportedObject(nullptr, dbus::ObjectPath(kObjectPath));
++    EXPECT_CALL(*exported_object_, ExportMethod(kInterfaceName, testing::_,
++                                                testing::_, testing::_))
++        .WillRepeatedly(testing::Invoke(
++            this, &DesktopNotificationServiceTest::MockExportMethod));
++    EXPECT_CALL(*exported_object_, SendSignal(testing::_))
++        .WillRepeatedly(testing::Invoke(
++            this, &DesktopNotificationServiceTest::MockSendSignal));
++    service_ = std::make_unique<DesktopNotificationService>();
++    service_->Start(exported_object_);
++  }
++
++  void TearDown() override {
++    service_.reset();
++    exported_object_.reset();
++    message_center::MessageCenter::Shutdown();
++  }
++
++ protected:
++  void MockExportMethod(
++      const std::string& interface_name,
++      const std::string& method_name,
++      dbus::ExportedObject::MethodCallCallback method_callback,
++      dbus::ExportedObject::OnExportedCallback on_exported_callback) {
++    method_callbacks_[method_name] = std::move(method_callback);
++    std::move(on_exported_callback).Run(interface_name, method_name, true);
++  }
++
++  void MockSendSignal(dbus::Signal* signal) {
++    signal_name_ = signal->GetMember();
++    dbus::MessageReader reader(signal);
++    EXPECT_TRUE(reader.PopUint32(&signal_notification_id_));
++    if (signal_name_ == "ActionInvoked") {
++      EXPECT_TRUE(reader.PopString(&signal_action_key_));
++    } else if (signal_name_ == "NotificationClosed") {
++      EXPECT_TRUE(reader.PopUint32(&signal_close_reason_));
++    } else {
++      ADD_FAILURE() << "Unexpected signal: " << signal_name_;
++    }
++    EXPECT_FALSE(reader.HasMoreData());
++  }
++
++  std::unique_ptr<dbus::Response> CallMethod(dbus::MethodCall* method_call) {
++    method_call->SetSerial(1);
++    const auto callback = method_callbacks_.find(method_call->GetMember());
++    EXPECT_NE(method_callbacks_.end(), callback);
++    if (callback == method_callbacks_.end()) {
++      return nullptr;
++    }
++    std::unique_ptr<dbus::Response> response;
++    callback->second.Run(method_call,
++                         base::BindOnce(
++                             [](std::unique_ptr<dbus::Response>* destination,
++                                std::unique_ptr<dbus::Response> value) {
++                               *destination = std::move(value);
++                             },
++                             &response));
++    return response;
++  }
++
++  std::unique_ptr<dbus::Response> CallNotifyDirect(
++      dbus::MethodCall* method_call) {
++    return CallMethod(method_call);
++  }
++
++  std::unique_ptr<dbus::Response> NotifyDirect(const NotifyOptions& options) {
++    dbus::MethodCall method_call(kInterfaceName, "Notify");
++    AppendNotifyArguments(&method_call, options);
++    return CallNotifyDirect(&method_call);
++  }
++
++  std::unique_ptr<dbus::Response> GetCapabilitiesDirect() {
++    dbus::MethodCall method_call(kInterfaceName, "GetCapabilities");
++    return CallMethod(&method_call);
++  }
++
++  std::unique_ptr<dbus::Response> GetServerInformationDirect() {
++    dbus::MethodCall method_call(kInterfaceName, "GetServerInformation");
++    return CallMethod(&method_call);
++  }
++
++  base::test::TaskEnvironment task_environment_{
++      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
++  scoped_refptr<dbus::MockExportedObject> exported_object_;
++  std::unique_ptr<DesktopNotificationService> service_;
++  std::map<std::string, dbus::ExportedObject::MethodCallCallback>
++      method_callbacks_;
++  std::string signal_name_;
++  uint32_t signal_notification_id_ = 0;
++  uint32_t signal_close_reason_ = 0;
++  std::string signal_action_key_;
++};
++
++TEST_F(DesktopNotificationServiceTest, ReportsOnlyImplementedCapabilities) {
++  std::unique_ptr<dbus::Response> response = GetCapabilitiesDirect();
++
++  ASSERT_TRUE(response);
++  dbus::MessageReader reader(response.get());
++  std::vector<std::string> capabilities;
++  ASSERT_TRUE(reader.PopArrayOfStrings(&capabilities));
++  EXPECT_EQ((std::vector<std::string>{"actions", "body", "icon-static"}),
++            capabilities);
++}
++
++TEST_F(DesktopNotificationServiceTest, ReportsServerInformation) {
++  std::unique_ptr<dbus::Response> response = GetServerInformationDirect();
++  ASSERT_TRUE(response);
++  dbus::MessageReader reader(response.get());
++  std::string name;
++  std::string vendor;
++  std::string version;
++  std::string specification_version;
++  EXPECT_TRUE(reader.PopString(&name));
++  EXPECT_TRUE(reader.PopString(&vendor));
++  EXPECT_TRUE(reader.PopString(&version));
++  EXPECT_TRUE(reader.PopString(&specification_version));
++  EXPECT_FALSE(reader.HasMoreData());
++  EXPECT_EQ("AuraDE", name);
++  EXPECT_EQ("AuraDE", vendor);
++  EXPECT_EQ("0.2.0", version);
++  EXPECT_EQ("1.2", specification_version);
++}
++
++TEST_F(DesktopNotificationServiceTest, AddsReadableNotification) {
++  std::unique_ptr<dbus::Response> response = NotifyDirect(NotifyOptions());
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++  message_center::Notification* notification =
++      message_center::MessageCenter::Get()->FindNotificationById(
++          "freedesktop:" + std::to_string(notification_id));
++  ASSERT_TRUE(notification);
++  EXPECT_EQ(u"A readable title", notification->title());
++  EXPECT_EQ(u"A readable message", notification->message());
++  EXPECT_EQ(u"Test app", notification->display_source());
++}
++
++TEST_F(DesktopNotificationServiceTest, EmitsCorrectActionKey) {
++  NotifyOptions options;
++  options.resident = true;
++  options.actions = {"default", "Open",    "accept",
++                     "Accept",  "dismiss", "Dismiss"};
++
++  dbus::MethodCall method_call(kInterfaceName, "Notify");
++  AppendNotifyArguments(&method_call, options);
++  std::unique_ptr<dbus::Response> response = CallMethod(&method_call);
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++  message_center::Notification* notification =
++      message_center::MessageCenter::Get()->FindNotificationById(
++          "freedesktop:" + std::to_string(notification_id));
++  ASSERT_TRUE(notification);
++  ASSERT_EQ(2u, notification->buttons().size());
++  EXPECT_EQ(u"Accept", notification->buttons()[0].title);
++  EXPECT_EQ(u"Dismiss", notification->buttons()[1].title);
++
++  message_center::MessageCenter::Get()->ClickOnNotificationButton(
++      notification->id(), 1);
++  EXPECT_EQ("ActionInvoked", signal_name_);
++  EXPECT_EQ(notification_id, signal_notification_id_);
++  EXPECT_EQ("dismiss", signal_action_key_);
++}
++
++TEST_F(DesktopNotificationServiceTest, CloseNotificationSignalsRequest) {
++  std::unique_ptr<dbus::Response> response = NotifyDirect(NotifyOptions());
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++
++  dbus::MethodCall close_call(kInterfaceName, "CloseNotification");
++  dbus::MessageWriter close_writer(&close_call);
++  close_writer.AppendUint32(notification_id);
++  response = CallMethod(&close_call);
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_METHOD_RETURN, response->GetMessageType());
++  EXPECT_EQ("NotificationClosed", signal_name_);
++  EXPECT_EQ(notification_id, signal_notification_id_);
++  EXPECT_EQ(3u, signal_close_reason_);
++  EXPECT_FALSE(message_center::MessageCenter::Get()->FindNotificationById(
++      "freedesktop:" + std::to_string(notification_id)));
++}
++
++TEST_F(DesktopNotificationServiceTest, ExpirationSignalsExpiredReason) {
++  NotifyOptions options;
++  options.expire_timeout = 250;
++  dbus::MethodCall method_call(kInterfaceName, "Notify");
++  AppendNotifyArguments(&method_call, options);
++  std::unique_ptr<dbus::Response> response = CallMethod(&method_call);
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++
++  task_environment_.FastForwardBy(base::Milliseconds(250));
++  EXPECT_EQ("NotificationClosed", signal_name_);
++  EXPECT_EQ(notification_id, signal_notification_id_);
++  EXPECT_EQ(1u, signal_close_reason_);
++  EXPECT_FALSE(message_center::MessageCenter::Get()->FindNotificationById(
++      "freedesktop:" + std::to_string(notification_id)));
++}
++
++TEST_F(DesktopNotificationServiceTest, CriticalUrgencyDoesNotExpire) {
++  NotifyOptions options;
++  options.urgency = 2;
++  options.expire_timeout = 1;
++  std::unique_ptr<dbus::Response> response = NotifyDirect(options);
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++  message_center::Notification* notification =
++      message_center::MessageCenter::Get()->FindNotificationById(
++          "freedesktop:" + std::to_string(notification_id));
++  ASSERT_TRUE(notification);
++  EXPECT_EQ(message_center::MAX_PRIORITY, notification->priority());
++  const std::string message_center_id = notification->id();
++  task_environment_.FastForwardBy(base::Seconds(1));
++  EXPECT_TRUE(message_center::MessageCenter::Get()->FindNotificationById(
++      message_center_id));
++}
++
++TEST_F(DesktopNotificationServiceTest, RendersRawImageData) {
++  NotifyOptions options;
++  options.raw_image = RawImage();
++  std::unique_ptr<dbus::Response> response = NotifyDirect(options);
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++  message_center::Notification* notification =
++      message_center::MessageCenter::Get()->FindNotificationById(
++          "freedesktop:" + std::to_string(notification_id));
++  ASSERT_TRUE(notification);
++  EXPECT_FALSE(notification->icon().IsEmpty());
++  EXPECT_EQ(2, notification->icon().Size().width());
++  EXPECT_EQ(2, notification->icon().Size().height());
++}
++
++TEST_F(DesktopNotificationServiceTest, ResolvesIconNameFromTheme) {
++  base::ScopedTempDir home;
++  ASSERT_TRUE(home.CreateUniqueTempDir());
++  base::ScopedEnvironmentVariableOverride home_override("HOME",
++                                                        home.GetPath().value());
++  const base::FilePath icon_directory =
++      home.GetPath().AppendASCII(".local/share/icons/hicolor/48x48/apps");
++  ASSERT_TRUE(base::CreateDirectory(icon_directory));
++
++  SkBitmap bitmap;
++  bitmap.allocN32Pixels(3, 3);
++  bitmap.eraseColor(SK_ColorBLUE);
++  std::optional<std::vector<uint8_t>> png =
++      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false);
++  ASSERT_TRUE(png);
++  ASSERT_TRUE(base::WriteFile(
++      icon_directory.AppendASCII("aurade-notification-test.png"), *png));
++
++  NotifyOptions options;
++  options.icon = "aurade-notification-test";
++  std::unique_ptr<dbus::Response> response = NotifyDirect(options);
++  ASSERT_TRUE(response);
++  const uint32_t notification_id = ReadNotificationId(response.get());
++  task_environment_.RunUntilIdle();
++
++  message_center::Notification* notification =
++      message_center::MessageCenter::Get()->FindNotificationById(
++          "freedesktop:" + std::to_string(notification_id));
++  ASSERT_TRUE(notification);
++  EXPECT_FALSE(notification->icon().IsEmpty());
++  EXPECT_EQ(3, notification->icon().Size().width());
++  EXPECT_EQ(3, notification->icon().Size().height());
++}
++
++TEST_F(DesktopNotificationServiceTest, RejectsMalformedRequestsAndRecovers) {
++  dbus::MethodCall wrong_count(kInterfaceName, "Notify");
++  dbus::MessageWriter wrong_count_writer(&wrong_count);
++  wrong_count_writer.AppendString("only one argument");
++  std::unique_ptr<dbus::Response> response = CallNotifyDirect(&wrong_count);
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_ERROR, response->GetMessageType());
++
++  NotifyOptions odd_actions;
++  odd_actions.actions = {"open"};
++  response = NotifyDirect(odd_actions);
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_ERROR, response->GetMessageType());
++
++  NotifyOptions oversized_image;
++  RawImage image;
++  image.width = 1024;
++  image.height = 1024;
++  image.row_stride = 4097;
++  image.bytes.assign(static_cast<size_t>(image.row_stride) * image.height, 0);
++  oversized_image.raw_image = std::move(image);
++  response = NotifyDirect(oversized_image);
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_ERROR, response->GetMessageType());
++
++  dbus::MethodCall invalid_utf8(kInterfaceName, "Notify");
++  AppendNotifyArguments(&invalid_utf8, NotifyOptions());
++  DBusMessageIter iterator;
++  ASSERT_TRUE(dbus_message_iter_init(invalid_utf8.raw_message(), &iterator));
++  const char* app_name = nullptr;
++  dbus_message_iter_get_basic(&iterator, &app_name);
++  ASSERT_TRUE(app_name);
++  const_cast<char*>(app_name)[0] = static_cast<char>(0xff);
++  response = CallNotifyDirect(&invalid_utf8);
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_ERROR, response->GetMessageType());
++
++  response = NotifyDirect(NotifyOptions());
++  ASSERT_TRUE(response);
++  EXPECT_EQ(dbus::Message::MESSAGE_METHOD_RETURN, response->GetMessageType());
++  EXPECT_EQ(1u, message_center::MessageCenter::Get()->NotificationCount());
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 969cd4d7fe38c2c7d9aac68c7a7bce86a36114b4..a148934afc1b580f3e7e469aac0be5567fad5cd1 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -77,6 +77,7 @@
+ #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
+ #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
+ #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
++#include "chrome/browser/ash/dbus/desktop_notification_service.h"
+ #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
+ #include "chrome/browser/ash/dbus/drive_file_stream_service_provider.h"
+ #include "chrome/browser/ash/dbus/encrypted_reporting_service_provider.h"
+@@ -402,6 +403,14 @@ class DBusServices {
+         CrosDBusService::CreateServiceProviderList(
+             std::make_unique<ScreenLockServiceProvider>()));
+ 
++    if (!base::SysInfo::IsRunningOnChromeOS()) {
++      // AuraDE compatibility: Linux applications send notifications on the
++      // user's session bus. Keep that unprivileged connection separate from
++      // the system services above, then translate requests into Ash state.
++      desktop_notification_service_host_ =
++          DesktopNotificationServiceHost::Create();
++    }
++
+     virtual_file_request_service_ = CrosDBusService::Create(
+         system_bus, chromeos::kVirtualFileRequestServiceName,
+         dbus::ObjectPath(chromeos::kVirtualFileRequestServicePath),
+@@ -631,6 +640,7 @@ class DBusServices {
+ 
+   void PreAshShutdown() {
+     // Services depending on ash should be released here.
++    desktop_notification_service_host_.reset();
+     machine_learning_decision_service_.reset();
+   }
+ 
+@@ -639,6 +649,8 @@ class DBusServices {
+   std::unique_ptr<CrosDBusService> kiosk_info_service_;
+   std::unique_ptr<CrosDBusService> printers_service_;
+   std::unique_ptr<CrosDBusService> screen_lock_service_;
++  std::unique_ptr<DesktopNotificationServiceHost>
++      desktop_notification_service_host_;
+   std::unique_ptr<CrosDBusService> virtual_file_request_service_;
+   std::unique_ptr<CrosDBusService> component_updater_service_;
+   std::unique_ptr<CrosDBusService> chrome_features_service_;
