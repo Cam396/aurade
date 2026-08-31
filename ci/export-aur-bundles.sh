@@ -31,6 +31,7 @@ SOURCE_PACKAGES=(
   aurade-power
   aurade-host-bridge
   aurade-login
+  aurade-greeter
   aurade-ai
   aurade-webapp-shortcuts
   aurade

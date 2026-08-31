@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="${REPO_DIR:-${REPO_ROOT}/private-repo}"
-AURADE_PACKAGES="${AURADE_PACKAGES:-aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full}"
+AURADE_PACKAGES="${AURADE_PACKAGES:-aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-greeter aurade-ai aurade-webapp-shortcuts aurade aurade-full}"
 MAKEPKG_FLAGS="${MAKEPKG_FLAGS:---force --noconfirm --clean}"
 
 need() {

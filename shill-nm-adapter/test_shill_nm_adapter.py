@@ -1,540 +1,336 @@
-#!/usr/bin/env python3
-"""Pure tests for the Shill to NetworkManager translation rules.
-
-The build host does not need a system D-Bus or NetworkManager daemon for these
-checks.  Small local stubs let us test the part that must remain deterministic:
-real access points become visible services, empty SSIDs do not, and secrets do
-not enter the public Shill property dictionary.
-"""
+#!/usr/bin/python
+"""Focused protocol tests for the Shill and NetworkManager translation."""
 
 from __future__ import annotations
 
 import importlib.util
-import pathlib
-import sys
-import types
+from pathlib import Path
 
 
-def _install_stubs() -> None:
-    dbus = types.ModuleType("dbus")
-    dbus.PROPERTIES_IFACE = "org.freedesktop.DBus.Properties"
-    dbus.Array = lambda value=(), signature=None: list(value)
-    dbus.ByteArray = bytes
-    dbus.Boolean = bool
-    dbus.Byte = int
-    dbus.Int32 = int
-    dbus.ObjectPath = str
-    dbus.String = str
-    dbus.Variant = object
-    dbus.Interface = lambda obj, iface: obj
-
-    class DBusException(Exception):
-        pass
-
-    exceptions = types.ModuleType("dbus.exceptions")
-    exceptions.DBusException = DBusException
-    dbus.exceptions = exceptions
-
-    service = types.ModuleType("dbus.service")
-    service.Object = type("Object", (), {
-        "__init__": lambda self, conn, path: None,
-        "remove_from_connection": lambda self: None,
-    })
-    service.BusName = object
-    service.method = lambda *args, **kwargs: (lambda fn: fn)
-    service.signal = lambda *args, **kwargs: (lambda fn: fn)
-    dbus.service = service
-
-    bus = types.ModuleType("dbus.bus")
-    bus.BusConnection = object
-    dbus.bus = bus
-    mainloop = types.ModuleType("dbus.mainloop")
-    mainloop_glib = types.ModuleType("dbus.mainloop.glib")
-    mainloop_glib.DBusGMainLoop = lambda **kwargs: None
-    mainloop.glib = mainloop_glib
-
-    class GLibStub:
-        @staticmethod
-        def source_remove(_source):
-            return None
-
-        @staticmethod
-        def timeout_add(_delay, _callback):
-            return 1
-
-    gi = types.ModuleType("gi")
-    repository = types.ModuleType("gi.repository")
-    repository.GLib = GLibStub
-    gi.repository = repository
-
-    sys.modules.update({
-        "dbus": dbus,
-        "dbus.bus": bus,
-        "dbus.exceptions": exceptions,
-        "dbus.service": service,
-        "dbus.mainloop": mainloop,
-        "dbus.mainloop.glib": mainloop_glib,
-        "gi": gi,
-        "gi.repository": repository,
-    })
+MODULE_PATH = Path(__file__).with_name("shill_nm_adapter.py")
+SPEC = importlib.util.spec_from_file_location("shill_nm_adapter_tested", MODULE_PATH)
+assert SPEC and SPEC.loader
+adapter = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(adapter)
 
 
-def _load():
-    _install_stubs()
-    path = pathlib.Path(__file__).with_name("shill_nm_adapter.py")
-    spec = importlib.util.spec_from_file_location("shill_nm_adapter_tested", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+class FakeService:
+    def __init__(self, service_type, security="none", ssid=b"", passphrase=None):
+        self._svc_type = service_type
+        self._props = {
+            adapter.PROP_SECURITY: security,
+            adapter.PROP_SSID: ssid,
+            adapter.PROP_AUTO_CONNECT: True,
+        }
+        self._passphrase = passphrase
+        self._iface_name = "wlan0"
 
 
-adapter = _load()
+# Cipher bits, so that the vectors below read as the radio reports them.
+PAIR_CCMP = 0x08
+GROUP_CCMP = 0x80
+CCMP = PAIR_CCMP | GROUP_CCMP
+PSK = adapter.NM_AP_SEC_KEY_MGMT_PSK
+SAE = adapter.NM_AP_SEC_KEY_MGMT_SAE
+EAP = adapter.NM_AP_SEC_KEY_MGMT_802_1X
+OWE = adapter.NM_AP_SEC_KEY_MGMT_OWE
+PRIVACY = adapter.NM_AP_FLAGS_PRIVACY
 
 
-def check(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
+def test_wpa2_is_not_reported_as_wpa3():
+    """The flags below were read off a real access point, SHELBY2.4, over the
+    system bus.  0x188 is CCMP plus PSK, which is WPA2.  Reading WPA3 out of it
+    made the adapter offer SAE to a network that cannot answer, so every attempt
+    to join failed."""
+    assert adapter.wifi_security(PRIVACY, 0, CCMP | PSK) == ("wpa2", "psk", True)
+    assert adapter.wifi_security(PRIVACY, 0, CCMP | PSK)[0] != "wpa3"
+    assert adapter.key_management("wpa2") == "wpa-psk"
 
 
-def main() -> None:
-    # A Wi-Fi-only machine must not inherit the old static Ethernet entry.
-    # This is deliberately a pure assertion over the publication rules so it
-    # remains testable without a system NetworkManager daemon.
-    wifi_props = adapter._technology_properties(
-        [adapter.SHILL_TYPE_WIFI, adapter.SHILL_TYPE_WIFI],
-        [adapter.SHILL_TYPE_WIFI],
-    )
-    check(wifi_props[adapter.PROP_ENABLED_TECHNOLOGIES] == [adapter.SHILL_TYPE_WIFI],
-          "Wi-Fi-only technology inventory contains a placeholder")
-    check(wifi_props[adapter.PROP_DEFAULT_TECHNOLOGY] == adapter.SHILL_TYPE_WIFI,
-          "Wi-Fi was not selected as the default technology")
-    check(wifi_props[adapter.PROP_CHECK_PORTAL_LIST] == adapter.SHILL_TYPE_WIFI,
-          "portal checks still advertise a missing technology")
+def test_security_mapping():
+    assert adapter.wifi_security(0, 0, 0) == ("none", "none", False)
+    assert adapter.wifi_security(PRIVACY, 0, 0) == ("wep", "wep", True)
+    # A cipher advertised with no key management bit is protected, not open.
+    assert adapter.wifi_security(0, 2, 0) == ("wpa", "psk", True)
+    assert adapter.wifi_security(0, CCMP | PSK, 0) == ("wpa", "psk", True)
+    assert adapter.wifi_security(0, CCMP | PSK, CCMP | PSK) == ("wpa+wpa2", "psk", True)
+    # Only SAE is WPA3.
+    assert adapter.wifi_security(PRIVACY, 0, CCMP | SAE) == ("wpa3", "psk", True)
+    # A transition mode network offers both, and is joined as the older one so
+    # that a radio without SAE still associates.
+    assert adapter.wifi_security(PRIVACY, 0, CCMP | PSK | SAE) == ("wpa2+wpa3", "psk", True)
+    assert adapter.key_management("wpa2+wpa3") == "wpa-psk"
+    assert adapter.key_management("wpa3") == "sae"
 
-    secured = adapter._access_point_record({
-        "Ssid": b"Home WiFi",
-        "HwAddress": "aa:bb:cc:dd:ee:ff",
-        "Strength": 118,
-        "Flags": 1,
-        "WpaFlags": 0,
-        "RsnFlags": 0x100,
-        "Frequency": 2412,
-    })
-    check(secured is not None, "a real SSID was discarded")
-    check(secured["name"] == "Home WiFi", "SSID name was not preserved")
-    check(secured["hex_ssid"] == "486f6d652057694669", "HexSSID is incorrect")
-    check(secured["strength"] == 100, "strength was not clamped to Shill's range")
-    check(secured["security"] == "psk", "WPA or RSN was not classified as PSK")
 
-    # WPA3, which needs SAE rather than a pre-shared key. An access point
-    # offering only SAE that is handed a wpa-psk profile does not report a
-    # wrong password, it never associates, and the person is told the network
-    # stopped responding.
-    wpa3 = adapter._access_point_record({
-        "Ssid": b"Modern",
-        "HwAddress": "11:22:33:44:55:66",
-        "Strength": 80,
-        "Flags": 1,
-        "WpaFlags": 0,
-        "RsnFlags": adapter.NM_AP_SEC_KEY_MGMT_SAE,
-    })
-    check(wpa3["security"] == "sae", "a WPA3 access point was classified as WPA2")
-    check(wpa3["security_name"] == "WPA3",
-          f"a WPA3 network is displayed as {wpa3['security_name']}")
+def test_enterprise_and_open_encryption_are_not_psk():
+    """Ash asks for what SecurityClass says it needs.  Calling an enterprise
+    network psk would put a passphrase box in front of something that wants a
+    certificate, and calling Enhanced Open psk would demand a word that does
+    not exist."""
+    name, klass, required = adapter.wifi_security(PRIVACY, 0, CCMP | EAP)
+    assert klass == "802_1x" and required
+    assert name.endswith("-ent")
 
-    # A transitional access point offers both, and takes the pre-shared key
-    # path so that profiles saved before it was upgraded keep working.
-    both = adapter._access_point_record({
-        "Ssid": b"Mixed",
-        "HwAddress": "11:22:33:44:55:77",
-        "Strength": 70,
-        "Flags": 1,
-        "WpaFlags": 2,
-        "RsnFlags": adapter.NM_AP_SEC_KEY_MGMT_SAE | 0x100,
-    })
-    check(both["security"] == "psk",
-          "a transitional WPA2 and WPA3 access point was forced onto SAE")
+    name, klass, required = adapter.wifi_security(PRIVACY, 0, CCMP | SAE | EAP)
+    assert (name, klass) == ("wpa3-ent", "802_1x")
 
-    open_ap = adapter._access_point_record({
-        "Ssid": b"Cafe",
-        "HwAddress": "00:11:22:33:44:55",
-        "Strength": 44,
-        "Flags": 0,
-        "WpaFlags": 0,
-        "RsnFlags": 0,
-    })
-    check(open_ap["security"] == "none", "an open AP was marked encrypted")
-    check(adapter._access_point_record({"Ssid": b""}) is None,
-          "a hidden SSID was exposed as a blank network")
+    name, klass, required = adapter.wifi_security(PRIVACY, 0, OWE)
+    assert (name, klass, required) == ("owe", "none", False)
+    assert adapter.key_management("owe") == ""
 
-    malformed = adapter._access_point_record({"Ssid": b"bad\xffssid"})
-    check("\ufffd" in malformed["name"], "invalid SSID bytes were not made UTF-8 safe")
 
-    fake_shill = object.__new__(adapter.ShillDBus)
-    fake_shill._manager = types.SimpleNamespace(_set_properties=lambda props: setattr(fake_shill, "published", props))
-    fake_shill._services = {
-        "/visible": types.SimpleNamespace(_props={adapter.PROP_VISIBLE: True}),
-        "/hidden": types.SimpleNamespace(_props={adapter.PROP_VISIBLE: False}),
-    }
-    fake_shill.update_service_lists()
-    check(fake_shill.published[adapter.PROP_SERVICES] == ["/visible"],
-          "hidden services leaked into the visible service list")
-    check(fake_shill.published[adapter.PROP_SERVICE_COMPLETE_LIST] == ["/visible", "/hidden"],
-          "the complete service list lost a configured service")
+def test_named_failures_reach_the_person_retyping():
+    assert adapter.NM_REASON_TO_SHILL_ERROR[adapter.NM_REASON_NO_SECRETS] == "bad-passphrase"
+    assert adapter.NM_REASON_TO_SHILL_ERROR[adapter.NM_REASON_SSID_NOT_FOUND] == "out-of-range"
+    # A network that walked out of range is not a mistyped word.
+    assert (adapter.NM_REASON_TO_SHILL_ERROR[adapter.NM_REASON_SSID_NOT_FOUND]
+            != adapter.NM_REASON_TO_SHILL_ERROR[adapter.NM_REASON_NO_SECRETS])
+    # An unmapped reason must not be dressed up as a bad passphrase.
+    assert adapter.NM_REASON_TO_SHILL_ERROR.get(999) is None
 
-    fake_store = types.SimpleNamespace(services={}, devices={}, ipconfigs={})
-    service = adapter.Service(object(), "/service/one", fake_store, adapter.SHILL_TYPE_WIFI,
-                              "Home WiFi", "one", ssid=b"Home WiFi", record=secured)
-    service.set_property(adapter.PROP_PASSPHRASE, "do not publish me")
-    check(adapter.PROP_PASSPHRASE not in service.GetProperties(),
-          "Wi-Fi passphrase entered the public property dictionary")
-    check(service.GetWiFiPassphrase() == "do not publish me",
-          "the private passphrase was not retained for connection")
-    service.set_state(adapter.SHILL_STATE_READY)
-    check(service._props[adapter.PROP_IS_CONNECTED] is False,
-          "a ready Wi-Fi service was marked connected")
-    service.set_state(adapter.SHILL_STATE_ONLINE)
-    check(service._props[adapter.PROP_IS_CONNECTED] is True,
-          "an online Wi-Fi service was not marked connected")
 
-    class FakeProps:
-        def __init__(self, values):
-            self.values = values
+def test_hidden_networks_are_asked_for_by_name():
+    plain = adapter.wifi_settings(b"Cafe", "wpa2", "secret", iface="wlan0")
+    assert not bool(plain["802-11-wireless"]["hidden"])
+    hidden = adapter.wifi_settings(b"Back office", "wpa2", "secret",
+                                   iface="wlan0", hidden=True)
+    assert bool(hidden["802-11-wireless"]["hidden"])
 
-        def Get(self, _interface, name):
-            return self.values[name]
 
-        def GetAll(self, _interface):
-            return dict(self.values)
+def test_profile_shapes_and_secret_boundary():
+    open_profile = adapter.wifi_settings(b"Cafe", "none", None, iface="wlan0")
+    assert bytes(open_profile["802-11-wireless"]["ssid"]) == b"Cafe"
+    assert "802-11-wireless-security" not in open_profile
 
-        def connect_to_signal(self, *_args, **_kwargs):
-            return None
+    psk_profile = adapter.wifi_settings(b"Cafe", "wpa2", "correct horse", iface="wlan0")
+    assert str(psk_profile["802-11-wireless-security"]["key-mgmt"]) == "wpa-psk"
+    assert str(psk_profile["802-11-wireless-security"]["psk"]) == "correct horse"
 
-    class FakeWifi(FakeProps):
-        def GetAccessPoints(self):
-            return ["/ap/one"]
+    sae_profile = adapter.wifi_settings(b"Modern", "wpa3", "secret", iface="wlan0")
+    assert str(sae_profile["802-11-wireless-security"]["key-mgmt"]) == "sae"
 
-        def RequestScan(self, _args):
-            return None
+    wep_profile = adapter.wifi_settings(b"Legacy", "wep", "abc123", iface="wlan0")
+    assert str(wep_profile["802-11-wireless-security"]["key-mgmt"]) == "none"
+    assert str(wep_profile["802-11-wireless-security"]["wep-key0"]) == "abc123"
 
-    class FakeBus:
-        def __init__(self):
-            self.device = FakeWifi({
-                "DeviceType": adapter.NM_DEVICE_TYPE_WIFI,
-                "State": adapter.NM_DEVICE_STATE_DISCONNECTED,
-                "Interface": "wlan0",
-                "HwAddress": "00:11:22:33:44:55",
-                "ActiveAccessPoint": "/",
-            })
-            self.ap = FakeProps({
-                "Ssid": b"Home WiFi",
-                "HwAddress": "aa:bb:cc:dd:ee:ff",
-                "Strength": 73,
-                "Flags": 1,
-                "WpaFlags": 0,
-                "RsnFlags": 0x100,
-            })
-
-        def get_object(self, _service, path):
-            return {
-                "/dev/wlan0": self.device,
-                "/ap/one": self.ap,
-            }[str(path)]
-
-        def get_connection(self):
-            return object()
-
-    bus = FakeBus()
-    fake_manager = types.SimpleNamespace(
-        _set_property=lambda *_args: None,
-        _refresh_technologies=lambda: None,
-    )
-    fake_shill = types.SimpleNamespace(
-        bus=bus,
-        manager=fake_manager,
-        services={},
-        devices={},
-        ipconfigs={},
-        update_service_lists=lambda: None,
-    )
+    fake = FakeService(adapter.SHILL_TYPE_WIFI, "wpa", b"Cafe", "secret")
     monitor = object.__new__(adapter.NetworkManagerMonitor)
-    monitor._bus = bus
-    monitor._shill = fake_shill
-    monitor._nm_devices = {}
-    monitor._services_by_device = {}
-    monitor._service_keys = {}
-    monitor._service_meta = {}
-    monitor._watched_devices = set()
-    monitor._watched_wifi = set()
-    monitor._scan_source = 0
-    monitor._nm_iface = types.SimpleNamespace()
-    monitor._nm_props = types.SimpleNamespace()
-    monitor._add_device("/dev/wlan0")
-    check(len(fake_shill.services) == 1,
-          "one real AP did not become one Shill service")
-    listed = next(iter(fake_shill.services.values()))
-    check(listed._props[adapter.PROP_NAME] == "Home WiFi",
-          "the adapter exposed the interface name instead of the SSID")
-    check(listed._props[adapter.PROP_VISIBLE] is True,
-          "a discovered AP was not visible")
-    check(all("wlan0" not in str(path) for path in fake_shill.services),
-          "the Wi-Fi interface itself became a dummy service")
+    profile = monitor._settings_for_connect(fake)
+    assert str(profile["802-11-wireless-security"]["psk"]) == "secret"
+    assert adapter.PROP_PASSPHRASE not in fake._props
 
-    bus.device.values["State"] = adapter.NM_DEVICE_STATE_ACTIVATED
-    bus.device.values["ActiveAccessPoint"] = "/ap/one"
-    monitor._sync_wifi_services("/dev/wlan0")
-    check(listed._props[adapter.PROP_STATE] == adapter.SHILL_STATE_ONLINE,
-          "the active NetworkManager AP was not reported online")
-    check(listed._props[adapter.PROP_IS_CONNECTED] is True,
-          "the active NetworkManager AP was not reported connected")
 
-    bus.device.values["State"] = adapter.NM_DEVICE_STATE_DISCONNECTED
-    bus.device.values["ActiveAccessPoint"] = "/"
-    monitor._sync_wifi_services("/dev/wlan0")
-    check(listed._props[adapter.PROP_STATE] == adapter.SHILL_STATE_READY,
-          "a disconnected Wi-Fi device did not expose a ready AP")
-    check(listed._props[adapter.PROP_IS_CONNECTED] is False,
-          "a disconnected Wi-Fi AP remained marked connected")
+def test_ethernet_profile_and_state_mapping():
+    profile = adapter.ethernet_settings("enp1s0")
+    assert str(profile["connection"]["type"]) == "802-3-ethernet"
+    assert str(profile["connection"]["interface-name"]) == "enp1s0"
+    assert adapter._device_state_to_shill(30, False) == adapter.SHILL_STATE_READY
+    assert adapter._device_state_to_shill(50, False) == adapter.SHILL_STATE_ASSOCIATION
+    assert adapter._device_state_to_shill(70, False) == adapter.SHILL_STATE_CONFIGURATION
+    assert adapter._device_state_to_shill(100, True) == adapter.SHILL_STATE_ONLINE
+    # A radio that failed to join one network has not broken every other
+    # network in the room.
+    assert adapter._device_state_to_shill(120, True) == adapter.SHILL_STATE_FAILURE
+    assert adapter._device_state_to_shill(120, False) == adapter.SHILL_STATE_IDLE
 
-    # A passphrase entered for a new network must not leave a failed profile
-    # behind. The next boot would otherwise show the same broken row again and
-    # NetworkManager could retry it without the user asking. Existing profiles
-    # take a separate path and are intentionally not deleted here.
-    class FailingConnection:
-        def __init__(self):
-            self.deleted = False
 
-        def GetSettings(self):
-            return {"connection": {"type": "802-11-wireless"},
-                    "802-11-wireless": {"ssid": b"Other WiFi"}}
+class RecordingConnection:
+    def __init__(self):
+        self.sent = []
 
-        def Delete(self):
-            self.deleted = True
+    def send_message(self, message):
+        self.sent.append(message)
 
-    class FailingSettings:
-        def __init__(self, connection):
-            self.connection = connection
-            self.added = False
 
-        def ListConnections(self):
-            return []
+def test_property_changes_are_announced_the_way_ash_listens():
+    """Ash subscribes to Shill's own PropertyChanged on the Shill interface, not
+    to the standard properties signal.  A list built only from the standard one
+    is correct when it is first read and then never moves again."""
+    obj = object.__new__(adapter.ShillObject)
+    obj._props = {}
+    obj._path = "/org/chromium/flimflam/Service/Wifi_test"
+    obj._interface_name = adapter.SHILL_SERVICE_IFACE
+    obj._conn = RecordingConnection()
+    obj.PropertiesChanged = lambda *args, **kwargs: None
 
-        def AddConnection(self, _settings):
-            self.added = True
-            return "/nm/connection/new"
+    obj._set_property(adapter.PROP_STATE, "online")
+    assert len(obj._conn.sent) == 1
+    message = obj._conn.sent[0]
+    assert message.get_interface() == adapter.SHILL_SERVICE_IFACE
+    assert message.get_member() == "PropertyChanged"
+    assert message.get_path() == obj._path
+    assert list(message.get_args_list()) == ["State", "online"]
 
-    class FailingNM:
-        def ActivateConnection(self, *_args):
-            raise adapter.dbus.exceptions.DBusException("activation failed")
+    # A write that changes nothing must not wake anybody up.
+    obj._set_property(adapter.PROP_STATE, "online")
+    assert len(obj._conn.sent) == 1
 
-    failing_connection = FailingConnection()
-    failing_settings = FailingSettings(failing_connection)
+    obj._set_properties({adapter.PROP_STRENGTH: 60, adapter.PROP_NAME: "Cafe"})
+    assert len(obj._conn.sent) == 3
+    assert {tuple(m.get_args_list()) for m in obj._conn.sent[1:]} == {
+        ("Strength", 60), ("Name", "Cafe"),
+    }
 
-    class FailingBus:
-        def get_object(self, _service, path):
-            if path == adapter.NM_SETTINGS_PATH:
-                return failing_settings
-            if path == "/nm/connection/new":
-                return failing_connection
-            raise KeyError(path)
 
-    failed_monitor = object.__new__(adapter.NetworkManagerMonitor)
-    failed_monitor._bus = FailingBus()
-    failed_monitor._nm_iface = FailingNM()
-    failed_monitor._device = lambda _path: object()
-    failed_monitor._shill = fake_shill
-    failed_service = adapter.Service(
-        object(), "/service/failing", fake_shill, adapter.SHILL_TYPE_WIFI,
-        "wlan0", "failing", monitor=failed_monitor, nm_device_path="/dev/wlan0",
-        ssid=b"Other WiFi", record={
-            "name": "Other WiFi", "hex_ssid": "4f746865722057694669",
-            "security": "psk", "security_name": "WPA2",
-        },
-    )
-    failed_service.set_property(adapter.PROP_PASSPHRASE, "temporary-passphrase")
+class FakeConnection:
+    def __init__(self, settings):
+        self._settings = settings
+
+    def GetSettings(self):
+        return self._settings
+
+
+class FakeSettings:
+    def __init__(self, connections):
+        self._connections = connections
+
+    def ListConnections(self):
+        return list(self._connections)
+
+
+def test_a_saved_network_is_recognised_as_saved():
+    """NetworkManager returns a saved SSID as an array of bytes.  Comparing that
+    against the scanned SSID without normalising both sides matched nothing, so
+    every saved network was treated as new: the passphrase was asked for again
+    and a second profile was written on every connect."""
+    as_nm_returns_it = [ord(c) for c in "SHELBY2.4"]
+    monitor = object.__new__(adapter.NetworkManagerMonitor)
+    monitor._settings_iface = FakeSettings(["/nm/Settings/1"])
+    monitor._obj = lambda path: FakeConnection({
+        "connection": {"type": "802-11-wireless", "interface-name": "wlp1s0"},
+        "802-11-wireless": {"ssid": as_nm_returns_it},
+    })
+
+    import types
+    monitor._connection_proxy = lambda path: monitor._obj(path)
+    original = adapter.dbus.Interface
+    adapter.dbus.Interface = lambda obj, iface: obj
     try:
-        failed_monitor.connect_service(failed_service)
-    except adapter.dbus.exceptions.DBusException:
-        pass
-    else:
-        raise AssertionError("a failed NetworkManager activation unexpectedly succeeded")
-    check(failing_settings.added, "the new NetworkManager profile was not created")
-    check(failing_connection.deleted,
-          "a failed new Wi-Fi profile was not deleted")
-    check(failed_service._props[adapter.PROP_STATE] == adapter.SHILL_STATE_IDLE,
-          "a failed Wi-Fi activation did not return to idle")
+        found = monitor._saved_connection(b"SHELBY2.4", "wlp1s0", "802-11-wireless")
+        missing = monitor._saved_connection(b"Somewhere else", "wlp1s0", "802-11-wireless")
+    finally:
+        adapter.dbus.Interface = original
 
-    # And the profile a WPA3 network is given asks for SAE.
-    sae_monitor = object.__new__(adapter.NetworkManagerMonitor)
-    sae_service = adapter.Service(
-        object(), "/service/sae", fake_shill, adapter.SHILL_TYPE_WIFI,
-        "wlan0", "sae", monitor=sae_monitor, nm_device_path="/dev/wlan0",
-        ssid=b"Modern", record={"name": "Modern", "hex_ssid": "4d6f6465726e",
-                                "security": "sae", "security_name": "WPA3"},
+    assert found == "/nm/Settings/1"
+    # A network that was never saved must still come back empty.
+    assert missing == ""
+
+
+def test_a_network_typed_in_by_hand_lands_on_a_real_radio():
+    """Joining a hidden network gives Shill the network's name and nothing
+    about the radio.  Using the name as the interface writes a profile bound to
+    a device that does not exist, and NetworkManager refuses to activate it."""
+    monitor = object.__new__(adapter.NetworkManagerMonitor)
+    monitor._nm_devices = {
+        "/nm/Devices/1": {"type": adapter.SHILL_TYPE_ETHERNET, "iface": "enp1s0"},
+        "/nm/Devices/2": {"type": adapter.SHILL_TYPE_WIFI, "iface": "wlp1s0"},
+    }
+    assert monitor.first_device(adapter.SHILL_TYPE_WIFI) == ("/nm/Devices/2", "wlp1s0")
+    assert monitor.first_device(adapter.SHILL_TYPE_ETHERNET) == ("/nm/Devices/1", "enp1s0")
+    # A technology with no radio fitted must not borrow another one.
+    assert monitor.first_device(adapter.SHILL_TYPE_CELLULAR) == ("", "")
+
+    # The path Ash actually takes when someone types a network in by hand.
+    args = {adapter.PROP_TYPE: adapter.SHILL_TYPE_WIFI,
+            adapter.PROP_NAME: "Back office",
+            adapter.PROP_HIDDEN_SSID: True}
+    device_path, iface = adapter.configured_device(monitor, adapter.SHILL_TYPE_WIFI, args)
+    assert (device_path, iface) == ("/nm/Devices/2", "wlp1s0")
+    assert iface != "Back office", "the network name is not an interface name"
+
+    # With no radio of that kind, fall back to whatever the caller named rather
+    # than to the network's own name.
+    empty = object.__new__(adapter.NetworkManagerMonitor)
+    empty._nm_devices = {}
+    assert adapter.configured_device(empty, adapter.SHILL_TYPE_WIFI, args) == ("", "")
+    named = dict(args, **{adapter.PROP_INTERFACE: "wlan9"})
+    assert adapter.configured_device(empty, adapter.SHILL_TYPE_WIFI, named) == ("", "wlan9")
+
+    settings = adapter.wifi_settings(b"Back office", "wpa2", "secret",
+                                     iface=iface, hidden=True)
+    assert str(settings["connection"]["interface-name"]) == "wlp1s0"
+    assert str(settings["connection"]["id"]) == "Back office"
+
+
+def test_service_paths_carry_the_prefix_ash_insists_on():
+    """ShillServiceClient::GetHelper refuses any service path that does not
+    begin with /service/, logs Invalid service path, and returns no helper. The
+    network handler then builds a NetworkState with no type, and the empty
+    specifier fails a DCHECK that takes the whole session down in a login loop.
+    This is not cosmetic and it cannot be caught by anything that does not run
+    Ash against the adapter."""
+    assert adapter.SERVICE_PREFIX == "/service/"
+    wifi = adapter.shill_service_path("wifi", "abc123")
+    ethernet = adapter.shill_service_path("ethernet", "def456")
+    for path in (wifi, ethernet):
+        assert path.startswith("/service/"), path
+    # Two networks must not collide.
+    assert wifi != adapter.shill_service_path("wifi", "zzz999")
+
+    assert adapter.shill_device_path("wlp1s0") == "/device/wlp1s0"
+    # No interface means no device, not a path ending in nothing.
+    assert adapter.shill_device_path("") == "/"
+
+
+def test_only_the_network_we_are_on_reads_as_connected():
+    """Shill's ready means connected but not yet online, and Ash draws it as
+    Connected. Handing that to every access point in range put the word
+    Connected under all four networks in the room."""
+    ACTIVATED = 100
+    assert adapter._service_state_to_shill(ACTIVATED, True) == adapter.SHILL_STATE_ONLINE
+    assert adapter._service_state_to_shill(ACTIVATED, False) == adapter.SHILL_STATE_IDLE
+    # A radio busy joining one network says nothing about the others.
+    for state in (40, 50, 60, 70, 80, 90):
+        assert adapter._service_state_to_shill(state, False) == adapter.SHILL_STATE_IDLE, state
+    assert adapter._service_state_to_shill(50, True) == adapter.SHILL_STATE_ASSOCIATION
+    assert adapter._service_state_to_shill(70, True) == adapter.SHILL_STATE_CONFIGURATION
+    # The device mapping keeps its own meaning, which is what devices need.
+    assert adapter._device_state_to_shill(50, False) == adapter.SHILL_STATE_ASSOCIATION
+
+
+def test_known_means_saved_and_nothing_else():
+    """NetworkState::IsInProfile is true for any non empty profile path, and Ash
+    files those under Known networks. Stamping the default profile on every
+    access point in range filed the whole neighbourhood as known."""
+    saved = adapter._profile_for("/nm/Settings/1")
+    unsaved = adapter._profile_for("")
+    assert str(saved) == adapter.SHALLOW_PROFILE_PATH
+    # Empty, not the root path: Ash reads "/" as a non empty string and would
+    # still call the network known.
+    assert str(unsaved) == ""
+    assert str(unsaved) != "/"
+    assert saved != unsaved
+
+
+def test_enabled_technology_translation():
+    assert adapter._technology_is_enabled(
+        adapter.SHILL_TYPE_WIFI, wireless_enabled=True, networking_enabled=True
     )
-    sae_service.set_property(adapter.PROP_PASSPHRASE, "a good long passphrase")
-    sae_settings = sae_monitor._connection_settings(sae_service)
-    check(str(sae_settings["802-11-wireless-security"]["key-mgmt"]) == "sae",
-          "a WPA3 network was given a wpa-psk profile, which never associates")
-
-    psk_service = adapter.Service(
-        object(), "/service/psk", fake_shill, adapter.SHILL_TYPE_WIFI,
-        "wlan0", "psk", monitor=sae_monitor, nm_device_path="/dev/wlan0",
-        ssid=b"Home", record={"name": "Home", "hex_ssid": "486f6d65",
-                              "security": "psk", "security_name": "WPA2"},
+    assert not adapter._technology_is_enabled(
+        adapter.SHILL_TYPE_WIFI, wireless_enabled=False, networking_enabled=True
     )
-    psk_service.set_property(adapter.PROP_PASSPHRASE, "a good long passphrase")
-    psk_settings = sae_monitor._connection_settings(psk_service)
-    check(str(psk_settings["802-11-wireless-security"]["key-mgmt"]) == "wpa-psk",
-          "a WPA2 network was given an SAE profile")
-
-    # ------------------------------------------------------------------
-    # What a person is told when the network does not come up
-    # ------------------------------------------------------------------
-    #
-    # NetworkManager's device states are not a scale. Everything above
-    # ACTIVATED is worse than it, and four places in the adapter used to read
-    # them as though higher were better, so a Wi-Fi network that had just
-    # refused a passphrase reported itself connected.
-    check(adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_ACTIVATED),
-          "an activated device was not treated as connected")
-    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_DEACTIVATING),
-          "a device on its way down was treated as connected")
-    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_FAILED),
-          "a failed device was treated as connected")
-    check(not adapter.nm_state_is_connected(adapter.NM_DEVICE_STATE_DISCONNECTED),
-          "a disconnected device was treated as connected")
-
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_FAILED)
-          == adapter.SHILL_STATE_NO_CONNECTIVITY,
-          "a failed device did not report a failure state")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_DEACTIVATING)
-          == adapter.SHILL_STATE_IDLE,
-          "a device on its way down did not report idle")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_ACTIVATED)
-          == adapter.SHILL_STATE_ONLINE,
-          "an activated device did not report online")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_NEED_AUTH)
-          == adapter.SHILL_STATE_ASSOCIATION,
-          "a device waiting on a password did not report associating")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_IP_CONFIG)
-          == adapter.SHILL_STATE_CONFIGURATION,
-          "a device getting an address did not report configuring")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_DISCONNECTED)
-          == adapter.SHILL_STATE_READY,
-          "a disconnected device did not report ready")
-    check(adapter.nm_state_to_shill(adapter.NM_DEVICE_STATE_UNAVAILABLE)
-          == adapter.SHILL_STATE_IDLE,
-          "an unavailable device did not report idle")
-
-    # The reason is the whole difference between telling somebody their
-    # password was wrong and telling them nothing.
-    token, details, ask = adapter.failure_for_reason(adapter.NM_REASON_NO_SECRETS)
-    check(token == adapter.SHILL_ERROR_BAD_PASSPHRASE,
-          "a refused passphrase was not reported as a refused passphrase")
-    check(ask is True, "a refused passphrase did not ask for the password again")
-    check("password" in details.lower(),
-          f"the sentence for a refused passphrase does not mention it: {details!r}")
-
-    token, _details, ask = adapter.failure_for_reason(
-        adapter.NM_REASON_NO_SECRETS, "wep")
-    check(token == adapter.SHILL_ERROR_BAD_WEP_KEY,
-          "a refused WEP key was reported as a passphrase")
-    check(ask is True, "a refused WEP key did not ask for the key again")
-
-    token, _details, ask = adapter.failure_for_reason(adapter.NM_REASON_SSID_NOT_FOUND)
-    check(token == adapter.SHILL_ERROR_OUT_OF_RANGE,
-          "a network that vanished was not reported as out of range")
-    check(ask is False,
-          "a network out of range asked for the password, which cannot help")
-
-    token, _d, ask = adapter.failure_for_reason(adapter.NM_REASON_DHCP_FAILED)
-    check(token == adapter.SHILL_ERROR_DHCP_FAILED,
-          "a network that gave no address was not reported as such")
-    check(ask is False, "a DHCP failure asked for the password")
-
-    token, _d, ask = adapter.failure_for_reason(adapter.NM_REASON_SUPPLICANT_TIMEOUT)
-    check(token == adapter.SHILL_ERROR_CONNECT_FAILED,
-          "a supplicant timeout was not reported as a connection failure")
-    check(ask is False, "a supplicant timeout asked for the password")
-
-    token, details, ask = adapter.failure_for_reason(adapter.NM_REASON_USER_REQUESTED)
-    check(token == adapter.SHILL_ERROR_NONE,
-          "disconnecting on purpose was reported as a failure")
-    check(details == "", "a deliberate disconnect produced an error sentence")
-
-    token, _d, _a = adapter.failure_for_reason(9999)
-    check(token == adapter.SHILL_ERROR_UNKNOWN,
-          "an unrecognised reason was given a diagnosis nobody checked")
-
-    # And the same thing end to end, through the signal NetworkManager
-    # actually sends.
-    joined = adapter.Service(
-        object(), "/service/joining", fake_shill, adapter.SHILL_TYPE_WIFI,
-        "wlan0", "joining", nm_device_path="/dev/wlan0", ssid=b"Home WiFi",
-        record={"name": "Home WiFi", "hex_ssid": "486f6d652057694669",
-                "security": "psk", "security_name": "WPA2"},
+    assert adapter._technology_is_enabled(
+        adapter.SHILL_TYPE_ETHERNET, wireless_enabled=False, networking_enabled=True
     )
-    bystander = adapter.Service(
-        object(), "/service/bystander", fake_shill, adapter.SHILL_TYPE_WIFI,
-        "wlan0", "bystander", nm_device_path="/dev/wlan0", ssid=b"Next Door",
-        record={"name": "Next Door", "hex_ssid": "4e65787420446f6f72",
-                "security": "psk", "security_name": "WPA2"},
+    assert not adapter._technology_is_enabled(
+        adapter.SHILL_TYPE_ETHERNET, wireless_enabled=True, networking_enabled=False
     )
-    fake_shill.services["/service/joining"] = joined
-    fake_shill.services["/service/bystander"] = bystander
-    monitor._services_by_device["/dev/wlan0"] = {
-        "/service/joining", "/service/bystander"}
-    joined.set_property(adapter.PROP_PASSPHRASE, "wrong one")
-    joined.set_state(adapter.SHILL_STATE_ASSOCIATION)
-    bystander.set_state(adapter.SHILL_STATE_READY)
 
-    monitor._on_device_state_changed(
-        "/dev/wlan0", adapter.NM_DEVICE_STATE_FAILED,
-        adapter.NM_DEVICE_STATE_CONFIG, adapter.NM_REASON_NO_SECRETS)
 
-    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_BAD_PASSPHRASE,
-          "a wrong passphrase produced no failure on the network being joined")
-    check(joined._props[adapter.PROP_STATE] == adapter.SHILL_STATE_NO_CONNECTIVITY,
-          "a network that just refused a password looks untouched")
-    check(joined._props[adapter.PROP_PASSPHRASE_REQUIRED] is True,
-          "nobody was asked to correct the password that failed")
-    try:
-        held = joined.GetWiFiPassphrase()
-    except adapter.dbus.exceptions.DBusException:
-        held = None
-    check(held in (None, ""),
-          "the passphrase that failed is still held for the next attempt")
-    check(joined._props[adapter.PROP_IS_CONNECTED] is False,
-          "a failed network still reports itself connected")
-    check(bystander._props.get(adapter.PROP_ERROR) in (None, "", adapter.SHILL_ERROR_NONE),
-          "one wrong password marked every other network in the list failed")
-    check(bystander._props[adapter.PROP_STATE] == adapter.SHILL_STATE_READY,
-          "an untouched network changed state because a different one failed")
-
-    # A deliberate disconnect is not a failure and must not leave one behind.
-    joined.set_state(adapter.SHILL_STATE_ONLINE)
-    monitor._on_device_state_changed(
-        "/dev/wlan0", adapter.NM_DEVICE_STATE_FAILED,
-        adapter.NM_DEVICE_STATE_ACTIVATED, adapter.NM_REASON_USER_REQUESTED)
-    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_NONE,
-          "disconnecting on purpose left an error on the network")
-    check(joined._props[adapter.PROP_STATE] == adapter.SHILL_STATE_READY,
-          "a network disconnected on purpose was left looking broken")
-
-    # And a connection that works clears whatever was said last time.
-    joined.set_failure(adapter.SHILL_ERROR_BAD_PASSPHRASE, "old news", True)
-    monitor._on_device_state_changed(
-        "/dev/wlan0", adapter.NM_DEVICE_STATE_ACTIVATED,
-        adapter.NM_DEVICE_STATE_IP_CONFIG, adapter.NM_REASON_NONE)
-    check(joined._props[adapter.PROP_ERROR] == adapter.SHILL_ERROR_NONE,
-          "a network that connected still shows the last failure")
-    check(joined._props[adapter.PROP_ERROR_DETAILS] == "",
-          "a network that connected still shows the last failure sentence")
-
-    print("shill adapter translation test: PASS")
+def test_identity_and_device_filtering():
+    assert adapter._stable_id("device", b"Cafe") == adapter._stable_id("device", b"Cafe")
+    assert adapter._stable_id("device", b"Cafe") != adapter._stable_id("device", b"Other")
+    assert adapter.NM_TYPE_TO_SHILL == {
+        adapter.NM_DEVICE_TYPE_ETHERNET: adapter.SHILL_TYPE_ETHERNET,
+        adapter.NM_DEVICE_TYPE_WIFI: adapter.SHILL_TYPE_WIFI,
+    }
+    assert adapter.SHILL_TYPE_CELLULAR not in adapter.NM_TYPE_TO_SHILL.values()
+    assert adapter._ssid_text(b"") == "Hidden network"
 
 
 if __name__ == "__main__":
-    main()
+    tests = [value for name, value in globals().items() if name.startswith("test_")]
+    for test in tests:
+        test()
+    print(f"shill adapter tests: {len(tests)} PASS")

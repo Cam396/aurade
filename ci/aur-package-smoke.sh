@@ -22,8 +22,8 @@ AURADE_AUR_OUTPUT="${OUTPUT}" "${SCRIPT_DIR}/export-aur-bundles.sh"
 
 mapfile -t packages < <(find "${OUTPUT}" -mindepth 1 -maxdepth 1 -type d \
   -printf '%f\n' | sort)
-[[ "${#packages[@]}" -eq 11 ]] ||
-  die "expected 11 package directories, found ${#packages[@]}"
+[[ "${#packages[@]}" -eq 12 ]] ||
+  die "expected 12 package directories, found ${#packages[@]}"
 
 for package in "${packages[@]}"; do
   package_dir="${OUTPUT}/${package}"

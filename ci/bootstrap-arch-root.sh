@@ -149,6 +149,7 @@ rsync -a --delete --exclude __pycache__ \
   "${REPO_ROOT}/aurade" \
   "${REPO_ROOT}/aurade-ai" \
   "${REPO_ROOT}/aurade-full" \
+  "${REPO_ROOT}/aurade-greeter" \
   "${REPO_ROOT}/aurade-webapp-shortcuts" \
   "${REPO_ROOT}/shill-nm-adapter" \
   "${REPO_ROOT}/chromiumos-ash" \

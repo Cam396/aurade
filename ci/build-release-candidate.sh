@@ -82,6 +82,7 @@ rsync -a --delete --exclude pkg --exclude src --exclude __pycache__ \
   "${REPO_ROOT}/aurade-login" \
   "${REPO_ROOT}/shill-nm-adapter" \
   "${REPO_ROOT}/aurade-ai" \
+  "${REPO_ROOT}/aurade-greeter" \
   "${REPO_ROOT}/aurade-webapp-shortcuts" \
   "${REPO_ROOT}/aurade" \
   "${REPO_ROOT}/aurade-full" \

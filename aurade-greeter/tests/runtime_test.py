@@ -336,7 +336,98 @@ def test_focus_lands_on_a_row_and_not_on_the_list(app) -> None:
         pump()
 
 
+def test_a_key_press_leaves_focus_on_a_row_and_not_on_the_status_bar(app) -> None:
+    """The bug somebody hit by pressing Return at their own login screen.
+
+    lift() switches the stack and grabs focus in the same breath. A row that
+    has not been mapped yet refuses focus without saying so, focus stays where
+    the window put it, and the next Return goes to whatever the window
+    considers first, which is the weather tile. The person pressed Return to
+    sign in and got a weather panel.
+
+    So this exercises the real entry point rather than calling the focus
+    helper directly, which is what the older test does and why it went on
+    passing through the bug.
+    """
+    window, service = build(app, [], lifted=False)
+    try:
+        handled = window._on_key(None, Gdk.KEY_Return, 0, 0)  # noqa: SLF001
+        check(handled, "the first key press was not swallowed by the shade")
+        check(pump_until(lambda: isinstance(window.get_focus(), Gtk.ListBoxRow)),
+              f"after a key press focus is on {type(window.get_focus()).__name__}, "
+              "not on somebody's row")
+        equal(window.stack.get_visible_child_name(), "accounts",
+              "a key press did not bring the accounts up")
+    finally:
+        pump()
+
+
 # --- signing in -----------------------------------------------------------
+
+def test_no_password_box_appears_for_an_account_that_is_never_asked(app) -> None:
+    """An account with no password is never prompted for one.
+
+    The field used to be shown the moment a row was pressed, before greetd had
+    said anything, so somebody with a blank password saw a password box, then
+    the screen went out underneath them without the box ever being used. That
+    reads as a screen that ignored what they were about to type.
+    """
+    window, service = build(app, [OK, OK])
+    try:
+        window.choose(window.accounts[0])
+        check(pump_until(lambda: window.stack.get_visible_child_name() == "handoff"),
+              "a sign in that needed no password never reached the handoff")
+        check(not window.entry.get_visible(),
+              "a password box was shown to somebody who was never asked for one")
+    finally:
+        pump()
+
+
+def test_the_password_box_appears_when_the_service_asks_for_it(app) -> None:
+    """And the other half: an account that does have a password must still get
+    a field, or the fix above locks everybody out."""
+    window, service = build(app, [SECRET, OK, OK])
+    try:
+        window.choose(window.accounts[0])
+        check(pump_until(lambda: window.entry.get_visible()),
+              "an account that was asked for a secret never got a field")
+        equal(window.stack.get_visible_child_name(), "password",
+              "the password screen is not the one on show")
+        # GtkPasswordEntry delegates focus to an inner GtkText, so the
+        # question is whether focus is inside the field, not whether it is the
+        # field. Somebody has to be able to type without clicking first.
+        focus = window.get_focus()
+        inside = focus is window.entry or (
+            focus is not None and focus.is_ancestor(window.entry))
+        check(inside,
+              "the password field is visible but focus is on "
+              f"{type(focus).__name__ if focus is not None else 'nothing'}")
+    finally:
+        pump()
+
+
+def test_the_handoff_says_whose_desktop_is_starting(app) -> None:
+    """Between the greeter letting go and the desktop drawing, this hardware
+    is dark for eight to twenty two seconds. The greeter owns the first part
+    of that, and what it leaves on screen is a name, not black."""
+    window, service = build(app, [SECRET, OK, OK])
+    try:
+        window.choose(window.accounts[0])
+        check(pump_until(lambda: window.entry.get_visible()),
+              "never got as far as a password field")
+        window.entry.set_text("secret")
+        window.submit()
+        check(pump_until(lambda: window.stack.get_visible_child_name() == "handoff"),
+              "signing in did not put the handoff screen up")
+        said = window.widgets["handoff.title"].get_label()
+        check("Ada" in said, f"the handoff says {said!r}, which is not who signed in")
+        check(window.widgets["handoff.note"].get_label().strip() != "",
+              "the handoff shows a name and no word about what is happening")
+    finally:
+        window._stop_handoff_pulse()  # noqa: SLF001
+        pump()
+
+
 
 def test_choosing_somebody_asks_greetd_about_them(app) -> None:
     window, service = build(app, [SECRET, OK, OK])

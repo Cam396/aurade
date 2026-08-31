@@ -1,0 +1,13 @@
+# Brightness keys are handled inside the desktop, which runs as the person who
+# signed in, but the kernel ships the backlight attribute as root owned and
+# world readable.  Writing it therefore fails silently and the keys appear to
+# do nothing.  Hand write access to the video group, which every seat user is
+# already a member of, the same way brightnessctl and light do.
+ACTION=="add", SUBSYSTEM=="backlight", \
+  RUN+="/usr/bin/chgrp video /sys/class/backlight/%k/brightness", \
+  RUN+="/usr/bin/chmod g+w /sys/class/backlight/%k/brightness"
+
+# The same for a lit keyboard, where one is fitted.
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="*::kbd_backlight", \
+  RUN+="/usr/bin/chgrp video /sys/class/leds/%k/brightness", \
+  RUN+="/usr/bin/chmod g+w /sys/class/leds/%k/brightness"

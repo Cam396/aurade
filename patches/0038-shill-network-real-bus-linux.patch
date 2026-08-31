@@ -1,0 +1,71 @@
+diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+index 0a4019b..c3b3854 100644
+--- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
++++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
+@@ -205,7 +205,16 @@ void InitializeDBus() {
+   // Initialize Chrome dbus clients.
+   dbus::Bus* bus = DBusThreadManager::Get()->GetSystemBus();
+ 
+-  shill_clients::Initialize(bus);
++  // AuraDE compatibility: on generic Linux the global system bus stays
++  // disabled, which would hand the network stack the fake Shill client and its
++  // invented eth1, wifi1 through wifi3 and cellular1 services. Point the Shill
++  // clients at the same narrowly scoped real bus that BlueZ and update_engine
++  // use, so the connection menu is backed by shill-nm-adapter.
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    shill_clients::Initialize(bus);
++  } else {
++    shill_clients::InitializeAuraDe(GetAuraDeBluezSystemBus());
++  }
+ 
+   // NOTE: base::Feature is not initialized yet, so any non MultiProcessMash
+   // dbus client initialization for Ash should be done in Shell::Init.
+diff --git a/chromeos/ash/components/dbus/shill/shill_clients.cc b/chromeos/ash/components/dbus/shill/shill_clients.cc
+index 23e6679..25c2bf6 100644
+--- a/chromeos/ash/components/dbus/shill/shill_clients.cc
++++ b/chromeos/ash/components/dbus/shill/shill_clients.cc
+@@ -47,6 +47,27 @@ void InitializeFakes() {
+   ShillManagerClient::Get()->GetTestInterface()->SetupDefaultEnvironment();
+ }
+ 
++void InitializeAuraDe(dbus::Bus* system_bus) {
++  DCHECK(system_bus);
++  // shill-nm-adapter owns org.chromium.flimflam on the Linux system bus and
++  // implements Manager, Service, Device, IPConfig and Profile on top of
++  // NetworkManager. Those five get the real bus.
++  ShillDeviceClient::Initialize(system_bus);
++  ShillIPConfigClient::Initialize(system_bus);
++  ShillManagerClient::Initialize(system_bus);
++  ShillProfileClient::Initialize(system_bus);
++  ShillServiceClient::Initialize(system_bus);
++
++  // Nothing on generic Linux answers the modem or third party VPN interfaces.
++  // Fakes keep those callers inert instead of blocking on a bus name that will
++  // never be owned. SetupDefaultEnvironment is deliberately not called: it is
++  // what invents eth1, wifi1 through wifi3 and cellular1.
++  Modem3gppClient::InitializeFake();
++  ModemMessagingClient::InitializeFake();
++  SMSClient::InitializeFake();
++  ShillThirdPartyVpnDriverClient::InitializeFake();
++}
++
+ void Shutdown() {
+   ShillThirdPartyVpnDriverClient::Shutdown();
+   ShillServiceClient::Shutdown();
+diff --git a/chromeos/ash/components/dbus/shill/shill_clients.h b/chromeos/ash/components/dbus/shill/shill_clients.h
+index 54009a6..3e05cb0 100644
+--- a/chromeos/ash/components/dbus/shill/shill_clients.h
++++ b/chromeos/ash/components/dbus/shill/shill_clients.h
+@@ -19,6 +19,12 @@ COMPONENT_EXPORT(SHILL_CLIENT) void Initialize(dbus::Bus* system_bus);
+ // Initialize fake Shill and modemmanager related dbus clients.
+ COMPONENT_EXPORT(SHILL_CLIENT) void InitializeFakes();
+ 
++// AuraDE compatibility: initialize the Shill clients that shill-nm-adapter
++// serves on the Linux system bus, and leave the rest fake. Unlike
++// InitializeFakes this never populates the demonstration network environment,
++// so the connection menu shows real hardware only.
++COMPONENT_EXPORT(SHILL_CLIENT) void InitializeAuraDe(dbus::Bus* system_bus);
++
+ // Shut down Shill and modemmanager related dbus clients.
+ COMPONENT_EXPORT(SHILL_CLIENT) void Shutdown();
+ 

@@ -2,7 +2,7 @@
 
 pkgname=aurade-power
 pkgver=0.2.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Linux laptop power lifecycle service for AuraDE"
 arch=('any')
 url="https://github.com/Cam396/aurade"
@@ -15,6 +15,7 @@ source=(
   'aurade-powerd.service'
   'aurade-power-sleep'
   '60-aurade-laptop.conf'
+  '60-aurade-backlight.rules'
   'org.aurade.Power.conf'
   'aurade-power.tmpfiles'
   'LICENSE'
@@ -24,6 +25,7 @@ sha256sums=('699720c5f7afd4c6587e21bdd79cc9764d2ee2e6ba0eb7c7267deec6c485b104'
             '52cc1c7b7fe25858168de81e56d2379572b3d647ef75bc0da28c0df26b609c91'
             'e9d3ff50d982979134c6a1b6b27c255edaf7562bdf0b7562a5078d57bfd871a2'
             'edd89db5a3ec9a3165f6eaa227f944581e55bc6c27c2ec52dd2f4bca261feeb8'
+            '03ffd3a0d4afb35d18e2053c798334bbde59646cf1c235b6b21fc376fef9e462'
             'b6247dfb5822b2fe2b7329d8a92b4e36db63897215281320f39df4be6e74239e'
             'd4e22f4c2aa8f1af92c017ac49013b62017756f07c7cf340e33f315e706644b0'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
@@ -37,6 +39,8 @@ package() {
     "${pkgdir}/usr/lib/systemd/system/aurade-powerd.service"
   install -Dm644 60-aurade-laptop.conf \
     "${pkgdir}/etc/systemd/logind.conf.d/60-aurade-laptop.conf"
+  install -Dm644 60-aurade-backlight.rules \
+    "${pkgdir}/usr/lib/udev/rules.d/60-aurade-backlight.rules"
   install -Dm644 org.aurade.Power.conf \
     "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Power.conf"
   install -Dm644 aurade-power.tmpfiles \

@@ -51,7 +51,7 @@ fi
 
 export REPO_DIR="${staging}"
 export REPO_NAME
-export AURADE_PACKAGES="aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-ai aurade-webapp-shortcuts aurade aurade-full"
+export AURADE_PACKAGES="aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power aurade-host-bridge aurade-login aurade-greeter aurade-ai aurade-webapp-shortcuts aurade aurade-full"
 export AURADE_NODEPS_PACKAGES="${AURADE_PACKAGES}"
 export MAKEPKG_FLAGS="${MAKEPKG_FLAGS:---force --noconfirm --clean --config ${makepkg_config}}"
 if [[ -n "${GPGKEY:-}" ]]; then

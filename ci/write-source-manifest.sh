@@ -67,6 +67,7 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
     aurade-host-bridge
     chromiumos-ash
     aurade-login
+    aurade-greeter
     aurade-ai
     aurade-webapp-shortcuts
     aurade
