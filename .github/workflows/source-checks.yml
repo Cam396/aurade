@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install source-check dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0
 
       - name: Verify archive tooling
         shell: bash
@@ -22,6 +22,8 @@ jobs:
           set -euo pipefail
           command -v bsdtar
           bsdtar --version
+          command -v mksquashfs
+          command -v unsquashfs
 
       - name: Check shell syntax
         shell: bash
@@ -64,6 +66,15 @@ jobs:
 
       - name: Run source integrity gate
         run: ci/source-integrity-gate.sh
+
+      - name: Run public release leak gate
+        run: ci/public-release-leak-gate.sh
+
+      - name: Run public documentation gate
+        run: ci/public-docs-gate.sh
+
+      - name: Run GTK/libadwaita widget introspection gate
+        run: python3 installer/tests/gui_widgets_test.py
 
       - name: Run installer source and refusal tests
         run: installer/tests/run.sh
