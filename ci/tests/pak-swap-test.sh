@@ -95,6 +95,10 @@ if "$TOOL" "$TMP/target.pak" "$TMP/donor.pak" "$TMP/out2.pak" \
      --expect '200:this string is not in there' >/dev/null 2>&1; then
   fail 'an unmet expectation did not fail the tool'
 fi
+# And it takes the file with it. A non-zero exit that leaves a plausible
+# looking pak on disk is how the wrong one gets installed by somebody who read
+# the filename and not the exit code.
+[[ -e "$TMP/out2.pak" ]] && fail 'a failed run left its output behind'
 if "$TOOL" "$TMP/target.pak" "$TMP/donor.pak" "$TMP/out3.pak" \
      --ids 4242 >/dev/null 2>&1; then
   fail 'an id absent from both paks did not fail the tool'
