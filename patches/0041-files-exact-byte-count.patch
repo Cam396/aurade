@@ -1,0 +1,40 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+@@ -40,6 +40,24 @@
+ /**
+  * Custom column model for advanced auto-resizing.
+  */
++/**
++ * AuraDE: the exact byte count, for the hover text beside a rounded size.
++ *
++ * Returns the empty string wherever an exact count would be a lie: a directory,
++ * a hosted document with no local bytes, an encrypted entry whose size is not
++ * its content, or a size that never arrived. The caller assigns the result
++ * unconditionally so an empty string clears a reused cell.
++ */
++export function auraDeExactBytes(
++    size: number|undefined, special: boolean): string {
++  if (special || typeof size !== 'number' || !isFinite(size) || size < 0) {
++    return '';
++  }
++  const exact = Math.floor(size);
++  const grouped = exact.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
++  return exact === 1 ? '1 byte' : `${grouped} bytes`;
++}
++
+ export class FileTableColumnModel extends TableColumnModel {
+   private snapshot_: ColumnSnapshot|null = null;
+ 
+@@ -835,6 +853,11 @@
+     const special =
+         metadata.hosted || isEncrypted(entry, metadata.contentMimeType);
+     div.textContent = this.formatter_!.formatSize(size, special);
++    // AuraDE: the rounded size is the right thing to read and the wrong thing
++    // to trust, so the exact count lives on hover. Cells are reused as the list
++    // scrolls, so the title has to be cleared and not merely skipped, or a row
++    // keeps the byte count of whichever file used to occupy it.
++    div.title = auraDeExactBytes(size, special);
+   }
+ 
+   /**
