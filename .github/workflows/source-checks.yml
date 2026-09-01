@@ -61,9 +61,6 @@ jobs:
       - name: Verify the release identity
         run: ci/verify-release-identity.sh
 
-      - name: Run release identity fixture
-        run: ci/tests/release-identity-test.sh
-
       - name: Run source integrity gate
         run: ci/source-integrity-gate.sh
 
@@ -79,32 +76,8 @@ jobs:
       - name: Run installer source and refusal tests
         run: installer/tests/run.sh
 
-      - name: Run ISO SBOM fixture test
-        run: ci/tests/iso-sbom-test.sh
-
-      - name: Run ISO artifact sidecar gate
-        run: ci/tests/iso-artifact-gate-test.sh
-
-      - name: Run GUI 0.2.0 release metadata gate
-        run: ci/tests/gui-release-metadata-test.sh
-
-      - name: Run repository signature policy fixture
-        run: ci/tests/release-signature-policy-test.sh
-
-      - name: Run repository checksum-manifest fixture
-        run: ci/tests/release-checksum-manifest-test.sh
-
-      - name: Run AUR export policy fixture
-        run: ci/tests/aur-export-policy-test.sh
-
-      - name: Run ISO structure fixture
-        run: ci/tests/iso-structure-script-test.sh
-
-      - name: Run runtime-risk source guard
-        run: ci/tests/runtime-risk-source-test.sh
-
-      - name: Run Chromium network client configuration guard
-        run: ci/tests/chromium-network-config-test.sh
+      - name: Run every ci/tests fixture
+        run: ci/tests/run.sh
 
       - name: Run host bridge tests
         run: aurade-host-bridge/run-tests.sh
