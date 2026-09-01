@@ -1,0 +1,146 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/constants.ts b/ui/file_manager/file_manager/foreground/js/constants.ts
+--- a/ui/file_manager/file_manager/foreground/js/constants.ts
++++ b/ui/file_manager/file_manager/foreground/js/constants.ts
+@@ -17,6 +17,10 @@
+   'contentMimeType',
+   'hosted',
+   'canPin',
++  // AuraDE: so the toolbar can say how much is selected and not only how
++  // many. The list container already prefetches size for the rows on screen,
++  // so for a selection made by hand this is nearly always a cache hit.
++  'size',
+ ] as const;
+ 
+ /**
+diff --git a/ui/file_manager/file_manager/foreground/js/file_selection.ts b/ui/file_manager/file_manager/foreground/js/file_selection.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_selection.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_selection.ts
+@@ -29,6 +29,19 @@
+   anyFilesHosted = true;
+   anyFilesEncrypted = true;
+ 
++  /**
++   * AuraDE: total bytes across the selected files, and whether that total can
++   * be trusted.
++   *
++   * Both are filled in by computeAdditional, so they are only meaningful once
++   * it has resolved. A selection is sized only when every file in it reported
++   * a size: a total assembled from some of the files reads as the total for
++   * all of them, and being quietly wrong about how much is about to be copied
++   * is worse than saying nothing.
++   */
++  totalBytes = 0;
++  totalBytesKnown = false;
++
+   private additionalPromise_: Promise<boolean>|null = null;
+ 
+   /**
+@@ -85,6 +98,27 @@
+                 this.mimeTypes = props.map(value => {
+                   return value.contentMimeType || '';
+                 });
++                // AuraDE: total the files only. A directory's size in this
++                // metadata is the size of the directory record, not of what is
++                // inside it, so adding it in would inflate the total by a
++                // number that means nothing to anybody.
++                let bytes = 0;
++                let known = true;
++                props.forEach((prop, index) => {
++                  const entry = this.entries[index];
++                  if (!entry || !entry.isFile) {
++                    return;
++                  }
++                  const size = prop.size;
++                  if (typeof size !== 'number' || !Number.isFinite(size) ||
++                      size < 0) {
++                    known = false;
++                    return;
++                  }
++                  bytes += size;
++                });
++                this.totalBytes = bytes;
++                this.totalBytesKnown = known && this.fileCount > 0;
+                 return true;
+               });
+     }
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -9,7 +9,7 @@
+ import type {VolumeManager} from '../../background/js/volume_manager.js';
+ import {queryRequiredElement} from '../../common/js/dom_utils.js';
+ import {isCrosComponentsEnabled} from '../../common/js/flags.js';
+-import {str, strf} from '../../common/js/translations.js';
++import {bytesToString, str, strf} from '../../common/js/translations.js';
+ import {canBulkPinningCloudPanelShow} from '../../common/js/util.js';
+ import {RootType} from '../../common/js/volume_manager_types.js';
+ import {type State} from '../../state/state.js';
+@@ -128,6 +128,12 @@
+     this.selectionHandler_.addEventListener(
+         EventType.CHANGE_THROTTLED, this.updateSharesheetCommand_.bind(this));
+ 
++    // AuraDE: the byte total arrives with computeAdditional, which resolves
++    // after the count is already on screen. Refreshing the label here is what
++    // lets the size appear without making the count wait for it.
++    this.selectionHandler_.addEventListener(
++        EventType.CHANGE_THROTTLED, this.updateSelectionLabel_.bind(this));
++
+     chrome.fileManagerPrivate.onAppsUpdated.addListener(
+         this.updateSharesheetCommand_.bind(this));
+ 
+@@ -222,13 +228,21 @@
+   }
+ 
+   /**
+-   * Handles selection's change event to update the UI.
++   * AuraDE: says how much is selected, not only how many.
++   *
++   * "12 files selected" is the answer to a question nobody asked. The question
++   * people actually have before a copy, a move or a delete is how much of
++   * their disk or their drive it is about to be, and the app already holds
++   * every byte count it needs to answer it.
++   *
++   * The size is appended only when the selection is entirely files. A folder's
++   * size is not known without walking it, so a total that silently left the
++   * folders out would be a smaller number than the truth, presented as the
++   * truth. Saying nothing is the honest option there.
+    */
+-  private onSelectionChanged_() {
++  private updateSelectionLabel_() {
+     const selection = this.selectionHandler_.selection;
+-    this.updateRefreshCommand_();
+ 
+-    // Update the label "x files selected." on the header.
+     let text = '';
+     if (selection.totalCount === 0) {
+       text = '';
+@@ -247,7 +261,29 @@
+         text = strf('MANY_ENTRIES_SELECTED', selection.totalCount);
+       }
+     }
++
++    if (text && selection.directoryCount === 0 && selection.totalBytesKnown) {
++      // The label ends in a full stop in most locales. Putting the size after
++      // it reads as a fragment, so it goes before whatever punctuation the
++      // string ends with.
++      const trailing = text.match(/[.\u3002]+$/);
++      const body = trailing ? text.slice(0, -trailing[0]!.length) : text;
++      text = `${body}, ${bytesToString(selection.totalBytes)}${
++          trailing ? trailing[0] : ''}`;
++    }
++
+     this.filesSelectedLabel_.textContent = text;
++  }
++
++  /**
++   * Handles selection's change event to update the UI.
++   */
++  private onSelectionChanged_() {
++    const selection = this.selectionHandler_.selection;
++    this.updateRefreshCommand_();
++
++    // Update the label "x files selected." on the header.
++    this.updateSelectionLabel_();
+ 
+     // Update visibility of the delete and move to trash buttons.
+     this.deleteButton_.hidden =
