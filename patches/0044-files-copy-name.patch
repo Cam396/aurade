@@ -1,0 +1,101 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+--- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
++++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+@@ -18,7 +18,7 @@
+ import type {FileFilter} from './directory_contents.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
+-import {BrowserBackCommand, ConfigureCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+ import {shouldIgnoreEvents} from './file_manager_commands_util.js';
+ import type {FileSelection, FileSelectionHandler} from './file_selection.js';
+ import type {FileTransferController} from './file_transfer_controller.js';
+@@ -161,6 +161,7 @@
+   'refresh': new RefreshCommand(),
+   'set-wallpaper': new SetWallpaperCommand(),
+   'volume-storage': new VolumeStorageCommand(),
++  'copy-name': new CopyNameCommand(),
+   'show-providers-submenu': new ShowProvidersSubmenuCommand(),
+   'volume-switch-1': new VolumeSwitchCommand(1),
+   'volume-switch-2': new VolumeSwitchCommand(2),
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+@@ -2459,6 +2459,55 @@
+   }
+ }
+ /**
++ * AuraDE: copies the names of the selected files to the clipboard.
++ *
++ * Renaming a file to match another one, quoting a filename in a message,
++ * typing it into a terminal: all of it currently means reading the name off
++ * the screen and retyping it, and a name like IMG_20260714_193045.heic is
++ * exactly the sort of thing people get wrong twice before getting it right.
++ *
++ * This deliberately does not use document.execCommand('copy'). Files listens
++ * for the copy event on the document and rewrites the clipboard with the
++ * selected file entries, so a text copy raised that way is silently replaced
++ * by a file copy and the user gets neither what they asked for nor an error.
++ * The async clipboard API raises no copy event and so is not intercepted.
++ */
++export class CopyNameCommand extends FilesCommand {
++  execute(_event: CommandEvent, fileManager: CommandHandlerDeps) {
++    const names = fileManager.getSelection().entries.map(entry => entry.name);
++    if (names.length === 0) {
++      return;
++    }
++    // One name per line, so a multiple selection pastes into a list rather
++    // than a run-on sentence somebody has to split by hand.
++    navigator.clipboard.writeText(names.join('\n'))
++        .then(() => {
++          const message = names.length === 1 ?
++              `Copied the name ${names[0]}` :
++              `Copied ${names.length} names`;
++          fileManager.ui.toast.show(message);
++          fileManager.ui.speakA11yMessage(message);
++        })
++        .catch(() => {
++          // Saying nothing here would leave somebody pasting an old clipboard
++          // into a message and wondering why the wrong name arrived.
++          const message = 'Could not reach the clipboard';
++          fileManager.ui.toast.show(message);
++          fileManager.ui.speakA11yMessage(message);
++        });
++  }
++
++  override canExecute(event: CanExecuteEvent, fileManager: CommandHandlerDeps) {
++    const count = fileManager.getSelection().entries.length;
++    event.canExecute = count > 0;
++    event.command.setHidden(count === 0);
++    // The label counts, because "Copy name" over a selection of nine reads as
++    // though it will copy one of them.
++    event.command.label = count > 1 ? `Copy ${count} names` : 'Copy name';
++  }
++}
++
++/**
+  * Opens "providers menu" to allow users to use providers/FSPs.
+  */
+ export class ShowProvidersSubmenuCommand extends FilesCommand {
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -34,6 +34,10 @@
+                shortcut="x|Ctrl">
+       <command id="copy" label="$i18n{COPY_BUTTON_LABEL}"
+                shortcut="c|Ctrl">
++      <!-- AuraDE: no shortcut on purpose. Ctrl+Shift+C is inspect-element
++           below, and quietly taking a key somebody already uses is a worse
++           trade than one extra trip to the context menu. -->
++      <command id="copy-name" label="Copy name">
+       <command id="paste" label="$i18n{PASTE_BUTTON_LABEL}"
+                shortcut="v|Ctrl">
+       <command id="paste-into-current-folder" label="$i18n{PASTE_BUTTON_LABEL}"
+@@ -170,6 +174,7 @@
+         <hr id="actions-separator" hidden>
+         <cr-menu-item command="#cut" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
++        <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
+         <hr visibleif="full-page">
