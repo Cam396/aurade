@@ -1,0 +1,32 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts b/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
+@@ -105,6 +105,7 @@
+ 
+     if (!spaceInfo) {
+       this.volumeSpaceInfoLabel_.textContent = str('FAILED_SPACE_INFO');
++      this.volumeSpaceInfo.title = '';
+       return;
+     }
+ 
+@@ -122,10 +123,20 @@
+ 
+       this.volumeSpaceInfoLabel_.textContent =
+           strf('SPACE_AVAILABLE', bytesToString(Math.max(0, remainingSize)));
++      // AuraDE: the bar shows a proportion and the label shows one number, so
++      // between them they never say how big the disk is. "12.3 GB available"
++      // means something quite different on a 32GB eMMC than on a 2TB drive,
++      // and the app knows which it is. Set unconditionally, because this
++      // element is reused every time the menu opens.
++      this.volumeSpaceInfo.title = strf(
++          'SPACE_AVAILABLE', bytesToString(Math.max(0, remainingSize))) +
++          ` of ${bytesToString(spaceInfo.totalSize)}, ` +
++          `${Math.round(100 * spaceInfo.usedSize / spaceInfo.totalSize)}% used`;
+     } else {
+       // User has unlimited individual storage.
+       this.volumeSpaceInfoLabel_.textContent =
+           strf('SPACE_USED', bytesToString(spaceInfo.usedSize));
++      this.volumeSpaceInfo.title = '';
+     }
+ 
+     if (spaceInfo.warningMessage) {
