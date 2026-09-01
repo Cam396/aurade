@@ -75,7 +75,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
 + * AuraDE: the title and description for an empty ordinary folder.
 + */
 +export function auraDeEmptyFolderMessage(
-+    rootType: string|null, fileKey: string): [string, string] {
++    rootType: string|null, fileKey: string|undefined): [string, string] {
 +  const options = (rootType && AURADE_EMPTY_MESSAGES[rootType]) ||
 +      AURADE_EMPTY_FALLBACK;
 +  return options[auraDeVariantIndex(fileKey || String(rootType), options.length)]!;
@@ -137,3 +137,22 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
      switch (this.recentEntry_.fileCategory) {
        case chrome.fileManagerPrivate.FileCategory.AUDIO:
          this.showMessage_(str('RECENT_EMPTY_AUDIO_FOLDER'));
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -97,9 +97,14 @@
+                label="$i18n{DRIVE_VISIT_DRIVE_GOOGLE_COM}">
+ 
+       <command id="toggle-pinned" label="$i18n{OFFLINE_COLUMN_LABEL}">
++      <!-- AuraDE: Ctrl+H alongside Ctrl+period. Every Linux file manager has
++           bound Ctrl+H to hidden files for twenty years, so it is the key
++           people already press here, and dotfiles are ordinary on this system
++           rather than an oddity. The shortcut text is no longer hidden either:
++           a toggle nobody can find is a toggle nobody uses. -->
+       <command id="toggle-hidden-files"
+                label="$i18n{TOGGLE_HIDDEN_FILES_COMMAND_LABEL}"
+-               shortcut=".|Ctrl" hide-shortcut-text>
++               shortcut=".|Ctrl h|Ctrl">
+       <command id="toggle-hidden-android-folders"
+                label="$i18n{SHOW_ALL_ANDROID_FOLDERS_OPTION}">
+ 

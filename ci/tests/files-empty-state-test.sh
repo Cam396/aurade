@@ -30,14 +30,16 @@ grep -Fq 'auraDeEmptyFolder = true' <<<"$added" || \
 # and `svgRef === AURADE_EMPTY_FOLDER` would answer true for Recents as well
 # and replace the Recents copy with folder copy. That reads as a typo and is a
 # behaviour change, so it is pinned here.
-grep -Eq 'svgRef *=== *AURADE_EMPTY_FOLDER' <<<"$added" && \
+if grep -Eq 'svgRef *=== *AURADE_EMPTY_FOLDER' <<<"$added"; then
   fail 'the empty state is selected by comparing svgRef, which also matches Recents'
+fi
 
 # 3. The chosen line must be stable for a given folder on a given day. A
 # message that rerolls on every redraw reads as a rendering glitch rather than
 # a flourish, so randomness is not allowed to decide it.
-grep -Fq 'Math.random' <<<"$added" && \
+if grep -Fq 'Math.random' <<<"$added"; then
   fail 'the empty state line is chosen randomly, so it changes on every redraw'
+fi
 grep -Fq '86400000' <<<"$added" || \
   fail 'the empty state line is not derived from the day, so it cannot be stable'
 
@@ -61,4 +63,26 @@ grep -Eq "query *=== *'xyzzy'" <<<"$added" || fail 'the xyzzy response was remov
 grep -Fq 'Nothing happens.' <<<"$added" || \
   fail 'xyzzy no longer answers with the line it exists to answer with'
 
+# 7b. Hidden files on Ctrl+H. The command already existed and was bound only to
+# Ctrl+period with its shortcut text suppressed, which is a toggle nobody can
+# find. Ctrl+H is what every Linux file manager has used for twenty years, and
+# dotfiles are ordinary on this system rather than an oddity.
+# The command and label lines are unchanged context, so only the shortcut line
+# itself shows up as added. This patch rebinds exactly one shortcut, so a lone
+# match is the right expectation and more than one means it grew a second.
+shortcut=$(grep -o 'shortcut="[^"]*"' <<<"$added" || true)
+[[ $(grep -c . <<<"$shortcut") -eq 1 ]] || \
+  fail "expected exactly one rebound shortcut, got: ${shortcut:-none}"
+grep -Fq 'toggle-hidden-files' "$PATCH" || \
+  fail 'the patch no longer touches toggle-hidden-files'
+grep -Fq 'h|Ctrl' <<<"$shortcut" || fail 'Ctrl+H is not bound to toggle-hidden-files'
+grep -Fq '.|Ctrl' <<<"$shortcut" || \
+  fail 'binding Ctrl+H removed the existing Ctrl+period binding'
+# Check the added lines, not the extracted shortcut value: the attribute sits
+# outside the quotes, so it never appears in what the shortcut match captured.
+if grep -Fq 'hide-shortcut-text' <<<"$added"; then
+  fail 'the hidden files shortcut is still hidden from the menu'
+fi
+
 echo 'files empty state test: PASS'
+
