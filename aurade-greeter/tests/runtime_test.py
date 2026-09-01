@@ -1517,6 +1517,45 @@ def test_the_warning_key_is_read_before_anything_else(app) -> None:
               f"cleared by a character nobody meant to spend on it")
 
 
+def test_return_on_the_shade_lifts_it_rather_than_opening_the_weather(app) -> None:
+    """The bug somebody hit by pressing Return at their own login screen.
+
+    The shade carries live pills and the weather one is interactive on purpose.
+    A key controller in the default bubble phase is asked after the focused
+    widget, so Return went to the weather and the shade never lifted. Somebody
+    pressing Return to sign in got a forecast instead.
+
+    This asserts the phase rather than the outcome, because the outcome cannot
+    tell the two versions apart: the test compositor maps the account rows
+    before lift() runs, so focus lands on a row either way and Return works in
+    the harness while failing on the machine. Five mutations against an
+    outcome-shaped version of this went uncaught, which is how the first
+    attempt at this fix shipped without fixing anything.
+    """
+    window, service = build(app, [], lifted=False)
+    try:
+        shade_key = None
+        for controller in window.observe_controllers():
+            if controller.get_name() == "aurade-shade-key":
+                shade_key = controller
+        check(shade_key is not None,
+              "the shade's own key controller is not on the window at all")
+        if shade_key is not None:
+            phase = shade_key.get_propagation_phase()
+            check(phase == Gtk.PropagationPhase.CAPTURE,
+                  f"the shade key controller runs in {phase.value_nick}, so a "
+                  f"focused pill answers Return first and the lock screen opens "
+                  f"the weather instead of letting somebody sign in")
+        # And the handler still only claims the keystroke while the shade is
+        # down, or capture would eat every character of a password.
+        window.shade_up = True
+        check(window._on_key(None, Gdk.KEY_a, 0, 0) is False,  # noqa: SLF001
+              "the shade key controller swallows keys after the shade is up, "
+              "which on capture means nobody can type a password")
+    finally:
+        pump()
+
+
 def test_the_shelf_holds_the_weather_beside_the_system(app) -> None:
     """Two pills, not one, and the weather to the left of the system.
 
