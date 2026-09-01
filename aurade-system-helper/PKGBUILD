@@ -2,7 +2,7 @@
 
 pkgname=aurade-system-helper
 pkgver=0.1.0
-pkgrel=2
+pkgrel=3
 pkgdesc="Privileged system helper for AuraDE desktop integration"
 arch=('any')
 url="https://github.com/Cam396/aurade"
@@ -11,10 +11,12 @@ depends=('bash' 'pacman' 'polkit' 'systemd')
 source=(
   'aurade-system-helper'
   'org.aurade.system-helper.policy'
+  '49-aurade-power.rules'
   'LICENSE'
 )
-sha256sums=('597084be2ed3570a09ce9c31c1feccaf3b7fb413e1a2d93fb3fca3ac9a8b1b8f'
+sha256sums=('66d5879f1d36e4bda19c0b89e4e5c1a0318be2cd74843545749fff1d4a154d4f'
             '1f60a6ba6dc906daccb309d8c2b5679c819cec8d30b2c41eb7aabb9fae75c728'
+            'ae4f2886238f187f128426ed050767c865d2c60ac9c79fefa041d90b2f331b90'
             '95b5c17f50877b2da28a79fca1401157f8eb0786abd747c2fba946c87710bb10')
 
 package() {
@@ -22,6 +24,8 @@ package() {
     "${pkgdir}/usr/bin/aurade-system-helper"
   install -Dm644 org.aurade.system-helper.policy \
     "${pkgdir}/usr/share/polkit-1/actions/org.aurade.system-helper.policy"
+  install -Dm644 49-aurade-power.rules \
+    "${pkgdir}/usr/share/polkit-1/rules.d/49-aurade-power.rules"
   install -Dm644 LICENSE \
     "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

@@ -1,0 +1,50 @@
+/* Let the person sitting at the machine turn it off.
+ *
+ * Reboot from the system menu did nothing: the screen went white and stayed
+ * there. The desktop was fine. The request died in polkit, and it died for a
+ * reason that is easy to miss.
+ *
+ * greetd keeps its greeter session registered after a user signs in, so logind
+ * sees two sessions rather than one. That changes which action is checked.
+ * A single session asks for org.freedesktop.login1.reboot, which is already
+ * allowed for an active local seat. Two sessions ask for
+ * org.freedesktop.login1.reboot-multiple-sessions instead, and that one
+ * defaults to auth_admin_keep. Ash runs no polkit authentication agent, so
+ * there is nothing to answer the prompt: the call does not fail, it waits, and
+ * the shutdown animation waits with it.
+ *
+ * So the multiple-sessions variants are the ones that actually matter here.
+ * The plain ones are listed too, because whether a greeter session is still
+ * around is not a thing the person pressing the button should have to know.
+ *
+ * Two deliberate limits:
+ *
+ * `subject.local` stays required. Somebody signed in over SSH must not be able
+ * to reboot the machine out from under whoever is using it.
+ *
+ * `subject.active` is deliberately NOT required, which is the one place this
+ * is more permissive than the stock policy. A session that logind has not
+ * marked active is exactly the case that is broken today, and requiring it
+ * would leave the button dead for the machine this is meant to fix. The cost
+ * is that an inactive local session can also power the machine down. On a
+ * single seat laptop that is the same person either way.
+ *
+ * Hibernate is not listed. AuraDE installs no swap large enough for it and the
+ * installer writes hibernation=unsupported into the manifest, so an allow rule
+ * here would only produce a failure further down.
+ */
+polkit.addRule(function (action, subject) {
+    if (!subject.local || !subject.isInGroup("wheel")) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    switch (action.id) {
+        case "org.freedesktop.login1.reboot":
+        case "org.freedesktop.login1.reboot-multiple-sessions":
+        case "org.freedesktop.login1.power-off":
+        case "org.freedesktop.login1.power-off-multiple-sessions":
+        case "org.freedesktop.login1.suspend":
+        case "org.freedesktop.login1.suspend-multiple-sessions":
+            return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
