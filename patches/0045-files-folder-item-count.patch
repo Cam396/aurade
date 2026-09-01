@@ -1,0 +1,57 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -134,6 +134,17 @@
+     this.selectionHandler_.addEventListener(
+         EventType.CHANGE_THROTTLED, this.updateSelectionLabel_.bind(this));
+ 
++    // AuraDE: with nothing selected the label says what is in the folder, so
++    // it has to follow the folder as well as the selection. The FileListModel
++    // is created once in DirectoryModel's constructor and never replaced, so
++    // one subscription covers every directory.
++    this.directoryModel_.addEventListener(
++        'cur-dir-scan-completed', this.updateSelectionLabel_.bind(this));
++    this.directoryModel_.addEventListener(
++        'cur-dir-rescan-completed', this.updateSelectionLabel_.bind(this));
++    this.directoryModel_.getFileList().addEventListener(
++        'splice', this.updateSelectionLabel_.bind(this));
++
+     chrome.fileManagerPrivate.onAppsUpdated.addListener(
+         this.updateSharesheetCommand_.bind(this));
+ 
+@@ -228,6 +239,26 @@
+   }
+ 
+   /**
++   * AuraDE: what is in this folder, for the times when nothing is selected.
++   *
++   * The label sits in the toolbar and is blank almost all of the time, which
++   * is a waste of the one place a person is already looking. Opening a folder
++   * and not knowing whether it holds nine things or nine hundred is a small
++   * thing that never stops being annoying.
++   *
++   * An empty folder gets nothing, because the empty state panel is already on
++   * screen saying so in more words than this could. Two voices saying the same
++   * thing in the same view is worse than one.
++   */
++  private auraDeDirectorySummary_(): string {
++    const count = this.directoryModel_.getFileList().length;
++    if (!count) {
++      return '';
++    }
++    return count === 1 ? '1 item' : `${count.toLocaleString()} items`;
++  }
++
++  /**
+    * AuraDE: says how much is selected, not only how many.
+    *
+    * "12 files selected" is the answer to a question nobody asked. The question
+@@ -245,7 +276,7 @@
+ 
+     let text = '';
+     if (selection.totalCount === 0) {
+-      text = '';
++      text = this.auraDeDirectorySummary_();
+     } else if (selection.totalCount === 1) {
+       if (selection.directoryCount === 0) {
+         text = str('ONE_FILE_SELECTED');
