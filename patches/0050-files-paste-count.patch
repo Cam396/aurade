@@ -1,0 +1,173 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+@@ -852,6 +852,37 @@
+ }
+ 
+ /**
++ * AuraDE: each paste command's own label, remembered the first time it is
++ * asked for.
++ *
++ * The label has to be rebuilt from the original every time, not appended to.
++ * canExecute runs on every selection change and every menu open, so appending
++ * to whatever is already there would give Paste (3) (3) (3) within a few
++ * clicks.
++ */
++const auraDePasteLabels = new WeakMap<Command, string>();
++
++/**
++ * AuraDE: says how much is on the clipboard, on the one command in the menu
++ * that acts on something the window is not showing. Paste on its own asks
++ * somebody to remember what they cut, possibly in another window, possibly
++ * ten minutes ago.
++ *
++ * The count is appended rather than replacing the label, because the label is
++ * translated and the number is not.
++ */
++function auraDeLabelPaste(command: Command, count: number) {
++  let base = auraDePasteLabels.get(command);
++  if (base === undefined) {
++    base = command.label;
++    auraDePasteLabels.set(command, base);
++  }
++  // Only when there is more than one. Paste (1) is noise: one item is the
++  // case where somebody already knows what they have.
++  command.label = count > 1 ? `${base} (${count})` : base;
++}
++
++/**
+  * Pastes files from clipboard.
+  */
+ export class PasteCommand extends FilesCommand {
+@@ -871,9 +902,10 @@
+ 
+     const fileTransferController = fileManager.fileTransferController;
+ 
+-    event.canExecute = !!fileTransferController &&
+-        !!fileTransferController.queryPasteCommandEnabled(
+-            fileManager.directoryModel.getCurrentDirEntry());
++    const pasteState = fileTransferController?.queryPasteCommandState(
++        fileManager.directoryModel.getCurrentDirEntry());
++    event.canExecute = !!pasteState?.enabled;
++    auraDeLabelPaste(event.command, pasteState?.count ?? 0);
+ 
+     // Hide this command if only one folder is selected.
+     event.command.setHidden(
+@@ -910,9 +942,10 @@
+   override canExecute(event: CanExecuteEvent, fileManager: CommandHandlerDeps) {
+     const fileTransferController = fileManager.fileTransferController;
+ 
+-    event.canExecute = !!fileTransferController &&
+-        !!fileTransferController.queryPasteCommandEnabled(
+-            fileManager.directoryModel.getCurrentDirEntry());
++    const pasteState = fileTransferController?.queryPasteCommandState(
++        fileManager.directoryModel.getCurrentDirEntry());
++    event.canExecute = !!pasteState?.enabled;
++    auraDeLabelPaste(event.command, pasteState?.count ?? 0);
+   }
+ }
+ 
+@@ -960,9 +993,10 @@
+     }
+ 
+     const fileTransferController = fileManager.fileTransferController;
+-    event.canExecute = !!fileTransferController &&
+-        !!fileTransferController.queryPasteCommandEnabled(
+-            entries[0] as DirectoryEntry | FakeEntry);
++    const pasteState = fileTransferController?.queryPasteCommandState(
++        entries[0] as DirectoryEntry | FakeEntry);
++    event.canExecute = !!pasteState?.enabled;
++    auraDeLabelPaste(event.command, pasteState?.count ?? 0);
+     event.command.setHidden(false);
+   }
+ }
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
+@@ -540,6 +540,10 @@
+     // Allow paste command.
+     fileTransferController: {
+       queryPasteCommandEnabled: () => true,
++      // AuraDE: the paste commands ask for the count alongside the answer, so
++      // a mock that only answers the old question throws instead of failing
++      // the assertion it was written for.
++      queryPasteCommandState: () => ({enabled: true, count: 1}),
+     },
+     ui: {
+       actionbar: {
+@@ -619,6 +623,7 @@
+       canCopyOrDrag: () => true,
+       canCutOrDrag: () => true,
+       queryPasteCommandEnabled: () => true,
++      queryPasteCommandState: () => ({enabled: true, count: 1}),
+     },
+     ui: {
+       directoryTree: {
+diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+@@ -63,6 +63,16 @@
+ export const SOURCE_URLS = 'sources';
+ 
+ /**
++ * AuraDE: what a paste into a given destination would do. Returned by
++ * queryPasteCommandState so a menu item can say what it will paste rather
++ * than only whether it can.
++ */
++export interface PasteCommandState {
++  enabled: boolean;
++  count: number;
++}
++
++/**
+  * The key under which we store the root of the file system of files on which
+  * we operate. This allows us to set the correct drag effect.
+  */
+@@ -1419,17 +1429,43 @@
+    */
+   queryPasteCommandEnabled(destinationEntry: DirectoryEntry|FilesAppDirEntry|
+                            null|undefined) {
++    return this.queryPasteCommandState(destinationEntry).enabled;
++  }
++
++  /**
++   * AuraDE: whether a paste can happen here, and how many entries it would
++   * bring with it.
++   *
++   * The count is taken inside the paste that queryPasteCommandEnabled was
++   * already simulating rather than in a second one. Reading the clipboard
++   * means synchronously driving execCommand on a hidden iframe, and that
++   * happens on every selection change and every menu open, so a second
++   * simulated paste would double the cost of opening a menu to say one
++   * number.
++   */
++  queryPasteCommandState(destinationEntry: DirectoryEntry|FilesAppDirEntry|
++                         null|undefined): PasteCommandState {
++    const state: PasteCommandState = {enabled: false, count: 0};
+     if (!this.isDocumentWideEvent_()) {
+-      return false;
++      return state;
+     }
+ 
+     // HACK(serya): return this.document_.queryCommandEnabled('paste')
+     // should be used.
+-    let result;
+     this.simulateCommand_('paste', (event: Event) => {
+-      result = this.canPasteOrDrop_(getClipboardData(event), destinationEntry);
++      const clipboardData = getClipboardData(event);
++      state.enabled = !!this.canPasteOrDrop_(clipboardData, destinationEntry);
++      if (!clipboardData) {
++        return;
++      }
++      // Written by appendCutOrCopyInfo_ as one URL per line. An empty string
++      // has to be treated as nothing rather than split, because splitting it
++      // yields one empty element and would report a clipboard holding one
++      // item when it holds none.
++      const sources = clipboardData.getData('fs/sources');
++      state.count = sources ? sources.split('\n').length : 0;
+     });
+-    return result;
++    return state;
+   }
+ 
+   /**
