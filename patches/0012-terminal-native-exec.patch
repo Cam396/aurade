@@ -97,10 +97,10 @@ index 0000000000000000000000000000000000000000..5f099d75843b208bfb99b74f16e9e128
 +These files are the third-party xterm.js runtime served by the AuraDE
 +terminal (`chrome-untrusted://terminal`) through `TerminalSource`:
 +
-+- `xterm.css` — xterm.js default stylesheet (MIT, Copyright (c) 2014 The
++- `xterm.css`: xterm.js default stylesheet (MIT, Copyright (c) 2014 The
 +  xterm.js authors; the license header is embedded at the top of the file).
-+- `xterm.js` — minified xterm.js dist bundle.
-+- `xterm-addon-fit.js` — minified fit addon dist bundle.
++- `xterm.js`: minified xterm.js dist bundle.
++- `xterm-addon-fit.js`: minified fit addon dist bundle.
 +
 +They are embedded into the chrome binary at build time: `embed_assets.py`
 +wraps them into the generated header `aurade_terminal_assets.h`, which
@@ -720,91 +720,91 @@ index 4f8c1e55c57af3b406cf11d810b2e6490f159bae..642b3a4f99c727f5ac42ad5498a7b0df
 +    const key = event.key.toLowerCase();
 +    const keyRaw = event.key;
 +
-+    // Ctrl+Shift+C — Copy selection
++    // Ctrl+Shift+C: Copy selection
 +    if (ctrl && shift && key === 'c') {
 +      handleCopy();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+V — Paste
++    // Ctrl+Shift+V: Paste
 +    if (ctrl && shift && key === 'v') {
 +      handlePaste();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+N — New terminal window
++    // Ctrl+Shift+N: New terminal window
 +    if (ctrl && shift && key === 'n') {
 +      try { chrome.terminalPrivate.openWindow({}); } catch (e) { console.warn('New window failed:', e); }
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+W — Close terminal window
++    // Ctrl+Shift+W: Close terminal window
 +    if (ctrl && shift && key === 'w') {
 +      window.close();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+F — Toggle search
++    // Ctrl+Shift+F: Toggle search
 +    if (ctrl && shift && key === 'f') {
 +      toggleSearch();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+K — Clear scrollback buffer
++    // Ctrl+Shift+K: Clear scrollback buffer
 +    if (ctrl && shift && key === 'k') {
 +      term.clear();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+ArrowUp — Scroll up one line
++    // Ctrl+Shift+ArrowUp: Scroll up one line
 +    if (ctrl && shift && key === 'arrowup') {
 +      term.scrollLines(-1);
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+ArrowDown — Scroll down one line
++    // Ctrl+Shift+ArrowDown: Scroll down one line
 +    if (ctrl && shift && key === 'arrowdown') {
 +      term.scrollLines(1);
 +      return false;
 +    }
 +
-+    // Ctrl+= / Ctrl++ — Zoom in
++    // Ctrl+= / Ctrl++: Zoom in
 +    if (ctrl && !shift && (key === '=' || key === '+')) {
 +      zoomIn();
 +      return false;
 +    }
 +
-+    // Ctrl+- — Zoom out
++    // Ctrl+-: Zoom out
 +    if (ctrl && !shift && key === '-') {
 +      zoomOut();
 +      return false;
 +    }
 +
-+    // Ctrl+0 — Reset zoom
++    // Ctrl+0: Reset zoom
 +    if (ctrl && !shift && key === '0') {
 +      resetZoom();
 +      return false;
 +    }
 +
-+    // Shift+PageUp — Scroll up one page
++    // Shift+PageUp: Scroll up one page
 +    if (shift && keyRaw === 'PageUp') {
 +      term.scrollPages(-1);
 +      return false;
 +    }
 +
-+    // Shift+PageDown — Scroll down one page
++    // Shift+PageDown: Scroll down one page
 +    if (shift && keyRaw === 'PageDown') {
 +      term.scrollPages(1);
 +      return false;
 +    }
 +
-+    // F11 — Toggle fullscreen
++    // F11: Toggle fullscreen
 +    if (keyRaw === 'F11') {
 +      toggleFullscreen();
 +      return false;
 +    }
 +
-+    // Ctrl+Shift+Enter — Toggle fullscreen (alternative)
++    // Ctrl+Shift+Enter: Toggle fullscreen (alternative)
 +    if (ctrl && shift && key === 'enter') {
 +      toggleFullscreen();
 +      return false;

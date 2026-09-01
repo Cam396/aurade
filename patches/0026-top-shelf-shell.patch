@@ -781,7 +781,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
    AddItemWithStringId(MENU_TASK_MANAGER,
                        IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER);
 +
-+  // Compact mode toggle — only makes sense in clamshell mode.
++  // Compact mode toggle, only meaningful in clamshell mode.
 +  if (!in_tablet_mode) {
 +    const bool compact_on =
 +        prefs && prefs->GetBoolean(prefs::kShelfCompactMode);

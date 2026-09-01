@@ -1612,7 +1612,7 @@ index cc0471d2b923a72aa68866ef4a6a5d9c5bc33f74..028483fa993f88ae71f0e46b48b8c70b
  };
  
 +// Contains live GPU utilization metrics (only populated when the kernel
-+// exposes them — currently AMD GPUs only via sysfs).
++// exposes them, currently AMD GPUs only via sysfs).
 +struct GpuUsage {
 +  uint8 gpu_busy_percent;
 +  uint64 vram_total;

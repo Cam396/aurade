@@ -37,7 +37,7 @@ index ef3b886d3ab6b1803ed77588b021b658b17333ad..3d48da0d6c142e90d94cae8549ae37db
 +    // Create the shelf when the session reaches ACTIVE and a user profile
 +    // is available. On linux-chromeos, LOGIN_PRIMARY uses the sign-in profile
 +    // which lacks proper services (e.g. AppServiceProxy), so we avoid creating
-+    // the shelf at that state — it would crash on Init().
++    // the shelf at that state, because it would crash on Init().
 +    // The shelf is instead created here at ACTIVE, then the OnUserProfileLoaded
 +    // handler below calls OnUserProfileReadyToSwitch to bind it.
      if (session_manager::SessionManager::Get()->session_state() ==

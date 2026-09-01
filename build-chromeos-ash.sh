@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-chromeos-ash.sh — CI/CD pipeline for ChromiumOS Ash Arch packaging
+# build-chromeos-ash.sh: CI/CD pipeline for ChromiumOS Ash Arch packaging
 #
 # Orchestrates: depot_tools sync → patch → gn → ninja → package
 #
@@ -146,7 +146,7 @@ apply_patches() {
            patch -p1 -N < "${patch_file}" 2>/dev/null; then
             info "    ✓ $(basename "${patch_file}")"
         else
-            warn "    ${patch_file} may already be applied — skipping."
+            warn "    ${patch_file} may already be applied, skipping."
         fi
     done
 }
@@ -194,7 +194,7 @@ build_chrome() {
 
     # Verify the binary
     if [ ! -f "${OUTPUT_DIR}/chrome" ]; then
-        error "Build failed — chrome binary not found at ${OUTPUT_DIR}/chrome"
+        error "Build failed, chrome binary not found at ${OUTPUT_DIR}/chrome"
         exit 1
     fi
 
@@ -202,7 +202,7 @@ build_chrome() {
     size=$(stat -c%s "${OUTPUT_DIR}/chrome" 2>/dev/null || stat -f%z "${OUTPUT_DIR}/chrome" 2>/dev/null)
     local md5
     md5=$(md5sum "${OUTPUT_DIR}/chrome" | cut -d' ' -f1)
-    info "Build complete — chrome: ${size} bytes, md5: ${md5}"
+    info "Build complete: chrome ${size} bytes, md5: ${md5}"
 }
 
 # ── Step 4: Package ────────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ package_chrome() {
         PKGEXT='.pkg.tar.zst' makepkg --repackage --clean 2>&1 | tee -a "${BUILD_LOG}"
         info "Package built: $(find "${PKG_DIR}" -name '*.pkg.tar.zst' -print)"
     else
-        info "makepkg not found — package staged at ${STAGEDIR}"
+        info "makepkg not found, package staged at ${STAGEDIR}"
     fi
 }
 
@@ -263,7 +263,7 @@ verify() {
 
     local binary="${OUTPUT_DIR}/chrome"
     if [ ! -f "${binary}" ]; then
-        error "Binary not found — build may have failed"
+        error "Binary not found, the build may have failed"
         return 1
     fi
 
@@ -277,7 +277,7 @@ verify() {
     if ldd "${binary}" &>/dev/null; then
         info "Dynamic linking: OK"
     else
-        warn "ldd failed — may be statically linked or have missing deps"
+        warn "ldd failed, the binary may be static or have missing deps"
     fi
 
     info "Verification passed."

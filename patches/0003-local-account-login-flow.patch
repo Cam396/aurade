@@ -416,7 +416,7 @@ index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e
      const std::string& signin_scoped_device_id) {
    DCHECK_CURRENTLY_ON(BrowserThread::UI);
 +
-+  // HACK(AuraDE): --stub-auth bypass — return fake OAuth2 tokens so the login
++  // HACK(AuraDE): --stub-auth bypass. Return fake OAuth2 tokens so the login
 +  // flow completes without contacting Google's servers. Needed because we
 +  // distribute this build without Chrome API keys.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-auth")) {

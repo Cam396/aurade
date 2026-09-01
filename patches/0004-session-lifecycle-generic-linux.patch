@@ -327,7 +327,7 @@ index dc8403f76799c9c44052f4e3ace3987448e2fa55..9ba2714d1c560abbf9a4ae03146a6677
    // Otherwise, auth token dependent code would be in an invalid state.
    // Important piece such as policy code might be broken because of this and
    // subject to an exploit. See http://crbug.com/41292933.
-+  // HACK(AuraDE): --stub-auth bypass — skip termination when using stub tokens.
++  // HACK(AuraDE): --stub-auth bypass. Skip termination when using stub tokens.
    if (IsOnlineSignin(user_context_) &&
 -      state == OAuth2LoginManager::SESSION_RESTORE_FAILED) {
 +      state == OAuth2LoginManager::SESSION_RESTORE_FAILED &&

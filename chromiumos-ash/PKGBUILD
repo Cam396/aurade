@@ -1,6 +1,6 @@
 # Maintainer: AuraDE Contributors
 #
-# ChromiumOS Ash — ChromeOS desktop environment for Linux, built with
+# ChromiumOS Ash: the ChromeOS desktop environment for Linux, built with
 # ChromeOS features (OOBE, login manager, Ash shell) but runs on a
 # standard Linux system via Ozone/X11, Ozone/Wayland, or direct DRM.
 #
@@ -99,7 +99,7 @@ makedepends=(
     'python-pip'
 )
 # The source is Chromium's monolithic depot_tools+gclient checkout.
-# This is NOT a tarball — see the CI/CD build script for how to
+# This is NOT a tarball. See the CI/CD build script for how to
 # prepare the source tree before invoking makepkg.
 #
 # The PKGBUILD expects ${srcdir}/chromiumos-src/ to contain a fully
