@@ -1,0 +1,126 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_types.css b/ui/file_manager/file_manager/foreground/css/file_types.css
+--- a/ui/file_manager/file_manager/foreground/css/file_types.css
++++ b/ui/file_manager/file_manager/foreground/css/file_types.css
+@@ -513,3 +513,122 @@
+ body.check-select li[selected] .icon-badge {
+   display: none;
+ }
++
++/* AuraDE: colour by what a file is.
++ *
++ * Every icon in this app is a mask painted with currentColor, so a list of
++ * thirty files is thirty identical grey glyphs and the eye has to read every
++ * filename to find anything. Giving the mask a colour per type turns scanning
++ * into recognition, and costs nothing but this block: no new images, no new
++ * resources.
++ *
++ * Two rules keep it from becoming a carnival.
++ *
++ * The first is that only content is coloured. Volumes, roots, trash, removable
++ * media and the rest are chrome, not content, so they keep currentColor and
++ * the sidebar stays calm. That is why every selector below is scoped to
++ * #list-container.
++ *
++ * The second is that saturation is weighted by how common a type is. Text and
++ * script files outnumber everything else in a real folder, so they get quiet
++ * plate tints; the rarer types that actually carry meaning when you spot them
++ * get the saturated colour. A list that is mostly text reads as calm with a
++ * few things standing out, which is the point.
++ *
++ * Hues are pulled onto AuraDE's lilac and aqua axis wherever there is no
++ * convention worth keeping. Where there is one, it is kept: spreadsheets are
++ * green and PDFs are red everywhere else a person has ever used a computer,
++ * and spending that recognition to be consistent would be a bad trade.
++ */
++
++html:not(body),
++body {
++  /* Light scheme, around tone 40 so each one holds contrast on white. */
++  --aurade-ft-folder: #6d4ea1;
++  --aurade-ft-doc: #1f5199;
++  --aurade-ft-sheet: #146c3a;
++  --aurade-ft-slides: #8a5a0f;
++  --aurade-ft-pdf: #a33a2c;
++  --aurade-ft-image: #12666f;
++  --aurade-ft-video: #4b3f9e;
++  --aurade-ft-audio: #97365f;
++  --aurade-ft-archive: #6d5423;
++  /* The quiet two. Same family as the brand, most of the saturation removed. */
++  --aurade-ft-text: #574a68;
++  --aurade-ft-script: #45566b;
++}
++
++@media (prefers-color-scheme: dark) {
++  html:not(body),
++  body {
++    /* Around tone 80, which is where these stay legible on the dark list. */
++    --aurade-ft-folder: #d1bcff;
++    --aurade-ft-doc: #a8c7fa;
++    --aurade-ft-sheet: #7fd69b;
++    --aurade-ft-slides: #f0c274;
++    --aurade-ft-pdf: #ffb4a8;
++    --aurade-ft-image: #8ed5db;
++    --aurade-ft-video: #b7b0f5;
++    --aurade-ft-audio: #f3aecb;
++    --aurade-ft-archive: #cbb89b;
++    --aurade-ft-text: #c8bfd8;
++    --aurade-ft-script: #b3c2d4;
++  }
++}
++
++/* Scoped to the list so the directory tree and the menus keep currentColor.
++ * This also puts them above the plain [file-type-icon] rules they override,
++ * and below the [selected] and .has-thumbnail resets, which is the order that
++ * lets a selected row still show its checkmark. */
++#list-container [file-type-icon='folder'] {
++  background-color: var(--aurade-ft-folder);
++}
++
++#list-container [file-type-icon='word'],
++#list-container [file-type-icon='gdoc'] {
++  background-color: var(--aurade-ft-doc);
++}
++
++#list-container [file-type-icon='excel'],
++#list-container [file-type-icon='gsheet'],
++#list-container [file-type-icon='gtable'] {
++  background-color: var(--aurade-ft-sheet);
++}
++
++#list-container [file-type-icon='ppt'],
++#list-container [file-type-icon='gslides'] {
++  background-color: var(--aurade-ft-slides);
++}
++
++#list-container [file-type-icon='pdf'] {
++  background-color: var(--aurade-ft-pdf);
++}
++
++#list-container [file-type-icon='image'],
++#list-container [file-type-icon='gdraw'] {
++  background-color: var(--aurade-ft-image);
++}
++
++#list-container [file-type-icon='video'] {
++  background-color: var(--aurade-ft-video);
++}
++
++#list-container [file-type-icon='audio'] {
++  background-color: var(--aurade-ft-audio);
++}
++
++#list-container [file-type-icon='archive'] {
++  background-color: var(--aurade-ft-archive);
++}
++
++/* getIcon falls back to the type name when a type declares no icon, so plain
++ * text arrives here as 'text' with no rule of its own upstream and lands on
++ * the generic mask. It is the single most common thing in a folder, which is
++ * why it gets a tint rather than a colour. */
++#list-container [file-type-icon='text'] {
++  background-color: var(--aurade-ft-text);
++}
++
++#list-container [file-type-icon='script'] {
++  background-color: var(--aurade-ft-script);
++}

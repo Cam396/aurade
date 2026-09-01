@@ -1,0 +1,129 @@
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -482,6 +482,10 @@
+                   <files-spinner class="loading-indicator" hidden></files-spinner>
+                   <div class="drive-welcome page"></div>
+                 </div>
++                <div id="aurade-status-bar" visibleif="full-page">
++                  <span id="aurade-status-count"></span>
++                  <span id="aurade-status-selection"></span>
++                </div>
+               </div>
+             </div>
+           </div>
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2290,3 +2290,49 @@
+     --cros-sys-ripple_primary: color-mix(in srgb, #d1bcff 12%, transparent);
+   }
+ }
++
++/* AuraDE: the status bar at the foot of the file list.
++ *
++ * The panel is a column flexbox whose list is flex: auto, so a sibling placed
++ * after the list and given flex: none pins itself to the bottom and the list
++ * gives up exactly that much height. No positioning, no z-index, nothing that
++ * can drift out of alignment with the scrollbar.
++ *
++ * It exists because the app already computed this text and then threw it away.
++ * The directory summary is written into #files-selected-label, which
++ * file_manager.css sets to display: none unless body.check-select, so the one
++ * number worth having when nothing is selected was being rendered into a
++ * hidden element. This is where it goes instead.
++ *
++ * It carries visibleif="full-page" so the file picker dialogs, which are the
++ * same document, do not grow a status bar they have no use for.
++ */
++#aurade-status-bar {
++  align-items: center;
++  border-top: 1px solid var(--cros-sys-separator);
++  box-sizing: border-box;
++  color: var(--cros-sys-on_surface_variant);
++  display: flex;
++  flex: none;
++  font-size: 12px;
++  gap: 16px;
++  height: 28px;
++  justify-content: space-between;
++  padding: 0 16px;
++  user-select: none;
++}
++
++#aurade-status-count,
++#aurade-status-selection {
++  /* These are numbers that change in place as you move through a folder.
++   * Proportional digits make the text jitter every time the count ticks. */
++  font-variant-numeric: tabular-nums;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++#aurade-status-selection {
++  color: var(--cros-sys-primary);
++  text-align: end;
++}
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -66,6 +66,14 @@
+   private bulkPinningEnabled_: boolean;
+   private store_: Store;
+ 
++  /**
++   * AuraDE: the status bar's two halves, looked up on first use rather than in
++   * the constructor. The dialog variants of this document have no status bar,
++   * so a queryRequiredElement here would throw in the file picker.
++   */
++  private auraDeStatusCount_: HTMLElement|null = null;
++  private auraDeStatusSelection_: HTMLElement|null = null;
++
+   constructor(
+       private toolbar_: HTMLElement, _navigationList: HTMLElement,
+       private listContainer_: ListContainer,
+@@ -308,6 +316,43 @@
+     }
+ 
+     this.filesSelectedLabel_.textContent = text;
++    this.auraDeUpdateStatusBar_(text);
++  }
++
++  /**
++   * AuraDE: keeps the status bar current.
++   *
++   * The elements are held in locals rather than read back off this between the
++   * null check and the use. auraDeDirectorySummary_ is a method call, and a
++   * method call invalidates narrowing on a mutable property, so the checked
++   * fields would be nullable again by the time they were assigned to.
++   *
++   * The count is asked for on every update, including when something is
++   * selected, because auraDeDirectorySummary_ is what sets the title that
++   * carries the forty two note. Reading the title before that call would show
++   * whatever the previous folder left behind.
++   */
++  private auraDeUpdateStatusBar_(selectionText: string) {
++    const count = this.auraDeStatusCount_ ??
++        document.querySelector<HTMLElement>('#aurade-status-count');
++    const selectionEl = this.auraDeStatusSelection_ ??
++        document.querySelector<HTMLElement>('#aurade-status-selection');
++    if (!count || !selectionEl) {
++      return;
++    }
++    this.auraDeStatusCount_ = count;
++    this.auraDeStatusSelection_ = selectionEl;
++
++    const summary = this.auraDeDirectorySummary_();
++    // An empty folder still says so. A blank bar reads as broken.
++    count.textContent = summary || 'Empty folder';
++    count.title = this.filesSelectedLabel_.title;
++
++    // The toolbar already shows the selection in full when there is one, so
++    // repeating it here would be noise; this half stays empty until there is
++    // something to say.
++    selectionEl.textContent =
++        this.selectionHandler_.selection.totalCount === 0 ? '' : selectionText;
+   }
+ 
+   /**

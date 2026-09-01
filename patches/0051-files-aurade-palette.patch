@@ -1,0 +1,124 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2173,3 +2173,120 @@
+   background-color: var(--cros-sys-app_base);
+   border-top: 1px solid var(--cros-sys-separator);
+ }
++
++/* AuraDE: the Files app, in AuraDE's colours rather than ChromeOS's.
++ *
++ * Files names no colour of its own. Every surface, every pill, every focus
++ * ring reads a --cros-sys-* custom property, and chrome://theme/colors.css
++ * fills those in from the ChromeOS palette at runtime. Redefining the
++ * properties therefore retints the entire app at once, including the parts
++ * that live inside shadow roots, because custom properties inherit through
++ * shadow boundaries. Not one component is touched here.
++ *
++ * The selector is not decoration. Chromium's token generators emit
++ * "html:not(body)", which is specificity (0,1,1); a plain ":root" is (0,1,0)
++ * and loses to it, silently, leaving the app looking exactly as it did. That
++ * was the first attempt. Matching the selector and relying on this stylesheet
++ * being linked after colors.css in main.html is what actually wins. "body" is
++ * listed too so that anything scoped there is covered as well.
++ *
++ * The values are not invented. They are the Material 3 roles from
++ * installer/lib/aurade_gui/tokens.py, the table the installer and the greeter
++ * already draw from, on AuraDE's brand hues: lilac 298.6, aqua 226.6, plate
++ * 274.2. Files was the last surface on the system still wearing ChromeOS
++ * amber.
++ *
++ * Light sits in the bare block and dark in the media query, because the WebUI
++ * follows the system colour scheme. A role defined in only one of them would
++ * put one theme's ink on the other theme's paper.
++ */
++
++html:not(body),
++body {
++  --cros-sys-app_base: #f8f9ff;
++  --cros-sys-app_base_shaded: #f1f3fb;
++  --cros-sys-base_elevated: #e6e8ef;
++  --cros-sys-dialog_container: #e6e8ef;
++  --cros-sys-surface1: #f1f3fb;
++  --cros-sys-surface_variant: #dee2f2;
++  --cros-sys-input_field_on_base: #e0e2e9;
++  --cros-sys-separator: #c2c6d5;
++  --cros-sys-outline: #737785;
++  --cros-sys-on_surface: #1a1b20;
++  --cros-sys-on_surface_bodytext: #1a1b20;
++  --cros-sys-on_surface_variant: #434653;
++  --cros-sys-primary: #6d4ea1;
++  --cros-sys-on_primary: #ffffff;
++  --cros-sys-primary_container: #e7deff;
++  --cros-sys-on_primary_container: #2a0053;
++  --cros-sys-inverse_primary: #d1bcff;
++  --cros-sys-secondary: #575d79;
++  --cros-sys-secondary_container: #dae2fe;
++  --cros-sys-on_secondary_container: #161a31;
++  --cros-sys-tertiary_container: #baeaff;
++  --cros-sys-on_tertiary_container: #011f2a;
++  --cros-sys-error: #b12c28;
++  --cros-sys-error_container: #fedbd6;
++  --cros-sys-on_error_container: #410002;
++  --cros-sys-warning: #7e5704;
++  --cros-sys-progress: #6d4ea1;
++  --cros-sys-illo: #6d4ea1;
++  --cros-sys-focus_ring: #6d4ea1;
++  --cros-sys-highlight_shape: #e7deff;
++  --cros-sys-highlight_text: #2a0053;
++  --cros-sys-scrim: #000000;
++  --cros-sys-disabled: color-mix(in srgb, #1a1b20 38%, transparent);
++  --cros-sys-disabled_container: color-mix(in srgb, #1a1b20 12%, transparent);
++  --cros-sys-hover_on_subtle: color-mix(in srgb, #1a1b20 8%, transparent);
++  --cros-sys-pressed_on_subtle: color-mix(in srgb, #1a1b20 12%, transparent);
++  --cros-sys-hover_on_prominent: color-mix(in srgb, #ffffff 8%, transparent);
++  --cros-sys-ripple_neutral_on_subtle: color-mix(in srgb, #1a1b20 10%, transparent);
++  --cros-sys-ripple_neutral_on_prominent: color-mix(in srgb, #ffffff 10%, transparent);
++  --cros-sys-ripple_primary: color-mix(in srgb, #6d4ea1 12%, transparent);
++}
++
++@media (prefers-color-scheme: dark) {
++  html:not(body),
++  body {
++    --cros-sys-app_base: #121318;
++    --cros-sys-app_base_shaded: #1a1b20;
++    --cros-sys-base_elevated: #282a2f;
++    --cros-sys-dialog_container: #282a2f;
++    --cros-sys-surface1: #1a1b20;
++    --cros-sys-surface_variant: #434653;
++    --cros-sys-input_field_on_base: #33353a;
++    --cros-sys-separator: #434653;
++    --cros-sys-outline: #8c909f;
++    --cros-sys-on_surface: #e0e2e9;
++    --cros-sys-on_surface_bodytext: #e0e2e9;
++    --cros-sys-on_surface_variant: #c2c6d5;
++    --cros-sys-primary: #d1bcff;
++    --cros-sys-on_primary: #3f1d6c;
++    --cros-sys-primary_container: #553586;
++    --cros-sys-on_primary_container: #e7deff;
++    --cros-sys-inverse_primary: #6d4ea1;
++    --cros-sys-secondary: #bec5e5;
++    --cros-sys-secondary_container: #404660;
++    --cros-sys-on_secondary_container: #dae2fe;
++    --cros-sys-tertiary_container: #014d64;
++    --cros-sys-on_tertiary_container: #baeaff;
++    --cros-sys-error: #feb4ab;
++    --cros-sys-error_container: #93000c;
++    --cros-sys-on_error_container: #fedbd6;
++    --cros-sys-warning: #fabc52;
++    --cros-sys-progress: #d1bcff;
++    --cros-sys-illo: #d1bcff;
++    --cros-sys-focus_ring: #d1bcff;
++    --cros-sys-highlight_shape: #553586;
++    --cros-sys-highlight_text: #e7deff;
++    --cros-sys-scrim: #000000;
++    --cros-sys-disabled: color-mix(in srgb, #e0e2e9 38%, transparent);
++    --cros-sys-disabled_container: color-mix(in srgb, #e0e2e9 12%, transparent);
++    --cros-sys-hover_on_subtle: color-mix(in srgb, #e0e2e9 8%, transparent);
++    --cros-sys-pressed_on_subtle: color-mix(in srgb, #e0e2e9 12%, transparent);
++    --cros-sys-hover_on_prominent: color-mix(in srgb, #3f1d6c 8%, transparent);
++    --cros-sys-ripple_neutral_on_subtle: color-mix(in srgb, #e0e2e9 10%, transparent);
++    --cros-sys-ripple_neutral_on_prominent: color-mix(in srgb, #3f1d6c 10%, transparent);
++    --cros-sys-ripple_primary: color-mix(in srgb, #d1bcff 12%, transparent);
++  }
++}

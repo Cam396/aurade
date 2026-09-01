@@ -1,0 +1,80 @@
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
+--- a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
++++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
+@@ -37,11 +37,43 @@
+ OpenLinuxVirtualTask::OpenLinuxVirtualTask() = default;
+ OpenLinuxVirtualTask::~OpenLinuxVirtualTask() = default;
+ 
++void OpenLinuxVirtualTask::OnHostControlProbed(bool present) {
++  host_control_present_ = present;
++}
++
+ bool OpenLinuxVirtualTask::IsEnabled(Profile* profile) const {
+   // AuraDE compatibility: use the freedesktop MIME database on generic Linux
+   // while retaining ChromeOS task behavior on ChromeOS images.
+-  return !base::SysInfo::IsRunningOnChromeOS() &&
+-         base::PathExists(base::FilePath(kAuraDeHostControlPath));
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++
++  // This used to be a base::PathExists right here, and it took the desktop
++  // down.
++  //
++  // MatchVirtualTasks() calls IsEnabled() on every virtual task for every non
++  // empty selection, and it takes a raw Profile*, so it runs on the browser UI
++  // thread. base::PathExists wraps its stat in a ScopedBlockingCall, which
++  // calls AssertBlockingAllowed, and blocking is disallowed on that thread. In
++  // a build with DCHECKs on that is not a log line, it is fatal: selecting
++  // files in the Files app killed the whole session and the supervisor
++  // restarted it, with nothing on screen to say why.
++  //
++  // The helper is installed by the AuraDE package and does not come and go
++  // while the session runs, so one probe answers for the life of the process.
++  // Until it answers the task reports itself disabled, which costs at most the
++  // first task lookup after startup and never costs correctness: offering to
++  // open a file with a helper that is not there would be the worse failure.
++  if (!probe_started_) {
++    probe_started_ = true;
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&base::PathExists,
++                       base::FilePath(kAuraDeHostControlPath)),
++        base::BindOnce(&OpenLinuxVirtualTask::OnHostControlProbed,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++  return host_control_present_;
+ }
+ 
+ std::string OpenLinuxVirtualTask::id() const {
+diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
+--- a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
++++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
+ #define CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
+ 
++#include "base/memory/weak_ptr.h"
+ #include "chrome/browser/ash/file_manager/virtual_file_tasks.h"
+ 
+ namespace file_manager::file_tasks {
+@@ -26,6 +27,19 @@
+   std::string title() const override;
+   bool IsDlpBlocked(
+       const std::vector<std::string>& dlp_source_urls) const override;
++
++ private:
++  void OnHostControlProbed(bool present);
++
++  // AuraDE: whether /usr/bin/aurade-hostctl is on disk.
++  //
++  // IsEnabled() is const and is called on the browser UI thread, so the answer
++  // has to already be known by the time it is asked. These are mutable because
++  // the probe is kicked off from inside that const call; see the comment there
++  // for why it cannot simply stat.
++  mutable bool probe_started_ = false;
++  bool host_control_present_ = false;
++  mutable base::WeakPtrFactory<OpenLinuxVirtualTask> weak_ptr_factory_{this};
+ };
+ 
+ }  // namespace file_manager::file_tasks
