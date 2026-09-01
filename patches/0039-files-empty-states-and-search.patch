@@ -1,0 +1,139 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts b/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
+@@ -54,6 +54,83 @@
+     'odfs_frozen_account.svg#odfs_frozen_account';
+ 
+ /**
++ * AuraDE: the empty state for an ordinary folder.
++ *
++ * Upstream leaves svgRef null for a plain directory, so updateUi_ returns
++ * before it ever unhides the panel and an empty folder renders as blank space
++ * with nothing in it at all. Recents, Trash and search each got a considered
++ * empty state and the folder people actually open the most got none. This
++ * reuses the existing illustration rather than adding an asset.
++ */
++const AURADE_EMPTY_FOLDER =
++    'foreground/images/files/ui/empty_folder.svg#empty_folder';
++
++/**
++ * AuraDE: what an empty folder says, chosen by which folder it is.
++ *
++ * The second line of each pair is the one doing the work. "This folder is
++ * empty" tells somebody what they can already see; saying what the folder is
++ * for tells them something they might not know, and it is the difference
++ * between a dead end and a place that is simply waiting.
++ */
++const AURADE_EMPTY_MESSAGES: Record<string, Array<[string, string]>> = {
++  [RootType.DOWNLOADS]: [
++    ['Nothing downloaded yet', 'Files you save from the web arrive here.'],
++    ['Nothing downloaded yet', 'This is where the web leaves things for you.'],
++  ],
++  [RootType.MY_FILES]: [
++    ['Nothing here yet', 'This is your space. Anything you keep lives here.'],
++    ['Nothing here yet', 'An empty desk, which is not the worst way to start.'],
++  ],
++  [RootType.REMOVABLE]: [
++    ['This drive is empty', 'Nothing has been written to it yet.'],
++    ['This drive is empty', 'Drag something across and it will be yours to carry.'],
++  ],
++  [RootType.ARCHIVE]: [
++    ['This archive is empty', 'There is nothing packed inside it.'],
++  ],
++  [RootType.CROSTINI]: [
++    ['Nothing here yet', 'Files you share with Linux appear in this folder.'],
++  ],
++};
++
++const AURADE_EMPTY_FALLBACK: Array<[string, string]> = [
++  ['This folder is empty', 'Nothing has been put here yet.'],
++  ['This folder is empty', 'Empty, and ready when you are.'],
++];
++
++/**
++ * AuraDE: pick one line and keep picking the same one.
++ *
++ * A folder that reworded itself on every redraw would read as a glitch rather
++ * than a flourish, so the choice is derived from the folder's own key and the
++ * calendar day. The same folder says the same thing all day and quietly says
++ * something else tomorrow, which is the only way a variant is ever noticed
++ * without being irritating.
++ */
++function auraDeVariantIndex(seed: string, count: number): number {
++  if (count <= 1) {
++    return 0;
++  }
++  const day = Math.floor(Date.now() / 86400000);
++  let hash = day % 1024;
++  for (let i = 0; i < seed.length; i++) {
++    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
++  }
++  return Math.abs(hash) % count;
++}
++
++/**
++ * AuraDE: the title and description for an empty ordinary folder.
++ */
++export function auraDeEmptyFolderMessage(
++    rootType: string|null, fileKey: string): [string, string] {
++  const options = (rootType && AURADE_EMPTY_MESSAGES[rootType]) ||
++      AURADE_EMPTY_FALLBACK;
++  return options[auraDeVariantIndex(fileKey || String(rootType), options.length)]!;
++}
++
++/**
+  * The state of the user's OneDrive account. Matches the enum in ODFS.
+  */
+ enum OdfsAccountState {
+@@ -399,6 +476,7 @@
+       return;
+     }
+     const currentRootType = this.directoryModel_.getCurrentRootType();
++    let auraDeEmptyFolder = false;
+ 
+     if (isRecentRootType(currentRootType)) {
+       svgRef = RECENTS_EMPTY_FOLDER;
+@@ -411,6 +489,13 @@
+       const {search} = getStore().getState();
+       if (search && search.query) {
+         svgRef = SEARCH_EMPTY_RESULTS;
++      } else {
++        // AuraDE: an ordinary folder gets an empty state too. Tracked with its
++        // own flag rather than by comparing svgRef, because this reuses the
++        // Recents illustration and comparing the two by value would answer for
++        // Recents as well.
++        svgRef = AURADE_EMPTY_FOLDER;
++        auraDeEmptyFolder = true;
+       }
+     }
+ 
+@@ -445,12 +530,29 @@
+     }
+ 
+     if (svgRef === SEARCH_EMPTY_RESULTS) {
++      // AuraDE: a search that finds nothing is the one place somebody types a
++      // word and gets told nothing came back, so it is the right place to
++      // answer the oldest one. Colossal Cave has replied "Nothing happens."
++      // to xyzzy since 1977, and anybody who types it here already knows that.
++      const {search} = getStore().getState();
++      const query = (search && search.query || '').trim().toLowerCase();
++      if (query === 'xyzzy') {
++        this.showMessage_('Nothing happens.', 'Nothing happens here either.');
++        return;
++      }
+       this.showMessage_(
+           str('SEARCH_NO_MATCHING_RESULTS_TITLE'),
+           str('SEARCH_NO_MATCHING_RESULTS_DESC'));
+       return;
+     }
+ 
++    if (auraDeEmptyFolder) {
++      const [title, description] = auraDeEmptyFolderMessage(
++          currentRootType, this.directoryModel_.getCurrentFileKey());
++      this.showMessage_(title, description);
++      return;
++    }
++
+     switch (this.recentEntry_.fileCategory) {
+       case chrome.fileManagerPrivate.FileCategory.AUDIO:
+         this.showMessage_(str('RECENT_EMPTY_AUDIO_FOLDER'));
