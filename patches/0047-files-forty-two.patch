@@ -1,0 +1,14 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -255,6 +255,10 @@
+     if (!count) {
+       return '';
+     }
++    // AuraDE: a folder of exactly forty two gets a note on hover and nothing
++    // else. The count stays true, the layout does not move, and almost nobody
++    // will ever see it. That is the point of it.
++    this.filesSelectedLabel_.title = count === 42 ? 'The answer.' : '';
+     return count === 1 ? '1 item' : `${count.toLocaleString()} items`;
+   }
+ 
