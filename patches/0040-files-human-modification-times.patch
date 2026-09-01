@@ -1,0 +1,75 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts b/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
+@@ -10,6 +10,51 @@
+ /**
+  * Formatter class for file metadatas.
+  */
++const WEEKDAYS = [
++  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
++];
++
++/**
++ * AuraDE: how long ago, in the words a person would actually use.
++ *
++ * Upstream jumps from "Today 10:15 PM" straight to a full date, so a file
++ * saved two minutes ago and one saved eleven hours ago read identically, and
++ * anything older than yesterday loses the one fact people navigate by: roughly
++ * how recent it is. A weekday carries that where a date does not. Nobody
++ * remembers editing something on the 26th; they remember it was Tuesday.
++ *
++ * Returns null when the plain date is the honest answer, which is anything
++ * beyond a week and anything in the future. A clock that is ahead should not
++ * produce "in 3 minutes ago", so future stamps fall through untouched.
++ */
++export function auraDeRelativeTime(
++    modTime: Date, now: Date, weekdayName: (d: Date) => string): string|null {
++  const elapsed = now.getTime() - modTime.getTime();
++  if (elapsed < 0) {
++    return null;
++  }
++  const MINUTE = 60 * 1000;
++  const HOUR = 60 * MINUTE;
++  if (elapsed < MINUTE) {
++    return 'Just now';
++  }
++  if (elapsed < HOUR) {
++    const minutes = Math.floor(elapsed / MINUTE);
++    return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
++  }
++  // Past an hour, the clock time is more useful than a count, and today and
++  // yesterday already have their own wording upstream. This fills the gap
++  // between yesterday and a week, where only a weekday means anything.
++  const startOfToday = new Date(now.getTime());
++  startOfToday.setHours(0, 0, 0, 0);
++  const daysBack =
++      Math.floor((startOfToday.getTime() - modTime.getTime()) / (24 * HOUR));
++  if (daysBack >= 1 && daysBack < 6) {
++    return weekdayName(modTime);
++  }
++  return null;
++}
++
+ export class FileMetadataFormatter extends EventTarget {
+   private timeFormatter_: Intl.DateTimeFormat|null = null;
+ 
+@@ -75,7 +120,18 @@
+     if (isNaN(modTime.getTime())) {
+       // In case of 'Invalid Date'.
+       return '--';
+-    } else if (
++    }
++
++    // AuraDE: say it the way a person would, where there is a better way to
++    // say it. Falls through to the upstream wording whenever there is not.
++    const relative = auraDeRelativeTime(
++        modTime, new Date(),
++        (d) => `${WEEKDAYS[d.getDay()]} ${this.timeFormatter_!.format(d)}`);
++    if (relative !== null) {
++      return relative;
++    }
++
++    if (
+         modTime >= today &&
+         modTime.getTime() < today.getTime() + MILLISECONDS_IN_DAY) {
+       return strf('TIME_TODAY', this.timeFormatter_!.format(modTime));
