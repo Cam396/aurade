@@ -1,0 +1,36 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/naming_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+@@ -165,7 +165,14 @@
+     input.focus();
+ 
+     const selectionEnd = input.value.lastIndexOf('.');
+-    if (currentEntry.isFile && selectionEnd !== -1) {
++    // AuraDE: a name that begins with a dot has no extension, it just starts
++    // with one. lastIndexOf returns 0 for .bashrc, so the stem selection
++    // collapses to nothing and renaming a dotfile hands somebody an empty
++    // selection and a cursor at the start, which reads as the app failing to
++    // respond. Selecting the whole name is what people want there anyway.
++    // A name like .bashrc.bak still selects .bashrc, because the last dot is
++    // then a real extension separator.
++    if (currentEntry.isFile && selectionEnd > 0) {
+       input.selectionStart = 0;
+       input.selectionEnd = selectionEnd;
+     } else {
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -47,8 +47,12 @@
+       <command id="get-info" label="$i18n{GET_INFO_BUTTON_LABEL}"
+                shortcut="Space">
+       <command id="dlp-restriction-details" label="$i18n{DLP_RESTRICTION_DETAILS}">
++      <!-- AuraDE: F2 as well as Ctrl+Enter. F2 is the rename key on Windows
++           and on every Linux file manager, it is the first thing anybody
++           arriving from either of those tries, and nothing else here binds
++           it. Keeping Ctrl+Enter means nobody has to relearn anything. -->
+       <command id="rename" label="$i18n{RENAME_BUTTON_LABEL}"
+-               shortcut="Enter|Ctrl">
++               shortcut="Enter|Ctrl F2">
+       <command id="move-to-trash" shortcut="Backspace|Alt Delete" label="$i18n{MOVE_TO_TRASH_BUTTON_LABEL}">
+       <command id="restore-from-trash" shortcut="Backspace|Alt Delete" label="$i18n{RESTORE_FROM_TRASH_BUTTON_LABEL}">
+       <command id="delete" shortcut="Backspace|Alt|Shift Delete|Shift Backspace|Alt Delete ">
