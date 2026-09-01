@@ -1,0 +1,57 @@
+diff --git a/chromeos/dbus/init/initialize_dbus_client.h b/chromeos/dbus/init/initialize_dbus_client.h
+--- a/chromeos/dbus/init/initialize_dbus_client.h
++++ b/chromeos/dbus/init/initialize_dbus_client.h
+@@ -15,7 +15,28 @@
+ template <typename T>
+ void InitializeDBusClient(dbus::Bus* bus) {
+ #if defined(USE_REAL_DBUS_CLIENTS)
+-  T::Initialize(bus);
++  // AuraDE: a real client when there is a real bus, a fake when there is not.
++  //
++  // Upstream hardened these clients in August 2026: about seventy of them
++  // under chromeos/ash/components/dbus now open with CHECK(bus). When AuraDE
++  // still set use_real_dbus_clients, and on generic Linux DBusThreadManager
++  // has no global system bus, this branch handed null to the first client
++  // in ash_dbus_helper's list, AnomalyDetectorClient, and the browser aborted
++  // in PostEarlyInitialization. No window, no log a user would find, and the
++  // session supervisor gave up after five attempts and fell back to the
++  // greeter.
++  //
++  // Falling back the same way the branch below does keeps what the flag is
++  // for. Where a real bus exists, which is ChromeOS, the real client is still
++  // used. Networking does not come through here at all: ash_dbus_helper calls
++  // shill_clients::InitializeAuraDe with its own narrowly scoped bus before
++  // this list runs, so no fake shill and none of its invented services can
++  // reappear as a result of this.
++  if (bus) {
++    T::Initialize(bus);
++  } else {
++    T::InitializeFake();
++  }
+ #else
+   // TODO(hashimoto): Always use fakes after adding
+   // use_real_dbus_clients=true to where needed. crbug.com/952745
+diff --git a/chromeos/ash/components/dbus/hermes/hermes_clients.cc b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
+--- a/chromeos/ash/components/dbus/hermes/hermes_clients.cc
++++ b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
+@@ -11,10 +11,17 @@
+ namespace ash::hermes_clients {
+ 
+ void Initialize(dbus::Bus* system_bus) {
+-#if !defined(USE_REAL_DBUS_CLIENTS)
+-  if (!system_bus)
++  // AuraDE: the same fallback the flag used to compile out.
++  //
++  // ash_dbus_helper calls this unconditionally, with the bus from
++  // DBusThreadManager, which is null on generic Linux. Behind
++  // use_real_dbus_clients the early return above was compiled out and the
++  // DCHECK below became the abort instead, in a build with DCHECK_ALWAYS_ON.
++  // Hermes talks to eSIM hardware that no AuraDE target has, so fakes are the
++  // honest answer here rather than a workaround.
++  if (!system_bus) {
+     return InitializeFakes();
+-#endif
++  }
+   DCHECK(system_bus);
+   // The Hermes fake Manager client depends on fake Profile client
+   // to coordinate creating and managing of fake profile objects. The

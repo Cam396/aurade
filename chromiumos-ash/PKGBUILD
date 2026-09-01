@@ -199,7 +199,6 @@ build() {
         use_system_minigbm = true
         enable_rust = true
         use_chromium_rust_toolchain = true
-        use_real_dbus_clients = true
         use_official_google_api_keys = false
     "
 
@@ -208,13 +207,24 @@ build() {
         exit 1
     fi
 
-    # Fail closed if the generated build does not carry the real D-Bus client
-    # define. Without this check a successful compile can still publish the
-    # desktop fake network services, which look like real connections in Ash.
-    local toolchain_ninja="${out_dir}/toolchain.ninja"
-    if [[ ! -r "${toolchain_ninja}" ]] ||
-       ! grep -Fq -- '-DUSE_REAL_DBUS_CLIENTS' "${toolchain_ninja}"; then
-        echo 'ERROR: generated Chromium build is missing real D-Bus clients' >&2
+    # Fail closed if the build would publish the desktop fake network services,
+    # which look like real connections in Ash. What makes them real on generic
+    # Linux is patch 0038: ash_dbus_helper routes the Shill clients to their own
+    # narrowly scoped bus rather than to the global one, which does not exist
+    # here. Check for that routing.
+    #
+    # This used to check toolchain.ninja for -DUSE_REAL_DBUS_CLIENTS. That flag
+    # was the mechanism before 0038 existed, and it stopped being safe on
+    # 2026-08-20 when upstream gave about seventy clients under
+    # chromeos/ash/components/dbus a CHECK(bus) on Initialize. Setting it also
+    # sets use_real_chromeos_services via chromeos/features.gni, which drops the
+    # fake mojo service manager from the build entirely, so a build carrying the
+    # define aborts in PostEarlyInitialization before any window appears. The
+    # binary that boots does not have it.
+    local shill_router="${chrome_src}/chrome/browser/ash/dbus/ash_dbus_helper.cc"
+    if [[ ! -r "${shill_router}" ]] ||
+       ! grep -Fq 'shill_clients::InitializeAuraDe' "${shill_router}"; then
+        echo 'ERROR: Chromium source is missing the real Shill routing from patch 0038' >&2
         return 1
     fi
 
