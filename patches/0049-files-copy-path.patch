@@ -1,0 +1,114 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+--- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
++++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+@@ -18,7 +18,7 @@
+ import type {FileFilter} from './directory_contents.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
+-import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+ import {shouldIgnoreEvents} from './file_manager_commands_util.js';
+ import type {FileSelection, FileSelectionHandler} from './file_selection.js';
+ import type {FileTransferController} from './file_transfer_controller.js';
+@@ -162,6 +162,7 @@
+   'set-wallpaper': new SetWallpaperCommand(),
+   'volume-storage': new VolumeStorageCommand(),
+   'copy-name': new CopyNameCommand(),
++  'copy-path': new CopyPathCommand(),
+   'show-providers-submenu': new ShowProvidersSubmenuCommand(),
+   'volume-switch-1': new VolumeSwitchCommand(1),
+   'volume-switch-2': new VolumeSwitchCommand(2),
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+@@ -2508,6 +2508,71 @@
+ }
+ 
+ /**
++ * AuraDE: the location of an entry the way Files itself writes it, for
++ * example My files/Downloads/report.pdf. Returns the empty string when the
++ * entry sits on no volume Files can place, which happens for fake roots and
++ * for a volume unmounted between the selection and the copy.
++ */
++function auraDeDisplayPath(
++    entry: Entry|FilesAppEntry, volumeManager: VolumeManager): string {
++  const components =
++      PathComponent.computeComponentsFromEntry(entry, volumeManager);
++  return components.map(component => component.name).join('/');
++}
++
++/**
++ * AuraDE: copies the location of the selected files to the clipboard.
++ *
++ * Telling somebody where a file is means reading the breadcrumb and retyping
++ * it, and the breadcrumb elides the middle of a long path, so the part most
++ * worth quoting is the part that is not on screen to copy.
++ *
++ * The string this writes is the one the details panel already shows under
++ * File location, so what gets pasted matches what the window says. It is
++ * deliberately not dressed up as a native filesystem path: nothing the Files
++ * frontend can call returns one, and a path that looked like it would paste
++ * into a terminal and then did not work would be worse than a path that is
++ * honest about what it is.
++ *
++ * Uses the async clipboard for the reason CopyNameCommand documents above.
++ */
++export class CopyPathCommand extends FilesCommand {
++  execute(_event: CommandEvent, fileManager: CommandHandlerDeps) {
++    const paths =
++        fileManager.getSelection()
++            .entries.map(
++                entry => auraDeDisplayPath(entry, fileManager.volumeManager))
++            .filter(path => path.length > 0);
++    if (paths.length === 0) {
++      return;
++    }
++    // One path per line, so a multiple selection pastes into a list rather
++    // than a run-on sentence somebody has to split by hand.
++    navigator.clipboard.writeText(paths.join('\n'))
++        .then(() => {
++          const message = paths.length === 1 ?
++              `Copied the path ${paths[0]}` :
++              `Copied ${paths.length} paths`;
++          fileManager.ui.toast.show(message);
++          fileManager.ui.speakA11yMessage(message);
++        })
++        .catch(() => {
++          const message = 'Could not reach the clipboard';
++          fileManager.ui.toast.show(message);
++          fileManager.ui.speakA11yMessage(message);
++        });
++  }
++
++  override canExecute(event: CanExecuteEvent, fileManager: CommandHandlerDeps) {
++    const count = fileManager.getSelection().entries.length;
++    event.canExecute = count > 0;
++    event.command.setHidden(count === 0);
++    // The label counts, for the same reason Copy name counts.
++    event.command.label = count > 1 ? `Copy ${count} paths` : 'Copy path';
++  }
++}
++
++/**
+  * Opens "providers menu" to allow users to use providers/FSPs.
+  */
+ export class ShowProvidersSubmenuCommand extends FilesCommand {
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -38,6 +38,7 @@
+            below, and quietly taking a key somebody already uses is a worse
+            trade than one extra trip to the context menu. -->
+       <command id="copy-name" label="Copy name">
++      <command id="copy-path" label="Copy path">
+       <command id="paste" label="$i18n{PASTE_BUTTON_LABEL}"
+                shortcut="v|Ctrl">
+       <command id="paste-into-current-folder" label="$i18n{PASTE_BUTTON_LABEL}"
+@@ -179,6 +180,7 @@
+         <cr-menu-item command="#cut" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>
++        <cr-menu-item command="#copy-path" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
+         <hr visibleif="full-page">
