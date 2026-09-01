@@ -37,9 +37,16 @@ command -v openssl >/dev/null 2>&1 || {
 }
 
 install -d "$TMP/zoneinfo" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
-  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri"
+  "$TMP/block/sda" "$TMP/block/sdb" "$TMP/dri" "$TMP/stub" \
+  "$TMP/bundle" "$TMP/installer-meta"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/locales/en_US"
 : >"$TMP/keymaps/i386/qwerty/us.map.gz"; : >"$TMP/dri/renderD128"
+cat >"$TMP/stub/loadkeys" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$TMP/stub/loadkeys"
+export PATH="$TMP/stub:$PATH"
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
@@ -87,12 +94,19 @@ export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
 export AURADE_KEYMAP_DIR="$TMP/keymaps" AURADE_BLOCK_DIR="$TMP/block"
 export AURADE_SNAPSHOT_FILE="$TMP/snapshot" AURADE_DISK_TABLE="$TMP/disks"
 export AURADE_PROBE_MEMINFO="$TMP/meminfo" AURADE_PROBE_DRI_DIR="$TMP/dri"
+# The production probe allows five seconds for an optional eglinfo call. This
+# fixture drives many independent installer flows, so bound that optional
+# lookup tightly while retaining the dedicated probe test's renderer cases.
+export AURADE_PROBE_GL_TIMEOUT=0.2
 export AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
 # Pinned so the progress screen picks the same layout everywhere.
 export AURADE_TUI_HEIGHT=34
 export AURADE_INSTALL_ENGINE="$TMP/stub-engine"
 export AURADE_JOURNAL_LIB="$ROOT/installer/lib/aurade-journal.sh"
 export TMPDIR="$TMP"
+export AURADE_BUNDLE_DIR="$TMP/bundle"
+printf '%s\n' development-unsigned >"$TMP/installer-meta/repo-fingerprint"
+export AURADE_REPO_FINGERPRINT_FILE="$TMP/installer-meta/repo-fingerprint"
 
 # Answer the default path, then whatever the scenario adds at the gate.
 answers() {
@@ -173,6 +187,8 @@ tail -1 "$calls" | grep -Fq -- '--target /dev/sda' || fail 'the execute call nam
 tail -1 "$calls" | grep -Fq -- '--arch-snapshot 2026/07/12' ||
   fail 'the execute call lost the image snapshot date'
 tail -1 "$calls" | grep -Fq -- '--encrypt' || fail 'encryption was requested but not passed'
+tail -1 "$calls" | grep -Fq -- '--allow-unsigned' ||
+  fail 'the image repository policy was not passed to the engine'
 
 # The finished screen must actually be reached.
 grep -Fq 'AuraDE is installed' "$TMP/out.happy" || fail 'the finished screen was never shown'

@@ -851,7 +851,13 @@ fi
 [[ -r $PASSWORD_HASH_FILE ]] || die "password hash file is not readable: $PASSWORD_HASH_FILE"
 [[ -z $(find "$PASSWORD_HASH_FILE" -maxdepth 0 -perm /077 -print -quit) ]] || die 'password hash file must not be group/world accessible'
 if ! awk 'BEGIN { count = 0; valid = 0 }
-  NF { count++; valid = ($0 ~ /^\$[^[:space:]]+$/) }
+  NR == 1 {
+    # Accept the crypt(3) families understood by shadow/chpasswd, including
+    # schemes with extra fields, but require a scheme, salt/parameter field,
+    # and final hash with no whitespace or blank records around it.
+    valid = ($0 ~ /^\$[^[:space:]$]+\$[^[:space:]$]+\$[^[:space:]]+$/)
+  }
+  { count++ }
   END { exit !(count == 1 && valid) }' "$PASSWORD_HASH_FILE"; then
   die 'password hash must be a single crypt(3) hash, not plaintext'
 fi
@@ -1078,6 +1084,18 @@ if [[ $MODE == execute ]]; then
     command -v cryptsetup >/dev/null || die 'required command not found: cryptsetup'
   fi
   secure_boot_state=$(bootctl is-secure-boot 2>/dev/null || true)
+  # The `is-secure-boot` verb is absent from older ArchISO snapshots. Read the
+  # firmware variable directly before treating the state as unreadable, so an
+  # older live image does not silently downgrade a known-enabled machine to the
+  # unknown branch. Only an explicit 0 or 1 is safe to carry forward.
+  case $secure_boot_state in
+    enabled|disabled) ;;
+    *)
+      case $(efi_boolean SecureBoot 2>/dev/null || true) in
+        1) secure_boot_state=enabled ;;
+        0) secure_boot_state=disabled ;;
+      esac ;;
+  esac
   case $secure_boot_state in
     enabled)
       setup_mode=$(efi_boolean SetupMode 2>/dev/null || true)

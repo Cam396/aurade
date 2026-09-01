@@ -100,6 +100,10 @@ bsdtar -cf "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
   -C "$TMP/package" .PKGINFO
 package_digest=$(sha256sum \
   "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" | awk '{print $1}')
+# Keep the exact bytes the lock was computed from. A later step has to put this
+# archive back, and rebuilding it there would embed a fresh .PKGINFO mtime.
+cp "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
+  "$TMP/locked-package.tar.zst"
 printf '%s %s aurade 1.0-1 any\n' "$package_digest" \
   aurade-1.0-1-any.pkg.tar.zst \
   >"$TMP/squash/opt/aurade/repo/packages.lock"
@@ -169,12 +173,13 @@ grep -Fq 'package checksum mismatch' "$TMP/tampered-full.out"
 # An unlisted archive must fail even when the listed archive itself is valid.
 cp "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
   "$TMP/squash/opt/aurade/repo/extra-1.0-1-any.pkg.tar.zst"
-# Restore the locked archive and rebuild the tiny squashfs.
-rm -f "$TMP/package/README"
-printf '%s\n' 'pkgname = aurade' 'pkgver = 1.0-1' 'arch = any' \
-  >"$TMP/package/.PKGINFO"
-bsdtar -cf "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst" \
-  -C "$TMP/package" .PKGINFO
+# Restore the locked archive and rebuild the tiny squashfs. Copy the bytes the
+# lock was computed from rather than re-creating the archive: bsdtar records the
+# .PKGINFO mtime, so a rebuild only matched the digest when both writes landed in
+# the same one second tick, and this check intermittently saw a checksum mismatch
+# instead of the unlisted archive it is meant to be testing for.
+cp "$TMP/locked-package.tar.zst" \
+  "$TMP/squash/opt/aurade/repo/aurade-1.0-1-any.pkg.tar.zst"
 mksquashfs "$TMP/squash" "$TMP/iso-tree/arch/x86_64/airootfs.sfs" \
   -noappend -quiet
 (cd "$TMP/iso-tree" && bsdtar -cf "$TMP/unlisted-full.iso" .)

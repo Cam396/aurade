@@ -56,6 +56,7 @@ python3 - "$sbom" "$basename_iso" "$actual_digest" "$build_info" "$ISO" <<'PY'
 import hashlib
 import json
 import pathlib
+import re
 import sys
 
 sbom_path, iso_name, iso_digest, build_info_path, iso_path = sys.argv[1:]
@@ -74,15 +75,47 @@ if not document.get("documentNamespace", "").endswith(iso_digest):
     raise SystemExit("verify-iso-artifacts: SBOM namespace is not bound to the ISO digest")
 
 info = {}
-for line in pathlib.Path(build_info_path).read_text(encoding="utf-8").splitlines():
-    if "=" in line:
-        key, value = line.split("=", 1)
-        info[key] = value
+for line_number, line in enumerate(pathlib.Path(build_info_path).read_text(encoding="utf-8").splitlines(), 1):
+    if not line:
+        continue
+    if "=" not in line:
+        raise SystemExit(f"verify-iso-artifacts: malformed build-info line {line_number}")
+    key, value = line.split("=", 1)
+    if not key or key in info:
+        raise SystemExit(f"verify-iso-artifacts: duplicate or empty build-info key on line {line_number}")
+    info[key] = value
 if info.get("sbom_file") != pathlib.Path(sbom_path).name:
     raise SystemExit("verify-iso-artifacts: build-info points at a different SBOM")
 sbom_digest = hashlib.sha256(pathlib.Path(sbom_path).read_bytes()).hexdigest()
 if info.get("sbom_sha256") != sbom_digest:
     raise SystemExit("verify-iso-artifacts: build-info SBOM digest mismatch")
+
+snapshot = info.get("arch_snapshot", "")
+if not re.fullmatch(r"\d{4}/\d{2}/\d{2}", snapshot):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid arch_snapshot")
+release_channel = info.get("release_channel", "")
+if release_channel not in {"development", "soak", "candidate", "public"}:
+    raise SystemExit("verify-iso-artifacts: build-info has invalid release_channel")
+source_epoch = info.get("source_date_epoch", "")
+if not source_epoch.isdigit() or int(source_epoch) <= 0:
+    raise SystemExit("verify-iso-artifacts: build-info has invalid source_date_epoch")
+if not info.get("repo_url", ""):
+    raise SystemExit("verify-iso-artifacts: build-info is missing repo_url")
+repo_fingerprint = info.get("repo_fingerprint", "")
+if repo_fingerprint != "unsigned" and not re.fullmatch(r"[0-9A-Fa-f]{40,64}", repo_fingerprint):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid repo_fingerprint")
+if "gui_release" in info:
+    if info["gui_release"] not in {"0", "1"}:
+        raise SystemExit("verify-iso-artifacts: build-info has invalid gui_release")
+    manifest_digest = info.get("gui_manifest_sha256", "")
+    if info["gui_release"] == "1":
+        if not re.fullmatch(r"[0-9A-Fa-f]{64}", manifest_digest):
+            raise SystemExit("verify-iso-artifacts: GUI build-info lacks a manifest digest")
+    elif manifest_digest != "not-embedded":
+        raise SystemExit("verify-iso-artifacts: text build-info embeds a GUI manifest")
+packages_lock_sha256 = info.get("packages_lock_sha256", "")
+if not re.fullmatch(r"[0-9A-Fa-f]{64}", packages_lock_sha256):
+    raise SystemExit("verify-iso-artifacts: build-info has invalid packages_lock_sha256")
 
 def positive_int(name):
     value = info.get(name, "")

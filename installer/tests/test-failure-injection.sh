@@ -37,6 +37,7 @@ printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
 chmod 0600 "$TMP/password.hash"
 printf '%s\n' 'audit-passphrase' >"$TMP/luks.passphrase"
 chmod 0600 "$TMP/luks.passphrase"
+export AURADE_JOURNAL_PATH="$TMP/journal.jsonl" AURADE_JOURNAL_RAW="$TMP/install.log"
 
 common=(
   --target /dev/aurade-test-disk
@@ -110,6 +111,16 @@ if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/plaintext.out" 2>&
 fi
 grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/plaintext.out"
 refute grep -Fq 'wipefs --all --force' "$TMP/plaintext.out"
+
+# A single malformed crypt-looking line is rejected too; the old prefix-only
+# check would have let this reach chpasswd during a real install.
+printf '%s\n' '$bogus' >"$TMP/password.hash"
+if "$ROOT/installer/bin/aurade-install" "${common[@]}" >"$TMP/malformed-hash.out" 2>&1; then
+  echo 'malformed password hash unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'password hash must be a single crypt(3) hash' "$TMP/malformed-hash.out"
+! grep -Fq 'wipefs --all --force' "$TMP/malformed-hash.out"
 
 printf '%s\n' '$6$audit$not-a-plaintext-password' >"$TMP/password.hash"
 
