@@ -1,0 +1,51 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+@@ -58,6 +58,36 @@
+   return exact === 1 ? '1 byte' : `${grouped} bytes`;
+ }
+ 
++/**
++ * AuraDE: the whole timestamp, for the same reason as the byte count.
++ *
++ * The Date column says "Yesterday 10:15 PM" or "Tuesday 4:02 PM", which is the
++ * right thing to read and, once somebody is comparing two versions of the same
++ * file, the wrong thing to trust. The exact time lives on hover, where it costs
++ * nobody anything until it is wanted.
++ *
++ * Returns the empty string for a time that cannot be shown, which is also what
++ * clears the tooltip on a recycled row.
++ */
++export function auraDeExactTime(modTime: Date|number|undefined): string {
++  if (modTime === undefined || modTime === null) {
++    return '';
++  }
++  const date = modTime instanceof Date ? modTime : new Date(modTime);
++  const value = date.getTime();
++  if (!isFinite(value)) {
++    return '';
++  }
++  try {
++    return date.toLocaleString(
++        /*locales=*/ undefined, {dateStyle: 'full', timeStyle: 'medium'});
++  } catch (error) {
++    // dateStyle and timeStyle are widely supported but not universally, and a
++    // tooltip is never worth throwing over.
++    return date.toLocaleString();
++  }
++}
++
+ export class FileTableColumnModel extends TableColumnModel {
+   private snapshot_: ColumnSnapshot|null = null;
+ 
+@@ -924,6 +954,10 @@
+         item.modificationTime;
+ 
+     div.textContent = this.formatter_!.formatModDate(modTime);
++    // AuraDE: cells are reused as the list scrolls, so this is assigned
++    // unconditionally. A title set only when a time exists leaves the previous
++    // file's timestamp sitting on a row that now shows something else.
++    div.title = auraDeExactTime(modTime);
+   }
+ 
+   private updateGroupHeading_() {
