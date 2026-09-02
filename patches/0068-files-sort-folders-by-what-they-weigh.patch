@@ -1,0 +1,70 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/file_list_model.ts b/ui/file_manager/file_manager/foreground/js/file_list_model.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_list_model.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_list_model.ts
+@@ -7,20 +7,21 @@ import {assert} from 'chrome://resources/js/assert.js';
+ import type {EntryLocation} from '../../background/js/entry_location_impl.js';
+ import type {VolumeManager} from '../../background/js/volume_manager.js';
+ import {ArrayDataModel} from '../../common/js/array_data_model.js';
+ import {compareLabel, compareName} from '../../common/js/entry_utils.js';
+ import type {FileExtensionType} from '../../common/js/file_type.js';
+ import {getType, isImage, isRaw} from '../../common/js/file_type.js';
+ import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
+ import {getRecentDateBucket, getTranslationKeyForDateBucket} from '../../common/js/recent_date_bucket.js';
+ import {collator, str, strf} from '../../common/js/translations.js';
+ 
++import {auraDeMeasuredFolderSize} from './aurade_folder_size.js';
+ import type {MetadataItem} from './metadata/metadata_item.js';
+ import type {MetadataModel} from './metadata/metadata_model.js';
+ 
+ export const GROUP_BY_FIELD_MODIFICATION_TIME = 'modificationTime';
+ export const GROUP_BY_FIELD_DIRECTORY = 'isDirectory';
+ 
+ const FIELDS_SUPPORT_GROUP_BY = new Set([
+   GROUP_BY_FIELD_MODIFICATION_TIME,
+   GROUP_BY_FIELD_DIRECTORY,
+ ]);
+@@ -450,20 +451,44 @@ export class FileListModel extends ArrayDataModel<UniversalEntry> {
+    * @param a First entry.
+    * @param b Second entry.
+    * @return Compare result.
+    */
+   private compareSize_(a: UniversalEntry, b: UniversalEntry): number {
+     // Directories always precede files.
+     if (a.isDirectory !== b.isDirectory) {
+       return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
+     }
+ 
++    // AuraDE: folders sort by the size the Size column is showing.
++    //
++    // That column stopped saying nothing for a folder and started saying what
++    // the folder weighs, and then sorting by it ignored the number and left
++    // every folder in name order. Somebody who clicks Size is asking what is
++    // taking up the room, and the folders are usually the answer, so ranking
++    // the files and not them answers the wrong question.
++    //
++    // Only the cache is read here, never a fresh measurement. A comparator runs
++    // O(n log n) times and a measurement is a recursive walk of the filesystem,
++    // so starting one here would turn a single sort into thousands of them.
++    // Folders nobody has measured keep name order, which is the honest answer:
++    // there is no ordering to claim between a size that is known and one that
++    // is not.
++    if (a.isDirectory && b.isDirectory) {
++      const aMeasured = auraDeMeasuredFolderSize(a);
++      const bMeasured = auraDeMeasuredFolderSize(b);
++      if (aMeasured !== undefined && bMeasured !== undefined &&
++          aMeasured !== bMeasured) {
++        return aMeasured - bMeasured;
++      }
++      return compareName(a, b);
++    }
++
+     const properties = this.metadataModel_.getCache([a, b], ['size']);
+     const aSize = properties[0]!.size || 0;
+     const bSize = properties[1]!.size || 0;
+ 
+     return aSize !== bSize ? aSize - bSize : compareName(a, b);
+   }
+ 
+   /**
+    * Compares entries by type first, then by subtype and then by name.
+    * @param a First entry.
