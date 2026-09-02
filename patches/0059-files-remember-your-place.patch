@@ -1,0 +1,139 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+@@ -32,6 +32,25 @@
+    */
+   private fileListSortDirection_: string|null = DEFAULT_SORT_DIRECTION;
+ 
++  /**
++   * AuraDE: where the list was scrolled to in each folder, by file key.
++   *
++   * Bounded, and least recently used first: a key is deleted before it is
++   * written so that re-entering a folder moves it to the end of the insertion
++   * order, which is what makes the eviction below actually evict the coldest
++   * entry rather than the oldest one ever seen.
++   */
++  private auraDeScrollTops_ = new Map<string, number>();
++
++  /**
++   * AuraDE: the folder whose position is waiting to be restored.
++   *
++   * directory-changed fires while the list still holds the previous folder's
++   * rows, so the position cannot be applied there. It is applied when the scan
++   * for the new folder completes, and this carries the key between the two.
++   */
++  private auraDePendingScrollKey_: string|null = null;
++
+   constructor(dialogType: DialogType) {
+     this.viewOptionStorageKey_ = 'file-manager-' + dialogType;
+   }
+@@ -96,6 +115,8 @@
+         'changed', this.onFileFilterChanged_.bind(this));
+     directoryModel.addEventListener(
+         'directory-changed', this.onDirectoryChanged_.bind(this));
++    directoryModel.addEventListener(
++        'cur-dir-scan-completed', this.auraDeRestoreScroll_.bind(this));
+   }
+ 
+   /**
+@@ -151,6 +172,11 @@
+     assert(this.directoryModel_);
+     assert(this.ui_);
+ 
++    // Before anything else, and in particular before the early return below:
++    // leaving a folder for one that reports no file data is still leaving it,
++    // and the position is worth keeping either way.
++    this.auraDeRememberScroll_(event);
++
+     // Sort the file list by:
+     // 1) 'date-modified' and 'desc' order on Recent folder.
+     // 2) preferred field and direction on other folders.
+@@ -183,9 +209,88 @@
+       }
+     }
+   }
++
++  /**
++   * AuraDE: remembers where the folder being left was scrolled to.
++   *
++   * Going into a subfolder and coming back put you at the top of a list you had
++   * scrolled a long way down, and there is no way to get back except to scroll
++   * again. Every other file manager remembers this.
++   *
++   * Only the scroll position is kept. Restoring the selection or the focused
++   * row as well would change what the next command acts on, and a delete or a
++   * rename aimed at a row the app chose rather than the person did is a much
++   * worse bug than a list that starts at the top. Scrolling cannot be wrong in
++   * that way: it moves the view and nothing else.
++   */
++  private auraDeRememberScroll_(event: DirectoryChangeEvent) {
++    const list = this.ui_?.listContainer.currentList;
++    const previousKey = event.detail.previousFileKey;
++    if (list && previousKey) {
++      const top = list.scrollTop;
++      // Delete first so that a rewrite moves the key to the end of the
++      // insertion order and the eviction below stays least recently used.
++      this.auraDeScrollTops_.delete(previousKey);
++      if (top > 0) {
++        // A folder sitting at the top has nothing worth restoring, and storing
++        // the zero would spend one of the slots saying so.
++        this.auraDeScrollTops_.set(previousKey, top);
++      }
++      while (this.auraDeScrollTops_.size > AURADE_SCROLL_MEMORY_LIMIT) {
++        const coldest = this.auraDeScrollTops_.keys().next().value;
++        if (coldest === undefined) {
++          break;
++        }
++        this.auraDeScrollTops_.delete(coldest);
++      }
++    }
++    this.auraDePendingScrollKey_ = event.detail.newFileKey ?? null;
++  }
++
++  /**
++   * AuraDE: puts the list back where it was, once the folder has been read.
++   *
++   * The key is taken and cleared in the same breath, so a later scan that
++   * belongs to some other folder cannot pick up a position that was meant for
++   * this one.
++   */
++  private auraDeRestoreScroll_() {
++    const key = this.auraDePendingScrollKey_;
++    this.auraDePendingScrollKey_ = null;
++    if (!key) {
++      return;
++    }
++    const top = this.auraDeScrollTops_.get(key);
++    if (top === undefined) {
++      return;
++    }
++    const list = this.ui_?.listContainer.currentList;
++    if (!list) {
++      return;
++    }
++    // The scan completes before the rows have been laid out, so the scrollable
++    // height is still whatever the previous folder left behind and assigning
++    // now would be clamped to the wrong maximum. One frame later the geometry
++    // is real.
++    requestAnimationFrame(() => {
++      const height = Math.max(0, list.scrollHeight - list.clientHeight);
++      // The folder can have shrunk while it was away, so never scroll past the
++      // end of what is actually there now.
++      list.scrollTop = Math.min(top, height);
++    });
++  }
+ }
+ 
+ /**
++ * AuraDE: how many folders keep a remembered scroll position.
++ *
++ * Enough that moving around a tree feels like the app is paying attention, and
++ * small enough that a session left open for a week cannot grow it without
++ * bound. Each entry is a string key and a number.
++ */
++const AURADE_SCROLL_MEMORY_LIMIT = 64;
++
++/**
+  * Default sort field of the file list.
+  */
+ const DEFAULT_SORT_FIELD = 'modificationTime';
