@@ -1,0 +1,268 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
+new file mode 100644
+--- /dev/null
++++ b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
++
++/**
++ * AuraDE: which files are waiting to be moved.
++ *
++ * Cutting a file gave a hundred millisecond flicker at opacity 0.8 and then
++ * nothing. Twenty percent of a fade for a tenth of a second is not an
++ * acknowledgement; it is indistinguishable from a rendering hiccup. So after
++ * cutting three files out of four hundred there was no way to see which three,
++ * and the only way to find out was to paste somewhere and look.
++ *
++ * Every other file manager dims a cut file until it is pasted. This is the set
++ * that makes that possible.
++ *
++ * Keyed by URL rather than by entry, because the list rebuilds its entry
++ * objects as rows are recycled, so the object that was cut is not the object
++ * the row is later rendered from. The URL survives that.
++ */
++const cutUrls = new Set<string>();
++
++/**
++ * Marks entries as cut, replacing anything marked before.
++ *
++ * There is only ever one clipboard, so a second cut replaces the first rather
++ * than adding to it.
++ */
++export function auraDeMarkCut(entries: Array<Entry|FilesAppEntry>) {
++  cutUrls.clear();
++  for (const entry of entries) {
++    cutUrls.add(entry.toURL());
++  }
++}
++
++/**
++ * Forgets what was cut. Returns whether anything was actually forgotten, so a
++ * caller can skip a redraw it does not need.
++ */
++export function auraDeClearCut(): boolean {
++  if (cutUrls.size === 0) {
++    return false;
++  }
++  cutUrls.clear();
++  return true;
++}
++
++/**
++ * Whether this entry is waiting to be moved.
++ */
++export function auraDeIsCut(entry: Entry|FilesAppEntry): boolean {
++  if (cutUrls.size === 0) {
++    return false;
++  }
++  return cutUrls.has(entry.toURL());
++}
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -212,20 +212,21 @@
+   "file_manager/background/js/volume_info_list.ts",
+   "file_manager/background/js/volume_manager.ts",
+   "file_manager/background/js/volume_manager_factory.ts",
+ 
+   # Foreground:
+   "file_manager/foreground/js/actions_controller.ts",
+   "file_manager/foreground/js/actions_model.ts",
+   "file_manager/foreground/js/android_app_list_model.ts",
+   "file_manager/foreground/js/app_state_controller.ts",
+   "file_manager/foreground/js/aurade_devices_controller.ts",
++  "file_manager/foreground/js/aurade_cut_marks.ts",
+   "file_manager/foreground/js/aurade_folder_size.ts",
+   "file_manager/foreground/js/banner_controller.ts",
+   "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",
+   "file_manager/foreground/js/crossover_search_utils.ts",
+   "file_manager/foreground/js/crostini_controller.ts",
+   "file_manager/foreground/js/one_drive_controller.ts",
+   "file_manager/foreground/js/deferred_elements.ts",
+   "file_manager/foreground/js/dialog_action_controller.ts",
+   "file_manager/foreground/js/directory_contents.ts",
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -45,20 +45,29 @@
+   user-select: none;
+   width: 100%;
+ }
+ 
+ /* Drop opacity of selected rows to give a visual feedback on copy/cut
+  * operation. */
+ .blink {
+   opacity: 0.8;
+ }
+ 
++/* AuraDE: a file that has been cut and is waiting to be pasted.
++ *
++ * Half opacity, not the 0.8 above. That one is a hundred millisecond flash
++ * acknowledging the keystroke; this one has to still read as "not settled yet"
++ * when you come back to the window a minute later, and 0.8 does not. */
++.aurade-cut {
++  opacity: 0.5;
++}
++
+ /* Main part of the dialog between header and footer. */
+ .dialog-container {
+   align-items: stretch;
+   background-color: var(--cros-sys-app_base_shaded);
+   display: flex;
+   flex: auto;
+   flex-direction: row;
+   overflow: hidden;
+   padding-inline-end: 16px;
+   padding-top: 16px;
+diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+@@ -21,20 +21,21 @@
+ import {getEnabledTrashVolumeURLs, isAllTrashEntries} from '../../common/js/trash.js';
+ import {FileErrorToDomError, visitURL} from '../../common/js/util.js';
+ import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
+ import type {FileKey} from '../../state/state.js';
+ import {getFileData, getStore} from '../../state/store.js';
+ import type {XfTree} from '../../widgets/xf_tree.js';
+ import type {XfTreeItem} from '../../widgets/xf_tree_item.js';
+ import {isTreeItem, isXfTree} from '../../widgets/xf_tree_util.js';
+ import type {FilesToast} from '../elements/files_toast.js';
+ 
++import {auraDeClearCut, auraDeMarkCut} from './aurade_cut_marks.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import type {FileSelectionHandler} from './file_selection.js';
+ import {EventType} from './file_selection.js';
+ import type {MetadataModel} from './metadata/metadata_model.js';
+ import type {Command} from './ui/command.js';
+ import {DragSelector} from './ui/drag_selector.js';
+ import type {FileGrid} from './ui/file_grid.js';
+ import type {FileTableList} from './ui/file_table_list.js';
+ import type {Grid} from './ui/grid.js';
+ import type {List} from './ui/list.js';
+@@ -1172,20 +1173,42 @@
+     if (document.activeElement && isTreeItem(document.activeElement)) {
+       this.cutOrCopyFromDirectoryTree(
+           document.activeElement, clipboardData, effectAllowed);
+       return;
+     }
+ 
+     // If current focus is not on DirectoryTree, write the current selection in
+     // the list to system clipboard.
+     this.cutOrCopy_(clipboardData, effectAllowed);
+     this.blinkSelection_();
++
++    // AuraDE: remember what is waiting to move, and forget any earlier lot.
++    // A copy clears the marks too: there is one clipboard, so copying means
++    // the previous cut is no longer what paste will do.
++    if (isMove) {
++      auraDeMarkCut(this.selectionHandler_.selection.entries);
++      this.auraDeRedrawForCutMarks_();
++    } else if (auraDeClearCut()) {
++      this.auraDeRedrawForCutMarks_();
++    }
++  }
++
++  /**
++   * AuraDE: repaint the rows so the dimming appears or clears at once.
++   *
++   * The class is applied while a row renders, so rows already on screen keep
++   * whatever they were given until something redraws them. Only ever called
++   * from a cut, a copy or a paste, so the cost lands on a keystroke a person
++   * just made rather than on scrolling.
++   */
++  private auraDeRedrawForCutMarks_() {
++    this.listContainer_.currentList.redraw();
+   }
+ 
+   /**
+    * Performs cut or copy operation dispatched from directory tree.
+    */
+   cutOrCopyFromDirectoryTree(
+       focusedItem: XfTreeItem|null, clipboardData: DataTransfer|null,
+       effectAllowed: DataTransfer['effectAllowed']) {
+     if (focusedItem === null) {
+       return;
+@@ -1301,20 +1324,24 @@
+     // Need to update here since 'beforepaste' doesn't fire.
+     if (!this.isDocumentWideEvent_() ||
+         !this.canPasteOrDrop_(getClipboardData(event), destination)) {
+       return;
+     }
+     event.preventDefault();
+     this.paste(getClipboardData(event), destination).then(effect => {
+       // On cut, we clear the clipboard after the file is pasted/moved so we
+       // don't try to move/delete the original file again.
+       if (effect === 'move') {
++        // AuraDE: the cut has been consumed, so the marks go with it.
++        if (auraDeClearCut()) {
++          this.auraDeRedrawForCutMarks_();
++        }
+         this.simulateCommand_('cut', (event: Event) => {
+           event.preventDefault();
+           const clipboardData = getClipboardData(event);
+           if (clipboardData) {
+             clipboardData.setData('fs/clear', '');
+           }
+         });
+       }
+     });
+   }
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
+@@ -6,20 +6,21 @@
+ 
+ import type {EntryLocation} from '../../../background/js/entry_location_impl.js';
+ import type {VolumeManager} from '../../../background/js/volume_manager.js';
+ import type {ArrayDataModel} from '../../../common/js/array_data_model.js';
+ import {isTeamDriveRoot} from '../../../common/js/entry_utils.js';
+ import {getIcon, isEncrypted} from '../../../common/js/file_type.js';
+ import type {FilesAppEntry} from '../../../common/js/files_app_entry_types.js';
+ import {isDlpEnabled, isDriveFsBulkPinningEnabled} from '../../../common/js/flags.js';
+ import {getEntryLabel, str, strf} from '../../../common/js/translations.js';
+ import type {FileListModel} from '../file_list_model.js';
++import {auraDeIsCut} from '../aurade_cut_marks.js';
+ import type {MetadataItem} from '../metadata/metadata_item.js';
+ import type {MetadataModel} from '../metadata/metadata_model.js';
+ 
+ import type {A11yAnnounce} from './a11y_announce.js';
+ import {DragSelector} from './drag_selector.js';
+ import type {FileGridSelectionController} from './file_grid.js';
+ import type {FileListSelectionModel} from './file_list_selection_model.js';
+ import type {FileTable} from './file_table.js';
+ import {FileTapHandler, TapEvent} from './file_tap_handler.js';
+ import {List} from './list.js';
+@@ -469,20 +470,28 @@
+       li.classList.toggle(
+           'dim-encrypted', isEncrypted(entry, externalProps.contentMimeType));
+     }
+     const dlpIcon = li.querySelector('.dlp-managed-icon');
+     if (dlpIcon) {
+       dlpIcon.classList.toggle(
+           'is-dlp-restricted', externalProps.isDlpRestricted);
+     }
+   }
+ 
++  // AuraDE: a file waiting to be moved stays dimmed until it is pasted.
++  //
++  // Here rather than at the moment of cutting, because this runs from
++  // decorateListItem on every row render. The list recycles its rows as it
++  // scrolls, so a class set once on the visible rows would be wiped off any row
++  // that scrolls away and come back missing.
++  li.classList.toggle('aurade-cut', auraDeIsCut(entry));
++
+   li.classList.toggle('shortcut', !!externalProps.shortcut);
+ 
+   const iconDiv = li.querySelector<HTMLElement>('.detail-icon');
+   if (!iconDiv) {
+     return;
+   }
+   iconDiv.style.backgroundImage = '';
+ 
+   if (li.classList.contains('directory')) {
+     iconDiv.classList.toggle('shared', !!externalProps.shared);
