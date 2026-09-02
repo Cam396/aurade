@@ -150,17 +150,34 @@ def real_call(args: argparse.Namespace) -> str:
     if args.group == "capabilities":
         return call_system("GetCapabilities")
     if args.group == "bluetooth":
-        methods = {
-            "state": ("BluetoothGetState", ()),
-            "power": ("BluetoothSetPowered", (dbus.Boolean(args.state == "on"),)),
-            "scan": ("BluetoothStartDiscovery" if args.state == "start" else "BluetoothStopDiscovery", ()),
-            "pair": ("BluetoothPair", (validate_mac(args.address),)),
-            "connect": ("BluetoothConnect", (validate_mac(args.address),)),
-            "disconnect": ("BluetoothDisconnect", (validate_mac(args.address),)),
-            "forget": ("BluetoothForget", (validate_mac(args.address),)),
+        # Each branch reads only the arguments its own subcommand defines.
+        #
+        # This was a dict of every method built up front, which reads more
+        # tidily and is wrong: a dict literal evaluates all of its values when
+        # it is constructed, so "bluetooth state" evaluated args.state and
+        # args.address as well, neither of which that subcommand has, and died
+        # with AttributeError before making any call. Every other group here
+        # already branches, so this now matches them.
+        if args.action == "state":
+            return call_system("BluetoothGetState")
+        if args.action == "power":
+            return call_system("BluetoothSetPowered", dbus.Boolean(args.state == "on"))
+        if args.action == "scan":
+            method = ("BluetoothStartDiscovery" if args.state == "start"
+                      else "BluetoothStopDiscovery")
+            return call_system(method)
+        # The remaining four take one address and nothing else. Names only in
+        # this map, so there is nothing here that can be evaluated too early.
+        address_methods = {
+            "pair": "BluetoothPair",
+            "connect": "BluetoothConnect",
+            "disconnect": "BluetoothDisconnect",
+            "forget": "BluetoothForget",
         }
-        method, call_args = methods[args.action]
-        return call_system(method, *call_args)
+        method = address_methods.get(args.action)
+        if method is None:
+            raise BridgeError("invalid_argument", "unsupported operation")
+        return call_system(method, validate_mac(args.address))
     if args.group == "storage":
         if args.action == "list":
             return call_system("StorageList")

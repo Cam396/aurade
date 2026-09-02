@@ -461,3 +461,76 @@ class StorageReadingTest(unittest.TestCase):
         runner = FakeRunner([CommandResult(1, "", "findmnt: no such target")])
         with self.assertRaises(BridgeError):
             DiskUsageBackend(runner).state()
+
+
+class HostctlDispatchTest(unittest.TestCase):
+    """Every hostctl subcommand must reach a call, touching only its own args.
+
+    The bluetooth branch used to build a dict of every method up front. A dict
+    literal evaluates all of its values when it is constructed, so asking for
+    "bluetooth state" also evaluated args.state and args.address, neither of
+    which that subcommand defines, and the tool died with AttributeError before
+    making any call at all.
+
+    Nothing caught it because run-tests.sh only ever exercised --dry-run, which
+    goes through dry_run() and never touches real_call(). So this walks every
+    subcommand through the real argument parser and the real dispatch, with the
+    transport stubbed, and asserts the method it would have called.
+    """
+
+    CASES = [
+        (["capabilities"], "GetCapabilities"),
+        (["bluetooth", "state"], "BluetoothGetState"),
+        (["bluetooth", "power", "on"], "BluetoothSetPowered"),
+        (["bluetooth", "power", "off"], "BluetoothSetPowered"),
+        (["bluetooth", "scan", "start"], "BluetoothStartDiscovery"),
+        (["bluetooth", "scan", "stop"], "BluetoothStopDiscovery"),
+        (["bluetooth", "pair", "AA:BB:CC:DD:EE:FF"], "BluetoothPair"),
+        (["bluetooth", "connect", "AA:BB:CC:DD:EE:FF"], "BluetoothConnect"),
+        (["bluetooth", "disconnect", "AA:BB:CC:DD:EE:FF"], "BluetoothDisconnect"),
+        (["bluetooth", "forget", "AA:BB:CC:DD:EE:FF"], "BluetoothForget"),
+        (["storage", "list"], "StorageList"),
+        (["storage", "mount", "/org/freedesktop/UDisks2/block_devices/sdb1"],
+         "StorageMount"),
+        (["storage", "unmount", "/org/freedesktop/UDisks2/block_devices/sdb1"],
+         "StorageUnmount"),
+        (["storage", "eject", "/org/freedesktop/UDisks2/drives/x"], "StorageEject"),
+        (["storage", "poweroff", "/org/freedesktop/UDisks2/drives/x"],
+         "StoragePowerOff"),
+        (["storage", "format", "/org/freedesktop/UDisks2/block_devices/sdb1",
+          "ext4", "--label", "TEST", "--confirm", "FORMAT /dev/sdb1"],
+         "StorageFormat"),
+        (["pacman", "installed"], "PacmanListInstalled"),
+        (["pacman", "query", "bash"], "PacmanQuery"),
+        (["pacman", "updates"], "PacmanListUpdates"),
+        (["pacman", "upgrade"], "PacmanUpgrade"),
+        (["pacman", "uninstall", "test-package"], "PacmanUninstall"),
+        (["pacman", "job", "abc123"], "JobGet"),
+        (["mime", "open", "/etc/hostname"], "MimeOpen"),
+    ]
+
+    def test_every_subcommand_dispatches_to_its_method(self):
+        import aurade_hostctl
+
+        for argv, expected in self.CASES:
+            with self.subTest(argv=" ".join(argv)):
+                args = aurade_hostctl.parser().parse_args(argv)
+                seen = []
+
+                def record(method, *call_args, **kwargs):
+                    seen.append(method)
+                    return "{}"
+
+                original_system = aurade_hostctl.call_system
+                original_desktop = aurade_hostctl.call_desktop
+                aurade_hostctl.call_system = record
+                aurade_hostctl.call_desktop = record
+                try:
+                    aurade_hostctl.real_call(args)
+                finally:
+                    aurade_hostctl.call_system = original_system
+                    aurade_hostctl.call_desktop = original_desktop
+
+                self.assertEqual(
+                    seen, [expected],
+                    f"{' '.join(argv)} did not reach {expected}")
