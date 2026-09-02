@@ -1,0 +1,18 @@
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -184,12 +184,12 @@
+         <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy-path" visibleif="full-page"></cr-menu-item>
+-        <cr-menu-item command="#duplicate" visibleif="full-page"></cr-menu-item>
+-        <cr-menu-item command="#calculate-size" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
++        <cr-menu-item command="#duplicate" visibleif="full-page"></cr-menu-item>
+         <hr visibleif="full-page">
+         <cr-menu-item command="#get-info"></cr-menu-item>
++        <cr-menu-item command="#calculate-size" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#dlp-restriction-details"></cr-menu-item>
+         <cr-menu-item command="#rename"></cr-menu-item>
+         <cr-menu-item command="#pin-folder"></cr-menu-item>
