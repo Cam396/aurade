@@ -1,0 +1,160 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
+@@ -19,20 +19,29 @@
+ import {ListSelectionModel} from './list_selection_model.js';
+ 
+ class TextSearchState {
+   text: string = '';
+   date: Date = new Date();
+ }
+ 
+ /**
+  * List container for the file table and the grid view.
+  */
++/**
++ * AuraDE: how long a typed prefix stays alive, in milliseconds.
++ *
++ * Long enough to finish a word without hurrying, short enough that coming back
++ * to the keyboard later starts a new search rather than appending to one
++ * abandoned minutes ago.
++ */
++const AURADE_TYPE_AHEAD_RESET_MS = 1000;
++
+ export class ListContainer {
+   currentListType: ListType = ListType.UNINITIALIZED;
+ 
+   /**
+    * The input element to rename entry.
+    */
+   readonly renameInput: HTMLInputElement;
+ 
+   /**
+    * Spinner on file list which is shown while loading.
+@@ -116,20 +125,24 @@
+       }
+     }, {passive: true});
+     this.element.addEventListener('touchend', (e: TouchEvent) => {
+       if (e.touches.length === 0) {
+         // contextmenu event will be sent right after touchend.
+         setTimeout(() => this.allowContextMenuByTouch_ = false);
+       }
+     });
+   }
+ 
++  // AuraDE: what has been typed so far, and when the last key landed.
++  private auraDeTypeAheadBuffer_ = '';
++  private auraDeTypeAheadAt_ = 0;
++
+   get currentView(): FileTable|FileGrid {
+     switch (this.currentListType) {
+       case ListType.DETAIL:
+         return this.table;
+       case ListType.THUMBNAIL:
+         return this.grid;
+       case ListType.UNINITIALIZED:
+         assertNotReached();
+       default:
+         assertNotReachedCase(this.currentListType);
+@@ -282,20 +295,101 @@
+    * KeyDown event handler for the div#list-container element.
+    * @param event Key event.
+    */
+   private onKeyDown_(event: Event) {
+     // Ignore keydown handler in the rename input box.
+     const srcElement = event.srcElement as HTMLElement | null;
+     if (srcElement?.tagName === 'INPUT') {
+       event.stopImmediatePropagation();
+       return;
+     }
++
++    // AuraDE: type a few letters and land on the file.
++    if (this.auraDeTypeAhead_(event as KeyboardEvent)) {
++      event.preventDefault();
++      event.stopPropagation();
++    }
++  }
++
++  /**
++   * AuraDE: jump to the first file whose name starts with what you just typed.
++   *
++   * Every file manager worth using does this and this one did not. Nothing in
++   * the app consumed a plain printable key, so in a folder of four hundred
++   * files the only ways to reach one were the scrollbar and the search box, and
++   * search replaces the listing rather than moving within it.
++   *
++   * Returns whether the selection moved, so the caller only swallows a key that
++   * actually did something.
++   */
++  private auraDeTypeAhead_(event: KeyboardEvent): boolean {
++    // Ctrl, Alt and Meta belong to real shortcuts. Shift does not: it is how
++    // capital letters are typed.
++    if (event.ctrlKey || event.altKey || event.metaKey) {
++      return false;
++    }
++    // One character means a printable key. Named keys like ArrowDown, Escape
++    // and F2 all have longer names, so this filters them without a list that
++    // would need maintaining.
++    if (event.key.length !== 1) {
++      return false;
++    }
++
++    const now = Date.now();
++    const stale = now - this.auraDeTypeAheadAt_ > AURADE_TYPE_AHEAD_RESET_MS;
++    const previous = stale ? '' : this.auraDeTypeAheadBuffer_;
++    const typed = event.key.toLowerCase();
++
++    // Space continues a search and never starts one. A file name can contain a
++    // space, so it has to be typeable, but on an empty buffer a bare space
++    // still belongs to whatever else wants it.
++    if (typed === ' ' && !previous) {
++      return false;
++    }
++
++    // Pressing one letter over and over walks through the files that start with
++    // it, rather than searching for that letter doubled. That is what every
++    // other file manager does, so it is what fingers already expect.
++    const cycling = previous === typed;
++    const buffer = cycling ? typed : previous + typed;
++
++    const list = this.currentList;
++    const model = list.dataModel;
++    const selection = list.selectionModel;
++    if (!model || !selection || !model.length) {
++      return false;
++    }
++
++    // A fresh search or a repeat starts at the row after the selected one, so
++    // it moves. Extending the buffer starts at the selected row itself, since
++    // the file already highlighted is usually the one the longer prefix means.
++    const current = selection.selectedIndex;
++    const from = (cycling || !previous) ? current + 1 : current;
++
++    for (let offset = 0; offset < model.length; offset++) {
++      const index = (from + offset + model.length) % model.length;
++      const name = model.item(index)?.name;
++      if (name && name.toLowerCase().startsWith(buffer)) {
++        selection.selectedIndex = index;
++        list.scrollIndexIntoView(index);
++        this.auraDeTypeAheadBuffer_ = buffer;
++        this.auraDeTypeAheadAt_ = now;
++        return true;
++      }
++    }
++
++    // Nothing matched, and the buffer is kept rather than thrown away. A typo
++    // in the middle of a long name would otherwise turn the next keystroke into
++    // the start of a new search and jump somewhere unrelated.
++    this.auraDeTypeAheadBuffer_ = buffer;
++    this.auraDeTypeAheadAt_ = now;
++    return false;
+   }
+ 
+   /**
+    * KeyPress event handler for the div#list-container element.
+    * @param event Key event.
+    */
+   private onKeyPress_(event: KeyboardEvent) {
+     const srcElement = event.srcElement as HTMLElement | null;
+ 
+     // Ignore keypress handler in the rename input box.
