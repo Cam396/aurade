@@ -1,0 +1,121 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/main_window_component.ts b/ui/file_manager/file_manager/foreground/js/main_window_component.ts
+--- a/ui/file_manager/file_manager/foreground/js/main_window_component.ts
++++ b/ui/file_manager/file_manager/foreground/js/main_window_component.ts
+@@ -345,20 +345,76 @@ export class MainWindowComponent {
+           // If there is nothing else for ESC to do, then cancel the dialog.
+           event.preventDefault();
+           this.ui_.dialogFooter.cancelButton.click();
+         }
+         break;
+       default:
+         break;
+     }
+   }
+ 
++  /**
++   * AuraDE: up one folder, landing on the one you just left.
++   *
++   * Going up used to leave nothing selected at all, so you arrived in a folder
++   * of thirteen things with no indication of which one you had just come out
++   * of, and had to find it again by reading. Every other file manager puts the
++   * cursor on it, and it is the difference between arriving somewhere and
++   * being put somewhere.
++   *
++   * Patch 0059 already restores the scroll position for the folder being
++   * returned to. This is the other half: the scroll says where you were
++   * looking, this says what you were looking at.
++   */
++  private auraDeGoUp_() {
++    const store = getStore();
++    const state = store.getState();
++    const components = state.currentDirectory?.pathComponents;
++    if (!components || components.length < 2) {
++      return;
++    }
++    const leaving = this.directoryModel_.getCurrentDirEntry();
++    const parent = components[components.length - 2]!;
++    if (leaving) {
++      this.auraDeSelectOnceScanned_(leaving);
++    }
++    store.dispatch(changeDirectory({toKey: parent.key}));
++  }
++
++  /**
++   * AuraDE: select an entry once the folder it lives in has finished loading.
++   *
++   * The directory change is asynchronous, so selecting straight after
++   * dispatching it would run against the file list of the folder being left.
++   *
++   * Both completion events, because a folder that is already cached need not
++   * be scanned again and announces itself as a rescan instead, and arriving
++   * somewhere familiar is the commonest case of going up there is. Whichever
++   * arrives first removes both.
++   *
++   * No check that the right folder loaded. selectEntry matches on URL against
++   * whatever list is current, so if something else has navigated in the
++   * meantime it finds nothing and does nothing, which is the correct outcome
++   * without needing to be told.
++   */
++  private auraDeSelectOnceScanned_(
++      entry: NonNullable<ReturnType<DirectoryModel['getCurrentDirEntry']>>) {
++    const model = this.directoryModel_;
++    const done = () => {
++      model.removeEventListener('cur-dir-scan-completed', done);
++      model.removeEventListener('cur-dir-rescan-completed', done);
++      model.selectEntry(entry as Entry);
++    };
++    model.addEventListener('cur-dir-scan-completed', done);
++    model.addEventListener('cur-dir-rescan-completed', done);
++  }
++
+   /**
+    * KeyUp event handler for the document.
+    * @param event Key event.
+    */
+   private onKeyUp_(event: KeyboardEvent) {
+     if (event.keyCode === 9) {  // Tab
+       this.pressingTab_ = false;
+     }
+   }
+ 
+@@ -384,30 +440,31 @@ export class MainWindowComponent {
+       }
+     }
+   }
+ 
+   /**
+    * KeyDown event handler for the div#list-container element.
+    * @param event Key event.
+    */
+   private onListKeyDown_(event: KeyboardEvent) {
+     switch (getKeyModifiers(event) + event.key) {
+-      case 'Backspace':  // Backspace => Up one directory.
++      // AuraDE: Alt+Up alongside Backspace.
++      //
++      // Alt+Up is up one level in Explorer, in GNOME Files, in Dolphin and in
++      // ChromeOS itself, and it did nothing here. Backspace was the only way,
++      // and Backspace is the ambiguous one: in a browser, and in plenty of
++      // other places, it means back rather than up, which is a different
++      // journey as soon as you have gone sideways.
++      case 'Alt-ArrowUp':
++      case 'Backspace':
+         event.preventDefault();
+-        const store = getStore();
+-        const state = store.getState();
+-        const components = state.currentDirectory?.pathComponents;
+-        if (!components || components.length < 2) {
+-          break;
+-        }
+-        const parent = components[components.length - 2]!;
+-        store.dispatch(changeDirectory({toKey: parent.key}));
++        this.auraDeGoUp_();
+         break;
+ 
+       case 'Enter':  // Enter => Change directory or perform default action.
+                      // If the selection is blocked by DLP restrictions, we
+                      // don't allow to
+         // change directory or the default action.
+         if (this.selectionHandler_.isDlpBlocked()) {
+           break;
+         }
+         const selection = this.selectionHandler_.selection;
