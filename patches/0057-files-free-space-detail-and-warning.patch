@@ -1,0 +1,122 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2347,6 +2347,12 @@
+   text-align: end;
+ }
+ 
++/* The one time it should compete. Warning rather than error, because a full
++ * disk is a thing to see coming, not a failure that has already happened. */
++#aurade-status-space.aurade-space-low {
++  color: var(--cros-sys-warning);
++}
++
+ #aurade-status-selection {
+   color: var(--cros-sys-primary);
+   text-align: end;
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -83,6 +83,14 @@
+   private auraDeSpaceText_ = '';
+ 
+   /**
++   * AuraDE: the hover detail and the low water flag, remembered alongside the
++   * text so that deselecting repaints all three from memory rather than asking
++   * the filesystem again.
++   */
++  private auraDeSpaceDetail_ = '';
++  private auraDeSpaceLow_ = false;
++
++  /**
+    * AuraDE: guards a slow answer from painting over a newer one. Each request
+    * takes the next number and only the newest is allowed to write.
+    */
+@@ -388,7 +396,13 @@
+     // is selected is the more urgent of the two and is also the thing that is
+     // about to be acted on, so it takes the slot while it exists.
+     if (spaceEl) {
++      // The title and the low water tint travel with the text. Leaving either
++      // behind would put a tooltip, or a warning colour, on a span showing
++      // nothing.
+       spaceEl.textContent = hasSelection ? '' : this.auraDeSpaceText_;
++      spaceEl.title = hasSelection ? '' : this.auraDeSpaceDetail_;
++      spaceEl.classList.toggle(
++          'aurade-space-low', !hasSelection && this.auraDeSpaceLow_);
+     }
+   }
+ 
+@@ -414,7 +428,7 @@
+         volumeInfo.volumeType === VolumeType.MEDIA_VIEW ||
+         volumeInfo.volumeType === VolumeType.ARCHIVE ||
+         volumeInfo.volumeType === VolumeType.DRIVE) {
+-      this.auraDeSetSpaceText_(request, '');
++      this.auraDeSetSpace_(request, '', '', false);
+       return;
+     }
+ 
+@@ -429,15 +443,33 @@
+     // a query failed. The gear menu says so when it is opened on purpose; here
+     // the honest thing is to say nothing at all.
+     if (!stats || !stats.totalSize) {
+-      this.auraDeSetSpaceText_(request, '');
++      this.auraDeSetSpace_(request, '', '', false);
+       return;
+     }
+ 
+-    this.auraDeSetSpaceText_(
+-        request,
+-        strf(
+-            'SPACE_AVAILABLE',
+-            bytesToString(Math.max(0, stats.remainingSize))));
++    const remaining = Math.max(0, stats.remainingSize);
++
++    // AuraDE: the whole picture behind the one number, the way the exact byte
++    // count sits behind the rounded size and the full timestamp behind the
++    // friendly date. Same wording as the gear menu's own hover so the two
++    // never appear to disagree.
++    const detail = `${strf('SPACE_AVAILABLE', bytesToString(remaining))} of ` +
++        `${bytesToString(stats.totalSize)}, ` +
++        `${Math.round(100 * (stats.totalSize - remaining) / stats.totalSize)}` +
++        `% used`;
++
++    // AuraDE: low is the smaller of a tenth of the disk and twenty gigabytes.
++    //
++    // A percentage alone is wrong on a large disk, where a tenth of two
++    // terabytes is two hundred gigabytes and nobody needs warning. An absolute
++    // alone is wrong on the small eMMC these machines ship with, where twenty
++    // gigabytes is most of the disk and the warning would never switch off.
++    // Taking the smaller of the two is right on both.
++    const lowWater = Math.min(stats.totalSize * 0.1, 20 * 1024 * 1024 * 1024);
++
++    this.auraDeSetSpace_(
++        request, strf('SPACE_AVAILABLE', bytesToString(remaining)), detail,
++        remaining < lowWater);
+   }
+ 
+   /**
+@@ -447,11 +479,14 @@
+    * the two are driven by separate listeners and nothing guarantees which of
+    * them runs first on the very first directory scan.
+    */
+-  private auraDeSetSpaceText_(request: number, text: string) {
++  private auraDeSetSpace_(
++      request: number, text: string, detail: string, low: boolean) {
+     if (request !== this.auraDeSpaceRequest_) {
+       return;
+     }
+     this.auraDeSpaceText_ = text;
++    this.auraDeSpaceDetail_ = detail;
++    this.auraDeSpaceLow_ = low;
+ 
+     const spaceEl = this.auraDeStatusSpace_ ??
+         document.querySelector<HTMLElement>('#aurade-status-space');
+@@ -461,6 +496,8 @@
+     this.auraDeStatusSpace_ = spaceEl;
+     if (this.selectionHandler_.selection.totalCount === 0) {
+       spaceEl.textContent = text;
++      spaceEl.title = detail;
++      spaceEl.classList.toggle('aurade-space-low', low);
+     }
+   }
+ 
