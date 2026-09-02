@@ -1,0 +1,233 @@
+diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_strings.grdp
+--- a/ui/chromeos/file_manager_strings.grdp
++++ b/ui/chromeos/file_manager_strings.grdp
+@@ -925,20 +925,29 @@
+  </message>
+  <message name="IDS_FILE_BROWSER_MOVE_TO_TRASH_FILE_NAME" desc="Showing progress that a single item is being moved to trash.">
+    Moving <ph name="FILE_NAME">$1<ex>file.txt</ex></ph> to the trash
+  </message>
+  <message name="IDS_FILE_BROWSER_MOVE_TO_TRASH_ITEMS_REMAINING" desc="Showing progress that multiple items are being moved to trash.">
+    Moving <ph name="NUMBER_OF_ITEMS">$1<ex>3</ex></ph> items to the trash
+  </message>
+  <message name="IDS_FILE_BROWSER_UNDO_DELETE_ACTION_LABEL" desc="Undo label shown on toast to undo delete operation">
+    Undo
+  </message>
++ <message name="IDS_FILE_BROWSER_AURADE_UNDO_ACTION_LABEL" desc="Label on the toast button that puts a renamed file back to its old name.">
++   Undo
++ </message>
++ <message name="IDS_FILE_BROWSER_AURADE_RENAME_UNDO_TOAST" desc="Toast confirming a rename and offering to reverse it.">
++   Renamed to <ph name="FILE_NAME">$1<ex>notes.txt</ex></ph>
++ </message>
++ <message name="IDS_FILE_BROWSER_AURADE_RENAME_UNDO_FAILED" desc="Toast shown when putting the old name back did not work, usually because something else now has that name.">
++   That name is in use again, so the rename was left as it is.
++ </message>
+  <message name="IDS_FILE_BROWSER_RESTORE_ACTION_LABEL" desc="Restore label shown on dialog when trying to open files that are in Trash">
+    Restore
+  </message>
+  <message name="IDS_FILE_BROWSER_CONFIRM_EMPTY_TRASH_TITLE" desc="Asks the user if they are sure they want to empty the trash / recylce bin.">
+    Permanently delete these files?
+  </message>
+  <message name="IDS_FILE_BROWSER_CONFIRM_EMPTY_TRASH_DESC" desc="Asks the user if they are sure they want to empty the trash / recylce bin.">
+    All items in trash will be deleted and you won't be able to restore them.
+  </message>
+  <message name="IDS_FILE_BROWSER_EMPTY_TRASH_DELETE_FOREVER" desc="Button label the users confirms empty trash">
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+@@ -1017,21 +1017,22 @@
+     this.appStateController_.initialize(this.ui_, this.directoryModel_);
+ 
+     // Create metadata update controller.
+     this.metadataUpdateController_ = new MetadataUpdateController(
+         this.ui_.listContainer, this.directoryModel_, this.metadataModel_,
+         this.fileMetadataFormatter_);
+ 
+     // Create naming controller.
+     this.namingController_ = new NamingController(
+         this.ui_.listContainer, this.ui_.alertDialog, this.ui_.confirmDialog,
+-        this.directoryModel_, this.fileFilter_, this.selectionHandler_);
++        this.directoryModel_, this.fileFilter_, this.selectionHandler_,
++        this.ui_.toast);
+ 
+     // Create task controller.
+     this.taskController_ = new TaskController(
+         this.volumeManager_, this.ui_, this.metadataModel_,
+         this.directoryModel_, this.selectionHandler_,
+         this.metadataUpdateController_, this.progressCenter);
+ 
+     // Create directory tree naming controller.
+     this.directoryTreeNamingController_ = new DirectoryTreeNamingController(
+         this.directoryModel_, this.ui_.directoryTree,
+diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/naming_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+@@ -2,34 +2,35 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+ import {assert} from 'chrome://resources/js/assert.js';
+ 
+ import type {VolumeInfo} from '../../background/js/volume_info.js';
+ import {getFile} from '../../common/js/api.js';
+ import {getKeyModifiers} from '../../common/js/dom_utils.js';
+ import {isFakeEntry, isSameEntry} from '../../common/js/entry_utils.js';
+ import type {FilesAppDirEntry, FilesAppEntry} from '../../common/js/files_app_entry_types.js';
+-import {strf} from '../../common/js/translations.js';
++import {str, strf} from '../../common/js/translations.js';
+ import {FileErrorToDomError, UserCanceledError} from '../../common/js/util.js';
+ 
+ import type {FileFilter} from './directory_contents.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import {renameEntry, validateEntryName, validateFileName} from './file_rename.js';
+ import type {FileSelectionHandler} from './file_selection.js';
+ import type {WithContextMenu} from './ui/context_menu_handler.js';
+ import type {ConfirmDialog} from './ui/dialogs.js';
+ import type {FilesAlertDialog} from './ui/files_alert_dialog.js';
+ import {type ListContainer, ListType} from './ui/list_container.js';
+ import type {ListItem} from './ui/list_item.js';
+ import type {ListSelectionModel} from './ui/list_selection_model.js';
+ import type {ListSingleSelectionModel} from './ui/list_single_selection_model.js';
++import type {FilesToast} from '../elements/files_toast.js';
+ 
+ 
+ // TODO(b/289003444): Fix this by using proper custom element.
+ type XfRenameInput = HTMLInputElement&{
+   currentEntry: Entry | FilesAppEntry | null,
+   validation: boolean,
+ }&WithContextMenu;
+ 
+ /**
+  * Controller to handle naming.
+@@ -42,21 +43,22 @@
+   private isRemovableRoot_: boolean = false;
+ 
+   private volumeInfo_: VolumeInfo|null = null;
+ 
+   constructor(
+       private readonly listContainer_: ListContainer,
+       private readonly alertDialog_: FilesAlertDialog,
+       private readonly confirmDialog_: ConfirmDialog,
+       private readonly directoryModel_: DirectoryModel,
+       private readonly fileFilter_: FileFilter,
+-      private readonly selectionHandler_: FileSelectionHandler) {
++      private readonly selectionHandler_: FileSelectionHandler,
++      private readonly toast_: FilesToast) {
+     // Register events.
+     this.listContainer_.renameInput.addEventListener(
+         'keydown', this.onRenameInputKeyDown_.bind(this));
+     this.listContainer_.renameInput.addEventListener(
+         'blur', this.onRenameInputBlur_.bind(this));
+   }
+ 
+   /**
+    * Verifies the user entered name for file or folder to be created or
+    * renamed to. See also validateFileName.
+@@ -218,20 +220,56 @@
+   }
+ 
+   /**
+    * Convenience method to access HTMLInputElement with the type that contains
+    * all extra properties we set on it.
+    */
+   private getRenameInput_(): XfRenameInput {
+     return this.listContainer_.renameInput as XfRenameInput;
+   }
+ 
++  /**
++   * AuraDE: offer to put the old name back, on the toast that is already used
++   * to undo a delete.
++   *
++   * Renaming is the operation people mistype, and until now the only way back
++   * was to remember the old name and type it again. Deleting a file has
++   * offered an undo for years; the one that is actually a slip of the fingers
++   * offered nothing.
++   *
++   * The undo goes through renameEntry rather than calling moveTo directly.
++   * moveTo overwrites whatever sits at the destination, and renameFile checks
++   * for an existing entry first and throws instead. A toast lives for several
++   * seconds, which is long enough for something to appear at the old name, and
++   * silently destroying it would be a worse bug than the one being undone.
++   */
++  private auraDeOfferRenameUndo_(
++      renamed: Entry|FilesAppEntry, oldName: string,
++      volumeInfo: VolumeInfo|null) {
++    this.toast_.show(strf('AURADE_RENAME_UNDO_TOAST', renamed.name), {
++      text: str('AURADE_UNDO_ACTION_LABEL'),
++      callback: async () => {
++        try {
++          const restored =
++              await renameEntry(renamed, oldName, volumeInfo, false);
++          await this.directoryModel_.onRenameEntry(renamed, restored!);
++        } catch (error: any) {
++          // A toast, not a dialog. The rename being undone already succeeded,
++          // so nothing is broken, and a modal would be out of proportion to
++          // somebody who has simply changed their mind twice.
++          console.warn('AuraDE: could not undo the rename: ' + error);
++          this.toast_.show(str('AURADE_RENAME_UNDO_FAILED'));
++        }
++      },
++    });
++  }
++
+   private onRenameInputKeyDown_(event: KeyboardEvent) {
+     if (!this.isRenamingInProgress()) {
+       return;
+     }
+ 
+     // Do not move selection or lead item in list during rename.
+     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+       event.stopPropagation();
+     }
+ 
+@@ -302,20 +340,23 @@
+       input.validation = false;
+     }
+ 
+     // Validation succeeded. Do renaming.
+     this.getRenameInput_().currentEntry = null;
+     if (this.listContainer_.renameInput.parentNode) {
+       this.listContainer_.renameInput.parentNode.removeChild(
+           this.listContainer_.renameInput);
+     }
+ 
++    // AuraDE: the name to go back to, read before the rename lands.
++    const auraDeOldName = entry.name;
++
+     // Optimistically apply new name immediately to avoid flickering in
+     // case of success.
+     nameNode!.textContent = newName;
+ 
+     try {
+       const newEntry =
+           await renameEntry(entry, newName, volumeInfo, isRemovableRoot);
+ 
+       // RemovableRoot doesn't have a callback to report renaming is done.
+       if (!isRemovableRoot) {
+@@ -329,20 +370,27 @@
+       selectionModel.selectedIndex =
+           this.directoryModel_.getFileList().indexOf(newEntry);
+       // Force to update selection immediately.
+       this.selectionHandler_.onFileSelectionChanged();
+ 
+       renamedItemElement.removeAttribute('renaming');
+       this.listContainer_.endBatchUpdates();
+ 
+       // Focus may go out of the list. Back it to the list.
+       this.listContainer_.currentList.focus();
++
++      // AuraDE: offer to put the old name back. Not for a removable root,
++      // which renames a volume label through a different call that reports
++      // nothing back, so there is no renamed entry to undo with.
++      if (!isRemovableRoot) {
++        this.auraDeOfferRenameUndo_(newEntry!, auraDeOldName, volumeInfo);
++      }
+     } catch (error: any) {
+       // Write back to the old name.
+       nameNode!.textContent = entry.name;
+       renamedItemElement.removeAttribute('renaming');
+       this.listContainer_.endBatchUpdates();
+ 
+       // Show error dialog.
+       this.alertDialog_.show(error.message);
+     }
+   }
