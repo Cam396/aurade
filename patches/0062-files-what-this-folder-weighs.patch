@@ -1,0 +1,178 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+@@ -566,7 +566,7 @@
+     this.toolbarController_ = new ToolbarController(
+         this.ui.toolbar, this.ui.dialogNavigationList, this.ui.listContainer,
+         this.selectionHandler_, this.directoryModel_, this.volumeManager_,
+-        this.ui_);
++        this.ui_, this.metadataModel_);
+     this.actionsController_ = new ActionsController(
+         this.volumeManager_, this.metadataModel_, this.folderShortcutsModel_,
+         this.selectionHandler_, this.ui_);
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -6,6 +6,7 @@
+ import type {Switch} from 'chrome://resources/cros_components/switch/switch.js';
+ import {assertInstanceof} from 'chrome://resources/js/assert.js';
+ 
++import type {UniversalEntry} from '../../common/js/files_app_entry_types.js';
+ import type {VolumeManager} from '../../background/js/volume_manager.js';
+ import {getSizeStats} from '../../common/js/api.js';
+ import {queryRequiredElement} from '../../common/js/dom_utils.js';
+@@ -20,6 +21,7 @@
+ import {ICON_TYPES} from './constants.js';
+ import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
+ import type {FileSelectionHandler} from './file_selection.js';
++import type {MetadataModel} from './metadata/metadata_model.js';
+ import {EventType} from './file_selection.js';
+ import type {A11yAnnounce} from './ui/a11y_announce.js';
+ import {Command} from './ui/command.js';
+@@ -96,12 +98,29 @@
+    */
+   private auraDeSpaceRequest_ = 0;
+ 
++  /**
++   * AuraDE: the hover detail for the item count, which exists only when there
++   * are folders the total cannot include.
++   */
++  private auraDeCountDetail_ = '';
++
++  /**
++   * AuraDE: identifies the folder and the length the last size fetch was for,
++   * so the fetch happens once per folder and cannot loop.
++   *
++   * Without a key, a folder holding a file whose size never arrives would
++   * fetch, repaint, find the cache still short, and fetch again forever. With
++   * one, the second pass sees the key already matches and stops.
++   */
++  private auraDeWeightKey_ = '';
++
+   constructor(
+       private toolbar_: HTMLElement, _navigationList: HTMLElement,
+       private listContainer_: ListContainer,
+       private selectionHandler_: FileSelectionHandler,
+       private directoryModel_: DirectoryModel,
+-      private volumeManager_: VolumeManager, private a11y_: A11yAnnounce) {
++      private volumeManager_: VolumeManager, private a11y_: A11yAnnounce,
++      private metadataModel_: MetadataModel) {
+     // HTML elements.
+     this.cancelSelectionButton_ =
+         queryRequiredElement('#cancel-selection-button', this.toolbar_);
+@@ -302,7 +321,102 @@
+     // else. The count stays true, the layout does not move, and almost nobody
+     // will ever see it. That is the point of it.
+     this.filesSelectedLabel_.title = count === 42 ? 'The answer.' : '';
+-    return count === 1 ? '1 item' : `${count.toLocaleString()} items`;
++    const items = count === 1 ? '1 item' : `${count.toLocaleString()} items`;
++    const weight = this.auraDeDirectoryWeight_();
++    return weight ? `${items}, ${weight}` : items;
++  }
++
++  /**
++   * AuraDE: what the files in this folder weigh.
++   *
++   * "how much room is left" is already at the right hand end of this bar, and
++   * on its own it answers half the question somebody clearing a disk has. The
++   * other half is what is using the room, and the first place to look is the
++   * folder already open.
++   *
++   * Folders are left out of the total, because their size in this metadata is
++   * the size of the directory record and not of what is inside them. Rather
++   * than quietly present a short number as a total, the wording changes when
++   * there are folders present: "340 MB in 9 files" says exactly what was
++   * counted, and the hover says what was not and how to find out.
++   *
++   * Returns the empty string wherever the total would be a guess, which is
++   * also what leaves the bar showing the count alone.
++   */
++  private auraDeDirectoryWeight_(): string {
++    this.auraDeCountDetail_ = '';
++    const list = this.directoryModel_.getFileList();
++    const files: UniversalEntry[] = [];
++    let folders = 0;
++    for (let index = 0; index < list.length; index++) {
++      const entry = list.item(index);
++      if (!entry) {
++        // A list caught mid splice hands back a hole. A total that stepped
++        // over it would be quietly short.
++        return '';
++      }
++      if (entry.isDirectory) {
++        folders++;
++      } else {
++        files.push(entry);
++      }
++    }
++    if (files.length === 0) {
++      return '';
++    }
++
++    let bytes = 0;
++    const cached = this.metadataModel_.getCache(files, ['size']);
++    for (const props of cached) {
++      const size = props?.size;
++      if (typeof size !== 'number' || !isFinite(size) || size < 0) {
++        // The scan prefetches size for everything it lists, but it does so in
++        // chunks and the last of them can still be in flight. Ask for the
++        // missing sizes once, repaint when they land, and say nothing until
++        // then. Half a total presented as a total is worse than no total.
++        this.auraDeFetchWeight_(files);
++        return '';
++      }
++      bytes += size;
++    }
++
++    const total = bytesToString(bytes);
++    if (folders === 0) {
++      return total;
++    }
++    this.auraDeCountDetail_ = folders === 1 ?
++        'One folder is not counted. Measure it from its right click menu.' :
++        `${folders.toLocaleString()} folders are not counted. Measure one ` +
++            'from its right click menu.';
++    return files.length === 1 ?
++        `${total} in 1 file` :
++        `${total} in ${files.length.toLocaleString()} files`;
++  }
++
++  /**
++   * AuraDE: asks for the sizes this folder is still missing, once.
++   *
++   * The key is the current directory and the number of rows in it. Fetching
++   * without one would loop forever on a file whose size never arrives: every
++   * repaint would find the cache short, ask again, and repaint again. With
++   * one, the repaint that follows the fetch sees a key that already matches
++   * and stops there, and a splice or a new folder makes a new key so the next
++   * folder is still asked about.
++   */
++  private auraDeFetchWeight_(files: UniversalEntry[]) {
++    const current = this.directoryModel_.getCurrentDirEntry();
++    const key = `${current ? current.toURL() : ''}:${files.length}`;
++    if (this.auraDeWeightKey_ === key) {
++      return;
++    }
++    this.auraDeWeightKey_ = key;
++    this.metadataModel_.get(files, ['size']).then(() => {
++      // Only repaint if this is still the folder that asked. Anything else
++      // would put one folder's total under another folder's name.
++      if (this.auraDeWeightKey_ === key) {
++        this.updateSelectionLabel_();
++      }
++    });
+   }
+ 
+   /**
+@@ -384,7 +498,10 @@
+     const summary = this.auraDeDirectorySummary_();
+     // An empty folder still says so. A blank bar reads as broken.
+     count.textContent = summary || 'Empty folder';
+-    count.title = this.filesSelectedLabel_.title;
++    // The forty two note wins when it applies. It is rarer, it is the more
++    // interesting of the two, and a folder of forty two things that also holds
++    // folders would otherwise lose it to a housekeeping hint.
++    count.title = this.filesSelectedLabel_.title || this.auraDeCountDetail_;
+ 
+     // The toolbar already shows the selection in full when there is one, so
+     // repeating it here would be noise; this half stays empty until there is
