@@ -1,0 +1,435 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts b/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts
+new file mode 100644
+--- /dev/null
++++ b/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts
+@@ -0,0 +1,225 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {getSizeStats} from '../../common/js/api.js';
++import {bytesToString} from '../../common/js/translations.js';
++import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
++import type {Volume} from '../../state/state.js';
++import {getStore} from '../../state/store.js';
++import type {Store} from '../../state/store.js';
++
++import type {DirectoryModel} from './directory_model.js';
++
++/**
++ * AuraDE: the panel that turns Computer into a view of the machine.
++ *
++ * Computer opened onto seven curated entries, Downloads and Filesystem Root
++ * and Users and the rest, which is a list of places rather than a picture of
++ * the hardware. Nothing on the screen told you what disks the machine has, how
++ * big they are, or how full. Every other desktop answers that in the same
++ * place.
++ *
++ * The data is already in the frontend. The store carries a Volume for every
++ * mounted volume with its label, device type, filesystem and read only flag,
++ * and getSizeStats gives the capacity. So this is a rendering job and nothing
++ * more: no new plumbing, no new host call.
++ */
++export class AuraDeDevicesController {
++  private store_: Store;
++  private panel_: HTMLElement|null = null;
++  private list_: HTMLElement|null = null;
++
++  /**
++   * Guards against a slow capacity query painting a panel that has since been
++   * rebuilt for another folder. Each render takes the next number.
++   */
++  private render_ = 0;
++
++  constructor(private directoryModel_: DirectoryModel) {
++    this.store_ = getStore();
++    this.directoryModel_.addEventListener(
++        'directory-changed', this.update_.bind(this));
++    this.directoryModel_.addEventListener(
++        'cur-dir-scan-completed', this.update_.bind(this));
++  }
++
++  /**
++   * The panel lives in the same document as the file picker dialogs, which
++   * have no Computer root and no panel, so this tolerates absence rather than
++   * asserting on it.
++   */
++  private elements_(): boolean {
++    if (!this.panel_) {
++      this.panel_ = document.querySelector<HTMLElement>('#aurade-devices');
++      this.list_ = document.querySelector<HTMLElement>('#aurade-devices-list');
++    }
++    return !!this.panel_ && !!this.list_;
++  }
++
++  private update_() {
++    if (!this.elements_()) {
++      return;
++    }
++    const onComputer =
++        this.directoryModel_.getCurrentRootType() === RootType.LOCAL_ROOT;
++    this.panel_!.hidden = !onComputer;
++    if (!onComputer) {
++      // Emptied rather than left in place. A stale panel behind hidden is a
++      // panel that flashes the previous machine state on the way back in.
++      this.list_!.textContent = '';
++      return;
++    }
++    this.render_++;
++    this.draw_(this.render_);
++  }
++
++  /**
++   * Volumes worth showing as hardware.
++   *
++   * Downloads and the Linux container are places, not disks, and the sidebar
++   * already lists them. Showing them here again would make the panel a second
++   * copy of the sidebar rather than an answer to a different question.
++   */
++  private isDevice_(volume: Volume): boolean {
++    switch (volume.volumeType) {
++      case VolumeType.REMOVABLE:
++      case VolumeType.ARCHIVE:
++      case VolumeType.MTP:
++      case VolumeType.SMB:
++      case VolumeType.LOCAL_ROOT:
++        return true;
++      default:
++        return false;
++    }
++  }
++
++  private iconFor_(volume: Volume): string {
++    if (volume.volumeType === VolumeType.LOCAL_ROOT) {
++      return 'computer';
++    }
++    if (volume.volumeType === VolumeType.ARCHIVE) {
++      return 'archive';
++    }
++    if (volume.volumeType === VolumeType.SMB) {
++      return 'smb';
++    }
++    if (volume.volumeType === VolumeType.MTP) {
++      return 'mobile';
++    }
++    switch (volume.deviceType) {
++      case 'usb':
++        return 'usb';
++      case 'sd':
++        return 'sd';
++      case 'optical':
++        return 'optical';
++      case 'mobile':
++        return 'mobile';
++      default:
++        return 'hdd';
++    }
++  }
++
++  /**
++   * What the row says under its name.
++   *
++   * Only facts the store actually holds. A filesystem it does not know is left
++   * out rather than guessed at, because a wrong filesystem next to a Format
++   * command is worse than no filesystem at all.
++   */
++  private detailFor_(volume: Volume): string {
++    const parts: string[] = [];
++    if (volume.diskFileSystemType) {
++      parts.push(volume.diskFileSystemType);
++    }
++    if (volume.isReadOnly) {
++      parts.push('Read only');
++    }
++    return parts.join('  ·  ');
++  }
++
++  private draw_(render: number) {
++    const list = this.list_!;
++    list.textContent = '';
++
++    const volumes = Object.values(this.store_.getState().volumes ?? {})
++                        .filter(volume => this.isDevice_(volume));
++    if (!volumes.length) {
++      return;
++    }
++
++    for (const volume of volumes) {
++      const row = document.createElement('div');
++      row.className = 'aurade-device';
++
++      const icon = document.createElement('span');
++      icon.setAttribute('aurade-device-icon', this.iconFor_(volume));
++      row.appendChild(icon);
++
++      const text = document.createElement('div');
++      text.className = 'aurade-device-text';
++
++      const name = document.createElement('div');
++      name.className = 'aurade-device-name';
++      name.textContent = volume.label || volume.volumeId;
++      text.appendChild(name);
++
++      const detail = document.createElement('div');
++      detail.className = 'aurade-device-detail';
++      detail.textContent = this.detailFor_(volume);
++      text.appendChild(detail);
++      row.appendChild(text);
++
++      const meter = document.createElement('div');
++      meter.className = 'aurade-device-meter';
++      const bar = document.createElement('div');
++      bar.className = 'aurade-device-bar';
++      const fill = document.createElement('div');
++      fill.className = 'aurade-device-fill';
++      bar.appendChild(fill);
++      const figure = document.createElement('div');
++      figure.className = 'aurade-device-figure';
++      meter.appendChild(bar);
++      meter.appendChild(figure);
++      row.appendChild(meter);
++
++      list.appendChild(row);
++      this.fill_(render, volume, fill, figure, meter);
++    }
++  }
++
++  /**
++   * Asks for one volume's capacity and fills its bar.
++   *
++   * A volume that cannot answer keeps its row and loses its bar. The row is
++   * still the useful part: the machine has that disk whether or not its size
++   * can be read, and dropping the row would make hardware disappear because a
++   * stat call failed.
++   */
++  private async fill_(
++      render: number, volume: Volume, fill: HTMLElement, figure: HTMLElement,
++      meter: HTMLElement) {
++    let stats;
++    try {
++      stats = await getSizeStats(volume.volumeId);
++    } catch (error) {
++      stats = undefined;
++    }
++    if (render !== this.render_) {
++      return;
++    }
++    if (!stats || !stats.totalSize) {
++      meter.hidden = true;
++      return;
++    }
++    const used = Math.max(0, stats.totalSize - stats.remainingSize);
++    const ratio = Math.min(1, Math.max(0, used / stats.totalSize));
++    fill.style.width = `${(ratio * 100).toFixed(1)}%`;
++    // Rounding a nearly full disk down to 99% would be a comforting lie, so
++    // the bar carries the proportion and the text carries the numbers.
++    figure.textContent =
++        `${bytesToString(used)} of ${bytesToString(stats.totalSize)}`;
++    meter.classList.toggle('aurade-device-low', ratio >= 0.9);
++  }
++}
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -218,6 +218,7 @@
+   "file_manager/foreground/js/actions_model.ts",
+   "file_manager/foreground/js/android_app_list_model.ts",
+   "file_manager/foreground/js/app_state_controller.ts",
++  "file_manager/foreground/js/aurade_devices_controller.ts",
+   "file_manager/foreground/js/banner_controller.ts",
+   "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -482,6 +482,10 @@
+                   <files-spinner class="loading-indicator" hidden></files-spinner>
+                   <div class="drive-welcome page"></div>
+                 </div>
++                <div id="aurade-devices" visibleif="full-page" hidden>
++                  <div id="aurade-devices-title">Devices</div>
++                  <div id="aurade-devices-list"></div>
++                </div>
+                 <div id="aurade-status-bar" visibleif="full-page">
+                   <span id="aurade-status-count"></span>
+                   <span id="aurade-status-space"></span>
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2357,3 +2357,156 @@
+   color: var(--cros-sys-primary);
+   text-align: end;
+ }
++
++/* AuraDE: the Devices panel, shown only in Computer.
++ *
++ * It sits above the list in the same column flexbox the status bar pins itself
++ * to the bottom of, so it takes its height from the list rather than floating
++ * over it. flex: none for the same reason: a panel that grew with the window
++ * would push the listing out of view on a short screen.
++ *
++ * The artwork is the volume set already in the tree, drawn as masks so a disk
++ * icon takes a colour from the theme like every other icon in the app rather
++ * than arriving as a fixed-colour picture that looks wrong in one scheme.
++ */
++#aurade-devices {
++  border-bottom: 1px solid var(--cros-sys-separator);
++  box-sizing: border-box;
++  flex: none;
++  padding: 12px 16px 14px;
++}
++
++#aurade-devices[hidden] {
++  display: none;
++}
++
++#aurade-devices-title {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  font-weight: 500;
++  letter-spacing: 0.06em;
++  margin-bottom: 10px;
++  text-transform: uppercase;
++}
++
++#aurade-devices-list {
++  display: grid;
++  gap: 8px;
++  /* Wide enough for a name, a filesystem and a capacity bar without wrapping,
++   * and it reflows to one column on a narrow window instead of clipping. */
++  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
++}
++
++.aurade-device {
++  align-items: center;
++  background: var(--cros-sys-app_base_shaded);
++  border-radius: 12px;
++  display: flex;
++  gap: 12px;
++  padding: 10px 14px;
++}
++
++#aurade-devices [aurade-device-icon] {
++  background-color: var(--cros-sys-primary);
++  flex: none;
++  height: 20px;
++  -webkit-mask-position: center;
++  -webkit-mask-repeat: no-repeat;
++  -webkit-mask-size: 20px;
++  width: 20px;
++}
++
++#aurade-devices [aurade-device-icon='hdd'] {
++  -webkit-mask-image: url(../images/volumes/hard_drive.svg);
++}
++
++#aurade-devices [aurade-device-icon='usb'] {
++  -webkit-mask-image: url(../images/volumes/usb.svg);
++}
++
++#aurade-devices [aurade-device-icon='sd'] {
++  -webkit-mask-image: url(../images/volumes/sd.svg);
++}
++
++#aurade-devices [aurade-device-icon='optical'] {
++  -webkit-mask-image: url(../images/volumes/cd.svg);
++}
++
++#aurade-devices [aurade-device-icon='mobile'] {
++  -webkit-mask-image: url(../images/volumes/phone.svg);
++}
++
++#aurade-devices [aurade-device-icon='computer'] {
++  -webkit-mask-image: url(../images/volumes/computer.svg);
++}
++
++#aurade-devices [aurade-device-icon='smb'] {
++  -webkit-mask-image: url(../images/volumes/smb.svg);
++}
++
++#aurade-devices [aurade-device-icon='archive'] {
++  -webkit-mask-image: url(../images/volumes/archive.svg);
++}
++
++.aurade-device-text {
++  flex: auto;
++  min-width: 0;
++}
++
++.aurade-device-name {
++  color: var(--cros-sys-on_surface);
++  font-size: 13px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.aurade-device-detail {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.aurade-device-meter {
++  flex: none;
++  /* Wide enough that "999.9 GB of 999.9 GB" stays on one line. Narrower and
++   * the unit wraps onto a line of its own, which reads as a broken layout
++   * rather than a tight one. */
++  width: 132px;
++}
++
++.aurade-device-meter[hidden] {
++  display: none;
++}
++
++.aurade-device-bar {
++  background: var(--cros-sys-separator);
++  border-radius: 3px;
++  height: 4px;
++  overflow: hidden;
++}
++
++.aurade-device-fill {
++  background: var(--cros-sys-primary);
++  height: 100%;
++  width: 0;
++}
++
++/* A disk with almost nothing left is the one case where this panel should
++ * raise its voice. Warning rather than error: it is a thing to see coming. */
++.aurade-device-low .aurade-device-fill {
++  background: var(--cros-sys-warning);
++}
++
++.aurade-device-figure {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  font-variant-numeric: tabular-nums;
++  margin-top: 5px;
++  overflow: hidden;
++  text-align: end;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+@@ -49,6 +49,7 @@
+ import {ActionsController} from './actions_controller.js';
+ import {AndroidAppListModel} from './android_app_list_model.js';
+ import {AppStateController} from './app_state_controller.js';
++import {AuraDeDevicesController} from './aurade_devices_controller.js';
+ import {BannerController} from './banner_controller.js';
+ import {CommandHandler} from './command_handler.js';
+ import {findQueryMatchedDirectoryEntry} from './crossover_search_utils.js';
+@@ -1054,6 +1055,8 @@
+     this.emptyFolderController_ = new EmptyFolderController(
+         this.ui_.emptyFolder, this.directoryModel_, this.providersModel_,
+         this.recentEntry_);
++    // AuraDE: Computer shows the machine's disks rather than a list of places.
++    new AuraDeDevicesController(this.directoryModel_);
+ 
+ 
+     return directoryTreePromise;
