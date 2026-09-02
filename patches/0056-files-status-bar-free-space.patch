@@ -1,0 +1,212 @@
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -484,6 +484,7 @@
+                 </div>
+                 <div id="aurade-status-bar" visibleif="full-page">
+                   <span id="aurade-status-count"></span>
++                  <span id="aurade-status-space"></span>
+                   <span id="aurade-status-selection"></span>
+                 </div>
+               </div>
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2317,12 +2317,21 @@
+   font-size: 12px;
+   gap: 16px;
+   height: 28px;
+-  justify-content: space-between;
+   padding: 0 16px;
+   user-select: none;
+ }
+ 
++/* The bar holds three spans and the right hand two share one slot, so
++ * space-between is wrong here: with the middle span empty it would centre
++ * whichever one had text. Pushing the count away from the others puts the
++ * count at the start and packs the rest at the end, which reads correctly
++ * whichever of the two is the one carrying text. */
++#aurade-status-count {
++  margin-inline-end: auto;
++}
++
+ #aurade-status-count,
++#aurade-status-space,
+ #aurade-status-selection {
+   /* These are numbers that change in place as you move through a folder.
+    * Proportional digits make the text jitter every time the count ticks. */
+@@ -2332,6 +2341,12 @@
+   white-space: nowrap;
+ }
+ 
++#aurade-status-space {
++  /* Inherits the bar's own on_surface_variant. Free space is background
++   * information that should never compete with the selection for attention. */
++  text-align: end;
++}
++
+ #aurade-status-selection {
+   color: var(--cros-sys-primary);
+   text-align: end;
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -7,11 +7,12 @@
+ import {assertInstanceof} from 'chrome://resources/js/assert.js';
+ 
+ import type {VolumeManager} from '../../background/js/volume_manager.js';
++import {getSizeStats} from '../../common/js/api.js';
+ import {queryRequiredElement} from '../../common/js/dom_utils.js';
+ import {isCrosComponentsEnabled} from '../../common/js/flags.js';
+ import {bytesToString, str, strf} from '../../common/js/translations.js';
+ import {canBulkPinningCloudPanelShow} from '../../common/js/util.js';
+-import {RootType} from '../../common/js/volume_manager_types.js';
++import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
+ import {type State} from '../../state/state.js';
+ import {getStore, type Store} from '../../state/store.js';
+ import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
+@@ -73,6 +74,19 @@
+    */
+   private auraDeStatusCount_: HTMLElement|null = null;
+   private auraDeStatusSelection_: HTMLElement|null = null;
++  private auraDeStatusSpace_: HTMLElement|null = null;
++
++  /**
++   * AuraDE: the last free space answer, kept so that selecting and deselecting
++   * repaints from memory instead of asking the filesystem again.
++   */
++  private auraDeSpaceText_ = '';
++
++  /**
++   * AuraDE: guards a slow answer from painting over a newer one. Each request
++   * takes the next number and only the newest is allowed to write.
++   */
++  private auraDeSpaceRequest_ = 0;
+ 
+   constructor(
+       private toolbar_: HTMLElement, _navigationList: HTMLElement,
+@@ -153,6 +167,19 @@
+     this.directoryModel_.getFileList().addEventListener(
+         'splice', this.updateSelectionLabel_.bind(this));
+ 
++    // AuraDE: free space moves when the contents move or the volume does, and
++    // at no other time. These are exactly those events, which is why the
++    // refresh is not hung off the selection change that drives the rest of
++    // this bar: selecting a file cannot change how much room is left, and
++    // asking the filesystem every time somebody arrows down a list would be a
++    // query per keypress.
++    this.directoryModel_.addEventListener(
++        'cur-dir-scan-completed', this.auraDeRefreshFreeSpace_.bind(this));
++    this.directoryModel_.addEventListener(
++        'cur-dir-rescan-completed', this.auraDeRefreshFreeSpace_.bind(this));
++    this.directoryModel_.getFileList().addEventListener(
++        'splice', this.auraDeRefreshFreeSpace_.bind(this));
++
+     chrome.fileManagerPrivate.onAppsUpdated.addListener(
+         this.updateSharesheetCommand_.bind(this));
+ 
+@@ -337,11 +364,14 @@
+         document.querySelector<HTMLElement>('#aurade-status-count');
+     const selectionEl = this.auraDeStatusSelection_ ??
+         document.querySelector<HTMLElement>('#aurade-status-selection');
++    const spaceEl = this.auraDeStatusSpace_ ??
++        document.querySelector<HTMLElement>('#aurade-status-space');
+     if (!count || !selectionEl) {
+       return;
+     }
+     this.auraDeStatusCount_ = count;
+     this.auraDeStatusSelection_ = selectionEl;
++    this.auraDeStatusSpace_ = spaceEl;
+ 
+     const summary = this.auraDeDirectorySummary_();
+     // An empty folder still says so. A blank bar reads as broken.
+@@ -351,8 +381,87 @@
+     // The toolbar already shows the selection in full when there is one, so
+     // repeating it here would be noise; this half stays empty until there is
+     // something to say.
+-    selectionEl.textContent =
+-        this.selectionHandler_.selection.totalCount === 0 ? '' : selectionText;
++    const hasSelection = this.selectionHandler_.selection.totalCount !== 0;
++    selectionEl.textContent = hasSelection ? selectionText : '';
++
++    // Free space and the selection share the right hand end of the bar. What
++    // is selected is the more urgent of the two and is also the thing that is
++    // about to be acted on, so it takes the slot while it exists.
++    if (spaceEl) {
++      spaceEl.textContent = hasSelection ? '' : this.auraDeSpaceText_;
++    }
++  }
++
++  /**
++   * AuraDE: how much room is left on the volume this folder lives on.
++   *
++   * Every other file manager on every other desktop puts this in the status
++   * bar, and Files puts it behind the gear menu, which means the one number
++   * people want before a large copy is the one number they have to go looking
++   * for. The query is the same one the gear menu makes.
++   *
++   * Some volumes are left alone. Provided filesystems, media views and
++   * archives have no size worth reporting, which is the same set the gear menu
++   * declines to describe. Drive is left out too, but for a different reason:
++   * its figure comes from a quota API rather than from the filesystem, it is a
++   * network round trip, and the gear menu already asks for it on a schedule of
++   * its own. Quietly showing nothing is right in all of these cases.
++   */
++  private async auraDeRefreshFreeSpace_() {
++    const request = ++this.auraDeSpaceRequest_;
++    const volumeInfo = this.directoryModel_.getCurrentVolumeInfo();
++    if (!volumeInfo || volumeInfo.volumeType === VolumeType.PROVIDED ||
++        volumeInfo.volumeType === VolumeType.MEDIA_VIEW ||
++        volumeInfo.volumeType === VolumeType.ARCHIVE ||
++        volumeInfo.volumeType === VolumeType.DRIVE) {
++      this.auraDeSetSpaceText_(request, '');
++      return;
++    }
++
++    let stats;
++    try {
++      stats = await getSizeStats(volumeInfo.volumeId);
++    } catch (error) {
++      stats = undefined;
++    }
++
++    // A bar that is on screen the whole time is the wrong place to report that
++    // a query failed. The gear menu says so when it is opened on purpose; here
++    // the honest thing is to say nothing at all.
++    if (!stats || !stats.totalSize) {
++      this.auraDeSetSpaceText_(request, '');
++      return;
++    }
++
++    this.auraDeSetSpaceText_(
++        request,
++        strf(
++            'SPACE_AVAILABLE',
++            bytesToString(Math.max(0, stats.remainingSize))));
++  }
++
++  /**
++   * AuraDE: writes a free space answer, if it is still the current one.
++   *
++   * The element is looked up here as well as in auraDeUpdateStatusBar_ because
++   * the two are driven by separate listeners and nothing guarantees which of
++   * them runs first on the very first directory scan.
++   */
++  private auraDeSetSpaceText_(request: number, text: string) {
++    if (request !== this.auraDeSpaceRequest_) {
++      return;
++    }
++    this.auraDeSpaceText_ = text;
++
++    const spaceEl = this.auraDeStatusSpace_ ??
++        document.querySelector<HTMLElement>('#aurade-status-space');
++    if (!spaceEl) {
++      return;
++    }
++    this.auraDeStatusSpace_ = spaceEl;
++    if (this.selectionHandler_.selection.totalCount === 0) {
++      spaceEl.textContent = text;
++    }
+   }
+ 
+   /**
