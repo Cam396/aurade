@@ -1,0 +1,127 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+--- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
++++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+@@ -18,7 +18,7 @@
+ import type {FileFilter} from './directory_contents.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
+-import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CalculateSizeCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, AboutAuraDeCommand, CalculateSizeCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+ import {shouldIgnoreEvents} from './file_manager_commands_util.js';
+ import type {FileSelection, FileSelectionHandler} from './file_selection.js';
+ import type {FileTransferController} from './file_transfer_controller.js';
+@@ -164,6 +164,7 @@
+   'copy-name': new CopyNameCommand(),
+   'copy-path': new CopyPathCommand(),
+   'calculate-size': new CalculateSizeCommand(),
++  'about-aurade-files': new AboutAuraDeCommand(),
+   'show-providers-submenu': new ShowProvidersSubmenuCommand(),
+   'volume-switch-1': new VolumeSwitchCommand(1),
+   'volume-switch-2': new VolumeSwitchCommand(2),
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+@@ -11,7 +11,6 @@
+ import type {VolumeInfo} from '../../background/js/volume_info.js';
+ import type {VolumeManager} from '../../background/js/volume_manager.js';
+ import {getDlpRestrictionDetails, getHoldingSpaceState, startIOTask} from '../../common/js/api.js';
+-import {isModal} from '../../common/js/dialog_type.js';
+ import {getFocusedTreeItem} from '../../common/js/dom_utils.js';
+ import {entriesToURLs, getTreeItemEntry, isDirectoryEntry, isFakeEntry, isGrandRootEntryInDrive, isNonModifiable, isReadOnlyForDelete, isRecentRootType, isTeamDriveRoot, isTeamDrivesGrandRoot, isTrashEntry, isTrashRoot, unwrapEntry} from '../../common/js/entry_utils.js';
+ import {getExtension, getType, isEncrypted} from '../../common/js/file_type.js';
+@@ -1260,15 +1259,15 @@
+     }
+   }
+ 
+-  override canExecute(event: CanExecuteEvent, fileManager: CommandHandlerDeps) {
+-    // Hides the help menu in modal dialog mode. It does not make much sense
+-    // because after all, users cannot view the help without closing, and
+-    // besides that the help page is about the Files app as an app, not about
+-    // the dialog mode itself. It can also lead to hard-to-fix bug
+-    // crbug.com/339089.
+-    const hideHelp = isModal(fileManager.dialogType);
+-    event.canExecute = !hideHelp;
+-    event.command.setHidden(hideHelp);
++  override canExecute(event: CanExecuteEvent, _fileManager: CommandHandlerDeps) {
++    // AuraDE: both destinations are Google support pages describing ChromeOS.
++    // One documents an app that does not behave the way this one does, on a
++    // system this is not; the other documents a Drive that is never mounted
++    // here. A Help item that opens either is a promise the system cannot keep,
++    // and a wrong answer costs more than no answer. Hidden here rather than
++    // only removed from the menu, so that no other surface can bind it back.
++    event.canExecute = false;
++    event.command.setHidden(true);
+   }
+ }
+ 
+@@ -1279,6 +1278,15 @@
+   execute(_event: CommandEvent, _fileManager: CommandHandlerDeps) {
+     chrome.fileManagerPrivate.sendFeedback();
+   }
++
++  override canExecute(event: CanExecuteEvent, _fileManager: CommandHandlerDeps) {
++    // AuraDE: this opens the ChromeOS feedback flow, which is not installed
++    // here. The item was always enabled, so choosing it did nothing at all and
++    // gave no reason why. A menu item that silently does nothing is worse than
++    // one that is not there.
++    event.canExecute = false;
++    event.command.setHidden(true);
++  }
+ }
+ 
+ /**
+@@ -2671,6 +2679,29 @@
+   }
+ }
+ 
++/**
++ * AuraDE: says what this is and what it is running on.
++ *
++ * Help and Send feedback both left, and neither could be replaced by another
++ * link, because there is no support site to promise. What the gear menu is
++ * still the right home for is the one question a link would have answered
++ * first: what am I actually using. So this says so, in the one line it takes.
++ *
++ * The version is read out of the user agent rather than from loadTimeData,
++ * because the Files app is served the browser's own string and does not
++ * receive a build stamp of its own. A user agent that does not carry one is
++ * not worth inventing around: the name alone is still a true answer.
++ */
++export class AboutAuraDeCommand extends FilesCommand {
++  execute(_event: CommandEvent, fileManager: CommandHandlerDeps) {
++    const match = navigator.userAgent.match(/Chrome\/(\d+(?:\.\d+)*)/);
++    const message = match ? `AuraDE Files, on Chromium ${match[1]}` :
++                            'AuraDE Files';
++    fileManager.ui.toast.show(message);
++    fileManager.ui.speakA11yMessage(message);
++  }
++}
++
+ /**
+  * Opens "providers menu" to allow users to use providers/FSPs.
+  */
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -100,6 +100,7 @@
+       <command id="files-settings" label="$i18n{FILES_SETTINGS_LABEL}">
+       <command id="volume-help" label="$i18n{DRIVE_MENU_HELP}">
+       <command id="send-feedback" label="$i18n{SEND_FEEDBACK}">
++      <command id="about-aurade-files" label="About AuraDE Files">
+       <command id="volume-storage">
+       <command id="drive-buy-more-space"
+                label="$i18n{DRIVE_BUY_MORE_SPACE}">
+@@ -284,10 +285,9 @@
+                       command="#drive-buy-more-space"></cr-menu-item>
+         <cr-menu-item id="gear-menu-drive-go-to-drive"
+                       command="#drive-go-to-drive"></cr-menu-item>
+-        <cr-menu-item id="gear-menu-volume-help"
+-                      command="#volume-help"></cr-menu-item>
+-        <cr-menu-item id="gear-menu-send-feedback"
+-                      command="#send-feedback"></cr-menu-item>
++        <cr-menu-item id="gear-menu-about-aurade-files"
++                      title="Everything here is on your own disk."
++                      command="#about-aurade-files"></cr-menu-item>
+         <hr id="volume-space-info-separator">
+         <cr-menu-item id="gear-menu-providers" command="#show-providers-submenu"
+             sub-menu="#providers-menu"></cr-menu-item>
