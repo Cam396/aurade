@@ -122,7 +122,7 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
 diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -21,20 +21,21 @@
+@@ -21,20 +21,21 @@ import type {TrashEntry} from '../../common/js/trash.js';
  import {getEnabledTrashVolumeURLs, isAllTrashEntries} from '../../common/js/trash.js';
  import {FileErrorToDomError, visitURL} from '../../common/js/util.js';
  import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
@@ -133,7 +133,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
  import {isTreeItem, isXfTree} from '../../widgets/xf_tree_util.js';
  import type {FilesToast} from '../elements/files_toast.js';
  
-+import {auraDeClearCut, auraDeMarkCut} from './aurade_cut_marks.js';
++import {auraDeClearCut, auraDeIsCut, auraDeMarkCut} from './aurade_cut_marks.js';
  import type {DirectoryModel} from './directory_model.js';
  import type {FileSelectionHandler} from './file_selection.js';
  import {EventType} from './file_selection.js';
@@ -144,7 +144,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
  import type {FileTableList} from './ui/file_table_list.js';
  import type {Grid} from './ui/grid.js';
  import type {List} from './ui/list.js';
-@@ -1172,20 +1173,42 @@
+@@ -1172,20 +1173,63 @@ export class FileTransferController {
      if (document.activeElement && isTreeItem(document.activeElement)) {
        this.cutOrCopyFromDirectoryTree(
            document.activeElement, clipboardData, effectAllowed);
@@ -168,15 +168,36 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
 +  }
 +
 +  /**
-+   * AuraDE: repaint the rows so the dimming appears or clears at once.
++   * AuraDE: bring the rows already on screen into line with what is cut.
 +   *
-+   * The class is applied while a row renders, so rows already on screen keep
-+   * whatever they were given until something redraws them. Only ever called
-+   * from a cut, a copy or a paste, so the cost lands on a keystroke a person
-+   * just made rather than on scrolling.
++   * Deliberately not list.redraw(). Redraw reuses the rows it already has:
++   * mergeItems takes cachedItems_[index] when one exists and only calls
++   * createItem when it does not, so the render path that applies the class
++   * never runs again for a row that is already on screen. Calling redraw here
++   * dimmed nothing at all, and would have dimmed only the rows scrolled into
++   * view afterwards, which is worse than dimming none of them.
++   *
++   * So the rows on screen are toggled directly and the render path keeps
++   * handling the ones that arrive later. Both are needed: this one cannot see
++   * rows that do not exist yet, and that one does not run for rows that
++   * already do.
 +   */
 +  private auraDeRedrawForCutMarks_() {
-+    this.listContainer_.currentList.redraw();
++    const list = this.listContainer_.currentList;
++    const model = list.dataModel;
++    if (!model) {
++      return;
++    }
++    for (const element of list.querySelectorAll<ListItem>('li')) {
++      const index = element.listIndex;
++      if (index < 0) {
++        continue;
++      }
++      const entry = model.item(index);
++      if (entry) {
++        element.classList.toggle('aurade-cut', auraDeIsCut(entry));
++      }
++    }
    }
  
    /**
@@ -187,7 +208,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
        effectAllowed: DataTransfer['effectAllowed']) {
      if (focusedItem === null) {
        return;
-@@ -1301,20 +1324,24 @@
+@@ -1301,20 +1345,24 @@ export class FileTransferController {
      // Need to update here since 'beforepaste' doesn't fire.
      if (!this.isDocumentWideEvent_() ||
          !this.canPasteOrDrop_(getClipboardData(event), destination)) {
