@@ -1,0 +1,314 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts b/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts
+new file mode 100644
+--- /dev/null
++++ b/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts
+@@ -0,0 +1,141 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {isNativeEntry, unwrapEntry} from '../../common/js/entry_utils.js';
++import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
++
++/**
++ * AuraDE: how big is that folder, actually.
++ *
++ * Every file manager on a desktop can answer this and Files cannot. The Size
++ * column shows a dash for every directory, because a directory has no size of
++ * its own and finding out means walking the whole tree underneath it. Files
++ * already owns that walk: `chrome.fileManagerPrivate.getDirectorySize` runs it
++ * in the browser process, and the details panel calls it whenever a folder is
++ * selected. Nothing surfaces it in the list, which is where somebody clearing
++ * a disk is actually looking.
++ *
++ * So this is on demand and never automatic. Measuring is expensive in a way
++ * that is invisible until the tree is large, and a list that silently measured
++ * every folder it drew would spend a spinning disk on numbers nobody asked
++ * for. The answer arrives because somebody asked for it, and is remembered
++ * afterwards so asking twice is free.
++ */
++
++/**
++ * Remembered measurements, keyed by entry URL.
++ *
++ * Capped, because this is never cleared while the window lives and a long
++ * session that walks a large tree would otherwise hold a number for every
++ * folder it ever visited. Sixty four folders is far more than anybody measures
++ * by hand in one sitting.
++ */
++const AURADE_FOLDER_SIZE_LIMIT = 64;
++
++const folderSizes = new Map<string, number>();
++
++/**
++ * URLs currently being measured, so a second invocation on the same folder
++ * joins the first walk instead of starting another one. Without this, holding
++ * the menu item down would queue a walk per keypress and each one would read
++ * the whole tree again.
++ */
++const inFlight = new Map<string, Promise<number|undefined>>();
++
++/**
++ * Whether Files can measure this entry at all.
++ *
++ * A directory is not enough. `getDirectorySize` takes a real filesystem
++ * directory, so the fake roots that Files synthesises, and any entry belonging
++ * to a provider rather than to a disk, have to be turned away here rather than
++ * fail in the callback where there is nothing useful to say about them.
++ */
++export function auraDeCanMeasureSize(entry: Entry|FilesAppEntry): boolean {
++  if (!entry || !entry.isDirectory) {
++    return false;
++  }
++  return isNativeEntry(unwrapEntry(entry) as Entry | FilesAppEntry);
++}
++
++/**
++ * The measurement for this folder if one has been taken, otherwise undefined.
++ *
++ * Undefined and not -1: -1 is what the metadata carries for a directory that
++ * has no size, and the two mean different things. Undefined here means nobody
++ * has asked yet.
++ */
++export function auraDeMeasuredFolderSize(entry: Entry|FilesAppEntry): number
++    |undefined {
++  if (!entry || !entry.isDirectory) {
++    return undefined;
++  }
++  return folderSizes.get(entry.toURL());
++}
++
++/**
++ * Records a measurement, evicting the least recently recorded one when full.
++ *
++ * The delete before the set is what makes the eviction a real LRU. A Map keeps
++ * insertion order, so setting a key that is already present leaves it where it
++ * first went in; deleting first moves it to the end, and the oldest key is
++ * then genuinely the one at the front.
++ */
++function remember(url: string, size: number) {
++  folderSizes.delete(url);
++  folderSizes.set(url, size);
++  while (folderSizes.size > AURADE_FOLDER_SIZE_LIMIT) {
++    const oldest = folderSizes.keys().next();
++    if (oldest.done) {
++      break;
++    }
++    folderSizes.delete(oldest.value);
++  }
++}
++
++/**
++ * Walks the folder and returns its total size in bytes, or undefined if the
++ * walk could not be done.
++ *
++ * `chrome.runtime.lastError` has to be read inside the callback. The extension
++ * bindings clear it as soon as the callback returns, and a failed call still
++ * invokes the callback, with a size that is undefined or stale rather than
++ * with an exception. Checking it is the only way to tell a folder of zero
++ * bytes from a folder that could not be read.
++ */
++export function auraDeMeasureFolderSize(entry: Entry|FilesAppEntry):
++    Promise<number|undefined> {
++  if (!auraDeCanMeasureSize(entry)) {
++    return Promise.resolve(undefined);
++  }
++  const url = entry.toURL();
++  const existing = inFlight.get(url);
++  if (existing) {
++    return existing;
++  }
++  const directoryEntry = unwrapEntry(entry) as DirectoryEntry;
++  const walk = new Promise<number|undefined>(resolve => {
++    chrome.fileManagerPrivate.getDirectorySize(directoryEntry, size => {
++      if (chrome.runtime.lastError || typeof size !== 'number' ||
++          !isFinite(size) || size < 0) {
++        resolve(undefined);
++        return;
++      }
++      remember(url, size);
++      resolve(size);
++    });
++  }).finally(() => {
++    inFlight.delete(url);
++  });
++  inFlight.set(url, walk);
++  return walk;
++}
++
++/**
++ * Forgets every measurement. Exists for tests, which would otherwise carry one
++ * case's numbers into the next.
++ */
++export function auraDeForgetFolderSizes() {
++  folderSizes.clear();
++  inFlight.clear();
++}
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -219,6 +219,7 @@
+   "file_manager/foreground/js/android_app_list_model.ts",
+   "file_manager/foreground/js/app_state_controller.ts",
+   "file_manager/foreground/js/aurade_devices_controller.ts",
++  "file_manager/foreground/js/aurade_folder_size.ts",
+   "file_manager/foreground/js/banner_controller.ts",
+   "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",
+diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+--- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
++++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+@@ -18,7 +18,7 @@
+ import type {FileFilter} from './directory_contents.js';
+ import type {DirectoryModel} from './directory_model.js';
+ import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
+-import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CalculateSizeCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+ import {shouldIgnoreEvents} from './file_manager_commands_util.js';
+ import type {FileSelection, FileSelectionHandler} from './file_selection.js';
+ import type {FileTransferController} from './file_transfer_controller.js';
+@@ -163,6 +163,7 @@
+   'volume-storage': new VolumeStorageCommand(),
+   'copy-name': new CopyNameCommand(),
+   'copy-path': new CopyPathCommand(),
++  'calculate-size': new CalculateSizeCommand(),
+   'show-providers-submenu': new ShowProvidersSubmenuCommand(),
+   'volume-switch-1': new VolumeSwitchCommand(1),
+   'volume-switch-2': new VolumeSwitchCommand(2),
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+@@ -19,7 +19,7 @@
+ import {EntryList} from '../../common/js/files_app_entry_types.js';
+ import {isDlpEnabled, isDriveFsBulkPinningEnabled, isMirrorSyncEnabled, isSinglePartitionFormatEnabled} from '../../common/js/flags.js';
+ import {recordEnum, recordUserAction} from '../../common/js/metrics.js';
+-import {getFileErrorString, str, strf} from '../../common/js/translations.js';
++import {bytesToString, getFileErrorString, str, strf} from '../../common/js/translations.js';
+ import type {TrashEntry} from '../../common/js/trash.js';
+ import {deleteIsForever, RestoreFailedType, RestoreFailedTypesUMA, RestoreFailedUMA, shouldMoveToTrash} from '../../common/js/trash.js';
+ import {debug, isNullOrUndefined, visitURL} from '../../common/js/util.js';
+@@ -31,6 +31,7 @@
+ import {isTreeItem, isXfTree} from '../../widgets/xf_tree_util.js';
+ import type {FilesTooltip} from '../elements/files_tooltip.js';
+ 
++import {auraDeCanMeasureSize, auraDeMeasureFolderSize} from './aurade_folder_size.js';
+ import {type ActionsModel, CommonActionId, InternalActionId} from './actions_model.js';
+ import {type CommandHandlerDeps, MenuCommandsForUma, recordMenuItemSelected} from './command_handler.js';
+ import {canExecuteVisibleOnDriveInNormalAppModeOnly, containsNonInteractiveEntry, currentVolumeIsInteractive, getCommandEntries, getCommandEntry, getElementVolumeInfo, getEventEntry, getOnlyOneSelectedDirectory, getParentEntry, getSharesheetLaunchSource, hasCapability, isDriveEntries, isFromSelectionMenu, isOnlyMyDriveEntries, isOnTrashRoot, isRootEntry, shouldIgnoreEvents, shouldShowMenuItemsForEntry} from './file_manager_commands_util.js';
+@@ -2606,6 +2607,70 @@
+   }
+ }
+ 
++/**
++ * AuraDE: measures the selected folders and shows how much they hold.
++ *
++ * Files answers "how much room is left" in the status bar and never answers
++ * "what is using it", which is the question somebody clearing a disk actually
++ * has. The walk is the one the details panel already runs; what is new is
++ * asking for it deliberately, on the folders picked out, and putting the
++ * answer in the Size column where a size belongs.
++ *
++ * Deliberately on demand and deliberately not on a keyboard shortcut. Every
++ * free chord in this window is read by ash first, and taking one somebody
++ * already uses is a worse trade than a trip to the context menu; the same
++ * reasoning that kept Copy name and Copy path off the keyboard.
++ */
++export class CalculateSizeCommand extends FilesCommand {
++  execute(_event: CommandEvent, fileManager: CommandHandlerDeps) {
++    const entries =
++        fileManager.getSelection().entries.filter(auraDeCanMeasureSize);
++    if (entries.length === 0) {
++      return;
++    }
++    const label = entries.length === 1 ? entries[0]!.name :
++                                         `${entries.length} folders`;
++    // Announced rather than shown, because a walk that finishes instantly
++    // would make a toast flash and vanish, which reads as a glitch.
++    fileManager.ui.speakA11yMessage(`Measuring ${label}`);
++    Promise.all(entries.map(entry => auraDeMeasureFolderSize(entry)))
++        .then(sizes => {
++          const measured = sizes.filter(size => size !== undefined);
++          // Redraw whatever landed, even on a partial failure, so a folder
++          // that did answer shows its number.
++          if (measured.length > 0) {
++            fileManager.ui.listContainer.currentList.redraw();
++          }
++          let message: string;
++          if (measured.length === 0) {
++            message = `Could not measure ${label}`;
++          } else {
++            const total = measured.reduce((sum, size) => sum + size!, 0);
++            message = entries.length === 1 ?
++                `${entries[0]!.name} holds ${bytesToString(total)}` :
++                `${measured.length} folders hold ${bytesToString(total)}`;
++          }
++          fileManager.ui.toast.show(message);
++          fileManager.ui.speakA11yMessage(message);
++        });
++  }
++
++  override canExecute(event: CanExecuteEvent, fileManager: CommandHandlerDeps) {
++    const entries = fileManager.getSelection().entries;
++    // Every selected entry has to be measurable, not merely one of them. A
++    // mixed selection of files and folders offering "Calculate size" would
++    // quietly measure the folders and ignore the files, and the total would be
++    // wrong in a way nothing on screen explains.
++    const canMeasure =
++        entries.length > 0 && entries.every(auraDeCanMeasureSize);
++    event.canExecute = canMeasure;
++    event.command.setHidden(!canMeasure);
++    event.command.label = entries.length > 1 ?
++        `Calculate ${entries.length} folder sizes` :
++        'Calculate size';
++  }
++}
++
+ /**
+  * Opens "providers menu" to allow users to use providers/FSPs.
+  */
+diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+--- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
++++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+@@ -14,6 +14,7 @@
+ import type {FilesAppEntry} from '../../../common/js/files_app_entry_types.js';
+ import {isDlpEnabled} from '../../../common/js/flags.js';
+ import {getEntryLabel, str, strf} from '../../../common/js/translations.js';
++import {auraDeMeasuredFolderSize} from '../aurade_folder_size.js';
+ import {FileListModel, GROUP_BY_FIELD_MODIFICATION_TIME} from '../file_list_model.js';
+ import type {ListThumbnailLoader} from '../list_thumbnail_loader.js';
+ import {type ThumbnailLoadedEvent} from '../list_thumbnail_loader.js';
+@@ -879,9 +880,14 @@
+   private updateSize_(div: HTMLElement, entry: Entry|FilesAppEntry) {
+     const metadata = this.metadataModel_!.getCache(
+         [entry], ['size', 'hosted', 'contentMimeType'])[0]!;
+-    const size = metadata.size;
+     const special =
+         metadata.hosted || isEncrypted(entry, metadata.contentMimeType);
++    // AuraDE: a folder that has been measured shows its total where its size
++    // belongs, instead of the dash every folder shows. The lookup is one map
++    // read on a cell that is redrawn on every scroll, so it stays cheap, and a
++    // folder nobody has measured falls through to exactly the old value.
++    const measured = auraDeMeasuredFolderSize(entry);
++    const size = measured === undefined ? metadata.size : measured;
+     div.textContent = this.formatter_!.formatSize(size, special);
+     // AuraDE: the rounded size is the right thing to read and the wrong thing
+     // to trust, so the exact count lives on hover. Cells are reused as the list
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -39,6 +39,7 @@
+            trade than one extra trip to the context menu. -->
+       <command id="copy-name" label="Copy name">
+       <command id="copy-path" label="Copy path">
++      <command id="calculate-size" label="Calculate size">
+       <command id="paste" label="$i18n{PASTE_BUTTON_LABEL}"
+                shortcut="v|Ctrl">
+       <command id="paste-into-current-folder" label="$i18n{PASTE_BUTTON_LABEL}"
+@@ -181,6 +182,7 @@
+         <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#copy-path" visibleif="full-page"></cr-menu-item>
++        <cr-menu-item command="#calculate-size" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
+         <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
+         <hr visibleif="full-page">
