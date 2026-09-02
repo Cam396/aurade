@@ -1,0 +1,156 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+@@ -9,6 +9,7 @@
+ import type {DialogType} from '../../state/state.js';
+ 
+ import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
++import type {FileListModel} from './file_list_model.js';
+ import {GROUP_BY_FIELD_DIRECTORY, GROUP_BY_FIELD_MODIFICATION_TIME} from './file_list_model.js';
+ import type {FileManagerUI} from './ui/file_manager_ui.js';
+ import type {FileTableColumnModel} from './ui/file_table.js';
+@@ -43,6 +44,32 @@
+   private auraDeScrollTops_ = new Map<string, number>();
+ 
+   /**
++   * AuraDE: the order each folder was last put in, by file key.
++   *
++   * Bounded and least recently used, for the same reasons and by the same
++   * delete before write as the scroll memory above.
++   *
++   * Held in memory and not in storage on purpose. A stored map would grow for
++   * the life of the profile, would keep an order for folders that have since
++   * been deleted, and would need pruning against a filesystem to stay honest.
++   * A session is the right lifetime for this: it is long enough to cover the
++   * work somebody is actually doing, and it cannot rot.
++   */
++  private auraDeSortByDirectory_ =
++      new Map<string, {field: string, direction: string}>();
++
++  /**
++   * AuraDE: true while this controller is applying a remembered order.
++   *
++   * The sorted event does not say who asked. Without this, applying a folder's
++   * remembered order would be read back as a choice the user just made, copied
++   * into the preferred field and direction, and from there onto every folder
++   * that has no order of its own. One visit to a folder sorted by size would
++   * quietly resort the whole app.
++   */
++  private auraDeApplyingSort_ = false;
++
++  /**
+    * AuraDE: the folder whose position is waiting to be restored.
+    *
+    * directory-changed fires while the list still holds the previous folder's
+@@ -142,6 +169,11 @@
+ 
+   private async onFileListSorted_() {
+     assert(this.directoryModel_);
++    // AuraDE: an order this controller applied is not a choice anybody made.
++    // Reading it back would spread one folder's order across the whole app.
++    if (this.auraDeApplyingSort_) {
++      return;
++    }
+     const currentDirectory = this.directoryModel_.getCurrentDirEntry();
+     if (!currentDirectory) {
+       return;
+@@ -153,6 +185,7 @@
+       const currentSortStatus = this.directoryModel_.getFileList().sortStatus;
+       this.fileListSortField_ = currentSortStatus.field;
+       this.fileListSortDirection_ = currentSortStatus.direction;
++      this.auraDeRememberSort_(currentSortStatus);
+     }
+     this.saveViewOptions();
+   }
+@@ -208,6 +241,75 @@
+             this.fileListSortField_!, this.fileListSortDirection_!);
+       }
+     }
++
++    // AuraDE: a folder opens in the order it was last left in. This runs on
++    // every arrival and not only on the crossing above, because that is the
++    // whole point: the order has to follow the folder rather than the window.
++    if (!isOnRecent) {
++      this.auraDeApplySort_(fileListModel, fileData.key);
++    }
++  }
++
++  /**
++   * AuraDE: records the order this folder was just put in.
++   *
++   * Downloads wants the newest first and a music folder wants the names in
++   * order, and one preference for the whole app cannot be both. Sorting a
++   * folder still sets the app wide default, which is what an unvisited folder
++   * opens in; what changes is that the folder you sorted also keeps it.
++   */
++  private auraDeRememberSort_(status: {field: string|null,
++                                       direction: string|null}) {
++    const key = this.directoryModel_?.getCurrentFileData()?.key;
++    if (!key || !status.field || !status.direction) {
++      return;
++    }
++    // Delete first so a rewrite moves the key to the end of the insertion
++    // order and the eviction below stays least recently used.
++    this.auraDeSortByDirectory_.delete(key);
++    this.auraDeSortByDirectory_.set(
++        key, {field: status.field, direction: status.direction});
++    while (this.auraDeSortByDirectory_.size > AURADE_SORT_MEMORY_LIMIT) {
++      const coldest = this.auraDeSortByDirectory_.keys().next().value;
++      if (coldest === undefined) {
++        break;
++      }
++      this.auraDeSortByDirectory_.delete(coldest);
++    }
++  }
++
++  /**
++   * AuraDE: puts this folder into the order it was last left in, or into the
++   * app wide default if it has never been sorted.
++   *
++   * Falling back to the default rather than to whatever the previous folder
++   * happened to be showing is the point. Without it, opening a folder sorted
++   * by size and then walking into a folder nobody has ever sorted would leave
++   * the second one in an order it never had, and which of the two you got
++   * would depend on the route you took to it.
++   */
++  private auraDeApplySort_(fileListModel: FileListModel, key: string) {
++    const remembered = this.auraDeSortByDirectory_.get(key);
++    const field = remembered ? remembered.field : this.fileListSortField_;
++    const direction =
++        remembered ? remembered.direction : this.fileListSortDirection_;
++    if (!field || !direction) {
++      return;
++    }
++    const status = fileListModel.sortStatus;
++    if (status.field === field && status.direction === direction) {
++      // Already in that order. Sorting again would fire the sorted event and
++      // rebuild every row in the list for no change at all.
++      return;
++    }
++    this.auraDeApplyingSort_ = true;
++    try {
++      fileListModel.sort(field, direction);
++    } finally {
++      // A throw in the sort would otherwise leave the flag set, and from then
++      // on every order the user chose would be discarded as one of ours.
++      this.auraDeApplyingSort_ = false;
++    }
+   }
+ 
+   /**
+@@ -291,6 +393,15 @@
+ const AURADE_SCROLL_MEMORY_LIMIT = 64;
+ 
+ /**
++ * AuraDE: how many folders keep a remembered order.
++ *
++ * The same sixty four as the scroll memory, and for the same reason: enough to
++ * cover the tree somebody is actually working in, small enough that a window
++ * left open for a week cannot grow without bound.
++ */
++const AURADE_SORT_MEMORY_LIMIT = 64;
++
++/**
+  * Default sort field of the file list.
+  */
+ const DEFAULT_SORT_FIELD = 'modificationTime';
