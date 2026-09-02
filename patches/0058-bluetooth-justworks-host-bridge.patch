@@ -1,0 +1,1559 @@
+diff --git a/ash/public/cpp/bluetooth_config_service.cc b/ash/public/cpp/bluetooth_config_service.cc
+index 958e428a58d0bd681c0aedc12e5a2c446e5c45f0..fa7f85f1dbe13eb9bb7dc851148a4a18c7a1cace 100644
+--- a/ash/public/cpp/bluetooth_config_service.cc
++++ b/ash/public/cpp/bluetooth_config_service.cc
+@@ -4,13 +4,33 @@
+ 
+ #include "ash/public/cpp/bluetooth_config_service.h"
+ 
++#include <utility>
++
++#include "base/no_destructor.h"
+ #include "chromeos/ash/services/bluetooth_config/in_process_instance.h"
+ 
+ namespace ash {
++namespace {
++
++BluetoothConfigServiceBinder& GetGenericLinuxBinder() {
++  static base::NoDestructor<BluetoothConfigServiceBinder> binder;
++  return *binder;
++}
++
++}  // namespace
++
++void SetBluetoothConfigServiceBinderForGenericLinux(
++    BluetoothConfigServiceBinder binder) {
++  GetGenericLinuxBinder() = std::move(binder);
++}
+ 
+ void GetBluetoothConfigService(
+     mojo::PendingReceiver<bluetooth_config::mojom::CrosBluetoothConfig>
+         receiver) {
++  if (GetGenericLinuxBinder()) {
++    GetGenericLinuxBinder().Run(std::move(receiver));
++    return;
++  }
+   bluetooth_config::BindToInProcessInstance(std::move(receiver));
+ }
+ 
+diff --git a/ash/public/cpp/bluetooth_config_service.h b/ash/public/cpp/bluetooth_config_service.h
+index 7c5187937c2d9f791e80b739ca2635756028ea26..63bdfa8a147479044c63f5bc01b21fb0b69efd23 100644
+--- a/ash/public/cpp/bluetooth_config_service.h
++++ b/ash/public/cpp/bluetooth_config_service.h
+@@ -6,11 +6,21 @@
+ #define ASH_PUBLIC_CPP_BLUETOOTH_CONFIG_SERVICE_H_
+ 
+ #include "ash/public/cpp/ash_public_export.h"
++#include "base/functional/callback.h"
+ #include "chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ 
+ namespace ash {
+ 
++using BluetoothConfigServiceBinder = base::RepeatingCallback<void(
++    mojo::PendingReceiver<bluetooth_config::mojom::CrosBluetoothConfig>)>;
++
++// Installs the generic Linux implementation used in place of the ChromeOS
++// Bluetooth service. Passing an empty callback restores the in-process
++// implementation.
++ASH_PUBLIC_EXPORT void SetBluetoothConfigServiceBinderForGenericLinux(
++    BluetoothConfigServiceBinder binder);
++
+ // Binds |pending_receiver| to CrosBluetoothConfig. Clients should use this
+ // function as the main entrypoint to the Mojo API.
+ //
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index d6fdaf14653c1f316ee264a0b944ca0787dd0924..cbda58345eef9e72423d01967e6772d2dad47248 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -16,6 +16,8 @@ static_library("dbus") {
+     "arc_tracing_service_provider.h",
+     "ash_dbus_helper.cc",
+     "ash_dbus_helper.h",
++    "aurade_bluetooth_service.cc",
++    "aurade_bluetooth_service.h",
+     "chrome_features_service_provider.cc",
+     "chrome_features_service_provider.h",
+     "component_updater_service_provider.cc",
+@@ -168,6 +170,7 @@ static_library("dbus") {
+     "//chromeos/ash/experiences/arc:arc_features",
+     "//chromeos/ash/experiences/arc/session",
+     "//chromeos/ash/experiences/arc/video",
++    "//chromeos/ash/services/bluetooth_config/public/mojom",
+     "//chromeos/ash/services/rollback_network_config/public/mojom",
+     "//chromeos/components/mojo_bootstrap",
+     "//chromeos/dbus/constants",
+@@ -265,6 +268,7 @@ source_set("unit_tests") {
+   sources = [
+     "arc_crosh_service_provider_unittest.cc",
+     "arc_tracing_service_provider_unittest.cc",
++    "aurade_bluetooth_service_unittest.cc",
+     "chrome_features_service_provider_unittest.cc",
+     "desktop_notification_service_unittest.cc",
+     "dlp_files_policy_service_provider_unittest.cc",
+@@ -315,6 +319,25 @@ source_set("unit_tests") {
+   ]
+ }
+ 
++executable("aurade_bluetooth_service_tests") {
++  testonly = true
++
++  sources = [
++    "aurade_bluetooth_service.cc",
++    "aurade_bluetooth_service_unittest.cc",
++  ]
++
++  deps = [
++    "//base",
++    "//base/test:run_all_unittests",
++    "//base/test:test_support",
++    "//chromeos/ash/services/bluetooth_config/public/mojom",
++    "//dbus",
++    "//mojo/public/cpp/bindings",
++    "//testing/gtest",
++  ]
++}
++
+ executable("desktop_notification_service_tests") {
+   testonly = true
+ 
+diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service.cc b/chrome/browser/ash/dbus/aurade_bluetooth_service.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd04575c02ce2
+--- /dev/null
++++ b/chrome/browser/ash/dbus/aurade_bluetooth_service.cc
+@@ -0,0 +1,960 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/aurade_bluetooth_service.h"
++
++#include <algorithm>
++#include <cstddef>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/logging.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "dbus/object_proxy.h"
++
++namespace ash {
++namespace {
++
++constexpr char kHostBridgeService[] = "org.aurade.HostBridge";
++constexpr char kHostBridgePath[] = "/org/aurade/HostBridge";
++constexpr char kHostBridgeInterface[] = "org.aurade.HostBridge1";
++constexpr char kHostBridgeEvent[] = "Event";
++constexpr int kHostBridgeTimeoutMs = 30000;
++constexpr size_t kMaxBridgeResponseBytes = 1024 * 1024;
++constexpr size_t kMaxEventBytes = 64 * 1024;
++constexpr size_t kMaxAdapters = 8;
++constexpr size_t kMaxDevices = 256;
++constexpr size_t kMaxDeviceTextBytes = 512;
++constexpr size_t kMaxDeviceUuids = 64;
++constexpr size_t kMaxUuidBytes = 128;
++
++bool ReadBoundedString(const base::Value::Dict& dictionary,
++                       std::string_view key,
++                       size_t maximum_bytes,
++                       bool required,
++                       std::string* destination) {
++  const base::Value* value = dictionary.Find(key);
++  if (!value) {
++    destination->clear();
++    return !required;
++  }
++  if (!value->is_string() || value->GetString().size() > maximum_bytes ||
++      !base::IsStringUTF8(value->GetString())) {
++    return false;
++  }
++  *destination = value->GetString();
++  return true;
++}
++
++bool IsHexCharacter(char character) {
++  return (character >= '0' && character <= '9') ||
++         (character >= 'a' && character <= 'f') ||
++         (character >= 'A' && character <= 'F');
++}
++
++template <typename ObserverSet, typename Callback>
++void ForEachObserver(ObserverSet& observers, Callback callback) {
++  for (auto& observer : observers) {
++    callback(observer.get());
++  }
++}
++
++}  // namespace
++
++AuraDeBluetoothService::AuraDeBluetoothService(dbus::Bus* system_bus) {
++  discovery_delegates_.set_disconnect_handler(base::BindRepeating(
++      &AuraDeBluetoothService::OnDiscoveryDelegateDisconnected,
++      base::Unretained(this)));
++  if (!system_bus) {
++    LOG(ERROR) << "AuraDE Bluetooth: the shared system bus is unavailable";
++    return;
++  }
++
++  host_bridge_proxy_ = system_bus->GetObjectProxy(
++      kHostBridgeService, dbus::ObjectPath(kHostBridgePath));
++  if (!host_bridge_proxy_) {
++    LOG(ERROR) << "AuraDE Bluetooth: the host bridge is unavailable";
++    return;
++  }
++
++  host_bridge_proxy_->ConnectToSignal(
++      kHostBridgeInterface, kHostBridgeEvent,
++      base::BindRepeating(&AuraDeBluetoothService::OnBridgeEvent,
++                          weak_factory_.GetWeakPtr()),
++      base::BindOnce(&AuraDeBluetoothService::OnBridgeSignalConnected,
++                     weak_factory_.GetWeakPtr()));
++  RefreshState();
++}
++
++AuraDeBluetoothService::~AuraDeBluetoothService() = default;
++
++void AuraDeBluetoothService::BindReceiver(
++    mojo::PendingReceiver<bluetooth_config::mojom::CrosBluetoothConfig>
++        receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void AuraDeBluetoothService::ObserveSystemProperties(
++    mojo::PendingRemote<bluetooth_config::mojom::SystemPropertiesObserver>
++        observer) {
++  const mojo::RemoteSetElementId id =
++      system_observers_.Add(std::move(observer));
++  if (auto* remote = system_observers_.Get(id)) {
++    remote->OnPropertiesUpdated(BuildSystemProperties());
++  }
++}
++
++void AuraDeBluetoothService::ObserveDeviceStatusChanges(
++    mojo::PendingRemote<bluetooth_config::mojom::BluetoothDeviceStatusObserver>
++        observer) {
++  device_status_observers_.Add(std::move(observer));
++}
++
++void AuraDeBluetoothService::ObserveDiscoverySessionStatusChanges(
++    mojo::PendingRemote<bluetooth_config::mojom::DiscoverySessionStatusObserver>
++        observer) {
++  const mojo::RemoteSetElementId id =
++      discovery_status_observers_.Add(std::move(observer));
++  if (auto* remote = discovery_status_observers_.Get(id)) {
++    remote->OnHasAtLeastOneDiscoverySessionChanged(
++        !discovery_delegates_.empty());
++  }
++}
++
++void AuraDeBluetoothService::SetBluetoothEnabledState(bool enabled) {
++  if (!host_state_.adapter_available || pending_power_state_ ||
++      host_state_.powered == enabled) {
++    return;
++  }
++
++  pending_power_state_ = enabled;
++  NotifySystemProperties();
++  CallBoolMethod("BluetoothSetPowered", enabled,
++                 base::BindOnce(&AuraDeBluetoothService::OnPowerChanged,
++                                weak_factory_.GetWeakPtr(), enabled));
++}
++
++void AuraDeBluetoothService::SetBluetoothEnabledWithoutPersistence() {
++  SetBluetoothEnabledState(true);
++}
++
++void AuraDeBluetoothService::SetBluetoothHidDetectionInactive(
++    bool is_using_bluetooth) {
++  // AuraDE compatibility: the host owns the persisted adapter state. HID
++  // detection must not replace that choice with an in-process preference.
++  static_cast<void>(is_using_bluetooth);
++}
++
++void AuraDeBluetoothService::StartDiscovery(
++    mojo::PendingRemote<bluetooth_config::mojom::BluetoothDiscoveryDelegate>
++        delegate) {
++  if (!delegate.is_valid()) {
++    return;
++  }
++  if (!host_state_.adapter_available || !host_state_.powered) {
++    mojo::Remote<bluetooth_config::mojom::BluetoothDiscoveryDelegate> remote(
++        std::move(delegate));
++    remote->OnBluetoothDiscoveryStopped();
++    return;
++  }
++
++  const bool was_empty = discovery_delegates_.empty();
++  const mojo::RemoteSetElementId id =
++      discovery_delegates_.Add(std::move(delegate));
++  if (was_empty) {
++    NotifyDiscoverySessionStatus(true);
++  }
++
++  if (host_state_.discovering && !discovery_request_in_flight_) {
++    ActivateDiscoveryDelegate(id);
++    return;
++  }
++  if (discovery_request_in_flight_) {
++    return;
++  }
++
++  discovery_request_in_flight_ = true;
++  CallNoArgumentMethod(
++      "BluetoothStartDiscovery",
++      base::BindOnce(&AuraDeBluetoothService::OnDiscoveryStarted,
++                     weak_factory_.GetWeakPtr()));
++}
++
++void AuraDeBluetoothService::Connect(const std::string& device_id,
++                                     ConnectCallback callback) {
++  RunDeviceAction("BluetoothConnect", device_id, std::move(callback));
++}
++
++void AuraDeBluetoothService::Disconnect(const std::string& device_id,
++                                        DisconnectCallback callback) {
++  RunDeviceAction("BluetoothDisconnect", device_id, std::move(callback));
++}
++
++void AuraDeBluetoothService::Forget(const std::string& device_id,
++                                    ForgetCallback callback) {
++  RunDeviceAction("BluetoothForget", device_id, std::move(callback));
++}
++
++void AuraDeBluetoothService::SetDeviceNickname(const std::string& device_id,
++                                               const std::string& nickname) {
++  // The frozen host contract has no nickname operation. Leaving the existing
++  // BlueZ alias unchanged is honest and avoids claiming a write succeeded.
++  static_cast<void>(device_id);
++  static_cast<void>(nickname);
++}
++
++void AuraDeBluetoothService::PairDevice(
++    const std::string& device_id,
++    mojo::PendingRemote<bluetooth_config::mojom::DevicePairingDelegate>
++        delegate,
++    PairDeviceCallback callback) {
++  const HostDevice* device = FindDevice(device_id);
++  if (!device || device->paired || pairing_in_flight_) {
++    std::move(callback).Run(
++        bluetooth_config::mojom::PairingResult::kNonAuthFailure);
++    return;
++  }
++
++  pairing_in_flight_ = true;
++  if (delegate.is_valid()) {
++    pairing_delegate_.Bind(std::move(delegate));
++  }
++  CallStringMethod(
++      "BluetoothPair", device->address,
++      base::BindOnce(&AuraDeBluetoothService::OnPairDevice,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void AuraDeBluetoothService::FetchDevice(const std::string& device_address,
++                                         FetchDeviceCallback callback) {
++  const HostDevice* device = FindDevice(device_address);
++  std::move(callback).Run(device ? BuildDeviceProperties(*device) : nullptr);
++}
++
++AuraDeBluetoothService::BridgeResponse
++AuraDeBluetoothService::ReadBridgeResponse(dbus::Response* response) {
++  if (!response ||
++      response->GetMessageType() != dbus::Message::MESSAGE_METHOD_RETURN) {
++    BridgeResponse result;
++    result.error_code = "transport_error";
++    result.error_message = "the Bluetooth service did not respond";
++    return result;
++  }
++
++  std::string json;
++  dbus::MessageReader reader(response);
++  if (!reader.PopString(&json) || reader.HasMoreData()) {
++    BridgeResponse result;
++    result.error_code = "invalid_response";
++    result.error_message = "the Bluetooth service returned an invalid reply";
++    return result;
++  }
++  return ParseBridgeJson(json);
++}
++
++AuraDeBluetoothService::BridgeResponse AuraDeBluetoothService::ParseBridgeJson(
++    std::string_view json) {
++  BridgeResponse result;
++  if (json.size() > kMaxBridgeResponseBytes || !base::IsStringUTF8(json)) {
++    result.error_code = "invalid_response";
++    result.error_message = "the Bluetooth service returned an invalid reply";
++    return result;
++  }
++
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (!parsed || !parsed->is_dict()) {
++    result.error_code = "invalid_response";
++    result.error_message = "the Bluetooth service returned invalid JSON";
++    return result;
++  }
++
++  const base::Value::Dict& envelope = parsed->GetDict();
++  const std::optional<int> schema = envelope.FindInt("schema");
++  const std::optional<bool> ok = envelope.FindBool("ok");
++  const std::string* operation = envelope.FindString("operation");
++  if (!schema || *schema != 1 || !ok || !operation || operation->empty() ||
++      operation->size() > 128 || !base::IsStringUTF8(*operation)) {
++    result.error_code = "invalid_response";
++    result.error_message = "the Bluetooth service returned an invalid envelope";
++    return result;
++  }
++
++  if (*ok) {
++    const base::Value::Dict* data = envelope.FindDict("data");
++    if (!data) {
++      result.error_code = "invalid_response";
++      result.error_message = "the Bluetooth service omitted its result";
++      return result;
++    }
++    result.ok = true;
++    result.data = data->Clone();
++    return result;
++  }
++
++  const base::Value::Dict* error = envelope.FindDict("error");
++  if (!error ||
++      !ReadBoundedString(*error, "code", 128, true, &result.error_code) ||
++      !ReadBoundedString(*error, "message", 1024, true,
++                         &result.error_message)) {
++    result.error_code = "invalid_response";
++    result.error_message = "the Bluetooth service returned an invalid error";
++    return result;
++  }
++  if (const base::Value::Dict* details = error->FindDict("details")) {
++    ReadBoundedString(*details, "dbus_error", 512, false, &result.dbus_error);
++  }
++  return result;
++}
++
++std::optional<AuraDeBluetoothService::HostState>
++AuraDeBluetoothService::ParseHostState(const BridgeResponse& response) {
++  if (!response.ok) {
++    return std::nullopt;
++  }
++  const base::Value::List* adapters = response.data.FindList("adapters");
++  const base::Value::List* devices = response.data.FindList("devices");
++  if (!adapters || !devices || adapters->size() > kMaxAdapters ||
++      devices->size() > kMaxDevices) {
++    return std::nullopt;
++  }
++
++  HostState state;
++  if (!adapters->empty()) {
++    const base::Value::Dict* adapter = (*adapters)[0].GetIfDict();
++    if (!adapter || !ReadBoundedString(*adapter, "path", kMaxDeviceTextBytes,
++                                       true, &state.adapter_path)) {
++      return std::nullopt;
++    }
++    const std::optional<bool> powered = adapter->FindBool("powered");
++    const std::optional<bool> discovering = adapter->FindBool("discovering");
++    if (!powered || !discovering) {
++      return std::nullopt;
++    }
++    state.adapter_available = true;
++    state.powered = *powered;
++    state.discovering = *discovering;
++  }
++  if (!state.adapter_available) {
++    return state;
++  }
++
++  for (const base::Value& value : *devices) {
++    const base::Value::Dict* dictionary = value.GetIfDict();
++    HostDevice device;
++    if (!dictionary ||
++        !ReadBoundedString(*dictionary, "address", kMaxDeviceTextBytes, true,
++                           &device.address) ||
++        !ReadBoundedString(*dictionary, "adapter", kMaxDeviceTextBytes, false,
++                           &device.adapter) ||
++        !ReadBoundedString(*dictionary, "name", kMaxDeviceTextBytes, false,
++                           &device.name) ||
++        !ReadBoundedString(*dictionary, "alias", kMaxDeviceTextBytes, false,
++                           &device.alias) ||
++        !ReadBoundedString(*dictionary, "icon", kMaxDeviceTextBytes, false,
++                           &device.icon)) {
++      return std::nullopt;
++    }
++    if (!IsValidAddress(device.address)) {
++      return std::nullopt;
++    }
++    device.address = base::ToUpperASCII(device.address);
++
++    const std::optional<bool> paired = dictionary->FindBool("paired");
++    const std::optional<bool> connected = dictionary->FindBool("connected");
++    if (!paired || !connected) {
++      return std::nullopt;
++    }
++    device.paired = *paired;
++    device.connected = *connected;
++
++    if (const base::Value* uuids_value = dictionary->Find("uuids")) {
++      const base::Value::List* uuids = uuids_value->GetIfList();
++      if (!uuids || uuids->size() > kMaxDeviceUuids) {
++        return std::nullopt;
++      }
++      for (const base::Value& uuid : *uuids) {
++        if (!uuid.is_string() || uuid.GetString().size() > kMaxUuidBytes ||
++            !base::IsStringUTF8(uuid.GetString())) {
++          return std::nullopt;
++        }
++        device.uuids.push_back(base::ToLowerASCII(uuid.GetString()));
++      }
++    }
++
++    if (state.adapter_available && !device.adapter.empty() &&
++        device.adapter != state.adapter_path) {
++      continue;
++    }
++    if (!state.devices.emplace(device.address, std::move(device)).second) {
++      return std::nullopt;
++    }
++  }
++  return state;
++}
++
++bool AuraDeBluetoothService::IsValidAddress(std::string_view address) {
++  if (address.size() != 17) {
++    return false;
++  }
++  for (size_t index = 0; index < address.size(); ++index) {
++    if ((index + 1) % 3 == 0) {
++      if (address[index] != ':') {
++        return false;
++      }
++    } else if (!IsHexCharacter(address[index])) {
++      return false;
++    }
++  }
++  return true;
++}
++
++bluetooth_config::mojom::DeviceType AuraDeBluetoothService::DeviceTypeFor(
++    const HostDevice& device) {
++  const std::string icon = base::ToLowerASCII(device.icon);
++  const bool keyboard = icon.find("keyboard") != std::string::npos;
++  const bool mouse = icon.find("mouse") != std::string::npos;
++  if (keyboard && mouse) {
++    return bluetooth_config::mojom::DeviceType::kKeyboardMouseCombo;
++  }
++  if (keyboard) {
++    return bluetooth_config::mojom::DeviceType::kKeyboard;
++  }
++  if (mouse) {
++    return bluetooth_config::mojom::DeviceType::kMouse;
++  }
++  if (icon.find("headset") != std::string::npos ||
++      icon.find("headphone") != std::string::npos ||
++      icon.find("audio") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kHeadset;
++  }
++  if (icon.find("phone") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kPhone;
++  }
++  if (icon.find("computer") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kComputer;
++  }
++  if (icon.find("video") != std::string::npos ||
++      icon.find("camera") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kVideoCamera;
++  }
++  if (icon.find("game") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kGameController;
++  }
++  if (icon.find("tablet") != std::string::npos) {
++    return bluetooth_config::mojom::DeviceType::kTablet;
++  }
++  return bluetooth_config::mojom::DeviceType::kUnknown;
++}
++
++bluetooth_config::mojom::AudioOutputCapability
++AuraDeBluetoothService::AudioCapabilityFor(const HostDevice& device) {
++  const std::string icon = base::ToLowerASCII(device.icon);
++  if (icon.find("audio") != std::string::npos ||
++      icon.find("headset") != std::string::npos ||
++      icon.find("headphone") != std::string::npos) {
++    return bluetooth_config::mojom::AudioOutputCapability::
++        kCapableOfAudioOutput;
++  }
++  for (const std::string& uuid : device.uuids) {
++    if (uuid.find("0000110b-") != std::string::npos ||
++        uuid.find("00001108-") != std::string::npos ||
++        uuid.find("0000111e-") != std::string::npos) {
++      return bluetooth_config::mojom::AudioOutputCapability::
++          kCapableOfAudioOutput;
++    }
++  }
++  return bluetooth_config::mojom::AudioOutputCapability::
++      kNotCapableOfAudioOutput;
++}
++
++std::u16string AuraDeBluetoothService::PublicNameFor(const HostDevice& device) {
++  const std::string& source =
++      !device.alias.empty()
++          ? device.alias
++          : (!device.name.empty() ? device.name : device.address);
++  std::u16string name = base::UTF8ToUTF16(source);
++  for (char16_t& character : name) {
++    if (character < 0x20 || character == 0x7f) {
++      character = u' ';
++    }
++  }
++  return name;
++}
++
++bluetooth_config::mojom::PairingResult
++AuraDeBluetoothService::PairingFailureFor(const BridgeResponse& response) {
++  const std::string reason =
++      base::ToLowerASCII(response.error_code + " " + response.error_message +
++                         " " + response.dbus_error);
++  if (reason.find("auth") != std::string::npos ||
++      reason.find("reject") != std::string::npos ||
++      reason.find("cancel") != std::string::npos ||
++      reason.find("agent") != std::string::npos ||
++      reason.find("passkey") != std::string::npos ||
++      reason.find("pin") != std::string::npos) {
++    return bluetooth_config::mojom::PairingResult::kAuthFailed;
++  }
++  return bluetooth_config::mojom::PairingResult::kNonAuthFailure;
++}
++
++void AuraDeBluetoothService::CallNoArgumentMethod(std::string_view method,
++                                                  BridgeCallback callback) {
++  if (!host_bridge_proxy_) {
++    BridgeResponse response;
++    response.error_code = "transport_error";
++    response.error_message = "the Bluetooth service is unavailable";
++    std::move(callback).Run(std::move(response));
++    return;
++  }
++  dbus::MethodCall method_call(kHostBridgeInterface, std::string(method));
++  host_bridge_proxy_->CallMethod(
++      &method_call, kHostBridgeTimeoutMs,
++      base::BindOnce(
++          [](BridgeCallback callback, dbus::Response* response) {
++            std::move(callback).Run(ReadBridgeResponse(response));
++          },
++          std::move(callback)));
++}
++
++void AuraDeBluetoothService::CallBoolMethod(std::string_view method,
++                                            bool value,
++                                            BridgeCallback callback) {
++  if (!host_bridge_proxy_) {
++    BridgeResponse response;
++    response.error_code = "transport_error";
++    response.error_message = "the Bluetooth service is unavailable";
++    std::move(callback).Run(std::move(response));
++    return;
++  }
++  dbus::MethodCall method_call(kHostBridgeInterface, std::string(method));
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendBool(value);
++  host_bridge_proxy_->CallMethod(
++      &method_call, kHostBridgeTimeoutMs,
++      base::BindOnce(
++          [](BridgeCallback callback, dbus::Response* response) {
++            std::move(callback).Run(ReadBridgeResponse(response));
++          },
++          std::move(callback)));
++}
++
++void AuraDeBluetoothService::CallStringMethod(std::string_view method,
++                                              std::string_view value,
++                                              BridgeCallback callback) {
++  if (!host_bridge_proxy_) {
++    BridgeResponse response;
++    response.error_code = "transport_error";
++    response.error_message = "the Bluetooth service is unavailable";
++    std::move(callback).Run(std::move(response));
++    return;
++  }
++  dbus::MethodCall method_call(kHostBridgeInterface, std::string(method));
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendString(std::string(value));
++  host_bridge_proxy_->CallMethod(
++      &method_call, kHostBridgeTimeoutMs,
++      base::BindOnce(
++          [](BridgeCallback callback, dbus::Response* response) {
++            std::move(callback).Run(ReadBridgeResponse(response));
++          },
++          std::move(callback)));
++}
++
++void AuraDeBluetoothService::RefreshState() {
++  if (refresh_in_flight_) {
++    refresh_pending_ = true;
++    return;
++  }
++  refresh_in_flight_ = true;
++  CallNoArgumentMethod("BluetoothGetState",
++                       base::BindOnce(&AuraDeBluetoothService::OnStateRefreshed,
++                                      weak_factory_.GetWeakPtr()));
++}
++
++void AuraDeBluetoothService::OnStateRefreshed(BridgeResponse response) {
++  refresh_in_flight_ = false;
++  std::optional<HostState> state = ParseHostState(response);
++  if (state) {
++    ApplyHostState(std::move(*state));
++  } else {
++    LOG(ERROR) << "AuraDE Bluetooth: state refresh failed: "
++               << response.error_code << " " << response.error_message;
++  }
++  if (std::exchange(refresh_pending_, false)) {
++    RefreshState();
++  }
++}
++
++void AuraDeBluetoothService::ApplyHostState(HostState state) {
++  const HostState old_state = host_state_;
++  const bool discovery_ended =
++      has_host_state_ && old_state.discovering && !state.discovering;
++  host_state_ = std::move(state);
++
++  if (has_host_state_) {
++    NotifyDeviceChanges(old_state, host_state_);
++  }
++  has_host_state_ = true;
++  NotifySystemProperties();
++  NotifyDiscoveredDevices();
++
++  if ((!host_state_.adapter_available || !host_state_.powered ||
++       discovery_ended) &&
++      !discovery_request_in_flight_ && !discovery_delegates_.empty()) {
++    StopDiscoveryClients();
++  }
++}
++
++void AuraDeBluetoothService::OnBridgeEvent(dbus::Signal* signal) {
++  std::string json;
++  dbus::MessageReader reader(signal);
++  if (!reader.PopString(&json) || reader.HasMoreData() ||
++      json.size() > kMaxEventBytes || !base::IsStringUTF8(json)) {
++    return;
++  }
++  std::optional<base::Value> event =
++      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (!event || !event->is_dict()) {
++    return;
++  }
++  const base::Value::Dict& dictionary = event->GetDict();
++  const std::string* source = dictionary.FindString("source");
++  if (!source) {
++    source = dictionary.FindString("domain");
++  }
++  if (source && *source == "bluetooth") {
++    RefreshState();
++  }
++}
++
++void AuraDeBluetoothService::OnBridgeSignalConnected(
++    const std::string& interface_name,
++    const std::string& signal_name,
++    bool connected) {
++  if (!connected) {
++    LOG(ERROR) << "AuraDE Bluetooth: host event signal is unavailable";
++  }
++}
++
++bluetooth_config::mojom::BluetoothDevicePropertiesPtr
++AuraDeBluetoothService::BuildDeviceProperties(const HostDevice& device) const {
++  auto properties = bluetooth_config::mojom::BluetoothDeviceProperties::New();
++  properties->id = device.address;
++  properties->address = device.address;
++  properties->public_name = PublicNameFor(device);
++  properties->device_type = DeviceTypeFor(device);
++  properties->audio_capability = AudioCapabilityFor(device);
++  properties->battery_info = nullptr;
++  properties->image_info = nullptr;
++  properties->connection_state =
++      device.connected
++          ? bluetooth_config::mojom::DeviceConnectionState::kConnected
++          : bluetooth_config::mojom::DeviceConnectionState::kNotConnected;
++  properties->is_blocked_by_policy = false;
++  return properties;
++}
++
++bluetooth_config::mojom::PairedBluetoothDevicePropertiesPtr
++AuraDeBluetoothService::BuildPairedDeviceProperties(
++    const HostDevice& device) const {
++  auto properties =
++      bluetooth_config::mojom::PairedBluetoothDeviceProperties::New();
++  properties->device_properties = BuildDeviceProperties(device);
++  properties->nickname = std::nullopt;
++  return properties;
++}
++
++bluetooth_config::mojom::BluetoothSystemPropertiesPtr
++AuraDeBluetoothService::BuildSystemProperties() const {
++  auto properties = bluetooth_config::mojom::BluetoothSystemProperties::New();
++  if (!host_state_.adapter_available) {
++    properties->system_state =
++        bluetooth_config::mojom::BluetoothSystemState::kUnavailable;
++    properties->modification_state = bluetooth_config::mojom::
++        BluetoothModificationState::kCannotModifyBluetooth;
++    return properties;
++  }
++
++  properties->modification_state =
++      bluetooth_config::mojom::BluetoothModificationState::kCanModifyBluetooth;
++  if (pending_power_state_) {
++    properties->system_state =
++        *pending_power_state_
++            ? bluetooth_config::mojom::BluetoothSystemState::kEnabling
++            : bluetooth_config::mojom::BluetoothSystemState::kDisabling;
++  } else {
++    properties->system_state =
++        host_state_.powered
++            ? bluetooth_config::mojom::BluetoothSystemState::kEnabled
++            : bluetooth_config::mojom::BluetoothSystemState::kDisabled;
++  }
++
++  std::vector<const HostDevice*> paired_devices;
++  for (const auto& [address, device] : host_state_.devices) {
++    if (device.paired) {
++      paired_devices.push_back(&device);
++    }
++  }
++  std::sort(paired_devices.begin(), paired_devices.end(),
++            [](const HostDevice* left, const HostDevice* right) {
++              if (left->connected != right->connected) {
++                return left->connected > right->connected;
++              }
++              return PublicNameFor(*left) < PublicNameFor(*right);
++            });
++  for (const HostDevice* device : paired_devices) {
++    properties->paired_devices.push_back(BuildPairedDeviceProperties(*device));
++  }
++  return properties;
++}
++
++std::vector<bluetooth_config::mojom::BluetoothDevicePropertiesPtr>
++AuraDeBluetoothService::BuildDiscoveredDevices() const {
++  std::vector<const HostDevice*> discovered_devices;
++  for (const auto& [address, device] : host_state_.devices) {
++    if (!device.paired) {
++      discovered_devices.push_back(&device);
++    }
++  }
++  std::sort(discovered_devices.begin(), discovered_devices.end(),
++            [](const HostDevice* left, const HostDevice* right) {
++              return PublicNameFor(*left) < PublicNameFor(*right);
++            });
++
++  std::vector<bluetooth_config::mojom::BluetoothDevicePropertiesPtr> result;
++  result.reserve(discovered_devices.size());
++  for (const HostDevice* device : discovered_devices) {
++    result.push_back(BuildDeviceProperties(*device));
++  }
++  return result;
++}
++
++const AuraDeBluetoothService::HostDevice* AuraDeBluetoothService::FindDevice(
++    std::string_view device_id) const {
++  if (!IsValidAddress(device_id)) {
++    return nullptr;
++  }
++  const auto device = host_state_.devices.find(base::ToUpperASCII(device_id));
++  return device == host_state_.devices.end() ? nullptr : &device->second;
++}
++
++void AuraDeBluetoothService::NotifySystemProperties() {
++  ForEachObserver(system_observers_, [this](auto* observer) {
++    observer->OnPropertiesUpdated(BuildSystemProperties());
++  });
++}
++
++void AuraDeBluetoothService::NotifyDeviceChanges(const HostState& old_state,
++                                                 const HostState& new_state) {
++  for (const auto& [address, device] : new_state.devices) {
++    const auto previous = old_state.devices.find(address);
++    const HostDevice* old_device =
++        previous == old_state.devices.end() ? nullptr : &previous->second;
++    if (device.paired && (!old_device || !old_device->paired)) {
++      ForEachObserver(
++          device_status_observers_, [this, &device](auto* observer) {
++            observer->OnDevicePaired(BuildPairedDeviceProperties(device));
++          });
++    }
++    if (device.paired && device.connected &&
++        (!old_device || !old_device->connected)) {
++      ForEachObserver(
++          device_status_observers_, [this, &device](auto* observer) {
++            observer->OnDeviceConnected(BuildPairedDeviceProperties(device));
++          });
++    }
++    if (device.paired && !device.connected && old_device &&
++        old_device->connected) {
++      ForEachObserver(
++          device_status_observers_, [this, &device](auto* observer) {
++            observer->OnDeviceDisconnected(BuildPairedDeviceProperties(device));
++          });
++    }
++  }
++}
++
++void AuraDeBluetoothService::NotifyDiscoveredDevices() {
++  std::vector<mojo::RemoteSetElementId> ids(active_discovery_delegates_.begin(),
++                                            active_discovery_delegates_.end());
++  for (mojo::RemoteSetElementId id : ids) {
++    if (auto* delegate = discovery_delegates_.Get(id)) {
++      delegate->OnDiscoveredDevicesListChanged(BuildDiscoveredDevices());
++    }
++  }
++}
++
++void AuraDeBluetoothService::NotifyDiscoverySessionStatus(bool active) {
++  ForEachObserver(discovery_status_observers_, [active](auto* observer) {
++    observer->OnHasAtLeastOneDiscoverySessionChanged(active);
++  });
++}
++
++void AuraDeBluetoothService::OnPowerChanged(bool requested_state,
++                                            BridgeResponse response) {
++  pending_power_state_.reset();
++  if (!response.ok) {
++    LOG(ERROR) << "AuraDE Bluetooth: power change failed: "
++               << response.error_code << " " << response.error_message;
++    NotifySystemProperties();
++    return;
++  }
++  host_state_.powered = requested_state;
++  NotifySystemProperties();
++  if (!requested_state && !discovery_delegates_.empty()) {
++    StopDiscoveryClients();
++  }
++  RefreshState();
++}
++
++void AuraDeBluetoothService::RunDeviceAction(
++    std::string_view method,
++    std::string_view device_id,
++    base::OnceCallback<void(bool)> callback) {
++  const HostDevice* device = FindDevice(device_id);
++  if (!device) {
++    std::move(callback).Run(false);
++    return;
++  }
++  CallStringMethod(
++      method, device->address,
++      base::BindOnce(&AuraDeBluetoothService::OnDeviceAction,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void AuraDeBluetoothService::OnDeviceAction(
++    base::OnceCallback<void(bool)> callback,
++    BridgeResponse response) {
++  if (!response.ok) {
++    LOG(ERROR) << "AuraDE Bluetooth: device operation failed: "
++               << response.error_code << " " << response.error_message;
++  }
++  std::move(callback).Run(response.ok);
++  if (response.ok) {
++    RefreshState();
++  }
++}
++
++void AuraDeBluetoothService::ActivateDiscoveryDelegate(
++    mojo::RemoteSetElementId id) {
++  if (active_discovery_delegates_.contains(id)) {
++    return;
++  }
++  auto* delegate = discovery_delegates_.Get(id);
++  if (!delegate) {
++    return;
++  }
++
++  mojo::PendingRemote<bluetooth_config::mojom::DevicePairingHandler> handler;
++  pairing_receivers_.Add(this, handler.InitWithNewPipeAndPassReceiver());
++  delegate->OnBluetoothDiscoveryStarted(std::move(handler));
++  active_discovery_delegates_.insert(id);
++  delegate->OnDiscoveredDevicesListChanged(BuildDiscoveredDevices());
++}
++
++void AuraDeBluetoothService::OnDiscoveryStarted(BridgeResponse response) {
++  discovery_request_in_flight_ = false;
++  if (!response.ok) {
++    LOG(ERROR) << "AuraDE Bluetooth: discovery could not start: "
++               << response.error_code << " " << response.error_message;
++    StopDiscoveryClients();
++    return;
++  }
++
++  host_state_.discovering = true;
++  if (discovery_delegates_.empty()) {
++    discovery_request_in_flight_ = true;
++    CallNoArgumentMethod(
++        "BluetoothStopDiscovery",
++        base::BindOnce(&AuraDeBluetoothService::OnDiscoveryStopped,
++                       weak_factory_.GetWeakPtr()));
++    return;
++  }
++
++  std::vector<mojo::RemoteSetElementId> ids;
++  for (auto iterator = discovery_delegates_.begin();
++       iterator != discovery_delegates_.end(); ++iterator) {
++    ids.push_back(iterator.id());
++  }
++  for (mojo::RemoteSetElementId id : ids) {
++    ActivateDiscoveryDelegate(id);
++  }
++  RefreshState();
++}
++
++void AuraDeBluetoothService::OnDiscoveryStopped(BridgeResponse response) {
++  discovery_request_in_flight_ = false;
++  host_state_.discovering = false;
++  if (!response.ok) {
++    LOG(ERROR) << "AuraDE Bluetooth: discovery could not stop: "
++               << response.error_code << " " << response.error_message;
++  }
++  if (!discovery_delegates_.empty() && host_state_.adapter_available &&
++      host_state_.powered) {
++    discovery_request_in_flight_ = true;
++    CallNoArgumentMethod(
++        "BluetoothStartDiscovery",
++        base::BindOnce(&AuraDeBluetoothService::OnDiscoveryStarted,
++                       weak_factory_.GetWeakPtr()));
++  } else {
++    RefreshState();
++  }
++}
++
++void AuraDeBluetoothService::OnDiscoveryDelegateDisconnected(
++    mojo::RemoteSetElementId id) {
++  active_discovery_delegates_.erase(id);
++  if (!discovery_delegates_.empty()) {
++    return;
++  }
++  NotifyDiscoverySessionStatus(false);
++  if (host_state_.discovering && !discovery_request_in_flight_) {
++    discovery_request_in_flight_ = true;
++    CallNoArgumentMethod(
++        "BluetoothStopDiscovery",
++        base::BindOnce(&AuraDeBluetoothService::OnDiscoveryStopped,
++                       weak_factory_.GetWeakPtr()));
++  }
++}
++
++void AuraDeBluetoothService::StopDiscoveryClients() {
++  std::vector<mojo::RemoteSetElementId> ids;
++  for (auto iterator = discovery_delegates_.begin();
++       iterator != discovery_delegates_.end(); ++iterator) {
++    ids.push_back(iterator.id());
++  }
++  for (mojo::RemoteSetElementId id : ids) {
++    if (auto* delegate = discovery_delegates_.Get(id)) {
++      delegate->OnBluetoothDiscoveryStopped();
++    }
++  }
++  discovery_delegates_.Clear();
++  active_discovery_delegates_.clear();
++  NotifyDiscoverySessionStatus(false);
++}
++
++void AuraDeBluetoothService::OnPairDevice(PairDeviceCallback callback,
++                                          BridgeResponse response) {
++  pairing_in_flight_ = false;
++  pairing_delegate_.reset();
++  if (!response.ok) {
++    LOG(ERROR) << "AuraDE Bluetooth: pairing failed: " << response.error_code
++               << " " << response.error_message;
++    std::move(callback).Run(PairingFailureFor(response));
++    return;
++  }
++  std::move(callback).Run(bluetooth_config::mojom::PairingResult::kSuccess);
++  RefreshState();
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service.h b/chrome/browser/ash/dbus/aurade_bluetooth_service.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0da47e17895dc6e138fd25dc775e644ec81050e
+--- /dev/null
++++ b/chrome/browser/ash/dbus/aurade_bluetooth_service.h
+@@ -0,0 +1,211 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_AURADE_BLUETOOTH_SERVICE_H_
++#define CHROME_BROWSER_ASH_DBUS_AURADE_BLUETOOTH_SERVICE_H_
++
++#include <map>
++#include <optional>
++#include <set>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/gtest_prod_util.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/values.h"
++#include "chromeos/ash/services/bluetooth_config/public/mojom/cros_bluetooth_config.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "mojo/public/cpp/bindings/remote_set.h"
++
++namespace dbus {
++class Bus;
++class ObjectProxy;
++class Response;
++class Signal;
++}  // namespace dbus
++
++namespace ash {
++
++// Supplies Ash Bluetooth state from the AuraDE host bridge on generic Linux.
++// Adapter control, discovery, device operations, and JustWorks pairing are
++// supported. PIN and passkey pairing require a BlueZ agent on the host. Until
++// that separate contract exists, those requests finish with a pairing failure
++// instead of waiting or appearing to succeed.
++class AuraDeBluetoothService
++    : public bluetooth_config::mojom::CrosBluetoothConfig,
++      public bluetooth_config::mojom::DevicePairingHandler {
++ public:
++  explicit AuraDeBluetoothService(dbus::Bus* system_bus);
++  AuraDeBluetoothService(const AuraDeBluetoothService&) = delete;
++  AuraDeBluetoothService& operator=(const AuraDeBluetoothService&) = delete;
++  ~AuraDeBluetoothService() override;
++
++  void BindReceiver(
++      mojo::PendingReceiver<bluetooth_config::mojom::CrosBluetoothConfig>
++          receiver);
++
++ private:
++  struct HostDevice {
++    std::string address;
++    std::string adapter;
++    std::string name;
++    std::string alias;
++    std::string icon;
++    bool paired = false;
++    bool connected = false;
++    std::vector<std::string> uuids;
++  };
++
++  struct HostState {
++    bool adapter_available = false;
++    bool powered = false;
++    bool discovering = false;
++    std::string adapter_path;
++    std::map<std::string, HostDevice> devices;
++  };
++
++  struct BridgeResponse {
++    bool ok = false;
++    std::string error_code;
++    std::string error_message;
++    std::string dbus_error;
++    base::Value::Dict data;
++  };
++
++  using BridgeCallback = base::OnceCallback<void(BridgeResponse)>;
++
++  // bluetooth_config::mojom::CrosBluetoothConfig:
++  void ObserveSystemProperties(
++      mojo::PendingRemote<bluetooth_config::mojom::SystemPropertiesObserver>
++          observer) override;
++  void ObserveDeviceStatusChanges(
++      mojo::PendingRemote<
++          bluetooth_config::mojom::BluetoothDeviceStatusObserver> observer)
++      override;
++  void ObserveDiscoverySessionStatusChanges(
++      mojo::PendingRemote<
++          bluetooth_config::mojom::DiscoverySessionStatusObserver> observer)
++      override;
++  void SetBluetoothEnabledState(bool enabled) override;
++  void SetBluetoothEnabledWithoutPersistence() override;
++  void SetBluetoothHidDetectionInactive(bool is_using_bluetooth) override;
++  void StartDiscovery(
++      mojo::PendingRemote<bluetooth_config::mojom::BluetoothDiscoveryDelegate>
++          delegate) override;
++  void Connect(const std::string& device_id, ConnectCallback callback) override;
++  void Disconnect(const std::string& device_id,
++                  DisconnectCallback callback) override;
++  void Forget(const std::string& device_id, ForgetCallback callback) override;
++  void SetDeviceNickname(const std::string& device_id,
++                         const std::string& nickname) override;
++
++  // bluetooth_config::mojom::DevicePairingHandler:
++  void PairDevice(
++      const std::string& device_id,
++      mojo::PendingRemote<bluetooth_config::mojom::DevicePairingDelegate>
++          delegate,
++      PairDeviceCallback callback) override;
++  void FetchDevice(const std::string& device_address,
++                   FetchDeviceCallback callback) override;
++
++  static BridgeResponse ReadBridgeResponse(dbus::Response* response);
++  static BridgeResponse ParseBridgeJson(std::string_view json);
++  static std::optional<HostState> ParseHostState(
++      const BridgeResponse& response);
++  static bool IsValidAddress(std::string_view address);
++  static bluetooth_config::mojom::DeviceType DeviceTypeFor(
++      const HostDevice& device);
++  static bluetooth_config::mojom::AudioOutputCapability AudioCapabilityFor(
++      const HostDevice& device);
++  static std::u16string PublicNameFor(const HostDevice& device);
++  static bluetooth_config::mojom::PairingResult PairingFailureFor(
++      const BridgeResponse& response);
++
++  void CallNoArgumentMethod(std::string_view method, BridgeCallback callback);
++  void CallBoolMethod(std::string_view method,
++                      bool value,
++                      BridgeCallback callback);
++  void CallStringMethod(std::string_view method,
++                        std::string_view value,
++                        BridgeCallback callback);
++  void RefreshState();
++  void OnStateRefreshed(BridgeResponse response);
++  void ApplyHostState(HostState state);
++  void OnBridgeEvent(dbus::Signal* signal);
++  void OnBridgeSignalConnected(const std::string& interface_name,
++                               const std::string& signal_name,
++                               bool connected);
++
++  bluetooth_config::mojom::BluetoothDevicePropertiesPtr BuildDeviceProperties(
++      const HostDevice& device) const;
++  bluetooth_config::mojom::PairedBluetoothDevicePropertiesPtr
++  BuildPairedDeviceProperties(const HostDevice& device) const;
++  bluetooth_config::mojom::BluetoothSystemPropertiesPtr BuildSystemProperties()
++      const;
++  std::vector<bluetooth_config::mojom::BluetoothDevicePropertiesPtr>
++  BuildDiscoveredDevices() const;
++  const HostDevice* FindDevice(std::string_view device_id) const;
++
++  void NotifySystemProperties();
++  void NotifyDeviceChanges(const HostState& old_state,
++                           const HostState& new_state);
++  void NotifyDiscoveredDevices();
++  void NotifyDiscoverySessionStatus(bool active);
++
++  void OnPowerChanged(bool requested_state, BridgeResponse response);
++  void RunDeviceAction(std::string_view method,
++                       std::string_view device_id,
++                       base::OnceCallback<void(bool)> callback);
++  void OnDeviceAction(base::OnceCallback<void(bool)> callback,
++                      BridgeResponse response);
++
++  void ActivateDiscoveryDelegate(mojo::RemoteSetElementId id);
++  void OnDiscoveryStarted(BridgeResponse response);
++  void OnDiscoveryStopped(BridgeResponse response);
++  void OnDiscoveryDelegateDisconnected(mojo::RemoteSetElementId id);
++  void StopDiscoveryClients();
++
++  void OnPairDevice(PairDeviceCallback callback, BridgeResponse response);
++
++  FRIEND_TEST_ALL_PREFIXES(AuraDeBluetoothServiceTest, ParsesBridgeState);
++  FRIEND_TEST_ALL_PREFIXES(AuraDeBluetoothServiceTest, RejectsMalformedState);
++  FRIEND_TEST_ALL_PREFIXES(AuraDeBluetoothServiceTest, MapsDeviceTypesAndAudio);
++  FRIEND_TEST_ALL_PREFIXES(AuraDeBluetoothServiceTest,
++                           ClassifiesInteractivePairingFailure);
++
++  raw_ptr<dbus::ObjectProxy> host_bridge_proxy_ = nullptr;
++  mojo::ReceiverSet<bluetooth_config::mojom::CrosBluetoothConfig> receivers_;
++  mojo::ReceiverSet<bluetooth_config::mojom::DevicePairingHandler>
++      pairing_receivers_;
++  mojo::RemoteSet<bluetooth_config::mojom::SystemPropertiesObserver>
++      system_observers_;
++  mojo::RemoteSet<bluetooth_config::mojom::BluetoothDeviceStatusObserver>
++      device_status_observers_;
++  mojo::RemoteSet<bluetooth_config::mojom::DiscoverySessionStatusObserver>
++      discovery_status_observers_;
++  mojo::RemoteSet<bluetooth_config::mojom::BluetoothDiscoveryDelegate>
++      discovery_delegates_;
++  std::set<mojo::RemoteSetElementId> active_discovery_delegates_;
++  mojo::Remote<bluetooth_config::mojom::DevicePairingDelegate>
++      pairing_delegate_;
++
++  HostState host_state_;
++  bool has_host_state_ = false;
++  bool refresh_in_flight_ = false;
++  bool refresh_pending_ = false;
++  bool discovery_request_in_flight_ = false;
++  bool pairing_in_flight_ = false;
++  std::optional<bool> pending_power_state_;
++
++  base::WeakPtrFactory<AuraDeBluetoothService> weak_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_AURADE_BLUETOOTH_SERVICE_H_
+diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc b/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..71af2a5d71810db1b78a87c277274ca0d67fb8b9
+--- /dev/null
++++ b/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc
+@@ -0,0 +1,189 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/aurade_bluetooth_service.h"
++
++#include <optional>
++#include <string>
++
++#include "base/test/task_environment.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace ash {
++
++class AuraDeBluetoothServiceTest : public testing::Test {
++ protected:
++  base::test::TaskEnvironment task_environment_;
++};
++
++TEST_F(AuraDeBluetoothServiceTest, ParsesBridgeState) {
++  constexpr char kState[] = R"({
++    "schema":1,
++    "operation":"bluetooth.state",
++    "ok":true,
++    "data":{
++      "adapters":[{
++        "path":"/org/bluez/hci0",
++        "powered":true,
++        "discovering":true
++      }],
++      "devices":[
++        {
++          "address":"AA:BB:CC:DD:EE:01",
++          "adapter":"/org/bluez/hci0",
++          "name":"Headphones",
++          "alias":"Desk headphones",
++          "icon":"audio-headphones",
++          "paired":true,
++          "connected":true,
++          "uuids":[]
++        },
++        {
++          "address":"aa:bb:cc:dd:ee:02",
++          "adapter":"/org/bluez/hci0",
++          "name":"Keyboard",
++          "alias":"",
++          "icon":"input-keyboard",
++          "paired":false,
++          "connected":false,
++          "uuids":[]
++        }
++      ]
++    }
++  })";
++
++  AuraDeBluetoothService::BridgeResponse response =
++      AuraDeBluetoothService::ParseBridgeJson(kState);
++  ASSERT_TRUE(response.ok);
++  std::optional<AuraDeBluetoothService::HostState> state =
++      AuraDeBluetoothService::ParseHostState(response);
++  ASSERT_TRUE(state);
++  EXPECT_TRUE(state->adapter_available);
++  EXPECT_TRUE(state->powered);
++  EXPECT_TRUE(state->discovering);
++  ASSERT_EQ(2u, state->devices.size());
++  EXPECT_TRUE(state->devices.at("AA:BB:CC:DD:EE:01").paired);
++  EXPECT_EQ("AA:BB:CC:DD:EE:02",
++            state->devices.at("AA:BB:CC:DD:EE:02").address);
++
++  AuraDeBluetoothService service(nullptr);
++  service.host_state_ = std::move(*state);
++  service.has_host_state_ = true;
++  auto properties = service.BuildSystemProperties();
++  EXPECT_EQ(bluetooth_config::mojom::BluetoothSystemState::kEnabled,
++            properties->system_state);
++  ASSERT_EQ(1u, properties->paired_devices.size());
++  EXPECT_EQ(u"Desk headphones",
++            properties->paired_devices[0]->device_properties->public_name);
++  auto discovered = service.BuildDiscoveredDevices();
++  ASSERT_EQ(1u, discovered.size());
++  EXPECT_EQ(u"Keyboard", discovered[0]->public_name);
++}
++
++TEST_F(AuraDeBluetoothServiceTest, RejectsMalformedState) {
++  AuraDeBluetoothService::BridgeResponse response =
++      AuraDeBluetoothService::ParseBridgeJson("not json");
++  EXPECT_FALSE(response.ok);
++
++  std::string invalid_utf8 =
++      "{\"schema\":1,\"operation\":\"bluetooth.state\",\"ok\":true,"
++      "\"data\":{\"adapters\":[],\"devices\":[]}}";
++  invalid_utf8[1] = static_cast<char>(0xff);
++  response = AuraDeBluetoothService::ParseBridgeJson(invalid_utf8);
++  EXPECT_FALSE(response.ok);
++
++  std::string oversized(1024 * 1024 + 1, 'x');
++  response = AuraDeBluetoothService::ParseBridgeJson(oversized);
++  EXPECT_FALSE(response.ok);
++
++  constexpr char kWrongContainerTypes[] = R"({
++    "schema":1,
++    "operation":"bluetooth.state",
++    "ok":true,
++    "data":{"adapters":{},"devices":[]}
++  })";
++  response = AuraDeBluetoothService::ParseBridgeJson(kWrongContainerTypes);
++  ASSERT_TRUE(response.ok);
++  EXPECT_FALSE(AuraDeBluetoothService::ParseHostState(response));
++
++  std::string too_many_devices =
++      "{\"schema\":1,\"operation\":\"bluetooth.state\",\"ok\":true,"
++      "\"data\":{\"adapters\":[],\"devices\":[";
++  for (size_t index = 0; index < 257; ++index) {
++    if (index) {
++      too_many_devices += ',';
++    }
++    too_many_devices += "{}";
++  }
++  too_many_devices += "]}}";
++  response = AuraDeBluetoothService::ParseBridgeJson(too_many_devices);
++  ASSERT_TRUE(response.ok);
++  EXPECT_FALSE(AuraDeBluetoothService::ParseHostState(response));
++
++  constexpr char kBadAddress[] = R"({
++    "schema":1,
++    "operation":"bluetooth.state",
++    "ok":true,
++    "data":{
++      "adapters":[{
++        "path":"/org/bluez/hci0",
++        "powered":true,
++        "discovering":false
++      }],
++      "devices":[{
++        "address":"not-an-address",
++        "paired":false,
++        "connected":false
++      }]
++    }
++  })";
++  response = AuraDeBluetoothService::ParseBridgeJson(kBadAddress);
++  ASSERT_TRUE(response.ok);
++  EXPECT_FALSE(AuraDeBluetoothService::ParseHostState(response));
++
++  EXPECT_FALSE(
++      AuraDeBluetoothService::IsValidAddress(std::string(1024 * 1024, 'A')));
++  EXPECT_TRUE(AuraDeBluetoothService::IsValidAddress("01:23:45:67:89:ab"));
++}
++
++TEST_F(AuraDeBluetoothServiceTest, MapsDeviceTypesAndAudio) {
++  AuraDeBluetoothService::HostDevice keyboard;
++  keyboard.icon = "input-keyboard";
++  EXPECT_EQ(bluetooth_config::mojom::DeviceType::kKeyboard,
++            AuraDeBluetoothService::DeviceTypeFor(keyboard));
++  EXPECT_EQ(
++      bluetooth_config::mojom::AudioOutputCapability::kNotCapableOfAudioOutput,
++      AuraDeBluetoothService::AudioCapabilityFor(keyboard));
++
++  AuraDeBluetoothService::HostDevice headset;
++  headset.icon = "audio-headset";
++  EXPECT_EQ(bluetooth_config::mojom::DeviceType::kHeadset,
++            AuraDeBluetoothService::DeviceTypeFor(headset));
++  EXPECT_EQ(
++      bluetooth_config::mojom::AudioOutputCapability::kCapableOfAudioOutput,
++      AuraDeBluetoothService::AudioCapabilityFor(headset));
++
++  AuraDeBluetoothService::HostDevice uuid_audio;
++  uuid_audio.uuids = {"0000110b-0000-1000-8000-00805f9b34fb"};
++  EXPECT_EQ(
++      bluetooth_config::mojom::AudioOutputCapability::kCapableOfAudioOutput,
++      AuraDeBluetoothService::AudioCapabilityFor(uuid_audio));
++}
++
++TEST_F(AuraDeBluetoothServiceTest, ClassifiesInteractivePairingFailure) {
++  AuraDeBluetoothService::BridgeResponse no_agent;
++  no_agent.error_code = "backend_failed";
++  no_agent.error_message = "host service operation failed";
++  no_agent.dbus_error = "org.bluez.Error.AuthenticationRejected";
++  EXPECT_EQ(bluetooth_config::mojom::PairingResult::kAuthFailed,
++            AuraDeBluetoothService::PairingFailureFor(no_agent));
++
++  AuraDeBluetoothService::BridgeResponse unavailable;
++  unavailable.error_code = "backend_unavailable";
++  unavailable.error_message = "BlueZ is unavailable";
++  EXPECT_EQ(bluetooth_config::mojom::PairingResult::kNonAuthFailure,
++            AuraDeBluetoothService::PairingFailureFor(unavailable));
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b5bcc6072 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -18,6 +18,7 @@
+ #include "ash/constants/ash_pref_names.h"
+ #include "ash/constants/ash_switches.h"
+ #include "ash/keyboard/ui/resources/keyboard_resource_util.h"
++#include "ash/public/cpp/bluetooth_config_service.h"
+ #include "ash/public/cpp/event_rewriter_controller.h"
+ #include "ash/public/cpp/keyboard/keyboard_controller.h"
+ #include "ash/public/cpp/session/session_controller.h"
+@@ -74,6 +75,7 @@
+ #include "chrome/browser/ash/dbus/arc_crosh_service_provider.h"
+ #include "chrome/browser/ash/dbus/arc_tracing_service_provider.h"
+ #include "chrome/browser/ash/dbus/ash_dbus_helper.h"
++#include "chrome/browser/ash/dbus/aurade_bluetooth_service.h"
+ #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
+ #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
+ #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
+@@ -404,6 +406,15 @@ class DBusServices {
+             std::make_unique<ScreenLockServiceProvider>()));
+ 
+     if (!base::SysInfo::IsRunningOnChromeOS()) {
++      // AuraDE compatibility: Ash already binds every Bluetooth surface
++      // through CrosBluetoothConfig. Replace that service at its public seam
++      // so quick settings and Settings share one view of the host adapter.
++      aurade_bluetooth_service_ =
++          std::make_unique<AuraDeBluetoothService>(GetAuraDeSharedSystemBus());
++      SetBluetoothConfigServiceBinderForGenericLinux(base::BindRepeating(
++          &AuraDeBluetoothService::BindReceiver,
++          base::Unretained(aurade_bluetooth_service_.get())));
++
+       // AuraDE compatibility: Linux applications send notifications on the
+       // user's session bus. Keep that unprivileged connection separate from
+       // the system services above, then translate requests into Ash state.
+@@ -602,6 +613,8 @@ class DBusServices {
+   DBusServices& operator=(const DBusServices&) = delete;
+ 
+   ~DBusServices() {
++    SetBluetoothConfigServiceBinderForGenericLinux({});
++    aurade_bluetooth_service_.reset();
+     rollback_network_config::Shutdown();
+     chromeos::sensors::SensorHalDispatcher::Shutdown();
+     NetworkHandler::Shutdown();
+@@ -640,6 +653,8 @@ class DBusServices {
+ 
+   void PreAshShutdown() {
+     // Services depending on ash should be released here.
++    SetBluetoothConfigServiceBinderForGenericLinux({});
++    aurade_bluetooth_service_.reset();
+     desktop_notification_service_host_.reset();
+     machine_learning_decision_service_.reset();
+   }
+@@ -649,6 +664,7 @@ class DBusServices {
+   std::unique_ptr<CrosDBusService> kiosk_info_service_;
+   std::unique_ptr<CrosDBusService> printers_service_;
+   std::unique_ptr<CrosDBusService> screen_lock_service_;
++  std::unique_ptr<AuraDeBluetoothService> aurade_bluetooth_service_;
+   std::unique_ptr<DesktopNotificationServiceHost>
+       desktop_notification_service_host_;
+   std::unique_ptr<CrosDBusService> virtual_file_request_service_;
