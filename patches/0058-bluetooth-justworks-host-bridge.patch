@@ -163,7 +163,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +constexpr size_t kMaxDeviceUuids = 64;
 +constexpr size_t kMaxUuidBytes = 128;
 +
-+bool ReadBoundedString(const base::Value::Dict& dictionary,
++bool ReadBoundedString(const base::DictValue& dictionary,
 +                       std::string_view key,
 +                       size_t maximum_bytes,
 +                       bool required,
@@ -404,7 +404,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +    return result;
 +  }
 +
-+  const base::Value::Dict& envelope = parsed->GetDict();
++  const base::DictValue& envelope = parsed->GetDict();
 +  const std::optional<int> schema = envelope.FindInt("schema");
 +  const std::optional<bool> ok = envelope.FindBool("ok");
 +  const std::string* operation = envelope.FindString("operation");
@@ -416,7 +416,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +  }
 +
 +  if (*ok) {
-+    const base::Value::Dict* data = envelope.FindDict("data");
++    const base::DictValue* data = envelope.FindDict("data");
 +    if (!data) {
 +      result.error_code = "invalid_response";
 +      result.error_message = "the Bluetooth service omitted its result";
@@ -427,7 +427,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +    return result;
 +  }
 +
-+  const base::Value::Dict* error = envelope.FindDict("error");
++  const base::DictValue* error = envelope.FindDict("error");
 +  if (!error ||
 +      !ReadBoundedString(*error, "code", 128, true, &result.error_code) ||
 +      !ReadBoundedString(*error, "message", 1024, true,
@@ -436,7 +436,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +    result.error_message = "the Bluetooth service returned an invalid error";
 +    return result;
 +  }
-+  if (const base::Value::Dict* details = error->FindDict("details")) {
++  if (const base::DictValue* details = error->FindDict("details")) {
 +    ReadBoundedString(*details, "dbus_error", 512, false, &result.dbus_error);
 +  }
 +  return result;
@@ -447,8 +447,8 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +  if (!response.ok) {
 +    return std::nullopt;
 +  }
-+  const base::Value::List* adapters = response.data.FindList("adapters");
-+  const base::Value::List* devices = response.data.FindList("devices");
++  const base::ListValue* adapters = response.data.FindList("adapters");
++  const base::ListValue* devices = response.data.FindList("devices");
 +  if (!adapters || !devices || adapters->size() > kMaxAdapters ||
 +      devices->size() > kMaxDevices) {
 +    return std::nullopt;
@@ -456,7 +456,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +
 +  HostState state;
 +  if (!adapters->empty()) {
-+    const base::Value::Dict* adapter = (*adapters)[0].GetIfDict();
++    const base::DictValue* adapter = (*adapters)[0].GetIfDict();
 +    if (!adapter || !ReadBoundedString(*adapter, "path", kMaxDeviceTextBytes,
 +                                       true, &state.adapter_path)) {
 +      return std::nullopt;
@@ -475,7 +475,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +  }
 +
 +  for (const base::Value& value : *devices) {
-+    const base::Value::Dict* dictionary = value.GetIfDict();
++    const base::DictValue* dictionary = value.GetIfDict();
 +    HostDevice device;
 +    if (!dictionary ||
 +        !ReadBoundedString(*dictionary, "address", kMaxDeviceTextBytes, true,
@@ -504,7 +504,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +    device.connected = *connected;
 +
 +    if (const base::Value* uuids_value = dictionary->Find("uuids")) {
-+      const base::Value::List* uuids = uuids_value->GetIfList();
++      const base::ListValue* uuids = uuids_value->GetIfList();
 +      if (!uuids || uuids->size() > kMaxDeviceUuids) {
 +        return std::nullopt;
 +      }
@@ -753,7 +753,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +  if (!event || !event->is_dict()) {
 +    return;
 +  }
-+  const base::Value::Dict& dictionary = event->GetDict();
++  const base::DictValue& dictionary = event->GetDict();
 +  const std::string* source = dictionary.FindString("source");
 +  if (!source) {
 +    source = dictionary.FindString("domain");
@@ -1166,7 +1166,7 @@ index 0000000000000000000000000000000000000000..f0da47e17895dc6e138fd25dc775e644
 +    std::string error_code;
 +    std::string error_message;
 +    std::string dbus_error;
-+    base::Value::Dict data;
++    base::DictValue data;
 +  };
 +
 +  using BridgeCallback = base::OnceCallback<void(BridgeResponse)>;
