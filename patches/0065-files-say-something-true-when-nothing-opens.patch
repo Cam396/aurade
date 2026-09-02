@@ -1,0 +1,34 @@
+diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_strings.grdp
+--- a/ui/chromeos/file_manager_strings.grdp
++++ b/ui/chromeos/file_manager_strings.grdp
+@@ -1310,20 +1310,20 @@
+   <message name="IDS_FILE_BROWSER_PHOTOS_WELCOME_DISMISS" desc="In the Google Photos welcome banner, a text on the button to dismiss the banner.">
+     Got it
+   </message>
+-  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_FILE" desc="Message shown when user tries to open file, which we can't handle.">
+-    This file type is not supported. <ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$1'&gt;</ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;</ph> about opening files on ChromeOS.
++  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_FILE" desc="AuraDE. Message shown when the user opens a file and no installed application handles its type. Names no help site, because AuraDE has none to promise.">
++    Nothing installed opens this kind of file yet. Install an application that handles it and this file will open from here.
+   </message>
+-  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_EXECUTABLE" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
+-    This file is designed for a PC using Windows software. This is not compatible with your device which runs ChromeOS. <ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$1'&gt;</ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;</ph> about opening files on ChromeOS.
++  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_EXECUTABLE" desc="AuraDE. Message shown when the user opens a Windows executable.">
++    This is a program built for Windows, so it will not run here. If the same program is published for Linux, install that version instead.
+   </message>
+-  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_DMG" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
+-    This file is designed for a computer using Macintosh software. This is not compatible with your device which runs ChromeOS. <ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$1'&gt;</ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;</ph> about opening files on ChromeOS.
++  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_DMG" desc="AuraDE. Message shown when the user opens a macOS disk image.">
++    This is a disk image built for macOS, so it will not open here. If the same program is published for Linux, install that version instead.
+   </message>
+-  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX_TITLE" desc="Message shown when a user tries to open a *.crx file, which we don't handle in the Files app.">
+-    Wait just a sec
++  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX_TITLE" desc="AuraDE. Title of the message shown when the user opens a browser extension package from the file manager.">
++    Extensions are added in the browser
+   </message>
+-  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX" desc="Message shown when a user tries to open a *.crx file, which we don't handle in the Files app.">
+-    We're constantly looking for ways to make your browsing safer. Previously, any website could prompt you to add an extension into your browser. In the latest versions of Google Chrome, you must explicitly tell Chrome that you want to install these extensions by adding them through the Extensions page. <ph name="BEGIN_LINK">&lt;a target='_blank' href='https://support.google.com/chrome_webstore/answer/2664769?p=crx_warning&amp;rd=1'&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
++  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX" desc="AuraDE. Message shown when the user opens a browser extension package from the file manager.">
++    This is a browser extension. Extensions are added from the browser's own Extensions page, and not from here, so that a file cannot put one into your browser by being opened.
+   </message>
+   <message name="IDS_FILE_BROWSER_SHARE_ROOT_FOLDER_WITH_CROSTINI_TITLE" desc="Message title shown when a user shares the root of a volume with the Crostini container.">
+     Share folder with Linux
