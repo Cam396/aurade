@@ -1,0 +1,71 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+@@ -414,20 +414,67 @@ export class FileTransferController {
+     this.document_.addEventListener(
+         'copy', this.onCutOrCopy_.bind(this, false /* not move operation */));
+     this.document_.addEventListener(
+         'beforecut',
+         this.onBeforeCutOrCopy_.bind(this, true /* move operation */));
+     this.document_.addEventListener(
+         'cut', this.onCutOrCopy_.bind(this, true /* move operation */));
+     this.document_.addEventListener(
+         'onbeforepaste', this.onBeforePaste_.bind(this));
+     this.document_.addEventListener('paste', this.onPaste_.bind(this));
++    // AuraDE: and the way to say never mind.
++    this.document_.addEventListener(
++        'keydown', this.auraDeOnKeyDown_.bind(this));
++  }
++
++  /**
++   * AuraDE: Escape takes back a cut.
++   *
++   * Cutting dims the files and leaves them dimmed, which is the point of it,
++   * but the only ways out were to paste them somewhere or to copy something
++   * else. Changing your mind is the commonest thing a person does after a cut
++   * and there was no way at all to say so, which left the files sitting there
++   * half faded, describing a move that was never going to happen.
++   *
++   * The clipboard is emptied as well as the marks. Clearing only the dimming
++   * would leave a paste still able to move the files, so the screen would say
++   * one thing while Ctrl+V did another, and that is worse than either on its
++   * own. simulateCommand_ writes a clipboard carrying nothing but fs/clear,
++   * which has no fs/sources and no fs/tag, so canPasteOrDrop_ goes false.
++   *
++   * Nothing is preventDefault'd and nothing is announced. When there was no
++   * cut this returns before doing anything and Escape goes on to mean whatever
++   * it already meant, and when there was one, the dimming disappearing is the
++   * acknowledgement. A toast on top of that would be telling someone what they
++   * just watched happen.
++   */
++  private auraDeOnKeyDown_(event: KeyboardEvent) {
++    if (event.key !== 'Escape' || event.ctrlKey || event.altKey ||
++        event.metaKey || event.shiftKey) {
++      return;
++    }
++    // The same guard the cut itself uses, so Escape in the rename box or in
++    // the search field still means cancel this edit and nothing else.
++    if (!this.isDocumentWideEvent_()) {
++      return;
++    }
++    if (!auraDeClearCut()) {
++      return;
++    }
++    this.auraDeRedrawForCutMarks_();
++    this.simulateCommand_('cut', (clipboardEvent: Event) => {
++      clipboardEvent.preventDefault();
++      const clipboardData = getClipboardData(clipboardEvent as ClipboardEvent);
++      if (clipboardData) {
++        clipboardData.setData('fs/clear', '');
++      }
++    });
+   }
+ 
+   /**
+    * Write the current selection to system clipboard.
+    */
+   private cutOrCopy_(
+       clipboardData: DataTransfer|null,
+       effectAllowed: DataTransfer['effectAllowed']) {
+     const currentDirEntry = this.directoryModel_.getCurrentDirEntry();
+     if (!currentDirEntry) {
