@@ -1,7 +1,7 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -414,20 +414,67 @@ export class FileTransferController {
+@@ -414,20 +414,100 @@ export class FileTransferController {
      this.document_.addEventListener(
          'copy', this.onCutOrCopy_.bind(this, false /* not move operation */));
      this.document_.addEventListener(
@@ -29,8 +29,8 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
 +   * The clipboard is emptied as well as the marks. Clearing only the dimming
 +   * would leave a paste still able to move the files, so the screen would say
 +   * one thing while Ctrl+V did another, and that is worse than either on its
-+   * own. simulateCommand_ writes a clipboard carrying nothing but fs/clear,
-+   * which has no fs/sources and no fs/tag, so canPasteOrDrop_ goes false.
++   * own. See auraDeForgetClipboardCut_ for why that is not done the way the
++   * rest of this file does it.
 +   *
 +   * Nothing is preventDefault'd and nothing is announced. When there was no
 +   * cut this returns before doing anything and Escape goes on to mean whatever
@@ -52,12 +52,45 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
 +      return;
 +    }
 +    this.auraDeRedrawForCutMarks_();
-+    this.simulateCommand_('cut', (clipboardEvent: Event) => {
-+      clipboardEvent.preventDefault();
++    this.auraDeForgetClipboardCut_();
++  }
++
++  /**
++   * AuraDE: empty the system clipboard, but only if it is still holding the
++   * cut that was just taken back.
++   *
++   * Not simulateCommand_('cut', ...) with an fs/clear payload, which is what
++   * onPaste_ does a few methods down and is the obvious thing to copy. That
++   * does nothing here and, as far as this can tell, nothing there either:
++   * execCommand('cut') on the dispatcher iframe returns false and fires no cut
++   * event at all, so the handler that would write the payload never runs.
++   * Measured on the hardware after this shipped once relying on it. Making the
++   * iframe contentEditable and giving it a selection does not help; the
++   * command is simply not permitted in this document. It goes unnoticed in
++   * onPaste_ because by the time it runs the files have already been moved, so
++   * a clipboard still describing them is harmless.
++   *
++   * The async clipboard writes for real, which is the same conclusion this
++   * codebase reached about copy.
++   *
++   * Guarded on the clipboard still being ours, because a person who cut in
++   * Files and then copied something in another application would otherwise
++   * lose that when they pressed Escape here. Only the Files app's own copy
++   * clears the marks, so this is a state that can be reached. Escape means
++   * never mind about the cut, and it should cost nothing else.
++   */
++  private auraDeForgetClipboardCut_() {
++    let holdsOurCut = false;
++    this.simulateCommand_('paste', (clipboardEvent: Event) => {
 +      const clipboardData = getClipboardData(clipboardEvent as ClipboardEvent);
-+      if (clipboardData) {
-+        clipboardData.setData('fs/clear', '');
-+      }
++      holdsOurCut = !!clipboardData && !!clipboardData.getData('fs/sources') &&
++          clipboardData.getData('fs/effectallowed') === 'move';
++    });
++    if (!holdsOurCut) {
++      return;
++    }
++    navigator.clipboard.writeText('').catch((error: any) => {
++      console.warn('AuraDE: could not empty the clipboard: ' + error);
 +    });
    }
  
