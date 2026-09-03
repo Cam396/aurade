@@ -677,6 +677,18 @@ ADAPTER2_MUTATIONS = [
      "      if (event.entry.toURL() === key) {",
      "watch reports an addition made after the listing"),
 
+    (UNIT, "a caller who walked away is paged at anyway",
+     "adapter/chromeos_backend.ts",
+     "          if (options.signal?.aborted) {\n            return;\n          }",
+     "          if (false) {\n            return;\n          }",
+     "a listing stops when aborted even if the platform answered in one read"),
+
+    (UNIT, "a key naming a volume that is gone reads as unreadable",
+     "adapter/chromeos_backend.ts",
+     "    case 'EncodingError':",
+     "    case 'EncodingErrorNeverMatches':",
+     "every DOMException the platform throws becomes a typed code"),
+
     (UNIT, "the watch arms with nothing to compare against",
      "adapter/chromeos_backend.ts",
      "      if (!this.known.has(key)) {",

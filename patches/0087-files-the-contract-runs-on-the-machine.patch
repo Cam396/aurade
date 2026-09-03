@@ -1,0 +1,986 @@
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+index 6b10510..e3ab1f0 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+@@ -149,6 +149,12 @@ function translateError(error: unknown, what: string): FilesError {
+   switch (name) {
+     case 'NotFoundError':
+       return new FilesError('not-found', `${what} is not there.`);
++    case 'EncodingError':
++      // A key naming a volume that is no longer mounted fails this way rather
++      // than as NotFoundError, measured. To the person holding a stale
++      // bookmark that is the same fact, and "could not be read" would be a
++      // worse answer to it than "is not there".
++      return new FilesError('not-found', `${what} is not there.`);
+     case 'TypeMismatchError':
+       return new FilesError('unsupported', `${what} is not a folder.`);
+     case 'NoModificationAllowedError':
+@@ -337,6 +343,14 @@ export class ChromeOsBackend implements FilesBackendPort {
+         if (batch.length >= size) {
+           yield {revision, entries: batch, done: false};
+           batch = [];
++          // Between pages, not only between reads. ChromeOS answers a whole
++          // directory in a single readEntries, so the loop above runs once and
++          // the check at the top of it never comes round again: a caller who
++          // aborted got every remaining page anyway. The fake chunks finely,
++          // which is why this only ever showed up on hardware.
++          if (options.signal?.aborted) {
++            return;
++          }
+         }
+       }
+     }
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
+new file mode 100644
+index 0000000..d9f1793
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
+@@ -0,0 +1,289 @@
++/**
++ * The thin edge: the real ChromeOS APIs, handed to the adapter as a `Platform`.
++ *
++ * Everything above this file is tested locally against a fake. This file is the
++ * one place that cannot be, because it is the wiring itself, and a fake of it
++ * would be a fake of a fake. Its correctness is established two ways instead:
++ * the shapes it depends on are checked against a live renderer by
++ * `tests/harness/platform_probe.js`, and the whole port contract can be run
++ * through it on real hardware by `tests/harness/hardware_contract.js`.
++ *
++ * Nothing here reaches for a global. The three collaborators arrive through the
++ * constructor, so this file states exactly what it needs and a caller decides
++ * where those come from. That matters more than usual: two of the three are not
++ * `chrome.fileManagerPrivate` at all, and finding that out was most of the cost
++ * of the last hardware pass. `getVolumeMetadataList` returns neither a label nor
++ * a root, so volumes come from `VolumeManager`; `getEntryProperties` answers
++ * `{}` for every local file, so metadata comes from `MetadataModel`.
++ */
++import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformIoProgress, PlatformIoType, PlatformLaunchDialog, PlatformMetadata, PlatformResultingTasks, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from './platform.js';
++
++/** A listener slot on a `chrome` event. */
++interface ChromeEvent<T> {
++  addListener(listener: (value: T) => void): void;
++  removeListener(listener: (value: T) => void): void;
++}
++
++/**
++ * The slice of `chrome.fileManagerPrivate` this touches, and no more.
++ *
++ * Spelled as the bindings spell it, which is not how our interface spells it:
++ * the io methods are `startIOTask` and `cancelIOTask` with a capital pair, and
++ * `getFileTasks` and `selectFiles` each take an argument our port has no reason
++ * to know about.
++ */
++export interface FileManagerPrivateSlice {
++  getSizeStats(
++      volumeId: string,
++      callback: (stats?: {totalSize: number, remainingSize: number}) => void):
++      void;
++  addFileWatch(entry: PlatformEntry, callback: (success?: boolean) => void): void;
++  removeFileWatch(entry: PlatformEntry, callback: (success?: boolean) => void):
++      void;
++  onDirectoryChanged: ChromeEvent<PlatformWatchEvent>;
++  searchFiles(
++      params: {
++        rootDir: PlatformEntry|null,
++        query: string,
++        types: string,
++        maxResults: number,
++      },
++      callback: (entries: PlatformEntry[]) => void): void;
++  getFileTasks(
++      entries: readonly PlatformEntry[], dlpSourceUrls: readonly string[],
++      callback: (tasks: PlatformResultingTasks) => void): void;
++  executeTask(
++      descriptor: PlatformTaskDescriptor, entries: readonly PlatformEntry[],
++      callback: (result: string) => void): void;
++  startIOTask(
++      type: PlatformIoType, entries: readonly PlatformEntry[],
++      params: {destinationFolder?: PlatformEntry, showNotification?: boolean},
++      callback: (taskId: number) => void): void;
++  cancelIOTask(taskId: number): void;
++  onIOTaskProgressStatus: ChromeEvent<PlatformIoProgress>;
++  selectFiles(
++      paths: readonly string[], shouldReturnLocalPath: boolean,
++      callback: () => void): void;
++  cancelDialog(): void;
++}
++
++/** What we read off `VolumeManager`, which is where a label and a root live. */
++export interface VolumeManagerSlice {
++  readonly volumeInfoList: {
++    readonly length: number,
++    item(index: number): {
++      volumeId: string,
++      volumeType: string,
++      label: string,
++      isReadOnly?: boolean,
++      displayRoot?: PlatformEntry|null,
++    },
++  };
++}
++
++/** `MetadataModel`, which is where the fields actually come from. */
++export interface MetadataModelSlice {
++  get(entries: readonly PlatformEntry[],
++      names: readonly string[]): Promise<PlatformMetadata[]>;
++}
++
++/** Resolves a filesystem url. Passed in so this file needs no global. */
++export type ResolveUrl =
++    (url: string, onSuccess: (entry: PlatformEntry) => void,
++     onError: (error: unknown) => void) => void;
++
++/** `chrome.runtime.lastError`, which is how these APIs report a failure. */
++export interface LastErrorSource {
++  readonly lastError?: {message?: string}|undefined;
++}
++
++/**
++ * Turns a callback API into a promise, failing on `lastError`.
++ *
++ * The private API does not throw and does not reject. It calls back normally
++ * and leaves `chrome.runtime.lastError` set, which is unset again the moment
++ * the callback returns, so reading it anywhere else reads nothing. A wrapper
++ * that forgets this reports every failure as a success carrying undefined.
++ *
++ * The error carries a message rather than a DOMException name, so the adapter's
++ * translation lands on its `io` default. That is honest: the private API does
++ * not tell us which of its failures this was.
++ */
++function fromCallback<T>(
++    runtime: LastErrorSource, call: (done: (value: T) => void) => void):
++    Promise<T> {
++  return new Promise<T>((resolve, reject) => {
++    try {
++      call((value: T) => {
++        const failure = runtime.lastError;
++        if (failure) {
++          reject(new Error(failure.message ?? 'the operation failed'));
++          return;
++        }
++        resolve(value);
++      });
++    } catch (error) {
++      // A wrong argument is refused synchronously by the bindings, before the
++      // callback exists, so this is not redundant with the check above.
++      reject(error);
++    }
++  });
++}
++
++class ChromeOsDirectoryReader implements PlatformDirectoryReader {
++  constructor(private readonly reader: {
++    readEntries(
++        onSuccess: (entries: PlatformEntry[]) => void,
++        onError: (error: unknown) => void): void,
++  }) {}
++
++  readEntries(): Promise<readonly PlatformEntry[]> {
++    return new Promise((resolve, reject) => {
++      this.reader.readEntries(resolve, reject);
++    });
++  }
++}
++
++export class ChromeOsPlatform implements Platform {
++  constructor(
++      private readonly api: FileManagerPrivateSlice,
++      private readonly runtime: LastErrorSource,
++      private readonly volumes: VolumeManagerSlice,
++      private readonly metadata: MetadataModelSlice,
++      private readonly resolveUrl: ResolveUrl,
++      /**
++       * The launch parameters, or null for an ordinary window. A window that is
++       * not a picker reports its type as `full-page`, which is not a dialog we
++       * can be, so the caller passes null for it rather than making the adapter
++       * know that string.
++       */
++      private readonly launch: PlatformLaunchDialog|null) {}
++
++  resolve(url: string): Promise<PlatformEntry> {
++    return new Promise((resolve, reject) => {
++      this.resolveUrl(url, resolve, reject);
++    });
++  }
++
++  createReader(directory: PlatformEntry): PlatformDirectoryReader {
++    const source = directory as unknown as {
++      createReader(): {
++        readEntries(
++            onSuccess: (entries: PlatformEntry[]) => void,
++            onError: (error: unknown) => void): void,
++      },
++    };
++    return new ChromeOsDirectoryReader(source.createReader());
++  }
++
++  getMetadata(
++      entries: readonly PlatformEntry[],
++      names: readonly string[]): Promise<readonly PlatformMetadata[]> {
++    return this.metadata.get(entries, names);
++  }
++
++  async listVolumes(): Promise<readonly PlatformVolume[]> {
++    const list = this.volumes.volumeInfoList;
++    const out: PlatformVolume[] = [];
++    for (let index = 0; index < list.length; index++) {
++      const volume = list.item(index);
++      // A volume that is still mounting has no display root yet. It is not an
++      // error and it is not a volume we can navigate to, so it is left out
++      // rather than reported as somewhere you can go and then cannot.
++      if (!volume.displayRoot) {
++        continue;
++      }
++      out.push({
++        volumeId: volume.volumeId,
++        volumeType: volume.volumeType,
++        label: volume.label,
++        isReadOnly: volume.isReadOnly === true,
++        root: volume.displayRoot,
++      });
++    }
++    return out;
++  }
++
++  async getSizeStats(volumeId: string):
++      Promise<{totalSize: number, remainingSize: number}|null> {
++    const stats = await fromCallback<{totalSize: number, remainingSize: number}|
++                                     undefined>(
++        this.runtime, done => this.api.getSizeStats(volumeId, done));
++    return stats ?? null;
++  }
++
++  async addFileWatch(entry: PlatformEntry): Promise<void> {
++    await fromCallback<boolean|undefined>(
++        this.runtime, done => this.api.addFileWatch(entry, done));
++  }
++
++  async removeFileWatch(entry: PlatformEntry): Promise<void> {
++    await fromCallback<boolean|undefined>(
++        this.runtime, done => this.api.removeFileWatch(entry, done));
++  }
++
++  onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void {
++    this.api.onDirectoryChanged.addListener(listener);
++    return () => this.api.onDirectoryChanged.removeListener(listener);
++  }
++
++  searchFiles(params: {
++    rootDir: PlatformEntry|null,
++    query: string,
++    types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
++    maxResults: number,
++  }): Promise<readonly PlatformEntry[]> {
++    return fromCallback<PlatformEntry[]>(
++        this.runtime, done => this.api.searchFiles(params, done));
++  }
++
++  getFileTasks(
++      entries: readonly PlatformEntry[],
++      dlpSourceUrls: readonly string[]): Promise<PlatformResultingTasks> {
++    return fromCallback<PlatformResultingTasks>(
++        this.runtime, done => this.api.getFileTasks(entries, dlpSourceUrls, done));
++  }
++
++  executeTask(
++      descriptor: PlatformTaskDescriptor,
++      entries: readonly PlatformEntry[]): Promise<string> {
++    return fromCallback<string>(
++        this.runtime, done => this.api.executeTask(descriptor, entries, done));
++  }
++
++  startIoTask(
++      type: PlatformIoType, entries: readonly PlatformEntry[],
++      params: {destinationFolder?: PlatformEntry}): Promise<number> {
++    return fromCallback<number>(
++        this.runtime,
++        // The notification is the system's own progress toast. The window is
++        // showing this operation already, so a second announcement of it is
++        // noise rather than news.
++        done => this.api.startIOTask(
++            type, entries, {...params, showNotification: false}, done));
++  }
++
++  cancelIoTask(taskId: number): void {
++    this.api.cancelIOTask(taskId);
++  }
++
++  onIoProgress(listener: (progress: PlatformIoProgress) => void): () => void {
++    this.api.onIOTaskProgressStatus.addListener(listener);
++    return () => this.api.onIOTaskProgressStatus.removeListener(listener);
++  }
++
++  async getLaunchDialog(): Promise<PlatformLaunchDialog|null> {
++    return this.launch;
++  }
++
++  async selectFiles(paths: readonly string[], shouldReturnLocalPath: boolean):
++      Promise<void> {
++    await fromCallback<void>(
++        this.runtime,
++        done => this.api.selectFiles(paths, shouldReturnLocalPath, done));
++  }
++
++  cancelDialog(): void {
++    this.api.cancelDialog();
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+index 7aabbc0..4e88a09 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+@@ -64,6 +64,9 @@ const CHECKS: Check[] = [
+         ['NotAllowedError', 'permission-denied'],
+         ['QuotaExceededError', 'no-space'],
+         ['AbortError', 'cancelled'],
++        // A key naming a volume that is no longer mounted fails this way, not
++        // as NotFoundError. Measured on hardware; the fake had no opinion.
++        ['EncodingError', 'not-found'],
+         // Anything unrecognised is io rather than a crash or a guess.
+         ['SomeFutureChromeError', 'io'],
+       ];
+@@ -574,6 +577,29 @@ const CHECKS: Check[] = [
+             'a caller that accepts any url was needlessly restricted');
+     },
+   },
++  {
++    name: 'a listing stops when aborted even if the platform answered in one read',
++    async run() {
++      // The signal used to be checked only between reads. ChromeOS answers a
++      // whole directory in a single readEntries, so on hardware that check came
++      // round once and every remaining page was delivered to a caller who had
++      // already walked away. A chunk larger than the directory reproduces it.
++      const platform = withRoot({chunk: 1000});
++      for (let i = 0; i < 50; i++) {
++        platform.add(ROOT, `f${i}`, false);
++      }
++      const port = new ChromeOsBackend(platform);
++      const controller = new AbortController();
++      let pages = 0;
++      for await (const _page of port.list(
++                     asFileKey(ROOT),
++                     {pageSize: 5, signal: controller.signal})) {
++        pages++;
++        controller.abort();
++      }
++      equal(pages, 1, 'it kept paging after the caller aborted');
++    },
++  },
+ ];
+ 
+ export async function runAdapterTests(): Promise<boolean> {
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+index ced644d..b9b6f2b 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+@@ -33,7 +33,8 @@ const DOM_NAMES: Record<string, string> = {
+  * simply does not report. See the Capability comment in the contract.
+  */
+ export const IMPLEMENTED: readonly Capability[] =
+-    ['list', 'metadata', 'watch', 'volumes', 'search', 'tasks', 'io', 'dialog'];
++    ['list', 'metadata', 'watch', 'volumes', 'search', 'tasks',
++     'task-execution', 'io', 'io-failure', 'dialog'];
+ 
+ export function makeAdapterFixture(): Fixture {
+   const platform = new FakePlatform();
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+index 94af8f2..afb7ba8 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+@@ -14,10 +14,42 @@ import {beginCheck} from '../progress.js';
+ export interface Fixture {
+   port: FilesBackendPort;
+   root: FileKey;
+-  /** Adds an entry out of band, the way another process would. */
+-  add(parent: FileKey, name: string, isDirectory: boolean): FileKey;
+-  remove(key: FileKey): void;
++  /**
++   * Adds an entry out of band, the way another process would.
++   *
++   * May answer with a promise. A fixture backed by an in memory store hands
++   * back a key immediately, and one backed by a real filesystem cannot: the
++   * file does not exist until the disk says so, and returning before then would
++   * race every assertion that follows.
++   */
++  add(parent: FileKey, name: string, isDirectory: boolean):
++      FileKey|Promise<FileKey>;
++  remove(key: FileKey): void|Promise<void>;
++  /**
++   * Makes an operation on this entry fail.
++   *
++   * Only a fixture that controls the failure can do this, which a real
++   * filesystem does not: it fails when it fails. Cases that need it are tagged
++   * `io-failure` so a backend over real hardware can decline them by name
++   * rather than by pretending.
++   */
+   failWith(key: FileKey, error: FilesError): void;
++  /**
++   * Waits until a watch opened a moment ago is actually live.
++   *
++   * Optional, and the default is a macrotask, which is all an in memory backend
++   * needs. A backend over real ChromeOS needs considerably more: `addFileWatch`
++   * is a round trip to the browser process, and a change made before it returns
++   * is not delivered to anybody. That window is documented in `platform.ts` and
++   * the hardware run is what demonstrated it, by waiting forever for an event
++   * that was never going to come.
++   *
++   * This is a gap in the port, not only in the fixture. Nothing in
++   * `FilesBackendPort` lets a caller know a watch is live. The app does not
++   * notice because it opens the watch and then lists, and the listing covers
++   * the window. Anyone who watches without listing is racing.
++   */
++  armed?(): Promise<void>;
+ }
+ 
+ /**
+@@ -30,6 +62,22 @@ export interface Fixture {
+  * quietly not covering it.
+  */
+ export type Capability = 'list'|'metadata'|'watch'|'search'|'tasks'|'io'|
++    /**
++     * Making an operation fail on demand. Separate from `io` because a fixture
++     * over a real filesystem cannot do it: a disk fails when it fails, and
++     * cannot be told to. A backend that runs against real hardware declines
++     * this one by name rather than by pretending the assertion passed.
++     */
++    'io-failure'|
++    /**
++     * Actually running a task. Separate from `tasks` because on a real machine
++     * it launches a real application: the default handler for a text file on
++     * the Dell is the Files app's own viewer, so a contract run that executed
++     * one navigated the very window the test was running in and took the
++     * debugger connection with it. Offering tasks is safe to check anywhere.
++     * Running one is not.
++     */
++    'task-execution'|
+     /**
+      * Naming the process holding a file open. Separate from `io` because it is
+      * genuinely separate: ChromeOS reports a failed operation as a
+@@ -42,10 +90,19 @@ export type Capability = 'list'|'metadata'|'watch'|'search'|'tasks'|'io'|
+      */
+     'io-holder'|'volumes'|'dialog';
+ 
++/**
++ * A fixture as a case receives it, with the arming wait filled in.
++ *
++ * `armed` is optional on `Fixture` because most fixtures have no opinion about
++ * it, and never optional here because the runner supplies the default before a
++ * case ever runs.
++ */
++export type ArmedFixture = Fixture&{armed(): Promise<void>};
++
+ export interface Case {
+   name: string;
+   capability: Capability;
+-  run(fixture: Fixture): Promise<void>;
++  run(fixture: ArmedFixture): Promise<void>;
+ }
+ 
+ class AssertionError extends Error {}
+@@ -106,8 +163,8 @@ export const CASES: Case[] = [
+     name: 'lists the entries in a directory',
+     capability: 'list',
+     async run({port, root, add}) {
+-      add(root, 'alpha.txt', false);
+-      add(root, 'beta', true);
++      await add(root, 'alpha.txt', false);
++      await add(root, 'beta', true);
+       const entries = await collect(port.list(root));
+       equal(entries.length, 2, 'entry count');
+       assert(entries.some(e => e.name === 'alpha.txt'), 'alpha.txt is listed');
+@@ -121,7 +178,7 @@ export const CASES: Case[] = [
+     capability: 'list',
+     async run({port, root, add}) {
+       for (let i = 0; i < 25; i++) {
+-        add(root, `file-${i}.txt`, false);
++        await add(root, `file-${i}.txt`, false);
+       }
+       const dones: boolean[] = [];
+       let total = 0;
+@@ -138,8 +195,8 @@ export const CASES: Case[] = [
+     name: 'hides dotfiles unless asked',
+     capability: 'list',
+     async run({port, root, add}) {
+-      add(root, 'visible.txt', false);
+-      add(root, '.hidden', false);
++      await add(root, 'visible.txt', false);
++      await add(root, '.hidden', false);
+       equal((await collect(port.list(root))).length, 1, 'hidden by default');
+       equal(
+           (await collect(port.list(root, {showHidden: true}))).length, 2,
+@@ -151,7 +208,7 @@ export const CASES: Case[] = [
+     capability: 'list',
+     async run({port, root, add}) {
+       for (let i = 0; i < 50; i++) {
+-        add(root, `f${i}`, false);
++        await add(root, `f${i}`, false);
+       }
+       const controller = new AbortController();
+       let pages = 0;
+@@ -176,7 +233,7 @@ export const CASES: Case[] = [
+     name: 'refuses to list something that is not a directory',
+     capability: 'list',
+     async run({port, root, add}) {
+-      const file = add(root, 'plain.txt', false);
++      const file = await add(root, 'plain.txt', false);
+       await rejects(
+           () => collect(port.list(file)), 'unsupported', 'listing a file');
+     },
+@@ -185,8 +242,8 @@ export const CASES: Case[] = [
+     name: 'returns metadata in one batch, limited to the fields asked for',
+     capability: 'metadata',
+     async run({port, root, add}) {
+-      const a = add(root, 'a.txt', false);
+-      const b = add(root, 'b.txt', false);
++      const a = await add(root, 'a.txt', false);
++      const b = await add(root, 'b.txt', false);
+       const snapshot = await port.metadata([a, b], ['size']);
+       equal(snapshot.size, 2, 'one entry per key');
+       assert(!('mimeType' in (snapshot.get(a) ?? {})), 'unrequested field absent');
+@@ -195,7 +252,7 @@ export const CASES: Case[] = [
+   {
+     name: 'watch reports an addition made after the listing',
+     capability: 'watch',
+-    async run({port, root, add}) {
++    async run({port, root, add, armed}) {
+       const controller = new AbortController();
+       const seen: ChangeEvent[] = [];
+       const pump = (async () => {
+@@ -205,7 +262,7 @@ export const CASES: Case[] = [
+         }
+       })();
+       await armed();
+-      add(root, 'late.txt', false);
++      await add(root, 'late.txt', false);
+       await pump;
+       controller.abort();
+       equal(seen.length, 1, 'one change observed');
+@@ -215,8 +272,8 @@ export const CASES: Case[] = [
+   {
+     name: 'the revision advances between a listing and a later change',
+     capability: 'watch',
+-    async run({port, root, add}) {
+-      add(root, 'first.txt', false);
++    async run({port, root, add, armed}) {
++      await add(root, 'first.txt', false);
+       let listed = -1;
+       for await (const page of port.list(root)) {
+         listed = page.revision;
+@@ -230,7 +287,7 @@ export const CASES: Case[] = [
+         }
+       })();
+       await armed();
+-      add(root, 'second.txt', false);
++      await add(root, 'second.txt', false);
+       await pump;
+       controller.abort();
+       assert(
+@@ -241,8 +298,8 @@ export const CASES: Case[] = [
+   {
+     name: 'watch reports a removal',
+     capability: 'watch',
+-    async run({port, root, add, remove}) {
+-      const doomed = add(root, 'doomed.txt', false);
++    async run({port, root, add, remove, armed}) {
++      const doomed = await add(root, 'doomed.txt', false);
+       const controller = new AbortController();
+       const seen: ChangeEvent[] = [];
+       const pump = (async () => {
+@@ -252,7 +309,7 @@ export const CASES: Case[] = [
+         }
+       })();
+       await armed();
+-      remove(doomed);
++      await remove(doomed);
+       await pump;
+       controller.abort();
+       equal(seen[0]!.kind, 'removed', 'the change is a removal');
+@@ -262,9 +319,9 @@ export const CASES: Case[] = [
+     name: 'search finds an entry nested below the scope',
+     capability: 'search',
+     async run({port, root, add}) {
+-      const deep = add(root, 'deep', true);
+-      add(deep, 'needle.txt', false);
+-      add(root, 'unrelated.txt', false);
++      const deep = await add(root, 'deep', true);
++      await add(deep, 'needle.txt', false);
++      await add(root, 'unrelated.txt', false);
+       const found = await collect(port.search('needle', root));
+       equal(found.length, 1, 'one match');
+       equal(found[0]!.name, 'needle.txt', 'the right match');
+@@ -274,10 +331,18 @@ export const CASES: Case[] = [
+     name: 'offers tasks for a selection and runs one',
+     capability: 'tasks',
+     async run({port, root, add}) {
+-      const file = add(root, 'openable.txt', false);
++      const file = await add(root, 'openable.txt', false);
+       const tasks = await port.tasks([file]);
+       assert(tasks.length > 0, 'at least one task offered');
+       assert(tasks.some(t => t.isDefault), 'one task is the default');
++    },
++  },
++  {
++    name: 'a task can be handed to whatever handles it',
++    capability: 'task-execution',
++    async run({port, root, add}) {
++      const file = await add(root, 'openable.txt', false);
++      const tasks = await port.tasks([file]);
+       await port.executeTask(tasks[0]!.id, [file]);
+     },
+   },
+@@ -285,7 +350,7 @@ export const CASES: Case[] = [
+     name: 'an io operation runs to completion and reports progress',
+     capability: 'io',
+     async run({port, root, add}) {
+-      const file = add(root, 'copied.txt', false);
++      const file = await add(root, 'copied.txt', false);
+       const controller = new AbortController();
+       const seen: IoProgress[] = [];
+       const pump = (async () => {
+@@ -305,9 +370,9 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'an io failure arrives as a typed error, not a string',
+-    capability: 'io',
++    capability: 'io-failure',
+     async run({port, root, add, failWith}) {
+-      const file = add(root, 'locked.txt', false);
++      const file = await add(root, 'locked.txt', false);
+       failWith(file, new FilesError(
+                          'permission-denied', 'It will not let you.'));
+       const controller = new AbortController();
+@@ -333,7 +398,7 @@ export const CASES: Case[] = [
+     name: 'a busy file names the process holding it open',
+     capability: 'io-holder',
+     async run({port, root, add, failWith}) {
+-      const file = add(root, 'busy.txt', false);
++      const file = await add(root, 'busy.txt', false);
+       failWith(file, new FilesError(
+                          'busy', 'It is open somewhere else.',
+                          {pid: 4012, name: 'celluloid'}));
+@@ -360,8 +425,11 @@ export const CASES: Case[] = [
+     name: 'a cancelled io operation stops and says it was cancelled',
+     capability: 'io',
+     async run({port, root, add}) {
+-      const files = [add(root, 'x', false), add(root, 'y', false),
+-                     add(root, 'z', false)];
++      const files = [
++        await add(root, 'x', false),
++        await add(root, 'y', false),
++        await add(root, 'z', false),
++      ];
+       const controller = new AbortController();
+       let last: IoProgress|null = null;
+       const taskIdHolder: {id?: string} = {};
+@@ -422,7 +490,8 @@ export async function runContract(
+     }
+     try {
+       beginCheck(`${label}: ${testCase.name}`);
+-      await testCase.run(await makeFixture());
++      const fixture = await makeFixture();
++      await testCase.run({...fixture, armed: fixture.armed ?? armed});
+       results.push({name: testCase.name, ok: true});
+     } catch (error) {
+       results.push({
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.js b/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.js
+new file mode 100644
+index 0000000..3c9e7c0
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.js
+@@ -0,0 +1,199 @@
++/**
++ * Runs the real port contract against real ChromeOS, in a live Files renderer.
++ *
++ * The local loop runs the contract against two backends, both of which stand on
++ * a fake. This runs the same cases, unmodified, against `ChromeOsBackend` over
++ * `ChromeOsPlatform` over the actual `chrome.fileManagerPrivate`, the app's
++ * `VolumeManager` and its `MetadataModel`. It is the only thing that exercises
++ * `adapter/chromeos_platform.ts` at all, since that file is the wiring itself
++ * and a fake of it would be a fake of a fake.
++ *
++ * Assembled and sent by `hardware_contract.py`, which compiles the modules into
++ * the marker below. Do not run this file directly: on its own it defines
++ * nothing.
++ *
++ * Every file it creates lives inside one timestamped directory under the
++ * downloads volume, and that directory is removed in a finally.
++ *
++ * Three capabilities are declined rather than faked. `io-holder` ChromeOS
++ * cannot report at all. `io-failure` needs a filesystem that can be told to
++ * fail on demand, and a real one fails when it fails. `task-execution` launches
++ * whatever handles the file, and the handler for a text file here is the Files
++ * app's own viewer: running it navigated this very window and took the
++ * debugger connection with it.
++ */
++
++// Scoped, because Runtime.evaluate declares at the top level of the page and
++// those declarations outlive the call. Without this the second run of the
++// harness dies on "auradeModules has already been declared", which says nothing
++// about the code under test.
++(() => {
++// A minimal AMD loader. The bundle below is a sequence of define() calls with
++// their dependencies already resolved to names, so nothing here needs to fetch.
++const auradeModules = {};
++const auradeExports = {};
++function define(name, deps, factory) {
++  auradeModules[name] = {deps: deps, factory: factory};
++}
++function requireModule(name) {
++  if (Object.prototype.hasOwnProperty.call(auradeExports, name)) {
++    return auradeExports[name];
++  }
++  const module = auradeModules[name];
++  if (!module) {
++    throw new Error('no such module in the bundle: ' + name);
++  }
++  // Registered before the factory runs, so a cycle sees a partial object rather
++  // than recursing forever.
++  const exported = (auradeExports[name] = {});
++  const args = module.deps.map(function(dep) {
++    if (dep === 'require') return requireModule;
++    if (dep === 'exports') return exported;
++    return requireModule(dep);
++  });
++  module.factory.apply(null, args);
++  return exported;
++}
++
++// @BUNDLE@
++
++return (async () => {
++  const {ChromeOsBackend} = requireModule('adapter/chromeos_backend');
++  const {ChromeOsPlatform} = requireModule('adapter/chromeos_platform');
++  const {runContract} = requireModule('tests/contract/port_contract');
++  const {currentCheck} = requireModule('tests/progress');
++
++  const app = window.fileManager;
++  if (!app || !app.volumeManager || !app.metadataModel_) {
++    return JSON.stringify({error: 'the Files app is not open in this renderer'});
++  }
++  const volumeManager = app.volumeManager;
++
++  let home = null;
++  for (let i = 0; i < volumeManager.volumeInfoList.length; i++) {
++    const volume = volumeManager.volumeInfoList.item(i);
++    if (volume.volumeType === 'downloads' && volume.displayRoot) {
++      home = volume.displayRoot;
++      break;
++    }
++  }
++  if (!home) {
++    return JSON.stringify({error: 'no writable downloads volume to work in'});
++  }
++
++  const resolveEntry = (url) =>
++      new Promise((ok, fail) => webkitResolveLocalFileSystemURL(url, ok, fail));
++  const getChild = (parent, name, isDirectory, create) => new Promise(
++      (ok, fail) => isDirectory ?
++          parent.getDirectory(name, {create: create}, ok, fail) :
++          parent.getFile(name, {create: create}, ok, fail));
++
++  // Delegates everything, and additionally reports when addFileWatch has come
++  // back. That is the only precise signal available that ChromeOS is really
++  // watching: the port exposes none, which is the finding this run produced.
++  const DELEGATED = [
++    'resolve', 'createReader', 'getMetadata', 'listVolumes', 'getSizeStats',
++    'removeFileWatch', 'onDirectoryChanged', 'searchFiles', 'getFileTasks',
++    'executeTask', 'startIoTask', 'cancelIoTask', 'onIoProgress',
++    'getLaunchDialog', 'selectFiles', 'cancelDialog',
++  ];
++  function recording(inner) {
++    let armed = () => {};
++    const watching = new Promise(resolve => { armed = resolve; });
++    const shim = {watching: watching};
++    for (const name of DELEGATED) {
++      shim[name] = (...args) => inner[name](...args);
++    }
++    shim.addFileWatch = async (entry) => {
++      const answer = await inner.addFileWatch(entry);
++      armed();
++      return answer;
++    };
++    return shim;
++  }
++
++  const platform = new ChromeOsPlatform(
++      chrome.fileManagerPrivate, chrome.runtime, volumeManager,
++      app.metadataModel_,
++      (url, ok, fail) => webkitResolveLocalFileSystemURL(url, ok, fail),
++      // This window is full-page rather than a picker, so there is no dialog to
++      // describe. dialogMode() should answer null, and the contract checks it.
++      null);
++
++  const stamp = 'aurade-contract-' + Date.now();
++  const box = await getChild(home, stamp, true, true);
++  const logged = [];
++  const realLog = console.log;
++  console.log = (...parts) => { logged.push(parts.join(' ')); };
++  let results;
++  try {
++    // A fresh directory per case, because every case assumes an empty root.
++    let index = 0;
++    const makeFixture = async () => {
++      const root = await getChild(box, 'case-' + (index++), true, true);
++      const watched = recording(platform);
++      return {
++        port: new ChromeOsBackend(watched),
++        root: root.toURL(),
++        // The round trip first, which is exact, and then a short settle for the
++        // baseline read the backend does immediately after it. That read is a
++        // couple of IPC calls on an empty directory, so this is generous rather
++        // than tuned, and it is bounded rather than a guess at the whole thing.
++        armed: async () => {
++          await watched.watching;
++          await new Promise(done => setTimeout(done, 250));
++        },
++        add: async (parent, name, isDirectory) => {
++          const entry = await resolveEntry(String(parent));
++          const child = await getChild(entry, name, isDirectory, true);
++          return child.toURL();
++        },
++        remove: async (key) => {
++          const entry = await resolveEntry(String(key));
++          await new Promise((ok, fail) => entry.isDirectory ?
++                                entry.removeRecursively(ok, fail) :
++                                entry.remove(ok, fail));
++        },
++        failWith: () => {
++          throw new Error(
++              'a real filesystem cannot be told to fail on demand');
++        },
++      };
++    };
++    // The same watchdog the local runner has, for the same reason: a case that
++    // waits forever for an event that never came does not fail, it stops, and
++    // on hardware there are far more ways for an event never to come. Racing
++    // the run means a hang is reported by name instead of looking like a dead
++    // connection to whoever is waiting on the other end of the debugger.
++    const HANG_MS = 180000;
++    let hung = false;
++    const watchdog = new Promise(
++        wake => setTimeout(() => { hung = true; wake('hung'); }, HANG_MS));
++    const run = runContract(
++        'ChromeOsPlatform on hardware', makeFixture,
++        ['list', 'metadata', 'watch', 'volumes', 'search', 'tasks', 'io',
++         'dialog']);
++    const outcome = await Promise.race([run, watchdog]);
++    if (hung) {
++      return JSON.stringify({
++        error: 'a case hung and never finished',
++        hungIn: currentCheck(),
++        log: logged,
++      }, null, 1);
++    }
++    results = outcome;
++  } finally {
++    console.log = realLog;
++    await new Promise(done => box.removeRecursively(done, done));
++  }
++
++  const failed = results.filter(r => !r.ok);
++  return JSON.stringify({
++    ran: results.length,
++    passed: results.length - failed.length,
++    failed: failed.length,
++    failures: failed,
++    log: logged,
++  }, null, 1);
++})();
++})()
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.py b/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.py
+new file mode 100644
+index 0000000..614626b
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/hardware_contract.py
+@@ -0,0 +1,91 @@
++#!/usr/bin/env python3
++"""Compiles the port and its ChromeOS wiring into one file and runs the
++contract against a live Files renderer on the hardware.
++
++The local suite proves the adapter translates correctly against a fake. Nothing
++local can touch `adapter/chromeos_platform.ts`, because that file is the wiring
++itself. This assembles the real modules, sends them to a running Files window
++over the debugger, and runs the same contract cases there.
++
++  python3 hardware_contract.py
++
++Needs the Files app open on the target. If it is not:
++
++  curl -s -X PUT "http://127.0.0.1:19222/json/new?chrome://file-manager"
++
++The lab script is found at AURADE_LAB, defaulting to the usual place. Only the
++assembled payload leaves this machine, and the only thing written on the far
++side is one timestamped directory that the harness removes in a finally.
++"""
++import os
++import subprocess
++import sys
++import tempfile
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++AURADE = os.path.dirname(os.path.dirname(HERE))
++SRC = os.path.abspath(os.path.join(AURADE, "..", "..", "..", ".."))
++NODE = os.path.join(SRC, "third_party/node/linux/node-linux-x64/bin/node")
++TSC = os.path.join(SRC, "third_party/node/node_modules/typescript/bin/tsc")
++LAB = os.environ.get("AURADE_LAB", "/mnt/build/aurade-work/lab")
++
++# Only what the contract actually needs at runtime. Type-only imports leave no
++# trace in the emitted code, so platform.ts arrives as an empty module.
++MODULES = [
++    "port/types.ts",
++    "port/port.ts",
++    "adapter/chromeos_backend.ts",
++    "adapter/chromeos_platform.ts",
++    "tests/progress.ts",
++    "tests/contract/port_contract.ts",
++]
++
++
++def build_bundle(out_path):
++    """Emit every module into one file as named AMD definitions.
++
++    outFile and module=amd are both deprecated in this TypeScript and say so on
++    stderr while emitting perfectly good output, so the exit code is what is
++    trusted here rather than the noise.
++    """
++    command = [
++        NODE, TSC, "--strict", "--skipLibCheck", "--target", "es2022",
++        "--module", "amd", "--outFile", out_path, "--lib", "es2022,dom",
++        "--ignoreDeprecations", "6.0",
++    ] + [os.path.join(AURADE, module) for module in MODULES]
++    finished = subprocess.run(command, capture_output=True, text=True)
++    if not os.path.exists(out_path):
++        sys.stdout.write(finished.stdout + finished.stderr)
++        raise SystemExit("the bundle did not compile")
++    return open(out_path).read()
++
++
++def main():
++    for needed in (NODE, TSC, LAB):
++        if not os.path.exists(needed):
++            raise SystemExit("not found: %s" % needed)
++
++    # Somewhere else entirely. A build artifact left in the source directory is
++    # one an export script will eventually sweep into a patch.
++    with tempfile.TemporaryDirectory() as scratch:
++        bundle = build_bundle(os.path.join(scratch, "bundle.js"))
++    harness = open(os.path.join(HERE, "hardware_contract.js")).read()
++    marker = "// @BUNDLE@"
++    if harness.count(marker) != 1:
++        raise SystemExit("the harness has no single %s to splice into" % marker)
++    payload = harness.replace(marker, bundle)
++
++    print("sending %d bytes to the renderer" % len(payload))
++    # Comfortably longer than the harness's own watchdog, so a hang is reported
++    # by the harness, which knows which case it was in, rather than by the
++    # socket, which only knows that nothing came back.
++    environment = dict(os.environ, AURADE_CDP_TIMEOUT="300")
++    finished = subprocess.run([LAB, "eval", payload], capture_output=True,
++                              text=True, env=environment)
++    sys.stderr.write(finished.stderr)
++    print(finished.stdout.strip())
++    return finished.returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
