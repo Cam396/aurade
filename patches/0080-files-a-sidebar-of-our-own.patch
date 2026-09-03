@@ -1,0 +1,2287 @@
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+new file mode 100644
+index 0000000..8d46092
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+@@ -0,0 +1,349 @@
++/**
++ * The list, driven the way a person drives it.
++ *
++ * The unit suite runs in node and has no DOM, so keyboard handling, ARIA and
++ * recycling had roles and handlers written but nothing exercising them. This
++ * runs in a real browser against real events.
++ *
++ * Every assertion here is about behaviour a person would notice: whether the
++ * arrow key moved the selection, whether a screen reader is told how many
++ * items there are, whether scrolling a hundred thousand rows quietly builds a
++ * hundred thousand elements.
++ */
++import type {EntryDto, Metadata} from '../../port/types.js';
++import {asFileKey} from '../../port/types.js';
++import {FileList} from '../../ui/file_list.js';
++
++const NOW = new Date('2026-09-02T15:30:00').getTime();
++const ROOT = asFileKey('mock://myfiles');
++
++class AssertionError extends Error {}
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) {
++    throw new AssertionError(message);
++  }
++}
++function equal<T>(actual: T, expected: T, message: string): void {
++  if (actual !== expected) {
++    throw new AssertionError(
++        `${message}: expected ${String(expected)}, got ${String(actual)}`);
++  }
++}
++
++interface Harness {
++  list: FileList;
++  host: HTMLElement;
++  viewport: HTMLElement;
++  entries: EntryDto[];
++  rows(): HTMLElement[];
++  key(key: string, modifiers?: {shift?: boolean, ctrl?: boolean}): void;
++  selectedNames(): string[];
++  destroy(): void;
++}
++
++function makeHarness(count = 20, height = 400): Harness {
++  const host = document.createElement('div');
++  host.style.height = `${height}px`;
++  host.style.width = '760px';
++  document.body.appendChild(host);
++
++  const entries: EntryDto[] = [];
++  const metadata = new Map<ReturnType<typeof asFileKey>, Metadata>();
++  for (let i = 0; i < count; i++) {
++    const name = i % 4 === 0 ? `folder-${i}` : `file-${i}.txt`;
++    const key = asFileKey(`${ROOT}/${name}`);
++    entries.push({key, name, isDirectory: i % 4 === 0, parent: ROOT});
++    metadata.set(key, {size: (i + 1) * 1024, modificationTime: NOW});
++  }
++
++  const list = new FileList(host, {rowHeight: 40});
++  list.setEntries(entries, NOW);
++  list.setMetadata(metadata);
++  const viewport = host.querySelector('.aurade-list') as HTMLElement;
++
++  return {
++    list,
++    host,
++    viewport,
++    entries,
++    rows: () => [...host.querySelectorAll<HTMLElement>('.aurade-row')],
++    key(key, modifiers = {}) {
++      viewport.dispatchEvent(new KeyboardEvent('keydown', {
++        key,
++        bubbles: true,
++        cancelable: true,
++        shiftKey: !!modifiers.shift,
++        ctrlKey: !!modifiers.ctrl,
++      }));
++    },
++    selectedNames() {
++      const keys = list.selectedKeys();
++      return entries.filter(e => keys.has(e.key)).map(e => e.name);
++    },
++    destroy() {
++      list.destroy();
++      host.remove();
++    },
++  };
++}
++
++interface Case {
++  name: string;
++  run(): void;
++}
++
++const CASES: Case[] = [
++  {
++    name: 'the list tells a screen reader what it is and how big it is',
++    run() {
++      const h = makeHarness(20);
++      try {
++        equal(h.viewport.getAttribute('role'), 'listbox', 'role');
++        equal(h.viewport.getAttribute('aria-multiselectable'), 'true',
++              'multiselectable');
++        equal(h.viewport.getAttribute('aria-setsize'), '20', 'set size');
++        const rows = h.rows();
++        assert(rows.length > 0, 'some rows are rendered');
++        equal(rows[0]!.getAttribute('role'), 'option', 'row role');
++        equal(rows[0]!.getAttribute('aria-posinset'), '1',
++              'the first row is position one, not zero');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'every row carries a name that reads as a sentence, not as cells',
++    run() {
++      const h = makeHarness(6);
++      try {
++        const label = h.rows()[1]!.getAttribute('aria-label') ?? '';
++        assert(label.includes('file-1.txt'), `names the file: ${label}`);
++        assert(label.includes('Document') || label.includes('File'),
++               `says what kind it is: ${label}`);
++        assert(label.split(',').length >= 3,
++               `carries the columns rather than just the name: ${label}`);
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'arrow keys move the selection',
++    run() {
++      const h = makeHarness(20);
++      try {
++        h.key('ArrowDown');
++        equal(h.selectedNames().length, 1, 'one selected');
++        h.key('ArrowDown');
++        h.key('ArrowDown');
++        equal(h.selectedNames()[0], 'file-3.txt', 'moved three down');
++        h.key('ArrowUp');
++        equal(h.selectedNames()[0], 'file-2.txt', 'and back up one');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'shift and an arrow extends the selection rather than moving it',
++    run() {
++      const h = makeHarness(20);
++      try {
++        h.key('ArrowDown');
++        h.key('ArrowDown', {shift: true});
++        h.key('ArrowDown', {shift: true});
++        equal(h.selectedNames().length, 3, 'three in the range');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'home and end reach the ends without walking there',
++    run() {
++      const h = makeHarness(500);
++      try {
++        h.key('End');
++        equal(h.selectedNames()[0], 'file-499.txt', 'the last entry');
++        h.key('Home');
++        equal(h.selectedNames()[0], 'folder-0', 'the first entry');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'page keys move by a viewport rather than by one',
++    run() {
++      const h = makeHarness(200, 400);
++      try {
++        h.key('Home');
++        h.key('PageDown');
++        const after = h.selectedNames()[0]!;
++        assert(after !== 'folder-0', 'it moved');
++        const index = h.entries.findIndex(e => e.name === after);
++        assert(index >= 8, `moved most of a viewport, landed on ${index}`);
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'control A selects everything, including what is not rendered',
++    run() {
++      const h = makeHarness(1000);
++      try {
++        h.key('a', {ctrl: true});
++        equal(h.list.selectedKeys().size, 1000,
++              'the selection is over indices, not over rendered rows');
++        assert(h.rows().length < 100,
++               `and only a viewport is rendered, not ${h.rows().length}`);
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'aria-selected follows the selection',
++    run() {
++      const h = makeHarness(20);
++      try {
++        h.key('ArrowDown');
++        const selected = h.rows().filter(
++            row => row.getAttribute('aria-selected') === 'true');
++        equal(selected.length, 1, 'exactly one row is marked selected');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'Enter opens what is focused',
++    run() {
++      const h = makeHarness(10);
++      try {
++        let opened: string|null = null;
++        const host = document.createElement('div');
++        host.style.height = '400px';
++        document.body.appendChild(host);
++        const list = new FileList(host, {
++          rowHeight: 40,
++          onActivate: entry => { opened = entry.name; },
++        });
++        list.setEntries(h.entries, NOW);
++        const viewport = host.querySelector('.aurade-list') as HTMLElement;
++        viewport.dispatchEvent(
++            new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
++        viewport.dispatchEvent(
++            new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
++        equal(opened, 'file-1.txt', 'the focused entry was opened');
++        list.destroy();
++        host.remove();
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'scrolling a long list does not build a long list',
++    run() {
++      const h = makeHarness(20_000);
++      try {
++        const before = h.rows().length;
++        for (let step = 0; step < 40; step++) {
++          h.viewport.scrollTop = step * 4_000;
++          h.list.render();
++        }
++        equal(h.rows().length, before,
++              'the pool is the size of the viewport and stays there');
++        assert(before < 40, `and it is small: ${before} rows`);
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'a short directory after a long one leaves no rows behind',
++    run() {
++      const h = makeHarness(2_000);
++      try {
++        const many = h.rows().length;
++        assert(many > 4, `the pool should start bigger than that: ${many}`);
++        // The pool only ever shrinks on this path. Scrolling never takes it,
++        // because the viewport keeps the same height and therefore asks for the
++        // same number of rows every time, so a suite that only scrolls will
++        // happily pass with the shrink deleted and leave a thousand rows from
++        // the previous directory sitting on screen.
++        const parent = h.entries[0]!.parent;
++        const short = ['one.txt', 'two.txt', 'three.txt'].map(name => ({
++          key: asFileKey(`${parent}/${name}`),
++          name,
++          isDirectory: false,
++          parent,
++        }));
++        h.list.setEntries(short, NOW);
++        equal(h.rows().length, 3,
++              'rows from the previous directory are still in the tree');
++        const shown = h.rows().map(row => row.textContent ?? '').join(' ');
++        assert(!shown.includes('file-1'),
++               `a row kept its old contents: ${shown.slice(0, 120)}`);
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'the empty state replaces the rows and is announced',
++    run() {
++      const h = makeHarness(0);
++      try {
++        h.list.setEmptyReason('filtered');
++        const empty = h.host.querySelector('.aurade-empty') as HTMLElement;
++        assert(empty && !empty.hidden, 'the empty state is showing');
++        equal(empty.getAttribute('role'), 'status', 'it is announced');
++        assert((empty.textContent ?? '').includes('filter'),
++               `it says which emptiness this is: ${empty.textContent}`);
++        equal(h.rows().length, 0, 'and there are no rows behind it');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++  {
++    name: 'a selection set programmatically reads back as those entries',
++    run() {
++      const h = makeHarness(50);
++      try {
++        h.list.setSelectedIndices([2, 3, 4]);
++        equal(h.selectedNames().length, 3, 'three selected');
++        equal(h.selectedNames()[0], 'file-2.txt', 'and the right three');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
++];
++
++export interface DomResult {
++  name: string;
++  ok: boolean;
++  error?: string;
++}
++
++export function runListDomTests(): DomResult[] {
++  const results: DomResult[] = [];
++  for (const testCase of CASES) {
++    try {
++      testCase.run();
++      results.push({name: testCase.name, ok: true});
++    } catch (error) {
++      results.push({
++        name: testCase.name,
++        ok: false,
++        error: error instanceof Error ? error.message : String(error),
++      });
++    }
++  }
++  return results;
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
+new file mode 100644
+index 0000000..d42d73d
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
+@@ -0,0 +1,406 @@
++/**
++ * The sidebar, driven the way a person drives it.
++ *
++ * The upstream tree lives in a shadow root and was restyled by pushing a
++ * stylesheet into every item; its selected state painted dark ink on a dark
++ * fill for months without anything noticing. These assertions are the reason
++ * that cannot happen again here: they are about what a person sees and what a
++ * screen reader is told, not about which classes exist.
++ */
++import type {Volume} from '../../port/types.js';
++import {asFileKey} from '../../port/types.js';
++import {Sidebar} from '../../ui/sidebar.js';
++import type {Place} from '../../ui/sidebar.js';
++
++const GIB = 1024 * 1024 * 1024;
++
++class AssertionError extends Error {}
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) {
++    throw new AssertionError(message);
++  }
++}
++function equal<T>(actual: T, expected: T, message: string): void {
++  if (actual !== expected) {
++    throw new AssertionError(
++        `${message}: expected ${String(expected)}, got ${String(actual)}`);
++  }
++}
++
++function volume(overrides: Partial<Volume> & {id: string}): Volume {
++  return {
++    root: asFileKey(`mock://${overrides.id}`),
++    label: overrides.id,
++    kind: 'drive',
++    removable: false,
++    readOnly: false,
++    capacity: null,
++    ...overrides,
++  } as Volume;
++}
++
++function places(): Place[] {
++  const internal = volume({
++    id: 'internal',
++    label: 'Home',
++    kind: 'system',
++    capacity: {total: 32 * GIB, free: 8 * GIB},
++  });
++  const stick = volume({
++    id: 'stick',
++    label: 'CRUZER',
++    removable: true,
++    capacity: {total: 16 * GIB, free: 128 * 1024 * 1024},
++  });
++  return [
++    {key: asFileKey('fake://recent'), label: 'Recent', kind: 'recent'},
++    {key: asFileKey('fake://starred'), label: 'Starred', kind: 'starred'},
++    {key: asFileKey('fake://trash'), label: 'Trash', kind: 'trash'},
++    {key: internal.root, label: internal.label, kind: 'volume', volume: internal},
++    {key: stick.root, label: stick.label, kind: 'volume', volume: stick},
++    {key: asFileKey('fake://basket'), label: 'Basket', kind: 'basket', badge: 3},
++  ];
++}
++
++interface Harness {
++  sidebar: Sidebar;
++  host: HTMLElement;
++  chosen: Place[];
++  buttons(): HTMLElement[];
++  labels(): string[];
++  headings(): string[];
++  destroy(): void;
++}
++
++function makeHarness(list: Place[] = places()): Harness {
++  const host = document.createElement('div');
++  document.body.appendChild(host);
++  const chosen: Place[] = [];
++  const sidebar = new Sidebar(host, {onSelect: place => chosen.push(place)});
++  sidebar.setPlaces(list);
++  return {
++    sidebar,
++    host,
++    chosen,
++    buttons: () => [...host.querySelectorAll<HTMLElement>('.aurade-place')],
++    labels: () => [...host.querySelectorAll<HTMLElement>('.aurade-place-label')]
++                      .map(node => node.textContent ?? ''),
++    headings: () => [...host.querySelectorAll<HTMLElement>('.aurade-place-heading')]
++                        .map(node => node.textContent ?? ''),
++    destroy: () => {
++      sidebar.destroy();
++      host.remove();
++    },
++  };
++}
++
++function press(target: HTMLElement, key: string): void {
++  target.dispatchEvent(
++      new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true}));
++}
++
++interface DomResult {
++  name: string;
++  ok: boolean;
++  error?: string;
++}
++
++const CASES: Array<{name: string, run: () => void}> = [
++  {
++    name: 'the sidebar is a navigation landmark with a name',
++    run: () => {
++      const h = makeHarness();
++      const nav = h.host.querySelector('nav');
++      assert(nav, 'there is no nav element');
++      equal(nav!.getAttribute('aria-label'), 'Places',
++            'the landmark is unnamed, so it is announced as just "navigation"');
++      h.destroy();
++    },
++  },
++  {
++    name: 'each group is a list that says which group it is',
++    run: () => {
++      const h = makeHarness();
++      const lists = [...h.host.querySelectorAll('.aurade-place-list')];
++      assert(lists.length >= 3, `expected several groups, got ${lists.length}`);
++      for (const list of lists) {
++        const id = list.getAttribute('aria-labelledby');
++        assert(id, 'a group is not associated with its heading');
++        const heading = h.host.querySelector(`#${id}`);
++        assert(heading, `nothing carries the id ${id}`);
++        assert((heading!.textContent ?? '').length > 0,
++               'the heading a group points at is empty');
++      }
++      h.destroy();
++    },
++  },
++  {
++    name: 'removable media is separated from what is bolted in',
++    run: () => {
++      const h = makeHarness();
++      const headings = h.headings();
++      assert(headings.includes('This computer'),
++             `no fixed group heading in ${JSON.stringify(headings)}`);
++      assert(headings.includes('Devices'),
++             `no removable group heading in ${JSON.stringify(headings)}`);
++      const groups = [...h.host.querySelectorAll('.aurade-place-group')];
++      const devices = groups.find(
++          group => group.querySelector('.aurade-place-heading')?.textContent ===
++              'Devices')!;
++      const names = [...devices.querySelectorAll('.aurade-place-label')]
++                        .map(node => node.textContent);
++      equal(names.join(','), 'CRUZER',
++            'the removable group holds the wrong drives');
++      h.destroy();
++    },
++  },
++  {
++    name: 'where you are is announced as current, and only once',
++    run: () => {
++      const h = makeHarness();
++      const all = places();
++      h.sidebar.setSelected(all[3]!.key);
++      const current = h.buttons().filter(
++          button => button.getAttribute('aria-current') === 'page');
++      equal(current.length, 1, 'exactly one place should be current');
++      equal(current[0]!.querySelector('.aurade-place-label')!.textContent,
++            'Home', 'the wrong place is marked current');
++      h.destroy();
++    },
++  },
++  {
++    name: 'selecting a different place moves the current marker',
++    run: () => {
++      const h = makeHarness();
++      const all = places();
++      h.sidebar.setSelected(all[3]!.key);
++      h.sidebar.setSelected(all[0]!.key);
++      const current = h.buttons().filter(
++          button => button.getAttribute('aria-current') === 'page');
++      equal(current.length, 1, 'the old marker was left behind');
++      equal(current[0]!.querySelector('.aurade-place-label')!.textContent,
++            'Recent', 'the marker did not move');
++      h.destroy();
++    },
++  },
++  {
++    name: 'clicking a place asks to go there',
++    run: () => {
++      const h = makeHarness();
++      h.buttons()[4]!.click();
++      equal(h.chosen.length, 1, 'the click was not reported');
++      equal(h.chosen[0]!.label, 'CRUZER', 'the wrong place was reported');
++      h.destroy();
++    },
++  },
++  {
++    name: 'arrow keys walk the whole sidebar, not one group',
++    run: () => {
++      const h = makeHarness();
++      const buttons = h.buttons();
++      buttons[2]!.focus();
++      press(buttons[2]!, 'ArrowDown');
++      // Trash is the last of Quick access; the next place down is the first
++      // drive. A sidebar that stops at a heading makes the keyboard useless.
++      equal(document.activeElement, buttons[3]!,
++            'arrowing down stopped at the end of the group');
++      h.destroy();
++    },
++  },
++  {
++    name: 'arrow keys stop at the ends rather than wrapping',
++    run: () => {
++      const h = makeHarness();
++      const buttons = h.buttons();
++      buttons[0]!.focus();
++      press(buttons[0]!, 'ArrowUp');
++      equal(document.activeElement, buttons[0]!, 'focus wrapped off the top');
++      const last = buttons[buttons.length - 1]!;
++      last.focus();
++      press(last, 'ArrowDown');
++      equal(document.activeElement, last, 'focus wrapped off the bottom');
++      h.destroy();
++    },
++  },
++  {
++    name: 'home and end reach the ends of the whole sidebar',
++    run: () => {
++      const h = makeHarness();
++      const buttons = h.buttons();
++      buttons[2]!.focus();
++      press(buttons[2]!, 'End');
++      equal(document.activeElement, buttons[buttons.length - 1]!,
++            'End did not reach the last place');
++      press(document.activeElement as HTMLElement, 'Home');
++      equal(document.activeElement, buttons[0]!,
++            'Home did not reach the first place');
++      h.destroy();
++    },
++  },
++  {
++    name: 'tab reaches the sidebar once, not once per place',
++    run: () => {
++      const h = makeHarness();
++      const stops = h.buttons().filter(button => button.tabIndex === 0);
++      equal(stops.length, 1,
++            'a roving tabindex means exactly one place is a tab stop');
++      h.destroy();
++    },
++  },
++  {
++    name: 'the sidebar stays reachable when you are somewhere it does not list',
++    run: () => {
++      const h = makeHarness();
++      // Three levels into a folder, nothing in the sidebar is current. That is
++      // the ordinary case rather than the exception, and it must not drop the
++      // whole sidebar out of the tab order.
++      h.sidebar.setSelected(asFileKey('mock://internal/deep/deeper/deepest'));
++      const stops = h.buttons().filter(button => button.tabIndex === 0);
++      equal(stops.length, 1,
++            'with nothing current the sidebar became unreachable by keyboard');
++      h.destroy();
++    },
++  },
++  {
++    name: 'two sidebars on one page do not share heading ids',
++    run: () => {
++      const first = makeHarness();
++      const second = makeHarness();
++      const ids = [...document.querySelectorAll('.aurade-place-heading')].map(
++          node => node.id);
++      equal(new Set(ids).size, ids.length,
++            `split view would resolve the wrong heading: ${ids.join(', ')}`);
++      second.destroy();
++      first.destroy();
++    },
++  },
++  {
++    name: 'capacity is a sentence, not only a bar',
++    run: () => {
++      const h = makeHarness();
++      const free = [...h.host.querySelectorAll('.aurade-place-free')]
++                       .map(node => node.textContent);
++      assert(free.includes('8.0 GB free of 32 GB'),
++             `capacity did not read as free of total: ${JSON.stringify(free)}`);
++      h.destroy();
++    },
++  },
++  {
++    name: 'the bar is not read out twice',
++    run: () => {
++      const h = makeHarness();
++      const bars = [...h.host.querySelectorAll('.aurade-place-bar')];
++      assert(bars.length > 0, 'no capacity bars were drawn');
++      for (const bar of bars) {
++        equal(bar.getAttribute('aria-hidden'), 'true',
++              'the bar repeats what the sentence already said');
++      }
++      h.destroy();
++    },
++  },
++  {
++    name: 'a drive with no room left says so in colour as well as words',
++    run: () => {
++      const h = makeHarness();
++      const fills =
++          [...h.host.querySelectorAll<HTMLElement>('.aurade-place-bar-fill')];
++      // The stick is 16 GB with 128 MB left, which is over 99% used.
++      const alarming = fills.filter(fill => fill.dataset['level'] === 'full');
++      equal(alarming.length, 1,
++            'a drive at 99% should not look the same as one at 25%');
++      const roomy = fills.filter(fill => fill.dataset['level'] === undefined);
++      equal(roomy.length, 1, 'a drive with room to spare should look ordinary');
++      h.destroy();
++    },
++  },
++  {
++    name: 'a place with no notion of capacity draws none',
++    run: () => {
++      const h = makeHarness();
++      const groups = [...h.host.querySelectorAll('.aurade-place-group')];
++      const quick = groups[0]!;
++      equal(quick.querySelectorAll('.aurade-place-capacity').length, 0,
++            'Recent and Trash are not drives and have no free space');
++      h.destroy();
++    },
++  },
++  {
++    name: 'a count says what it counts',
++    run: () => {
++      const h = makeHarness();
++      const basket = h.buttons().find(
++          button => button.querySelector('.aurade-place-label')?.textContent ===
++              'Basket')!;
++      equal(basket.getAttribute('aria-label'), 'Basket, 3 items',
++            'the badge is announced as a bare number');
++      h.destroy();
++    },
++  },
++  {
++    name: 'one gathered item is not "1 items"',
++    run: () => {
++      const list = places().map(
++          place => place.kind === 'basket' ? {...place, badge: 1} : place);
++      const h = makeHarness(list);
++      const basket = h.buttons().find(
++          button => button.querySelector('.aurade-place-label')?.textContent ===
++              'Basket')!;
++      equal(basket.getAttribute('aria-label'), 'Basket, 1 item',
++            'the plural rule does not hold at one');
++      h.destroy();
++    },
++  },
++  {
++    name: 'an empty basket shows no badge at all',
++    run: () => {
++      const list = places().map(
++          place => place.kind === 'basket' ? {...place, badge: 0} : place);
++      const h = makeHarness(list);
++      equal(h.host.querySelectorAll('.aurade-place-badge').length, 0,
++            'a zero should be absent rather than drawn as a zero');
++      h.destroy();
++    },
++  },
++  {
++    name: 'a drive named by its owner cannot inject markup',
++    run: () => {
++      // Deliberately not alert(): a dialog blocks the page, so the suite
++      // would hang instead of failing, and a hang tells you far less.
++      delete (window as unknown as Record<string, unknown>)['auradeInjected'];
++      const nasty = volume({
++        id: 'x',
++        label: '<img src=x onerror="window.auradeInjected = true">',
++      });
++      const h = makeHarness([{
++        key: nasty.root,
++        label: nasty.label,
++        kind: 'volume',
++        volume: nasty,
++      }]);
++      equal(h.host.querySelectorAll('img').length, 0,
++            'a volume label was parsed as HTML');
++      equal(h.labels()[0], '<img src=x onerror="window.auradeInjected = true">',
++            'the label should be shown literally');
++      equal((window as unknown as Record<string, unknown>)['auradeInjected'],
++            undefined, 'a volume label ran as script');
++      h.destroy();
++    },
++  },
++];
++
++export function runSidebarDomTests(): DomResult[] {
++  const results: DomResult[] = [];
++  for (const testCase of CASES) {
++    try {
++      testCase.run();
++      results.push({name: testCase.name, ok: true});
++    } catch (error) {
++      results.push({
++        name: testCase.name,
++        ok: false,
++        error: error instanceof Error ? error.message : String(error),
++      });
++    }
++  }
++  return results;
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.html b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
+new file mode 100644
+index 0000000..65069a5
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
+@@ -0,0 +1,28 @@
++<!doctype html>
++<meta charset="utf-8">
++<title>AuraDE Files DOM tests</title>
++<link rel="stylesheet" href="../../ui/tokens.css">
++<style>html, body { margin: 0; background: var(--aurade-ground); }</style>
++<script type="module">
++  import {runListDomTests} from '../dom/list_test.js';
++  import {runSidebarDomTests} from '../dom/sidebar_test.js';
++  // Named here rather than in each suite so a suite that throws on import is
++  // still reported as a failure with a name, instead of the page simply never
++  // publishing a result and the runner timing out with nothing to say.
++  const suites = [['list', runListDomTests], ['sidebar', runSidebarDomTests]];
++  const results = [];
++  for (const [suite, run] of suites) {
++    try {
++      for (const result of run()) {
++        results.push(Object.assign({}, result, {name: suite + ': ' + result.name}));
++      }
++    } catch (error) {
++      results.push({
++        name: suite + ': the suite itself',
++        ok: false,
++        error: String(error && error.stack || error),
++      });
++    }
++  }
++  window.auradeDomResults = results;
++</script>
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.py b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
+new file mode 100755
+index 0000000..403e619
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++"""Run the DOM suite in a real browser.
++
++The unit suite runs in node, which has no DOM, so keyboard handling, ARIA and
++row recycling had code written and nothing exercising it. Those are not details
++that can be checked by reading: whether an arrow key moved the selection is a
++question about events, and whether scrolling builds elements is a question
++about what the browser actually did.
++
++Shares the golden harness's build and browser rather than adding a second way
++to compile and launch the same code.
++"""
++import argparse
++import importlib.util
++import json
++import os
++import shutil
++import sys
++import tempfile
++import time
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++spec = importlib.util.spec_from_file_location(
++    "golden", os.path.join(HERE, "golden.py"))
++golden = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(golden)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.parse_args()
++
++    work = tempfile.mkdtemp(prefix="aurade-dom-")
++    try:
++        # build() compiles the folders the golden harness needs; the DOM suite
++        # lives beside them and has to be added to that set.
++        sources = []
++        for folder in ("port", "session", "ui", "tests/harness", "tests/dom"):
++            directory = os.path.join(golden.AURADE, folder)
++            sources += [os.path.join(directory, f)
++                        for f in sorted(os.listdir(directory))
++                        if f.endswith(".ts")]
++        import subprocess
++        result = subprocess.run(
++            [golden.NODE, golden.TSC, "--strict", "--skipLibCheck",
++             "--target", "es2022", "--module", "es2022",
++             "--moduleResolution", "bundler", "--lib", "es2022,dom",
++             "--rootDir", golden.AURADE, "--outDir", work] + sources,
++            capture_output=True, text=True)
++        if result.returncode:
++            sys.stderr.write(result.stdout + result.stderr)
++            raise SystemExit("the DOM suite does not compile")
++        os.makedirs(os.path.join(work, "ui"), exist_ok=True)
++        shutil.copy(os.path.join(golden.AURADE, "ui/tokens.css"),
++                    os.path.join(work, "ui/tokens.css"))
++        shutil.copy(os.path.join(HERE, "dom.html"),
++                    os.path.join(work, "tests/harness/dom.html"))
++
++        server, port = golden.serve(work)
++        browser = golden.Browser(os.path.join(work, "profile"))
++        try:
++            browser.call("Emulation.setDeviceMetricsOverride", width=900,
++                         height=700, deviceScaleFactor=1, mobile=False)
++            browser.call("Page.navigate",
++                         url="http://127.0.0.1:%d/tests/harness/dom.html" % port)
++            browser.wait_for("Page.loadEventFired")
++            deadline = time.time() + 30
++            results = None
++            while time.time() < deadline:
++                answer = browser.call(
++                    "Runtime.evaluate",
++                    expression="JSON.stringify(window.auradeDomResults || null)",
++                    returnByValue=True)
++                value = answer.get("result", {}).get("value")
++                if value and value != "null":
++                    results = json.loads(value)
++                    break
++                time.sleep(0.1)
++            if results is None:
++                raise SystemExit("the DOM suite never reported a result")
++        finally:
++            browser.close()
++            server.shutdown()
++    finally:
++        shutil.rmtree(work, ignore_errors=True)
++
++    failed = [r for r in results if not r["ok"]]
++    print("DOM suites: %d/%d passed" % (len(results) - len(failed), len(results)))
++    for result in failed:
++        print("  FAIL %s\n       %s" % (result["name"], result.get("error", "")))
++    return 1 if failed else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-current.png b/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-current.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..12f47b2e15dd75057a155255e2b365995312aae5
+GIT binary patch
+literal 15672
+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
+LUaUgIAmD!iMLF3y
+
+literal 0
+HcmV?d00001
+
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-dark.png b/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-dark.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..66a908caf701d7754c75e91386b8e4cae850fa9e
+GIT binary patch
+literal 15158
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-light.png b/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-light.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..41bc7fd04974ecefbb71ed2555774a69a80064a3
+GIT binary patch
+literal 15049
+zcmch8bxd7foF`tK779F|xD|(D#fv+X;_hxO?(XjHTD-WsyYq@Y?BViohqwGDJG(o{
+z?C#8LvVYv~O-^!>dvlWW{n$7ByMiPJDj_Ni3=D>}l-Lg#7+CbTry3dVZRLo!h8zaw
+zJ&d%Nu!>vO$vTRTvUwNx`8%l*5&nFtZ}id_?^RMNl!_SfIaNL{AXaK0GE8kQwTj!X
+z^ER)vHZ4u5KuXnY`R0CAOoTN@$RbuC4x&+*(#aMgCaJCj5t4m(K-c7l-AII~-h{RO
+zJOX{n=i=GtQ4Gt`&)MgZ&Iv6Uj7El;;U<KG;l~R?fI)qa4fFY%6iglrIjkSte|&-8
+zQ0i>0b$(g;HST+9+5Cbqs5KA<AY)@=YvI!5!l6y1ZDMUEDgu8;Mb37BvfUK!CD+!O
+z-Py@B>8}9#Q(rF*gHBCMoIP-gi8Cv_cE$k+i<weD3LG++n}u0MKgbLR7ZN%ljQdX!
+z43Zf~zyJhCrebbWloWG%7~4+2>CL};pRg){BkaUKY(9VJg6y{yZlmp^+B|=1c^mcW
+zQus)OoxL<-Fv}{52WN0U|6ES1f4z(u_4@Hly-<{90Jc6f$j=<<jt4K(xW*cyjwVcu
+z{pF_#(cJU|EUV7fp8%8CNd8Vb*&jhg$B!@#<eTYYO|;GSnY?_wr20`5RN%(S{j6nV
+zKl3D<4dEJE68*hj<ZOf!>YiI#cy1x__7`lL9G5D-a_NGiB3-3+9BCtWqVHj*IWUJh
+zyxRl$x1Q){%%ynwAR3_QP*?O`_NgU@452+o)mRj1+HA~R4p>UKNl^8bw8-4A(35I%
+z7zr3pN2$k-p_`Vt8G{i_38YIE2<y#q!u7)iuCgR;1C>D#nWD4u1|;R00Nddce6G(s
+zN(A?EA+t@)4LO8=d#(n9aqlx81K3+zcgI5T=0E$-(0+9?YY74Z@uQr_uEHf9m$$6d
+zWJu}e)e`PwMU(qlCVvTgA@q>duiP+*WVZ`FXebCcU`0n_<%X4^bqm%(qJ99?-P;O1
+z{Wv(j^$?x|uVMc%TQ^b#$>@Dw>`j>RH7+Av{(>O=aL`ZLDt;OA8TNS2pIG1eWkaiT
+z085n?x-<XDY+wkNjbByx(KQ(07@*Q4aTEZaFB8XTjtkWGvl+Ec$kCE_)7;A$5b@Fh
+zmnRGNoyDGKs)(o4PA92WtQ-cgy*iprV{OjIZw(dO$K<qv{3vN%Ehol4``WDrIxGBI
+zOv;v%VQHC-VFjWnDWUZZ0%l!y<sO3zG9FVfsm^sDmvroPa$L&uips@f0eUq<RbJxA
+z`a}T#N?dH6Vk>bl%Ghw5780*MqXAg0Jc%$7e=xs<$XtPHpPTmqY3fcq8X>eYf3{9n
+zKe-j6VOTL7737J+CWI*W8O1{tTY_69iznNgao*FWGL_<LCf-4Zm6<|D>bHdn1{N@U
+zp;c00pZ?xIvM;!N+mVh|;ivk5Q7i2{!;LX~Dl_)cwH%wac0y8)_U>2rSufwFUaD<T
+z5eXUwthJjvJ8XoTJ1VB#hB01FBljW3m`ezWe}iWEk8H))L%el%X2Fq{*ZO3Oim6od
+zQR^es6bQq7Llv*6b#fgp4+3)r@y_rez2ieZFQ@5Z1g41<qntETgU#<6YswN7T}^6W
+zdBn7FR(g#T8<#wpgP1B)@!{ZKeoa7Zcu$x~RoovpFZ9JG`lPSqtXKoi<yNZijIMN-
+z8=goOiso+;K6ya;u?urfzx7+Q6ak+Gr2phpweeo=c7Ku&Uv3dzb2#boaR>I_)hP51
+zw21rcl^<~6Dfa9}Zu~vb_(}65GCTM(=&&4ui>9YtJ4<=D);zc@4Q0HJUQQ$1?Txbp
+z*Dm#BGofbi3<~S#bg}R>lhte<yxPnB;=72VGh)WraXk3l$y;+Gqa^I&{?soy$J18}
+zm(j(=Nqu!$ytZIJuA-|?SQwq&P2)5AF?1-){)g`jh(R%J;%WI)#*v4et1SmDRxN`S
+zi?p<mZ`u8GSpX`=)fVp|oc#y*_|T7KH+yO_!8jZu<kL*ROE?j8q;tkA6)Ohj(PWNa
+z2MqZjMzI5Q1USn0_4Z7zyS9D{*68im5X=x_$A;$N&(6BDce@Vmr_)S9#|`2Y1p;4P
+z!Y;BX%PZobZdDB>$|sX{)*>uHawOAs?HNzT@cqVGVQvi;4TTE2-Z#VBb3~IaB*L%?
+z%`%a@-Mk7JAFd0U6J_*%Fxoq3^ZRhDX8q(HjxSVF^GeOtwDaiAoL>s)5GghuWa;p;
+zBpPEtjbvc(HGK@ekGjJa{B9m+QrX<|`*(tVD-FxD(kt2|?aZ*Ic1FjYk-}Ci?$<s1
+z$GHhINz<d*nlIHKlV6SYx9%?c@_ctzDbJ(kwuidRzMVQc@OH>UJHjG!kVKR^AoKOW
+znHJ#EL^gdujsPISj-JDN5|sl0X_*&SPN_EB!=uwaR%!VbCEQGc&JcKA`>|;RVj52h
+zX8;J8wuAi!D*^|Dh>QaBk&FuFyI&m4e_+AzTx8Dh$il+n$7>~pJ(~Xeme$t4vj$5Z
+ztmx=Jr0B=2VyLn$?Sbs+d*T2Lq(b=6P7}*(H&QHwo*6CxIZvhw9lHPvBR{KC8?==@
+z)yBrAz)XH}lz!#uuJD5rRFK_+7tR2={t=aGS7^zk#JBmj`xPJnp{6BCZINH&0_|N8
+z>+1q)Z>KNt=epbVlz<y;=#8QH_YrFy6GEWgc(f%u*&0qVhPfpDk?P(LfaS`!4mEY&
+z4Sh5l8Yed%C~R+9>&83>+|3$p37f#y-7QX|et<_?NzhvVuI6&MNuzmnaR*H)Ik>BZ
+zU&`u)UhV9@Pl%stBd2Tsu~@w*pDce^@$L5nDbQlPW+~6#@Taa<fRWh~nX_#o4^>D>
+zAG|gGc!xKwB;#tz%6tbPY1vmFkFJqJaBeVke3F`znzorSChJ5%v&qd-MjeKOM|+P^
+z13Jt1Yo11S%`0%fqm@?Hl69ekF;dU_SxZYKZDf+0Sv<T)%5*)>V#Tg@S+1IL{|t|a
+zXaQu`(*EgBB2FsfH#|}J5OovX??yO*;(#wIR5jX}Hd&pgUJ_&Npj}exj!ckT%6F4z
+z+xeW3Q3wfLSygpc1K&!j;rA>r*Y*8~&F&%{-Y)qP1+S~@Btl1rs0;?nhg&q);$7WG
+zht_)ji^3w*!u^7QK%&5PJy3G7#b-r5DlvniIy))AL?~@JDso2N{lngE)l>Bt1H`Uq
+z_0AIxms0N!_0Tv!<Ar|0UhQEdG^LeH^kKPyFm{({4>2+*;m<vF@6eo+JB}5zeD_e;
+z!}yT+4}2OUhwRpo-xIv5W7&;9gB;<J=H~@&1fn@gD>e_}5A&(dbVK?F6ev0^Rw*-o
+zXKXqZJ^}3B4wyTifroLnVLkKbtbG8`*Y|wSf_tCkE{FeB^|7YvtLC@Q4yX3f0>%l~
+zOe{ttng=#rc{T%!lVgyL>@#zM`OwO*pqZ#033$+&jnl1@@tP|~wF-mmow&PJ$gAM5
+zcMJ<HLl%dbY%Npkhy-E6pt_?Q7}gGrJM2H-smP!cohtkc5-zSgpC`zDcKI*M@!ivp
+zFN=*#MzIM2A&>$g@sf^uCeG&`Qhox!#xlFtcsL7%?iov=lZ#ng87swf`_-1=8+u`U
+zJ?{mQrco%)`!OzmgSj3$TCYmgf4G~7>c~Cvb+<@`bW3Ns#c1NA>ZJ=T=CGYV9JS1+
+z)TGd3os4`3q$h+KRC`V5phcVkeG7-YM8EQk5lzdC{XRV6iDyC*1z?j`O0OiV&9c`G
+zldc-EvIYTDmN>~-3p8K6u`fIO4p}<yA813nr@K9%w;kg`UQJhjY$Oc8m1PIvVH8ky
+z1*(lk+R|_a-DYd+hKmZ-d8U`ohjri|Yd<zwwEHreU0wU}NEmz56M)U95yN#Lv@6!s
+zYu)=_y~fx*AIDO}3=YR%)@fKmE3_&98cZNYF_OwkEAY<G&i3vLx$aM8r=)NZM&scN
+z4X*-mU|A9P&6qcZQBge3;bRKerej?kYwPPh_>jH{y-eYlxz-jgce3ueU%rE7t?apz
+z{!fGI|1%B`Bu>C{CVHTag@nNXXplU+5+<%YCZfDJ&@Jmg@!~d9Kr+@jbStT!(M_z-
+zvAYNL5uyWWfb|dVVQ~c6wGOHu%YBWW^|<TD%qCzu!&^NA>OjH-v_tpoY*$`hUMNHa
+zmhh|Sq<SW(dqVd?TuodW6kqj=+-?dGC>Qg^8<Nvt{bvdD4|YYYboKLhO)VAB%G}aQ
+zM6<QCE>S&;kG_h=9yo~S;?s-%bv79>Ft<F4kb3G|1Hj0sm@%A<w<BxUKMw7(nQdbD
+z+IHd#K*6UeIZIhO+o-)d4<@yWo)Yw*h1luh)0kK}G%;=*chHj%gW@%Kt=8jNOsTDb
+z>JwT*nqB*e%43`BW$o}63)4-+U$wvYpNB{3L(h(TnNtwI<Kj2jKd)Y#Ac1+5xYF0)
+z#`9vt)a<3bp7~c-Zz6J4U2*1uJFG!}t07RiQXT0aIVW4-P<KfR_nlKU>&Bu!iN@Ae
+zD{F00KCiE95L#alc@2bLSxY&ymVGGgR_RBu=|{r_9a&J~VaK*X`11hjM)j@v##V;q
+z>QqvKWPW9L)x8w6rZely^I7mg#SMz|E*Rbd{0`We7(GbJJR-Y+3(;Yy2^N=?psENB
+zQYh_wSUT=(!Uan>;A_I%;Bfy`zP!k;(;gi+dHrBdGGcvZ`>F5!gH{G%$<H5u79P$V
+z_$8>Ko{gQt&OsSyX?F#<AFv%G^CuMPOoBR--|tdlOBbq7;m|XKfrJ>G_+LJP#<@EL
+zHNlLRxt(5v9ORW#tP~hSX#-PJE{8-{q^R)jscT<15B<{nHj|-_9jrpm@K86Awc8F!
+z35t-tXJ2Qmv(AFM7r#5k;r<>f?5&rI1Xi7*91S4((B581MF02;<ME?MXGh^T_lji$
+zj%}+f@{fk=qdlzXU%q_7nCp32Vqy|bJKGQeErP5h6_FE1UO(<f?wbPz{-y!Om6xi8
+zygavV!5u4gbq(A!hA+RP!g=`G<yVs4T3*$`>*!x_EE}t!nT_2Sm%G}ZpF%-PBOFrX
+zN-qUxZR9Sll)i1;AQi0N*nuKBxwI_mY3iWaBy+O`RxjFiwhw_pz_H}L+RzU*s_b6<
+zfiD8O-yM4|CL(-vuN=5o?h@-LTZ`Hodh1%Sl)u=1aXEE6;&dD&bYI!}L|tSeMp)#!
+zrplc;>bkt&@tELr>2_J&0bWU;*W~uKyd~r=fhGeoQST~Oe~orz#dMng9O%Qs91`bA
+zboDaQ!<u@uj+z#{JW?AAX{OxRXg8XQF~gwzYIWokpRpX9As(;oN|=ag7kN8r?`{`_
+z@~>JzPkiTeU)8&&Y5ZUCIH2rC3d8&jt}7TC52XPr<k2t=spG`wxfwA1=7ta)`34ht
+zBK!FwHte5>4PWnsSvzJdTXJ}K6xe<^FI2#PnbiMp@1MTSU@%ba`RSP<+jXMZ*7m!>
+zh}iJ{BfIk_m~Qrp&;g5<s{02T_rm+9%K!-2wYmAlV;m}e)p7oINwNcOE&gzpcD0`8
+zS-6h1&%Me`AWD3x2&LN5v8$<w2m8`aH=DeHpk7Bk4AGZArWwHAm3Q21G(JwRBiJZ%
+zb7++#N95r-cXLH_g1I(N4)agG4!GxMcIxXY_8V=GQ`b}!@c<vSM(R=zw1@5zdo`x}
+zHTS0rCh{3=_&`I}Jvf)mG}@v0#$)Is2><O85L$$afGq5Ri9|e~xE|%BIH6j2ofjr9
+zV|&5=UA@*U9Qk|CFA&BoF3s&dqEEFp+9{^#Ujx7FK&&T;1Zc+b>=o!BIal~K4_5tf
+z={1?DkOsu#JN!O}usroZZ0vWAQa?L%*PpGeBTG)zvpQxui}_dmgMBLArR*F!f5<I4
+zAzu9vh30CSw3u9C7n|zL(&`6Hp$}%jp7)j7AQ&70JzQK6rXAy78?lPaaWVrBukY+_
+zfJdh%Hm9eD2hHuxpRkUcKahsh6PZ=EC$ZEll2wn)7kmDWaUa`Gm3#=(;ips|7|*h&
+z%Os=9!w+n@h70-Sbcz*Hq&rQp>z5PaIew7`!oS#hgg%_7LJyT+9}@C5gNeH7ZQDHa
+z9PfVZ?Gn8gL%6nz6X|m?Xc7Woe__W|%&)nL6Z~h>l-`ZF7U-d>YnQZUV_x9dFVZMa
+z2#Jo$gk*$UZYbJy|Dt7DV3?Rs&t`^**ys57i&7`cw()nBB<;2zaubvD1pR<GOjek{
+z>lnVw{<cTa;z+-{oA8NhCLz75gec-3RKb@(d9B%T3c;b0aqVp*R7U>~W1zpSB4gr{
+z$bPQ`MdDs>%_luk^?GK=(hwGh_Qo2~6{hl(E%N>i<--8BeW1zJFo3TAIB)nbP>uil
+zmR??Ra+Uq&Q+Z`jcR1~8%Z$LwOumfa+FlFUYbP<2I4yQ;8Es`$EWxmtXqd1jmHOp#
+z0RLCyD4Qh|lx#@%b?jM26N7ozXjd;*G}hfdTeeu#BWTR1@4}xQ{Vafdsl@VVnsnSQ
+zoBZ}}lRsLup_kRHSUGVBC)~Y&i$63)-Z)}drei{0Qd{8R-K?4en6xa}3P=A_n}uBz
+zX?=0W<{HozN6bgh<}{i85I@4|NSimV$MsO#@#R6Fn<SrEN-$e%;U^kT3*tyh2iKsg
+zdSY@yy6Tbzh$5LOJd?ttIhl&&Yvp^n_YJxX_QD-(uk#3P1$7lNIEsXX?OzunW%2HZ
+z4THZ*EvQl0i}i(HrAi>8pd*GurK)k5*9rHhn>hR)!>vInYA1ZU5k#{<PoVcHVW<1x
+zIRDKqczz$e7mD+4#7IArg31chUP$Yd8Mj%ddxb)$j%SH<3DHvmWA3Q^E=?;*>iLpi
+zh}QWuSQ$}f8$_b3dp3GKCILz+wx9B4lA+%NVf;B9O2-*}z_|Y9f3^S6iuM&?#URZS
+zPXk01F%y$Yj~+C~$}R(H%4BF+9UtzPOSsQz`Ha12`HWLq?0r-y<bTT2k#`dE*~Jz4
+z#Ab^w@4gEztHUd3)=wD9eNSdW4(2db>kDapg`1DQ#u<)SMVP1D*^>?{s1H?G)F7!Y
+zY-}lN82lv?rt-XikBuZcl;`STVaLLPinY`HL0p|stDyyx=jJ5eSVUcIw6T2q3Shp+
+z@Z-deC3J@Vcp+?;p#JMvw>4{FtDcg1QR}##CzDj(PO}OzLzPMsc8u;#XeT|IF>r09
+zf@!d1!k1~GOhH>iC#)Ipe%lE*t@X1Py?*r3Z3$gcG_N#EH&yly{pL&@F%7myG|mi)
+zv$!r1LHJQ5!J;nWkxGlSK^Hml+8?$tV(d#fqU*SsbjG#^;lq&_FHK*A>8m+zE<U`h
+z(XQ`KzkF+TnhXa6a`O3KwhaA8uMN<?70z2=EhrXdLU)`55(xZ1#~~t%R&)WqQ`#);
+z>WaURj?X1JG3QDuXWG|(WdzjmABW8RO#eROcx+J(o6jE4#j}yu?Wr~Yk3OU2Zfhk|
+zGL^bq?ueene2%xQTQw%&j_Ph1QL{b5DK=7A81l*=Rkqa!OsC1=l?~VEGE!&8F_bG(
+zPyU!p?y;PVcgdSo49FanAdcQORTtM%kDpmjjV&jXVb*ocW+R!e(0;EUMb0XM{+L!|
+zAEc1(3^v&|myAi7r<n+gXmJ%!qsbEFb6EkXJgnDJ;-i(LgBR=b?h*6PO04nO=f>in
+zqSA_$`d+*8=3DsXmq#NTN4$+rD1=C|4{=G3q8s&J9>KHxV9urdW79yU3~aVwNfmF`
+z&usN@r6~RQjM;lu<@7wagYhq;gEt5Px5i+A(s4^>jh(=w1O^Q9(yw=$&Hv~fhGNdm
+zFb6nJ%`k2b{{@9!4J-VpM9Z_{g$+@{5VIQY9`hrht&-?XGB<i!@{VOOHV%9>zso&6
+z-Fo_C5cWoxk^A^FMXx(j^#E61HHbd1hh{5fQ1*1*M_g>t)2-cKmUV%l>W@yo(Dm=N
+z=7u7N3E;rUAY_<hKor}k1vmcaU$)LOiXGus_x&kigr4u5L1wZKryRSq+)Qx~9`_0{
+z8co#V)ok|cOV8Gt;JQg|P*l#z7InNt^`pAs?JGBBaTi7GX#BX~l$w(-o3gTl!}#{d
+zC@9f1lDjl%2icEgT0sh(lNQLbs>J@lQiixp2k`)U)!7Wbq6WIhDy3&He|k<$l0AHf
+z7d;00*i5%-{1PA40d5Z3mF82n9{qweIO+=Yu4YZ;`5$@$C0vhDOYlG#zD@Xr!xgsk
+zi`$S5i)~ZZl!WP$Ixh27Q)O&i%U9Vx&`LvJA=jx*6*YC*e&sHkKX!bnjks6b43nF<
+zS5eLPk6-M?lit@@_Dl}v(C<!ZbsJ?246?f^bwrU*f3}r?(a>;}GcvZuB<JDij>`dB
+z!*))2;jJ#;@KvBQT8vY|yIwI-g1pdpJPp?Q08<p?W<9?s9cUoGf&qo?a5V6aU7n@y
+z{yXajwZF$N@=rl<s<)H+YqM7Xy^D}2^p;C6`{GNJ=<maTL<27T!Kn~3m4!oD{hhG&
+zg9enICiW(2kW}!#%|fb*5+MYM!KL|UG}n&K*$$3~mGyj%P->(yZeid1M@eMd(uDft
+zy{57<Rv!6N9OAR(n#3G(^zipfRHrh>g#B?CAML)uIMo};IvlHcI`1mJw02lqTOafF
+zqV2qv1OwB$Y9MRDm?Toj(k*6AIe=EHyD6bKf<yJ1a5{JIRpz1Ien_xwM*#<gjl)S!
+zAnBOSdl+PzQusVHIfZvUiGlwimG9qey}^dK*afF!>Go5jtM8-3!=KHj&>XrUXe@1Q
+z+li$S$t@@sLo8ufcOK{MtZv!QUS=1K^s1B!jt;3olaZ)I!zw<WoAXXgLpy&C<nR<X
+zp%IJ+uMo(QN@{HJK0W%$uPs^qM1zAv_ad`wksO!GJVNeS3yvl!LR%jzBvZY|Q72P0
+zLy<HxC(udi@GqZZb~r_oufbxapS!+~#;ybQr<T+{$q1@bxl?9s2wW6azpm99J!ZAY
+z`!o=3kO;V!(2y(io$<uAX#V_M3xhaf#4R;2?HH#OT|bI5B_`-y>ep&LK`qbZE{PL6
+zI%pk$AfPP0?TpxZe_xz=X6vp+Qk5Qq^1MGdb@#If#}@G^ae9>6Ue2}X;<<o(!eu`r
+zDP8g|oBrILPe%$WKaI?vzV#8CcRXHvfx}AfOlq}&7P7G_-td_y?q^BpL!;UOZ9XlK
+z<A6$UosMl`f5drix#Fw|$x9Hj)rL_;j}yH=a#ogTld6!_2Ffd6?iQu<WXijlFclGN
+zcPR^r8?s9?esuADOvb}0aO^19V@_wz!+G;^aQ4R<5ehDfOm;Sh+n?G$*y5VcDeuw?
+z_-ho<)kccyYM)i`_?#{5PeKu#s`DxiDHq19IQv*>h-VRYs8Z-Hs!2pDM@(|Qq`ZRP
+zexcS7H(|e+ZQlCU`!bfXEu5Iu_0Z|HQ&|aEQpi`wcz4K%8TtJ%to>=lZXsQ#5TWxX
+zRSttk@|9uOE0QJ+@U+({h`VY$7NCAaG&*EeoFw^KnRBe-Gl$ES4yj<dl)?{>3D9*D
+z!lLOJUy3%lE?MQ+RNqUA9R}`Eb*|h**LT`*V&M9yWqfHa<Icp!pQX^MuB@~yFNr_o
+zXI&W(zCi7Wgl0(1B4x-|t6rkSGl(WZQZoHx%Xjr#dk=}taE#J72QFicztQ?zoRC^>
+za&Go65fS^DU1;X*CPT^S^=7S8+irUKZf;kqmaRxbZ9P{_e1c@FytbT+!U3<dx8B}t
+zkqwY@>+A$Xl6iK3!#Nl_Eyimqp4=8MwV^C67?!WvUuJJ9YC1N=YkG;vGa2-=Q7vx<
+zdnYYrV|YemDFktZu?oR=o5RqhtvvbQWndR^z?+e?;rEfFqA5uy`0o|AK})>*HaPmC
+zmSOOu^eO6FH%4JxnihDF+pSKu=D|>k-i&nJ_rl}gtED=3U`)IKTO(+Wocvl#AUkj!
+z10%bCC*L}Pt55OUzATVR=Ar<{lO&5Fc4{xO7`rs<SSEWkd;NF=C3;aeAEoxq_u9c<
+z8!x>bqt5VL2nbRqIepHYIMtk1Bg{5?74|M<cc+lfv+sSCNd|qwcHnTJXdU_G)Aw=f
+zMO7%<9O2R0P2SP!%VA?nOow61qESKZh`M!P-N_?Hbodm$=d3EVvzFt2QKiH%&c<;T
+zS&Vv^Mrv-lYRS@#uA{7~JcBG*5r6JqFV~!{qroq#>aH<l#yw6qo4+s7=od=Pm|Q(Q
+zQgoTbFFm5&8<Y|XixLYXK}aYqB4rC2n831%iU!7b%E;&Bh%O#2<}mrR)2s7JPQ@Dn
+zSo;10`#74oF}U4Q*UHJFd0yl$2zFh6m2!?ya(FkzPb@N)ghyg|g-2Gz+Mu~K_no4T
+zf}j6Y3xGi841ARA^R^xF6>WqHsGUxmk>5dhlt)s8W96#EONGje63n@_rOk$dZwt-)
+z($80Hc3<aLfhKhaG><L6gOZgI$Q|)N$Ix^)?|fc2*?t`C;#|#DJbuj<EigJ#IPtW9
+z7dZ)z#)yc<PKZ4p$-1EtQT=JL>YO!6<wTRiVMXmuEbAz6^EcV!llS93gwga9+&^Az
+ztYxq{!snh2ZJ4y)x5Cf!?>aOg%2MUk<q0le3(h}1F^kLWmdfTaz8BPr90xWwGoP8~
+z4HxY7pHIpNxF9XAE+C#14Hy)HPt6!5S@zX95;%lTu4j4Lgzyj3(IHWWIM~|SnU?j#
+zl&l(Fr7g1r-HMWdgH5#1*4a2%NDI6H(pxzP|Nmusy;kH(<3ipnjVt^Nt?O_8xh%am
+zj|~0Eox|wB<hFONX{Ol#br9MCvfoCcvw3nU%FB-06ebQ~b#dw0J;zl@b@#iuRye4o
+zus_KsDdhWg&E|ITebi34q7J`{vlIB-y^(tQz%^R7i@Fn0$%qQ=C`Nztfr91yj^l7r
+zGmgi}jjYYk!=qTA`)M7I%?yo|;F@kqv#=L|uTtIuoOGRkWD3nMXeQE$@tHXUG(^*K
+zDV5Z-{*AL;42{Nv`G{ohja^bv;}^U_WN+boR9E=a-7cIe#*%|OqFj6`q$?sNGR$_J
+zY`SQbsGy`a8?YAevX&+gihUGNgtM$lv(+&2Fh5wW^MxG?`2D=T4Xol}hkL2V;cM#U
+z_M4Ox8!o3nn5ZR_5t=T?BvVY1e!XicIo9r?(#&csGEjN>m_THuW-8AxY1^gp4X6(h
+zR48pLIml}b?Yh<a4m=Q3*F2ZPuqYq-pxT&Jf^U3fV#rSew|PjA6$eP#rLUs|GdY}i
+z@R!oXUy0s>c@#_8CBwh+iyTF(>b0x*X>nBkszdQ2{IT|gVc8iiOH%32lGb2UD0$Xu
+zA6cLHs(C<E&n7$;IE(HkQ@OfM!7+AJu)Qz<|Kz~Ik<T%a+K(4D2(U^Xm;I;(N1%e*
+z*c!eS5m=<-y_j6VgsDfq{cg&>sYh~vb$vv@rF_%DZ0~`e`luMmc96O?fd<o?dLc6y
+zIotmm3_s_Rt+d=&0{8_S__H&BvTz@<HFFr%2TiT%Fp)XMCtE9G=65Z-T5udu`gYt!
+zHBWGK+E=H_9eC9l;urjBTmFP}PqsqB<#2ss(lPI%5Ex}yrM=p6%pgFuG40UARp9v0
+zCS3sMn=ujiR{l#&;a|xGs}%Wc<FO-4vXc|2wS91Eip!}@C=+8t@}1~9S#VKD<=$F)
+z7XH9A(RK4^yIji4^bL2eV;>wG6a$vE0b?pj<UnDcm@gxHz<R=Q+E7O_2KcqMs_HcR
+zi4YGar1H%&sbhl*zYn^&wcTzyY`O?9wPNMkrMA^-`bKku+xmbc$*2cqX+<I!7mE1U
+z>aOWS^KM$R!^c-4(VsEO+&(I)s&mE(a=v%c7#~mM$gxM%D-h}g9Raa;{h_~#g>2V+
+zL@FBfq-`-D2V2gLbNjqSp?Z+nG{|ck2&R}7z*rl*JnFF1Lr4PtC6(RG;ZH4Vrmsyn
+z%ci&lo?H`|XUAp_G=idlR)LzPwl<2>9(qWI0K|6M-p59Ms&4%uBIK>{CxA6br^`@e
+zi|)#gmQ{Vg&he&e1Ls-J_n}tewt7d^LTyQ29fvUKpIIq1yyXIRR=PW(ScO|$*$SC>
+zct2gA4sp_<Pc`-m#X9%nOHcskSiZh90euXFCo;wB*L|R+uCj_;47LInwA-8+jmGFp
+za95psd_ny(XAAj6tNtR_F4b8FqmDPLR$q&{s(#uO1vKm+&U=|t<`ZI{908^OqUc=p
+zVj_yW_b6lU!8?Uzs7|+-bNxd_zj<S`(+hfd{_T@ZFsld7VA-;Y2Uq*3JlAroFaA_U
+z{oTok%j>+q#k7x}1^Z`IcA4lLwBnaYGQe#mNdlkigg_PkKw+*gE0yt@<oxNo+XD&s
+zhiw7WV*v^Y)1jgF&Cz?AePu+hr+R0x@sj}6WE1FVy{)DlivCn0t7io&d9Hj}S%vq6
+zw)He~y3<nKB$LPLS+?(aPz8{3z#v*W2MKAOfF1P1%H#BdbFB1O4D=Uv;HT&78Uo9)
+z<(pa4(W7Q2;;MHQM+Au`mA8lG<(_hvqT3>*13$Og$yk4&m&UOM|In}G;ycyKr8J}2
+z4jHJ)&`G@?MGSs8!h`Pz44E~~&M5a7sBr9{lbel-Io?in@5;V98ee}~K}fYkk>$S>
+zTF%5!Z<dI9L&gKi%sOCQ&&^3(h_7;a50iP9lCj(GxSx+lLMXCAiX8guMs5-c&diD{
+z$x5rLEi^k<V2Aw?1FVwP!bW55oZ&WC^GKv6TO%nWP=vAB89&)S&f>ryR1~B8>Q@R=
+zAY)P+GtJ1x_+|A-dD2R#QD4%87HR*;-_~Z8z?N5EK`$@{qp5pXXzBo;gL0eqTD9)p
+zRzyCR@iaGXV|qp4^I0c#-AR$@m#1pBQFurqzu&~sqov!?@bGvUbFja8z~Vlfol04=
+z_aDXUfSw#f=uGwM(CVA&oeA>oSM8C6d9L=EZuQI7bz{3S2cS25t{+1Saw8eAU|EAS
+z1*n>uxD2=ak^KzOx)lG@35<WZS@0Gfc0twlLU_N!YeKZ6cMDk8d9>{MYS-!w>IYn~
+z<A*AO=bfAfX%%sSJ7K{*9`abZ1U;p9pQ<XJ&7NqfD}V3WPvf}QQY~D1la?%b4%p~W
+znyUI-jh31sY{U;1)Go(tTh^r~o)JgJHSw~)=;X)@Cl6JlJDV4lmfmGJM{I)!Y`i4a
+zGJXnA+iNE}muzOpR1`+yS4Lg7L7oJIO1d`Xgbm%jy(8nP0qlkn_s@qSVi#}t7QG_w
+z{ZW7@t;5Zy6OgO1g+f=p{RGa{`_^L%t+oM%7+<D(4N~lOwt)}pj8bxARV3Eo%8KrI
+zu@x)~6|vYJ>C@uMvhJD;nd3)1zbp#qz;x0%B|#K-^DpV@0!A+o64{(Q_mY{Q#aG1_
+zBBRd5D0MRu-V&3Gw7V(Gx0p#0T&X+Sk{kbJuyOXK&UQF<HHVpLQu9c>d_$R&+~va|
+z2{h^(^z9pG9$tT4;Bc6RCL{@He_DU}#MJz0aOabz^GHw{BiCHT3i1G3<8KtPLZSOH
+z>HY9vDa{||=a<F_r*oXGy|$Icg|GRNU$&081{?;?NGi&Nauc-kZQ3t1f81oLd(n3@
+z<)I<F|Ken@m?X5^Df@@CfsHSU-uUm;&MXG^7e(4qhEc~Prt{41FGpQT8UF<Ex~nV~
+zGT+MrYMpLX<ec><9rxdTbrGQ1`_Oi2tNc<1MiY3~l!VXVu59LUeVOdlQMXB-z#NSQ
+zu?s$kf#X_ahkN0gXw!D$!nxsv!p*Ab+F>i;7=#_N({@l?4BS@9nP5+NIaUKjOVP50
+zdeuGif0Nu1P5;p8ju`lYb<=uzmi<Vy;azvjcg2*F$>`&Me^#sW>u-hdqLt}EMk`Kh
+zNJL%J5xs)b^AYzD&$c*i%(jnga|o(4P?5$=|99fVFnIs+`#?ye@H1DPcY9pvrAKjT
+zw^RN7UxH-U=Ll7jgQ4cprv%4!V9<v8)k`;RqI@@W{HA26jVmZ={|=Y?Abs19&JcDx
+zhaEJdQB0$a4g`7lc?(j`*iR4itgm74c`pihm63+>rzeRc0^`1N=tS+~nq<>mY0>Wr
+zoL@@sL|^qsjFm5n(7Izxa*rivd%Kd3zie>FW#hD|scQaY+;yrZV?KERy+$0!0XJvz
+zet|2x)HF+MDwSy<ar1J>>eh&;whZkOWj`8yE@Bx8=b9Tn&@_@bha#vi9lQCwrl4pA
+z!TvCObuOL)M?Cfy0SSH%U}+P^SRU2K6y@d(Go$@Hc_1QNWz2XWM_zoe^_(9G!6RyR
+zaI92^=6*O>J%>Jhp#@vu>E24T?5h4y&&@PXdyoHA_YUKMm*j<mPn}J0ua_A$n)Y@d
+zH|eA9@KG8L9^YJY?1J<@^3a2Oef7q7g1(&n>&HKLH`^9xN@&;~E2xg$pRsCR`f$_)
+zKPp@?i>1k3pLIL(F5?!(o4W`>Q7izdlpm2tmjb8oJ;E*2akUEC?Inn)jWWRWS?@0o
+z0#Y|Tg-*;ax?XPJy(RKk`mJU1B`p~gyp=~VeJQ6PUF>s3z&J_-v4aL)hav@EFk=y)
+z2jY41VLI-~h2S&De0{F$sN&|6tKe>yj+{DH41IT=i0zjRN;w4Kegrr*U17E2rsGud
+zGbVP!<>I*1G+MeZYo8Oi9R}@Qh$Yx{hc7Q=s1?$DTdjger3YF)TmAR>2CIt6Zhm;n
+zZpdm~KN0wcVn9;F)YHAMw-u`nO79#Q?=*8{n}^2qK9I;fUQbJ-7nQblw~?tVj5`kS
+z7wPFxe;}hNTy)rQNi4XZxjlBe)G@z!(a&BzuEi=q5!qw@{z=})epsn(bl@h^+q$Vc
+zl+i_DHUFjkEywU7$oOEa1<_}n1?1$Qz7Q^&dp2dn&UTq`Q$S||zcAgX#VVw!@er=K
+zG0rt@%EQF3cI4)YpABgS%dfPuFF!Fi9irGW#OM?&>DCa!`$}vYs^z+(`5A8AWxc(&
+zF#o+MUhrF|T)d-JUwRF<u$0);G#PgRyo4h3_E8tM$b~AQbC{rKx~}o@L6YoWS)@kT
+zE0uw-vU3}JPHq2|+2Ozb!S*-Ln3t`$(X_!^&3WFJ5Jl?P!So||EB{ZL;D0hb_%FJm
+zb%<DLmjfMl^Y1RbGIG|OR1OZa9F>u?#^3+bqDxmvmtIv~q3LM!NZ**(ary+^ItbNY
+zK*onk_Bja>!_Me0p@rYdILy6nyAV!K(rN^d+oJhvcxPv3JYEggX`BB;)P6n&<PT|)
+zliQ`}#x>8cnOAD!9QpVj3pc1{Nh?lPSgtj!^TNQOYW*`K&||4^wnMpHP;#kK7G5g*
+zi}KL}(pIBe$UUscn##_h$N#wHWBPVClGD?3=}bt35N+frDAZUk%x4YB7~_RL3B`_Z
+z?I*I22>EI1swifXbknpjG0}ByO7QjRj27YrMY7fD(#t3c($vs?HG-X^gh86nI!-)D
+zzKN#cGxP&*z2au?939_XZvPG97S&Z%pNmOuBzp~lAx9%GrK`v0nz+Gt+HES#59Tq<
+zv4Lx^y;gA<mB-Ob@i{n_>7zVo9L(=a+3uHKmg&=pnc)WSEl^@v{?<3&il1*qje!=V
+z0q9P(#=>#LZQs}{Q)^Mq`yh!2p2J3DKmU3yS&_81BU(E=S|7Kjj1Ec1%x*ftkIH(J
+z3{y<dvJcHC!;4?HTTs7pn1qH0>FppmT{doX1hN?_sK~+Whsfx8D6RhH-c&7Db8vic
+z9UfzPXO$#_ft_i;>^@whhr1odVfyrucw|8%EkVnI?uR~bDPWP|W`v2}>Xku6q^Rn(
+z5*?QH+Y%~D<gj`EN(yfyoyqevXI8}Zyk#=jOnGPUI`P346#1G)Ca#(L!rnfOYQeEo
+z*iF>`w76_Yab=M+wb$YhKh+UG+IL2@fkrdLblE>aZNZr1x9Ffxf4~7a_oFqaI>XZj
+z@3S<tt9otE7p)Pszyh5)8N<HqaRm>WZmSNetGddvFaIvA?KrX0jQ(MKwCv$4^@dJF
+zXiX}o;?;L(#4M8O;XMwL%+Wf;(Tm!0w2NqlNj#EKX)SDW(oRM>b!3DdY|loGFVzrw
+z{4{MR#hQMaiP!`!d`QJ7S<TJxE;LRGoxwFmEgcmZE|`1q#9<+?sm0`wegC(B?t`+M
+z*rIDFHao+);1Lo2>yVLtPRXsvT<ri$7o8IS9P-?Q@CBNQvE|JJL8u^~!{<&AzubOo
+zY|It@Jdr~;vjuKgw#9kZdjP8j`v(~Ix8g_p?mstY^1nn<(6Mo5mzTrO-UzDWK1hOy
+z$i&#%*gDd}slvPQkeg^>qw@ag%O{}KN<*>uE^-vWge&S16X#cH{f>W7+(`Ss#H{=n
+zxi~QNr0ibjvb;W56}QT-uRYeVD64WWB1gfPz&otYTzuyu5yvBojJFgPo!$(l61sbb
+zz7r-8M3R8d%3Qk1$3y6qktP2jKJ)S?0uti#SM-ApS{!HdgGSoGj|nj`Q;;iPbj;+8
+zr#!CDtR_ZEy|LgSSk-|4nFS{4t>YQzI-OPm#3chVP}wh&)GB<$$fAfX{OmSJ&dHa|
+z*8QJcd5VX-Wx74NcXXH^9PiFT7FXNt7-MpA-rw85l*juc+VZ%$6=ThPw!TW_vh^}g
+z{cLNV#P0DJHFn+UNw1gtk-{qj2RoK3Hs;$%Nx|VTR93#mmim46lv6qflSdov?Pevn
+ziL3~Tg|&HL2>NkIkVHKtG%AbphRyWLlpaluTOO>D!+$5B5ArRrJnWp8Nw%b<a;fT@
+z=((GkD5TG>Q9;67h@*T$d^yZDoV<z=Z!tVOFV-DBjEs(0bsNU4j+aPz@~OQ9Qty;3
+z^5I~AG<B${Zj|HcMk>>a3!-G|3l`;8-@x<w2W0f`lEa12$_6Fo9X-9*IRGtTpLOin
+zB;75^Rl;gNt)cn86l%CZ!vm)vt4TnjG6bil;rHrDoD(k5XZeR+uRvE5AcH{vr0dpF
+z(rHc<&BH~swd;!jt($9}!}JCwz1b=MmFb_6zbb+3IwQtyn4DH)-C9tee8{`KATm+$
+z%eKbRzuK!)&{)Swb!{%1j&Uha>*F~5BpSCRNMV_HE1)Ow;N-M1c9+*I>H%7^6tbd^
+z{B9bwM@z1a&5^YCp}|fn#~0*v3oWoYVxR&uUn+7p`{ag7bQs7+0aL2^o)0r!BvF~F
+z;OCct8wniv5QFs9Ui8M<o*w?U&|u%m+&4w@vPgt>_0TVlPfax~6|T1E?4(AYg)-H4
+zYM)0s3_iezZ>J*UuBR~DN1%#rHXj-z+qJxQ>wmiMBA#^<_Vv;|S{Ntzx=@X%?Ye0<
+zoyT|4(#^qfqq><IBGGl_=#rwR*_}2_Rknz+xF}Ra0>ZW9Ki@0w$K9)KETPzaF^%^J
+z{{gYs%-_ir&V~UJg#Ja2m<-)OM~l#F6e=yVMz>QbvGrnU9SY-dosO~k9}(qNs`qu<
+zZldg<VG|PrG8+#F8{06n+nKMa>ZN8k(Y`phRcB*7`9mi8ZCAmfZ}z?<pAZ+7{B*m3
+zw0`8_Hl_CU{tcUk?QODI^cQDi5hLY+6v}1OMpI2~Jts3K3_(_Djpr$x2hDKh%-fDD
+zVV8P$BKXX%UAH3-pP`{{)6Y>U7+&Vn=kP)*41{gIW8GOSBAd;1ji;VEz1uBrv59RK
+z*1mJt@Vw`DtjOfQT9;j=2$SSZV6PE4#^x3}-_`vz*T;(TXUL2<{~MV|HHF@B{*~vI
+zh6r0MMwI?ziZC+GB_5Bl#@%mX$9Ok6y*lUY8n5xEQY-W@x^U#ZvAdJj8As0L-)tKO
+zapzjCKLUFaYY%sIxH%Rp&Z{}u35musEv8$q>ulz~qlGUDwR5gaK5RccPrK6GwW+T^
+zA6qp02Z6iTQ1*D(97fNWWZ_!n8h*YU<MIKSR${p+AqRhurwJX&GOk=I|2k<}GV{?}
+z3_?%PT_lFA*Kb$_@V(DdN%6Xy5B=`^7w4SYn|Mj@tro9?NJr+TSnTAUjZ~5MaIQRl
+zF6kS4-S#e4(TWzXrpbY4z^}F?OOR<Q-<pzo3l9OuwJi00Pay~Yb)@Cl5H+bvLHwWX
+zYOeR+wWb}YvFe*kSu_bJT@1+287WwPu5+Q=0PLn4UUan*h9?lwam?V4zkJAkftsK$
+z-#_b-z6(LA?}dc$AD&tqG}Z20kdD<giaUj5PtF{fJHHvc6_kqJNb@mXk#Q&9ny($r
+zkrPM{d%Vltgg@+Sg%CvGkivP;O|V0@61@IZmi%|85=C-JVgJ-N5}b=+z@RIF%k1Xw
+z-VHsXqfAbv06ebLU<@$8WePdx-lwOIq1oBd;eK&`AN=_jNv|HByV|u~xMmXkK5XBf
+zVrsAYH&cPx25bR|ejj>GFh_f|u`dBv&l}mIzwFdtawx9M6Zs(gqdn_GLqj0Y86M`m
+zSAcmI9`|2%3ob5rER^uxBBE;=K)Rnfz}+K}mgjBat^|Ehom!LevF6AHp@+R(b$!Z6
+z*=snMf~v`-$q7mRs)7Xee1crj1}X41?O03qcej(hy<)p9N29f&g6O#%x#HpK5N4ae
+z4Q>4+Cp+S*fBrlu<Q9RSeI!w{l=?5`?F-%7#-a8|mXphx<s)L~FMhz%2u{ldewLSg
+zVJ?brY`SZOI{3yUJBI8XFJ>V?)RtKWh9uUDJ&1ob+9P21TQk8((HfK#1_lZx1Oj*8
+g22zp!L7DI{;@h-5oR}|tZ!0j;;tFEbA_f8f4Rn0SrT_o{
+
+literal 0
+HcmV?d00001
+
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
+index d536252..2d8a570 100644
+--- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
++++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
+@@ -10,6 +10,8 @@ import {asFileKey} from '../../port/types.js';
+ import type {EmptyReason} from '../../ui/copy.js';
+ import {FileList} from '../../ui/file_list.js';
+ import {createRow, updateRow} from '../../ui/file_row.js';
++import {Sidebar} from '../../ui/sidebar.js';
++import type {Place} from '../../ui/sidebar.js';
+ 
+ export interface Story {
+   readonly name: string;
+@@ -122,7 +124,76 @@ function emptyStory(name: string, reason: EmptyReason, subject?: string): Story
+   };
+ }
+ 
++
++/**
++ * One sidebar, holding the states that are easy to get wrong: a drive with
++ * room, a drive with none, and a count. The near full stick is here on purpose,
++ * because the colour it turns is the kind of thing that survives a refactor
++ * looking fine and is only wrong when you put the two bars side by side.
++ */
++const PLACES: Place[] = (() => {
++  const gib = 1024 * 1024 * 1024;
++  const internal = {
++    id: 'internal',
++    root: asFileKey('mock://internal'),
++    label: 'Home',
++    kind: 'system' as const,
++    removable: false,
++    readOnly: false,
++    capacity: {total: 32 * gib, free: 8 * gib},
++  };
++  const stick = {
++    id: 'stick',
++    root: asFileKey('mock://stick'),
++    label: 'CRUZER',
++    kind: 'removable' as const,
++    removable: true,
++    readOnly: false,
++    capacity: {total: 16 * gib, free: 128 * 1024 * 1024},
++  };
++  return [
++    {key: asFileKey('fake://recent'), label: 'Recent', kind: 'recent'},
++    {key: asFileKey('fake://starred'), label: 'Starred', kind: 'starred'},
++    {key: asFileKey('fake://trash'), label: 'Trash', kind: 'trash'},
++    {key: internal.root, label: internal.label, kind: 'volume', volume: internal},
++    {key: stick.root, label: stick.label, kind: 'volume', volume: stick},
++    {key: asFileKey('fake://basket'), label: 'Basket', kind: 'basket', badge: 3},
++  ];
++})();
++
++function sidebar(root: HTMLElement, selected?: string): void {
++  const host = document.createElement('div');
++  host.className = 'aurade-panel';
++  root.appendChild(host);
++  const widget = new Sidebar(host);
++  widget.setPlaces(PLACES);
++  if (selected) {
++    widget.setSelected(asFileKey(selected));
++  }
++}
++
+ export const STORIES: Story[] = [
++  {
++    name: 'sidebar-light',
++    width: 268,
++    height: 430,
++    theme: 'light',
++    render: root => sidebar(root),
++  },
++  {
++    name: 'sidebar-dark',
++    width: 268,
++    height: 430,
++    theme: 'dark',
++    render: root => sidebar(root),
++  },
++  {
++    name: 'sidebar-current',
++    width: 268,
++    height: 430,
++    theme: 'dark',
++    render: root => sidebar(root, 'mock://internal'),
++  },
+   {
+     name: 'rows-light',
+     width: 720,
+diff --git a/ui/file_manager/file_manager/aurade/ui/sidebar.ts b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
+new file mode 100644
+index 0000000..3548b95
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
+@@ -0,0 +1,269 @@
++/**
++ * The places you can go, as our own component.
++ *
++ * Upstream puts this in a shadow root, which is why restyling it needed a
++ * stylesheet pushed into every tree item individually and why its selected
++ * state was unreadable for months: the rule paints on_primary over primary and
++ * a palette that retints those separately lands dark on dark. None of that is
++ * a problem you can have if you own the markup.
++ *
++ * Built as a list of buttons rather than a tree. A tree role promises expand
++ * and collapse semantics, arrow keys that walk levels, and a shape a screen
++ * reader will describe as nested. This is a flat set of destinations in
++ * labelled groups, so it says so.
++ */
++import type {FileKey, Volume} from '../port/types.js';
++import {formatSize} from './format.js';
++
++export type PlaceKind = 'recent'|'starred'|'trash'|'basket'|'volume';
++
++export interface Place {
++  readonly key: FileKey;
++  readonly label: string;
++  readonly kind: PlaceKind;
++  readonly volume?: Volume;
++  /** Shown as a count beside the label, for the basket. */
++  readonly badge?: number;
++}
++
++export interface SidebarOptions {
++  readonly onSelect?: (place: Place) => void;
++}
++
++const GLYPHS: Record<PlaceKind|'removable'|'system', string> = {
++  recent: 'M10 5v5l3.5 2M10 3.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13z',
++  starred: 'M10 3.5l2 4.2 4.5.6-3.3 3.2.8 4.5-4-2.2-4 2.2.8-4.5L3.5 8.3l4.5-.6z',
++  trash: 'M4.5 6h11M8 6V4.5h4V6M6 6l.7 9.5h6.6L14 6M8.5 8.5v5M11.5 8.5v5',
++  basket: 'M3.5 7.5h13l-1.4 8h-10.2zM7 7.5 8.5 3.5M13 7.5 11.5 3.5',
++  volume: 'M3 5.5h14v9H3zM3 11.5h14',
++  system: 'M4 5h12v7H4zM2.5 14.5h15',
++  removable: 'M7 3.5h6v5h2v8H5v-8h2zM9 5v2M11 5v2',
++};
++
++const STROKED = new Set<string>(['recent', 'trash', 'volume', 'system',
++                                 'removable', 'basket']);
++
++function glyph(kind: string): string {
++  const path = GLYPHS[kind as keyof typeof GLYPHS] ?? GLYPHS.volume;
++  const stroke = STROKED.has(kind) ?
++      'fill="none" stroke="currentColor" stroke-width="1.5" ' +
++          'stroke-linejoin="round" stroke-linecap="round"' :
++      'fill="currentColor"';
++  return `<svg class="aurade-place-glyph" viewBox="0 0 20 20" aria-hidden="true">` +
++      `<path d="${path}" ${stroke}/></svg>`;
++}
++
++function volumeGlyphKind(volume: Volume): string {
++  if (volume.removable) {
++    return 'removable';
++  }
++  return volume.kind === 'system' ? 'system' : 'volume';
++}
++
++let instances = 0;
++
++export class Sidebar {
++  private readonly nav: HTMLElement;
++  /** Distinguishes this sidebar's heading ids from another pane's. */
++  private readonly instance = ++instances;
++  private places: Place[] = [];
++  private selected: FileKey|null = null;
++
++  constructor(
++      private readonly container: HTMLElement,
++      private readonly options: SidebarOptions = {}) {
++    this.nav = document.createElement('nav');
++    this.nav.className = 'aurade-sidebar';
++    this.nav.setAttribute('aria-label', 'Places');
++    this.container.appendChild(this.nav);
++    this.nav.addEventListener('click', this.onClick);
++    this.nav.addEventListener('keydown', this.onKeyDown);
++  }
++
++  setPlaces(places: readonly Place[]): void {
++    this.places = places.slice();
++    this.render();
++  }
++
++  setSelected(key: FileKey|null): void {
++    this.selected = key;
++    this.render();
++  }
++
++  private groups(): Array<{title: string, places: Place[]}> {
++    const quick = this.places.filter(
++        place => place.kind !== 'volume' && place.kind !== 'basket');
++    const volumes = this.places.filter(place => place.kind === 'volume');
++    const basket = this.places.filter(place => place.kind === 'basket');
++    const out: Array<{title: string, places: Place[]}> = [];
++    if (quick.length) {
++      out.push({title: 'Quick access', places: quick});
++    }
++    // Removable media is separated from what is always there, because a drive
++    // you can pull out and a drive you cannot are not the same kind of place.
++    const fixed = volumes.filter(place => !place.volume?.removable);
++    const removable = volumes.filter(place => place.volume?.removable);
++    if (fixed.length) {
++      out.push({title: 'This computer', places: fixed});
++    }
++    if (removable.length) {
++      out.push({title: 'Devices', places: removable});
++    }
++    if (basket.length) {
++      out.push({title: 'Gathered', places: basket});
++    }
++    return out;
++  }
++
++  private render(): void {
++    this.nav.textContent = '';
++    for (const group of this.groups()) {
++      const section = document.createElement('div');
++      section.className = 'aurade-place-group';
++      const heading = document.createElement('h2');
++      heading.className = 'aurade-place-heading';
++      heading.textContent = group.title;
++      const id = `aurade-group-${this.instance}-` +
++          group.title.replace(/\s+/g, '-').toLowerCase();
++      heading.id = id;
++      const list = document.createElement('ul');
++      list.className = 'aurade-place-list';
++      list.setAttribute('aria-labelledby', id);
++      for (const place of group.places) {
++        list.appendChild(this.renderPlace(place));
++      }
++      section.append(heading, list);
++      this.nav.appendChild(section);
++    }
++  }
++
++  private renderPlace(place: Place): HTMLElement {
++    const item = document.createElement('li');
++    const button = document.createElement('button');
++    button.type = 'button';
++    button.className = 'aurade-place';
++    button.dataset['key'] = place.key;
++    const current = place.key === this.selected;
++    // aria-current rather than aria-selected: this is where you are, not one
++    // of a set of things you have picked.
++    if (current) {
++      button.setAttribute('aria-current', 'page');
++    }
++    // Where you are is the natural place for the keyboard to land, but only if
++    // it is somewhere this sidebar actually lists. It usually is not: open a
++    // folder three levels down and none of these is current. Falling back to
++    // the first place keeps the sidebar in the tab order instead of dropping
++    // it out of the document entirely.
++    button.tabIndex = place === this.tabStop() ? 0 : -1;
++
++    const kind = place.kind === 'volume' && place.volume ?
++        volumeGlyphKind(place.volume) : place.kind;
++    const label = document.createElement('span');
++    label.className = 'aurade-place-label';
++    label.textContent = place.label;
++
++    button.innerHTML = glyph(kind);
++    button.appendChild(label);
++
++    if (place.badge !== undefined && place.badge > 0) {
++      const badge = document.createElement('span');
++      badge.className = 'aurade-place-badge';
++      badge.textContent = String(place.badge);
++      // The number is meaningless read on its own, so the button says what it
++      // counts and the badge itself is decoration.
++      button.setAttribute(
++          'aria-label',
++          `${place.label}, ${place.badge} ${place.badge === 1 ? 'item' : 'items'}`);
++      button.appendChild(badge);
++    }
++
++    item.appendChild(button);
++
++    const capacity = place.volume?.capacity;
++    if (capacity && capacity.total > 0) {
++      // Exact free space in words, with the bar as the supplement. A ring or a
++      // bar on its own is poor for comparison and worse for anybody who cannot
++      // see it, so the sentence carries the meaning.
++      const used = 1 - capacity.free / capacity.total;
++      const meter = document.createElement('div');
++      meter.className = 'aurade-place-capacity';
++      const text = document.createElement('span');
++      text.className = 'aurade-place-free';
++      text.textContent =
++          `${formatSize(capacity.free)} free of ${formatSize(capacity.total)}`;
++      const bar = document.createElement('div');
++      bar.className = 'aurade-place-bar';
++      bar.setAttribute('role', 'img');
++      bar.setAttribute('aria-hidden', 'true');
++      const fill = document.createElement('div');
++      fill.className = 'aurade-place-bar-fill';
++      fill.style.inlineSize = `${Math.round(used * 100)}%`;
++      if (used >= 0.98) {
++        fill.dataset['level'] = 'full';
++      } else if (used >= 0.90) {
++        fill.dataset['level'] = 'high';
++      }
++      bar.appendChild(fill);
++      meter.append(text, bar);
++      item.appendChild(meter);
++    }
++
++    return item;
++  }
++
++  private tabStop(): Place|undefined {
++    return this.places.find(place => place.key === this.selected) ??
++        this.places[0];
++  }
++
++  private buttons(): HTMLElement[] {
++    return [...this.nav.querySelectorAll<HTMLElement>('.aurade-place')];
++  }
++
++  private activate(button: HTMLElement): void {
++    const key = button.dataset['key'];
++    const place = this.places.find(candidate => candidate.key === key);
++    if (place) {
++      this.options.onSelect?.(place);
++    }
++  }
++
++  private onClick = (event: MouseEvent): void => {
++    const button = (event.target as HTMLElement|null)?.closest?.('.aurade-place');
++    if (button) {
++      this.activate(button as HTMLElement);
++    }
++  };
++
++  // Arrow keys walk the whole sidebar rather than one group, because the
++  // grouping is a way of reading it and not a set of separate controls.
++  private onKeyDown = (event: KeyboardEvent): void => {
++    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' &&
++        event.key !== 'Home' && event.key !== 'End') {
++      return;
++    }
++    const buttons = this.buttons();
++    if (!buttons.length) {
++      return;
++    }
++    const active = document.activeElement as HTMLElement|null;
++    const at = buttons.findIndex(button => button === active);
++    let next: number;
++    switch (event.key) {
++      case 'ArrowDown': next = at < 0 ? 0 : Math.min(buttons.length - 1, at + 1); break;
++      case 'ArrowUp': next = at < 0 ? 0 : Math.max(0, at - 1); break;
++      case 'Home': next = 0; break;
++      default: next = buttons.length - 1;
++    }
++    for (const button of buttons) {
++      button.tabIndex = -1;
++    }
++    buttons[next]!.tabIndex = 0;
++    buttons[next]!.focus();
++    event.preventDefault();
++  };
++
++  destroy(): void {
++    this.nav.remove();
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
+index a087b21..d608ed3 100644
+--- a/ui/file_manager/file_manager/aurade/ui/tokens.css
++++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
+@@ -29,6 +29,8 @@
+   --aurade-tile-selected: #dbcdf6;
+   --aurade-glyph: #6f6885;
+   --aurade-tag-bg: #f7f5fc;
++  --aurade-warn: #a1651a;
++  --aurade-danger: #b3261e;
+ 
+   --aurade-radius-row: 11px;
+   --aurade-radius-tile: 11px;
+@@ -57,6 +59,8 @@
+     --aurade-tile-selected: #4a3b74;
+     --aurade-glyph: #a79dc4;
+     --aurade-tag-bg: #211f2c;
++  --aurade-warn: #e6b062;
++  --aurade-danger: #f2b8b5;
+   }
+ }
+ 
+@@ -80,6 +84,8 @@
+     --aurade-tile-selected: #4a3b74;
+     --aurade-glyph: #a79dc4;
+     --aurade-tag-bg: #211f2c;
++  --aurade-warn: #e6b062;
++  --aurade-danger: #f2b8b5;
+ }
+ 
+ /* Density is fixed per mode, never measured. Dynamic row heights across a
+@@ -229,3 +235,125 @@
+      stranding "files." on its own. */
+   max-inline-size: 48ch;
+ }
++
++
++/* The sidebar: where you can go, as opposed to what is in front of you.
++
++   Group headings are quiet and small rather than uppercase and tracked out.
++   Small caps at this size is a legibility cost paid for a filing cabinet
++   aesthetic nobody asked for, and these are three or four words that want to
++   be skimmed past on the way to the thing underneath. */
++.aurade-sidebar {
++  box-sizing: border-box;
++  display: flex;
++  flex-direction: column;
++  gap: 18px;
++  inline-size: 232px;
++  overflow-y: auto;
++  padding: 12px 10px;
++}
++.aurade-place-heading {
++  color: var(--aurade-quiet);
++  font-size: 11px;
++  font-weight: 600;
++  letter-spacing: .01em;
++  margin: 0 0 4px;
++  padding-inline: 10px;
++}
++.aurade-place-list {
++  display: flex;
++  flex-direction: column;
++  gap: 1px;
++  list-style: none;
++  margin: 0;
++  padding: 0;
++}
++.aurade-place {
++  align-items: center;
++  background: none;
++  border: 0;
++  border-radius: var(--aurade-radius-row);
++  color: var(--aurade-ink);
++  cursor: default;
++  display: flex;
++  font: inherit;
++  gap: 10px;
++  inline-size: 100%;
++  padding: 7px 10px;
++  position: relative;
++  text-align: start;
++}
++.aurade-place:hover { background: var(--aurade-row-hover); }
++.aurade-place:focus-visible {
++  outline: 2px solid var(--aurade-accent);
++  outline-offset: -2px;
++}
++.aurade-place[aria-current="page"] {
++  background: var(--aurade-row-selected);
++  color: var(--aurade-accent);
++  font-weight: 600;
++}
++/* A rail rather than a full bleed fill. The fill alone reads as a hover that
++   got stuck; the rail is what says this is where you are. */
++.aurade-place[aria-current="page"]::before {
++  background: var(--aurade-accent);
++  block-size: 16px;
++  border-radius: var(--aurade-radius-pill);
++  content: "";
++  inline-size: 3px;
++  inset-block-start: 50%;
++  inset-inline-start: 1px;
++  position: absolute;
++  translate: 0 -50%;
++}
++.aurade-place-glyph {
++  block-size: 18px;
++  color: var(--aurade-glyph);
++  flex: none;
++  inline-size: 18px;
++}
++.aurade-place[aria-current="page"] .aurade-place-glyph { color: inherit; }
++.aurade-place-label {
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.aurade-place-badge {
++  background: var(--aurade-tag-bg);
++  border-radius: var(--aurade-radius-pill);
++  color: var(--aurade-quiet);
++  font-size: 11px;
++  font-variant-numeric: tabular-nums;
++  margin-inline-start: auto;
++  padding: 1px 7px;
++}
++.aurade-place[aria-current="page"] .aurade-place-badge {
++  background: var(--aurade-panel);
++  color: var(--aurade-accent);
++}
++
++/* Capacity sits under the drive it belongs to, indented to the label rather
++   than the glyph, so the eye reads it as a note about that row. */
++.aurade-place-capacity {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  padding: 1px 10px 6px 38px;
++}
++.aurade-place-free {
++  color: var(--aurade-quiet);
++  font-size: 11px;
++}
++.aurade-place-bar {
++  background: var(--aurade-line);
++  block-size: 3px;
++  border-radius: var(--aurade-radius-pill);
++  overflow: hidden;
++}
++.aurade-place-bar-fill {
++  background: var(--aurade-accent);
++  block-size: 100%;
++  border-radius: inherit;
++}
++.aurade-place-bar-fill[data-level="high"] { background: var(--aurade-warn); }
++.aurade-place-bar-fill[data-level="full"] { background: var(--aurade-danger); }

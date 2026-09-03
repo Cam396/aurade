@@ -18,15 +18,21 @@ fail() { printf 'aurade port mutation test: %s\n' "$*" >&2; exit 1; }
 
 AURADE="$AURADE" python3 - <<'PYEOF'
 import os
+import atexit
+import signal
 import subprocess
 import sys
 
 A = os.environ["AURADE"]
 
-# label, file, the code to break, what to replace it with, the test that must
-# then fail by name.
+# suite, label, file, the code to break, what to replace it with, and the test
+# that must then fail by name. The suite matters: keyboard, ARIA and recycling
+# are invisible to the node suite, which has no DOM at all.
+UNIT = ["bash", os.path.join(A, "tests/run.sh")]
+DOM = ["python3", os.path.join(A, "tests/harness/dom.py")]
+
 MUTATIONS = [
-    ("the session drops its buffered replay, reopening the list/watch race",
+    (UNIT, "the session drops its buffered replay, reopening the list/watch race",
      "session/navigation_session.ts",
      """      listed = true;
       for (const event of buffered) {
@@ -37,13 +43,13 @@ MUTATIONS = [
      "      listed = true;",
      "a change that lands during the listing is not lost"),
 
-    ("the session stops cancelling the navigation it is replacing",
+    (UNIT, "the session stops cancelling the navigation it is replacing",
      "session/navigation_session.ts",
      "    this.controller?.abort();\n    const controller = new AbortController();",
      "    const controller = new AbortController();",
      "navigating again abandons the first listing"),
 
-    ("the session stops pruning the selection when an entry is removed",
+    (UNIT, "the session stops pruning the selection when an entry is removed",
      "session/navigation_session.ts",
      """        for (const key of gone) {
           this.selection.delete(key);
@@ -51,14 +57,14 @@ MUTATIONS = [
      "        void gone;",
      "a removed entry drops out of the selection"),
 
-    ("a range selection collapses to the single item clicked",
+    (UNIT, "a range selection collapses to the single item clicked",
      "session/navigation_session.ts",
      """        this.selection = new Set(
             this.entries.slice(lo, hi + 1).map(entry => entry.key));""",
      "        this.selection = new Set([key]);",
      "a range selection is resolved over indices"),
 
-    ("the backend stops honouring the abort signal while listing",
+    (UNIT, "the backend stops honouring the abort signal while listing",
      "port/mock_backend.ts",
      """      if (options.signal?.aborted) {
         return;
@@ -67,7 +73,7 @@ MUTATIONS = [
      "      const slice = all.slice(i, i + size);",
      "stops listing when the caller aborts"),
 
-    ("the backend stops advancing the revision when something changes",
+    (UNIT, "the backend stops advancing the revision when something changes",
      "port/mock_backend.ts",
      """  private bump(key: FileKey): number {
     const next = (this.revisions.get(key) ?? 1) + 1;""",
@@ -75,7 +81,7 @@ MUTATIONS = [
     const next = (this.revisions.get(key) ?? 1);""",
      "the revision advances between a listing and a later change"),
 
-    ("the backend returns every metadata field regardless of the request",
+    (UNIT, "the backend returns every metadata field regardless of the request",
      "port/mock_backend.ts",
      """      const picked: Record<string, unknown> = {};
       for (const field of fields) {
@@ -88,19 +94,204 @@ MUTATIONS = [
      "returns metadata in one batch, limited to the fields asked for"),
 ]
 
+DOM_MUTATIONS = [
+    (DOM, "the list stops telling a screen reader how many items there are",
+     "ui/file_list.ts",
+     "    this.viewport.setAttribute('aria-setsize', String(entries.length));",
+     "",
+     "the list tells a screen reader what it is and how big it is"),
+
+    (DOM, "rows stop carrying a position, so \"item 4 of 20\" becomes nothing",
+     "ui/file_list.ts",
+     "      row.setAttribute('aria-posinset', String(index + 1));",
+     "",
+     "the list tells a screen reader what it is and how big it is"),
+
+    (DOM, "a row's accessible name falls back to its columns",
+     "ui/file_row.ts",
+     """  row.setAttribute(
+      'aria-label',""",
+     """  row.setAttribute(
+      'data-aurade-unused-label',""",
+     "every row carries a name that reads as a sentence, not as cells"),
+
+    (DOM, "shift and an arrow moves the selection instead of extending it",
+     "ui/file_list.ts",
+     "    this.selectIndex(next, extend ? 'range' : 'replace');",
+     "    this.selectIndex(next, 'replace');",
+     "shift and an arrow extends the selection rather than moving it"),
+
+    (DOM, "control A selects only what happens to be rendered",
+     "ui/file_list.ts",
+     """    for (let i = 0; i < this.entries.length; i++) {
+      this.selection.add(i);
+    }""",
+     """    for (let i = 0; i < Math.min(this.entries.length, 12); i++) {
+      this.selection.add(i);
+    }""",
+     "control A selects everything, including what is not rendered"),
+
+    (DOM, "page keys move by one row rather than by a viewport",
+     "ui/file_list.ts",
+     "    const page = Math.max(1, Math.floor(this.viewport.clientHeight / this.rowHeight) - 1);",
+     "    const page = 1;",
+     "page keys move by a viewport rather than by one"),
+
+    (DOM, "rows are appended rather than recycled",
+     "ui/file_list.ts",
+     """    while (this.pool.length > count) {
+      this.pool.pop()!.remove();
+    }""",
+     "",
+     "a short directory after a long one leaves no rows behind"),
+
+    (DOM, "the empty state stops saying which emptiness this is",
+     "ui/file_list.ts",
+     "    const copy = emptyCopy(this.emptyReason, this.emptySubject);",
+     "    const copy = {title: 'No files.', detail: undefined};",
+     "the empty state replaces the rows and is announced"),
+]
+
+
+# The sidebar is our own markup rather than a shadow tree we style from
+# outside, which is the whole reason its selected state can be asserted at all.
+# These are the ways it would quietly stop being usable.
+SIDEBAR_MUTATIONS = [
+    (DOM, "the sidebar landmark loses its name",
+     "ui/sidebar.ts",
+     "    this.nav.setAttribute('aria-label', 'Places');\n",
+     "",
+     "the sidebar is a navigation landmark with a name"),
+
+    (DOM, "a group of places is no longer tied to its heading",
+     "ui/sidebar.ts",
+     "      list.setAttribute('aria-labelledby', id);\n",
+     "",
+     "each group is a list that says which group it is"),
+
+    (DOM, "a drive you can pull out is filed with the ones you cannot",
+     "ui/sidebar.ts",
+     """    const fixed = volumes.filter(place => !place.volume?.removable);
+    const removable = volumes.filter(place => place.volume?.removable);""",
+     """    const fixed = volumes;
+    const removable: Place[] = [];""",
+     "removable media is separated from what is bolted in"),
+
+    (DOM, "changing where you are does not redraw where you are",
+     "ui/sidebar.ts",
+     """    this.selected = key;
+    this.render();""",
+     "    this.selected = key;",
+     "where you are is announced as current"),
+
+    (DOM, "arrowing past the last place wraps to the first",
+     "ui/sidebar.ts",
+     "      case 'ArrowDown': next = at < 0 ? 0 : Math.min(buttons.length - 1, at + 1); break;",
+     "      case 'ArrowDown': next = at < 0 ? 0 : (at + 1) % buttons.length; break;",
+     "arrow keys stop at the ends rather than wrapping"),
+
+    (DOM, "every place becomes its own tab stop",
+     "ui/sidebar.ts",
+     "    button.tabIndex = place === this.tabStop() ? 0 : -1;",
+     "    button.tabIndex = 0;",
+     "tab reaches the sidebar once, not once per place"),
+
+    (DOM, "free space is left to the bar alone",
+     "ui/sidebar.ts",
+     """      text.textContent =
+          `${formatSize(capacity.free)} free of ${formatSize(capacity.total)}`;""",
+     "      text.textContent = '';",
+     "capacity is a sentence, not only a bar"),
+
+    (DOM, "the capacity bar is read out as well as the sentence",
+     "ui/sidebar.ts",
+     "      bar.setAttribute('aria-hidden', 'true');\n",
+     "",
+     "the bar is not read out twice"),
+
+    (DOM, "a drive with no room left looks like one with plenty",
+     "ui/sidebar.ts",
+     "      if (used >= 0.98) {",
+     "      if (used >= 1.5) {",
+     "a drive with no room left says so in colour as well as words"),
+
+    (DOM, "a count of one is announced as items",
+     "ui/sidebar.ts",
+     "          `${place.label}, ${place.badge} ${place.badge === 1 ? 'item' : 'items'}`);",
+     "          `${place.label}, ${place.badge} items`);",
+     "one gathered item is not"),
+
+    (DOM, "an empty basket is drawn as a zero",
+     "ui/sidebar.ts",
+     "    if (place.badge !== undefined && place.badge > 0) {",
+     "    if (place.badge !== undefined) {",
+     "an empty basket shows no badge at all"),
+
+    (DOM, "a drive label is parsed as markup",
+     "ui/sidebar.ts",
+     "    label.textContent = place.label;",
+     "    label.innerHTML = place.label;",
+     "a drive named by its owner cannot inject markup"),
+    (DOM, "the sidebar drops out of the tab order when nothing is current",
+     "ui/sidebar.ts",
+     """    return this.places.find(place => place.key === this.selected) ??
+        this.places[0];""",
+     "    return this.places.find(place => place.key === this.selected);",
+     "the sidebar stays reachable when you are somewhere it does not list"),
+
+    (DOM, "two sidebars emit the same heading ids",
+     "ui/sidebar.ts",
+     """      const id = `aurade-group-${this.instance}-` +
+          group.title.replace(/\\s+/g, '-').toLowerCase();""",
+     """      const id = 'aurade-group-' +
+          group.title.replace(/\\s+/g, '-').toLowerCase();""",
+     "two sidebars on one page do not share heading ids"),]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS
+
+# Every anchor is checked before anything is touched. A run that is killed
+# rather than returned from skips the finally below and leaves a mutation in
+# the tree, and the next run then measures already broken source: the page key
+# mutation did exactly that, and reported itself and its neighbour as escapes
+# rather than as the dirty tree it was. Failing loudly here turns a silent
+# wrong answer into a refusal.
+dirty = []
+for _, label, relative, old, _, _ in MUTATIONS:
+    hits = open(os.path.join(A, relative)).read().count(old)
+    if hits != 1:
+        dirty.append("  %-60s anchor found %d times in %s" % (label, hits, relative))
+if dirty:
+    print("aurade port mutation test: the tree is not in a state worth mutating.")
+    print("\n".join(dirty))
+    print("An anchor that is missing usually means a killed run left its "
+          "mutation behind. Check the file before trusting any earlier result.")
+    sys.exit(1)
+
+# A SIGTERM, the usual way a run this long gets stopped, would otherwise skip
+# the restore for whichever mutation is live at the time.
+in_flight = {}
+
+
+def restore_all(*_):
+    for path, text in in_flight.items():
+        open(path, "w").write(text)
+    in_flight.clear()
+
+
+atexit.register(restore_all)
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(sig, lambda *_: (restore_all(), sys.exit(2)))
+
 caught = 0
 escaped = []
-for label, relative, old, new, expected in MUTATIONS:
+for suite, label, relative, old, new, expected in MUTATIONS:
     path = os.path.join(A, relative)
     original = open(path).read()
-    if original.count(old) != 1:
-        escaped.append("%s: anchor matched %d times, so it was never applied"
-                       % (label, original.count(old)))
-        continue
+    in_flight[path] = original
     open(path, "w").write(original.replace(old, new, 1))
     try:
-        run = subprocess.run(["bash", os.path.join(A, "tests/run.sh")],
-                             capture_output=True, text=True, timeout=300)
+        run = subprocess.run(suite, capture_output=True, text=True,
+                             timeout=300)
         output = run.stdout + run.stderr
         if run.returncode != 0 and expected in output:
             print("  caught      %s" % label)
@@ -112,6 +303,7 @@ for label, relative, old, new, expected in MUTATIONS:
             escaped.append("%s: NOT CAUGHT" % label)
     finally:
         open(path, "w").write(original)
+        in_flight.pop(path, None)
 
 for line in escaped:
     print("  escaped     %s" % line)
