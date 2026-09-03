@@ -441,7 +441,68 @@ TOOLBAR_MUTATIONS = [
      "the popover is actually on screen and not clipped away"),
 ]
 
-MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS
+
+# The status bar, whose whole difficulty is knowing when to keep quiet.
+STATUS_MUTATIONS = [
+    (DOM, "a total is assembled from whatever sizes happen to have arrived",
+     "ui/shell.ts",
+     """      if (size === undefined) {
+        return null;
+      }""",
+     """      if (size === undefined) {
+        continue;
+      }""",
+     "a huge directory is not given a total assembled from one screen"),
+
+    (DOM, "folders are counted as files with no size",
+     "ui/shell.ts",
+     """      if (entry.isDirectory) {
+        continue;
+      }""",
+     "",
+     "a total is given only when every size is actually known"),
+
+    (DOM, "the selection is never reported",
+     "ui/status_bar.ts",
+     """    const head =
+        selected > 0 ? formatSelection(selected) : formatCount(folders, files);""",
+     "    const head = formatCount(folders, files);",
+     "selecting something replaces the count with the selection"),
+
+    (DOM, "selecting something does not update the bar",
+     "ui/shell.ts",
+     "      onSelectionChange: () => this.refreshStatus(),\n",
+     "",
+     "selecting something replaces the count with the selection"),
+
+    (DOM, "sizes arriving never make the total sayable",
+     "ui/shell.ts",
+     """    // Sizes arriving is exactly when a total can become sayable.
+    this.refreshStatus();""",
+     "",
+     "a total is given only when every size is actually known"),
+
+    (DOM, "free space is read off the folder rather than the drive",
+     "ui/shell.ts",
+     "    const root = this.trail[0];",
+     "    const root = this.trail[this.trail.length - 1];",
+     "the drive does not change just because you opened a folder"),
+
+    (DOM, "a place with no capacity keeps the last drive's figure on screen",
+     "ui/status_bar.ts",
+     """      this.space.hidden = true;
+      return;""",
+     "      return;",
+     "somewhere with no notion of free space shows none"),
+
+    (DOM, "the free space bar is announced as well as the sentence",
+     "ui/status_bar.ts",
+     "    track.setAttribute('aria-hidden', 'true');\n",
+     "",
+     "the free space bar is not read out as well as the words"),
+]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS + STATUS_MUTATIONS
 
 # Every anchor is checked before anything is touched. A run that is killed
 # rather than returned from skips the finally below and leaves a mutation in
