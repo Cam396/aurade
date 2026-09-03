@@ -1,0 +1,951 @@
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+index 2ffbf3d..42831ca 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+@@ -12,9 +12,9 @@
+  * passing over them quietly.
+  */
+ import type {FilesBackendPort} from '../port/port.js';
+-import type {ChangeEvent, DialogMode, EntryDto, EntryPage, FileKey, IoProgress, IoRequest, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind} from '../port/types.js';
++import type {ChangeEvent, DialogKind, DialogMode, EntryDto, EntryPage, FileKey, IoKind, IoProgress, IoRequest, IoState, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind} from '../port/types.js';
+ import {asFileKey, FilesError} from '../port/types.js';
+-import type {Platform, PlatformEntry, PlatformMetadata, PlatformVolume, PlatformWatchEvent} from './platform.js';
++import type {Platform, PlatformEntry, PlatformIoProgress, PlatformIoState, PlatformIoType, PlatformMetadata, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from './platform.js';
+ 
+ /** ChromeOS volume types, as they are actually spelled. */
+ const VOLUME_KINDS: Record<string, VolumeKind> = {
+@@ -50,6 +50,80 @@ const METADATA_NAMES: Record<MetadataField, string> = {
+   restricted: 'restricted',
+ };
+ 
++
++/** Our kinds to `IoTaskType`. Note compress is spelled zip on the far side. */
++const IO_TYPES: Record<IoKind, PlatformIoType> = {
++  copy: 'copy',
++  move: 'move',
++  trash: 'trash',
++  restore: 'restore',
++  delete: 'delete',
++  compress: 'zip',
++  extract: 'extract',
++};
++
++/**
++ * `IoTaskState` to ours, which has fewer states on purpose.
++ *
++ * Two are worth knowing about. `paused` is running: the task is alive and will
++ * carry on, and calling it queued would say it had not started. `need_password`
++ * is the awkward one: an encrypted archive is waiting for input, which is
++ * neither failure nor progress, and we have no state that says so. It is
++ * reported as failed with a typed error rather than as a task that appears to
++ * be working while nothing happens. Encrypted archives are not supported until
++ * IoState grows a variant for waiting on a person.
++ */
++const IO_STATES: Record<PlatformIoState, IoState> = {
++  queued: 'queued',
++  scanning: 'running',
++  in_progress: 'running',
++  paused: 'running',
++  success: 'succeeded',
++  error: 'failed',
++  need_password: 'failed',
++  cancelled: 'cancelled',
++};
++
++const IO_KINDS: Record<string, IoKind> = {
++  copy: 'copy',
++  move: 'move',
++  trash: 'trash',
++  restore: 'restore',
++  restore_to_destination: 'restore',
++  delete: 'delete',
++  empty_trash: 'delete',
++  zip: 'compress',
++  extract: 'extract',
++};
++
++/** ChromeOS dialog types to ours. */
++const DIALOG_KINDS: Record<string, DialogKind> = {
++  'open-file': 'open-file',
++  'open-multi-file': 'open-multi',
++  'folder': 'open-folder',
++  'upload-folder': 'open-upload',
++  'saveas-file': 'save-as',
++};
++
++/**
++ * The task id, as the rest of the app already spells it.
++ *
++ * `FileTaskDescriptor` is a triple and our `TaskDescriptor.id` is one string,
++ * so it has to be encoded. `common/js/util.ts` already joins them with pipes
++ * for the same reason, and using a second scheme here would mean two ways of
++ * naming the same task in one application.
++ */
++function encodeTask(descriptor: PlatformTaskDescriptor): string {
++  return `${descriptor.appId}|${descriptor.taskType}|${descriptor.actionId}`;
++}
++
++function decodeTask(id: string): PlatformTaskDescriptor {
++  const [appId = '', taskType = '', ...rest] = id.split('|');
++  // Split into three, not into however many pipes there are: an action id is
++  // an arbitrary string and is allowed to contain one.
++  return {appId, taskType, actionId: rest.join('|')};
++}
++
+ /**
+  * A DOMException is a name, not a code, and the UI has to say something
+  * different for each. Matching on the message is how that stops working in
+@@ -157,6 +231,19 @@ export class ChromeOsBackend implements FilesBackendPort {
+     };
+   }
+ 
++  /** Resolves every key or fails, unlike the metadata path which forgives. */
++  private async resolveAll(keys: readonly FileKey[]): Promise<PlatformEntry[]> {
++    const out: PlatformEntry[] = [];
++    for (const key of keys) {
++      try {
++        out.push(await this.platform.resolve(key));
++      } catch (error) {
++        throw translateError(error, 'That file');
++      }
++    }
++    return out;
++  }
++
+   private async resolveDirectory(key: FileKey): Promise<PlatformEntry> {
+     let entry: PlatformEntry;
+     try {
+@@ -469,40 +556,170 @@ export class ChromeOsBackend implements FilesBackendPort {
+     return Promise.all(found.map(volume => this.toVolume(volume)));
+   }
+ 
+-  // Not implemented yet, and saying so rather than returning something
+-  // plausible. The contract reports these as skipped for this backend.
+-
+-  private unsupported(what: string): never {
+-    throw new FilesError('unsupported', `${what} is not wired up yet.`);
++  async * search(query: string, scope: FileKey, options: ListOptions = {}):
++      AsyncIterable<EntryPage> {
++    let root: PlatformEntry|null = null;
++    try {
++      root = await this.platform.resolve(scope);
++    } catch (error) {
++      throw translateError(error, 'That folder');
++    }
++    // maxResults is required by the API, so a search is capped whether or not
++    // we choose a cap. Saying so here is better than pretending to stream
++    // everything and quietly stopping at somebody else's number.
++    const maxResults = options.pageSize ?? 200;
++    let found: readonly PlatformEntry[];
++    try {
++      found = await this.platform.searchFiles({rootDir: root, query, maxResults});
++    } catch (error) {
++      throw translateError(error, 'That search');
++    }
++    const entries = found
++                        .filter(
++                            entry => options.showHidden ||
++                                !entry.name.startsWith('.'))
++                        .map(entry => this.toDto(entry, scope));
++    yield {revision: this.revisionOf(scope), entries, done: true};
+   }
+ 
+-  // eslint-disable-next-line require-yield
+-  async * search(): AsyncIterable<EntryPage> {
+-    this.unsupported('Search');
++  async tasks(keys: readonly FileKey[]): Promise<readonly TaskDescriptor[]> {
++    const entries = await this.resolveAll(keys);
++    let found: readonly Awaited<ReturnType<Platform['getFileTasks']>>[number][];
++    try {
++      found = await this.platform.getFileTasks(entries);
++    } catch (error) {
++      throw translateError(error, 'Those files');
++    }
++    return found.map(task => ({
++                       id: encodeTask(task.descriptor),
++                       title: task.title,
++                       iconUrl: task.iconUrl,
++                       // Optional on the far side, so the absence of the flag
++                       // is false rather than undefined leaking into the UI.
++                       isDefault: task.isDefault === true,
++                       isDlpBlocked: task.isDlpBlocked === true,
++                     }));
+   }
+-  async tasks(): Promise<readonly TaskDescriptor[]> {
+-    this.unsupported('Open with');
++
++  async executeTask(taskId: string, keys: readonly FileKey[]): Promise<void> {
++    const entries = await this.resolveAll(keys);
++    let result: string;
++    try {
++      result = await this.platform.executeTask(decodeTask(taskId), entries);
++    } catch (error) {
++      throw translateError(error, 'That app');
++    }
++    // The API answers with a result string rather than by rejecting, so a
++    // failure here is silent unless it is read.
++    if (result === 'failed') {
++      throw new FilesError('io', 'That could not be opened.');
++    }
++    if (result === 'empty') {
++      throw new FilesError('unsupported', 'Nothing can open that.');
++    }
+   }
+-  async executeTask(): Promise<void> {
+-    this.unsupported('Open with');
++
++  private toIoProgress(status: PlatformIoProgress): IoProgress {
++    const state = IO_STATES[status.state] ?? 'running';
++    const progress: {
++      taskId: TaskId,
++      kind: IoKind,
++      state: IoState,
++      processed: number,
++      total: number,
++      currentName?: string,
++      error?: FilesError,
++    } = {
++      taskId: String(status.taskId) as TaskId,
++      kind: IO_KINDS[status.type] ?? 'copy',
++      state,
++      processed: status.bytesTransferred,
++      total: status.totalBytes,
++      currentName: status.sourceName,
++    };
++    if (status.state === 'need_password') {
++      progress.error = new FilesError(
++          'unsupported', 'That archive needs a password.');
++    } else if (state === 'failed') {
++      progress.error = translateError(
++          {name: status.errorName ?? ''}, 'That operation');
++    }
++    return progress;
+   }
+-  async startIo(_request: IoRequest): Promise<TaskId> {
+-    this.unsupported('File operations');
++
++  async startIo(request: IoRequest): Promise<TaskId> {
++    const entries = await this.resolveAll(request.sources);
++    let destination: PlatformEntry|undefined;
++    if (request.destination) {
++      destination = await this.resolveDirectory(request.destination);
++    }
++    let taskId: number;
++    try {
++      taskId = await this.platform.startIoTask(
++          IO_TYPES[request.kind], entries, {destinationFolder: destination});
++    } catch (error) {
++      throw translateError(error, 'That operation');
++    }
++    return String(taskId) as TaskId;
+   }
+-  // eslint-disable-next-line require-yield
+-  async * subscribeIo(): AsyncIterable<IoProgress> {
+-    this.unsupported('File operations');
++
++  async * subscribeIo(signal?: AbortSignal): AsyncIterable<IoProgress> {
++    const stream = new Stream<IoProgress>();
++    // Registered before any await, for the same reason watch is.
++    const off = this.platform.onIoProgress(status => {
++      stream.push(this.toIoProgress(status));
++    });
++    const stop = () => {
++      off();
++      stream.close();
++    };
++    if (signal?.aborted) {
++      stop();
++      return;
++    }
++    signal?.addEventListener('abort', stop, {once: true});
++    try {
++      yield* stream;
++    } finally {
++      stop();
++    }
+   }
+-  async cancelIo(): Promise<void> {
+-    this.unsupported('File operations');
++
++  async cancelIo(taskId: TaskId): Promise<void> {
++    const numeric = Number(taskId);
++    if (!Number.isFinite(numeric)) {
++      throw new FilesError('not-found', 'There is no such operation.');
++    }
++    this.platform.cancelIoTask(numeric);
+   }
++
+   async dialogMode(): Promise<DialogMode|null> {
+-    this.unsupported('Dialog mode');
++    const launch = await this.platform.getLaunchDialog();
++    if (!launch) {
++      return null;
++    }
++    const kind = DIALOG_KINDS[launch.dialogType];
++    if (!kind) {
++      // An unrecognised dialog type is not a picker we know how to be. Saying
++      // so beats guessing "open-file" and handing a caller the wrong contract.
++      throw new FilesError(
++          'unsupported', `${launch.dialogType} is not a dialog we can be.`);
++    }
++    return {
++      kind,
++      typeList: launch.typeList ?? [],
++      // shouldReturnLocalPath means the caller needs a real path, so Drive and
++      // provider volumes cannot be offered.
++      allowedPaths: launch.shouldReturnLocalPath ? 'native' : 'any',
++      defaultName: launch.defaultName,
++    };
+   }
+-  async confirmDialog(): Promise<void> {
+-    this.unsupported('Dialog mode');
++
++  async confirmDialog(keys: readonly FileKey[]): Promise<void> {
++    await this.platform.selectFiles(keys.map(key => String(key)));
+   }
++
+   async cancelDialog(): Promise<void> {
+-    this.unsupported('Dialog mode');
++    this.platform.cancelDialog();
+   }
+ }
+diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+index 36f9233..123a655 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+@@ -68,6 +68,53 @@ export interface PlatformWatchEvent {
+   readonly changedFiles?: readonly PlatformFileChange[];
+ }
+ 
++
++/** `chrome.fileManagerPrivate.FileTaskDescriptor`, which is a triple. */
++export interface PlatformTaskDescriptor {
++  readonly appId: string;
++  readonly taskType: string;
++  readonly actionId: string;
++}
++
++/** `FileTask`. Note every interesting flag is optional in the real one. */
++export interface PlatformFileTask {
++  readonly descriptor: PlatformTaskDescriptor;
++  readonly title: string;
++  readonly iconUrl?: string;
++  readonly isDefault?: boolean;
++  readonly isDlpBlocked?: boolean;
++}
++
++/** `IoTaskType`, spelled the way the API spells it. */
++export type PlatformIoType = 'copy'|'delete'|'empty_trash'|'extract'|'move'|
++    'restore'|'restore_to_destination'|'trash'|'zip';
++
++/** `IoTaskState`. More states than we model, which is the point. */
++export type PlatformIoState = 'queued'|'scanning'|'in_progress'|'paused'|
++    'success'|'error'|'need_password'|'cancelled';
++
++/** `ProgressStatus`, reduced to what we report. */
++export interface PlatformIoProgress {
++  readonly taskId: number;
++  readonly type: PlatformIoType;
++  readonly state: PlatformIoState;
++  readonly bytesTransferred: number;
++  readonly totalBytes: number;
++  readonly sourceName: string;
++  readonly itemCount: number;
++  readonly numRemainingItems: number;
++  /** A DOMException style name. Notably there is no notion of a holder. */
++  readonly errorName?: string;
++}
++
++/** What the window was launched with, when it was launched as a picker. */
++export interface PlatformLaunchDialog {
++  readonly dialogType: string;
++  readonly typeList?: readonly string[];
++  readonly shouldReturnLocalPath?: boolean;
++  readonly defaultName?: string;
++}
++
+ export interface Platform {
+   /** `webkitResolveLocalFileSystemURL`. Rejects with a DOMException. */
+   resolve(url: string): Promise<PlatformEntry>;
+@@ -83,4 +130,28 @@ export interface Platform {
+   addFileWatch(entry: PlatformEntry): Promise<void>;
+   removeFileWatch(entry: PlatformEntry): Promise<void>;
+   onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void;
++
++  /** `searchFiles`. maxResults is required, so a search is always capped. */
++  searchFiles(params: {
++    rootDir: PlatformEntry|null,
++    query: string,
++    maxResults: number,
++  }): Promise<readonly PlatformEntry[]>;
++
++  getFileTasks(entries: readonly PlatformEntry[]):
++      Promise<readonly PlatformFileTask[]>;
++  executeTask(
++      descriptor: PlatformTaskDescriptor,
++      entries: readonly PlatformEntry[]): Promise<string>;
++
++  startIoTask(
++      type: PlatformIoType, entries: readonly PlatformEntry[],
++      params: {destinationFolder?: PlatformEntry}): Promise<number>;
++  cancelIoTask(taskId: number): void;
++  onIoProgress(listener: (progress: PlatformIoProgress) => void): () => void;
++
++  /** Null unless the window was launched as the system file dialog. */
++  getLaunchDialog(): Promise<PlatformLaunchDialog|null>;
++  selectFiles(paths: readonly string[]): Promise<void>;
++  cancelDialog(): void;
+ }
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+index 6268704..2a784cf 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+@@ -7,7 +7,7 @@
+  * they are tested here.
+  */
+ import {ChromeOsBackend} from '../../adapter/chromeos_backend.js';
+-import type {ChangeEvent, EntryPage} from '../../port/types.js';
++import type {ChangeEvent, EntryPage, IoProgress} from '../../port/types.js';
+ import {asFileKey, FilesError} from '../../port/types.js';
+ import {FakePlatform} from './fake_platform.js';
+ import {beginCheck} from '../progress.js';
+@@ -69,7 +69,7 @@ const CHECKS: Check[] = [
+       for (const [name, code] of expected) {
+         const platform = withRoot();
+         const folder = platform.add(ROOT, 'sub', true);
+-        platform.failWith(folder, name);
++        platform.failResolve(folder, name);
+         const port = new ChromeOsBackend(platform);
+         try {
+           await drain(port.list(asFileKey(folder)));
+@@ -287,6 +287,212 @@ const CHECKS: Check[] = [
+              `the first page waited for ${readsAtFirstPage} reads of the directory`);
+     },
+   },
++  {
++    name: 'a task id survives being turned into a string and back',
++    async run() {
++      const platform = withRoot();
++      const key = asFileKey(platform.add(ROOT, 'doc.txt', false));
++      const port = new ChromeOsBackend(platform);
++      const tasks = await port.tasks([key]);
++      // The second task has a pipe inside its action id, which is the whole
++      // reason the decode splits into three rather than on every pipe.
++      const viewer = tasks.find(task => task.title === 'Viewer')!;
++      assert(viewer, 'the viewer task is missing');
++      await port.executeTask(viewer.id, [key]);
++      equal(platform.ran?.descriptor.appId, 'viewer', 'the app id was lost');
++      equal(platform.ran?.descriptor.taskType, 'web', 'the task type was lost');
++      equal(platform.ran?.descriptor.actionId, 'view|raw',
++            'everything after the second pipe was thrown away');
++    },
++  },
++  {
++    name: 'a flag the platform leaves off is false, not undefined',
++    async run() {
++      const platform = withRoot();
++      const key = asFileKey(platform.add(ROOT, 'doc.txt', false));
++      const tasks = await new ChromeOsBackend(platform).tasks([key]);
++      const viewer = tasks.find(task => task.title === 'Viewer')!;
++      equal(viewer.isDefault, false, 'a missing flag leaked through as undefined');
++      equal(viewer.isDlpBlocked, false, 'and so did this one');
++    },
++  },
++  {
++    name: 'a task that refuses to run says so rather than returning quietly',
++    async run() {
++      for (const [result, code] of [['failed', 'io'], ['empty', 'unsupported']] as
++           Array<[string, string]>) {
++        const platform = withRoot();
++        platform.taskResult = result;
++        const key = asFileKey(platform.add(ROOT, 'doc.txt', false));
++        const port = new ChromeOsBackend(platform);
++        const tasks = await port.tasks([key]);
++        try {
++          await port.executeTask(tasks[0]!.id, [key]);
++          throw new AssertionError(`${result} came back as success`);
++        } catch (error) {
++          // The API answers with a string rather than rejecting, so this is
++          // silent unless somebody reads it.
++          assert(error instanceof FilesError, `${result} was not typed`);
++          equal(error.code, code, `${result} mapped to the wrong code`);
++        }
++      }
++    },
++  },
++  {
++    name: 'compress is called zip on the other side',
++    async run() {
++      const platform = withRoot();
++      const key = asFileKey(platform.add(ROOT, 'doc.txt', false));
++      const port = new ChromeOsBackend(platform);
++      const seen: IoProgress[] = [];
++      const controller = new AbortController();
++      const pump = (async () => {
++        for await (const progress of port.subscribeIo(controller.signal)) {
++          seen.push(progress);
++          if (progress.state === 'succeeded') {
++            break;
++          }
++        }
++      })();
++      await port.startIo({kind: 'compress', sources: [key], destination: asFileKey(ROOT)});
++      await pump;
++      controller.abort();
++      // Sent as zip, and reported back to us as compress.
++      equal(seen[seen.length - 1]!.kind, 'compress',
++            'the operation came back named something else');
++    },
++  },
++  {
++    name: 'a paused operation is still running, not back in the queue',
++    async run() {
++      const platform = withRoot();
++      const port = new ChromeOsBackend(platform);
++      const seen: IoProgress[] = [];
++      const controller = new AbortController();
++      const pump = (async () => {
++        for await (const progress of port.subscribeIo(controller.signal)) {
++          seen.push(progress);
++          break;
++        }
++      })();
++      await Promise.resolve();
++      platform.emitRawIo({
++        taskId: 7,
++        type: 'copy',
++        state: 'paused',
++        bytesTransferred: 5,
++        totalBytes: 10,
++        sourceName: 'x',
++        itemCount: 1,
++        numRemainingItems: 1,
++      });
++      await pump;
++      controller.abort();
++      // Paused means started and will continue. Queued means it has not begun,
++      // which would put the progress bar back to nothing.
++      equal(seen[0]!.state, 'running', 'a paused copy was reported as queued');
++    },
++  },
++  {
++    name: 'an archive waiting for a password is not left looking busy',
++    async run() {
++      const platform = withRoot();
++      const port = new ChromeOsBackend(platform);
++      const seen: IoProgress[] = [];
++      const controller = new AbortController();
++      const pump = (async () => {
++        for await (const progress of port.subscribeIo(controller.signal)) {
++          seen.push(progress);
++          break;
++        }
++      })();
++      await Promise.resolve();
++      platform.emitRawIo({
++        taskId: 9,
++        type: 'extract',
++        state: 'need_password',
++        bytesTransferred: 0,
++        totalBytes: 10,
++        sourceName: 'secret.zip',
++        itemCount: 1,
++        numRemainingItems: 1,
++      });
++      await pump;
++      controller.abort();
++      // We have no state for waiting on a person, so it must not be reported
++      // as progress that will never arrive.
++      equal(seen[0]!.state, 'failed', 'it would spin forever');
++      equal(seen[0]!.error?.code, 'unsupported', 'and say nothing useful');
++    },
++  },
++  {
++    name: 'dialog types are translated, and an unknown one is refused',
++    async run() {
++      const pairs: Array<[string, string]> = [
++        ['open-file', 'open-file'],
++        ['open-multi-file', 'open-multi'],
++        ['folder', 'open-folder'],
++        ['upload-folder', 'open-upload'],
++        ['saveas-file', 'save-as'],
++      ];
++      for (const [platformType, kind] of pairs) {
++        const platform = withRoot();
++        platform.launchDialog = {dialogType: platformType};
++        const mode = await new ChromeOsBackend(platform).dialogMode();
++        equal(mode?.kind, kind, `${platformType} mapped wrongly`);
++      }
++      const platform = withRoot();
++      platform.launchDialog = {dialogType: 'something-new'};
++      try {
++        await new ChromeOsBackend(platform).dialogMode();
++        throw new AssertionError('an unknown dialog type was guessed at');
++      } catch (error) {
++        assert(error instanceof FilesError, 'it was not typed');
++        equal(error.code, 'unsupported', 'wrong code');
++      }
++    },
++  },
++  {
++    name: 'a caller that needs a real path is not offered Drive',
++    async run() {
++      const platform = withRoot();
++      platform.launchDialog = {
++        dialogType: 'open-file',
++        shouldReturnLocalPath: true,
++      };
++      const mode = await new ChromeOsBackend(platform).dialogMode();
++      equal(mode?.allowedPaths, 'native',
++            'a caller wanting a real path would be handed a Drive url');
++    },
++  },
++  {
++    name: 'search is capped, because the API requires a cap',
++    async run() {
++      const platform = withRoot();
++      for (let i = 0; i < 30; i++) {
++        platform.add(ROOT, `needle-${i}.txt`, false);
++      }
++      const port = new ChromeOsBackend(platform);
++      const found: string[] = [];
++      for await (const page of port.search('needle', asFileKey(ROOT), {pageSize: 5})) {
++        found.push(...page.entries.map(entry => entry.name));
++      }
++      equal(found.length, 5, 'the cap was not passed through');
++    },
++  },
++  {
++    name: 'cancelling an operation that was never started is a typed error',
++    async run() {
++      const port = new ChromeOsBackend(withRoot());
++      try {
++        await port.cancelIo('not-a-number' as Parameters<typeof port.cancelIo>[0]);
++        throw new AssertionError('it accepted nonsense');
++      } catch (error) {
++        assert(error instanceof FilesError, 'not typed');
++        equal(error.code, 'not-found', 'wrong code');
++      }
++    },
++  },
+   {
+     name: 'walking away from a watch releases it on the platform',
+     async run() {
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+index 8451c80..9483836 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+@@ -11,7 +11,7 @@
+  * It proves the adapter translates correctly. It cannot prove this description
+  * of ChromeOS is right, and only the hardware can do that.
+  */
+-import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformFileChange, PlatformMetadata, PlatformVolume, PlatformWatchEvent} from '../../adapter/platform.js';
++import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformFileChange, PlatformFileTask, PlatformIoProgress, PlatformIoType, PlatformLaunchDialog, PlatformMetadata, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from '../../adapter/platform.js';
+ 
+ class FakeEntry implements PlatformEntry {
+   constructor(
+@@ -51,10 +51,28 @@ export class FakePlatform implements Platform {
+   private readonly volumeList: PlatformVolume[] = [];
+   private readonly sizes = new Map<string, {totalSize: number, remainingSize: number}>();
+   private readonly listeners = new Set<(event: PlatformWatchEvent) => void>();
+-  private readonly failures = new Map<string, string>();
++  /**
++   * Two kinds of failure, because they are two different things. A file can
++   * exist, resolve and read perfectly well and still refuse to be moved.
++   * Conflating them made an io failure arrive as a rejection from startIo
++   * rather than as a failed progress report, which is not how the API behaves.
++   */
++  private readonly resolveFailures = new Map<string, string>();
++  private readonly operationFailures = new Map<string, string>();
+   readonly watched = new Set<string>();
+   /** Every name list getMetadata was asked for, so a test can check batching. */
+   readonly metadataCalls: Array<readonly string[]> = [];
++  private readonly ioListeners = new Set<(progress: PlatformIoProgress) => void>();
++  private readonly cancelled = new Set<number>();
++  private nextTask = 1;
++  /** What executeTask was last asked to run, so a test can check the decode. */
++  ran: {descriptor: PlatformTaskDescriptor, count: number}|null = null;
++  /** Set to answer getLaunchDialog with something other than null. */
++  launchDialog: PlatformLaunchDialog|null = null;
++  readonly selected: string[] = [];
++  dialogCancelled = false;
++  /** Set to make executeTask answer with a failure rather than reject. */
++  taskResult = 'opened';
+ 
+   constructor(private readonly options: FakeOptions = {}) {}
+ 
+@@ -112,9 +130,14 @@ export class FakePlatform implements Platform {
+     }
+   }
+ 
+-  /** Makes this url fail the way the platform fails, by DOMException name. */
+-  failWith(url: string, domExceptionName: string): void {
+-    this.failures.set(url, domExceptionName);
++  /** Makes resolving or reading this url fail, by DOMException name. */
++  failResolve(url: string, domExceptionName: string): void {
++    this.resolveFailures.set(url, domExceptionName);
++  }
++
++  /** Makes operations on this url fail, while it still resolves and reads. */
++  failOperation(url: string, domExceptionName: string): void {
++    this.operationFailures.set(url, domExceptionName);
+   }
+ 
+   private notify(directoryUrl: string, changes: PlatformFileChange[]): void {
+@@ -127,7 +150,7 @@ export class FakePlatform implements Platform {
+   }
+ 
+   async resolve(url: string): Promise<PlatformEntry> {
+-    const failure = this.failures.get(url);
++    const failure = this.resolveFailures.get(url);
+     if (failure) {
+       throw domError(failure);
+     }
+@@ -145,7 +168,7 @@ export class FakePlatform implements Platform {
+     let exhausted = false;
+     return {
+       readEntries: async () => {
+-        const failure = this.failures.get(url);
++        const failure = this.resolveFailures.get(url);
+         if (failure) {
+           throw domError(failure);
+         }
+@@ -203,4 +226,139 @@ export class FakePlatform implements Platform {
+     this.listeners.add(listener);
+     return () => this.listeners.delete(listener);
+   }
++
++  async searchFiles(params: {
++    rootDir: PlatformEntry|null,
++    query: string,
++    maxResults: number,
++  }): Promise<readonly PlatformEntry[]> {
++    const start = params.rootDir?.toURL();
++    const needle = params.query.toLowerCase();
++    const found: PlatformEntry[] = [];
++    const walk = (url: string) => {
++      const node = this.nodes.get(url);
++      if (!node || found.length >= params.maxResults) {
++        return;
++      }
++      if (url !== start && node.entry.name.toLowerCase().includes(needle)) {
++        found.push(node.entry);
++      }
++      for (const child of node.children) {
++        walk(child);
++      }
++    };
++    if (start) {
++      walk(start);
++    }
++    // Capped, the way the real one is: maxResults is not optional there.
++    return found.slice(0, params.maxResults);
++  }
++
++  async getFileTasks(entries: readonly PlatformEntry[]):
++      Promise<readonly PlatformFileTask[]> {
++    if (!entries.length) {
++      return [];
++    }
++    return [
++      {
++        descriptor: {appId: 'text-app', taskType: 'app', actionId: 'open'},
++        title: 'Text',
++        isDefault: true,
++      },
++      {
++        // A pipe inside the action id on purpose. The id is encoded by joining
++        // the triple with pipes, so a naive split loses everything after it.
++        descriptor: {appId: 'viewer', taskType: 'web', actionId: 'view|raw'},
++        title: 'Viewer',
++      },
++    ];
++  }
++
++  async executeTask(
++      descriptor: PlatformTaskDescriptor,
++      entries: readonly PlatformEntry[]): Promise<string> {
++    this.ran = {descriptor, count: entries.length};
++    return this.taskResult;
++  }
++
++  private emitIo(progress: PlatformIoProgress): void {
++    for (const listener of [...this.ioListeners]) {
++      listener(progress);
++    }
++  }
++
++  async startIoTask(
++      type: PlatformIoType, entries: readonly PlatformEntry[],
++      _params: {destinationFolder?: PlatformEntry}): Promise<number> {
++    const taskId = this.nextTask++;
++    const total = Math.max(1, entries.length) * 1000;
++    const failure =
++        entries.map(entry => this.operationFailures.get(entry.toURL()))
++            .find(Boolean);
++    const base = {
++      taskId,
++      type,
++      totalBytes: total,
++      sourceName: entries[0]?.name ?? '',
++      itemCount: entries.length,
++    };
++    this.emitIo({
++      ...base,
++      state: 'queued',
++      bytesTransferred: 0,
++      numRemainingItems: entries.length,
++    });
++    const tick = () => new Promise(resolve => setTimeout(resolve, 0));
++    void (async () => {
++      await tick();
++      if (this.cancelled.has(taskId)) {
++        this.emitIo({...base, state: 'cancelled', bytesTransferred: 0,
++                     numRemainingItems: entries.length});
++        return;
++      }
++      this.emitIo({...base, state: 'in_progress', bytesTransferred: total / 2,
++                   numRemainingItems: Math.max(0, entries.length - 1)});
++      await tick();
++      if (this.cancelled.has(taskId)) {
++        this.emitIo({...base, state: 'cancelled', bytesTransferred: total / 2,
++                     numRemainingItems: 1});
++        return;
++      }
++      if (failure) {
++        // An error arrives as a name on the status, not as a rejection.
++        this.emitIo({...base, state: 'error', bytesTransferred: total / 2,
++                     numRemainingItems: 1, errorName: failure});
++        return;
++      }
++      this.emitIo({...base, state: 'success', bytesTransferred: total,
++                   numRemainingItems: 0});
++    })();
++    return taskId;
++  }
++
++  /** Emits a status verbatim, for states a normal run never produces. */
++  emitRawIo(progress: PlatformIoProgress): void {
++    this.emitIo(progress);
++  }
++
++  cancelIoTask(taskId: number): void {
++    this.cancelled.add(taskId);
++  }
++
++  onIoProgress(listener: (progress: PlatformIoProgress) => void): () => void {
++    this.ioListeners.add(listener);
++    return () => this.ioListeners.delete(listener);
++  }
++
++  async getLaunchDialog(): Promise<PlatformLaunchDialog|null> {
++    return this.launchDialog;
++  }
++
++  async selectFiles(paths: readonly string[]): Promise<void> {
++    this.selected.push(...paths);
++  }
++
++  cancelDialog(): void {
++    this.dialogCancelled = true;
++  }
+ }
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+index a3603a2..ced644d 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+@@ -28,8 +28,12 @@ const DOM_NAMES: Record<string, string> = {
+   busy: 'InvalidStateError',
+ };
+ 
++/**
++ * Everything except naming the process holding a file open, which ChromeOS
++ * simply does not report. See the Capability comment in the contract.
++ */
+ export const IMPLEMENTED: readonly Capability[] =
+-    ['list', 'metadata', 'watch', 'volumes'];
++    ['list', 'metadata', 'watch', 'volumes', 'search', 'tasks', 'io', 'dialog'];
+ 
+ export function makeAdapterFixture(): Fixture {
+   const platform = new FakePlatform();
+@@ -53,8 +57,10 @@ export function makeAdapterFixture(): Fixture {
+     add: (parent: FileKey, name: string, isDirectory: boolean) =>
+         asFileKey(platform.add(parent, name, isDirectory, {size: 1024})),
+     remove: (key: FileKey) => platform.remove(key),
++    // An operation failure, not a resolution one: the contract's io cases are
++    // about a file that is there and will not budge.
+     failWith: (key: FileKey, error: FilesError) =>
+-        platform.failWith(key, DOM_NAMES[error.code] ?? 'InvalidStateError'),
++        platform.failOperation(key, DOM_NAMES[error.code] ?? 'InvalidStateError'),
+   };
+ }
+ 
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+index 043399c..909f1da 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+@@ -29,8 +29,18 @@ export interface Fixture {
+  * rather than the suite either failing on unfinished work or, far worse,
+  * quietly not covering it.
+  */
+-export type Capability =
+-    'list'|'metadata'|'watch'|'search'|'tasks'|'io'|'volumes'|'dialog';
++export type Capability = 'list'|'metadata'|'watch'|'search'|'tasks'|'io'|
++    /**
++     * Naming the process holding a file open. Separate from `io` because it is
++     * genuinely separate: ChromeOS reports a failed operation as a
++     * `ProgressStatus` carrying an error name and nothing else, so there is no
++     * holder to be had from that API at all. On Linux it would come from the
++     * host bridge asking who has the file open, which is not built. Folding it
++     * into `io` would have meant either a backend failing a case it cannot
++     * satisfy, or the assertion being dropped and the mock losing coverage of a
++     * feature we do intend to have.
++     */
++    'io-holder'|'volumes'|'dialog';
+ 
+ export interface Case {
+   name: string;
+@@ -279,6 +289,32 @@ export const CASES: Case[] = [
+   {
+     name: 'an io failure arrives as a typed error, not a string',
+     capability: 'io',
++    async run({port, root, add, failWith}) {
++      const file = add(root, 'locked.txt', false);
++      failWith(file, new FilesError(
++                         'permission-denied', 'It will not let you.'));
++      const controller = new AbortController();
++      let last: IoProgress|null = null;
++      const pump = (async () => {
++        for await (const progress of port.subscribeIo(controller.signal)) {
++          last = progress;
++          if (progress.state === 'failed' || progress.state === 'succeeded') {
++            break;
++          }
++        }
++      })();
++      await port.startIo({kind: 'move', sources: [file], destination: root});
++      await pump;
++      controller.abort();
++      equal(last!.state, 'failed', 'the operation failed');
++      assert(last!.error instanceof FilesError,
++             'the failure arrived as a string rather than a typed error');
++      equal(last!.error!.code, 'permission-denied', 'the error is typed');
++    },
++  },
++  {
++    name: 'a busy file names the process holding it open',
++    capability: 'io-holder',
+     async run({port, root, add, failWith}) {
+       const file = add(root, 'busy.txt', false);
+       failWith(file, new FilesError(
+@@ -297,8 +333,9 @@ export const CASES: Case[] = [
+       await port.startIo({kind: 'move', sources: [file], destination: root});
+       await pump;
+       controller.abort();
+-      equal(last!.state, 'failed', 'the operation failed');
+       equal(last!.error!.code, 'busy', 'the error is typed');
++      // "It is open in celluloid" is a sentence somebody can act on. "The
++      // operation failed" is not.
+       equal(last!.error!.holder!.name, 'celluloid', 'the holder is named');
+     },
+   },

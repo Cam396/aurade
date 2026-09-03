@@ -574,10 +574,15 @@ ADAPTER_MUTATIONS = [
 
     (UNIT, "the platform watch is never released",
      "adapter/chromeos_backend.ts",
-     """    } finally {
+     """      // Also runs when the consumer breaks out of the loop, which is how the
+      // platform watch gets released rather than leaking one per navigation.
+      yield* stream;
+    } finally {
       stop();
     }""",
-     "    } finally {\n    }",
+     """      yield* stream;
+    } finally {
+    }""",
      "walking away from a watch releases it on the platform"),
 
     (UNIT, "the watch is armed a tick after it is asked for",
@@ -587,7 +592,77 @@ ADAPTER_MUTATIONS = [
      "watch reports an addition made after the listing"),
 ]
 
-MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS + STATUS_MUTATIONS + ADAPTER_MUTATIONS
+
+# The four capabilities the adapter gained last: search, tasks, io and dialog.
+ADAPTER2_MUTATIONS = [
+    (UNIT, "compress is sent to the platform under our name, not its own",
+     "adapter/chromeos_backend.ts",
+     "  compress: 'zip',",
+     "  compress: 'compress' as PlatformIoType,",
+     "compress is called zip on the other side"),
+
+    (UNIT, "a paused operation is put back in the queue",
+     "adapter/chromeos_backend.ts",
+     "  paused: 'running',",
+     "  paused: 'queued',",
+     "a paused operation is still running, not back in the queue"),
+
+    (UNIT, "an archive waiting for a password looks like an ordinary failure",
+     "adapter/chromeos_backend.ts",
+     "    if (status.state === 'need_password') {",
+     "    if (false) {",
+     "an archive waiting for a password is not left looking busy"),
+
+    (UNIT, "a missing task flag leaks through as undefined",
+     "adapter/chromeos_backend.ts",
+     "                       isDefault: task.isDefault === true,",
+     "                       isDefault: task.isDefault as boolean,",
+     "a flag the platform leaves off is false, not undefined"),
+
+    (UNIT, "a task id is split on every pipe it contains",
+     "adapter/chromeos_backend.ts",
+     "  return {appId, taskType, actionId: rest.join('|')};",
+     "  return {appId, taskType, actionId: rest[0] ?? ''};",
+     "a task id survives being turned into a string and back"),
+
+    (UNIT, "a task that refused to run is treated as having run",
+     "adapter/chromeos_backend.ts",
+     "    if (result === 'failed') {",
+     "    if (false) {",
+     "a task that refuses to run says so rather than returning quietly"),
+
+    (UNIT, "an unrecognised dialog type is guessed at",
+     "adapter/chromeos_backend.ts",
+     "    const kind = DIALOG_KINDS[launch.dialogType];",
+     "    const kind = DIALOG_KINDS[launch.dialogType] ?? 'open-file';",
+     "dialog types are translated, and an unknown one is refused"),
+
+    (UNIT, "a caller needing a real path is offered anything",
+     "adapter/chromeos_backend.ts",
+     "      allowedPaths: launch.shouldReturnLocalPath ? 'native' : 'any',",
+     "      allowedPaths: 'any',",
+     "a caller that needs a real path is not offered Drive"),
+
+    (UNIT, "the search cap the caller asked for is ignored",
+     "adapter/chromeos_backend.ts",
+     "    const maxResults = options.pageSize ?? 200;",
+     "    const maxResults = 1000;",
+     "search is capped, because the API requires a cap"),
+
+    (UNIT, "a nonsense task id is passed to the platform anyway",
+     "adapter/chromeos_backend.ts",
+     "    if (!Number.isFinite(numeric)) {",
+     "    if (false) {",
+     "cancelling an operation that was never started is a typed error"),
+
+    (UNIT, "the io subscription is armed a tick after it is asked for",
+     "adapter/chromeos_backend.ts",
+     "    const stream = new Stream<IoProgress>();",
+     "    await new Promise(resolve => setTimeout(resolve, 0));\n    const stream = new Stream<IoProgress>();",
+     "an io operation runs to completion and reports progress"),
+]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS + STATUS_MUTATIONS + ADAPTER_MUTATIONS + ADAPTER2_MUTATIONS
 
 # Every anchor is checked before anything is touched. A run that is killed
 # rather than returned from skips the finally below and leaves a mutation in
