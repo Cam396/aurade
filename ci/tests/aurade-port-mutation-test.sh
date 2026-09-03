@@ -523,7 +523,7 @@ ADAPTER_MUTATIONS = [
     const fresh = now.filter(entry => !before.has(entry.key));""",
      """    const gone: FileKey[] = [];
     const fresh: EntryDto[] = [];""",
-     "a change event that does not say what changed is worked out"),
+     "watch reports an addition made after the listing"),
 
     (UNIT, "our field names are sent to the provider untranslated",
      "adapter/chromeos_backend.ts",
@@ -587,9 +587,9 @@ ADAPTER_MUTATIONS = [
 
     (UNIT, "the watch is armed a tick after it is asked for",
      "adapter/chromeos_backend.ts",
-     "    const stream = new Stream<ChangeEvent>();\n    const off = this.platform.onDirectoryChanged(event => {",
-     "    await new Promise(resolve => setTimeout(resolve, 0));\n    const stream = new Stream<ChangeEvent>();\n    const off = this.platform.onDirectoryChanged(event => {",
-     "watch reports an addition made after the listing"),
+     "    const stream = new Stream<ChangeEvent>();\n    // Events that arrive before the baseline exists",
+     "    await new Promise(resolve => setTimeout(resolve, 0));\n    const stream = new Stream<ChangeEvent>();\n    // Events that arrive before the baseline exists",
+     "a change event that does not say what changed is worked out"),
 ]
 
 
@@ -633,15 +633,55 @@ ADAPTER2_MUTATIONS = [
 
     (UNIT, "an unrecognised dialog type is guessed at",
      "adapter/chromeos_backend.ts",
-     "    const kind = DIALOG_KINDS[launch.dialogType];",
-     "    const kind = DIALOG_KINDS[launch.dialogType] ?? 'open-file';",
+     "    const kind = DIALOG_KINDS[launch.type];",
+     "    const kind = DIALOG_KINDS[launch.type] ?? 'open-file';",
      "dialog types are translated, and an unknown one is refused"),
 
     (UNIT, "a caller needing a real path is offered anything",
      "adapter/chromeos_backend.ts",
-     "      allowedPaths: launch.shouldReturnLocalPath ? 'native' : 'any',",
+     "      allowedPaths: launch.allowedPaths === 'nativePath' ? 'native' : 'any',",
      "      allowedPaths: 'any',",
      "a caller that needs a real path is not offered Drive"),
+
+    # The six below cover what the hardware pass corrected. Each one restores
+    # the mistake that was actually shipped, so the assertion that found it is
+    # the assertion that has to catch it.
+
+    (UNIT, "a local volume is filed as somewhere that is not this computer",
+     "adapter/chromeos_backend.ts",
+     "  local_root: 'system',",
+     "  local_root_removed_by_mutation: 'system',",
+     "a local volume is part of this computer, not somewhere else"),
+
+    (UNIT, "restriction is asked for by a name the platform does not know",
+     "adapter/chromeos_backend.ts",
+     "  restricted: 'isDlpRestricted',",
+     "  restricted: 'restricted',",
+     "restriction is asked for by the name the platform knows"),
+
+    (UNIT, "tasks are asked for without the source urls the API requires",
+     "adapter/chromeos_backend.ts",
+     "          entries, entries.map(entry => entry.toURL()));",
+     "          entries, []);",
+     "tasks are asked for with the source urls the API requires"),
+
+    (UNIT, "a dialog is confirmed without saying a real path is needed",
+     "adapter/chromeos_backend.ts",
+     "        keys.map(key => String(key)), launch?.allowedPaths === 'nativePath');",
+     "        keys.map(key => String(key)), false);",
+     "confirming a dialog says whether a real path is required"),
+
+    (UNIT, "the watch matches every directory except its own",
+     "adapter/chromeos_backend.ts",
+     "      if (event.entry.toURL() !== key) {",
+     "      if (event.entry.toURL() === key) {",
+     "watch reports an addition made after the listing"),
+
+    (UNIT, "the watch arms with nothing to compare against",
+     "adapter/chromeos_backend.ts",
+     "      if (!this.known.has(key)) {",
+     "      if (this.known.has(key)) {",
+     "watch reports a removal"),
 
     (UNIT, "the search cap the caller asked for is ignored",
      "adapter/chromeos_backend.ts",

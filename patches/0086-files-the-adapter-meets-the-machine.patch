@@ -1,0 +1,1109 @@
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+index 42831ca..6b10510 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+@@ -14,11 +14,17 @@
+ import type {FilesBackendPort} from '../port/port.js';
+ import type {ChangeEvent, DialogKind, DialogMode, EntryDto, EntryPage, FileKey, IoKind, IoProgress, IoRequest, IoState, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind} from '../port/types.js';
+ import {asFileKey, FilesError} from '../port/types.js';
+-import type {Platform, PlatformEntry, PlatformIoProgress, PlatformIoState, PlatformIoType, PlatformMetadata, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from './platform.js';
++import type {Platform, PlatformEntry, PlatformIoProgress, PlatformIoState, PlatformIoType, PlatformMetadata, PlatformResultingTasks, PlatformTaskDescriptor, PlatformVolume} from './platform.js';
+ 
+ /** ChromeOS volume types, as they are actually spelled. */
+ const VOLUME_KINDS: Record<string, VolumeKind> = {
+   downloads: 'system',
++  // The ordinary local volume, and the one this machine has most of: Home,
++  // Documents, Pictures and the filesystem root are all local_root. Leaving it
++  // out sent every one of them to the provided fallback, and from there into
++  // the sidebar's Elsewhere group, which is for things that are not this
++  // computer.
++  local_root: 'system',
+   system_internal: 'system',
+   removable: 'removable',
+   archive: 'archive',
+@@ -39,7 +45,13 @@ const VOLUME_KINDS: Record<string, VolumeKind> = {
+ /** Anything you can unplug or unmount out from under yourself. */
+ const DETACHABLE = new Set(['removable', 'archive', 'mtp']);
+ 
+-/** Our field names to the ones MetadataModel answers to. */
++/**
++ * Our field names to the ones MetadataModel answers to.
++ *
++ * `restricted` was not one of them. MetadataModel asserts on a name it does not
++ * know rather than ignoring it, so every metadata fetch on hardware would have
++ * thrown, and the fake had no opinion about names at all.
++ */
+ const METADATA_NAMES: Record<MetadataField, string> = {
+   size: 'size',
+   modificationTime: 'modificationTime',
+@@ -47,7 +59,7 @@ const METADATA_NAMES: Record<MetadataField, string> = {
+   pinned: 'pinned',
+   shared: 'shared',
+   availableOffline: 'availableOffline',
+-  restricted: 'restricted',
++  restricted: 'isDlpRestricted',
+ };
+ 
+ 
+@@ -383,7 +395,11 @@ export class ChromeOsBackend implements FilesBackendPort {
+             }
+             break;
+           default:
+-            if (item[field] !== undefined) {
++            if (field === 'restricted') {
++              if (item.isDlpRestricted !== undefined) {
++                value['restricted'] = item.isDlpRestricted;
++              }
++            } else if (item[field] !== undefined) {
+               value[field] = item[field];
+             }
+         }
+@@ -394,59 +410,15 @@ export class ChromeOsBackend implements FilesBackendPort {
+   }
+ 
+   /**
+-   * Turns a change event into what actually changed.
++   * Works out what actually changed, by reading the directory again.
+    *
+-   * When ChromeOS says which files moved, this is a translation. When it does
+-   * not, and it is allowed not to, the directory is read again and compared
+-   * with what we last reported. Passing the shrug along as an empty change
+-   * would be a lie in the other direction: the caller would be told nothing
+-   * happened.
++   * There is no shortcut, because ChromeOS does not offer one. The event says
++   * that a directory changed and stops there: no list of changed files on any
++   * event, and an add and a delete arrive identical. This used to translate
++   * such a list when one was present, which never happened, so the branch was
++   * removed rather than left as coverage the fake alone could reach.
+    */
+-  private async describe(key: FileKey, event: PlatformWatchEvent):
+-      Promise<ChangeEvent[]> {
+-    if (event.changedFiles?.length) {
+-      const added: FileKey[] = [];
+-      const removed: FileKey[] = [];
+-      for (const change of event.changedFiles) {
+-        (change.changes.includes('delete') ? removed : added)
+-            .push(asFileKey(change.url));
+-      }
+-      const out: ChangeEvent[] = [];
+-      const seen = this.known.get(key);
+-      if (removed.length) {
+-        for (const gone of removed) {
+-          seen?.delete(gone);
+-        }
+-        out.push({kind: 'removed', revision: this.bump(key), keys: removed});
+-      }
+-      if (added.length) {
+-        // add_or_update covers both, so an entry we already knew about has
+-        // changed rather than appeared.
+-        const fresh = added.filter(candidate => !seen?.has(candidate));
+-        const touched = added.filter(candidate => !!seen?.has(candidate));
+-        if (touched.length) {
+-          out.push({kind: 'changed', revision: this.bump(key), keys: touched});
+-        }
+-        if (fresh.length) {
+-          const entries: EntryDto[] = [];
+-          for (const candidate of fresh) {
+-            try {
+-              entries.push(this.toDto(await this.platform.resolve(candidate), key));
+-            } catch {
+-              // Added and gone again before we looked. Nothing to report.
+-            }
+-          }
+-          if (entries.length) {
+-            for (const entry of entries) {
+-              seen?.add(entry.key);
+-            }
+-            out.push({kind: 'added', revision: this.bump(key), entries});
+-          }
+-        }
+-      }
+-      return out;
+-    }
+-
++  private async describe(key: FileKey): Promise<ChangeEvent[]> {
+     let directory: PlatformEntry;
+     try {
+       directory = await this.resolveDirectory(key);
+@@ -489,11 +461,21 @@ export class ChromeOsBackend implements FilesBackendPort {
+    */
+   async * watch(key: FileKey, signal?: AbortSignal): AsyncIterable<ChangeEvent> {
+     const stream = new Stream<ChangeEvent>();
++    // Events that arrive before the baseline exists have to wait for it, not be
++    // dropped and not be answered against an empty directory, which would call
++    // every file in the folder new.
++    let baselineReady = () => {};
++    const baseline = new Promise<void>(resolve => {
++      baselineReady = resolve;
++    });
+     const off = this.platform.onDirectoryChanged(event => {
+-      if (event.directoryUrl !== key) {
++      // The event names its directory with an entry. There is no url field
++      // on it, and reading one got undefined, which never equals a key: the
++      // watch matched nothing on hardware while passing against the fake.
++      if (event.entry.toURL() !== key) {
+         return;
+       }
+-      void this.describe(key, event).then(events => {
++      void baseline.then(() => this.describe(key)).then(events => {
+         for (const change of events) {
+           stream.push(change);
+         }
+@@ -506,6 +488,7 @@ export class ChromeOsBackend implements FilesBackendPort {
+         return;
+       }
+       stopped = true;
++      baselineReady();
+       off();
+       if (directory) {
+         void this.platform.removeFileWatch(directory);
+@@ -520,6 +503,17 @@ export class ChromeOsBackend implements FilesBackendPort {
+     try {
+       directory = await this.resolveDirectory(key);
+       await this.platform.addFileWatch(directory);
++      // The diff is the only way to know what changed, so it needs something to
++      // diff against, and a watcher is not obliged to have listed first. A
++      // removal with no baseline is invisible: nothing is missing from nothing.
++      // Only read when there is no baseline, since the usual caller opens the
++      // watch and then immediately lists, and paying for that directory twice
++      // on every navigation is not free on a large one.
++      if (!this.known.has(key)) {
++        const seed = await this.readAll(directory, key, {showHidden: true});
++        this.known.set(key, new Set(seed.map(entry => entry.key)));
++      }
++      baselineReady();
+       // Also runs when the consumer breaks out of the loop, which is how the
+       // platform watch gets released rather than leaking one per navigation.
+       yield* stream;
+@@ -570,7 +564,10 @@ export class ChromeOsBackend implements FilesBackendPort {
+     const maxResults = options.pageSize ?? 200;
+     let found: readonly PlatformEntry[];
+     try {
+-      found = await this.platform.searchFiles({rootDir: root, query, maxResults});
++      // types is as required as maxResults is: omitting either is refused by
++      // the bindings before the call is made.
++      found = await this.platform.searchFiles(
++          {rootDir: root, query, types: 'ALL', maxResults});
+     } catch (error) {
+       throw translateError(error, 'That search');
+     }
+@@ -584,13 +581,17 @@ export class ChromeOsBackend implements FilesBackendPort {
+ 
+   async tasks(keys: readonly FileKey[]): Promise<readonly TaskDescriptor[]> {
+     const entries = await this.resolveAll(keys);
+-    let found: readonly Awaited<ReturnType<Platform['getFileTasks']>>[number][];
++    let found: PlatformResultingTasks;
+     try {
+-      found = await this.platform.getFileTasks(entries);
++      // The second argument is not optional. Called with one, the bindings
++      // refuse it outright with "No matching signature", and the answer is an
++      // object wrapping the tasks rather than the tasks themselves.
++      found = await this.platform.getFileTasks(
++          entries, entries.map(entry => entry.toURL()));
+     } catch (error) {
+       throw translateError(error, 'Those files');
+     }
+-    return found.map(task => ({
++    return found.tasks.map(task => ({
+                        id: encodeTask(task.descriptor),
+                        title: task.title,
+                        iconUrl: task.iconUrl,
+@@ -698,25 +699,32 @@ export class ChromeOsBackend implements FilesBackendPort {
+     if (!launch) {
+       return null;
+     }
+-    const kind = DIALOG_KINDS[launch.dialogType];
++    const kind = DIALOG_KINDS[launch.type];
+     if (!kind) {
+       // An unrecognised dialog type is not a picker we know how to be. Saying
+       // so beats guessing "open-file" and handing a caller the wrong contract.
+       throw new FilesError(
+-          'unsupported', `${launch.dialogType} is not a dialog we can be.`);
++          'unsupported', `${launch.type} is not a dialog we can be.`);
+     }
+     return {
+       kind,
+       typeList: launch.typeList ?? [],
+-      // shouldReturnLocalPath means the caller needs a real path, so Drive and
+-      // provider volumes cannot be offered.
+-      allowedPaths: launch.shouldReturnLocalPath ? 'native' : 'any',
+-      defaultName: launch.defaultName,
++      // The launch parameters carry allowedPaths directly. nativePath means
++      // the caller needs a real path, so Drive and provider volumes cannot be
++      // offered.
++      allowedPaths: launch.allowedPaths === 'nativePath' ? 'native' : 'any',
++      defaultName: launch.targetName,
+     };
+   }
+ 
+   async confirmDialog(keys: readonly FileKey[]): Promise<void> {
+-    await this.platform.selectFiles(keys.map(key => String(key)));
++    // Urls, despite the parameter being named for paths: Chromium's own dialog
++    // controller passes entry.toURL() here, so a key is already the right
++    // thing. The boolean beside it is not optional, and is the same reduction
++    // of allowedPaths that controller performs.
++    const launch = await this.platform.getLaunchDialog();
++    await this.platform.selectFiles(
++        keys.map(key => String(key)), launch?.allowedPaths === 'nativePath');
+   }
+ 
+   async cancelDialog(): Promise<void> {
+diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+index 123a655..150c629 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+@@ -1,14 +1,16 @@
+ /**
+  * The narrow slice of ChromeOS the adapter is allowed to touch.
+  *
+- * Written against the real definitions in `definitions/file_manager_private.d.ts`
+- * rather than from memory, and deliberately narrow: the adapter reaches for
+- * nothing outside this, so the whole of it can be driven by a fake in a browser
+- * that has no `chrome.fileManagerPrivate` and no filesystem.
++ * Deliberately narrow: the adapter reaches for nothing outside this, so the
++ * whole of it can be driven by a fake in a browser that has no
++ * `chrome.fileManagerPrivate` and no filesystem.
+  *
+- * The shapes here are the real ones. `changedFiles` really is optional, chunked
+- * reads really do end with an empty array, and metadata really does come back
+- * positionally. Where this lies, the adapter is verified against a fiction.
++ * Every shape here was read off a live Files app renderer on the Dell on
++ * 2026-09-03, by calling the real API and printing what came back, rather than
++ * from the type definitions or from memory. That pass corrected six things this
++ * file previously asserted, and each correction is noted where it applies. The
++ * rule the file lives by is unchanged: where this lies, the adapter is verified
++ * against a fiction, and the fiction is what ships.
+  */
+ 
+ /** A DOM `Entry`, reduced to what we read from it. */
+@@ -22,14 +24,32 @@ export interface PlatformEntry {
+ /**
+  * A `DirectoryReader`, promisified.
+  *
+- * Chunked by design: it is called repeatedly and returns an empty array when
+- * the directory is exhausted. One call is not one directory.
++ * It must be called until it returns an empty array, which is the only signal
++ * that a directory is exhausted. Whether it splits the answer is up to the
++ * implementation and is not something to rely on either way: measured on the
++ * Dell, a directory of 86 entries came back in a single call. So one call may
++ * well be one directory, and there is still no way to know that without the
++ * empty read that follows.
+  */
+ export interface PlatformDirectoryReader {
+   readEntries(): Promise<readonly PlatformEntry[]>;
+ }
+ 
+-/** A `MetadataItem`, of which we read a handful of fields. */
++/**
++ * A `MetadataItem`, of which we read a handful of fields.
++ *
++ * These come from `MetadataModel`, not from
++ * `chrome.fileManagerPrivate.getEntryProperties`. That distinction is not
++ * stylistic: asked directly, the private API answers `{}` for every local file,
++ * because the fields are filled in by the model layer above it. It also answers
++ * in a different vocabulary, and `restricted` is not a word in either. The name
++ * for it is `isDlpRestricted`, and MetadataModel fails an assertion rather than
++ * ignoring the wrong one.
++ *
++ * MetadataModel also returns a companion `<name>Error` key beside each field it
++ * could not read. We do not model those: a field that errored arrives absent,
++ * which is the same thing the caller has to handle anyway.
++ */
+ export interface PlatformMetadata {
+   readonly size?: number;
+   readonly modificationTime?: Date;
+@@ -37,10 +57,22 @@ export interface PlatformMetadata {
+   readonly pinned?: boolean;
+   readonly shared?: boolean;
+   readonly availableOffline?: boolean;
+-  readonly restricted?: boolean;
++  readonly isDlpRestricted?: boolean;
+ }
+ 
+-/** A `VolumeInfo`, reduced. */
++/**
++ * A `VolumeInfo`, reduced.
++ *
++ * From `VolumeManager`, and it has to be: `getVolumeMetadataList` on the
++ * private API returns `VolumeMetadata`, which carries neither a label nor a
++ * root entry. It has `volumeLabel` and nothing to navigate to. So `listVolumes`
++ * cannot be written over `chrome.fileManagerPrivate` alone, and the thin
++ * implementation needs the app's VolumeManager as well as the private API.
++ *
++ * The two lists also differ in what they contain. On the Dell, VolumeManager
++ * reported 14 volumes and the private API 16, the extra two being a hidden
++ * `system_internal` and a `removable` device VolumeManager had not adopted.
++ */
+ export interface PlatformVolume {
+   readonly volumeId: string;
+   /** The raw ChromeOS volume type string, mapped in the adapter. */
+@@ -50,25 +82,29 @@ export interface PlatformVolume {
+   readonly root: PlatformEntry;
+ }
+ 
+-/** `chrome.fileManagerPrivate.FileChange`. */
+-export interface PlatformFileChange {
+-  readonly url: string;
+-  readonly changes: ReadonlyArray<'add_or_update'|'delete'>;
+-}
+-
+ /**
+- * `chrome.fileManagerPrivate.FileWatchEvent`, reduced.
++ * `chrome.fileManagerPrivate.FileWatchEvent`.
++ *
++ * This is the correction that matters most in this file. The event was
++ * previously written here as a directory url plus an optional list of changed
++ * files, on the understanding that ChromeOS was allowed to say only that
++ * something changed. What it actually delivers is smaller than that: two keys,
++ * an `entry` for the directory and an `eventType`, and no list of changed files
++ * at all, on any event. Creating a file and deleting it produced two events
++ * that were byte for byte identical.
+  *
+- * `changedFiles` is optional in the real API, which is the single most
+- * important fact in this file: ChromeOS is allowed to say only that a
+- * directory changed, without saying how.
++ * So the diff is not a fallback for when ChromeOS declines to elaborate. It is
++ * the only way to know what changed, and the code that read `changedFiles` was
++ * unreachable. Worse, the old shape named a `directoryUrl` field that does not
++ * exist, so the adapter's test for whether an event belonged to the directory
++ * it was watching compared `undefined` against a key and never matched: on
++ * hardware, the watch would have delivered nothing at all.
+  */
+ export interface PlatformWatchEvent {
+-  readonly directoryUrl: string;
+-  readonly changedFiles?: readonly PlatformFileChange[];
++  readonly entry: PlatformEntry;
++  readonly eventType: 'changed'|'error';
+ }
+ 
+-
+ /** `chrome.fileManagerPrivate.FileTaskDescriptor`, which is a triple. */
+ export interface PlatformTaskDescriptor {
+   readonly appId: string;
+@@ -85,7 +121,18 @@ export interface PlatformFileTask {
+   readonly isDlpBlocked?: boolean;
+ }
+ 
+-/** `IoTaskType`, spelled the way the API spells it. */
++/**
++ * `ResultingTasks`, which is what `getFileTasks` answers with.
++ *
++ * Not an array. The tasks arrive wrapped in an object alongside a policy field,
++ * and unwrapping it is the caller's job.
++ */
++export interface PlatformResultingTasks {
++  readonly tasks: readonly PlatformFileTask[];
++  readonly policyDefaultHandlerStatus?: string;
++}
++
++/** `IoTaskType`, spelled the way the API spells it. Verified against the enum. */
+ export type PlatformIoType = 'copy'|'delete'|'empty_trash'|'extract'|'move'|
+     'restore'|'restore_to_destination'|'trash'|'zip';
+ 
+@@ -98,21 +145,37 @@ export interface PlatformIoProgress {
+   readonly taskId: number;
+   readonly type: PlatformIoType;
+   readonly state: PlatformIoState;
++  /**
++   * Both byte counts are zero on a successful small copy, measured. Nothing may
++   * divide by the total to get a fraction without checking it first.
++   */
+   readonly bytesTransferred: number;
+   readonly totalBytes: number;
+   readonly sourceName: string;
+   readonly itemCount: number;
+   readonly numRemainingItems: number;
+-  /** A DOMException style name. Notably there is no notion of a holder. */
++  /**
++   * A DOMException style name, and the empty string rather than absent when
++   * there was no error. Notably there is no notion of a holder.
++   */
+   readonly errorName?: string;
+ }
+ 
+-/** What the window was launched with, when it was launched as a picker. */
++/**
++ * What the window was launched with, when it was launched as a picker.
++ *
++ * These are the launch parameters as the app receives them. Two fields named
++ * here before did not exist: there is no `shouldReturnLocalPath` anywhere in
++ * the app, and no `defaultName`. The real fields are `allowedPaths`, which is
++ * where the local path requirement comes from, and `targetName`. A window that
++ * is not a picker reports its type as `full-page`.
++ */
+ export interface PlatformLaunchDialog {
+-  readonly dialogType: string;
++  readonly type: string;
+   readonly typeList?: readonly string[];
+-  readonly shouldReturnLocalPath?: boolean;
+-  readonly defaultName?: string;
++  /** `nativePath` when the caller cannot accept a Drive or provider url. */
++  readonly allowedPaths?: string;
++  readonly targetName?: string;
+ }
+ 
+ export interface Platform {
+@@ -124,22 +187,39 @@ export interface Platform {
+       entries: readonly PlatformEntry[],
+       names: readonly string[]): Promise<readonly PlatformMetadata[]>;
+   listVolumes(): Promise<readonly PlatformVolume[]>;
+-  /** `getSizeStats`, which returns nothing for a volume that has no notion. */
++  /**
++   * `getSizeStats`. Documented as answering nothing for a volume with no notion
++   * of capacity, and it does return undefined for those. Be aware that it is
++   * generous with the ones that do: every `local_root` volume on the Dell
++   * reported the capacity of the whole root filesystem, so several volumes
++   * legitimately report identical figures.
++   */
+   getSizeStats(volumeId: string):
+       Promise<{totalSize: number, remainingSize: number}|null>;
+   addFileWatch(entry: PlatformEntry): Promise<void>;
+   removeFileWatch(entry: PlatformEntry): Promise<void>;
+   onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void;
+ 
+-  /** `searchFiles`. maxResults is required, so a search is always capped. */
++  /**
++   * `searchFiles`. Both `maxResults` and `types` are required, so a search is
++   * always capped and always says what it will match. Omitting either is a
++   * TypeError from the bindings before the call is made.
++   */
+   searchFiles(params: {
+     rootDir: PlatformEntry|null,
+     query: string,
++    types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
+     maxResults: number,
+   }): Promise<readonly PlatformEntry[]>;
+ 
+-  getFileTasks(entries: readonly PlatformEntry[]):
+-      Promise<readonly PlatformFileTask[]>;
++  /**
++   * `getFileTasks`, which takes two arguments and not one. The second is the
++   * source urls for data leak prevention, and calling it without them is
++   * refused with "No matching signature" rather than defaulted.
++   */
++  getFileTasks(
++      entries: readonly PlatformEntry[],
++      dlpSourceUrls: readonly string[]): Promise<PlatformResultingTasks>;
+   executeTask(
+       descriptor: PlatformTaskDescriptor,
+       entries: readonly PlatformEntry[]): Promise<string>;
+@@ -152,6 +232,13 @@ export interface Platform {
+ 
+   /** Null unless the window was launched as the system file dialog. */
+   getLaunchDialog(): Promise<PlatformLaunchDialog|null>;
+-  selectFiles(paths: readonly string[]): Promise<void>;
++  /**
++   * `selectFiles`. Takes the urls of the chosen entries, despite the parameter
++   * being named for paths: Chromium's own dialog controller passes
++   * `entry.toURL()`. The second argument is not optional, and is the dialog's
++   * allowedPaths reduced to a boolean, exactly as that controller computes it.
++   */
++  selectFiles(paths: readonly string[], shouldReturnLocalPath: boolean):
++      Promise<void>;
+   cancelDialog(): void;
+ }
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+index 2a784cf..7aabbc0 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+@@ -10,6 +10,7 @@ import {ChromeOsBackend} from '../../adapter/chromeos_backend.js';
+ import type {ChangeEvent, EntryPage, IoProgress} from '../../port/types.js';
+ import {asFileKey, FilesError} from '../../port/types.js';
+ import {FakePlatform} from './fake_platform.js';
++import {armed} from '../contract/port_contract.js';
+ import {beginCheck} from '../progress.js';
+ 
+ const ROOT = 'filesystem:chrome://file-manager/external/myfiles';
+@@ -85,9 +86,10 @@ const CHECKS: Check[] = [
+   {
+     name: 'a change event that does not say what changed is worked out',
+     async run() {
+-      // The real API may report only that a directory changed. Passing that
+-      // shrug along as an empty change would tell the caller nothing happened.
+-      const platform = withRoot({vagueChanges: true});
++      // The real API reports only that a directory changed, every time.
++      // Passing that shrug along as an empty change would tell the caller
++      // nothing happened.
++      const platform = withRoot();
+       platform.add(ROOT, 'before.txt', false);
+       const port = new ChromeOsBackend(platform);
+       await drain(port.list(asFileKey(ROOT)));
+@@ -113,7 +115,7 @@ const CHECKS: Check[] = [
+   {
+     name: 'a vague removal is worked out too',
+     async run() {
+-      const platform = withRoot({vagueChanges: true});
++      const platform = withRoot();
+       const doomed = platform.add(ROOT, 'doomed.txt', false);
+       const port = new ChromeOsBackend(platform);
+       await drain(port.list(asFileKey(ROOT)));
+@@ -437,12 +439,12 @@ const CHECKS: Check[] = [
+       ];
+       for (const [platformType, kind] of pairs) {
+         const platform = withRoot();
+-        platform.launchDialog = {dialogType: platformType};
++        platform.launchDialog = {type: platformType};
+         const mode = await new ChromeOsBackend(platform).dialogMode();
+         equal(mode?.kind, kind, `${platformType} mapped wrongly`);
+       }
+       const platform = withRoot();
+-      platform.launchDialog = {dialogType: 'something-new'};
++      platform.launchDialog = {type: 'something-new'};
+       try {
+         await new ChromeOsBackend(platform).dialogMode();
+         throw new AssertionError('an unknown dialog type was guessed at');
+@@ -457,8 +459,8 @@ const CHECKS: Check[] = [
+     async run() {
+       const platform = withRoot();
+       platform.launchDialog = {
+-        dialogType: 'open-file',
+-        shouldReturnLocalPath: true,
++        type: 'open-file',
++        allowedPaths: 'nativePath',
+       };
+       const mode = await new ChromeOsBackend(platform).dialogMode();
+       equal(mode?.allowedPaths, 'native',
+@@ -504,7 +506,7 @@ const CHECKS: Check[] = [
+           break;
+         }
+       })();
+-      await Promise.resolve();
++      await armed();
+       platform.add(ROOT, 'poke.txt', false);
+       await pump;
+       // Give the teardown its microtask.
+@@ -513,6 +515,65 @@ const CHECKS: Check[] = [
+             'the platform watch leaked, one per navigation');
+     },
+   },
++  {
++    name: 'a local volume is part of this computer, not somewhere else',
++    async run() {
++      // Thirteen of the Dell's fourteen volumes are local_root: Home,
++      // Documents, Pictures, the filesystem root. Unmapped they fell through to
++      // the provided fallback, which the sidebar files under Elsewhere.
++      const platform = new FakePlatform().addVolume({
++        volumeId: 'local_root:Documents',
++        volumeType: 'local_root',
++        label: 'Documents',
++        url: 'filesystem:chrome://file-manager/external/docs/',
++      });
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      equal(volumes[0]?.kind, 'system',
++            'a local folder was not treated as part of this computer');
++    },
++  },
++  {
++    name: 'restriction is asked for by the name the platform knows',
++    async run() {
++      const platform = withRoot();
++      platform.add(ROOT, 'a.txt', false, {isDlpRestricted: true});
++      const key = asFileKey(`${ROOT}/a.txt`);
++      const snapshot =
++          await new ChromeOsBackend(platform).metadata([key], ['restricted']);
++      // MetadataModel asserts on a name it does not know rather than ignoring
++      // it, so asking for `restricted` threw and took the whole batch with it.
++      equal(platform.metadataCalls[0]?.join(','), 'isDlpRestricted',
++            'the platform was asked for a field it does not have');
++      equal(snapshot.get(key)?.['restricted'], true,
++            'the restriction did not survive the rename');
++    },
++  },
++  {
++    name: 'tasks are asked for with the source urls the API requires',
++    async run() {
++      const platform = withRoot();
++      platform.add(ROOT, 'a.txt', false);
++      const key = asFileKey(`${ROOT}/a.txt`);
++      await new ChromeOsBackend(platform).tasks([key]);
++      equal(platform.dlpSourceUrls.join(','), String(key),
++            'the second argument was not the urls of the entries');
++    },
++  },
++  {
++    name: 'confirming a dialog says whether a real path is required',
++    async run() {
++      const platform = withRoot();
++      platform.launchDialog = {type: 'open-file', allowedPaths: 'nativePath'};
++      await new ChromeOsBackend(platform).confirmDialog([asFileKey(ROOT)]);
++      equal(platform.selectedLocalPathOnly, true,
++            'a caller needing a real path was not told so');
++      const relaxed = withRoot();
++      relaxed.launchDialog = {type: 'open-file', allowedPaths: 'anyPathOrUrl'};
++      await new ChromeOsBackend(relaxed).confirmDialog([asFileKey(ROOT)]);
++      equal(relaxed.selectedLocalPathOnly, false,
++            'a caller that accepts any url was needlessly restricted');
++    },
++  },
+ ];
+ 
+ export async function runAdapterTests(): Promise<boolean> {
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+index 9483836..57950c4 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+@@ -5,13 +5,18 @@
+  * not convenient. So `createReader` hands back a few entries at a time and only
+  * signals the end with an empty array, `getMetadata` answers positionally and
+  * only for the names it was asked for, failures arrive as objects with
+- * DOMException names rather than as our own error type, and a change event can
+- * legitimately arrive with no `changedFiles` at all.
++ * DOMException names rather than as our own error type, and a change event says
++ * only that a directory changed.
++ *
++ * That last one used to be optional here, on the belief that ChromeOS was
++ * merely allowed to be vague. Probing a live renderer on 2026-09-03 showed it
++ * is always vague: there is no list of changed files on any event, so the fake
++ * no longer offers a mode that produces one.
+  *
+  * It proves the adapter translates correctly. It cannot prove this description
+  * of ChromeOS is right, and only the hardware can do that.
+  */
+-import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformFileChange, PlatformFileTask, PlatformIoProgress, PlatformIoType, PlatformLaunchDialog, PlatformMetadata, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from '../../adapter/platform.js';
++import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformFileTask, PlatformIoProgress, PlatformIoType, PlatformLaunchDialog, PlatformMetadata, PlatformResultingTasks, PlatformTaskDescriptor, PlatformVolume, PlatformWatchEvent} from '../../adapter/platform.js';
+ 
+ class FakeEntry implements PlatformEntry {
+   constructor(
+@@ -39,11 +44,6 @@ function domError(name: string): Error {
+ export interface FakeOptions {
+   /** Entries per readEntries call. Small on purpose, so paging is exercised. */
+   readonly chunk?: number;
+-  /**
+-   * When true, change events omit `changedFiles`, which the real API is
+-   * allowed to do. The adapter then has to go and find out what happened.
+-   */
+-  readonly vagueChanges?: boolean;
+ }
+ 
+ export class FakePlatform implements Platform {
+@@ -69,6 +69,10 @@ export class FakePlatform implements Platform {
+   ran: {descriptor: PlatformTaskDescriptor, count: number}|null = null;
+   /** Set to answer getLaunchDialog with something other than null. */
+   launchDialog: PlatformLaunchDialog|null = null;
++  /** What the last getFileTasks was told, so the contract can check it. */
++  dlpSourceUrls: string[] = [];
++  /** What the last selectFiles was told about needing a real path. */
++  selectedLocalPathOnly: boolean|null = null;
+   readonly selected: string[] = [];
+   dialogCancelled = false;
+   /** Set to make executeTask answer with a failure rather than reject. */
+@@ -111,7 +115,7 @@ export class FakePlatform implements Platform {
+         {entry: new FakeEntry(name, isDirectory, url), parent: parentUrl,
+          children: [], metadata});
+     parent.children.push(url);
+-    this.notify(parentUrl, [{url, changes: ['add_or_update']}]);
++    this.notify(parentUrl);
+     return url;
+   }
+ 
+@@ -126,7 +130,7 @@ export class FakePlatform implements Platform {
+       if (parent) {
+         parent.children = parent.children.filter(child => child !== url);
+       }
+-      this.notify(node.parent, [{url, changes: ['delete']}]);
++      this.notify(node.parent);
+     }
+   }
+ 
+@@ -140,10 +144,19 @@ export class FakePlatform implements Platform {
+     this.operationFailures.set(url, domExceptionName);
+   }
+ 
+-  private notify(directoryUrl: string, changes: PlatformFileChange[]): void {
+-    const event: PlatformWatchEvent = this.options.vagueChanges ?
+-        {directoryUrl} :
+-        {directoryUrl, changedFiles: changes};
++  /**
++   * An add and a delete are indistinguishable here, because they are on the
++   * real thing: both arrive as the same two keys naming the directory.
++   */
++  private notify(directoryUrl: string): void {
++    const directory = this.nodes.get(directoryUrl);
++    if (!directory) {
++      return;
++    }
++    const event: PlatformWatchEvent = {
++      entry: directory.entry,
++      eventType: 'changed',
++    };
+     for (const listener of [...this.listeners]) {
+       listener(event);
+     }
+@@ -230,8 +243,15 @@ export class FakePlatform implements Platform {
+   async searchFiles(params: {
+     rootDir: PlatformEntry|null,
+     query: string,
++    types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
+     maxResults: number,
+   }): Promise<readonly PlatformEntry[]> {
++    // The bindings refuse the call outright when either is missing, so refusing
++    // it here too is the difference between the contract catching that and the
++    // hardware catching it.
++    if (params.maxResults === undefined || params.types === undefined) {
++      throw domError('TypeError');
++    }
+     const start = params.rootDir?.toURL();
+     const needle = params.query.toLowerCase();
+     const found: PlatformEntry[] = [];
+@@ -254,12 +274,19 @@ export class FakePlatform implements Platform {
+     return found.slice(0, params.maxResults);
+   }
+ 
+-  async getFileTasks(entries: readonly PlatformEntry[]):
+-      Promise<readonly PlatformFileTask[]> {
++  async getFileTasks(
++      entries: readonly PlatformEntry[],
++      dlpSourceUrls: readonly string[]): Promise<PlatformResultingTasks> {
++    // Two arguments, not one. Called with one the real bindings answer "No
++    // matching signature", so this refuses it rather than defaulting.
++    if (dlpSourceUrls === undefined) {
++      throw domError('TypeError');
++    }
++    this.dlpSourceUrls = [...dlpSourceUrls];
+     if (!entries.length) {
+-      return [];
++      return {tasks: []};
+     }
+-    return [
++    const tasks: PlatformFileTask[] = [
+       {
+         descriptor: {appId: 'text-app', taskType: 'app', actionId: 'open'},
+         title: 'Text',
+@@ -272,6 +299,8 @@ export class FakePlatform implements Platform {
+         title: 'Viewer',
+       },
+     ];
++    // Wrapped, the way the real one wraps it.
++    return {tasks};
+   }
+ 
+   async executeTask(
+@@ -354,8 +383,13 @@ export class FakePlatform implements Platform {
+     return this.launchDialog;
+   }
+ 
+-  async selectFiles(paths: readonly string[]): Promise<void> {
++  async selectFiles(paths: readonly string[], shouldReturnLocalPath: boolean):
++      Promise<void> {
++    if (shouldReturnLocalPath === undefined) {
++      throw domError('TypeError');
++    }
+     this.selected.push(...paths);
++    this.selectedLocalPathOnly = shouldReturnLocalPath;
+   }
+ 
+   cancelDialog(): void {
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+index 909f1da..94af8f2 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+@@ -84,6 +84,23 @@ async function rejects(
+   throw new AssertionError(`${message}: nothing was thrown`);
+ }
+ 
++/**
++ * Waits until a watch has actually armed.
++ *
++ * A single microtask used to be enough, because the mock arms in one. A backend
++ * over ChromeOS cannot: the platform never says what changed, only that
++ * something did, so the adapter has to read the directory once to have anything
++ * to compare against, and that read is several awaits deep. Making the change
++ * before it lands means the baseline already contains the change, and the diff
++ * then correctly reports nothing, which reads as a hang.
++ *
++ * A macrotask boundary drains every microtask chain queued behind it, which is
++ * all any in-memory backend needs.
++ */
++export async function armed(): Promise<void> {
++  await new Promise(resolve => setTimeout(resolve, 0));
++}
++
+ export const CASES: Case[] = [
+   {
+     name: 'lists the entries in a directory',
+@@ -187,7 +204,7 @@ export const CASES: Case[] = [
+           break;
+         }
+       })();
+-      await Promise.resolve();
++      await armed();
+       add(root, 'late.txt', false);
+       await pump;
+       controller.abort();
+@@ -212,7 +229,7 @@ export const CASES: Case[] = [
+           break;
+         }
+       })();
+-      await Promise.resolve();
++      await armed();
+       add(root, 'second.txt', false);
+       await pump;
+       controller.abort();
+@@ -234,7 +251,7 @@ export const CASES: Case[] = [
+           break;
+         }
+       })();
+-      await Promise.resolve();
++      await armed();
+       remove(doomed);
+       await pump;
+       controller.abort();
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js b/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js
+new file mode 100644
+index 0000000..52580dd
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js
+@@ -0,0 +1,253 @@
++/**
++ * Checks adapter/platform.ts against the machine, one claim at a time.
++ *
++ * The local loop can prove the adapter translates correctly. It cannot prove
++ * the description it translates against is right, because the fake is written
++ * from that same description: if the description is wrong, both agree and both
++ * are wrong together. On 2026-09-03 that is exactly what had happened, in seven
++ * places, six of which would have failed on first use.
++ *
++ * So this is the other half of the contract, and it runs where the fake cannot:
++ * inside a live Files app renderer, against the real chrome.fileManagerPrivate.
++ *
++ *   /mnt/build/aurade-work/lab eval "$(cat platform_probe.js)"
++ *
++ * The Files app has to be open, since fileManagerPrivate is gated to that
++ * origin. If no page target exists:
++ *
++ *   curl -s -X PUT "http://127.0.0.1:19222/json/new?chrome://file-manager"
++ *
++ * Everything here reads, except one directory it creates under My files and
++ * removes in a finally. That directory is the only way to see a watch event or
++ * a progress report, which are two of the shapes most worth checking.
++ *
++ * Signatures are learned by making a deliberately invalid call and reading the
++ * binding's own rejection, which names the expected signature without
++ * performing anything.
++ */
++(async () => {
++  const fmp = chrome.fileManagerPrivate;
++  const results = [];
++  const check = (claim, ok, detail) =>
++      results.push({claim, ok: !!ok, detail: detail === undefined ? null : detail});
++  const resolveOne = (u) =>
++      new Promise((res, rej) => webkitResolveLocalFileSystemURL(u, res, rej));
++  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
++
++  // --- the enums our tables mirror ---
++  check('PlatformIoType matches IoTaskType',
++        same(Object.values(fmp.IoTaskType).sort(),
++             ['copy', 'delete', 'empty_trash', 'extract', 'move', 'restore',
++              'restore_to_destination', 'trash', 'zip'].sort()),
++        Object.values(fmp.IoTaskType));
++  check('PlatformIoState matches IoTaskState',
++        same(Object.values(fmp.IoTaskState).sort(),
++             ['cancelled', 'error', 'in_progress', 'need_password', 'paused',
++              'queued', 'scanning', 'success'].sort()),
++        Object.values(fmp.IoTaskState));
++  check('every volume type VOLUME_KINDS maps still exists',
++        ['downloads', 'local_root', 'system_internal', 'removable', 'archive',
++         'provided', 'documents_provider', 'smb', 'drive', 'android_files',
++         'crostini', 'guest_os', 'mtp', 'media_view']
++            .filter(t => !Object.values(fmp.VolumeType).includes(t)),
++        Object.values(fmp.VolumeType));
++
++  // --- signatures, from the bindings' own refusals ---
++  const signature = (name, args) => {
++    try {
++      fmp[name].apply(fmp, args.concat([() => {}]));
++      return 'ACCEPTED, which it should not have been';
++    } catch (error) {
++      return String(error.message)
++          .replace(/^Error in invocation of /, '')
++          .replace(/: No matching signature\.$/, '');
++    }
++  };
++  const signatures = {
++    getFileTasks: signature('getFileTasks', [123]),
++    selectFiles: signature('selectFiles', [123]),
++    searchFiles: signature('searchFiles', [123]),
++    startIOTask: signature('startIOTask', [123]),
++    getEntryProperties: signature('getEntryProperties', [123]),
++  };
++  check('getFileTasks takes entries and dlp source urls',
++        signatures.getFileTasks.includes('array entries, array dlpSourceUrls'),
++        signatures.getFileTasks);
++  check('selectFiles takes the urls and a local path flag',
++        signatures.selectFiles.includes('array selectedPaths, boolean shouldReturnLocalPath'),
++        signatures.selectFiles);
++  check('startIOTask takes a type, entries and params',
++        signatures.startIOTask.includes(
++            'IoTaskType type, array entries, fileManagerPrivate.IoTaskParams params'),
++        signatures.startIOTask);
++  check('getEntryProperties takes entries, not urls',
++        signatures.getEntryProperties.includes('array entries, array names'),
++        signatures.getEntryProperties);
++
++  // --- volumes: the label and the root come from VolumeManager, not the API ---
++  const metadataList = await new Promise(r => fmp.getVolumeMetadataList(r));
++  const metaKeys = Object.keys(metadataList[0] || {});
++  check('VolumeMetadata carries neither a label nor a root, so listVolumes needs VolumeManager',
++        !metaKeys.includes('label') && !metaKeys.includes('root'), metaKeys);
++  const vm = window.fileManager && window.fileManager.volumeManager;
++  check('VolumeManager is reachable and its volumes carry a label and a display root',
++        !!(vm && vm.volumeInfoList.length &&
++           vm.volumeInfoList.item(0).label && vm.volumeInfoList.item(0).displayRoot),
++        vm ? vm.volumeInfoList.length + ' volumes' : 'no VolumeManager');
++
++  const root = vm && vm.volumeInfoList.item(0).displayRoot;
++  if (!root) {
++    return JSON.stringify({results, verdict: 'incomplete, no volume to work in'}, null, 1);
++  }
++
++  // --- resolve and its failure mode ---
++  check('entry.toURL() round trips through webkitResolveLocalFileSystemURL',
++        (await resolveOne(root.toURL())).toURL() === root.toURL());
++  try {
++    await resolveOne(root.toURL().replace(/\/?$/, '/not-here-0e1f2a'));
++    check('a missing path rejects with a DOMException', false, 'it resolved');
++  } catch (error) {
++    check('a missing path rejects with a DOMException',
++          error instanceof DOMException && error.name === 'NotFoundError',
++          error && error.name);
++  }
++
++  // --- readEntries terminates with an empty array ---
++  const reader = root.createReader();
++  const chunks = [];
++  for (let i = 0; i < 200; i++) {
++    const chunk = await new Promise((res, rej) => reader.readEntries(res, rej));
++    chunks.push(chunk.length);
++    if (!chunk.length) break;
++  }
++  check('readEntries ends with an empty array',
++        chunks[chunks.length - 1] === 0, chunks);
++
++  // --- metadata comes from MetadataModel, positionally ---
++  const listing = await new Promise((res, rej) => root.createReader().readEntries(res, rej));
++  const file = listing.find(entry => !entry.isDirectory);
++  const model = window.fileManager && window.fileManager.metadataModel_;
++  if (file && model) {
++    const items = await model.get(listing.slice(0, 3), ['size', 'modificationTime']);
++    check('MetadataModel answers positionally',
++          items.length === Math.min(3, listing.length), items.length);
++    check('modificationTime is a Date from MetadataModel',
++          items.some(item => item.modificationTime instanceof Date));
++    const raw = await new Promise(
++        r => fmp.getEntryProperties([file], ['size', 'modificationTime'], r));
++    check('getEntryProperties alone answers nothing for a local file, so MetadataModel is required',
++          Object.keys(raw[0] || {}).length === 0, Object.keys(raw[0] || {}));
++    try {
++      await model.get([file], ['restricted']);
++      check('MetadataModel rejects a name it does not know', false, 'it accepted restricted');
++    } catch (error) {
++      check('MetadataModel rejects a name it does not know', true,
++            String(error.message).slice(0, 60));
++    }
++    try {
++      const restricted = await model.get([file], ['isDlpRestricted']);
++      check('isDlpRestricted is the name the model knows it by',
++            'isDlpRestricted' in (restricted[0] || {}),
++            Object.keys(restricted[0] || {}));
++    } catch (error) {
++      check('isDlpRestricted is the name the model knows it by', false,
++            String(error.message).slice(0, 60));
++    }
++    check('and getEntryProperties does not know that name at all, which is why the model is used',
++          !Object.values(fmp.EntryPropertyName).includes('isDlpRestricted'));
++  }
++
++  // --- tasks arrive wrapped ---
++  if (file) {
++    const answer = await new Promise(
++        r => fmp.getFileTasks([file], [file.toURL()], r));
++    check('getFileTasks answers with a wrapper, not an array',
++          !Array.isArray(answer) && Array.isArray(answer.tasks),
++          Object.keys(answer));
++  }
++
++  // --- search needs both a cap and a type ---
++  try {
++    await new Promise((res, rej) => {
++      try { fmp.searchFiles({rootDir: root, query: 'a', types: 'ALL'}, res); }
++      catch (error) { rej(error); }
++    });
++    check('searchFiles requires maxResults', false, 'it accepted the call');
++  } catch (error) {
++    check('searchFiles requires maxResults', error instanceof TypeError);
++  }
++  try {
++    await new Promise((res, rej) => {
++      try { fmp.searchFiles({rootDir: root, query: 'a', maxResults: 5}, res); }
++      catch (error) { rej(error); }
++    });
++    check('searchFiles requires types', false, 'it accepted the call');
++  } catch (error) {
++    check('searchFiles requires types', error instanceof TypeError);
++  }
++
++  // --- the watch event, and a progress report, inside one directory of our own ---
++  const stamp = 'aurade-probe-' + Date.now();
++  const box = await new Promise(
++      (res, rej) => root.getDirectory(stamp, {create: true}, res, rej));
++  try {
++    const src = await new Promise(
++        (res, rej) => box.getDirectory('src', {create: true}, res, rej));
++    const dest = await new Promise(
++        (res, rej) => box.getDirectory('dest', {create: true}, res, rej));
++    const seed = await new Promise(
++        (res, rej) => src.getFile('seed.txt', {create: true}, res, rej));
++
++    const events = [];
++    const onChange = (event) => events.push(Object.keys(event).sort().join(','));
++    fmp.onDirectoryChanged.addListener(onChange);
++    await new Promise(r => fmp.addFileWatch(src, r));
++    try {
++      await new Promise((res, rej) => src.getFile('appeared.txt', {create: true}, res, rej));
++      await new Promise(r => setTimeout(r, 2500));
++    } finally {
++      await new Promise(r => fmp.removeFileWatch(src, r));
++      fmp.onDirectoryChanged.removeListener(onChange);
++    }
++    check('a watch event is an entry and an event type, with no changed files',
++          events.length > 0 && events.every(keys => keys === 'entry,eventType'),
++          events);
++
++    const progress = [];
++    const onIo = (status) => progress.push(status);
++    fmp.onIOTaskProgressStatus.addListener(onIo);
++    try {
++      const taskId = await new Promise((res, rej) => {
++        try {
++          fmp.startIOTask('copy', [seed],
++                          {destinationFolder: dest, showNotification: false}, res);
++        } catch (error) { rej(error); }
++      });
++      check('startIOTask answers with a number', typeof taskId === 'number', taskId);
++      await new Promise(r => setTimeout(r, 3000));
++    } finally {
++      fmp.onIOTaskProgressStatus.removeListener(onIo);
++    }
++    const last = progress[progress.length - 1];
++    check('ProgressStatus carries every field PlatformIoProgress reads',
++          !!last && ['taskId', 'type', 'state', 'bytesTransferred', 'totalBytes',
++                     'sourceName', 'itemCount', 'numRemainingItems']
++                        .every(field => field in last),
++          last ? Object.keys(last) : 'no progress reported');
++    check('errorName is the empty string rather than absent when nothing failed',
++          !!last && last.state === 'success' && last.errorName === '',
++          last && JSON.stringify(last.errorName));
++  } finally {
++    await new Promise(res => box.removeRecursively(res, res));
++  }
++
++  const failed = results.filter(r => !r.ok);
++  return JSON.stringify({
++    checked: results.length,
++    failed: failed.length,
++    verdict: failed.length ? 'platform.ts disagrees with this machine' :
++                             'platform.ts agrees with this machine',
++    failures: failed,
++    all: results,
++  }, null, 1);
++})()
