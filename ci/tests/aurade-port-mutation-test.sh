@@ -298,16 +298,16 @@ SHELL_MUTATIONS = [
      "  return 'empty';",
      "a folder that cannot be read does not claim to be empty"),
 
-    (DOM, "opening a folder leaves the marker on the drive you left",
+    (DOM, "the marker claims you are at the drive from three folders down",
      "ui/shell.ts",
-     "    this.sidebar.setSelected(entry.key);\n",
-     "",
+     "    this.sidebar.setSelected(trail.length === 1 ? here.key : null);",
+     "    this.sidebar.setSelected(trail[0]!.key);",
      "opening a folder takes the marker off the drive you left"),
 
-    (DOM, "choosing a place does not mark it",
+    (DOM, "nothing in the sidebar is ever marked",
      "ui/shell.ts",
-     "    this.sidebar.setSelected(place.key);\n",
-     "",
+     "    this.sidebar.setSelected(trail.length === 1 ? here.key : null);",
+     "    this.sidebar.setSelected(null);",
      "choosing a place shows what is in it"),
 
     (DOM, "a mild notice interrupts the screen reader",
@@ -331,7 +331,117 @@ SHELL_MUTATIONS = [
      "a folder with files in it does not also say it is empty"),
 ]
 
-MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS
+
+# Back, forward, up, and the way sideways.
+TOOLBAR_MUTATIONS = [
+    (UNIT, "going somewhere new keeps the branch you left",
+     "ui/history.ts",
+     "    this.entries.length = this.index + 1;\n",
+     "",
+     "going somewhere new discards the branch you left"),
+
+    (UNIT, "arriving where you already are counts as a step",
+     "ui/history.ts",
+     """    if (here && here.length === trail.length &&
+        here[here.length - 1]!.key === trail[trail.length - 1]!.key) {""",
+     "    if (false) {",
+     "arriving where you already are is not a step"),
+
+    (UNIT, "up walks off the top of a root",
+     "ui/history.ts",
+     "    return trail.length > 1 ? trail.slice(0, -1) : null;",
+     "    return trail.slice(0, -1);",
+     "up removes the last step and stops at a root"),
+
+    (UNIT, "clicking a crumb lands one level short of it",
+     "ui/history.ts",
+     "    return trail.slice(0, level + 1);",
+     "    return trail.slice(0, level);",
+     "clicking a crumb cuts the trail there"),
+
+    (UNIT, "a sibling is appended as a child",
+     "ui/history.ts",
+     "    return [...trail.slice(0, -1), visit];",
+     "    return [...trail, visit];",
+     "stepping sideways replaces the last step rather than adding one"),
+
+    (DOM, "the deepest folder gets no chevron of its own",
+     "ui/path_bar.ts",
+     """    if (this.trail.length) {
+      this.list.appendChild(this.renderChevron(this.trail.length - 1));
+    }""",
+     "",
+     "a chevron says which folder it is about to list"),
+
+    (DOM, "an open chevron is not announced as open",
+     "ui/path_bar.ts",
+     "    chevron.setAttribute('aria-expanded', 'true');\n",
+     "",
+     "a chevron lists what else is in that folder"),
+
+    (DOM, "the popover offers files as places to go",
+     "ui/shell.ts",
+     """        if (entry.isDirectory) {
+          found.push({key: entry.key, label: entry.name});
+        }""",
+     "        found.push({key: entry.key, label: entry.name});",
+     "a chevron lists what else is in that folder"),
+
+    (DOM, "a sibling is opened as a child of where you are",
+     "ui/path_bar.ts",
+     "    const base = History.truncate(this.trail, level);",
+     "    const base = this.trail;",
+     "choosing a sibling steps sideways rather than deeper"),
+
+    (DOM, "escape drops focus on the document",
+     "ui/path_bar.ts",
+     "    chevron?.focus();\n",
+     "",
+     "escape closes the popover and gives focus back"),
+
+    (DOM, "a popover with nothing in it opens blank",
+     "ui/path_bar.ts",
+     "      message.textContent = 'No other folders here.';",
+     "      message.textContent = '';",
+     "a folder with nothing beside it says so rather than opening empty"),
+
+    (DOM, "the crumb you are standing on is not marked",
+     "ui/path_bar.ts",
+     "      button.setAttribute('aria-current', 'page');\n",
+     "",
+     "the crumb you are standing on is not a link to elsewhere"),
+
+    (DOM, "up is offered from the root of a drive",
+     "ui/shell.ts",
+     "      up: this.trail.length > 1,",
+     "      up: true,",
+     "there is nowhere to go back to when the window opens"),
+
+    # Deliberately absent: replacing step() with go(). It is an equivalent
+    # mutant. NavigationSession's history refuses to record a trail ending
+    # where you already are, so recording during a back is a no op and no test
+    # can tell the two apart. Excluded rather than left escaping, because an
+    # escape should always mean a test is missing.
+
+    (DOM, "the toolbar buttons are pictures with no names",
+     "ui/toolbar.ts",
+     "  element.setAttribute('aria-label', label);\n",
+     "",
+     "the glyph buttons have names, not just pictures"),
+
+    (DOM, "the popover goes back inside the path bar, which clips",
+     "ui/tokens.css",
+     """.aurade-toolbar {
+  align-items: center;
+  /* The containing block for a sibling popover, which cannot live inside the
+     path bar because that clips. */
+  position: relative;""",
+     """.aurade-toolbar {
+  align-items: center;""",
+     "the popover is actually on screen and not clipped away"),
+]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS
 
 # Every anchor is checked before anything is touched. A run that is killed
 # rather than returned from skips the finally below and leaves a mutation in
