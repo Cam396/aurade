@@ -502,7 +502,92 @@ STATUS_MUTATIONS = [
      "the free space bar is not read out as well as the words"),
 ]
 
-MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS + STATUS_MUTATIONS
+
+# The adapter. Its whole job is translation, so these are the translations.
+ADAPTER_MUTATIONS = [
+    (UNIT, "an unrecognised platform error is guessed at rather than typed io",
+     "adapter/chromeos_backend.ts",
+     "      return new FilesError('io', `${what} could not be read.`);",
+     "      return new FilesError('not-found', `${what} could not be read.`);",
+     "every DOMException the platform throws becomes a typed code"),
+
+    (UNIT, "listing a file reports io rather than saying it is not a folder",
+     "adapter/chromeos_backend.ts",
+     "      return new FilesError('unsupported', `${what} is not a folder.`);",
+     "      return new FilesError('io', `${what} is not a folder.`);",
+     "every DOMException the platform throws becomes a typed code"),
+
+    (UNIT, "a change with no detail is passed along as no change",
+     "adapter/chromeos_backend.ts",
+     """    const gone = [...before].filter(candidate => !after.has(candidate));
+    const fresh = now.filter(entry => !before.has(entry.key));""",
+     """    const gone: FileKey[] = [];
+    const fresh: EntryDto[] = [];""",
+     "a change event that does not say what changed is worked out"),
+
+    (UNIT, "our field names are sent to the provider untranslated",
+     "adapter/chromeos_backend.ts",
+     "    const names = fields.map(field => METADATA_NAMES[field]);",
+     "    const names = fields.slice() as string[];",
+     "our field names are translated to the ones the provider knows"),
+
+    (UNIT, "every metadata field is handed back regardless of the request",
+     "adapter/chromeos_backend.ts",
+     "      for (const field of fields) {",
+     "      for (const field of Object.keys(METADATA_NAMES) as MetadataField[]) {",
+     "metadata asks for the fields wanted and no others"),
+
+    (UNIT, "one file that vanished fails the whole batch",
+     "adapter/chromeos_backend.ts",
+     """      } catch {
+        // A file that vanished between listing and stat is ordinary. It gets
+        // no entry in the snapshot rather than failing the whole batch.
+      }""",
+     """      } catch (error) {
+        throw translateError(error, 'That file');
+      }""",
+     "a file that vanishes mid batch does not fail the batch"),
+
+    (UNIT, "an unknown volume type is filed as a disk in the machine",
+     "adapter/chromeos_backend.ts",
+     "    const kind = VOLUME_KINDS[volume.volumeType] ?? 'provided';",
+     "    const kind = VOLUME_KINDS[volume.volumeType] ?? 'system';",
+     "ChromeOS volume types become the kinds the sidebar groups by"),
+
+    (UNIT, "the built in disk is marked as something you can unplug",
+     "adapter/chromeos_backend.ts",
+     "const DETACHABLE = new Set(['removable', 'archive', 'mtp']);",
+     "const DETACHABLE = new Set(['removable', 'archive', 'mtp', 'downloads']);",
+     "only what can be unplugged is marked removable"),
+
+    (UNIT, "a volume with no size stats is given a capacity of zero",
+     "adapter/chromeos_backend.ts",
+     "    let capacity: {total: number, free: number}|null = null;",
+     "    let capacity: {total: number, free: number}|null = {total: 0, free: 0};",
+     "a volume with no size stats has no capacity rather than zero"),
+
+    (UNIT, "the listing is buffered and paged afterwards",
+     "adapter/chromeos_backend.ts",
+     "        if (batch.length >= size) {",
+     "        if (false) {",
+     "pages arrive before the whole directory has been read"),
+
+    (UNIT, "the platform watch is never released",
+     "adapter/chromeos_backend.ts",
+     """    } finally {
+      stop();
+    }""",
+     "    } finally {\n    }",
+     "walking away from a watch releases it on the platform"),
+
+    (UNIT, "the watch is armed a tick after it is asked for",
+     "adapter/chromeos_backend.ts",
+     "    const stream = new Stream<ChangeEvent>();\n    const off = this.platform.onDirectoryChanged(event => {",
+     "    await new Promise(resolve => setTimeout(resolve, 0));\n    const stream = new Stream<ChangeEvent>();\n    const off = this.platform.onDirectoryChanged(event => {",
+     "watch reports an addition made after the listing"),
+]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS + TOOLBAR_MUTATIONS + STATUS_MUTATIONS + ADAPTER_MUTATIONS
 
 # Every anchor is checked before anything is touched. A run that is killed
 # rather than returned from skips the finally below and leaves a mutation in
@@ -545,8 +630,17 @@ for suite, label, relative, old, new, expected in MUTATIONS:
     in_flight[path] = original
     open(path, "w").write(original.replace(old, new, 1))
     try:
-        run = subprocess.run(suite, capture_output=True, text=True,
-                             timeout=300)
+        try:
+            run = subprocess.run(suite, capture_output=True, text=True,
+                                 timeout=300)
+        except subprocess.TimeoutExpired:
+            # A suite that hangs has not passed. This is how the watch arming
+            # bug actually presented: the contract waited forever for an event
+            # that had already been dropped, and node exited silently rather
+            # than failing, so without this the gate would hang with it.
+            print("  caught      %s (the suite hung)" % label)
+            caught += 1
+            continue
         output = run.stdout + run.stderr
         if run.returncode != 0 and expected in output:
             print("  caught      %s" % label)

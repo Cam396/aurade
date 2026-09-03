@@ -1,0 +1,1539 @@
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+new file mode 100644
+index 0000000..2ffbf3d
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+@@ -0,0 +1,508 @@
++/**
++ * The real backend: `FilesBackendPort` over the plumbing we kept.
++ *
++ * Everything it touches is behind `Platform`, so the contract suite runs
++ * against it here rather than only on a machine. That proves the translation:
++ * identity, paging, error mapping, revisions and the change diff. It does not
++ * prove that `Platform` describes ChromeOS correctly, and only hardware can.
++ *
++ * Four capabilities are implemented: list, metadata, watch and volumes, which
++ * is what the window uses. The rest throw `unsupported` rather than returning
++ * something plausible, and the contract reports them as skipped rather than
++ * passing over them quietly.
++ */
++import type {FilesBackendPort} from '../port/port.js';
++import type {ChangeEvent, DialogMode, EntryDto, EntryPage, FileKey, IoProgress, IoRequest, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind} from '../port/types.js';
++import {asFileKey, FilesError} from '../port/types.js';
++import type {Platform, PlatformEntry, PlatformMetadata, PlatformVolume, PlatformWatchEvent} from './platform.js';
++
++/** ChromeOS volume types, as they are actually spelled. */
++const VOLUME_KINDS: Record<string, VolumeKind> = {
++  downloads: 'system',
++  system_internal: 'system',
++  removable: 'removable',
++  archive: 'archive',
++  provided: 'provided',
++  documents_provider: 'provided',
++  smb: 'provided',
++  drive: 'drive',
++  android_files: 'android',
++  crostini: 'crostini',
++  guest_os: 'crostini',
++  mtp: 'mtp',
++  trash: 'trash',
++  // An aggregated view rather than a device, which is the same shape as Recent.
++  media_view: 'recent',
++  recent: 'recent',
++};
++
++/** Anything you can unplug or unmount out from under yourself. */
++const DETACHABLE = new Set(['removable', 'archive', 'mtp']);
++
++/** Our field names to the ones MetadataModel answers to. */
++const METADATA_NAMES: Record<MetadataField, string> = {
++  size: 'size',
++  modificationTime: 'modificationTime',
++  mimeType: 'contentMimeType',
++  pinned: 'pinned',
++  shared: 'shared',
++  availableOffline: 'availableOffline',
++  restricted: 'restricted',
++};
++
++/**
++ * A DOMException is a name, not a code, and the UI has to say something
++ * different for each. Matching on the message is how that stops working in
++ * another language, which is the same reason FilesError is typed at all.
++ */
++function translateError(error: unknown, what: string): FilesError {
++  if (error instanceof FilesError) {
++    return error;
++  }
++  const name = (error as {name?: string} | null)?.name ?? '';
++  switch (name) {
++    case 'NotFoundError':
++      return new FilesError('not-found', `${what} is not there.`);
++    case 'TypeMismatchError':
++      return new FilesError('unsupported', `${what} is not a folder.`);
++    case 'NoModificationAllowedError':
++      return new FilesError('read-only', `${what} is read only.`);
++    case 'SecurityError':
++    case 'NotAllowedError':
++      return new FilesError('permission-denied', `${what} could not be opened.`);
++    case 'QuotaExceededError':
++      return new FilesError('no-space', 'There is no room left.');
++    case 'AbortError':
++      return new FilesError('cancelled', 'That was cancelled.');
++    default:
++      return new FilesError('io', `${what} could not be read.`);
++  }
++}
++
++/**
++ * An async iterable queue.
++ *
++ * Deliberately not shared with the mock's. A queue used by both the fake and
++ * the real thing is a place a single bug can hide from a suite designed to
++ * compare them.
++ */
++class Stream<T> implements AsyncIterable<T> {
++  private readonly buffer: T[] = [];
++  private wake: (() => void)|null = null;
++  private closed = false;
++
++  push(value: T): void {
++    if (this.closed) {
++      return;
++    }
++    this.buffer.push(value);
++    this.wake?.();
++    this.wake = null;
++  }
++
++  close(): void {
++    this.closed = true;
++    this.wake?.();
++    this.wake = null;
++  }
++
++  async * [Symbol.asyncIterator](): AsyncIterator<T> {
++    for (;;) {
++      while (this.buffer.length) {
++        yield this.buffer.shift()!;
++      }
++      if (this.closed) {
++        return;
++      }
++      await new Promise<void>(resolve => {
++        this.wake = resolve;
++      });
++    }
++  }
++}
++
++export class ChromeOsBackend implements FilesBackendPort {
++  /**
++   * ChromeOS has no revision concept, so this is ours. It advances whenever a
++   * change is observed for a directory, which is exactly what `list` and
++   * `watch` have to agree on for the session's replay to close its race.
++   */
++  private readonly revisions = new Map<FileKey, number>();
++  /**
++   * What we last told anybody a directory contained, per watch. Needed because
++   * a change event is allowed to omit what changed, and the honest answer to
++   * "something happened here" is to go and find out rather than to pass the
++   * shrug along.
++   */
++  private readonly known = new Map<FileKey, Set<FileKey>>();
++
++  constructor(private readonly platform: Platform) {}
++
++  private revisionOf(key: FileKey): number {
++    return this.revisions.get(key) ?? 1;
++  }
++
++  private bump(key: FileKey): number {
++    const next = this.revisionOf(key) + 1;
++    this.revisions.set(key, next);
++    return next;
++  }
++
++  private toDto(entry: PlatformEntry, parent: FileKey): EntryDto {
++    return {
++      key: asFileKey(entry.toURL()),
++      name: entry.name,
++      isDirectory: entry.isDirectory,
++      parent,
++    };
++  }
++
++  private async resolveDirectory(key: FileKey): Promise<PlatformEntry> {
++    let entry: PlatformEntry;
++    try {
++      entry = await this.platform.resolve(key);
++    } catch (error) {
++      throw translateError(error, 'That folder');
++    }
++    if (!entry.isDirectory) {
++      throw new FilesError('unsupported', `${entry.name} is not a folder.`);
++    }
++    return entry;
++  }
++
++  private async readAll(
++      directory: PlatformEntry, key: FileKey,
++      options: ListOptions): Promise<EntryDto[]> {
++    const reader = this.platform.createReader(directory);
++    const found: EntryDto[] = [];
++    for (;;) {
++      if (options.signal?.aborted) {
++        return found;
++      }
++      let chunk: readonly PlatformEntry[];
++      try {
++        chunk = await reader.readEntries();
++      } catch (error) {
++        throw translateError(error, `${directory.name}`);
++      }
++      // An empty chunk is the end. It is not "no entries": a directory with a
++      // thousand children answers several times before it says nothing.
++      if (!chunk.length) {
++        return found;
++      }
++      for (const child of chunk) {
++        if (!options.showHidden && child.name.startsWith('.')) {
++          continue;
++        }
++        found.push(this.toDto(child, key));
++      }
++    }
++  }
++
++  /**
++   * Streamed, not buffered.
++   *
++   * The obvious implementation reads the whole directory and then slices it
++   * into pages, which is a page shaped API over a blocking read and defeats the
++   * entire reason `list` returns an iterable. A hundred thousand entries has to
++   * start arriving before the last one has been counted.
++   */
++  async * list(key: FileKey, options: ListOptions = {}):
++      AsyncIterable<EntryPage> {
++    const directory = await this.resolveDirectory(key);
++    const reader = this.platform.createReader(directory);
++    const revision = this.revisionOf(key);
++    const size = options.pageSize ?? 200;
++    const seen = new Set<FileKey>();
++    let batch: EntryDto[] = [];
++    for (;;) {
++      if (options.signal?.aborted) {
++        return;
++      }
++      let chunk: readonly PlatformEntry[];
++      try {
++        chunk = await reader.readEntries();
++      } catch (error) {
++        throw translateError(error, directory.name);
++      }
++      if (!chunk.length) {
++        break;
++      }
++      for (const child of chunk) {
++        if (!options.showHidden && child.name.startsWith('.')) {
++          continue;
++        }
++        const dto = this.toDto(child, key);
++        seen.add(dto.key);
++        batch.push(dto);
++        if (batch.length >= size) {
++          yield {revision, entries: batch, done: false};
++          batch = [];
++        }
++      }
++    }
++    this.known.set(key, seen);
++    // The final page carries whatever is left, which may be nothing. An empty
++    // last page is how a directory whose size is an exact multiple of the page
++    // size still says it has finished.
++    yield {revision, entries: batch, done: true};
++  }
++
++  async metadata(keys: readonly FileKey[], fields: readonly MetadataField[]):
++      Promise<MetadataSnapshot> {
++    const out = new Map<FileKey, Metadata>();
++    if (!keys.length) {
++      return out;
++    }
++    const entries: PlatformEntry[] = [];
++    for (const key of keys) {
++      try {
++        entries.push(await this.platform.resolve(key));
++      } catch {
++        // A file that vanished between listing and stat is ordinary. It gets
++        // no entry in the snapshot rather than failing the whole batch.
++      }
++    }
++    const names = fields.map(field => METADATA_NAMES[field]);
++    let items: readonly PlatformMetadata[];
++    try {
++      items = await this.platform.getMetadata(entries, names);
++    } catch (error) {
++      throw translateError(error, 'Those files');
++    }
++    entries.forEach((entry, index) => {
++      const item = items[index];
++      if (!item) {
++        return;
++      }
++      const value: Record<string, unknown> = {};
++      // Only what was asked for. Handing back everything makes the caller's
++      // field list decorative and hides a provider that ignored it.
++      for (const field of fields) {
++        switch (field) {
++          case 'size':
++            if (item.size !== undefined) {
++              value['size'] = item.size;
++            }
++            break;
++          case 'modificationTime':
++            if (item.modificationTime) {
++              value['modificationTime'] = item.modificationTime.getTime();
++            }
++            break;
++          case 'mimeType':
++            if (item.contentMimeType !== undefined) {
++              value['mimeType'] = item.contentMimeType;
++            }
++            break;
++          default:
++            if (item[field] !== undefined) {
++              value[field] = item[field];
++            }
++        }
++      }
++      out.set(asFileKey(entry.toURL()), value as Metadata);
++    });
++    return out;
++  }
++
++  /**
++   * Turns a change event into what actually changed.
++   *
++   * When ChromeOS says which files moved, this is a translation. When it does
++   * not, and it is allowed not to, the directory is read again and compared
++   * with what we last reported. Passing the shrug along as an empty change
++   * would be a lie in the other direction: the caller would be told nothing
++   * happened.
++   */
++  private async describe(key: FileKey, event: PlatformWatchEvent):
++      Promise<ChangeEvent[]> {
++    if (event.changedFiles?.length) {
++      const added: FileKey[] = [];
++      const removed: FileKey[] = [];
++      for (const change of event.changedFiles) {
++        (change.changes.includes('delete') ? removed : added)
++            .push(asFileKey(change.url));
++      }
++      const out: ChangeEvent[] = [];
++      const seen = this.known.get(key);
++      if (removed.length) {
++        for (const gone of removed) {
++          seen?.delete(gone);
++        }
++        out.push({kind: 'removed', revision: this.bump(key), keys: removed});
++      }
++      if (added.length) {
++        // add_or_update covers both, so an entry we already knew about has
++        // changed rather than appeared.
++        const fresh = added.filter(candidate => !seen?.has(candidate));
++        const touched = added.filter(candidate => !!seen?.has(candidate));
++        if (touched.length) {
++          out.push({kind: 'changed', revision: this.bump(key), keys: touched});
++        }
++        if (fresh.length) {
++          const entries: EntryDto[] = [];
++          for (const candidate of fresh) {
++            try {
++              entries.push(this.toDto(await this.platform.resolve(candidate), key));
++            } catch {
++              // Added and gone again before we looked. Nothing to report.
++            }
++          }
++          if (entries.length) {
++            for (const entry of entries) {
++              seen?.add(entry.key);
++            }
++            out.push({kind: 'added', revision: this.bump(key), entries});
++          }
++        }
++      }
++      return out;
++    }
++
++    let directory: PlatformEntry;
++    try {
++      directory = await this.resolveDirectory(key);
++    } catch (error) {
++      if (error instanceof FilesError && error.code === 'not-found') {
++        return [{kind: 'gone', revision: this.bump(key)}];
++      }
++      return [];
++    }
++    const now = await this.readAll(directory, key, {showHidden: true});
++    const before = this.known.get(key) ?? new Set<FileKey>();
++    const after = new Set(now.map(entry => entry.key));
++    const gone = [...before].filter(candidate => !after.has(candidate));
++    const fresh = now.filter(entry => !before.has(entry.key));
++    this.known.set(key, after);
++    const out: ChangeEvent[] = [];
++    if (gone.length) {
++      out.push({kind: 'removed', revision: this.bump(key), keys: gone});
++    }
++    if (fresh.length) {
++      out.push({kind: 'added', revision: this.bump(key), entries: fresh});
++    }
++    return out;
++  }
++
++  /**
++   * Armed before anything is awaited.
++   *
++   * An async generator body does not run at all until the consumer starts
++   * iterating, and every `await` after that is a window in which a change
++   * arrives and is dropped on the floor. Resolving the directory first cost
++   * several microtasks, which was long enough to miss a change made in the very
++   * next statement, and the contract caught it by hanging forever waiting for
++   * an event that had already been thrown away.
++   *
++   * A window remains on real hardware: `addFileWatch` is what arms ChromeOS,
++   * and a change landing before it returns is not delivered to anybody. The
++   * session opens `watch` before `list` precisely so the listing that follows
++   * picks such a change up, and the revision on each is what lets it tell.
++   */
++  async * watch(key: FileKey, signal?: AbortSignal): AsyncIterable<ChangeEvent> {
++    const stream = new Stream<ChangeEvent>();
++    const off = this.platform.onDirectoryChanged(event => {
++      if (event.directoryUrl !== key) {
++        return;
++      }
++      void this.describe(key, event).then(events => {
++        for (const change of events) {
++          stream.push(change);
++        }
++      });
++    });
++    let directory: PlatformEntry|null = null;
++    let stopped = false;
++    const stop = () => {
++      if (stopped) {
++        return;
++      }
++      stopped = true;
++      off();
++      if (directory) {
++        void this.platform.removeFileWatch(directory);
++      }
++      stream.close();
++    };
++    if (signal?.aborted) {
++      stop();
++      return;
++    }
++    signal?.addEventListener('abort', stop, {once: true});
++    try {
++      directory = await this.resolveDirectory(key);
++      await this.platform.addFileWatch(directory);
++      // Also runs when the consumer breaks out of the loop, which is how the
++      // platform watch gets released rather than leaking one per navigation.
++      yield* stream;
++    } finally {
++      stop();
++    }
++  }
++
++  private async toVolume(volume: PlatformVolume): Promise<Volume> {
++    const kind = VOLUME_KINDS[volume.volumeType] ?? 'provided';
++    let capacity: {total: number, free: number}|null = null;
++    try {
++      const stats = await this.platform.getSizeStats(volume.volumeId);
++      if (stats && stats.totalSize > 0) {
++        capacity = {total: stats.totalSize, free: stats.remainingSize};
++      }
++    } catch {
++      // A volume that will not answer has no capacity to show, which is the
++      // same as one that has no notion of it. Neither is worth failing over.
++    }
++    return {
++      id: volume.volumeId,
++      root: asFileKey(volume.root.toURL()),
++      label: volume.label,
++      kind,
++      removable: DETACHABLE.has(volume.volumeType),
++      readOnly: volume.isReadOnly,
++      capacity,
++    };
++  }
++
++  async volumes(): Promise<readonly Volume[]> {
++    const found = await this.platform.listVolumes();
++    return Promise.all(found.map(volume => this.toVolume(volume)));
++  }
++
++  // Not implemented yet, and saying so rather than returning something
++  // plausible. The contract reports these as skipped for this backend.
++
++  private unsupported(what: string): never {
++    throw new FilesError('unsupported', `${what} is not wired up yet.`);
++  }
++
++  // eslint-disable-next-line require-yield
++  async * search(): AsyncIterable<EntryPage> {
++    this.unsupported('Search');
++  }
++  async tasks(): Promise<readonly TaskDescriptor[]> {
++    this.unsupported('Open with');
++  }
++  async executeTask(): Promise<void> {
++    this.unsupported('Open with');
++  }
++  async startIo(_request: IoRequest): Promise<TaskId> {
++    this.unsupported('File operations');
++  }
++  // eslint-disable-next-line require-yield
++  async * subscribeIo(): AsyncIterable<IoProgress> {
++    this.unsupported('File operations');
++  }
++  async cancelIo(): Promise<void> {
++    this.unsupported('File operations');
++  }
++  async dialogMode(): Promise<DialogMode|null> {
++    this.unsupported('Dialog mode');
++  }
++  async confirmDialog(): Promise<void> {
++    this.unsupported('Dialog mode');
++  }
++  async cancelDialog(): Promise<void> {
++    this.unsupported('Dialog mode');
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+new file mode 100644
+index 0000000..36f9233
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+@@ -0,0 +1,86 @@
++/**
++ * The narrow slice of ChromeOS the adapter is allowed to touch.
++ *
++ * Written against the real definitions in `definitions/file_manager_private.d.ts`
++ * rather than from memory, and deliberately narrow: the adapter reaches for
++ * nothing outside this, so the whole of it can be driven by a fake in a browser
++ * that has no `chrome.fileManagerPrivate` and no filesystem.
++ *
++ * The shapes here are the real ones. `changedFiles` really is optional, chunked
++ * reads really do end with an empty array, and metadata really does come back
++ * positionally. Where this lies, the adapter is verified against a fiction.
++ */
++
++/** A DOM `Entry`, reduced to what we read from it. */
++export interface PlatformEntry {
++  readonly name: string;
++  readonly isDirectory: boolean;
++  /** The identity used throughout the Files store already. */
++  toURL(): string;
++}
++
++/**
++ * A `DirectoryReader`, promisified.
++ *
++ * Chunked by design: it is called repeatedly and returns an empty array when
++ * the directory is exhausted. One call is not one directory.
++ */
++export interface PlatformDirectoryReader {
++  readEntries(): Promise<readonly PlatformEntry[]>;
++}
++
++/** A `MetadataItem`, of which we read a handful of fields. */
++export interface PlatformMetadata {
++  readonly size?: number;
++  readonly modificationTime?: Date;
++  readonly contentMimeType?: string;
++  readonly pinned?: boolean;
++  readonly shared?: boolean;
++  readonly availableOffline?: boolean;
++  readonly restricted?: boolean;
++}
++
++/** A `VolumeInfo`, reduced. */
++export interface PlatformVolume {
++  readonly volumeId: string;
++  /** The raw ChromeOS volume type string, mapped in the adapter. */
++  readonly volumeType: string;
++  readonly label: string;
++  readonly isReadOnly: boolean;
++  readonly root: PlatformEntry;
++}
++
++/** `chrome.fileManagerPrivate.FileChange`. */
++export interface PlatformFileChange {
++  readonly url: string;
++  readonly changes: ReadonlyArray<'add_or_update'|'delete'>;
++}
++
++/**
++ * `chrome.fileManagerPrivate.FileWatchEvent`, reduced.
++ *
++ * `changedFiles` is optional in the real API, which is the single most
++ * important fact in this file: ChromeOS is allowed to say only that a
++ * directory changed, without saying how.
++ */
++export interface PlatformWatchEvent {
++  readonly directoryUrl: string;
++  readonly changedFiles?: readonly PlatformFileChange[];
++}
++
++export interface Platform {
++  /** `webkitResolveLocalFileSystemURL`. Rejects with a DOMException. */
++  resolve(url: string): Promise<PlatformEntry>;
++  createReader(directory: PlatformEntry): PlatformDirectoryReader;
++  /** `MetadataModel.get`, which is batched and returns results positionally. */
++  getMetadata(
++      entries: readonly PlatformEntry[],
++      names: readonly string[]): Promise<readonly PlatformMetadata[]>;
++  listVolumes(): Promise<readonly PlatformVolume[]>;
++  /** `getSizeStats`, which returns nothing for a volume that has no notion. */
++  getSizeStats(volumeId: string):
++      Promise<{totalSize: number, remainingSize: number}|null>;
++  addFileWatch(entry: PlatformEntry): Promise<void>;
++  removeFileWatch(entry: PlatformEntry): Promise<void>;
++  onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void;
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+new file mode 100644
+index 0000000..6268704
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+@@ -0,0 +1,330 @@
++/**
++ * What the shared contract cannot ask.
++ *
++ * The contract is written to be true of any backend, so it cannot mention
++ * DOMException names, ChromeOS volume type strings, or the fact that a change
++ * event is allowed to omit what changed. Those are the adapter's whole job, so
++ * they are tested here.
++ */
++import {ChromeOsBackend} from '../../adapter/chromeos_backend.js';
++import type {ChangeEvent, EntryPage} from '../../port/types.js';
++import {asFileKey, FilesError} from '../../port/types.js';
++import {FakePlatform} from './fake_platform.js';
++import {beginCheck} from '../progress.js';
++
++const ROOT = 'filesystem:chrome://file-manager/external/myfiles';
++
++class AssertionError extends Error {}
++function assert(condition: unknown, message: string): asserts condition {
++  if (!condition) {
++    throw new AssertionError(message);
++  }
++}
++function equal<T>(actual: T, expected: T, message: string): void {
++  if (actual !== expected) {
++    throw new AssertionError(
++        `${message}: expected ${String(expected)}, got ${String(actual)}`);
++  }
++}
++
++function withRoot(options?: ConstructorParameters<typeof FakePlatform>[0]):
++    FakePlatform {
++  return new FakePlatform(options).addVolume({
++    volumeId: 'system',
++    volumeType: 'downloads',
++    label: 'My files',
++    url: ROOT,
++    sizeStats: {totalSize: 512e9, remainingSize: 8.7e9},
++  });
++}
++
++async function drain(pages: AsyncIterable<EntryPage>): Promise<string[]> {
++  const names: string[] = [];
++  for await (const page of pages) {
++    names.push(...page.entries.map(entry => entry.name));
++  }
++  return names;
++}
++
++interface Check {
++  name: string;
++  run(): Promise<void>;
++}
++
++const CHECKS: Check[] = [
++  {
++    name: 'every DOMException the platform throws becomes a typed code',
++    async run() {
++      const expected: Array<[string, string]> = [
++        ['NotFoundError', 'not-found'],
++        ['TypeMismatchError', 'unsupported'],
++        ['NoModificationAllowedError', 'read-only'],
++        ['SecurityError', 'permission-denied'],
++        ['NotAllowedError', 'permission-denied'],
++        ['QuotaExceededError', 'no-space'],
++        ['AbortError', 'cancelled'],
++        // Anything unrecognised is io rather than a crash or a guess.
++        ['SomeFutureChromeError', 'io'],
++      ];
++      for (const [name, code] of expected) {
++        const platform = withRoot();
++        const folder = platform.add(ROOT, 'sub', true);
++        platform.failWith(folder, name);
++        const port = new ChromeOsBackend(platform);
++        try {
++          await drain(port.list(asFileKey(folder)));
++          throw new AssertionError(`${name} did not fail at all`);
++        } catch (error) {
++          assert(error instanceof FilesError,
++                 `${name} came back as ${(error as Error)?.name}, not a FilesError`);
++          equal(error.code, code, `${name} mapped to the wrong code`);
++        }
++      }
++    },
++  },
++  {
++    name: 'a change event that does not say what changed is worked out',
++    async run() {
++      // The real API may report only that a directory changed. Passing that
++      // shrug along as an empty change would tell the caller nothing happened.
++      const platform = withRoot({vagueChanges: true});
++      platform.add(ROOT, 'before.txt', false);
++      const port = new ChromeOsBackend(platform);
++      await drain(port.list(asFileKey(ROOT)));
++      const controller = new AbortController();
++      const seen: ChangeEvent[] = [];
++      const pump = (async () => {
++        for await (const event of port.watch(asFileKey(ROOT), controller.signal)) {
++          seen.push(event);
++          break;
++        }
++      })();
++      await Promise.resolve();
++      platform.add(ROOT, 'after.txt', false);
++      await pump;
++      controller.abort();
++      equal(seen.length, 1, 'nothing was reported');
++      const event = seen[0]!;
++      equal(event.kind, 'added', 'the difference was not worked out');
++      assert(event.kind === 'added' && event.entries[0]?.name === 'after.txt',
++             'it found the wrong entry');
++    },
++  },
++  {
++    name: 'a vague removal is worked out too',
++    async run() {
++      const platform = withRoot({vagueChanges: true});
++      const doomed = platform.add(ROOT, 'doomed.txt', false);
++      const port = new ChromeOsBackend(platform);
++      await drain(port.list(asFileKey(ROOT)));
++      const controller = new AbortController();
++      const seen: ChangeEvent[] = [];
++      const pump = (async () => {
++        for await (const event of port.watch(asFileKey(ROOT), controller.signal)) {
++          seen.push(event);
++          break;
++        }
++      })();
++      await Promise.resolve();
++      platform.remove(doomed);
++      await pump;
++      controller.abort();
++      equal(seen[0]?.kind, 'removed', 'a removal was not noticed');
++    },
++  },
++  {
++    name: 'metadata is one call for the whole selection',
++    async run() {
++      const platform = withRoot();
++      const keys = [];
++      for (let i = 0; i < 8; i++) {
++        keys.push(asFileKey(platform.add(ROOT, `f-${i}.txt`, false, {size: 10})));
++      }
++      const port = new ChromeOsBackend(platform);
++      await port.metadata(keys, ['size']);
++      equal(platform.metadataCalls.length, 1,
++            'eight files should not be eight round trips');
++    },
++  },
++  {
++    name: 'metadata asks for the fields wanted and no others',
++    async run() {
++      const platform = withRoot();
++      const key = asFileKey(
++          platform.add(ROOT, 'one.txt', false, {size: 10, contentMimeType: 'text/plain'}));
++      const port = new ChromeOsBackend(platform);
++      const snapshot = await port.metadata([key], ['size']);
++      equal(platform.metadataCalls[0]?.join(','), 'size',
++            'it asked the provider for more than it needed');
++      const item = snapshot.get(key)!;
++      equal(item.size, 10, 'the size did not come back');
++      equal(item.mimeType, undefined,
++            'a field nobody asked for was handed back anyway');
++    },
++  },
++  {
++    name: 'our field names are translated to the ones the provider knows',
++    async run() {
++      const platform = withRoot();
++      const key = asFileKey(platform.add(
++          ROOT, 'one.txt', false, {contentMimeType: 'text/plain'}));
++      const port = new ChromeOsBackend(platform);
++      const snapshot = await port.metadata([key], ['mimeType']);
++      // The provider calls it contentMimeType. Asking it for "mimeType" gets
++      // nothing back and no error, which is the quietest kind of wrong.
++      equal(platform.metadataCalls[0]?.join(','), 'contentMimeType',
++            'the field name was not translated');
++      equal(snapshot.get(key)?.mimeType, 'text/plain', 'and it did not arrive');
++    },
++  },
++  {
++    name: 'a file that vanishes mid batch does not fail the batch',
++    async run() {
++      const platform = withRoot();
++      const good = asFileKey(platform.add(ROOT, 'here.txt', false, {size: 4}));
++      const gone = asFileKey(`${ROOT}/never-existed.txt`);
++      const port = new ChromeOsBackend(platform);
++      const snapshot = await port.metadata([gone, good], ['size']);
++      equal(snapshot.get(good)?.size, 4, 'the file that is there was lost');
++      equal(snapshot.has(gone), false, 'the one that is not there was invented');
++    },
++  },
++  {
++    name: 'ChromeOS volume types become the kinds the sidebar groups by',
++    async run() {
++      const platform = new FakePlatform();
++      const types: Array<[string, string]> = [
++        ['downloads', 'system'],
++        ['removable', 'removable'],
++        ['drive', 'drive'],
++        ['android_files', 'android'],
++        ['crostini', 'crostini'],
++        ['mtp', 'mtp'],
++        ['archive', 'archive'],
++        ['trash', 'trash'],
++        ['media_view', 'recent'],
++        // Something we have never heard of is a provider, not a crash and not
++        // a disk in the machine.
++        ['some_future_type', 'provided'],
++      ];
++      types.forEach(([type], index) => {
++        platform.addVolume({
++          volumeId: `v${index}`,
++          volumeType: type,
++          label: type,
++          url: `filesystem:chrome://file-manager/external/${type}`,
++        });
++      });
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      types.forEach(([type, kind], index) => {
++        equal(volumes[index]!.kind, kind, `${type} mapped wrongly`);
++      });
++    },
++  },
++  {
++    name: 'only what can be unplugged is marked removable',
++    async run() {
++      const platform = new FakePlatform();
++      for (const type of ['downloads', 'removable', 'mtp', 'archive', 'drive']) {
++        platform.addVolume({
++          volumeId: type,
++          volumeType: type,
++          label: type,
++          url: `filesystem:chrome://file-manager/external/${type}`,
++        });
++      }
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      const removable =
++          volumes.filter(volume => volume.removable).map(volume => volume.id);
++      equal(removable.join(','), 'removable,mtp,archive',
++            'the wrong things are marked as unpluggable');
++    },
++  },
++  {
++    name: 'a volume with no size stats has no capacity rather than zero',
++    async run() {
++      const platform = new FakePlatform().addVolume({
++        volumeId: 'drive',
++        volumeType: 'drive',
++        label: 'Google Drive',
++        url: 'filesystem:chrome://file-manager/external/drive',
++      });
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      equal(volumes[0]!.capacity, null,
++            'a cloud mount was given a capacity of zero, which draws a full bar');
++    },
++  },
++  {
++    name: 'pages arrive before the whole directory has been read',
++    async run() {
++      // Two entries per read, twenty entries, ten reads to exhaust. If the
++      // first page waits for all of them, the iterable is a page shaped API
++      // over a blocking read and a hundred thousand entries never starts.
++      const platform = withRoot({chunk: 2});
++      for (let i = 0; i < 20; i++) {
++        platform.add(ROOT, `f-${i}.txt`, false);
++      }
++      const port = new ChromeOsBackend(platform);
++      let readsAtFirstPage = -1;
++      let reads = 0;
++      const inner = platform.createReader.bind(platform);
++      platform.createReader = directory => {
++        const reader = inner(directory);
++        return {
++          readEntries: async () => {
++            reads++;
++            return reader.readEntries();
++          },
++        };
++      };
++      for await (const page of port.list(asFileKey(ROOT), {pageSize: 2})) {
++        if (readsAtFirstPage < 0 && page.entries.length) {
++          readsAtFirstPage = reads;
++        }
++      }
++      assert(readsAtFirstPage > 0, 'no page ever arrived');
++      assert(readsAtFirstPage <= 2,
++             `the first page waited for ${readsAtFirstPage} reads of the directory`);
++    },
++  },
++  {
++    name: 'walking away from a watch releases it on the platform',
++    async run() {
++      const platform = withRoot();
++      const port = new ChromeOsBackend(platform);
++      const controller = new AbortController();
++      const pump = (async () => {
++        for await (const _event of port.watch(asFileKey(ROOT), controller.signal)) {
++          break;
++        }
++      })();
++      await Promise.resolve();
++      platform.add(ROOT, 'poke.txt', false);
++      await pump;
++      // Give the teardown its microtask.
++      await new Promise(resolve => setTimeout(resolve, 0));
++      equal(platform.watched.size, 0,
++            'the platform watch leaked, one per navigation');
++    },
++  },
++];
++
++export async function runAdapterTests(): Promise<boolean> {
++  let passed = 0;
++  const failures: string[] = [];
++  for (const check of CHECKS) {
++    try {
++      beginCheck(`adapter: ${check.name}`);
++      await check.run();
++      passed++;
++    } catch (error) {
++      failures.push(`  FAIL ${check.name}\n       ${
++          error instanceof Error ? error.message : String(error)}`);
++    }
++  }
++  console.log(`adapter: ${passed}/${CHECKS.length} passed`);
++  for (const failure of failures) {
++    console.log(failure);
++  }
++  return failures.length === 0;
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+new file mode 100644
+index 0000000..8451c80
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+@@ -0,0 +1,206 @@
++/**
++ * A ChromeOS shaped fake, for running the contract against the real adapter.
++ *
++ * The point of this file is to be awkward in the same ways the real thing is,
++ * not convenient. So `createReader` hands back a few entries at a time and only
++ * signals the end with an empty array, `getMetadata` answers positionally and
++ * only for the names it was asked for, failures arrive as objects with
++ * DOMException names rather than as our own error type, and a change event can
++ * legitimately arrive with no `changedFiles` at all.
++ *
++ * It proves the adapter translates correctly. It cannot prove this description
++ * of ChromeOS is right, and only the hardware can do that.
++ */
++import type {Platform, PlatformDirectoryReader, PlatformEntry, PlatformFileChange, PlatformMetadata, PlatformVolume, PlatformWatchEvent} from '../../adapter/platform.js';
++
++class FakeEntry implements PlatformEntry {
++  constructor(
++      readonly name: string, readonly isDirectory: boolean,
++      private readonly url: string) {}
++  toURL(): string {
++    return this.url;
++  }
++}
++
++interface Node {
++  entry: FakeEntry;
++  parent: string|null;
++  children: string[];
++  metadata: PlatformMetadata;
++}
++
++/** Thrown the way the platform throws: a name, not a type of ours. */
++function domError(name: string): Error {
++  const error = new Error(name);
++  error.name = name;
++  return error;
++}
++
++export interface FakeOptions {
++  /** Entries per readEntries call. Small on purpose, so paging is exercised. */
++  readonly chunk?: number;
++  /**
++   * When true, change events omit `changedFiles`, which the real API is
++   * allowed to do. The adapter then has to go and find out what happened.
++   */
++  readonly vagueChanges?: boolean;
++}
++
++export class FakePlatform implements Platform {
++  private readonly nodes = new Map<string, Node>();
++  private readonly volumeList: PlatformVolume[] = [];
++  private readonly sizes = new Map<string, {totalSize: number, remainingSize: number}>();
++  private readonly listeners = new Set<(event: PlatformWatchEvent) => void>();
++  private readonly failures = new Map<string, string>();
++  readonly watched = new Set<string>();
++  /** Every name list getMetadata was asked for, so a test can check batching. */
++  readonly metadataCalls: Array<readonly string[]> = [];
++
++  constructor(private readonly options: FakeOptions = {}) {}
++
++  addVolume(volume: {
++    volumeId: string,
++    volumeType: string,
++    label: string,
++    url: string,
++    isReadOnly?: boolean,
++    sizeStats?: {totalSize: number, remainingSize: number},
++  }): this {
++    const root = new FakeEntry(volume.label, true, volume.url);
++    this.nodes.set(volume.url, {entry: root, parent: null, children: [], metadata: {}});
++    this.volumeList.push({
++      volumeId: volume.volumeId,
++      volumeType: volume.volumeType,
++      label: volume.label,
++      isReadOnly: volume.isReadOnly ?? false,
++      root,
++    });
++    if (volume.sizeStats) {
++      this.sizes.set(volume.volumeId, volume.sizeStats);
++    }
++    return this;
++  }
++
++  add(parentUrl: string, name: string, isDirectory: boolean,
++      metadata: PlatformMetadata = {}): string {
++    const parent = this.nodes.get(parentUrl);
++    if (!parent) {
++      throw new Error(`no such parent ${parentUrl}`);
++    }
++    const url = `${parentUrl.replace(/\/$/, '')}/${name}`;
++    this.nodes.set(
++        url,
++        {entry: new FakeEntry(name, isDirectory, url), parent: parentUrl,
++         children: [], metadata});
++    parent.children.push(url);
++    this.notify(parentUrl, [{url, changes: ['add_or_update']}]);
++    return url;
++  }
++
++  remove(url: string): void {
++    const node = this.nodes.get(url);
++    if (!node) {
++      return;
++    }
++    this.nodes.delete(url);
++    if (node.parent) {
++      const parent = this.nodes.get(node.parent);
++      if (parent) {
++        parent.children = parent.children.filter(child => child !== url);
++      }
++      this.notify(node.parent, [{url, changes: ['delete']}]);
++    }
++  }
++
++  /** Makes this url fail the way the platform fails, by DOMException name. */
++  failWith(url: string, domExceptionName: string): void {
++    this.failures.set(url, domExceptionName);
++  }
++
++  private notify(directoryUrl: string, changes: PlatformFileChange[]): void {
++    const event: PlatformWatchEvent = this.options.vagueChanges ?
++        {directoryUrl} :
++        {directoryUrl, changedFiles: changes};
++    for (const listener of [...this.listeners]) {
++      listener(event);
++    }
++  }
++
++  async resolve(url: string): Promise<PlatformEntry> {
++    const failure = this.failures.get(url);
++    if (failure) {
++      throw domError(failure);
++    }
++    const node = this.nodes.get(url);
++    if (!node) {
++      throw domError('NotFoundError');
++    }
++    return node.entry;
++  }
++
++  createReader(directory: PlatformEntry): PlatformDirectoryReader {
++    const url = directory.toURL();
++    const chunk = this.options.chunk ?? 3;
++    let offset = 0;
++    let exhausted = false;
++    return {
++      readEntries: async () => {
++        const failure = this.failures.get(url);
++        if (failure) {
++          throw domError(failure);
++        }
++        if (exhausted) {
++          return [];
++        }
++        const node = this.nodes.get(url);
++        if (!node) {
++          throw domError('NotFoundError');
++        }
++        const slice = node.children.slice(offset, offset + chunk);
++        offset += slice.length;
++        if (!slice.length) {
++          exhausted = true;
++          return [];
++        }
++        return slice.map(child => this.nodes.get(child)!.entry);
++      },
++    };
++  }
++
++  async getMetadata(
++      entries: readonly PlatformEntry[],
++      names: readonly string[]): Promise<readonly PlatformMetadata[]> {
++    this.metadataCalls.push(names.slice());
++    // Positionally, and carrying whatever it happens to have cached.
++    //
++    // Deliberately more than was asked for. MetadataModel is a cache in front
++    // of several providers, so a MetadataItem can arrive holding fields nobody
++    // requested on this call. A fake that returns exactly the requested names
++    // makes the adapter's own filter look load bearing when it is not, and a
++    // mutation removing that filter escaped for precisely that reason.
++    return entries.map(
++        entry => (this.nodes.get(entry.toURL())?.metadata ?? {}));
++  }
++
++  async listVolumes(): Promise<readonly PlatformVolume[]> {
++    return this.volumeList.slice();
++  }
++
++  async getSizeStats(volumeId: string):
++      Promise<{totalSize: number, remainingSize: number}|null> {
++    return this.sizes.get(volumeId) ?? null;
++  }
++
++  async addFileWatch(entry: PlatformEntry): Promise<void> {
++    this.watched.add(entry.toURL());
++  }
++
++  async removeFileWatch(entry: PlatformEntry): Promise<void> {
++    this.watched.delete(entry.toURL());
++  }
++
++  onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void {
++    this.listeners.add(listener);
++    return () => this.listeners.delete(listener);
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+new file mode 100644
+index 0000000..a3603a2
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
+@@ -0,0 +1,63 @@
++/**
++ * The contract, run against the real adapter.
++ *
++ * This is the file the port's docstring has been promising since M0: the same
++ * cases, two implementations, and a difference between them is a bug in
++ * whichever one is lying. Four capabilities are implemented so far, and the six
++ * cases covering the rest are reported as not run rather than passed over.
++ */
++import {ChromeOsBackend} from '../../adapter/chromeos_backend.js';
++import type {FileKey} from '../../port/types.js';
++import {asFileKey, FilesError} from '../../port/types.js';
++import type {Capability, Fixture} from '../contract/port_contract.js';
++import {runContract} from '../contract/port_contract.js';
++import {FakePlatform} from './fake_platform.js';
++
++const ROOT = 'filesystem:chrome://file-manager/external/myfiles';
++const USB = 'filesystem:chrome://file-manager/external/usb';
++
++/** Our codes back to the DOMException names the platform actually throws. */
++const DOM_NAMES: Record<string, string> = {
++  'not-found': 'NotFoundError',
++  'permission-denied': 'SecurityError',
++  'read-only': 'NoModificationAllowedError',
++  'no-space': 'QuotaExceededError',
++  cancelled: 'AbortError',
++  unsupported: 'TypeMismatchError',
++  io: 'InvalidStateError',
++  busy: 'InvalidStateError',
++};
++
++export const IMPLEMENTED: readonly Capability[] =
++    ['list', 'metadata', 'watch', 'volumes'];
++
++export function makeAdapterFixture(): Fixture {
++  const platform = new FakePlatform();
++  platform.addVolume({
++    volumeId: 'system',
++    volumeType: 'downloads',
++    label: 'My files',
++    url: ROOT,
++    sizeStats: {totalSize: 512e9, remainingSize: 8.7e9},
++  });
++  platform.addVolume({
++    volumeId: 'usb',
++    volumeType: 'removable',
++    label: 'Samsung Flash Drive',
++    url: USB,
++    sizeStats: {totalSize: 128e9, remainingSize: 96e9},
++  });
++  return {
++    port: new ChromeOsBackend(platform),
++    root: asFileKey(ROOT),
++    add: (parent: FileKey, name: string, isDirectory: boolean) =>
++        asFileKey(platform.add(parent, name, isDirectory, {size: 1024})),
++    remove: (key: FileKey) => platform.remove(key),
++    failWith: (key: FileKey, error: FilesError) =>
++        platform.failWith(key, DOM_NAMES[error.code] ?? 'InvalidStateError'),
++  };
++}
++
++export async function runAdapterContract() {
++  return runContract('ChromeOsBackend', makeAdapterFixture, IMPLEMENTED);
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+index 05b9583..043399c 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+@@ -9,6 +9,7 @@
+ import type {FilesBackendPort} from '../../port/port.js';
+ import type {ChangeEvent, EntryDto, FileKey, IoProgress, Volume} from '../../port/types.js';
+ import {asFileKey, FilesError} from '../../port/types.js';
++import {beginCheck} from '../progress.js';
+ 
+ export interface Fixture {
+   port: FilesBackendPort;
+@@ -19,8 +20,21 @@ export interface Fixture {
+   failWith(key: FileKey, error: FilesError): void;
+ }
+ 
++/**
++ * What a case exercises.
++ *
++ * A backend that implements some of the port and not the rest is the normal
++ * state of affairs part way through building one. Tagging cases lets such a
++ * backend run everything it claims and have the remainder reported as skipped,
++ * rather than the suite either failing on unfinished work or, far worse,
++ * quietly not covering it.
++ */
++export type Capability =
++    'list'|'metadata'|'watch'|'search'|'tasks'|'io'|'volumes'|'dialog';
++
+ export interface Case {
+   name: string;
++  capability: Capability;
+   run(fixture: Fixture): Promise<void>;
+ }
+ 
+@@ -63,6 +77,7 @@ async function rejects(
+ export const CASES: Case[] = [
+   {
+     name: 'lists the entries in a directory',
++    capability: 'list',
+     async run({port, root, add}) {
+       add(root, 'alpha.txt', false);
+       add(root, 'beta', true);
+@@ -76,6 +91,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'pages a long listing and marks only the last page done',
++    capability: 'list',
+     async run({port, root, add}) {
+       for (let i = 0; i < 25; i++) {
+         add(root, `file-${i}.txt`, false);
+@@ -93,6 +109,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'hides dotfiles unless asked',
++    capability: 'list',
+     async run({port, root, add}) {
+       add(root, 'visible.txt', false);
+       add(root, '.hidden', false);
+@@ -104,6 +121,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'stops listing when the caller aborts',
++    capability: 'list',
+     async run({port, root, add}) {
+       for (let i = 0; i < 50; i++) {
+         add(root, `f${i}`, false);
+@@ -120,6 +138,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'reports not-found for an entry that is not there',
++    capability: 'list',
+     async run({port}) {
+       await rejects(
+           () => collect(port.list(asFileKey('nowhere'))), 'not-found',
+@@ -128,6 +147,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'refuses to list something that is not a directory',
++    capability: 'list',
+     async run({port, root, add}) {
+       const file = add(root, 'plain.txt', false);
+       await rejects(
+@@ -136,6 +156,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'returns metadata in one batch, limited to the fields asked for',
++    capability: 'metadata',
+     async run({port, root, add}) {
+       const a = add(root, 'a.txt', false);
+       const b = add(root, 'b.txt', false);
+@@ -146,6 +167,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'watch reports an addition made after the listing',
++    capability: 'watch',
+     async run({port, root, add}) {
+       const controller = new AbortController();
+       const seen: ChangeEvent[] = [];
+@@ -165,6 +187,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'the revision advances between a listing and a later change',
++    capability: 'watch',
+     async run({port, root, add}) {
+       add(root, 'first.txt', false);
+       let listed = -1;
+@@ -190,6 +213,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'watch reports a removal',
++    capability: 'watch',
+     async run({port, root, add, remove}) {
+       const doomed = add(root, 'doomed.txt', false);
+       const controller = new AbortController();
+@@ -209,6 +233,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'search finds an entry nested below the scope',
++    capability: 'search',
+     async run({port, root, add}) {
+       const deep = add(root, 'deep', true);
+       add(deep, 'needle.txt', false);
+@@ -220,6 +245,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'offers tasks for a selection and runs one',
++    capability: 'tasks',
+     async run({port, root, add}) {
+       const file = add(root, 'openable.txt', false);
+       const tasks = await port.tasks([file]);
+@@ -230,6 +256,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'an io operation runs to completion and reports progress',
++    capability: 'io',
+     async run({port, root, add}) {
+       const file = add(root, 'copied.txt', false);
+       const controller = new AbortController();
+@@ -251,6 +278,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'an io failure arrives as a typed error, not a string',
++    capability: 'io',
+     async run({port, root, add, failWith}) {
+       const file = add(root, 'busy.txt', false);
+       failWith(file, new FilesError(
+@@ -276,6 +304,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'a cancelled io operation stops and says it was cancelled',
++    capability: 'io',
+     async run({port, root, add}) {
+       const files = [add(root, 'x', false), add(root, 'y', false),
+                      add(root, 'z', false)];
+@@ -302,6 +331,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'volumes are reported with their capacity and removability',
++    capability: 'volumes',
+     async run({port}) {
+       const volumes: readonly Volume[] = await port.volumes();
+       assert(volumes.length > 0, 'at least one volume');
+@@ -312,6 +342,7 @@ export const CASES: Case[] = [
+   },
+   {
+     name: 'reports no dialog mode when not launched as a picker',
++    capability: 'dialog',
+     async run({port}) {
+       equal(await port.dialogMode(), null, 'dialog mode');
+     },
+@@ -325,11 +356,18 @@ export interface Result {
+ }
+ 
+ export async function runContract(
+-    label: string, makeFixture: () => Promise<Fixture>|Fixture):
+-    Promise<Result[]> {
++    label: string, makeFixture: () => Promise<Fixture>|Fixture,
++    capabilities?: readonly Capability[]): Promise<Result[]> {
+   const results: Result[] = [];
++  const skipped = capabilities ?
++      CASES.filter(c => !capabilities.includes(c.capability)) :
++      [];
+   for (const testCase of CASES) {
++    if (capabilities && !capabilities.includes(testCase.capability)) {
++      continue;
++    }
+     try {
++      beginCheck(`${label}: ${testCase.name}`);
+       await testCase.run(await makeFixture());
+       results.push({name: testCase.name, ok: true});
+     } catch (error) {
+@@ -345,5 +383,13 @@ export async function runContract(
+   for (const result of failed) {
+     console.log(`  FAIL ${result.name}\n       ${result.error}`);
+   }
++  if (skipped.length) {
++    // Named out loud every run. A capability nobody has built is a fact about
++    // the backend, and a suite that reports 11 of 11 without saying which six
++    // it did not run is telling you something false by omission.
++    const groups = [...new Set(skipped.map(c => c.capability))].sort();
++    console.log(`  ${skipped.length} case(s) not run, ${
++        label} does not implement: ${groups.join(', ')}`);
++  }
+   return results;
+ }
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
+index 24976db..afe960f 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
+@@ -9,6 +9,9 @@ import {runPlacesTests} from '../ui/places_test.js';
+ import {runVoiceTests} from '../ui/voice_test.js';
+ import type {Fixture} from './port_contract.js';
+ import {runContract} from './port_contract.js';
++import {currentCheck} from '../progress.js';
++import {runAdapterTests} from '../adapter/adapter_test.js';
++import {runAdapterContract} from '../adapter/run_adapter.js';
+ 
+ const ROOT = asFileKey('mock://myfiles');
+ 
+@@ -45,17 +48,38 @@ function makeFixture(): Fixture {
+ 
+ // Declared rather than pulled in from @types/node, which is not on this
+ // tree's path and would be a dependency for one property.
+-declare const process: {exitCode: number};
++declare const process: {exitCode: number, exit(code: number): never};
+ 
+ async function main(): Promise<void> {
++  // Set before anything runs, cleared only once everything has finished.
++  //
++  // Node exits silently with code 0 when nothing is left on the event loop,
++  // including when that is because a promise will never settle. So a suite
++  // that hangs half way through prints nothing further and reports success,
++  // and three mutations escaped exactly that way: they made a test wait
++  // forever for an event that had been dropped, and the runner called it a
++  // pass. A hang is a failure.
++  process.exitCode = 1;
++  const watchdog = setTimeout(() => {
++    // Naming it matters twice over: a person can go straight to the test, and
++    // the mutation gate can tell that the hang is the escape it was looking
++    // for rather than an unrelated stall.
++    console.log(`a suite hung and never finished, in: ${currentCheck()}`);
++    process.exit(1);
++  }, 120_000);
+   const contract = await runContract('MockBackend', makeFixture);
++  const adapter = await runAdapterContract();
++  const adapterUnits = await runAdapterTests();
+   const sessions = await runSessionTests();
+   const formats = runFormatTests();
+   const voice = runVoiceTests();
+   const places = runPlacesTests();
+   const history = runHistoryTests();
++  clearTimeout(watchdog);
+   process.exitCode =
+-      contract.every(r => r.ok) && sessions && formats && voice &&
++      contract.every(r => r.ok) && adapter.every(r => r.ok) &&
++          adapterUnits &&
++          sessions && formats && voice &&
+           places && history ? 0 : 1;
+ }
+ 
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.py b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
+index 5efe7d4..9b26b68 100755
+--- a/ui/file_manager/file_manager/aurade/tests/harness/dom.py
++++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
+@@ -64,7 +64,10 @@ def main():
+             browser.call("Page.navigate",
+                          url="http://127.0.0.1:%d/tests/harness/dom.html" % port)
+             browser.wait_for("Page.loadEventFired")
+-            deadline = time.time() + 90
++            # Generous because the mutation gate launches this suite
++            # dozens of times back to back, and a run that merely got
++            # slow must not be reported as a suite that said nothing.
++            deadline = time.time() + 240
+             results = None
+             while time.time() < deadline:
+                 answer = browser.call(
+diff --git a/ui/file_manager/file_manager/aurade/tests/progress.ts b/ui/file_manager/file_manager/aurade/tests/progress.ts
+new file mode 100644
+index 0000000..682f6db
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/progress.ts
+@@ -0,0 +1,18 @@
++/**
++ * What the suite is in the middle of.
++ *
++ * Only read by the watchdog. A hanging test cannot report its own failure,
++ * because it never finishes, so without this the only thing anybody learns is
++ * that something somewhere stopped. That is enough to fail a run and not enough
++ * to fix one, and it is also not enough for the mutation gate to attribute the
++ * hang to the test that was supposed to catch it.
++ */
++let inFlight = 'nothing yet';
++
++export function beginCheck(label: string): void {
++  inFlight = label;
++}
++
++export function currentCheck(): string {
++  return inFlight;
++}
+diff --git a/ui/file_manager/file_manager/aurade/tests/run.sh b/ui/file_manager/file_manager/aurade/tests/run.sh
+index 752e049..f639262 100755
+--- a/ui/file_manager/file_manager/aurade/tests/run.sh
++++ b/ui/file_manager/file_manager/aurade/tests/run.sh
+@@ -25,8 +25,9 @@ echo "==> check and emit"
+ "$NODE" "$TSC" --strict --skipLibCheck --target es2022 --module es2022 \
+   --moduleResolution bundler --lib es2022,dom \
+   --rootDir "$AURADE" --outDir "$OUT" \
+-  "$AURADE"/port/*.ts "$AURADE"/session/*.ts "$AURADE"/ui/*.ts "$AURADE"/tests/contract/*.ts "$AURADE"/tests/session/*.ts \
+-  "$AURADE"/tests/ui/*.ts \
++  "$AURADE"/port/*.ts "$AURADE"/session/*.ts "$AURADE"/ui/*.ts "$AURADE"/adapter/*.ts \
++  "$AURADE"/tests/contract/*.ts "$AURADE"/tests/session/*.ts \
++  "$AURADE"/tests/ui/*.ts "$AURADE"/tests/adapter/*.ts \
+   || fail "the types do not check"
+ 
+ printf '{"type":"module"}' > "$OUT/package.json"
