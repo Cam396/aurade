@@ -247,7 +247,91 @@ SIDEBAR_MUTATIONS = [
           group.title.replace(/\\s+/g, '-').toLowerCase();""",
      "two sidebars on one page do not share heading ids"),]
 
-MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS
+
+# The shell is the first thing that talks to the port rather than being handed
+# data, so these are the ways the seam stops holding.
+SHELL_MUTATIONS = [
+    (UNIT, "the window opens on whatever the backend listed first",
+     "ui/places.ts",
+     """  return places.find(place => place.kind === 'volume') ??
+      places.find(place => place.kind === 'network') ?? places[0];""",
+     "  return places[0];",
+     "the window opens on a drive, not on Recent"),
+
+    (UNIT, "a cloud mount is filed as a disk in the machine",
+     "ui/places.ts",
+     "const ELSEWHERE = new Set(['drive', 'provided', 'android', 'crostini']);",
+     "const ELSEWHERE = new Set<string>([]);",
+     "a cloud, a phone and a container are not this computer"),
+
+    (UNIT, "a basket is offered whether or not there is one",
+     "ui/places.ts",
+     "  if (basketCount !== undefined && basketKey !== undefined) {",
+     "  if (basketKey !== undefined) {",
+     "the basket appears only when there is one"),
+
+    (UNIT, "the mapping throws the capacity away",
+     "ui/places.ts",
+     """    kind: placeKindFor(volume),
+    volume,
+  }));""",
+     """    kind: placeKindFor(volume),
+  }));""",
+     "the capacity survives the mapping"),
+
+    (DOM, "metadata is fetched for the directory rather than the screen",
+     "ui/shell.ts",
+     "    const wanted = this.entries.slice(first, first + count)",
+     "    const wanted = this.entries.slice(0)",
+     "a huge directory does not stat every entry to fill one screen"),
+
+    (DOM, "a window that cannot read its places comes up blank and silent",
+     "ui/shell.ts",
+     """      this.say('The places on this computer could not be read.');
+      return;""",
+     "      return;",
+     "places that cannot be read say so instead of a blank frame"),
+
+    (DOM, "a folder that was refused is reported as empty",
+     "ui/shell.ts",
+     "  return error.code === 'not-found' ? 'gone' : 'unreadable';",
+     "  return 'empty';",
+     "a folder that cannot be read does not claim to be empty"),
+
+    (DOM, "opening a folder leaves the marker on the drive you left",
+     "ui/shell.ts",
+     "    this.sidebar.setSelected(entry.key);\n",
+     "",
+     "opening a folder takes the marker off the drive you left"),
+
+    (DOM, "choosing a place does not mark it",
+     "ui/shell.ts",
+     "    this.sidebar.setSelected(place.key);\n",
+     "",
+     "choosing a place shows what is in it"),
+
+    (DOM, "a mild notice interrupts the screen reader",
+     "ui/shell.ts",
+     "    this.notice.setAttribute('role', 'status');",
+     "    this.notice.setAttribute('role', 'alert');",
+     "the notice is announced without interrupting"),
+
+    (DOM, "somebody elses drive is filed under this computer",
+     "ui/sidebar.ts",
+     """    if (elsewhere.length) {
+      out.push({title: 'Elsewhere', places: elsewhere});
+    }""",
+     "",
+     "somebody elses drive is not filed as part of this computer"),
+
+    (DOM, "the empty state cannot be hidden again",
+     "ui/tokens.css",
+     ".aurade-empty[hidden] { display: none; }\n",
+     "",
+     "a folder with files in it does not also say it is empty"),
+]
+
+MUTATIONS = MUTATIONS + DOM_MUTATIONS + SIDEBAR_MUTATIONS + SHELL_MUTATIONS
 
 # Every anchor is checked before anything is touched. A run that is killed
 # rather than returned from skips the finally below and leaves a mutation in
