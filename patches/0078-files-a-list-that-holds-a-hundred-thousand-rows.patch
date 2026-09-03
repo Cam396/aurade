@@ -1,0 +1,569 @@
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/perf.html b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
+new file mode 100644
+index 000000000000..c3fecb30be2f
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
+@@ -0,0 +1,11 @@
++<!doctype html>
++<meta charset="utf-8">
++<title>AuraDE Files list benchmark</title>
++<link rel="stylesheet" href="../../ui/tokens.css">
++<style>
++  html, body { margin: 0; height: 100%; background: var(--aurade-ground); }
++  body { font: 13px system-ui, sans-serif; }
++  #stage { height: 600px; }
++</style>
++<div id="stage"></div>
++<script type="module" src="./perf_page.js"></script>
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/perf.py b/ui/file_manager/file_manager/aurade/tests/harness/perf.py
+new file mode 100755
+index 000000000000..03d2f58462ff
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/perf.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""Assert the list stays inside a frame budget at a hundred thousand rows.
++
++Reuses the golden harness's build and browser, because a second way to compile
++and launch the same code is a second thing to keep true.
++
++The budget is per scroll step rather than per frame. What is being defended is
++that the cost of a step is the cost of the rows on screen, so a regression that
++starts touching the whole list shows up here as a number that grows with the
++folder rather than staying flat.
++"""
++import argparse
++import importlib.util
++import json
++import os
++import shutil
++import sys
++import tempfile
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++spec = importlib.util.spec_from_file_location(
++    "golden", os.path.join(HERE, "golden.py"))
++golden = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(golden)
++
++FRAME_BUDGET_MS = 16.6
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--budget", type=float, default=FRAME_BUDGET_MS)
++    args = parser.parse_args()
++
++    work = tempfile.mkdtemp(prefix="aurade-perf-")
++    try:
++        golden.build(work)
++        shutil.copy(os.path.join(HERE, "perf.html"),
++                    os.path.join(work, "tests/harness/perf.html"))
++        server, port = golden.serve(work)
++        browser = golden.Browser(os.path.join(work, "profile"))
++        try:
++            browser.call("Emulation.setDeviceMetricsOverride", width=1000,
++                         height=700, deviceScaleFactor=1, mobile=False)
++            browser.call("Page.navigate",
++                         url="http://127.0.0.1:%d/tests/harness/perf.html" % port)
++            browser.wait_for("Page.loadEventFired")
++            import time
++            deadline = time.time() + 30
++            while time.time() < deadline:
++                ready = browser.call(
++                    "Runtime.evaluate", expression="!!window.auradeReady",
++                    returnByValue=True)
++                if ready.get("result", {}).get("value"):
++                    break
++                time.sleep(0.1)
++            else:
++                raise SystemExit("the benchmark page never loaded its module")
++
++            result = browser.call(
++                "Runtime.evaluate",
++                expression="JSON.stringify(window.auradeBench())",
++                returnByValue=True, awaitPromise=True)
++            if "exceptionDetails" in result:
++                raise SystemExit("the benchmark threw: %s"
++                                 % json.dumps(result["exceptionDetails"])[:400])
++            stats = json.loads(result["result"]["value"])
++        finally:
++            browser.close()
++            server.shutdown()
++    finally:
++        shutil.rmtree(work, ignore_errors=True)
++
++    print("  entries          %d" % stats["count"])
++    print("  build            %d ms" % stats["buildMs"])
++    print("  scroll steps     %d" % stats["steps"])
++    print("  mean per step    %.3f ms" % stats["meanStepMs"])
++    print("  p95 per step     %.3f ms" % stats["p95StepMs"])
++    print("  worst step       %.3f ms" % stats["worstStepMs"])
++    print("  nodes after build   %d" % stats["nodesAfterBuild"])
++    print("  nodes after scroll  %d" % stats["nodesAfterScroll"])
++
++    failures = []
++    if stats["meanStepMs"] > args.budget:
++        failures.append("mean step %.3f ms is over the %.1f ms budget"
++                        % (stats["meanStepMs"], args.budget))
++    if stats["p95StepMs"] > args.budget:
++        failures.append("p95 step %.3f ms is over the %.1f ms budget"
++                        % (stats["p95StepMs"], args.budget))
++    # The pool is the size of the viewport and does not grow, so scrolling the
++    # whole list must not add a node. Growth here means rows are being made and
++    # not recycled, which is the failure this whole component exists to avoid.
++    if stats["nodesAfterScroll"] > stats["nodesAfterBuild"]:
++        failures.append("scrolling added %d DOM nodes; rows are not being recycled"
++                        % (stats["nodesAfterScroll"] - stats["nodesAfterBuild"]))
++
++    if failures:
++        for line in failures:
++            print("  FAIL %s" % line)
++        return 1
++    print("\nlist benchmark: PASS")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/perf_page.ts b/ui/file_manager/file_manager/aurade/tests/harness/perf_page.ts
+new file mode 100644
+index 000000000000..0fb2a3b58a8c
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/perf_page.ts
+@@ -0,0 +1,96 @@
++/**
++ * A hundred thousand rows, scrolled hard, measured.
++ *
++ * The claim being tested is that the cost of a scroll step is the cost of the
++ * rows on screen and not of the rows in the folder. If the virtualiser ever
++ * starts touching the whole list, the per step time stops being flat and this
++ * is where that shows up.
++ */
++import type {EntryDto, FileKey, Metadata} from '../../port/types.js';
++import {asFileKey} from '../../port/types.js';
++import {FileList} from '../../ui/file_list.js';
++
++const COUNT = 100_000;
++const NOW = new Date('2026-09-02T15:30:00').getTime();
++
++const KINDS = ['txt', 'jpeg', 'ts', 'pdf', 'tar.zst', 'mp3', 'mp4'];
++
++function makeEntries(): {entries: EntryDto[], metadata: Map<FileKey, Metadata>} {
++  const parent = asFileKey('mock://big');
++  const entries: EntryDto[] = [];
++  const metadata = new Map<FileKey, Metadata>();
++  for (let i = 0; i < COUNT; i++) {
++    const name = i % 11 === 0 ? `folder-${i}` : `file-${i}.${KINDS[i % KINDS.length]}`;
++    const key = asFileKey(`mock://big/${name}`);
++    entries.push({key, name, isDirectory: i % 11 === 0, parent});
++    metadata.set(key, {
++      // Deterministic rather than random, so a run is comparable to the last.
++      size: ((i * 7919) % 5_000_000) + 1024,
++      modificationTime: NOW - (i % 900) * 3_600_000,
++    });
++  }
++  return {entries, metadata};
++}
++
++export interface BenchResult {
++  count: number;
++  steps: number;
++  buildMs: number;
++  meanStepMs: number;
++  worstStepMs: number;
++  p95StepMs: number;
++  nodesAfterBuild: number;
++  nodesAfterScroll: number;
++}
++
++declare global {
++  interface Window {
++    auradeBench?: () => BenchResult;
++    auradeReady?: boolean;
++  }
++}
++
++function run(): BenchResult {
++  const host = document.getElementById('stage')!;
++  host.style.height = '600px';
++  const {entries, metadata} = makeEntries();
++
++  const buildStart = performance.now();
++  const list = new FileList(host, {rowHeight: 40});
++  list.setEntries(entries, NOW);
++  list.setMetadata(metadata);
++  const buildMs = performance.now() - buildStart;
++
++  const viewport = host.querySelector('.aurade-list') as HTMLElement;
++  const nodesAfterBuild = host.querySelectorAll('*').length;
++
++  const steps = 300;
++  const extent = COUNT * 40 - viewport.clientHeight;
++  const times: number[] = [];
++  for (let step = 0; step < steps; step++) {
++    const top = Math.floor((extent * step) / steps);
++    const start = performance.now();
++    viewport.scrollTop = top;
++    // render() is called directly rather than waiting for the scroll event,
++    // because the work being measured is ours and a rAF in a headless browser
++    // measures the harness instead.
++    list.render();
++    times.push(performance.now() - start);
++  }
++  times.sort((a, b) => a - b);
++  const total = times.reduce((sum, value) => sum + value, 0);
++
++  return {
++    count: COUNT,
++    steps,
++    buildMs: Math.round(buildMs),
++    meanStepMs: Math.round((total / steps) * 1000) / 1000,
++    worstStepMs: Math.round(times[times.length - 1]! * 1000) / 1000,
++    p95StepMs: Math.round(times[Math.floor(steps * 0.95)]! * 1000) / 1000,
++    nodesAfterBuild,
++    nodesAfterScroll: host.querySelectorAll('*').length,
++  };
++}
++
++window.auradeBench = run;
++window.auradeReady = true;
+diff --git a/ui/file_manager/file_manager/aurade/ui/file_list.ts b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+new file mode 100644
+index 000000000000..75c662bd5633
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+@@ -0,0 +1,307 @@
++/**
++ * The list, virtualised, and ours.
++ *
++ * ChromeOS's List is not reused for two reasons that cost real time to learn.
++ * `mergeItems` keeps the element it already made and never re-runs the render
++ * path for a row already on screen, so a change made during rendering never
++ * reaches anything visible. And its selection walks rendered rows, which at a
++ * hundred thousand entries walks the few dozen that happen to exist.
++ *
++ * So: a fixed row height per density, a spacer that owns the scroll extent, a
++ * pool of rows the size of the viewport, and a selection that is a set of
++ * indices with an anchor. Nothing here asks the DOM what is selected.
++ */
++import type {EntryDto, FileKey, MetadataSnapshot} from '../port/types.js';
++import {createRow, updateRow} from './file_row.js';
++
++export interface FileListOptions {
++  /** Must match --aurade-row-height for the density in use. */
++  readonly rowHeight?: number;
++  /** Rows rendered beyond the viewport, so a fast scroll is not a blank band. */
++  readonly overscan?: number;
++  readonly onActivate?: (entry: EntryDto) => void;
++  readonly onSelectionChange?: (keys: ReadonlySet<FileKey>) => void;
++}
++
++export class FileList {
++  private entries: readonly EntryDto[] = [];
++  private metadata: MetadataSnapshot = new Map();
++  private readonly selection = new Set<number>();
++  private anchor: number|null = null;
++  private focused = -1;
++  private readonly rowHeight: number;
++  private readonly overscan: number;
++  private readonly pool: HTMLElement[] = [];
++  private readonly viewport: HTMLElement;
++  private readonly spacer: HTMLElement;
++  private readonly surface: HTMLElement;
++  private frame = 0;
++  private lastFirst = -1;
++  private lastCount = -1;
++  private now = Date.now();
++  /** Shares for the bar behind the size column, indexed alongside entries. */
++  private shares: number[] = [];
++
++  constructor(
++      private readonly container: HTMLElement,
++      private readonly options: FileListOptions = {}) {
++    this.rowHeight = options.rowHeight ?? 40;
++    this.overscan = options.overscan ?? 4;
++
++    this.viewport = document.createElement('div');
++    this.viewport.className = 'aurade-list';
++    this.viewport.setAttribute('role', 'listbox');
++    this.viewport.setAttribute('aria-multiselectable', 'true');
++    this.viewport.tabIndex = 0;
++
++    this.spacer = document.createElement('div');
++    this.spacer.className = 'aurade-list-spacer';
++
++    this.surface = document.createElement('div');
++    this.surface.className = 'aurade-list-surface';
++
++    this.spacer.appendChild(this.surface);
++    this.viewport.appendChild(this.spacer);
++    this.container.appendChild(this.viewport);
++
++    this.viewport.addEventListener('scroll', this.onScroll, {passive: true});
++    this.viewport.addEventListener('keydown', this.onKeyDown);
++    this.viewport.addEventListener('click', this.onClick);
++    this.viewport.addEventListener('dblclick', this.onDoubleClick);
++  }
++
++  setEntries(entries: readonly EntryDto[], now = Date.now()): void {
++    this.entries = entries;
++    this.now = now;
++    this.selection.clear();
++    this.anchor = null;
++    this.focused = entries.length ? 0 : -1;
++    this.recomputeShares();
++    this.spacer.style.height = `${entries.length * this.rowHeight}px`;
++    this.viewport.setAttribute('aria-setsize', String(entries.length));
++    this.lastFirst = -1;
++    this.render();
++  }
++
++  setMetadata(snapshot: MetadataSnapshot): void {
++    this.metadata = snapshot;
++    this.recomputeShares();
++    this.lastFirst = -1;
++    this.render();
++  }
++
++  /**
++   * Each entry's share of the largest in the folder, not of the total.
++   *
++   * Against the total, a folder of five hundred files gives every bar a width
++   * of nothing and the column says the same as it did before.
++   */
++  private recomputeShares(): void {
++    let largest = 0;
++    for (const entry of this.entries) {
++      const size = this.metadata.get(entry.key)?.size ?? 0;
++      if (size > largest) {
++        largest = size;
++      }
++    }
++    this.shares = this.entries.map(entry => {
++      if (!largest || entry.isDirectory) {
++        return 0;
++      }
++      return (this.metadata.get(entry.key)?.size ?? 0) / largest;
++    });
++  }
++
++  private onScroll = (): void => {
++    // One render per frame at most. A scroll fires far more often than the
++    // compositor draws, and doing the work each time is how a list stutters
++    // while doing nothing visible.
++    if (this.frame) {
++      return;
++    }
++    this.frame = requestAnimationFrame(() => {
++      this.frame = 0;
++      this.render();
++    });
++  };
++
++  private visibleRange(): {first: number, count: number} {
++    const height = this.viewport.clientHeight || this.rowHeight;
++    const first = Math.max(
++        0, Math.floor(this.viewport.scrollTop / this.rowHeight) - this.overscan);
++    const visible = Math.ceil(height / this.rowHeight) + this.overscan * 2;
++    return {first, count: Math.min(visible, this.entries.length - first)};
++  }
++
++  render(): void {
++    const {first, count} = this.visibleRange();
++    if (first === this.lastFirst && count === this.lastCount) {
++      // Still the same window, but the rows themselves may have changed, so
++      // they are rewritten rather than skipped. Skipping here is exactly the
++      // mistake mergeItems makes.
++      this.paint(first, count);
++      return;
++    }
++    while (this.pool.length < count) {
++      const row = createRow();
++      this.pool.push(row);
++      this.surface.appendChild(row);
++    }
++    while (this.pool.length > count) {
++      this.pool.pop()!.remove();
++    }
++    this.lastFirst = first;
++    this.lastCount = count;
++    this.surface.style.transform = `translateY(${first * this.rowHeight}px)`;
++    this.paint(first, count);
++  }
++
++  private paint(first: number, count: number): void {
++    for (let i = 0; i < count; i++) {
++      const index = first + i;
++      const entry = this.entries[index];
++      const row = this.pool[i];
++      if (!entry || !row) {
++        continue;
++      }
++      updateRow(row, {
++        entry,
++        metadata: this.metadata.get(entry.key),
++        selected: this.selection.has(index),
++        cut: false,
++        share: this.shares[index],
++        now: this.now,
++      });
++      row.dataset['index'] = String(index);
++      row.setAttribute('aria-posinset', String(index + 1));
++      row.tabIndex = index === this.focused ? 0 : -1;
++    }
++  }
++
++  // ---- selection, over indices and never over the DOM ---------------------
++
++  private selectIndex(index: number, mode: 'replace'|'toggle'|'range'): void {
++    if (index < 0 || index >= this.entries.length) {
++      return;
++    }
++    if (mode === 'replace') {
++      this.selection.clear();
++      this.selection.add(index);
++      this.anchor = index;
++    } else if (mode === 'toggle') {
++      if (!this.selection.delete(index)) {
++        this.selection.add(index);
++      }
++      this.anchor = index;
++    } else {
++      const from = this.anchor ?? index;
++      const [lo, hi] = from <= index ? [from, index] : [index, from];
++      this.selection.clear();
++      for (let i = lo; i <= hi; i++) {
++        this.selection.add(i);
++      }
++    }
++    this.focused = index;
++    this.lastFirst = -1;
++    this.render();
++    this.options.onSelectionChange?.(this.selectedKeys());
++  }
++
++  selectedKeys(): ReadonlySet<FileKey> {
++    const keys = new Set<FileKey>();
++    for (const index of this.selection) {
++      const entry = this.entries[index];
++      if (entry) {
++        keys.add(entry.key);
++      }
++    }
++    return keys;
++  }
++
++  selectAll(): void {
++    this.selection.clear();
++    for (let i = 0; i < this.entries.length; i++) {
++      this.selection.add(i);
++    }
++    this.lastFirst = -1;
++    this.render();
++    this.options.onSelectionChange?.(this.selectedKeys());
++  }
++
++  scrollToIndex(index: number): void {
++    const top = index * this.rowHeight;
++    const bottom = top + this.rowHeight;
++    const viewTop = this.viewport.scrollTop;
++    const viewBottom = viewTop + this.viewport.clientHeight;
++    if (top < viewTop) {
++      this.viewport.scrollTop = top;
++    } else if (bottom > viewBottom) {
++      this.viewport.scrollTop = bottom - this.viewport.clientHeight;
++    }
++  }
++
++  private move(delta: number, extend: boolean): void {
++    const next = Math.max(
++        0, Math.min(this.entries.length - 1, (this.focused < 0 ? 0 : this.focused) + delta));
++    this.selectIndex(next, extend ? 'range' : 'replace');
++    this.scrollToIndex(next);
++  }
++
++  private onKeyDown = (event: KeyboardEvent): void => {
++    const page = Math.max(1, Math.floor(this.viewport.clientHeight / this.rowHeight) - 1);
++    switch (event.key) {
++      case 'ArrowDown': this.move(1, event.shiftKey); break;
++      case 'ArrowUp': this.move(-1, event.shiftKey); break;
++      case 'PageDown': this.move(page, event.shiftKey); break;
++      case 'PageUp': this.move(-page, event.shiftKey); break;
++      case 'Home': this.move(-this.entries.length, event.shiftKey); break;
++      case 'End': this.move(this.entries.length, event.shiftKey); break;
++      case 'a':
++        if (event.ctrlKey) {
++          this.selectAll();
++          break;
++        }
++        return;
++      case 'Enter': {
++        const entry = this.entries[this.focused];
++        if (entry) {
++          this.options.onActivate?.(entry);
++        }
++        break;
++      }
++      default:
++        return;
++    }
++    event.preventDefault();
++  };
++
++  private indexFromEvent(event: Event): number {
++    const row = (event.target as HTMLElement|null)?.closest?.('.aurade-row');
++    const raw = (row as HTMLElement|null)?.dataset?.['index'];
++    return raw === undefined ? -1 : Number(raw);
++  }
++
++  private onClick = (event: MouseEvent): void => {
++    const index = this.indexFromEvent(event);
++    if (index < 0) {
++      return;
++    }
++    this.selectIndex(
++        index, event.shiftKey ? 'range' : (event.ctrlKey ? 'toggle' : 'replace'));
++  };
++
++  private onDoubleClick = (event: MouseEvent): void => {
++    const index = this.indexFromEvent(event);
++    const entry = this.entries[index];
++    if (entry) {
++      this.options.onActivate?.(entry);
++    }
++  };
++
++  destroy(): void {
++    if (this.frame) {
++      cancelAnimationFrame(this.frame);
++    }
++    this.viewport.remove();
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
+index dd41f23f038b..c1c919a00972 100644
+--- a/ui/file_manager/file_manager/aurade/ui/tokens.css
++++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
+@@ -184,3 +184,21 @@
+   line-height: 15px;
+   padding: 2px 9px;
+ }
++
++/* The list owns its scrolling. The spacer carries the full extent so the
++   scrollbar is honest about how much there is, and the surface holding the
++   recycled rows is moved rather than repositioned per row. */
++.aurade-list {
++  block-size: 100%;
++  overflow-y: auto;
++  overflow-x: hidden;
++  position: relative;
++}
++.aurade-list:focus-visible { outline: none; }
++.aurade-list-spacer { position: relative; }
++.aurade-list-surface {
++  inset-block-start: 0;
++  inset-inline: 0;
++  position: absolute;
++  will-change: transform;
++}
