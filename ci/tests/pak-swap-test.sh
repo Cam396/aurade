@@ -53,15 +53,19 @@ out=$("$TOOL" "$TMP/target.pak" "$TMP/donor.pak" "$TMP/out.pak" \
   --expect '400:new html, shorter' 2>&1) || fail "the tool failed on a valid swap: $out"
 
 # 1. Both differing ids swapped, and only those.
-grep -Fq 'swapping 2 resource(s): [200, 400]' <<<"$out" || \
+grep -Fq "swapping 2 resource(s): ['200->200', '400->400']" <<<"$out" || \
   fail "the tool did not swap exactly the two differing ids: $out"
+# The mapping is now stated rather than assumed, so the run has to say it
+# checked one: a swap that silently placed by raw id is the bug this catches.
+grep -Fq 'mapping verified: 1 untouched resource(s) identical across it' <<<"$out" || \
+  fail "the tool did not verify its id mapping: $out"
 grep -Fq 'exactly 2 changed' <<<"$out" || \
   fail "the tool did not confirm exactly two entries changed: $out"
 
 # 2. An id the donor has and the target does not is skipped, not inserted.
 # Inserting changes the resource count and the order the reader binary
 # searches, and the machine renders without it today.
-grep -Fq 'skipped, present in the donor and absent from the target: [999]' <<<"$out" || \
+grep -Fq 'skipped, no counterpart in the target: [999]' <<<"$out" || \
   fail "the donor-only id was not reported as skipped: $out"
 
 # 3. The unchanged resources really are untouched, and the id set is stable.

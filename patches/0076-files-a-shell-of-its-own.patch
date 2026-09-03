@@ -1,0 +1,283 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2533,3 +2533,226 @@
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
++
++/* AuraDE: the Files shell.
++ *
++ * The palette block above retints ChromeOS's own tokens, which leaves the
++ * structure of the app untouched: an edge to edge system table of text rows
++ * with a small outline glyph at the start of each one. Retinting a table
++ * still reads as that table. This block changes the structure instead.
++ *
++ * Three moves carry it. The list becomes a panel floating on a ground rather
++ * than filling the window to its edges. Rows lose their full width rules and
++ * become inset rounded shapes. And every entry gets a tinted tile behind its
++ * glyph, so the list reads as a shelf of objects rather than lines of text.
++ *
++ * The tile is drawn by .detail-name rather than by .detail-icon, because the
++ * glyph is painted through -webkit-mask-image: setting a background on the
++ * icon recolours the glyph itself, and a mask clips its own pseudo elements,
++ * so there is nowhere on that element for a tile to live.
++ */
++
++:root {
++  --aurade-ground: #f4f2f9;
++  --aurade-panel: #ffffff;
++  --aurade-line: #e6e2f0;
++  --aurade-ink: #1c1a24;
++  --aurade-quiet: #6b6580;
++  --aurade-accent: #6d4ea1;
++  --aurade-accent-soft: #ece4fb;
++  --aurade-row-hover: #f5f2fb;
++  --aurade-tile: #f0edf7;
++  --aurade-tile-dir: #e4dbf8;
++  --aurade-tile-selected: #dbcdf6;
++  --aurade-glyph: #6f6885;
++  --aurade-tag-bg: #f7f5fc;
++  --aurade-thumb: #d5d0e2;
++  --aurade-thumb-hover: #bfb8d2;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --aurade-ground: #100f16;
++    --aurade-panel: #191823;
++    --aurade-line: #262433;
++    --aurade-ink: #efecf8;
++    --aurade-quiet: #948ea8;
++    --aurade-accent: #c0a6ff;
++    --aurade-accent-soft: #322a4d;
++    --aurade-row-hover: #221f2e;
++    --aurade-tile: #23212f;
++    --aurade-tile-dir: #372c57;
++    --aurade-tile-selected: #4a3b74;
++    --aurade-glyph: #a79dc4;
++    --aurade-tag-bg: #211f2c;
++    --aurade-thumb: #322f42;
++    --aurade-thumb-hover: #443f5c;
++  }
++}
++
++body,
++#main-window,
++.dialog-container,
++#directory-tree,
++.dialog-navigation-list,
++#navigation-list {
++  background: var(--aurade-ground) !important;
++}
++
++#list-container {
++  background: var(--aurade-panel) !important;
++  border: 1px solid var(--aurade-line) !important;
++  border-radius: 16px !important;
++  margin: 0 14px 12px 6px !important;
++  overflow: hidden !important;
++}
++
++/* The table's column model makes the content wider than the panel, and the
++ * horizontal scrollbar that produced cut the panel's bottom corners off. */
++#file-list {
++  overflow-x: hidden !important;
++}
++
++.table-header {
++  align-items: center !important;
++  background: transparent !important;
++  border-bottom: 1px solid var(--aurade-line) !important;
++  display: flex !important;
++  height: 38px !important;
++}
++
++.table-header-inner,
++.table-header-cell {
++  align-items: center !important;
++  display: flex !important;
++  height: 38px !important;
++}
++
++.table-header .table-header-cell {
++  border-inline-start: none !important;
++}
++
++.table-header-splitter {
++  background: transparent !important;
++  border: 0 !important;
++}
++
++.table-header-label span {
++  color: var(--aurade-quiet) !important;
++  font-size: 10px !important;
++  font-weight: 700 !important;
++  letter-spacing: 0.1em !important;
++  text-transform: uppercase !important;
++}
++
++#file-list li.table-row {
++  background: transparent !important;
++  border: 0 !important;
++  border-radius: 11px !important;
++  height: 46px !important;
++  margin: 1px 8px !important;
++  /* width: auto lets the row grow past the panel and brings the horizontal
++   * scrollbar back, so the row has to give its own margins back. */
++  width: calc(100% - 16px) !important;
++}
++
++#file-list li.table-row:hover {
++  background: var(--aurade-row-hover) !important;
++}
++
++#file-list li.table-row[selected] {
++  background: var(--aurade-accent-soft) !important;
++  box-shadow: inset 3px 0 0 0 var(--aurade-accent) !important;
++}
++
++#file-list li.table-row .detail-name {
++  position: relative !important;
++}
++
++#file-list li.table-row .detail-name::before {
++  background: var(--aurade-tile) !important;
++  border-radius: 11px !important;
++  content: '' !important;
++  height: 36px !important;
++  left: 16px !important;
++  margin-top: -18px !important;
++  pointer-events: none !important;
++  position: absolute !important;
++  top: 50% !important;
++  width: 36px !important;
++}
++
++#file-list li.table-row.directory .detail-name::before {
++  background: var(--aurade-tile-dir) !important;
++}
++
++#file-list li.table-row[selected] .detail-name::before {
++  background: var(--aurade-tile-selected) !important;
++}
++
++#file-list li.table-row .detail-icon {
++  background-color: var(--aurade-glyph) !important;
++  height: 36px !important;
++  width: 36px !important;
++  -webkit-mask-position: center !important;
++  -webkit-mask-repeat: no-repeat !important;
++  -webkit-mask-size: 20px !important;
++}
++
++#file-list li.table-row.directory .detail-icon {
++  background-color: var(--aurade-accent) !important;
++}
++
++.entry-name {
++  color: var(--aurade-ink) !important;
++  font-size: 13px !important;
++  font-weight: 550 !important;
++  letter-spacing: -0.005em !important;
++}
++
++#file-list .size,
++#file-list .date {
++  color: var(--aurade-quiet) !important;
++  font-size: 12px !important;
++  font-variant-numeric: tabular-nums !important;
++}
++
++/* The type stops being a word in a column and becomes a quiet tag. Both the
++ * width and the flex basis are needed: fit-content alone loses to the cell's
++ * flex sizing and the tag stretches the full column. */
++#file-list .type {
++  align-self: center !important;
++  background: var(--aurade-tag-bg) !important;
++  border: 1px solid var(--aurade-line) !important;
++  border-radius: 999px !important;
++  color: var(--aurade-quiet) !important;
++  display: inline-block !important;
++  flex: 0 0 auto !important;
++  font-size: 10.5px !important;
++  font-weight: 600 !important;
++  letter-spacing: 0.04em !important;
++  line-height: 15px !important;
++  max-width: max-content !important;
++  padding: 2px 9px !important;
++  width: auto !important;
++}
++
++::-webkit-scrollbar {
++  height: 10px !important;
++  width: 10px !important;
++}
++
++::-webkit-scrollbar-corner,
++::-webkit-scrollbar-track {
++  background: transparent !important;
++}
++
++::-webkit-scrollbar-thumb {
++  background: var(--aurade-thumb) !important;
++  border: 3px solid var(--aurade-panel) !important;
++  border-radius: 999px !important;
++}
++
++::-webkit-scrollbar-thumb:hover {
++  background: var(--aurade-thumb-hover) !important;
++}
+diff --git a/ui/file_manager/file_manager/widgets/xf_tree_item.ts b/ui/file_manager/file_manager/widgets/xf_tree_item.ts
+--- a/ui/file_manager/file_manager/widgets/xf_tree_item.ts
++++ b/ui/file_manager/file_manager/widgets/xf_tree_item.ts
+@@ -595,6 +595,49 @@
+     :host([selected]) slot[name="trailingIcon"]::slotted(.root-eject:active) {
+       --ink-color: var(--cros-sys-ripple_neutral_on_prominent);
+     }
++
++    /* AuraDE: the sidebar follows the list. Rows tighten and take the same
++       rounded inset shape, and selection is an accent bar over a soft wash
++       rather than a solid fill.
++
++       The stock selected rule paints --cros-sys-on_primary on
++       --cros-sys-primary. The AuraDE palette retints those two independently,
++       and in dark mode the pair lands dark on dark, so the selected item's
++       label and icon are invisible. Naming both colours here fixes that. */
++    .tree-row {
++      border-radius: 10px;
++      height: 36px;
++      margin-inline: 2px;
++    }
++
++    :host(:not([selected]):not([disabled]):not([renaming]):not(:focus))
++        .tree-row:hover {
++      background-color: var(--aurade-row-hover);
++    }
++
++    :host([selected]) .tree-row {
++      background-color: var(--aurade-accent-soft);
++      box-shadow: inset 3px 0 0 0 var(--aurade-accent);
++      color: var(--aurade-ink);
++    }
++
++    .tree-label {
++      font-size: 13px;
++      font-weight: 550;
++      letter-spacing: -0.005em;
++    }
++
++    :host([selected]) .tree-label {
++      color: var(--aurade-ink);
++    }
++
++    .tree-label-icon {
++      --xf-icon-color: var(--aurade-glyph);
++    }
++
++    :host([selected]) .tree-label-icon {
++      --xf-icon-color: var(--aurade-accent);
++    }
+   `;
+ }
+ 

@@ -1,0 +1,243 @@
+diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
+--- a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
++++ b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
+@@ -14,56 +14,73 @@ import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
+  * and the only way to find out was to paste somewhere and look.
+  *
+  * Every other file manager dims a cut file until it is pasted. This is the set
+  * that makes that possible.
+  *
+  * Keyed by URL rather than by entry, because the list rebuilds its entry
+  * objects as rows are recycled, so the object that was cut is not the object
+  * the row is later rendered from. The URL survives that.
+  */
+ const cutUrls = new Set<string>();
++let cutFolders = 0;
+ 
+ /**
+  * Marks entries as cut, replacing anything marked before.
+  *
+  * There is only ever one clipboard, so a second cut replaces the first rather
+  * than adding to it.
+  */
+ export function auraDeMarkCut(entries: Array<Entry|FilesAppEntry>) {
+   cutUrls.clear();
++  cutFolders = 0;
+   for (const entry of entries) {
+     cutUrls.add(entry.toURL());
++    if (entry.isDirectory) {
++      cutFolders++;
++    }
+   }
+ }
+ 
+ /**
+  * Forgets what was cut. Returns whether anything was actually forgotten, so a
+  * caller can skip a redraw it does not need.
+  */
+ export function auraDeClearCut(): boolean {
+   if (cutUrls.size === 0) {
+     return false;
+   }
+   cutUrls.clear();
++  cutFolders = 0;
+   return true;
+ }
+ 
+ /**
+  * How many files are waiting to be moved.
+  *
+  * The dimming only says which ones while you are looking at the folder they
+  * are in. Walk into another folder and the clipboard becomes invisible again,
+  * which is where the status bar picks it up.
+  */
+ export function auraDeCutCount(): number {
+   return cutUrls.size;
+ }
+ 
++/**
++ * How many of the things waiting to be moved are folders.
++ *
++ * Counted when the cut is made rather than worked out later. The status bar
++ * asks from any folder in the app, including ones the cut files are not in,
++ * and by then there is nothing on hand to ask whether a URL was a directory.
++ */
++export function auraDeCutFolderCount(): number {
++  return cutFolders;
++}
++
+ /**
+  * Whether this entry is waiting to be moved.
+  */
+ export function auraDeIsCut(entry: Entry|FilesAppEntry): boolean {
+   if (cutUrls.size === 0) {
+     return false;
+   }
+   return cutUrls.has(entry.toURL());
+ }
+diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+@@ -1226,21 +1226,25 @@ export class FileTransferController {
+     const element = this.document_.activeElement;
+     const tagName = this.document_.activeElement?.nodeName.toLowerCase();
+ 
+     return !(
+         (tagName === 'input' &&
+          (element && 'type' in element && element?.type === 'text')) ||
+         tagName === 'cr-input');
+   }
+ 
+   private onCutOrCopy_(isMove: boolean, event: DragEvent|ClipboardEvent) {
+-    if (!this.isDocumentWideEvent_() || !this.canCutOrCopy_(isMove)) {
++    if (!this.isDocumentWideEvent_()) {
++      return;
++    }
++    if (!this.canCutOrCopy_(isMove)) {
++      this.auraDeRefused_(isMove);
+       return;
+     }
+ 
+     event.preventDefault();
+ 
+     const clipboardData = getClipboardData(event);
+     const effectAllowed = isMove ? 'move' : 'copy';
+ 
+     // If current focus is on DirectoryTree, write selected item of
+     // DirectoryTree to system clipboard.
+@@ -1265,20 +1269,52 @@ export class FileTransferController {
+     // A copy clears the marks too: there is one clipboard, so copying means
+     // the previous cut is no longer what paste will do.
+     if (isMove) {
+       auraDeMarkCut(this.selectionHandler_.selection.entries);
+       this.auraDeRedrawForCutMarks_();
+     } else if (auraDeClearCut()) {
+       this.auraDeRedrawForCutMarks_();
+     }
+   }
+ 
++  /**
++   * AuraDE: say so when a cut or a copy is refused, and stop the marks lying.
++   *
++   * Measured on the Dell. Select two folders, one of them a folder the app
++   * will not move, press Ctrl+X, and nothing at all happens: no dimming, no
++   * message. Worse, the marks from the *previous* cut stay exactly where they
++   * were and the status bar goes on naming them, so someone who has just
++   * selected two things and pressed the keys sees two other things dimmed and
++   * has every reason to believe it worked. Pasting then moves files they never
++   * chose. Silence would have been bad on its own; silence on top of state
++   * that describes a different cut is worse than either.
++   *
++   * Clearing is not optional here even though the refusal changed nothing:
++   * what is on screen has to describe what a paste would now do, and after a
++   * refusal that is nothing.
++   *
++   * Nothing is said when the selection is empty, because Ctrl+X with nothing
++   * chosen is a keystroke into the air rather than a request that was turned
++   * down, and a message would be scolding someone for pressing a key.
++   */
++  private auraDeRefused_(isMove: boolean) {
++    if (this.selectionHandler_.selection.totalCount === 0) {
++      return;
++    }
++    if (auraDeClearCut()) {
++      this.auraDeRedrawForCutMarks_();
++    }
++    this.filesToast_.show(
++        isMove ? str('AURADE_CANNOT_MOVE_THESE') :
++                 str('AURADE_CANNOT_COPY_THESE'));
++  }
++
+   /**
+    * AuraDE: bring the rows already on screen into line with what is cut.
+    *
+    * Deliberately not list.redraw(). Redraw reuses the rows it already has:
+    * mergeItems takes cachedItems_[index] when one exists and only calls
+    * createItem when it does not, so the render path that applies the class
+    * never runs again for a row that is already on screen. Calling redraw here
+    * dimmed nothing at all, and would have dimmed only the rows scrolled into
+    * view afterwards, which is worse than dimming none of them.
+    *
+diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+--- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
++++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+@@ -11,21 +11,21 @@ import type {VolumeManager} from '../../background/js/volume_manager.js';
+ import {getSizeStats} from '../../common/js/api.js';
+ import {queryRequiredElement} from '../../common/js/dom_utils.js';
+ import {isCrosComponentsEnabled} from '../../common/js/flags.js';
+ import {bytesToString, str, strf} from '../../common/js/translations.js';
+ import {canBulkPinningCloudPanelShow} from '../../common/js/util.js';
+ import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
+ import {type State} from '../../state/state.js';
+ import {getStore, type Store} from '../../state/store.js';
+ import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
+ 
+-import {auraDeCutCount} from './aurade_cut_marks.js';
++import {auraDeCutCount, auraDeCutFolderCount} from './aurade_cut_marks.js';
+ import {ICON_TYPES} from './constants.js';
+ import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
+ import type {FileSelectionHandler} from './file_selection.js';
+ import type {MetadataModel} from './metadata/metadata_model.js';
+ import {EventType} from './file_selection.js';
+ import type {A11yAnnounce} from './ui/a11y_announce.js';
+ import {Command} from './ui/command.js';
+ import type {FileListSelectionModel} from './ui/file_list_selection_model.js';
+ import type {ListContainer} from './ui/list_container.js';
+ 
+@@ -504,24 +504,31 @@ export class ToolbarController {
+    * nothing is pending and there is nothing to warn anyone about.
+    */
+   private auraDeUpdateClipboard_() {
+     const el = this.auraDeStatusClipboard_ ??
+         document.querySelector<HTMLElement>('#aurade-status-clipboard');
+     if (!el) {
+       return;
+     }
+     this.auraDeStatusClipboard_ = el;
+     const count = auraDeCutCount();
+-    el.textContent = count === 0 ?
+-        '' :
+-        (count === 1 ? '1 file ready to move' :
+-                       `${count} files ready to move`);
++    // Folders are not files. Cutting two directories and being told "2 files
++    // ready to move" is the app describing something that is not what you
++    // did, which is a small thing that makes everything around it feel less
++    // trustworthy. Mixed selections get the word that covers both rather than
++    // a sentence naming each count, because the bar has one line and the
++    // number is what is being asked for.
++    const folders = auraDeCutFolderCount();
++    const noun = folders === 0 ? (count === 1 ? 'file' : 'files') :
++        folders === count ? (count === 1 ? 'folder' : 'folders') :
++                            'items';
++    el.textContent = count === 0 ? '' : `${count} ${noun} ready to move`;
+     el.title = count === 0 ?
+         '' :
+         'Cut with Ctrl+X. Paste to finish the move, or press Escape to keep them where they are.';
+   }
+ 
+   private auraDeUpdateStatusBar_(selectionText: string) {
+     const count = this.auraDeStatusCount_ ??
+         document.querySelector<HTMLElement>('#aurade-status-count');
+     const selectionEl = this.auraDeStatusSelection_ ??
+         document.querySelector<HTMLElement>('#aurade-status-selection');
+diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_strings.grdp
+--- a/ui/chromeos/file_manager_strings.grdp
++++ b/ui/chromeos/file_manager_strings.grdp
+@@ -1898,11 +1898,17 @@
+     In the future, be sure to eject your removable device in the Files app before unplugging it. Otherwise, you might lose data.
+   </message>
+ 
+   <!-- Renaming removable device notifications -->
+   <message name="IDS_REMOVABLE_DEVICE_RENAMING_OF_DEVICE_FAILED_TITLE" desc="Title of notification message which is shown when renaming process fails">
+     Renaming failed
+   </message>
+   <message name="IDS_REMOVABLE_DEVICE_RENAMING_OF_DEVICE_FINISHED_FAILURE_MESSAGE" desc="Text of notification message which is shown when there are some errors while renaming.">
+     Aw, Snap! There was an error during renaming.
+   </message>
++  <message name="IDS_FILE_BROWSER_AURADE_CANNOT_MOVE_THESE" desc="Shown when a cut is refused because at least one of the chosen items cannot be moved.">
++    Some of these cannot be moved, so nothing was cut.
++  </message>
++  <message name="IDS_FILE_BROWSER_AURADE_CANNOT_COPY_THESE" desc="Shown when a copy is refused because at least one of the chosen items cannot be copied.">
++    Some of these cannot be copied, so nothing was copied.
++  </message>
+ </grit-part>
