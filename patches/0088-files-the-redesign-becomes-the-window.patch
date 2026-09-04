@@ -1,0 +1,2028 @@
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+index e3ab1f0..c75070e 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
+@@ -12,11 +12,69 @@
+  * passing over them quietly.
+  */
+ import type {FilesBackendPort} from '../port/port.js';
+-import type {ChangeEvent, DialogKind, DialogMode, EntryDto, EntryPage, FileKey, IoKind, IoProgress, IoRequest, IoState, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind} from '../port/types.js';
++import type {ChangeEvent, DialogKind, DialogMode, EntryDto, EntryPage, FileKey, IoKind, IoProgress, IoRequest, IoState, ListOptions, Metadata, MetadataField, MetadataSnapshot, TaskDescriptor, TaskId, Volume, VolumeKind, VolumePurpose} from '../port/types.js';
+ import {asFileKey, FilesError} from '../port/types.js';
+ import type {Platform, PlatformEntry, PlatformIoProgress, PlatformIoState, PlatformIoType, PlatformMetadata, PlatformResultingTasks, PlatformTaskDescriptor, PlatformVolume} from './platform.js';
+ 
+ /** ChromeOS volume types, as they are actually spelled. */
++/**
++ * What a place is for, keyed by the tail of its volume id.
++ *
++ * The id and not the label. `local_root:Pictures` is spelled that way whatever
++ * language the desktop is in, and its label is whatever XDG decided to call it,
++ * so matching on the label would give a French install a sidebar of identical
++ * disk glyphs. Anything not listed simply has no purpose, which is the ordinary
++ * case and draws the disk it always drew.
++ */
++const PURPOSES: Record<string, VolumePurpose> = {
++  Desktop: 'desktop',
++  Documents: 'documents',
++  Downloads: 'downloads',
++  Music: 'music',
++  Pictures: 'pictures',
++  Videos: 'videos',
++};
++
++/** The part of `local_root:Pictures` after the colon, or '' if there is none. */
++function suffixOf(volumeId: string): string {
++  const colon = volumeId.indexOf(':');
++  return colon < 0 ? '' : volumeId.slice(colon + 1);
++}
++
++/**
++ * Which id suffix names the account's own home directory.
++ *
++ * Nothing in a single volume says "this one is home". ChromeOS's `downloads`
++ * volume is My files and its id carries the account name, and the same account
++ * home is published separately as `local_root:<account>`, so the downloads
++ * volume is read for the name and whatever local_root shares it is home.
++ *
++ * Undefined where there is no downloads volume, which means no place is marked
++ * as home rather than that the wrong one is.
++ */
++function homeSuffixOf(volumes: readonly PlatformVolume[]): string|undefined {
++  const downloads = volumes.find(volume => volume.volumeType === 'downloads');
++  const suffix = downloads ? suffixOf(downloads.volumeId) : '';
++  return suffix || undefined;
++}
++
++function purposeOf(volume: PlatformVolume, home: string|undefined):
++    VolumePurpose|undefined {
++  // My files is the account's own files whatever its id looks like. Usually
++  // the test below would catch it anyway, because the account name is read off
++  // this very volume and so always matches it. Usually is not always: an id
++  // with no colon in it yields no account name at all, and then this is the
++  // only line that marks a home.
++  if (volume.volumeType === 'downloads') {
++    return 'home';
++  }
++  const suffix = suffixOf(volume.volumeId);
++  if (home !== undefined && suffix === home) {
++    return 'home';
++  }
++  return PURPOSES[suffix];
++}
++
+ const VOLUME_KINDS: Record<string, VolumeKind> = {
+   downloads: 'system',
+   // The ordinary local volume, and the one this machine has most of: Home,
+@@ -536,7 +594,8 @@ export class ChromeOsBackend implements FilesBackendPort {
+     }
+   }
+ 
+-  private async toVolume(volume: PlatformVolume): Promise<Volume> {
++  private async toVolume(volume: PlatformVolume, home: string|undefined):
++      Promise<Volume> {
+     const kind = VOLUME_KINDS[volume.volumeType] ?? 'provided';
+     let capacity: {total: number, free: number}|null = null;
+     try {
+@@ -556,17 +615,21 @@ export class ChromeOsBackend implements FilesBackendPort {
+       removable: DETACHABLE.has(volume.volumeType),
+       readOnly: volume.isReadOnly,
+       capacity,
++      purpose: purposeOf(volume, home),
+     };
+   }
+ 
+   async volumes(): Promise<readonly Volume[]> {
+     const found = await this.platform.listVolumes();
+-    return Promise.all(found.map(volume => this.toVolume(volume)));
++    // Worked out once over the whole list, because which volume is home is a
++    // fact about the set rather than about any one of them.
++    const home = homeSuffixOf(found);
++    return Promise.all(found.map(volume => this.toVolume(volume, home)));
+   }
+ 
+   async * search(query: string, scope: FileKey, options: ListOptions = {}):
+       AsyncIterable<EntryPage> {
+-    let root: PlatformEntry|null = null;
++    let root: PlatformEntry;
+     try {
+       root = await this.platform.resolve(scope);
+     } catch (error) {
+diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
+index d9f1793..2d2a444 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
+@@ -24,6 +24,34 @@ interface ChromeEvent<T> {
+   removeListener(listener: (value: T) => void): void;
+ }
+ 
++/**
++ * What ChromeOS hands these listeners, before the edge narrows it.
++ *
++ * `eventType`, `type` and `state` are `string` here rather than the unions
++ * `platform.ts` uses, and that is not laziness. Each of them is a member of a
++ * TypeScript string enum on the ChromeOS side, and a string enum is nominal:
++ * no union of string literals is assignable to one in either direction, so a
++ * description naming the literals cannot be satisfied by the real API at all.
++ * `string` is the largest true thing this file can say. The exact unions live
++ * one layer in, on `Platform`, where they are ours to enforce.
++ */
++interface RawWatchEvent {
++  entry: PlatformEntry;
++  eventType: string;
++}
++
++interface RawIoProgress {
++  taskId: number;
++  type: string;
++  state: string;
++  bytesTransferred: number;
++  totalBytes: number;
++  sourceName: string;
++  itemCount: number;
++  numRemainingItems: number;
++  errorName?: string;
++}
++
+ /**
+  * The slice of `chrome.fileManagerPrivate` this touches, and no more.
+  *
+@@ -40,10 +68,11 @@ export interface FileManagerPrivateSlice {
+   addFileWatch(entry: PlatformEntry, callback: (success?: boolean) => void): void;
+   removeFileWatch(entry: PlatformEntry, callback: (success?: boolean) => void):
+       void;
+-  onDirectoryChanged: ChromeEvent<PlatformWatchEvent>;
++  onDirectoryChanged: ChromeEvent<RawWatchEvent>;
+   searchFiles(
+       params: {
+-        rootDir: PlatformEntry|null,
++        /** Absent, never null. The bindings declare it optional. */
++        rootDir?: PlatformEntry,
+         query: string,
+         types: string,
+         maxResults: number,
+@@ -56,11 +85,12 @@ export interface FileManagerPrivateSlice {
+       descriptor: PlatformTaskDescriptor, entries: readonly PlatformEntry[],
+       callback: (result: string) => void): void;
+   startIOTask(
+-      type: PlatformIoType, entries: readonly PlatformEntry[],
++      // `string`, for the nominal enum reason above.
++      type: string, entries: readonly PlatformEntry[],
+       params: {destinationFolder?: PlatformEntry, showNotification?: boolean},
+       callback: (taskId: number) => void): void;
+   cancelIOTask(taskId: number): void;
+-  onIOTaskProgressStatus: ChromeEvent<PlatformIoProgress>;
++  onIOTaskProgressStatus: ChromeEvent<RawIoProgress>;
+   selectFiles(
+       paths: readonly string[], shouldReturnLocalPath: boolean,
+       callback: () => void): void;
+@@ -223,12 +253,28 @@ export class ChromeOsPlatform implements Platform {
+   }
+ 
+   onDirectoryChanged(listener: (event: PlatformWatchEvent) => void): () => void {
+-    this.api.onDirectoryChanged.addListener(listener);
+-    return () => this.api.onDirectoryChanged.removeListener(listener);
++    // Wrapped rather than passed straight through, because this is the line
++    // where ChromeOS's vocabulary becomes ours. Its eventType is a member of a
++    // nominal string enum whose values are exactly the union in `platform.ts`,
++    // copied from the same declaration, so the narrowing is a rename and not a
++    // guess. If that enum ever grows a third value this is the one place that
++    // has to learn about it.
++    const forward = (raw: RawWatchEvent) =>
++        listener({entry: raw.entry, eventType: raw.eventType as 'changed' | 'error'});
++    this.api.onDirectoryChanged.addListener(forward);
++    return () => this.api.onDirectoryChanged.removeListener(forward);
+   }
+ 
+   searchFiles(params: {
+-    rootDir: PlatformEntry|null,
++    /**
++     * Where to search. Absent means everywhere.
++     *
++     * Absent, never null. The bindings declare it optional and a null is not
++     * the same thing as an omission to them. Nothing ever passed one, so this
++     * was a wrong description rather than a live defect, and it was invisible
++     * until `aurade/` was compiled against the app's own definitions.
++     */
++    rootDir?: PlatformEntry,
+     query: string,
+     types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
+     maxResults: number,
+@@ -268,8 +314,13 @@ export class ChromeOsPlatform implements Platform {
+   }
+ 
+   onIoProgress(listener: (progress: PlatformIoProgress) => void): () => void {
+-    this.api.onIOTaskProgressStatus.addListener(listener);
+-    return () => this.api.onIOTaskProgressStatus.removeListener(listener);
++    // Narrowed here for the same reason as onDirectoryChanged: `type` and
++    // `state` are members of nominal string enums whose values are exactly the
++    // unions in `platform.ts`.
++    const forward = (raw: RawIoProgress) =>
++        listener(raw as unknown as PlatformIoProgress);
++    this.api.onIOTaskProgressStatus.addListener(forward);
++    return () => this.api.onIOTaskProgressStatus.removeListener(forward);
+   }
+ 
+   async getLaunchDialog(): Promise<PlatformLaunchDialog|null> {
+diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+index 150c629..2aeb1f9 100644
+--- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
++++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
+@@ -206,7 +206,15 @@ export interface Platform {
+    * TypeError from the bindings before the call is made.
+    */
+   searchFiles(params: {
+-    rootDir: PlatformEntry|null,
++    /**
++     * Where to search. Absent means everywhere.
++     *
++     * Absent, never null. The bindings declare it optional and a null is not
++     * the same thing as an omission to them. Nothing ever passed one, so this
++     * was a wrong description rather than a live defect, and it was invisible
++     * until `aurade/` was compiled against the app's own definitions.
++     */
++    rootDir?: PlatformEntry,
+     query: string,
+     types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
+     maxResults: number,
+diff --git a/ui/file_manager/file_manager/aurade/app/mount.ts b/ui/file_manager/file_manager/aurade/app/mount.ts
+new file mode 100644
+index 0000000..92f9cf5
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/app/mount.ts
+@@ -0,0 +1,97 @@
++/**
++ * The redesign, mounted by the app rather than pushed into it.
++ *
++ * `tests/harness/live_shell.js` proved this assembly by injecting it over the
++ * debugger, which was enough to see it and not enough to ship it: nothing in
++ * the Files app constructed any of this, so opening the window normally still
++ * gave you the stock one. This is the same three lines, run by the app itself.
++ *
++ * The stock UI is not torn down. It is still initialised and still holds every
++ * piece we have not replaced: the dialogs, the IO progress panel, the context
++ * menus, the crostini share flow. This draws over it, opaque and full window,
++ * so the machinery underneath stays alive and reachable while the surface is
++ * ours. Remove `#aurade-shell` and the old window is exactly as it was, which
++ * is the property that makes it safe to put this in front of a real
++ * filesystem before all of those have an answer.
++ *
++ * Every collaborator arrives as an argument. Nothing here reads a global, so
++ * the local loop can compile it without the ChromeOS type definitions and the
++ * hardware harness can build the same thing from the running app's own
++ * objects.
++ */
++import type {FileManagerPrivateSlice, LastErrorSource, MetadataModelSlice, ResolveUrl, VolumeManagerSlice} from '../adapter/chromeos_platform.js';
++import {ChromeOsPlatform} from '../adapter/chromeos_platform.js';
++import {ChromeOsBackend} from '../adapter/chromeos_backend.js';
++import {TOKENS_CSS} from '../ui/tokens_css.js';
++import {FilesShell} from '../ui/shell.js';
++
++export interface MountOptions {
++  readonly api: FileManagerPrivateSlice;
++  readonly runtime: LastErrorSource;
++  readonly volumes: VolumeManagerSlice;
++  readonly metadata: MetadataModelSlice;
++  readonly resolveUrl: ResolveUrl;
++  /** Defaults to the document body. */
++  readonly container?: HTMLElement;
++}
++
++/** The id of the element the shell lives in, so it can be found and removed. */
++export const MOUNT_ID = 'aurade-shell';
++
++/** The id of the style element, so a second mount replaces rather than repeats. */
++const STYLE_ID = 'aurade-tokens';
++
++/**
++ * Puts the stylesheet in the document.
++ *
++ * As a `<style>` rather than a `<link>`, because the stylesheet cannot be its
++ * own pak resource: a new resource is a new id, the id map is compiled into
++ * chrome, and that is a full link rather than a pak swap. `tools/gen_tokens.py`
++ * turns `ui/tokens.css` into the string this writes, and `tests/run.sh` fails
++ * if the two have drifted.
++ */
++function applyTokens(): void {
++  let style = document.getElementById(STYLE_ID);
++  if (!style) {
++    style = document.createElement('style');
++    style.id = STYLE_ID;
++    document.head.appendChild(style);
++  }
++  style.textContent = TOKENS_CSS;
++}
++
++/**
++ * Builds the window and starts it.
++ *
++ * Returns null rather than throwing when it cannot start. A window that fails
++ * halfway is worse than the old window, so the host element goes away again
++ * and the app underneath is what you see. Deciding that here rather than in
++ * the caller means there is one place that knows what the fallback is.
++ */
++export async function mountAuradeShell(options: MountOptions):
++    Promise<FilesShell|null> {
++  const existing = document.getElementById(MOUNT_ID);
++  if (existing) {
++    existing.remove();
++  }
++  applyTokens();
++  const host = document.createElement('div');
++  host.id = MOUNT_ID;
++  (options.container ?? document.body).appendChild(host);
++
++  try {
++    const platform = new ChromeOsPlatform(
++        options.api, options.runtime, options.volumes, options.metadata,
++        options.resolveUrl,
++        // Null is an ordinary window rather than a picker. Dialog mode comes
++        // later, and passing the launch parameters here is all it will need.
++        null);
++    const shell = new FilesShell(host, new ChromeOsBackend(platform));
++    await shell.start();
++    return shell;
++  } catch (error) {
++    host.remove();
++    console.error('AuraDE Files did not start, leaving the stock window', error);
++    return null;
++  }
++}
+diff --git a/ui/file_manager/file_manager/aurade/port/mock_backend.ts b/ui/file_manager/file_manager/aurade/port/mock_backend.ts
+index 18e1a24..b761ff2 100644
+--- a/ui/file_manager/file_manager/aurade/port/mock_backend.ts
++++ b/ui/file_manager/file_manager/aurade/port/mock_backend.ts
+@@ -319,6 +319,12 @@ export class MockBackend implements FilesBackendPort {
+     for (const key of keys) {
+       this.require(key);
+     }
++    // A task id the backend never offered is a caller bug, and the real one
++    // refuses it. Ignoring it here made the mock kinder than the platform,
++    // which is the direction that hides mistakes rather than finding them.
++    if (taskId !== 'mock-view' && taskId !== 'mock-edit') {
++      throw new FilesError('not-found', 'There is no such task.');
++    }
+   }
+ 
+   async startIo(request: IoRequest): Promise<TaskId> {
+diff --git a/ui/file_manager/file_manager/aurade/port/types.ts b/ui/file_manager/file_manager/aurade/port/types.ts
+index a6bdad2..9bb4989 100644
+--- a/ui/file_manager/file_manager/aurade/port/types.ts
++++ b/ui/file_manager/file_manager/aurade/port/types.ts
+@@ -58,6 +58,18 @@ export type MetadataSnapshot = ReadonlyMap<FileKey, Metadata>;
+ export type VolumeKind = 'system'|'removable'|'archive'|'provided'|'drive'|
+     'android'|'crostini'|'mtp'|'trash'|'recent';
+ 
++/**
++ * What a place is for, as opposed to what kind of storage it is made of.
++ *
++ * A pictures folder on the internal disk is a `system` volume with a
++ * `pictures` purpose, and the two answers are wanted for different things: the
++ * kind decides which group the sidebar files it under, the purpose decides what
++ * it looks like. Absent when the platform does not say so, which is most
++ * volumes and is not a failure.
++ */
++export type VolumePurpose =
++    'home'|'desktop'|'documents'|'downloads'|'music'|'pictures'|'videos';
++
+ export interface Volume {
+   readonly id: string;
+   readonly root: FileKey;
+@@ -67,6 +79,7 @@ export interface Volume {
+   readonly readOnly: boolean;
+   /** Null where the notion does not apply, such as Recent. */
+   readonly capacity: {readonly total: number, readonly free: number}|null;
++  readonly purpose?: VolumePurpose;
+ }
+ 
+ /**
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+index 4e88a09..f415fc4 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
+@@ -535,6 +535,95 @@ const CHECKS: Check[] = [
+             'a local folder was not treated as part of this computer');
+     },
+   },
++  {
++    name: 'a user folder says what it is for, read off the id not the label',
++    async run() {
++      // The Dell's actual volume list. The label is localised and the id is
++      // not, so the id is what decides: a French install would call Pictures
++      // something else and still be `local_root:Pictures`.
++      const platform = new FakePlatform();
++      const listed: Array<[string, string, string]> = [
++        ['local_root:Desktop', 'local_root', 'Desktop'],
++        ['local_root:Documents', 'local_root', 'Documents'],
++        ['local_root:Downloads', 'local_root', 'Downloads'],
++        ['local_root:Music', 'local_root', 'Music'],
++        ['local_root:Pictures', 'local_root', 'Pictures'],
++        ['local_root:Videos', 'local_root', 'Videos'],
++        ['local_root:root', 'local_root', 'Filesystem Root'],
++      ];
++      for (const [volumeId, volumeType, label] of listed) {
++        platform.addVolume({
++          volumeId,
++          volumeType,
++          label,
++          url: `filesystem:chrome://file-manager/external/${volumeId}/`,
++        });
++      }
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      const purposes = volumes.map(volume => volume.purpose);
++      equal(purposes.join(','),
++            'desktop,documents,downloads,music,pictures,videos,',
++            'the wrong glyph would be drawn for these places');
++    },
++  },
++  {
++    name: 'home is worked out from the account name, not from the word Home',
++    async run() {
++      // Nothing in one volume says it is home. My files carries the account
++      // name in its id, and the local_root sharing that name is the home
++      // directory. On the Dell that is downloads:cam and local_root:cam, and
++      // local_root:home is /home, which is somewhere else entirely.
++      const platform = new FakePlatform();
++      for (const [volumeId, volumeType, label] of [
++             ['downloads:cam', 'downloads', 'My files'],
++             ['local_root:cam', 'local_root', 'Home'],
++             ['local_root:home', 'local_root', 'Users'],
++           ] as Array<[string, string, string]>) {
++        platform.addVolume({
++          volumeId,
++          volumeType,
++          label,
++          url: `filesystem:chrome://file-manager/external/${volumeId}/`,
++        });
++      }
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      equal(volumes[0]?.purpose, 'home', 'My files is the account own files');
++      equal(volumes[1]?.purpose, 'home', 'the account home was not recognised');
++      equal(volumes[2]?.purpose, undefined,
++            '/home holds every account and is not one account home');
++    },
++  },
++  {
++    name: 'My files is a home even when its id carries no account name',
++    async run() {
++      // The account name is read off this volume, so on ordinary ids the two
++      // rules agree and either one alone would look sufficient. An id with no
++      // colon yields no account name and leaves only the first.
++      const platform = new FakePlatform().addVolume({
++        volumeId: 'downloads',
++        volumeType: 'downloads',
++        label: 'My files',
++        url: 'filesystem:chrome://file-manager/external/downloads/',
++      });
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      equal(volumes[0]?.purpose, 'home',
++            'My files is the account own files whatever its id looks like');
++    },
++  },
++  {
++    name: 'with no My files there is no home rather than the wrong home',
++    async run() {
++      const platform = new FakePlatform().addVolume({
++        volumeId: 'local_root:cam',
++        volumeType: 'local_root',
++        label: 'Home',
++        url: 'filesystem:chrome://file-manager/external/cam/',
++      });
++      const volumes = await new ChromeOsBackend(platform).volumes();
++      equal(volumes[0]?.purpose, undefined,
++            'guessing at home from a label is how the wrong one gets marked');
++    },
++  },
+   {
+     name: 'restriction is asked for by the name the platform knows',
+     async run() {
+diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+index 57950c4..335615d 100644
+--- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
++++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
+@@ -241,7 +241,15 @@ export class FakePlatform implements Platform {
+   }
+ 
+   async searchFiles(params: {
+-    rootDir: PlatformEntry|null,
++    /**
++     * Where to search. Absent means everywhere.
++     *
++     * Absent, never null. The bindings declare it optional and a null is not
++     * the same thing as an omission to them. Nothing ever passed one, so this
++     * was a wrong description rather than a live defect, and it was invisible
++     * until `aurade/` was compiled against the app's own definitions.
++     */
++    rootDir?: PlatformEntry,
+     query: string,
+     types: 'ALL'|'EXCLUDE_DIRECTORIES'|'OFFLINE'|'SHARED_WITH_ME',
+     maxResults: number,
+@@ -306,6 +314,13 @@ export class FakePlatform implements Platform {
+   async executeTask(
+       descriptor: PlatformTaskDescriptor,
+       entries: readonly PlatformEntry[]): Promise<string> {
++    // A descriptor naming an app that was never offered is not something the
++    // platform quietly runs. Accepting anything made the fake kinder than the
++    // real thing, which is the direction that hides a bad task id rather than
++    // finding it.
++    if (descriptor.appId !== 'text-app' && descriptor.appId !== 'viewer') {
++      throw domError('NotFoundError');
++    }
+     this.ran = {descriptor, count: entries.length};
+     return this.taskResult;
+   }
+diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+index afb7ba8..7103c14 100644
+--- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
++++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
+@@ -337,6 +337,16 @@ export const CASES: Case[] = [
+       assert(tasks.some(t => t.isDefault), 'one task is the default');
+     },
+   },
++  {
++    name: 'a task that was never offered is refused',
++    capability: 'task-execution',
++    async run({port, root, add}) {
++      const file = await add(root, 'openable.txt', false);
++      await rejects(
++          () => port.executeTask('no-such-task', [file]), 'not-found',
++          'running a task the backend never offered');
++    },
++  },
+   {
+     name: 'a task can be handed to whatever handles it',
+     capability: 'task-execution',
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+index 2d18edd..f0a13d5 100644
+--- a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+@@ -41,20 +41,36 @@ interface Harness {
+   destroy(): void;
+ }
+ 
+-function makeHarness(count = 20, height = 400): Harness {
++function entriesOf(count: number): EntryDto[] {
++  const entries: EntryDto[] = [];
++  for (let i = 0; i < count; i++) {
++    const name = i % 4 === 0 ? `folder-${i}` : `file-${i}.txt`;
++    entries.push({
++      key: asFileKey(`${ROOT}/${name}`),
++      name,
++      isDirectory: i % 4 === 0,
++      parent: ROOT,
++    });
++  }
++  return entries;
++}
++
++function stage(height = 400): HTMLElement {
+   const host = document.createElement('div');
+   host.style.height = `${height}px`;
+   host.style.width = '760px';
+   document.body.appendChild(host);
++  return host;
++}
+ 
+-  const entries: EntryDto[] = [];
++function makeHarness(count = 20, height = 400): Harness {
++  const host = stage(height);
++
++  const entries = entriesOf(count);
+   const metadata = new Map<ReturnType<typeof asFileKey>, Metadata>();
+-  for (let i = 0; i < count; i++) {
+-    const name = i % 4 === 0 ? `folder-${i}` : `file-${i}.txt`;
+-    const key = asFileKey(`${ROOT}/${name}`);
+-    entries.push({key, name, isDirectory: i % 4 === 0, parent: ROOT});
+-    metadata.set(key, {size: (i + 1) * 1024, modificationTime: NOW});
+-  }
++  entries.forEach((entry, i) => {
++    metadata.set(entry.key, {size: (i + 1) * 1024, modificationTime: NOW});
++  });
+ 
+   const list = new FileList(host, {rowHeight: 40});
+   list.setEntries(entries, NOW);
+@@ -340,6 +356,40 @@ const CASES: Case[] = [
+       }
+     },
+   },
++  {
++    name: 'a folder that changes under an unmoved window reports its range',
++    run() {
++      // This is the whole reason a new file gets a size. The window fetches
++      // details for the rows it can see, and it learns which those are from
++      // this report. A file arriving in the folder you are already looking at
++      // scrolls nothing, so if the report is skipped as an unchanged window,
++      // the row sits there blank until you scroll it away and back.
++      const host = stage();
++      const reports: Array<{first: number, count: number}> = [];
++      const list = new FileList(host, {
++        rowHeight: 40,
++        onRangeChange: (first, count) => reports.push({first, count}),
++      });
++      try {
++        list.setEntries(entriesOf(20), NOW);
++        const before = reports.length;
++        assert(before > 0, 'the first render reported no range at all');
++        // Same length and the same scroll position, so first and count are
++        // identical to last time and nothing but an explicit invalidation
++        // makes this report.
++        list.setEntries(entriesOf(20), NOW);
++        assert(
++            reports.length > before,
++            'the range was never reported, so nothing would fetch the details');
++        const last = reports[reports.length - 1]!;
++        equal(last.first, 0, 'reported the wrong first row');
++        assert(last.count > 0, 'reported an empty range');
++      } finally {
++        list.destroy();
++        host.remove();
++      }
++    },
++  },
+   {
+     name: 'a selection set programmatically reads back as those entries',
+     run() {
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
+index dc909f5..eb573f3 100644
+--- a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
+@@ -33,6 +33,8 @@ function equal<T>(actual: T, expected: T, message: string): void {
+ class CountingPort implements FilesBackendPort {
+   metadataCalls = 0;
+   metadataKeys = 0;
++  /** Every key the shell has asked about, in order. */
++  readonly metadataAsked: FileKey[] = [];
+   constructor(private readonly inner: FilesBackendPort) {}
+   list(key: FileKey, options?: Parameters<FilesBackendPort['list']>[1]) {
+     return this.inner.list(key, options);
+@@ -40,6 +42,7 @@ class CountingPort implements FilesBackendPort {
+   metadata(keys: readonly FileKey[], fields: readonly MetadataField[]) {
+     this.metadataCalls++;
+     this.metadataKeys += keys.length;
++    this.metadataAsked.push(...keys);
+     return this.inner.metadata(keys, fields);
+   }
+   watch(key: FileKey, signal?: AbortSignal) {
+@@ -224,6 +227,32 @@ interface DomResult {
+ }
+ 
+ const CASES: Array<{name: string, run: () => Promise<void>}> = [
++  {
++    name: 'a file that appears in the folder you are looking at gets its details',
++    run: async () => {
++      // The window fetches metadata for the rows it can see, driven by the list
++      // telling it the visible range changed. A file arriving in a folder you
++      // are already looking at does not change that range, so nothing asked for
++      // its size, and the row sat there blank until you scrolled it out of
++      // sight and back. The shell remembers the range for exactly this.
++      const backend = backendWith();
++      const h = makeHarness(backend);
++      await h.shell.start();
++      await settle();
++      const arrived = asFileKey('mock://myfiles/arrived.txt');
++      assert(!h.port.metadataAsked.includes(arrived),
++             'the file was asked about before it existed');
++      backend.add(asFileKey('mock://myfiles'), 'arrived.txt', false,
++                  {size: 4096});
++      await settle();
++      assert(h.names().includes('arrived.txt'), 'the new row never appeared');
++      // The key, not the call count. Any metadata call at all satisfies a
++      // count, which is how this passed for an hour while proving nothing.
++      assert(h.port.metadataAsked.includes(arrived),
++             'nothing asked for the details of the row that just appeared');
++      h.destroy();
++    },
++  },
+   {
+     name: 'the window asks the backend what places exist',
+     run: async () => {
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
+index d42d73d..030843c 100644
+--- a/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
+@@ -56,8 +56,24 @@ function places(): Place[] {
+     {key: asFileKey('fake://recent'), label: 'Recent', kind: 'recent'},
+     {key: asFileKey('fake://starred'), label: 'Starred', kind: 'starred'},
+     {key: asFileKey('fake://trash'), label: 'Trash', kind: 'trash'},
+-    {key: internal.root, label: internal.label, kind: 'volume', volume: internal},
+-    {key: stick.root, label: stick.label, kind: 'volume', volume: stick},
++    // capacity is set here and not read off the volume, because the sidebar
++    // draws what it is handed. Which volumes are worth measuring is decided
++    // once, in placesFor, so that one disk behind fourteen folders does not
++    // draw fourteen identical bars. These are two different disks, so both.
++    {
++      key: internal.root,
++      label: internal.label,
++      kind: 'volume',
++      volume: internal,
++      capacity: internal.capacity!,
++    },
++    {
++      key: stick.root,
++      label: stick.label,
++      kind: 'volume',
++      volume: stick,
++      capacity: stick.capacity!,
++    },
+     {key: asFileKey('fake://basket'), label: 'Basket', kind: 'basket', badge: 3},
+   ];
+ }
+@@ -313,6 +329,42 @@ const CASES: Array<{name: string, run: () => void}> = [
+       h.destroy();
+     },
+   },
++  {
++    name: 'a place that says what it is for does not draw the generic disk',
++    run: () => {
++      // Every user folder on the Dell is a local disk, so before this the
++      // sidebar drew the same laptop fourteen times down the column.
++      const purposes = ['home', 'desktop', 'documents', 'downloads', 'music',
++                        'pictures', 'videos'] as const;
++      const list: Place[] = purposes.map(purpose => {
++        const disk = volume({id: purpose, kind: 'system', purpose});
++        return {
++          key: disk.root,
++          label: purpose,
++          kind: 'volume' as const,
++          volume: disk,
++        };
++      });
++      const plain = volume({id: 'plain', kind: 'system'});
++      list.push({
++        key: plain.root,
++        label: 'plain',
++        kind: 'volume',
++        volume: plain,
++      });
++      const h = makeHarness(list);
++      const drawn = [...h.host.querySelectorAll('.aurade-place-glyph path')]
++                        .map(node => node.getAttribute('d'));
++      equal(drawn.length, purposes.length + 1, 'a glyph per place');
++      equal(new Set(drawn).size, drawn.length,
++            'two places that are for different things drew the same glyph');
++      const generic = drawn[drawn.length - 1];
++      assert(
++          drawn.slice(0, -1).every(d => d !== generic),
++          'a place that says what it is for still drew the generic disk');
++      h.destroy();
++    },
++  },
+   {
+     name: 'a place with no notion of capacity draws none',
+     run: () => {
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.html b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
+index 61409e5..3dcde2d 100644
+--- a/ui/file_manager/file_manager/aurade/tests/harness/dom.html
++++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
+@@ -1,5 +1,7 @@
+ <!doctype html>
+ <meta charset="utf-8">
++<meta http-equiv="Content-Security-Policy"
++      content="require-trusted-types-for 'script'">
+ <title>AuraDE Files DOM tests</title>
+ <link rel="stylesheet" href="../../ui/tokens.css">
+ <style>html, body { margin: 0; background: var(--aurade-ground); }</style>
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/golden.py b/ui/file_manager/file_manager/aurade/tests/harness/golden.py
+index 505a80e..c8cc54b 100755
+--- a/ui/file_manager/file_manager/aurade/tests/harness/golden.py
++++ b/ui/file_manager/file_manager/aurade/tests/harness/golden.py
+@@ -264,6 +264,7 @@ def main():
+         stories = {s["name"]: [s["width"], s["height"]] for s in published}
+         names = [args.only] if args.only else [s["name"] for s in published]
+         failures = []
++        recorded = []
+         for name in names:
+             width, height = stories.get(name, [720, 260])
+             shot = os.path.join(artifacts, name + ".png")
+@@ -275,6 +276,7 @@ def main():
+             golden = os.path.join(GOLDENS, name + ".png")
+             if args.update or not os.path.exists(golden):
+                 shutil.copy(shot, golden)
++                recorded.append(name)
+                 print("  recorded  %s (%dx%d)" % (name, width, height))
+                 continue
+             ok, why = compare(golden, shot, os.path.join(artifacts,
+@@ -294,7 +296,17 @@ def main():
+               % (len(failures), artifacts))
+         print("If the change is intended, re-run with --update.")
+         return 1
+-    print("\ngolden renders: %d matched" % len(names))
++    # Recorded and matched are not the same claim. A story whose golden did not
++    # exist yet was written from this very run and compared against nothing, so
++    # counting it as matched tells the next reader it was verified when it was
++    # only recorded.
++    if recorded:
++        print("\ngolden renders: %d matched, %d recorded for the first time "
++              "and compared against nothing: %s"
++              % (len(names) - len(recorded), len(recorded),
++                 ", ".join(recorded)))
++    else:
++        print("\ngolden renders: %d matched" % len(names))
+     return 0
+ 
+ 
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-purposes.png b/ui/file_manager/file_manager/aurade/tests/harness/goldens/sidebar-purposes.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..055be519dfad7bf8a89bad714dd19ef9e7ad9fba
+GIT binary patch
+literal 9915
+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
+DZ_N7%
+
+literal 0
+HcmV?d00001
+
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/index.html b/ui/file_manager/file_manager/aurade/tests/harness/index.html
+index 73acc02..ac92ada 100644
+--- a/ui/file_manager/file_manager/aurade/tests/harness/index.html
++++ b/ui/file_manager/file_manager/aurade/tests/harness/index.html
+@@ -1,5 +1,7 @@
+ <!doctype html>
+ <meta charset="utf-8">
++<meta http-equiv="Content-Security-Policy"
++      content="require-trusted-types-for 'script'">
+ <title>AuraDE Files harness</title>
+ <link rel="stylesheet" href="../../ui/tokens.css">
+ <style>
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js
+new file mode 100644
+index 0000000..cf6b816
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js
+@@ -0,0 +1,90 @@
++/**
++ * Mounts the AuraDE shell in a live Files window, over the real backend.
++ *
++ * Not a test. This is the thing you look at. It builds `ChromeOsPlatform` from
++ * the running app's own collaborators, wraps it in `ChromeOsBackend`, and hands
++ * that to `FilesShell`, so what appears on screen is the redesign driven by the
++ * actual filesystem rather than a mock and rather than a screenshot.
++ *
++ * It overlays rather than replacing, so nothing about the existing app is torn
++ * down: remove `#aurade-live` from the page, or close the window, and the
++ * stock Files app is exactly as it was.
++ *
++ * Assembled and sent by `live_shell.py`. Do not run directly.
++ */
++(() => {
++const auradeModules = {};
++const auradeExports = {};
++function define(name, deps, factory) {
++  auradeModules[name] = {deps: deps, factory: factory};
++}
++function requireModule(name) {
++  if (Object.prototype.hasOwnProperty.call(auradeExports, name)) {
++    return auradeExports[name];
++  }
++  const module = auradeModules[name];
++  if (!module) {
++    throw new Error('no such module in the bundle: ' + name);
++  }
++  const exported = (auradeExports[name] = {});
++  const args = module.deps.map(function(dep) {
++    if (dep === 'require') return requireModule;
++    if (dep === 'exports') return exported;
++    return requireModule(dep);
++  });
++  module.factory.apply(null, args);
++  return exported;
++}
++
++// @BUNDLE@
++
++return (async () => {
++  const {ChromeOsBackend} = requireModule('adapter/chromeos_backend');
++  const {ChromeOsPlatform} = requireModule('adapter/chromeos_platform');
++  const {FilesShell} = requireModule('ui/shell');
++
++  const app = window.fileManager;
++  if (!app || !app.volumeManager || !app.metadataModel_) {
++    return JSON.stringify({error: 'the Files app is not open in this renderer'});
++  }
++
++  const platform = new ChromeOsPlatform(
++      chrome.fileManagerPrivate, chrome.runtime, app.volumeManager,
++      app.metadataModel_,
++      (url, ok, fail) => webkitResolveLocalFileSystemURL(url, ok, fail),
++      null);
++
++  let style = document.getElementById('aurade-tokens');
++  if (!style) {
++    style = document.createElement('style');
++    style.id = 'aurade-tokens';
++    document.head.appendChild(style);
++  }
++  style.textContent = "@TOKENS@";
++
++  const existing = document.getElementById('aurade-live');
++  if (existing) {
++    existing.remove();
++  }
++  const host = document.createElement('div');
++  host.id = 'aurade-live';
++  host.style.cssText =
++      'position:fixed;inset:0;z-index:2147483647;overflow:hidden;';
++  document.body.appendChild(host);
++
++  const shell = new FilesShell(host, new ChromeOsBackend(platform));
++  await shell.start();
++  await new Promise(done => setTimeout(done, 1200));
++
++  const text = (selector) =>
++      [...host.querySelectorAll(selector)].map(node => node.textContent.trim());
++  return JSON.stringify({
++    mounted: true,
++    places: text('.aurade-place-label'),
++    headings: text('.aurade-place-heading'),
++    rows: text('.aurade-name').slice(0, 12),
++    rowCount: host.querySelectorAll('.aurade-row').length,
++    status: (host.querySelector('.aurade-status-summary') || {}).textContent,
++  }, null, 1);
++})();
++})()
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py
+new file mode 100644
+index 0000000..c67084a
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python3
++"""Puts the AuraDE shell on screen in a live Files window, over the real backend.
++
++Not a test, and not a screenshot. This compiles the shell, the adapter and the
++ChromeOS wiring into one bundle, sends it into a running Files renderer, and
++mounts it as an overlay driven by the actual filesystem.
++
++  python3 live_shell.py
++
++It adds `#aurade-live` and a `#aurade-tokens` style to the page and touches
++nothing else, so removing that element, or closing the window, leaves the stock
++app exactly as it was.
++"""
++import json
++import os
++import subprocess
++import sys
++import tempfile
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++AURADE = os.path.dirname(os.path.dirname(HERE))
++SRC = os.path.abspath(os.path.join(AURADE, "..", "..", "..", ".."))
++NODE = os.path.join(SRC, "third_party/node/linux/node-linux-x64/bin/node")
++TSC = os.path.join(SRC, "third_party/node/node_modules/typescript/bin/tsc")
++LAB = os.environ.get("AURADE_LAB", "/mnt/build/aurade-work/lab")
++
++# ui/shell.ts drags in the whole window: sidebar, toolbar, path bar, list, rows,
++# status bar, copy and format. Naming it is enough.
++MODULES = [
++    "port/types.ts",
++    "port/port.ts",
++    "adapter/chromeos_backend.ts",
++    "adapter/chromeos_platform.ts",
++    "ui/shell.ts",
++]
++
++
++def build_bundle(out_path):
++    command = [
++        NODE, TSC, "--strict", "--skipLibCheck", "--target", "es2022",
++        "--module", "amd", "--outFile", out_path, "--lib", "es2022,dom",
++        "--ignoreDeprecations", "6.0",
++    ] + [os.path.join(AURADE, module) for module in MODULES]
++    finished = subprocess.run(command, capture_output=True, text=True)
++    if not os.path.exists(out_path):
++        sys.stdout.write(finished.stdout + finished.stderr)
++        raise SystemExit("the bundle did not compile")
++    return open(out_path).read()
++
++
++def main():
++    for needed in (NODE, TSC, LAB):
++        if not os.path.exists(needed):
++            raise SystemExit("not found: %s" % needed)
++
++    with tempfile.TemporaryDirectory() as scratch:
++        bundle = build_bundle(os.path.join(scratch, "bundle.js"))
++    harness = open(os.path.join(HERE, "live_shell.js")).read()
++    tokens = open(os.path.join(AURADE, "ui/tokens.css")).read()
++
++    for marker in ("// @BUNDLE@", '"@TOKENS@"'):
++        if harness.count(marker) != 1:
++            raise SystemExit("the harness has no single %s to splice" % marker)
++    # json.dumps rather than a naive quote: the stylesheet is full of braces,
++    # quotes and newlines, and one unescaped character turns the whole payload
++    # into a syntax error a long way from its cause.
++    payload = harness.replace("// @BUNDLE@", bundle)
++    payload = payload.replace('"@TOKENS@"', json.dumps(tokens))
++
++    print("sending %d bytes to the renderer" % len(payload))
++    environment = dict(os.environ, AURADE_CDP_TIMEOUT="120")
++    # Through a file, not an argument. A bundled application is well past the
++    # 128KB Linux allows in a single argv entry, and the failure for that is an
++    # OSError from posix_spawn that says nothing about size.
++    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
++        handle.write(payload)
++        payload_path = handle.name
++    try:
++        finished = subprocess.run([LAB, "eval", "@" + payload_path],
++                                  capture_output=True, text=True,
++                                  env=environment)
++    finally:
++        os.unlink(payload_path)
++    sys.stderr.write(finished.stderr)
++    print(finished.stdout.strip())
++    return finished.returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/perf.html b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
+index c3fecb3..b1398fe 100644
+--- a/ui/file_manager/file_manager/aurade/tests/harness/perf.html
++++ b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
+@@ -1,5 +1,7 @@
+ <!doctype html>
+ <meta charset="utf-8">
++<meta http-equiv="Content-Security-Policy"
++      content="require-trusted-types-for 'script'">
+ <title>AuraDE Files list benchmark</title>
+ <link rel="stylesheet" href="../../ui/tokens.css">
+ <style>
+diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
+index 4fd6643..b6d95e3 100644
+--- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
++++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
+@@ -5,7 +5,7 @@
+  * noticing until it is on the hardware. Each one is deterministic: a fixed
+  * clock, fixed sizes, no randomness, no network.
+  */
+-import type {EntryDto, Metadata} from '../../port/types.js';
++import type {EntryDto, Metadata, Volume} from '../../port/types.js';
+ import {asFileKey} from '../../port/types.js';
+ import type {EmptyReason} from '../../ui/copy.js';
+ import {FileList} from '../../ui/file_list.js';
+@@ -14,6 +14,7 @@ import {MockBackend} from '../../port/mock_backend.js';
+ import {Sidebar} from '../../ui/sidebar.js';
+ import {FilesShell} from '../../ui/shell.js';
+ import type {Place} from '../../ui/sidebar.js';
++import {placesFor} from '../../ui/places.js';
+ 
+ export interface Story {
+   readonly name: string;
+@@ -138,7 +139,7 @@ function emptyStory(name: string, reason: EmptyReason, subject?: string): Story
+  */
+ const PLACES: Place[] = (() => {
+   const gib = 1024 * 1024 * 1024;
+-  const internal = {
++  const internal: Volume = {
+     id: 'internal',
+     root: asFileKey('mock://internal'),
+     label: 'Home',
+@@ -147,7 +148,7 @@ const PLACES: Place[] = (() => {
+     readOnly: false,
+     capacity: {total: 32 * gib, free: 8 * gib},
+   };
+-  const stick = {
++  const stick: Volume = {
+     id: 'stick',
+     root: asFileKey('mock://stick'),
+     label: 'CRUZER',
+@@ -160,12 +161,43 @@ const PLACES: Place[] = (() => {
+     {key: asFileKey('fake://recent'), label: 'Recent', kind: 'recent'},
+     {key: asFileKey('fake://starred'), label: 'Starred', kind: 'starred'},
+     {key: asFileKey('fake://trash'), label: 'Trash', kind: 'trash'},
+-    {key: internal.root, label: internal.label, kind: 'volume', volume: internal},
+-    {key: stick.root, label: stick.label, kind: 'volume', volume: stick},
++    // Through placesFor rather than written out, so the golden shows the
++    // meters the app would actually draw rather than the ones a fixture felt
++    // like asking for. Two different disks here, so two bars.
++    ...placesFor([internal, stick]),
+     {key: asFileKey('fake://basket'), label: 'Basket', kind: 'basket', badge: 3},
+   ];
+ })();
+ 
++/**
++ * One place per purpose, which is the whole point of having purposes.
++ *
++ * Every one of these is the same kind of storage, a local disk, so before the
++ * purpose existed this was seven identical laptop glyphs in a column. Left as
++ * its own story rather than folded into the ones above, because those are
++ * about grouping and capacity and are worth keeping still.
++ */
++const PURPOSED: Place[] = placesFor(
++    (['home', 'desktop', 'documents', 'downloads', 'music', 'pictures',
++      'videos'] as const)
++        .map(purpose => ({
++               id: purpose,
++               root: asFileKey(`mock://${purpose}`),
++               label: purpose[0]!.toUpperCase() + purpose.slice(1),
++               kind: 'system' as const,
++               removable: false,
++               readOnly: false,
++               capacity: null,
++               purpose,
++             })));
++
++function purposes(root: HTMLElement): void {
++  const host = document.createElement('div');
++  host.className = 'aurade-panel';
++  root.appendChild(host);
++  new Sidebar(host).setPlaces(PURPOSED);
++}
++
+ function sidebar(root: HTMLElement, selected?: string): void {
+   const host = document.createElement('div');
+   host.className = 'aurade-panel';
+@@ -303,6 +335,13 @@ export const STORIES: Story[] = [
+     theme: 'dark',
+     render: root => sidebar(root, 'mock://internal'),
+   },
++  {
++    name: 'sidebar-purposes',
++    width: 268,
++    height: 340,
++    theme: 'dark',
++    render: root => purposes(root),
++  },
+   {
+     name: 'rows-light',
+     width: 720,
+diff --git a/ui/file_manager/file_manager/aurade/tests/run.sh b/ui/file_manager/file_manager/aurade/tests/run.sh
+index f639262..520f8e2 100755
+--- a/ui/file_manager/file_manager/aurade/tests/run.sh
++++ b/ui/file_manager/file_manager/aurade/tests/run.sh
+@@ -21,11 +21,22 @@ fail() { printf 'aurade port contract: %s\n' "$*" >&2; exit 1; }
+ # skipLibCheck applies to the shipped .d.ts files only: lib.dom.d.ts refers to
+ # TrustedHTML, which needs a package this tree does not put on our path. Our own
+ # sources are still checked in full, and --strict stays on.
++# The generated module and the stylesheet it came from cannot be allowed to
++# drift, and this is the loop that runs every time.
++"$AURADE"/tools/gen_tokens.py --check || fail "ui/tokens_css.ts is stale"
++
+ echo "==> check and emit"
+-"$NODE" "$TSC" --strict --skipLibCheck --target es2022 --module es2022 \
++# noUnusedLocals and noUnusedParameters because the Files app's own tsconfig
++# sets them, and the first time this code was compiled by the real build it
++# failed on two declarations this invocation was happy to ignore. A local loop
++# that is laxer than the build it feeds is a local loop that hands you a
++# surprise at the worst moment.
++"$NODE" "$TSC" --strict --skipLibCheck --noUnusedLocals --noUnusedParameters \
++  --target es2022 --module es2022 \
+   --moduleResolution bundler --lib es2022,dom \
+   --rootDir "$AURADE" --outDir "$OUT" \
+   "$AURADE"/port/*.ts "$AURADE"/session/*.ts "$AURADE"/ui/*.ts "$AURADE"/adapter/*.ts \
++  "$AURADE"/app/*.ts \
+   "$AURADE"/tests/contract/*.ts "$AURADE"/tests/session/*.ts \
+   "$AURADE"/tests/ui/*.ts "$AURADE"/tests/adapter/*.ts \
+   || fail "the types do not check"
+diff --git a/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
+index db1012c..81a70fc 100644
+--- a/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
+@@ -97,9 +97,45 @@ const CHECKS: Check[] = [
+         ...volume('a', 'system'),
+         capacity: {total: 100, free: 50},
+       };
+-      const [place] = placesFor([disk]);
++      const other: Volume = {
++        ...volume('b', 'system'),
++        capacity: {total: 200, free: 80},
++      };
++      const [place] = placesFor([disk, other]);
+       equal(place!.volume?.capacity?.free, 50,
+             'the sidebar cannot draw what the mapping threw away');
++      equal(place!.capacity?.free, 50, 'and it should be asked to draw it');
++    },
++  },
++  {
++    name: 'one disk behind many folders is measured once, not many times',
++    run() {
++      // What the Dell actually reports: every user folder is its own volume on
++      // the same 28 GB disk. Reading a capacity off each of them is how the
++      // sidebar ended up saying "8.7 GB free of 28 GB" fourteen times.
++      const capacity = {total: 28, free: 8};
++      const folders = ['Desktop', 'Documents', 'Downloads', 'Home'].map(
++          name => ({...volume(name, 'system'), capacity}));
++      const places = placesFor(folders);
++      equal(places.length, 4, 'every folder is still a place you can go');
++      equal(places.filter(place => place.capacity).length, 0,
++            'one disk needs no bar at all, the status bar already says it');
++    },
++  },
++  {
++    name: 'a second disk is worth measuring, and both get exactly one bar',
++    run() {
++      const internal = {total: 28, free: 8};
++      const stick = {total: 64, free: 61};
++      const places = placesFor([
++        {...volume('Desktop', 'system'), capacity: internal},
++        {...volume('Home', 'system'), capacity: internal},
++        {...volume('stick', 'system', true), capacity: stick},
++      ]);
++      const measured = places.filter(place => place.capacity);
++      equal(measured.length, 2, 'one bar per disk, not one per folder');
++      equal(measured[0]!.label, 'Desktop', 'on the first place that names it');
++      equal(measured[1]!.label, 'stick', 'and the removable one is its own disk');
+     },
+   },
+   {
+diff --git a/ui/file_manager/file_manager/aurade/tools/gen_tokens.py b/ui/file_manager/file_manager/aurade/tools/gen_tokens.py
+new file mode 100755
+index 0000000..2f422c2
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/tools/gen_tokens.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++"""Turns ui/tokens.css into a TypeScript module.
++
++The stylesheet cannot ship as its own pak resource. A new resource is a new id,
++the id map is compiled into chrome, and adding one means a full link: 43,084
++edges and about six hours on hardware that overheats. `pak-swap-resources.py`
++refuses to insert an id for exactly this reason. So the tokens travel inside a
++resource that already exists, which is the bundled JavaScript.
++
++`ui/tokens.css` stays the single source. The harness pages and the goldens link
++it directly; the app imports the module this writes. `tests/run.sh` regenerates
++and fails if the result would differ, so the two cannot drift.
++
++  python3 gen_tokens.py [--check]
++"""
++import argparse
++import json
++import os
++import sys
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++AURADE = os.path.dirname(HERE)
++SOURCE = os.path.join(AURADE, "ui/tokens.css")
++OUTPUT = os.path.join(AURADE, "ui/tokens_css.ts")
++
++HEADER = """/**
++ * The stylesheet, as a string the bundle can carry.
++ *
++ * Generated by `tools/gen_tokens.py` from `ui/tokens.css`, which is the source
++ * of truth. Do not edit this file; edit the stylesheet and run the generator,
++ * or just run `tests/run.sh`, which checks that this is current.
++ *
++ * It exists because a new pak resource needs a new id, a new id is compiled
++ * into chrome, and that is a full link. See the generator for the details.
++ */
++"""
++
++
++def render():
++    with open(SOURCE) as handle:
++        css = handle.read()
++    return HEADER + "export const TOKENS_CSS = " + json.dumps(css) + ";\n"
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--check", action="store_true",
++                        help="exit non zero if the file is not current")
++    args = parser.parse_args()
++
++    wanted = render()
++    current = None
++    if os.path.exists(OUTPUT):
++        with open(OUTPUT) as handle:
++            current = handle.read()
++    if current == wanted:
++        return 0
++    if args.check:
++        sys.stderr.write(
++            "ui/tokens_css.ts is stale. Run tools/gen_tokens.py\n")
++        return 1
++    with open(OUTPUT, "w") as handle:
++        handle.write(wanted)
++    print("wrote %s" % os.path.relpath(OUTPUT, AURADE))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/ui/file_manager/file_manager/aurade/ui/file_list.ts b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+index 81c55f6..b6066de 100644
+--- a/ui/file_manager/file_manager/aurade/ui/file_list.ts
++++ b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+@@ -78,8 +78,11 @@ export class FileList {
+     this.empty.className = 'aurade-empty';
+     this.empty.setAttribute('role', 'status');
+     this.empty.hidden = true;
+-    this.empty.innerHTML =
+-        '<p class="aurade-empty-title"></p><p class="aurade-empty-detail"></p>';
++    const emptyTitle = document.createElement('p');
++    emptyTitle.className = 'aurade-empty-title';
++    const emptyDetail = document.createElement('p');
++    emptyDetail.className = 'aurade-empty-detail';
++    this.empty.append(emptyTitle, emptyDetail);
+ 
+     this.spacer.appendChild(this.surface);
+     this.viewport.appendChild(this.spacer);
+@@ -143,6 +146,10 @@ export class FileList {
+     this.recomputeShares();
+     this.spacer.style.height = `${entries.length * this.rowHeight}px`;
+     this.viewport.setAttribute('aria-setsize', String(entries.length));
++    // Invalidated even when the window has not moved, so render() takes the
++    // full path and reports the range. A file arriving in the folder you are
++    // already looking at does not scroll anything, and whoever fetches the
++    // details for visible rows only hears about them through that report.
+     this.lastFirst = -1;
+     this.renderEmpty();
+     this.render();
+diff --git a/ui/file_manager/file_manager/aurade/ui/file_row.ts b/ui/file_manager/file_manager/aurade/ui/file_row.ts
+index 5624683..5ce7fca 100644
+--- a/ui/file_manager/file_manager/aurade/ui/file_row.ts
++++ b/ui/file_manager/file_manager/aurade/ui/file_row.ts
+@@ -14,6 +14,7 @@
+ import type {EntryDto, Metadata} from '../port/types.js';
+ import type {FileKind} from './format.js';
+ import {formatDate, formatSize, kindOf, labelForKind} from './format.js';
++import {drawPath, glyphElement} from './svg.js';
+ 
+ export interface RowModel {
+   readonly entry: EntryDto;
+@@ -53,12 +54,17 @@ export function createRow(): HTMLElement {
+   row.className = 'aurade-row';
+   row.setAttribute('role', 'option');
+   row.tabIndex = -1;
+-  row.innerHTML = `
+-    <span class="aurade-tile"><svg class="aurade-glyph" viewBox="0 0 20 20" aria-hidden="true"><path/></svg></span>
+-    <span class="aurade-name"></span>
+-    <span class="aurade-size"></span>
+-    <span class="aurade-type"></span>
+-    <span class="aurade-date"></span>`;
++
++  const tile = document.createElement('span');
++  tile.className = 'aurade-tile';
++  tile.appendChild(glyphElement('aurade-glyph'));
++  row.appendChild(tile);
++
++  for (const field of ['name', 'size', 'type', 'date']) {
++    const cell = document.createElement('span');
++    cell.className = `aurade-${field}`;
++    row.appendChild(cell);
++  }
+   return row;
+ }
+ 
+@@ -71,18 +77,8 @@ export function updateRow(row: HTMLElement, model: RowModel): void {
+   row.dataset['cut'] = String(cut);
+   row.setAttribute('aria-selected', String(selected));
+ 
+-  const path = row.querySelector('path')!;
+-  path.setAttribute('d', GLYPHS[kind]);
+-  if (STROKED.has(kind)) {
+-    path.setAttribute('fill', 'none');
+-    path.setAttribute('stroke', 'currentColor');
+-    path.setAttribute('stroke-width', '1.6');
+-    path.setAttribute('stroke-linejoin', 'round');
+-    path.setAttribute('stroke-linecap', 'round');
+-  } else {
+-    path.setAttribute('fill', 'currentColor');
+-    path.removeAttribute('stroke');
+-  }
++  drawPath(
++      row.querySelector('path')!, GLYPHS[kind], {stroked: STROKED.has(kind)});
+ 
+   row.querySelector('.aurade-name')!.textContent = entry.name;
+   // A folder has no meaningful size of its own, and printing a dash for one is
+diff --git a/ui/file_manager/file_manager/aurade/ui/path_bar.ts b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
+index eb3c609..eb2664c 100644
+--- a/ui/file_manager/file_manager/aurade/ui/path_bar.ts
++++ b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
+@@ -11,6 +11,7 @@
+  */
+ import type {Trail, Visit} from './history.js';
+ import {History} from './history.js';
++import {glyph} from './svg.js';
+ 
+ export interface PathBarOptions {
+   readonly onGo?: (trail: Trail) => void;
+@@ -22,10 +23,11 @@ export interface PathBarOptions {
+   readonly siblings?: (level: number) => Promise<readonly Visit[]>;
+ }
+ 
+-const CHEVRON =
+-    '<svg class="aurade-chevron-glyph" viewBox="0 0 20 20" aria-hidden="true">' +
+-    '<path d="M8 6l4 4-4 4" fill="none" stroke="currentColor" ' +
+-    'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
++// A function rather than a constant: a node lives in one place, and a deep
++// path draws six of these.
++function chevron(): SVGElement {
++  return glyph('aurade-chevron-glyph', 'M8 6l4 4-4 4', {stroked: true});
++}
+ 
+ export class PathBar {
+   private readonly nav: HTMLElement;
+@@ -98,7 +100,7 @@ export class PathBar {
+     // The name has to say which folder is about to be listed, because on a
+     // deep path there are five of these and they are otherwise identical.
+     button.setAttribute('aria-label', `What else is in ${at?.label ?? 'here'}`);
+-    button.innerHTML = CHEVRON;
++    button.appendChild(chevron());
+     item.appendChild(button);
+     return item;
+   }
+diff --git a/ui/file_manager/file_manager/aurade/ui/places.ts b/ui/file_manager/file_manager/aurade/ui/places.ts
+index bfe6b1b..0e3823e 100644
+--- a/ui/file_manager/file_manager/aurade/ui/places.ts
++++ b/ui/file_manager/file_manager/aurade/ui/places.ts
+@@ -30,6 +30,36 @@ export function placeKindFor(volume: Volume): PlaceKind {
+   return 'volume';
+ }
+ 
++/**
++ * Which places get a free space meter.
++ *
++ * On this hardware every user folder is exposed as its own volume backed by the
++ * same disk, so reading a capacity off each place puts fourteen identical
++ * "8.7 GB free of 28 GB" bars down the sidebar. Fourteen copies of one fact
++ * state it less clearly than one does, and the status bar is already saying it.
++ *
++ * So a meter has to earn its place by having something to be compared against.
++ * One device gets none. Two or more get exactly one each, on the first place
++ * that names them. Devices are told apart by the numbers they report, which is
++ * all the port offers and is enough: two disks reporting byte-identical size
++ * and free space are indistinguishable to a person looking at a sidebar too.
++ */
++function metered(volumes: readonly Volume[]): ReadonlySet<string> {
++  const firstOfDevice = new Map<string, string>();
++  for (const volume of volumes) {
++    const capacity = volume.capacity;
++    if (!capacity || capacity.total <= 0) {
++      continue;
++    }
++    const device = `${capacity.total}/${capacity.free}`;
++    if (!firstOfDevice.has(device)) {
++      firstOfDevice.set(device, volume.id);
++    }
++  }
++  return firstOfDevice.size > 1 ? new Set(firstOfDevice.values()) :
++                                  new Set<string>();
++}
++
+ export interface PlacesOptions {
+   /** Omitted or zero means the basket is not offered at all. */
+   readonly basketCount?: number;
+@@ -38,12 +68,18 @@ export interface PlacesOptions {
+ 
+ export function placesFor(
+     volumes: readonly Volume[], options: PlacesOptions = {}): Place[] {
+-  const places: Place[] = volumes.map(volume => ({
+-    key: volume.root,
+-    label: volume.label,
+-    kind: placeKindFor(volume),
+-    volume,
+-  }));
++  const meters = metered(volumes);
++  const places: Place[] = volumes.map(volume => {
++    const place: Place = {
++      key: volume.root,
++      label: volume.label,
++      kind: placeKindFor(volume),
++      volume,
++    };
++    return meters.has(volume.id) && volume.capacity ?
++        {...place, capacity: volume.capacity} :
++        place;
++  });
+   const {basketCount, basketKey} = options;
+   if (basketCount !== undefined && basketKey !== undefined) {
+     places.push({
+diff --git a/ui/file_manager/file_manager/aurade/ui/shell.ts b/ui/file_manager/file_manager/aurade/ui/shell.ts
+index c9a8b51..ffdbb39 100644
+--- a/ui/file_manager/file_manager/aurade/ui/shell.ts
++++ b/ui/file_manager/file_manager/aurade/ui/shell.ts
+@@ -71,7 +71,6 @@ export class FilesShell {
+    * work done on behalf of a screen that no longer exists.
+    */
+   private generation = 0;
+-  private range: {first: number, count: number} = {first: 0, count: 0};
+ 
+   constructor(
+       container: HTMLElement,
+@@ -280,6 +279,10 @@ export class FilesShell {
+ 
+   private apply(state: SessionState): void {
+     this.entries = state.entries;
++    // Details for the new rows are not fetched here. setEntries reports its
++    // range unconditionally, precisely so a folder that changed under a window
++    // that has not scrolled still asks for what just arrived, and doing it
++    // again here only asks twice with a staler range. list_test pins that.
+     this.list.setEntries(state.entries);
+     this.refreshStatus();
+     if (state.error) {
+@@ -290,7 +293,6 @@ export class FilesShell {
+   }
+ 
+   private async fillMetadata(first: number, count: number): Promise<void> {
+-    this.range = {first, count};
+     const generation = this.generation;
+     const wanted = this.entries.slice(first, first + count)
+                        .filter(entry => !this.metadata.has(entry.key))
+diff --git a/ui/file_manager/file_manager/aurade/ui/sidebar.ts b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
+index 1aff1aa..12f8819 100644
+--- a/ui/file_manager/file_manager/aurade/ui/sidebar.ts
++++ b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
+@@ -12,8 +12,9 @@
+  * reader will describe as nested. This is a flat set of destinations in
+  * labelled groups, so it says so.
+  */
+-import type {FileKey, Volume} from '../port/types.js';
++import type {FileKey, Volume, VolumePurpose} from '../port/types.js';
+ import {formatSize} from './format.js';
++import {glyph} from './svg.js';
+ 
+ export type PlaceKind =
+     'recent'|'starred'|'trash'|'basket'|'volume'|'network';
+@@ -23,6 +24,14 @@ export interface Place {
+   readonly label: string;
+   readonly kind: PlaceKind;
+   readonly volume?: Volume;
++  /**
++   * The free space meter to draw, when this place has earned one.
++   *
++   * Deliberately not `volume.capacity`. Every place on this machine has a
++   * capacity, and drawing all of them is what put fourteen identical bars down
++   * the sidebar. `placesFor` decides which ones are worth showing.
++   */
++  readonly capacity?: {readonly total: number, readonly free: number};
+   /** Shown as a count beside the label, for the basket. */
+   readonly badge?: number;
+ }
+@@ -31,7 +40,16 @@ export interface SidebarOptions {
+   readonly onSelect?: (place: Place) => void;
+ }
+ 
+-const GLYPHS: Record<PlaceKind|'removable'|'system', string> = {
++const GLYPHS: Record<PlaceKind|'removable'|'system'|VolumePurpose, string> = {
++  // Drawn from the same family as the row glyphs in `file_row.ts`, so a
++  // Pictures place and a picture in the list read as the same idea.
++  home: 'M3.2 9.6 10 3.8l6.8 5.8M5.6 8.4V16.2h8.8V8.4M8.4 16.2v-4.1h3.2v4.1',
++  desktop: 'M3.5 4.8h13v8.4h-13zM7.6 16.2h4.8M10 13.2v3',
++  documents: 'M6 3.4h5.2l3.6 3.6v9.6H6zM11.2 3.4V7h3.6M8 10.5h5M8 13h5',
++  downloads: 'M10 3.8v7.8m0 0-3.2-3.2M10 11.6l3.2-3.2M4.6 15.8h10.8',
++  music: 'M7.4 13.1V4.6l7.2-1.4v8.5M7.4 13.1a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0zM14.6 11.7a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0z',
++  pictures: 'M3.5 5.5h13v9h-13zM5.5 12.5l3-3.5 2.5 3 2-2.5 2.5 3M7.4 8.6a1 1 0 1 1-2 0 1 1 0 0 1 2 0z',
++  videos: 'M3.5 5.5h9v9h-9zM12.5 10l4-2.5v5zM6.5 5.5v9M9.5 5.5v9',
+   recent: 'M10 5v5l3.5 2M10 3.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13z',
+   starred: 'M10 3.5l2 4.2 4.5.6-3.3 3.2.8 4.5-4-2.2-4 2.2.8-4.5L3.5 8.3l4.5-.6z',
+   trash: 'M4.5 6h11M8 6V4.5h4V6M6 6l.7 9.5h6.6L14 6M8.5 8.5v5M11.5 8.5v5',
+@@ -42,20 +60,27 @@ const GLYPHS: Record<PlaceKind|'removable'|'system', string> = {
+   removable: 'M7 3.5h6v5h2v8H5v-8h2zM9 5v2M11 5v2',
+ };
+ 
++// Everything except the two pictorial fills. A frame with something inside it,
++// filled with a single non zero winding path, floods to a solid block, which is
++// the same trap `file_row.ts` records.
+ const STROKED = new Set<string>(['recent', 'trash', 'volume', 'system',
+-                                 'removable', 'basket', 'network']);
++                                 'removable', 'basket', 'network', 'home',
++                                 'desktop', 'documents', 'downloads', 'music',
++                                 'pictures', 'videos']);
+ 
+-function glyph(kind: string): string {
+-  const path = GLYPHS[kind as keyof typeof GLYPHS] ?? GLYPHS.volume;
+-  const stroke = STROKED.has(kind) ?
+-      'fill="none" stroke="currentColor" stroke-width="1.5" ' +
+-          'stroke-linejoin="round" stroke-linecap="round"' :
+-      'fill="currentColor"';
+-  return `<svg class="aurade-place-glyph" viewBox="0 0 20 20" aria-hidden="true">` +
+-      `<path d="${path}" ${stroke}/></svg>`;
++function placeGlyph(kind: string): SVGElement {
++  return glyph(
++      'aurade-place-glyph', GLYPHS[kind as keyof typeof GLYPHS] ?? GLYPHS.volume,
++      {stroked: STROKED.has(kind), width: 1.5});
+ }
+ 
+ function volumeGlyphKind(volume: Volume): string {
++  // What a place is for beats what it is made of. Every user folder on this
++  // machine is a local disk, and drawing the disk on all of them is what made
++  // the sidebar a column of fourteen identical laptops.
++  if (volume.purpose) {
++    return volume.purpose;
++  }
+   if (volume.removable) {
+     return 'removable';
+   }
+@@ -172,7 +197,7 @@ export class Sidebar {
+     label.className = 'aurade-place-label';
+     label.textContent = place.label;
+ 
+-    button.innerHTML = glyph(kind);
++    button.appendChild(placeGlyph(kind));
+     button.appendChild(label);
+ 
+     if (place.badge !== undefined && place.badge > 0) {
+@@ -189,7 +214,7 @@ export class Sidebar {
+ 
+     item.appendChild(button);
+ 
+-    const capacity = place.volume?.capacity;
++    const {capacity} = place;
+     if (capacity && capacity.total > 0) {
+       // Exact free space in words, with the bar as the supplement. A ring or a
+       // bar on its own is poor for comparison and worse for anybody who cannot
+diff --git a/ui/file_manager/file_manager/aurade/ui/svg.ts b/ui/file_manager/file_manager/aurade/ui/svg.ts
+new file mode 100644
+index 0000000..c5d41fd
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/ui/svg.ts
+@@ -0,0 +1,73 @@
++/**
++ * Glyphs as nodes rather than as markup.
++ *
++ * Every glyph in this app used to be a template string assigned to innerHTML.
++ * That works in a plain page and throws on chrome://file-manager, which
++ * requires Trusted Types and refuses a bare string at that sink. Nothing local
++ * caught it, because the harness pages carried no such policy. They do now, so
++ * this particular way of being wrong cannot come back quietly.
++ *
++ * Building the nodes is the right way round for SVG regardless.
++ * `createElement('svg')` makes an HTMLUnknownElement that renders nothing,
++ * which is why the string form was reached for in the first place.
++ */
++
++const SVG_NS = 'http://www.w3.org/2000/svg';
++
++/** How a glyph's path is painted. */
++export interface Stroke {
++  /** Drawn as an outline rather than filled. */
++  readonly stroked: boolean;
++  /** Line width when stroked. Ignored when filled. */
++  readonly width?: number;
++}
++
++/**
++ * An `<svg>` holding one empty `<path>`.
++ *
++ * Empty because a recycled row keeps the element it already has and only ever
++ * changes the path's attributes. See `file_row.ts` for why that split matters.
++ */
++export function glyphElement(className: string): SVGElement {
++  const svg = document.createElementNS(SVG_NS, 'svg');
++  // setAttribute rather than `.className`: on an SVGElement that property is a
++  // read only SVGAnimatedString, and assigning a string to it does nothing at
++  // all rather than failing.
++  svg.setAttribute('class', className);
++  svg.setAttribute('viewBox', '0 0 20 20');
++  svg.setAttribute('aria-hidden', 'true');
++  svg.appendChild(document.createElementNS(SVG_NS, 'path'));
++  return svg;
++}
++
++/**
++ * Points an existing path at a shape.
++ *
++ * Every attribute the other branch sets is cleared here, because a recycled row
++ * that goes from a stroked glyph to a filled one keeps whatever the last one
++ * left behind.
++ */
++export function drawPath(path: Element, d: string, stroke: Stroke): void {
++  path.setAttribute('d', d);
++  if (stroke.stroked) {
++    path.setAttribute('fill', 'none');
++    path.setAttribute('stroke', 'currentColor');
++    path.setAttribute('stroke-width', String(stroke.width ?? 1.6));
++    path.setAttribute('stroke-linejoin', 'round');
++    path.setAttribute('stroke-linecap', 'round');
++  } else {
++    path.setAttribute('fill', 'currentColor');
++    path.removeAttribute('stroke');
++    path.removeAttribute('stroke-width');
++    path.removeAttribute('stroke-linejoin');
++    path.removeAttribute('stroke-linecap');
++  }
++}
++
++/** A finished glyph, for the places that draw one and never change it. */
++export function glyph(
++    className: string, d: string, stroke: Stroke): SVGElement {
++  const svg = glyphElement(className);
++  drawPath(svg.firstElementChild!, d, stroke);
++  return svg;
++}
+diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
+index 0a5ae62..fd03e4b 100644
+--- a/ui/file_manager/file_manager/aurade/ui/tokens.css
++++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
+@@ -364,6 +364,21 @@
+ .aurade-place-bar-fill[data-level="full"] { background: var(--aurade-danger); }
+ 
+ 
++/* Where the app mounts us.
++
++   Opaque and over everything, because the stock window is still underneath and
++   still running: it owns the dialogs, the progress panel and the menus we have
++   not replaced. Drawing over it rather than deleting it is what makes this
++   reversible, and `mountAuradeShell` removes this element if the shell fails
++   to start, which puts the old window straight back. */
++#aurade-shell {
++  background: var(--aurade-ground);
++  inset: 0;
++  overflow: hidden;
++  position: fixed;
++  z-index: 2147483647;
++}
++
+ /* The window. Places on the left, what is in them on the right, each on its
+    own panel so the ground shows between them: the greeter does the same thing,
+    and it is what stops a file manager reading as one undifferentiated grid. */
+diff --git a/ui/file_manager/file_manager/aurade/ui/tokens_css.ts b/ui/file_manager/file_manager/aurade/ui/tokens_css.ts
+new file mode 100644
+index 0000000..3a5ca56
+--- /dev/null
++++ b/ui/file_manager/file_manager/aurade/ui/tokens_css.ts
+@@ -0,0 +1,11 @@
++/**
++ * The stylesheet, as a string the bundle can carry.
++ *
++ * Generated by `tools/gen_tokens.py` from `ui/tokens.css`, which is the source
++ * of truth. Do not edit this file; edit the stylesheet and run the generator,
++ * or just run `tests/run.sh`, which checks that this is current.
++ *
++ * It exists because a new pak resource needs a new id, a new id is compiled
++ * into chrome, and that is a full link. See the generator for the details.
++ */
++export const TOKENS_CSS = "/**\n * The AuraDE surface vocabulary.\n *\n * The accent is not a new decision. The greeter already defines it, in GTK\n * theme variables rather than in its stylesheet: accent_bg_color is #6d4ea1 in\n * theme.css and #d1bcff in theme-dark.css, and the installer's token table\n * carries the same pair. Counting literal hex in greeter.css and concluding the\n * greeter was achromatic was a mistake; it uses @accent_color for focus rings\n * and the active pod.\n *\n * Surfaces are taken from the greeter's own values: translucent grounds, white\n * hairlines, white overlay interactive states, and deep soft shadows.\n */\n\n:root {\n  --aurade-accent: #6d4ea1;\n  --aurade-on-accent: #ffffff;\n\n  --aurade-ground: #f4f2f9;\n  --aurade-panel: #ffffff;\n  --aurade-line: #e6e2f0;\n  --aurade-ink: #1c1a24;\n  --aurade-quiet: #6b6580;\n\n  --aurade-row-hover: rgba(0, 0, 0, .04);\n  --aurade-row-selected: rgba(109, 78, 161, .12);\n  --aurade-tile: #f0edf7;\n  --aurade-tile-dir: #e4dbf8;\n  --aurade-tile-selected: #dbcdf6;\n  --aurade-glyph: #6f6885;\n  --aurade-tag-bg: #f7f5fc;\n  --aurade-warn: #a1651a;\n  --aurade-danger: #b3261e;\n\n  --aurade-radius-row: 11px;\n  --aurade-radius-tile: 11px;\n  --aurade-radius-panel: 16px;\n  --aurade-radius-pill: 999px;\n\n  --aurade-row-height: 40px;\n  --aurade-tile-size: 32px;\n}\n\n@media (prefers-color-scheme: dark) {\n  :root:not([data-aurade-theme=\"light\"]) {\n    --aurade-accent: #d1bcff;\n    --aurade-on-accent: #3f1d6c;\n\n    --aurade-ground: #100f16;\n    --aurade-panel: #191823;\n    --aurade-line: #262433;\n    --aurade-ink: #efecf8;\n    --aurade-quiet: #948ea8;\n\n    --aurade-row-hover: rgba(255, 255, 255, .06);\n    --aurade-row-selected: rgba(209, 188, 255, .16);\n    --aurade-tile: #23212f;\n    --aurade-tile-dir: #372c57;\n    --aurade-tile-selected: #4a3b74;\n    --aurade-glyph: #a79dc4;\n    --aurade-tag-bg: #211f2c;\n  --aurade-warn: #e6b062;\n  --aurade-danger: #f2b8b5;\n  }\n}\n\n/* Repeated rather than shared, because a media query and an attribute cannot\n   select the same block. The attribute form is what lets both themes be\n   rendered and diffed without emulating the reader's system setting. */\n:root[data-aurade-theme=\"dark\"] {\n    --aurade-accent: #d1bcff;\n    --aurade-on-accent: #3f1d6c;\n\n    --aurade-ground: #100f16;\n    --aurade-panel: #191823;\n    --aurade-line: #262433;\n    --aurade-ink: #efecf8;\n    --aurade-quiet: #948ea8;\n\n    --aurade-row-hover: rgba(255, 255, 255, .06);\n    --aurade-row-selected: rgba(209, 188, 255, .16);\n    --aurade-tile: #23212f;\n    --aurade-tile-dir: #372c57;\n    --aurade-tile-selected: #4a3b74;\n    --aurade-glyph: #a79dc4;\n    --aurade-tag-bg: #211f2c;\n  --aurade-warn: #e6b062;\n  --aurade-danger: #f2b8b5;\n}\n\n/* Density is fixed per mode, never measured. Dynamic row heights across a\n   hundred thousand entries make the scrollbar thumb jitter and drop frames. */\n:root[data-aurade-density=\"compact\"] { --aurade-row-height: 32px; --aurade-tile-size: 26px; }\n:root[data-aurade-density=\"relaxed\"] { --aurade-row-height: 52px; --aurade-tile-size: 38px; }\n\n.aurade-row {\n  align-items: center;\n  block-size: var(--aurade-row-height);\n  border-radius: var(--aurade-radius-row);\n  box-sizing: border-box;\n  color: var(--aurade-ink);\n  display: grid;\n  gap: 12px;\n  grid-template-columns: var(--aurade-tile-size) 1fr 84px 96px 132px;\n  margin-inline: 8px;\n  padding-inline: 8px;\n  position: relative;\n  user-select: none;\n}\n\n.aurade-row:hover { background: var(--aurade-row-hover); }\n\n/* Selection and focus differ by shape as well as colour, because colour alone\n   is not a distinction everyone can see. */\n.aurade-row[aria-selected=\"true\"] {\n  background: var(--aurade-row-selected);\n  box-shadow: inset 3px 0 0 0 var(--aurade-accent);\n}\n.aurade-row:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n\n/* A cut entry is dashed as well as dimmed, so it reads as pending rather than\n   as disabled. */\n.aurade-row[data-cut=\"true\"] { opacity: .55; }\n.aurade-row[data-cut=\"true\"] .aurade-tile {\n  border: 1px dashed var(--aurade-quiet);\n}\n\n.aurade-tile {\n  align-items: center;\n  background: var(--aurade-tile);\n  block-size: var(--aurade-tile-size);\n  border-radius: var(--aurade-radius-tile);\n  box-sizing: border-box;\n  display: flex;\n  inline-size: var(--aurade-tile-size);\n  justify-content: center;\n}\n.aurade-row[data-directory=\"true\"] .aurade-tile { background: var(--aurade-tile-dir); }\n.aurade-row[aria-selected=\"true\"] .aurade-tile { background: var(--aurade-tile-selected); }\n\n.aurade-glyph {\n  block-size: 18px;\n  color: var(--aurade-glyph);\n  inline-size: 18px;\n}\n.aurade-row[data-directory=\"true\"] .aurade-glyph { color: var(--aurade-accent); }\n\n.aurade-name {\n  font-size: 13px;\n  font-weight: 550;\n  letter-spacing: -.005em;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.aurade-size, .aurade-date {\n  color: var(--aurade-quiet);\n  font-size: 12px;\n  font-variant-numeric: tabular-nums;\n}\n\n/* A quiet proportional bar behind the size, so the large item in a folder of\n   five hundred is visible without reading a digit. */\n.aurade-size { position: relative; }\n.aurade-size::before {\n  background: currentColor;\n  block-size: 100%;\n  content: '';\n  inset-block-start: 0;\n  inset-inline-start: 0;\n  inline-size: var(--aurade-share, 0%);\n  opacity: .10;\n  position: absolute;\n  border-radius: 3px;\n}\n\n.aurade-type {\n  background: var(--aurade-tag-bg);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-pill);\n  color: var(--aurade-quiet);\n  font-size: 10.5px;\n  font-weight: 600;\n  justify-self: start;\n  letter-spacing: .04em;\n  line-height: 15px;\n  padding: 2px 9px;\n}\n\n/* The list owns its scrolling. The spacer carries the full extent so the\n   scrollbar is honest about how much there is, and the surface holding the\n   recycled rows is moved rather than repositioned per row. */\n.aurade-list {\n  block-size: 100%;\n  overflow-y: auto;\n  overflow-x: hidden;\n  position: relative;\n}\n.aurade-list:focus-visible { outline: none; }\n.aurade-list-spacer { position: relative; }\n.aurade-list-surface {\n  inset-block-start: 0;\n  inset-inline: 0;\n  position: absolute;\n  will-change: transform;\n}\n\n/* An empty view should read as prepared rather than abandoned, so it is\n   centred and quiet rather than a message pinned to the top left. */\n/* An author `display` beats the user agent's `[hidden] { display: none }`\n   regardless of specificity, because author styles win on origin. So setting\n   .hidden on this element did nothing at all and every folder with files in it\n   also announced that it was empty. */\n.aurade-empty[hidden] { display: none; }\n.aurade-empty {\n  align-items: center;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  justify-content: center;\n  min-block-size: 220px;\n  padding: 32px 24px;\n  text-align: center;\n}\n.aurade-empty-title {\n  color: var(--aurade-ink);\n  font-size: 14px;\n  font-weight: 600;\n  margin: 0;\n}\n.aurade-empty-detail {\n  color: var(--aurade-quiet);\n  font-size: 13px;\n  margin: 0;\n  /* Wide enough that a two line detail breaks after a clause rather than\n     stranding \"files.\" on its own. */\n  max-inline-size: 48ch;\n}\n\n\n/* The sidebar: where you can go, as opposed to what is in front of you.\n\n   Group headings are quiet and small rather than uppercase and tracked out.\n   Small caps at this size is a legibility cost paid for a filing cabinet\n   aesthetic nobody asked for, and these are three or four words that want to\n   be skimmed past on the way to the thing underneath. */\n.aurade-sidebar {\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 18px;\n  inline-size: 232px;\n  overflow-y: auto;\n  padding: 12px 10px;\n}\n.aurade-place-heading {\n  color: var(--aurade-quiet);\n  font-size: 11px;\n  font-weight: 600;\n  letter-spacing: .01em;\n  margin: 0 0 4px;\n  padding-inline: 10px;\n}\n.aurade-place-list {\n  display: flex;\n  flex-direction: column;\n  gap: 1px;\n  list-style: none;\n  margin: 0;\n  padding: 0;\n}\n.aurade-place {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-row);\n  color: var(--aurade-ink);\n  cursor: default;\n  display: flex;\n  font: inherit;\n  gap: 10px;\n  inline-size: 100%;\n  padding: 7px 10px;\n  position: relative;\n  text-align: start;\n}\n.aurade-place:hover { background: var(--aurade-row-hover); }\n.aurade-place:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n.aurade-place[aria-current=\"page\"] {\n  background: var(--aurade-row-selected);\n  color: var(--aurade-accent);\n  font-weight: 600;\n}\n/* A rail rather than a full bleed fill. The fill alone reads as a hover that\n   got stuck; the rail is what says this is where you are. */\n.aurade-place[aria-current=\"page\"]::before {\n  background: var(--aurade-accent);\n  block-size: 16px;\n  border-radius: var(--aurade-radius-pill);\n  content: \"\";\n  inline-size: 3px;\n  inset-block-start: 50%;\n  inset-inline-start: 1px;\n  position: absolute;\n  translate: 0 -50%;\n}\n.aurade-place-glyph {\n  block-size: 18px;\n  color: var(--aurade-glyph);\n  flex: none;\n  inline-size: 18px;\n}\n.aurade-place[aria-current=\"page\"] .aurade-place-glyph { color: inherit; }\n.aurade-place-label {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-place-badge {\n  background: var(--aurade-tag-bg);\n  border-radius: var(--aurade-radius-pill);\n  color: var(--aurade-quiet);\n  font-size: 11px;\n  font-variant-numeric: tabular-nums;\n  margin-inline-start: auto;\n  padding: 1px 7px;\n}\n.aurade-place[aria-current=\"page\"] .aurade-place-badge {\n  background: var(--aurade-panel);\n  color: var(--aurade-accent);\n}\n\n/* Capacity sits under the drive it belongs to, indented to the label rather\n   than the glyph, so the eye reads it as a note about that row. */\n.aurade-place-capacity {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  padding: 1px 10px 6px 38px;\n}\n.aurade-place-free {\n  color: var(--aurade-quiet);\n  font-size: 11px;\n}\n.aurade-place-bar {\n  background: var(--aurade-line);\n  block-size: 3px;\n  border-radius: var(--aurade-radius-pill);\n  overflow: hidden;\n}\n.aurade-place-bar-fill {\n  background: var(--aurade-accent);\n  block-size: 100%;\n  border-radius: inherit;\n}\n.aurade-place-bar-fill[data-level=\"high\"] { background: var(--aurade-warn); }\n.aurade-place-bar-fill[data-level=\"full\"] { background: var(--aurade-danger); }\n\n\n/* Where the app mounts us.\n\n   Opaque and over everything, because the stock window is still underneath and\n   still running: it owns the dialogs, the progress panel and the menus we have\n   not replaced. Drawing over it rather than deleting it is what makes this\n   reversible, and `mountAuradeShell` removes this element if the shell fails\n   to start, which puts the old window straight back. */\n#aurade-shell {\n  background: var(--aurade-ground);\n  inset: 0;\n  overflow: hidden;\n  position: fixed;\n  z-index: 2147483647;\n}\n\n/* The window. Places on the left, what is in them on the right, each on its\n   own panel so the ground shows between them: the greeter does the same thing,\n   and it is what stops a file manager reading as one undifferentiated grid. */\n.aurade-shell {\n  background: var(--aurade-ground);\n  block-size: 100%;\n  box-sizing: border-box;\n  display: flex;\n  gap: 8px;\n  padding: 8px;\n}\n.aurade-shell-aside {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  display: flex;\n  flex: none;\n  overflow: hidden;\n}\n.aurade-shell-main {\n  display: flex;\n  flex: 1;\n  flex-direction: column;\n  gap: 8px;\n  /* Without this a long file name makes the whole window wider instead of\n     being truncated, and the sidebar gets pushed off the left edge. */\n  min-inline-size: 0;\n}\n.aurade-shell-list {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  flex: 1;\n  min-block-size: 0;\n  overflow: hidden;\n  padding: 4px 0;\n}\n.aurade-shell-notice {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  color: var(--aurade-quiet);\n  font-size: 13px;\n  margin: 0;\n  padding: 11px 15px;\n}\n\n\n/* The toolbar. Back, forward, up, then where you are.\n\n   The buttons are disabled rather than removed when there is nowhere to go: a\n   control that appears and disappears shifts everything beside it, and the one\n   thing you need from back and forward is that they are always in the same\n   place. */\n.aurade-toolbar {\n  align-items: center;\n  /* The containing block for a sibling popover, which cannot live inside the\n     path bar because that clips. */\n  position: relative;\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  display: flex;\n  flex: none;\n  gap: 8px;\n  min-block-size: 44px;\n  padding: 5px 8px;\n}\n.aurade-tool-group {\n  display: flex;\n  flex: none;\n  gap: 2px;\n}\n.aurade-tool {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  block-size: 30px;\n  color: var(--aurade-glyph);\n  cursor: default;\n  display: flex;\n  inline-size: 30px;\n  justify-content: center;\n  padding: 0;\n}\n.aurade-tool:hover:not(:disabled) {\n  background: var(--aurade-row-hover);\n  color: var(--aurade-ink);\n}\n.aurade-tool:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n/* Not display:none and not 0.3 either. A disabled control still has to read as\n   a control, or the row looks like it lost something. */\n.aurade-tool:disabled { opacity: .38; }\n.aurade-tool-glyph { block-size: 18px; inline-size: 18px; }\n\n.aurade-path {\n  flex: 1;\n  min-inline-size: 0;\n  overflow: hidden;\n}\n.aurade-path-list {\n  align-items: center;\n  display: flex;\n  list-style: none;\n  margin: 0;\n  padding: 0;\n}\n.aurade-path-list > li { display: flex; position: relative; }\n.aurade-crumb {\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  color: var(--aurade-quiet);\n  cursor: default;\n  font: inherit;\n  max-inline-size: 22ch;\n  overflow: hidden;\n  padding: 5px 8px;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-crumb:hover { background: var(--aurade-row-hover); }\n.aurade-crumb:focus-visible,\n.aurade-chevron:focus-visible,\n.aurade-path-option:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n/* Where you are is the one crumb that is not a link to somewhere else, so it\n   is the one that reads as text rather than as an action. */\n.aurade-crumb[aria-current=\"page\"] {\n  color: var(--aurade-ink);\n  font-weight: 600;\n}\n.aurade-chevron {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  block-size: 24px;\n  color: var(--aurade-glyph);\n  cursor: default;\n  display: flex;\n  inline-size: 20px;\n  justify-content: center;\n  opacity: .6;\n  padding: 0;\n}\n.aurade-chevron:hover,\n.aurade-chevron[aria-expanded=\"true\"] {\n  background: var(--aurade-row-hover);\n  color: var(--aurade-ink);\n  opacity: 1;\n}\n.aurade-chevron-glyph { block-size: 16px; inline-size: 16px; }\n\n.aurade-path-popover {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-tile);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .12);\n  display: flex;\n  flex-direction: column;\n  max-block-size: 320px;\n  min-inline-size: 200px;\n  overflow-y: auto;\n  padding: 5px;\n  position: absolute;\n  z-index: 20;\n}\n.aurade-path-option {\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  color: var(--aurade-ink);\n  cursor: default;\n  font: inherit;\n  overflow: hidden;\n  padding: 7px 10px;\n  text-align: start;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-path-option:hover { background: var(--aurade-row-hover); }\n.aurade-path-popover-empty {\n  color: var(--aurade-quiet);\n  margin: 0;\n  padding: 8px 10px;\n}\n\n\n/* The status bar. What is in front of you on the left, how much room is left\n   on the right, and nothing in the middle until there is an undo to put there. */\n.aurade-status {\n  align-items: center;\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  color: var(--aurade-quiet);\n  display: flex;\n  flex: none;\n  font-size: 12px;\n  gap: 16px;\n  justify-content: space-between;\n  min-block-size: 34px;\n  padding: 6px 14px;\n}\n.aurade-status-summary {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-status-space {\n  align-items: center;\n  display: flex;\n  flex: none;\n  gap: 8px;\n}\n.aurade-status-track {\n  background: var(--aurade-line);\n  block-size: 3px;\n  border-radius: var(--aurade-radius-pill);\n  inline-size: 72px;\n  overflow: hidden;\n}\n.aurade-status-fill {\n  background: var(--aurade-accent);\n  block-size: 100%;\n  border-radius: inherit;\n}\n.aurade-status-fill[data-level=\"high\"] { background: var(--aurade-warn); }\n.aurade-status-fill[data-level=\"full\"] { background: var(--aurade-danger); }\n";
+diff --git a/ui/file_manager/file_manager/aurade/ui/toolbar.ts b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
+index 583993a..42db48b 100644
+--- a/ui/file_manager/file_manager/aurade/ui/toolbar.ts
++++ b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
+@@ -8,6 +8,7 @@
+ import type {Trail} from './history.js';
+ import type {PathBarOptions} from './path_bar.js';
+ import {PathBar} from './path_bar.js';
++import {glyph} from './svg.js';
+ 
+ const GLYPHS = {
+   back: 'M12.5 4.5 7 10l5.5 5.5',
+@@ -30,10 +31,8 @@ function button(kind: keyof typeof GLYPHS, label: string): HTMLButtonElement {
+   // not a name and a glyph on its own has none.
+   element.setAttribute('aria-label', label);
+   element.disabled = true;
+-  element.innerHTML =
+-      `<svg class="aurade-tool-glyph" viewBox="0 0 20 20" aria-hidden="true">` +
+-      `<path d="${GLYPHS[kind]}" fill="none" stroke="currentColor" ` +
+-      `stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
++  element.appendChild(
++      glyph('aurade-tool-glyph', GLYPHS[kind], {stroked: true}));
+   return element;
+ }
+ 
+diff --git a/ui/file_manager/file_manager/foreground/js/main.ts b/ui/file_manager/file_manager/foreground/js/main.ts
+index a932566..d1388cc 100644
+--- a/ui/file_manager/file_manager/foreground/js/main.ts
++++ b/ui/file_manager/file_manager/foreground/js/main.ts
+@@ -13,7 +13,9 @@ import '/strings.m.js';
+ 
+ import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
+ 
++import {mountAuradeShell} from '../../aurade/app/mount.js';
+ import {GlitchType, reportGlitch} from '../../common/js/glitch.js';
++import {DialogType} from '../../common/js/shared_types.js';
+ import {testSendMessage} from '../../common/js/util.js';
+ 
+ import {FileManager} from './file_manager.js';
+@@ -34,7 +36,27 @@ async function run() {
+ run().then(() => {
+   fileManager.initializeCore();
+ 
+-  fileManager.initializeUi(document.body).then(() => {
++  fileManager.initializeUi(document.body).then(async () => {
++    // AuraDE draws over the window the line above just built. The stock UI
++    // stays initialised underneath, because it still owns the dialogs, the
++    // progress panel and the menus that have no replacement yet, and
++    // mountAuradeShell takes its own element away again if the shell cannot
++    // start, which puts that window straight back on screen.
++    //
++    // Not over a file picker. A picker has Open and Cancel and a selection
++    // contract this shell does not implement, so drawing over one would leave
++    // every application on the machine unable to choose a file. The port has a
++    // dialogMode for this and nothing uses it yet.
++    if (fileManager.dialogType === DialogType.FULL_PAGE) {
++      await mountAuradeShell({
++        api: chrome.fileManagerPrivate,
++        runtime: chrome.runtime,
++        volumes: fileManager.volumeManager,
++        metadata: fileManager.metadataModel,
++        resolveUrl: (url, onSuccess, onError) =>
++            window.webkitResolveLocalFileSystemURL(url, onSuccess, onError),
++      });
++    }
+     testSendMessage('ready');
+   });
+ });
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+index 33103db..15f2955 100644
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -34,6 +34,30 @@ foreach(_f, image_loader_ts) {
+ }
+ 
+ ts_files = [
++  # AuraDE Files: the port, its ChromeOS adapter, and the shell above
++  # it. The tests stay out of the shipping list on purpose.
++  "file_manager/aurade/adapter/chromeos_backend.ts",
++  "file_manager/aurade/app/mount.ts",
++  "file_manager/aurade/adapter/chromeos_platform.ts",
++  "file_manager/aurade/adapter/platform.ts",
++  "file_manager/aurade/port/mock_backend.ts",
++  "file_manager/aurade/port/port.ts",
++  "file_manager/aurade/port/types.ts",
++  "file_manager/aurade/session/navigation_session.ts",
++  "file_manager/aurade/ui/copy.ts",
++  "file_manager/aurade/ui/file_list.ts",
++  "file_manager/aurade/ui/file_row.ts",
++  "file_manager/aurade/ui/format.ts",
++  "file_manager/aurade/ui/history.ts",
++  "file_manager/aurade/ui/path_bar.ts",
++  "file_manager/aurade/ui/places.ts",
++  "file_manager/aurade/ui/shell.ts",
++  "file_manager/aurade/ui/sidebar.ts",
++  "file_manager/aurade/ui/status_bar.ts",
++  "file_manager/aurade/ui/svg.ts",
++  "file_manager/aurade/ui/tokens_css.ts",
++  "file_manager/aurade/ui/toolbar.ts",
++
+   # Common:
+   "file_manager/common/js/api.ts",
+   "file_manager/common/js/array_data_model.ts",
