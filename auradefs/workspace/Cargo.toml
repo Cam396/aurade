@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/auradefs-core", "crates/auradefs-daemon"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/aurade/auradefs"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustix = { version = "1", features = ["fs", "process", "thread"] }
+#: The same library Files.App uses through LibGit2Sharp, so the status a row
+#: shows is decided by the same rules rather than by parsing porcelain output.
+git2 = { version = "0.20", default-features = false }
+#: The hashes tab. Small, pure Rust, and the same digests Files offers.
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+crc32fast = "1"
+#: Thumbnails. Decoding only the formats a picture folder actually holds keeps
+#: the build honest; anything else falls back to the system thumbnailers.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+#: The image crate's PNG encoder cannot write the tEXt chunks the thumbnail
+#: spec requires, and a thumbnail without them is one no other program trusts.
+png = "0.17"
+tracing = "0.1"
+
+#: The crates.io 0.19.4 with one setter added, so the Create archive dialog's
+#: Word size reaches the LZMA2 encoder. See vendor/sevenz-rust2/AURADE-PATCH.md.
+[patch.crates-io]
+sevenz-rust2 = { path = "vendor/sevenz-rust2" }

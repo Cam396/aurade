@@ -1,0 +1,65 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=auradefs
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="The file service behind the AuraDE Files app"
+arch=('x86_64')
+url="https://github.com/Cam396/aurade"
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'xz' 'bzip2' 'zlib')
+makedepends=('cargo' 'rust')
+optdepends=(
+  'ffmpeg: video thumbnails, media details and the covers of sound files'
+  'poppler: PDF thumbnails and previews'
+  'gnupg: signature verification in Properties'
+  'polkit: Run as administrator, through pkexec'
+)
+# The source is the Cargo workspace beside this file, under workspace/. It is
+# not a tarball and it is not listed here: the tree is copied into
+# ${srcdir}/auradefs-src by ci/build-auradefs-package.sh, which is the only
+# supported way to drive this PKGBUILD. Everything the tree needs from
+# crates.io is fetched in prepare() and pinned by Cargo.lock; the one
+# dependency this project patches, sevenz-rust2, is vendored in the tree.
+source=(
+  'README.md'
+  'LICENSE'
+)
+sha256sums=('b10ea51389ffcac705a1616a9f93dca8a00d4396ec5a45713fb4f73c7b5a0d7a'
+            'd9980fe1b68b40a5b2b87ee437e874888186d0ac4f51c6e8ffe32d7ff9ecfa4e')
+
+prepare() {
+  local tree="${AURADEFS_SRC:-${srcdir}/auradefs-src}"
+  [ -f "${tree}/Cargo.lock" ] || {
+    echo "ERROR: ${tree} is not the auradefs workspace; run ci/build-auradefs-package.sh" >&2
+    return 1
+  }
+  cd "${tree}"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "${AURADEFS_SRC:-${srcdir}/auradefs-src}"
+  export CARGO_TARGET_DIR="${srcdir}/target"
+  export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-z,now"
+  cargo build --release --frozen -p auradefs-daemon
+}
+
+check() {
+  cd "${AURADEFS_SRC:-${srcdir}/auradefs-src}"
+  export CARGO_TARGET_DIR="${srcdir}/target"
+  # The service's own tests, the ones that need nothing outside the tree.
+  # Thumbnails through ffmpeg and PDFs through poppler are exercised where
+  # those are installed and skipped where they are not, by the tests
+  # themselves.
+  cargo test --release --frozen --workspace
+}
+
+package() {
+  install -Dm755 "${srcdir}/target/release/auradefs" \
+    "${pkgdir}/usr/bin/auradefs"
+  install -Dm644 "${srcdir}/README.md" \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 "${srcdir}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

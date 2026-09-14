@@ -1,0 +1,19 @@
+[package]
+name = "auradefs-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "auradefs"
+path = "src/main.rs"
+
+[dependencies]
+auradefs-core = { path = "../auradefs-core" }
+serde_json.workspace = true
+serde.workspace = true
+rustix.workspace = true
+
+[dev-dependencies]
+# The route tests draw their own fixtures rather than carry binary files.
+image.workspace = true

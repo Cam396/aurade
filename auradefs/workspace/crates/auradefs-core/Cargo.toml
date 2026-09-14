@@ -1,0 +1,42 @@
+[package]
+name = "auradefs-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustix.workspace = true
+git2.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+crc32fast.workspace = true
+image.workspace = true
+png.workspace = true
+tracing.workspace = true
+
+# Archives. Every one of these either is pure Rust or vendors its own C, so
+# the daemon stays a single binary with no runtime library hunt on the target.
+zip = "2"
+tar = "0.4"
+flate2 = "1"
+zstd = "0.13"
+# xz2 binds the same lzma-sys that sevenz-rust2 already links, so there is
+# only ever one copy of liblzma in the binary.
+xz2 = "0.1"
+sevenz-rust2 = "0.19"
+# The names inside a zip that was written without the UTF-8 flag are bytes in
+# whatever code page the writer had, and the Extract dialog offers the same
+# list of them the reference does. encoding_rs decodes them and chardetng
+# makes the "(detected)" guess; both pure Rust, from the same author.
+encoding_rs = "0.8"
+chardetng = "1"
+# The album cover in a file's tag, read for the thumbnail and written by the
+# Properties window's Change album cover, which the reference does through
+# TagLib. Pure Rust; ID3v2, MP4, FLAC, Vorbis and Opus comments, RIFF and
+# ADTS, with no C library under it.
+lofty = "0.25"
