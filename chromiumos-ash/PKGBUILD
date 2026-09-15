@@ -222,6 +222,16 @@ build() {
         enable_rust = true
         use_chromium_rust_toolchain = true
         use_official_google_api_keys = false
+
+        # Chromium turns DCHECKs on and makes them fatal for any build that is
+        # not is_official_build, which this is not and cannot be without Google
+        # branding. Left at that default the desktop inherits every DCHECK in
+        # Chromium as an abort: ash::help_app's search handler drops a mojo
+        # callback about a hundred seconds into a session and takes the whole
+        # session down with it, and that is one of hundreds. A release logs
+        # where a development build asserts, so the assert comes off here and
+        # the bring up tree keeps it.
+        dcheck_always_on = false
     "
 
     if grep -Eq '^[[:space:]]*google_(api_key|default_client_id|default_client_secret)[[:space:]]*=[[:space:]]*\"[^\"]+\"' "${out_dir}/args.gn"; then
