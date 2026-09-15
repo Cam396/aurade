@@ -170,6 +170,12 @@
     //: because they are places the app can reach, not decoration.
     frag.appendChild(sbHead('Network', groups.Network, groups.Network.length > 0));
     frag.appendChild(sbHead('Tags', [], false));
+    //: The sidebar's foot is a child of .slist, and Settings lives in it, so
+    //: replacing the list's children takes the Settings row out of the window
+    //: for the whole of live mode, which is every mode a user ever sees. Carry
+    //: it across and put it back at the end, where the static build has it.
+    const foot = list.querySelector('.sfoot');
+    if (foot) frag.appendChild(foot);
     list.replaceChildren(frag);
     paintTagSidebar();
     if (window.__sidebarActive) {

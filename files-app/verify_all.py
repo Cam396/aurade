@@ -637,8 +637,15 @@ def main():
                     return f"RECV:{e}"
                 if msg.get("id") == seq[0]:
                     if "exceptionDetails" in msg["result"]:
-                        return "EXC:" + json.dumps(
-                            msg["result"]["exceptionDetails"])[:200]
+                        #: The description carries the error and its stack, and
+                        #: it sits at the end of the envelope, so dumping the
+                        #: envelope and cutting at a couple of hundred
+                        #: characters reported every failure as the word
+                        #: "TypeError" and nothing else. Lead with it.
+                        _d = msg["result"]["exceptionDetails"]
+                        _e = (_d.get("exception") or {})
+                        _why = (_e.get("description") or _d.get("text") or "")
+                        return "EXC:" + " ".join(str(_why).split())[:600]
                     return msg["result"]["result"].get("value")
 
         def go(url):
