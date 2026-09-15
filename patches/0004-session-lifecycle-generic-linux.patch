@@ -151,7 +151,7 @@ index fcce446d5cb593ae131c6f2e9ca86a88d267a5e4..447d64c8e16d7d1b57dfeee19ff7a7c7
    UpdateLoginStatus();
  }
  
-@@ -825,6 +839,17 @@ void SessionControllerImpl::MaybeNotifyOnActiveUserPrefServiceChanged() {
+@@ -825,6 +839,26 @@ void SessionControllerImpl::MaybeNotifyOnActiveUserPrefServiceChanged() {
    DCHECK(last_active_user_prefs_);
  
    if (!signin_screen_prefs_obtained_) {
@@ -159,6 +159,15 @@ index fcce446d5cb593ae131c6f2e9ca86a88d267a5e4..447d64c8e16d7d1b57dfeee19ff7a7c7
 +      // AuraDE can boot directly into a local session without a signin profile.
 +      // In that mode there is no signin pref service to order before the
 +      // active user's prefs, so notify with the real user prefs immediately.
++      // The signin phase is over as well, and saying so here is what keeps
++      // it over. Left clear, this flag lets EnsureSigninScreenPrefService(),
++      // which SetSessionState() runs when the session goes active, send
++      // OnSigninScreenPrefServiceInitialized after the user's prefs have
++      // already gone out. Every observer is written for the opposite order:
++      // AmbientController CHECKs on it and takes the browser down, and the
++      // other six rebind to the signin screen's prefs inside a live user
++      // session, quietly.
++      signin_screen_prefs_obtained_ = true;
 +      for (auto& observer : observers_) {
 +        observer.OnActiveUserPrefServiceChanged(last_active_user_prefs_);
 +      }
