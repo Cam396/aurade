@@ -1,0 +1,48 @@
+diff --git a/ash/webui/file_manager/file_manager_ui.cc b/ash/webui/file_manager/file_manager_ui.cc
+index a44855486bad..599b0dc24b77 100644
+--- a/ash/webui/file_manager/file_manager_ui.cc
++++ b/ash/webui/file_manager/file_manager_ui.cc
+@@ -131,6 +131,18 @@ void FileManagerUI::CreateAndAddTrustedAppDataSource(content::WebUI* web_ui,
+       "frame-src chrome-untrusted://file-manager "
+       "'self';");
+ 
++  // AuraDE compatibility: the window reads and changes the machine through
++  // auradefs, which listens on loopback and nowhere else, so the page has to
++  // be able to connect to it. A trusted chrome:// source sets neither
++  // default-src nor connect-src, which would leave this page able to reach
++  // any address once it is allowed to make network requests at all, so the
++  // directive is written here rather than left absent: loopback, whatever
++  // port the service was given, and the sources the app already uses.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ConnectSrc,
++      "connect-src http://127.0.0.1:* chrome://resources chrome://theme "
++      "chrome://image blob: data: 'self';");
++
+   ash::EnableTrustedTypesCSP(source);
+ }
+ 
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
+index c3020dfdea16..a46d67090ad2 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
+@@ -354,7 +354,19 @@ bool ChromeWebUIControllerFactory::IsWebUIAllowedToMakeNetworkRequests(
+       // https://crbug.com/376417346
+       origin.host() == chrome::kChromeUIExtensionsHost ||
+       // https://crbug.com/509216218
+-      origin.host() == chrome::kChromeUIDrivePickerHostHost;
++      origin.host() == chrome::kChromeUIDrivePickerHostHost
++#if BUILDFLAG(IS_CHROMEOS)
++      // AuraDE compatibility: the Files window reads and changes the machine
++      // through auradefs, a service on loopback, rather than through the
++      // ChromeOS file manager private API, which has no counterpart here.
++      // Without this the frame's default subresource factory is
++      // WebUIURLLoaderFactory, and a fetch to any http URL is not blocked but
++      // reported as a bad Mojo message, which kills the renderer. The Files
++      // data source narrows connect-src to loopback so this permits the
++      // service and nothing wider.
++      || origin.host() == ash::file_manager::kChromeUIFileManagerHost
++#endif  // BUILDFLAG(IS_CHROMEOS)
++      ;  // NOLINT(whitespace/semicolon)
+ }
+ 
+ ChromeWebUIControllerFactory::ChromeWebUIControllerFactory() = default;
