@@ -32,20 +32,27 @@ def write(path, entries, aliases, encoding=1):
 
 # The html slot is found by a text only it holds; "shared marker" is in two
 # resources, so asking for it must be refused.
+# The old page names the script path it is served at; a replacement has to
+# ask for that same path, because nothing in a pak says what path a resource
+# has and a path that does not resolve leaves a page that renders and does
+# nothing.
 target = [(100, b"unchanged one, shared marker"),
           (200, gzip.compress(b"the old bundle, run().then(fileManager.start)")),
           (300, b"unchanged two, shared marker"),
-          (400, gzip.compress(b"<!DOCTYPE HTML> old page with init_globals.js in it")),
+          (400, gzip.compress(b'<!DOCTYPE HTML> old page with init_globals.js'
+                              b' in it <script src="foreground/js/main.js">'
+                              b'</script>')),
           (500, b"unchanged three")]
 write(os.path.join(tmp, "target.pak"), target, [(9001, 0), (9002, 2)])
-open(os.path.join(tmp, "files.html"), "wb").write(b'<meta charset="utf-8"><div class="win" data-path="~"></div><script src="files.js"></script>' * 40)
+open(os.path.join(tmp, "files.html"), "wb").write(b'<meta charset="utf-8"><div class="win" data-path="~"></div><script src="foreground/js/main.js"></script>' * 40)
+open(os.path.join(tmp, "files-wrong-path.html"), "wb").write(b'<meta charset="utf-8"><div class="win" data-path="~"></div><script src="foreground/js/main.rollup.js"></script>' * 40)
 open(os.path.join(tmp, "files.js"), "wb").write(b"(() => { enterLive(); })();\n")
 PY
 
 out=$("$TOOL" "$TMP/target.pak" "$TMP/out.pak" \
   --set "init_globals.js=$TMP/files.html" \
   --set "run().then(fileManager.start)=$TMP/files.js" \
-  --expect 'files.html:data-path="~"' \
+  --expect 'files.html:foreground/js/main.js' \
   --expect 'files.js:enterLive();' 2>&1) || fail "the tool failed on a valid run: $out"
 
 grep -Fq 'files.html -> resource 400' <<<"$out" || fail "the page did not land in the html slot: $out"
@@ -90,5 +97,21 @@ if "$TOOL" "$TMP/target.pak" "$TMP/out4.pak" --set "init_globals.js=$TMP/files.h
   fail 'an unmet expectation did not fail the tool'
 fi
 [[ -e "$TMP/out4.pak" ]] && fail 'a failed expectation left its output behind'
+
+# A page whose script asks for a path the page it replaces never asked for.
+# The pak says nothing about what path a resource is served at, so such a
+# page renders from its inline markup and never runs, which is the one
+# failure that looks like success. Refused by default, allowed on request.
+if "$TOOL" "$TMP/target.pak" "$TMP/out5.pak" \
+     --set "init_globals.js=$TMP/files-wrong-path.html" \
+     --set "run().then(fileManager.start)=$TMP/files.js" >/dev/null 2>&1; then
+  fail 'a script path the old page never asked for did not fail the tool'
+fi
+[[ -e "$TMP/out5.pak" ]] && fail 'the refused path left its output behind'
+"$TOOL" "$TMP/target.pak" "$TMP/out6.pak" --allow-new-paths \
+   --set "init_globals.js=$TMP/files-wrong-path.html" \
+   --set "run().then(fileManager.start)=$TMP/files.js" >/dev/null 2>&1 \
+  || fail 'the escape hatch did not let a new path through'
+[[ -e "$TMP/out6.pak" ]] || fail 'the escape hatch wrote nothing'
 
 echo 'pak set test: PASS'

@@ -4,7 +4,12 @@
 pak-swap-resources.py moves resources between two paks that came out of the
 same build. This one puts files the builder wrote into a pak, which is how
 the AuraDE Files page reaches chrome://file-manager without a chrome link:
-main.html's slot gets files.html and main.rollup.js's slot gets files.js.
+main.html's slot gets files.html and the slot holding the page's script gets
+files.js. A resource keeps the path it is served at, so the replacement page
+has to point its script tag at that same path: on the 152 pak it is
+foreground/js/main.js. Get that wrong and the page still renders, because the
+markup and the stylesheet are inline, and is dead, because the script never
+arrives. That is what --expect and the src check below are for.
 
 Slots are found by content, never by id, because ids move between builds:
 the resource holding `--find TEXT` must be exactly one, and it is replaced by
@@ -24,6 +29,7 @@ Usage:
 import argparse
 import gzip
 import os
+import re
 import struct
 import sys
 
@@ -89,6 +95,10 @@ def main():
                              "read back out of the written pak. Repeatable.")
     parser.add_argument("--raw", action="store_true",
                         help="store the bytes as they are rather than gzipped")
+    parser.add_argument("--allow-new-paths", action="store_true",
+                        help="do not require a replacement page's relative "
+                             "script and stylesheet paths to be ones the page "
+                             "it replaces already asked for")
     args = parser.parse_args()
     if not args.set:
         raise SystemExit("nothing to set")
@@ -114,6 +124,40 @@ def main():
         placed[rid] = (os.path.basename(path), blob, body)
         print("  %s -> resource %d (%d bytes, was %d)"
               % (path, rid, len(body), len(plain[rid])))
+
+    # A resource is served at the path the binary gives it, and nothing in
+    # the pak says what that path is. So a replacement page can only safely
+    # ask for paths the page it replaces already asked for: those are known
+    # to resolve. A page whose script does not resolve still renders, because
+    # its markup and stylesheet are inline, and does nothing at all, which
+    # looks like success in a screenshot.
+    if not args.allow_new_paths:
+        for rid, (leaf, _, body) in placed.items():
+            if not leaf.endswith((".html", ".htm")):
+                continue
+            was = plain[rid]
+            try:
+                old_text = was.decode("utf-8")
+                new_text = body.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            ref = r"""(?:src|href)=["']([^"']+)["']"""
+            #: A chrome://file-manager/x URL and a relative x are the same
+            #: resource, and the page being replaced spells them both ways.
+            def bare(u):
+                u = u.split("#", 1)[0].split("?", 1)[0]
+                host = "chrome://file-manager/"
+                return u[len(host):] if u.startswith(host) else u
+            known = {bare(u) for u in re.findall(ref, old_text)}
+            for want in (bare(u) for u in re.findall(ref, new_text)):
+                if not want or ":" in want.split("/", 1)[0]:
+                    continue
+                if want not in known:
+                    raise SystemExit(
+                        "%s asks for %r, which the page it replaces never "
+                        "asked for, so it may not resolve; pass "
+                        "--allow-new-paths only if you know it does"
+                        % (leaf, want))
 
     rewritten = [(rid, placed[rid][1] if rid in placed else blob)
                  for rid, blob in payloads]
