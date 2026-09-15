@@ -1,0 +1,541 @@
+/* Wave 3: Rich InfoPane Previews (P09) CSS */
+/* Strict Trusted Types compliant styling */
+/* Strict typography rule: ZERO em dashes and ZERO en dashes */
+
+/* Segmented Pill Header in .pane or .infopane */
+.infopane-tabs {
+  display: flex;
+  justify-content: center;
+  margin: 10px 12px;
+  padding: 2px;
+  background: none;
+  border-radius: 6px;
+  border: 0;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.infopane-tab {
+  flex: 1;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  color: var(--text-secondary, var(--text-2, rgba(255, 255, 255, 0.7)));
+  background: transparent;
+  border: none;
+  outline: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.infopane-tab:hover {
+  color: var(--text-primary, var(--text-1, #ffffff));
+  background: var(--subtle-hover, rgba(255, 255, 255, 0.04));
+}
+
+.infopane-tab.active {
+  background: var(--subtle-2);
+  color: var(--text-primary, var(--text-1, #ffffff));
+  position: relative;
+}
+
+.infopane-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 3px;
+  border-radius: 1.5px;
+  /* The raw system accent, not the theme's accent fill. Measured #0078D4 in
+     dark, where every other accent control in the window reads #4CC2FF. */
+  background: var(--accent-base, #0078d4);
+}
+
+/* Light theme overrides for segmented pill header */
+[data-theme="light"] .infopane-tabs {
+  background: var(--subtle-fill, rgba(0, 0, 0, 0.04));
+  border-color: var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+
+[data-theme="light"] .infopane-tab {
+  color: var(--text-secondary, rgba(0, 0, 0, 0.6));
+}
+
+[data-theme="light"] .infopane-tab:hover {
+  color: var(--text-primary, rgba(0, 0, 0, 0.9));
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .infopane-tab.active {
+  background: var(--bg-card, #ffffff);
+  color: var(--text-primary, rgba(0, 0, 0, 0.9));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+/* Details and Preview Views in Pane */
+.iphead { display:flex; flex-direction:column; align-items:center; gap:12px;
+  padding:20px 12px 16px; }
+.iphead-art { width:96px; height:96px; display:grid; place-items:center; }
+.iphead-art svg, .iphead-art .art { width:96px; height:auto; max-height:96px;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.28)); }
+.iphead-name { font-size:20px; font-weight:600; color:var(--text-1);
+  text-align:center; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; max-width:100%; }
+.ipbtns { display:flex; flex-direction:column; gap:8px; padding:8px 12px 12px; }
+.ipbtns .btn-dlg { justify-content:flex-start; gap:10px; padding:0 12px; }
+
+.infopane-details-view {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.infopane-details-view[hidden] {
+  display: none !important;
+}
+
+.infopane-preview-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Top, not centred. The reference anchors the preview under the tabs and
+     lets the property rows follow it; centring leaves a column of empty pane
+     above the picture that grows with the window. */
+  justify-content: flex-start;
+  padding: 12px;
+  height: 100%;
+  min-height: 200px;
+  overflow: auto;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.infopane-preview-view[hidden] {
+  display: none !important;
+}
+
+/* Preview Content Area Components */
+
+/* 1. Image Preview */
+.preview-image-box {
+  max-width: 100%;
+  max-height: 280px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.preview-image-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* 2. Media Preview (Audio and Video) */
+.preview-media-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.preview-media-box video,
+.preview-media-box audio {
+  width: 100%;
+  max-height: 240px;
+  border-radius: 6px;
+  outline: none;
+}
+
+.preview-media-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, var(--text-1, #ffffff));
+  text-align: center;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+/* 3. Text and Code Preview */
+.preview-text-box {
+  width: 100%;
+  height: 280px;
+  overflow-y: auto;
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-primary, var(--text-1, #ffffff));
+  box-sizing: border-box;
+  margin: 0;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+}
+
+/* 4. Markdown Preview */
+.preview-markdown-box {
+  width: 100%;
+  height: 280px;
+  overflow-y: auto;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-sizing: border-box;
+  color: var(--text-primary, var(--text-1, #ffffff));
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+}
+
+/* .preview-markdown-box h1, .preview-markdown-box h2, .preview-markdown-box h3, .preview-markdown-box h4: merged into the later definition of the same selector, which already won. */
+
+.preview-markdown-box h1 {
+  font-size:16px; border-bottom:1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom:4px; margin:8px 0 4px;
+  color:var(--text-primary, var(--text-1, #ffffff)); line-height:1.25;
+}
+.preview-markdown-box h2 {
+  font-size:14px; margin:8px 0 4px;
+  color:var(--text-primary, var(--text-1, #ffffff)); line-height:1.25;
+}
+.preview-markdown-box h3 {
+  font-size:13px; margin:8px 0 4px;
+  color:var(--text-primary, var(--text-1, #ffffff)); line-height:1.25;
+}
+.preview-markdown-box h4 {
+  font-size:12px; margin:8px 0 4px;
+  color:var(--text-primary, var(--text-1, #ffffff)); line-height:1.25;
+}
+
+.preview-markdown-box p {
+  margin: 4px 0 8px;
+}
+
+.preview-markdown-box ul,
+.preview-markdown-box ol {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.preview-markdown-box li {
+  margin: 2px 0;
+}
+
+.preview-markdown-box code {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.preview-markdown-box pre {
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.preview-markdown-box pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.preview-markdown-box blockquote {
+  border-left: 3px solid var(--accent, #60cdff);
+  margin: 6px 0;
+  padding: 4px 8px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 4px 4px 0;
+}
+
+.preview-markdown-box a {
+  color: var(--accent, #60cdff);
+  text-decoration: none;
+}
+
+.preview-markdown-box a:hover {
+  text-decoration: underline;
+}
+
+.preview-markdown-box hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 8px 0;
+}
+
+/* 5. Folder Preview */
+.preview-folder-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 20px 10px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.preview-folder-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-folder-icon svg {
+  width: 56px;
+  height: 56px;
+}
+
+.preview-folder-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, var(--text-1, #ffffff));
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.preview-folder-count {
+  font-size: 12px;
+  color: var(--text-secondary, var(--text-2, rgba(255, 255, 255, 0.7)));
+}
+
+/* 6. Empty or Multi-selection State */
+.preview-empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-secondary, var(--text-3, rgba(255, 255, 255, 0.5)));
+  width: 100%;
+  height: 100%;
+  min-height: 180px;
+  box-sizing: border-box;
+}
+
+.preview-empty-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-empty-message {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary, var(--text-2, rgba(255, 255, 255, 0.7)));
+}
+
+.preview-empty-sub {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* Light mode adjustments for preview boxes */
+[data-theme="light"] .preview-image-box,
+[data-theme="light"] .preview-text-box,
+[data-theme="light"] .preview-markdown-box {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.88);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .preview-markdown-box h1,
+[data-theme="light"] .preview-markdown-box h2,
+[data-theme="light"] .preview-markdown-box h3,
+[data-theme="light"] .preview-markdown-box h4,
+[data-theme="light"] .preview-folder-name,
+[data-theme="light"] .preview-media-title {
+  color: rgba(0, 0, 0, 0.9);
+}
+
+[data-theme="light"] .preview-markdown-box code {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .preview-markdown-box pre {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .preview-markdown-box blockquote {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+
+/* ---- details pane (InfoPane: Details and Preview tabs) ---- */
+.infopane {
+  width:288px; flex:none; margin-left:8px; display:flex; flex-direction:column;
+  background:var(--card); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay); overflow:hidden;
+}
+.itabs { display:flex; gap:4px; padding:8px 8px 0; flex:none; }
+.itab {
+  flex:1; height:32px; border:0; background:none; border-radius:var(--r-ctl);
+  color:var(--text-2); font:inherit; font-size:14px; cursor:pointer;
+  transition:background-color 83ms ease-out;
+}
+.itab:hover { background:var(--subtle-2); }
+.itab.on { background:var(--subtle-2); color:var(--text-1); }
+.ipane { padding:8px 12px 12px; overflow:auto; }
+.ipreview-art {
+  /* A frame that grows to what it holds and then stops. Fixed height made the
+     media box overflow and print its title over the property rows below. */
+  min-height:150px; max-height:280px; width:100%; display:grid;
+  place-items:center; margin:4px 0 8px; overflow:hidden;
+  background:var(--card-2); border:1px solid var(--card-stroke);
+  border-radius:var(--r-ctl);
+}
+.ipreview-art .art { width:76px; height:76px; }
+/* A real picture fills the box it is given, letterboxed, never cropped: a
+   thumbnail that crops has told you something false about the file. */
+.ipreview-art > * { max-width:100%; max-height:280px; box-sizing:border-box; }
+.ipreview-art .preview-image-box,
+.ipreview-art .preview-media-box {
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  max-height:280px; overflow:hidden; width:100%;
+}
+.ipreview-art .preview-image-box img,
+.ipreview-art .preview-media-box video {
+  max-width:100%; max-height:230px; object-fit:contain; border-radius:4px;
+}
+.ipreview-art .preview-media-title {
+  font-size:12px; color:var(--text-2); text-align:center;
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ipreview-art .ipreview-img {
+  max-width:100%; max-height:100%; display:block; border-radius:4px;
+  object-fit:contain;
+}
+.ipreview-art.has-img { background:var(--subtle-3); }
+.ipreview-text {
+  font-family:ui-monospace, monospace; font-size:12px; line-height:18px;
+  color:var(--text-2); white-space:pre-wrap; word-break:break-word;
+  max-height:220px; overflow:auto; margin:8px 0 0; width:100%;
+}
+/* A rendered preview sets its own typography per block, so the monospace and
+   the pre-wrap that plain text needs have to come back off. */
+.ipreview-text.pv-rich {
+  white-space:normal; font-family:inherit; font-size:13px; line-height:19px;
+  color:var(--text-1); max-height:340px;
+}
+/* HTML and rich text previews. Deliberately plain: this is a reading pane,
+   not a browser, and the document's own styling is dropped on the way in. */
+.preview-rich-box {
+  font-size:13px; line-height:1.55; color:var(--text-1); padding:2px 2px 8px;
+  overflow-wrap:anywhere;
+}
+.preview-rich-box h1, .preview-rich-box h2, .preview-rich-box h3 {
+  font-size:15px; font-weight:600; margin:12px 0 4px;
+}
+.preview-rich-box h4, .preview-rich-box h5, .preview-rich-box h6 {
+  font-size:13px; font-weight:600; margin:10px 0 4px;
+}
+.preview-rich-box p, .preview-rich-box .pv-p { margin:0 0 8px; min-height:1em; }
+.preview-rich-box ul, .preview-rich-box ol { margin:0 0 8px; padding-left:20px; }
+.preview-rich-box blockquote {
+  margin:0 0 8px; padding-left:10px; border-left:2px solid var(--divider);
+  color:var(--text-2);
+}
+.preview-rich-box pre {
+  background:var(--subtle-1); padding:8px; border-radius:var(--r-ctl);
+  overflow-x:auto; font-size:12px;
+}
+.preview-rich-box code { font-size:12px; background:var(--subtle-1);
+  padding:1px 4px; border-radius:3px; }
+.preview-rich-box pre code { background:none; padding:0; }
+.preview-rich-box table { border-collapse:collapse; margin:0 0 8px;
+  font-size:12px; }
+.preview-rich-box th, .preview-rich-box td {
+  border:1px solid var(--divider); padding:3px 7px; text-align:left;
+}
+.preview-rich-box a { color:var(--accent); }
+/* A link whose target the allowlist refused keeps its words and loses its
+   href. Leaving it accent coloured would offer something that does not
+   happen. */
+.preview-rich-box a:not([href]) { color:inherit; }
+.preview-rich-box img { max-width:100%; height:auto; border-radius:4px; }
+.preview-rich-box hr { border:0; border-top:1px solid var(--divider);
+  margin:10px 0; }
+.pv-cut { font-size:11px; color:var(--text-3); padding-top:8px;
+  border-top:1px solid var(--divider); margin-top:8px; }
+.pv-code {
+  font-family:ui-monospace, monospace; font-size:11.5px; line-height:16px;
+  margin:0; white-space:pre; overflow-x:auto; color:var(--text-2);
+}
+.pv-line { white-space:pre; }
+.pv-add { color:#6fbf73; }
+.pv-del { color:#e07a7a; }
+.pv-hunk { color:var(--accent); }
+.tok-kw { color:#6aa9e0; }
+.tok-str { color:#c9a26d; }
+.tok-com { color:var(--text-3); font-style:italic; }
+.tok-num { color:#a3c98a; }
+.pv-md { font-size:13px; line-height:19px; }
+.pv-md .md-h { margin:10px 0 4px; font-weight:600; line-height:1.3; }
+.pv-md h1.md-h { font-size:17px; }
+.pv-md h2.md-h { font-size:15px; }
+.pv-md h3.md-h, .pv-md h4.md-h,
+.pv-md h5.md-h, .pv-md h6.md-h { font-size:13px; color:var(--text-2); }
+.pv-md .md-p { margin:0 0 8px; }
+.pv-md .md-list { margin:0 0 8px; padding-left:18px; }
+.pv-md .md-list li { margin:2px 0; }
+.pv-md .md-quote {
+  margin:0 0 8px; padding-left:10px; color:var(--text-2);
+  border-left:2px solid var(--divider);
+}
+.pv-md code {
+  font-family:ui-monospace, monospace; font-size:11.5px;
+  background:var(--subtle-2); border-radius:3px; padding:1px 4px;
+}
+.pv-md .md-fence {
+  background:var(--subtle-3); border-radius:var(--r-ctl); padding:8px 10px;
+  margin:0 0 8px;
+}
+.pv-md .md-link { color:var(--accent); }
+.pv-md hr { border:0; border-top:1px solid var(--divider); margin:10px 0; }
+.drow {
+  display:flex; gap:12px; padding:5px 0; font-size:12px;
+  border-bottom:1px solid var(--divider); align-items:center;
+  justify-content:space-between; box-sizing:border-box;
+}
+.drow:last-child { border-bottom:0; }
+.drow .k {
+  width:96px; flex:none; color:var(--text-3); font-weight:500;
+}
+.drow .v {
+  flex:1; min-width:0; color:var(--text-1); overflow:hidden;
+  text-overflow:ellipsis; white-space:pre; font-family:inherit;
+}
+

@@ -1,0 +1,180 @@
+/* ---- home widgets (HomePage.xaml) ---- */
+.widgets-page {
+  display:flex; flex-direction:column; gap:16px; padding:12px 16px 24px;
+  overflow-y:auto; flex:1; /*@@sidebar_css_tones@@*/
+}
+.wsec { display:flex; flex-direction:column; }
+.wsec.collapsed .wsec-body { display:none; }
+.wsec.collapsed .wchev { transform:rotate(-90deg); }
+.wsec-h {
+  height:32px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 4px;
+}
+.wsec-btn {
+  height:28px; display:flex; align-items:center; gap:8px; background:none;
+  border:0; border-radius:var(--r-ctl); padding:0 8px; color:var(--text-2);
+  font:inherit; font-size:12px; font-weight:600; cursor:pointer;
+  transition:background-color 83ms ease-out, color 83ms ease-out;
+}
+.wsec-btn:hover { background:var(--subtle-2); color:var(--text-1); }
+.wchev { transition:transform 200ms cubic-bezier(0.1,0.9,0.2,1.0); }
+.wsec-more {
+  width:28px; height:28px; display:grid; place-items:center; background:none;
+  border:0; border-radius:var(--r-ctl); color:var(--text-3); cursor:pointer;
+  transition:background-color 83ms ease-out, color 83ms ease-out;
+}
+.wsec-more:hover { background:var(--subtle-2); color:var(--text-1); }
+.wcards-qa {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr));
+  gap:8px; max-width:800px; padding:4px 0 8px;
+}
+.wcard {
+  min-height:72px; padding:8px; border-radius:var(--r-ctl);
+  background:var(--control-fill); border:1px solid var(--control-stroke);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  position:relative; cursor:pointer; user-select:none;
+  transition:background-color 83ms ease-out, border-color 83ms ease-out;
+  color:inherit; text-decoration:none; outline:none;
+}
+.wcard:hover { background:var(--subtle-2); border-color:var(--card-stroke); }
+.wcard:active { background:var(--subtle-3); }
+.wcard-folder { height:72px; }
+.wcard-pin { position:absolute; top:6px; right:6px; width:12px; height:12px; color:var(--text-3); }
+.wcard-ico { width:32px; height:32px; display:grid; place-items:center; margin-bottom:4px; }
+.wcard-name {
+  font-size:14px; color:var(--text-1); text-align:center;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;
+}
+.wcards-drives, .wcards-net {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+  gap:8px; padding:4px 0 8px;
+}
+/* A network card is a drive card with nothing to say about free space: the
+   share is somewhere else and asking it costs a hang. Two rows, not three. */
+.wnet-card {
+  min-height:72px; padding:8px 12px; display:grid;
+  grid-template-columns:32px 1fr; column-gap:12px; row-gap:2px;
+  align-items:center; align-content:center;
+}
+.wnet-card .wd-icon { grid-row:span 2; }
+.winfobar {
+  grid-column:1 / -1; display:flex; align-items:center; gap:8px;
+  min-height:44px; padding:8px 12px; border-radius:var(--r-ctl);
+  background:var(--control-fill); border:1px solid var(--control-stroke);
+  color:var(--text-2); font-size:13px;
+}
+.winfobar svg { flex:none; color:var(--accent); }
+.winfobar span { flex:1; }
+.winfobar-btn {
+  height:28px; padding:0 12px; border-radius:var(--r-ctl); font:inherit;
+  font-size:12px; background:var(--control-fill);
+  border:1px solid var(--control-stroke); color:var(--text-1); cursor:pointer;
+  transition:background-color 83ms ease-out;
+}
+.winfobar-btn:hover { background:var(--subtle-2); }
+.wcard-drive {
+  min-height:72px; padding:8px 12px; display:grid;
+  grid-template-columns:32px 1fr auto; column-gap:12px; row-gap:2px;
+  align-items:center;
+}
+.wd-icon { grid-row:span 3; width:32px; height:32px; display:grid; place-items:center; }
+.wd-info { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.wd-name {
+  font-size:14px; font-weight:500; color:var(--text-1);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.wd-bar {
+  height:4px; border-radius:2px; background:var(--divider);
+  overflow:hidden; width:100%;
+}
+.wd-fill { height:100%; background:var(--accent); border-radius:2px; }
+.wd-sub {
+  font-size:12px; color:var(--text-3);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.wd-storage {
+  width:24px; height:24px; border:0; background:none; border-radius:var(--r-ctl);
+  display:grid; place-items:center; color:var(--text-3); cursor:pointer;
+  transition:background-color 83ms ease-out, color 83ms ease-out;
+}
+.wd-storage:hover { background:var(--subtle-2); color:var(--text-1); }
+.wrecent-list { display:flex; flex-direction:column; gap:2px; padding:4px 0; }
+.wrecent-row {
+  height:32px; display:flex; align-items:center; gap:14px; padding:2.5px 12px;
+  border-radius:var(--r-ctl); cursor:pointer; transition:background-color 83ms ease-out;
+  color:inherit; text-decoration:none; font-size:14px;
+}
+.wrecent-row:hover { background:var(--subtle-2); }
+.wrecent-ico { width:16px; height:16px; display:grid; place-items:center; flex:none; }
+.wrecent-ico .art, .wtag-item-ico .art, .wrecent-ico svg, .wtag-item-ico svg { width:16px; height:16px; filter:none; }
+.wrecent-name {
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; color:var(--text-1);
+}
+.wrecent-path {
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:12px; color:var(--text-3);
+}
+.wtags-grid {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));
+  gap:8px; padding:4px 0;
+}
+.wtag-card {
+  border-radius:var(--r-ctl); background:var(--card-2);
+  border:1px solid var(--card-stroke); overflow:hidden;
+  display:flex; flex-direction:column;
+}
+.wtag-h {
+  height:32px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 8px; border-bottom:1px solid var(--divider);
+}
+.wtag-title {
+  display:flex; align-items:center; gap:8px; font-size:13px;
+  font-weight:600; color:var(--text-1);
+}
+.wtag-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.wtag-open {
+  width:24px; height:24px; border:0; background:none; border-radius:var(--r-ctl);
+  display:grid; place-items:center; color:var(--text-3); cursor:pointer;
+}
+.wtag-open:hover { background:var(--subtle-2); color:var(--text-1); }
+.wtag-items { display:flex; flex-direction:column; padding:4px; gap:2px; }
+.wtag-item {
+  height:28px; display:flex; align-items:center; gap:8px; padding:0 6px;
+  border-radius:var(--r-ctl); font-size:12px; color:var(--text-2); cursor:pointer;
+}
+.wtag-item:hover { background:var(--subtle-2); color:var(--text-1); }
+.wtag-item-ico { width:16px; height:16px; display:grid; place-items:center; }
+.wtag-item-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---- context menu submenus. The .ctx-bar and .ctx-bbtn rules that used to
+   sit here were a second definition of the measured ones above, and being
+   later they won: a 32px button in a 56px bar. ---- */
+.mi-sub { position:relative; }
+.mi-sub:hover > .ctx-sub {
+  display:flex; animation:subFadeIn 100ms cubic-bezier(0.1, 0.9, 0.2, 1.0);
+}
+.ctx-sub {
+  display:none; position:absolute; left:100%; top:-4px; min-width:160px;
+  background:var(--layer-mica-alt); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay); box-shadow:0 8px 24px rgba(0,0,0,.35);
+  padding:4px; flex-direction:column; gap:2px; z-index:1100; max-width:280px;
+  backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+}
+.mchev {
+  margin-left:auto; display:grid; place-items:center; width:12px;
+  height:12px; color:var(--text-3); align-items:center;
+  justify-content:center; flex:none;
+}
+.macc { margin-left:auto; font-size:11px; color:var(--text-3); }
+.mck { width:14px; height:14px; display:grid; place-items:center; margin-right:6px; }
+.mck:not(.on) svg { display:none; }
+
+/* navigation. Rows, cells, crumbs and places are anchors now, so they have to
+   inherit everything a div gave them and add nothing of their own. */
+a { color:inherit; text-decoration:none; }
+span.nbtn {display:grid; place-items:center; }
+a.cell, a.row, a.srow, a.crumb {cursor:default; }
+a.nbtn {
+  cursor:default; display:grid; place-items:center;
+}

@@ -1,0 +1,494 @@
+/* ==========================================================================
+   1. Design Tokens and Theme Variables
+   ========================================================================== */
+
+[data-theme="dark"], body.dark-theme {--accent-hover: #71d4ff;
+  --r-card: 6px;
+  --focus-stroke: var(--accent);
+  --expander-drawer-bg: rgba(0, 0, 0, 0.14);
+}
+
+/* [data-theme="light"], body.light-theme: merged into the later definition of the same selector, which already won. */
+
+/* ==========================================================================
+   2. Layout Container
+   ========================================================================== */
+
+#settings-page {width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--desktop, #1b1b1f);
+  color: var(--text-1, #ffffff);
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
+  z-index: 20;
+}
+
+#settings-page[hidden] {display: none !important;
+}
+
+/* .sbody: merged into the later definition of the same selector, which already won. */
+
+/* ==========================================================================
+   3. Settings Header
+   ========================================================================== */
+
+/* .shead: merged into the later definition of the same selector, which already won. */
+
+#settings-back,
+.settings-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-1, #ffffff);
+  cursor: pointer;
+  transition: background 0.1s ease, transform 0.05s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+#settings-back:hover,
+.settings-back-btn:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.06));
+}
+
+#settings-back:active,
+.settings-back-btn:active {
+  background: var(--control-fill, rgba(255, 255, 255, 0.08));
+  transform: scale(0.96);
+}
+
+#settings-back:focus-visible,
+.settings-back-btn:focus-visible {
+  outline: 2px solid var(--accent, #60cdff);
+  outline-offset: 1px;
+}
+
+#settings-back svg,
+.settings-back-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.settings-title {font-size: 20px;
+  font-weight: 600;
+  color: var(--text-1, #ffffff);
+  line-height: 1.2;
+  letter-spacing: -0.2px;
+  margin: 0;
+}
+
+.settings-header-spacer {flex: 1;
+}
+
+.settings-search-wrap,
+.shead-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 260px;
+  box-sizing: border-box;
+}
+
+.settings-search-input {width: 260px;
+  height: 32px;
+  padding: 0 10px 0 10px;
+  border-radius: 4px;
+  border: 1px solid var(--control-stroke, rgba(255, 255, 255, 0.12));
+  background: var(--control-fill, rgba(255, 255, 255, 0.06));
+  color: var(--text-1, #ffffff);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.settings-search-wrap.has-icon #settings-search,
+.shead-search-wrap.has-icon #settings-search {
+  padding-left: 32px;
+}
+
+#settings-search::placeholder,
+.settings-search-input::placeholder {
+  color: var(--text-3, rgba(255, 255, 255, 0.54));
+}
+
+#settings-search:hover,
+.settings-search-input:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.09));
+  border-color: var(--control-stroke, rgba(255, 255, 255, 0.18));
+}
+
+.settings-search-input:focus {border-color: var(--accent, #60cdff);
+  background: var(--solid-2, #2c2c2c);
+  box-shadow: inset 0 -2px 0 0 var(--accent, #60cdff), 0 0 0 1px var(--accent, #60cdff);
+}
+
+.settings-search-icon {
+  position: absolute;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: var(--text-3, rgba(255, 255, 255, 0.54));
+  width: 14px;
+  height: 14px;
+}
+
+.settings-search-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.settings-search-clear:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.1));
+  color: var(--text-1, #ffffff);
+}
+
+/* ==========================================================================
+   4. Sidebar Navigation
+   ========================================================================== */
+
+.settings-sidebar {width: 240px;
+  min-width: 220px;
+  max-width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--card-stroke, rgba(255, 255, 255, 0.08));
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  background: transparent;
+  user-select: none;
+}
+
+.snav-btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 10px 0 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-ctl, 4px);
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-2, rgba(255, 255, 255, 0.78));
+  cursor: pointer;
+  text-align: left;
+  transition: background 83ms ease-out, color 83ms ease-out;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  user-select: none;
+  outline: none;
+}
+
+.snav-btn:hover {
+  background: var(--subtle-1, rgba(255, 255, 255, 0.04));
+  color: var(--text-1, #ffffff);
+}
+
+.snav-btn:active {
+  background: var(--control-fill, rgba(255, 255, 255, 0.04));
+}
+
+.snav-btn:focus-visible {
+  outline: 2px solid var(--accent, #60cdff);
+  outline-offset: -2px;
+}
+
+.snav-btn.on {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.08));
+  color: var(--text-1, #ffffff);
+}
+
+/* The selection pill, on the left edge of the row and only when selected. */
+.snav-btn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent, #60cdff);
+  display: none;
+}
+
+.snav-btn.on::before { display: block; }
+
+.snav-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: inherit;
+  transition: color 83ms ease-out;
+}
+
+.snav-btn.on .snav-ico { color: var(--accent, #60cdff); }
+
+.snav-ico svg { width: 16px; height: 16px; fill: currentColor; display: block; }
+
+.snav-lbl {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snav-btn.on .snav-lbl { font-weight: 500; }
+
+.snav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent, #60cdff);
+  color: var(--on-accent, #000000);
+  margin-left: auto;
+  flex-shrink: 0;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.snav-badge[data-count="0"],
+.snav-badge:empty {
+  display: none !important;
+}
+
+.snav button[hidden],
+.snav-btn[hidden] {
+  display: none !important;
+}
+
+/* ==========================================================================
+   5. Main Paned Area and Panes
+   ========================================================================== */
+
+/* .spanes: merged into the later definition of the same selector, which already won. */
+
+.spane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* .spane[hidden]: merged into the later definition of the same selector, which already won. */
+
+.spane-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-1, #ffffff);
+  margin: 0 0 10px 0;
+  letter-spacing: -0.2px;
+}
+
+/* ==========================================================================
+   6. Section Headers
+   ========================================================================== */
+
+/* .ssec: merged into the later definition of the same selector, which already won. */
+
+.ssec:first-child {
+  margin-top: 4px;
+}
+
+.ssec[hidden] {
+  display: none !important;
+}
+
+/* ==========================================================================
+   7. Settings Cards
+   ========================================================================== */
+
+/* .scard: merged into the later definition of the same selector, which already won. */
+
+.scard:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.06));
+  border-color: var(--card-stroke, rgba(255, 255, 255, 0.14));
+}
+
+.scard[role="button"],
+.scard.is-clickable {
+  cursor: pointer;
+}
+
+.scard-icon,
+.scard-ico {
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #60cdff);
+}
+
+.scard-icon svg,
+.scard-ico svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* .scard-t: merged into the later definition of the same selector, which already won. */
+
+/* .scard-h: merged into the later definition of the same selector, which already won. */
+
+/* .scard-d: merged into the later definition of the same selector, which already won. */
+
+/* .scard-c: merged into the later definition of the same selector, which already won. */
+
+.scard[hidden] {
+  display: none !important;
+}
+
+/* ==========================================================================
+   8. Settings Expander
+   ========================================================================== */
+
+.settings-expander {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--card-stroke, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  background: var(--card, rgba(255, 255, 255, 0.04));
+  overflow: hidden;
+  margin-bottom: 8px;
+  transition: border-color 0.1s ease, background 0.1s ease;
+  box-sizing: border-box;
+}
+
+.settings-expander:hover {
+  border-color: var(--card-stroke, rgba(255, 255, 255, 0.14));
+}
+
+.expander-header {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 12px 16px;
+  min-height: 52px;
+  user-select: none;
+  transition: background 0.1s ease;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.expander-header:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.06));
+}
+
+.expander-header:focus-visible {
+  outline: 2px solid var(--accent, #60cdff);
+  outline-offset: -2px;
+}
+
+.expander-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
+  transition: transform 0.2s cubic-bezier(0.85, 0, 0.15, 1);
+  flex-shrink: 0;
+}
+
+.expander-chevron svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.settings-expander.expanded .expander-chevron,
+.expander-header.expanded .expander-chevron,
+.settings-expander[aria-expanded="true"] .expander-chevron {
+  transform: rotate(180deg);
+}
+
+.expander-drawer {
+  display: none;
+  flex-direction: column;
+  background: var(--expander-drawer-bg, rgba(0, 0, 0, 0.14));
+  border-top: 1px solid var(--card-stroke, rgba(255, 255, 255, 0.08));
+  box-sizing: border-box;
+}
+
+.settings-expander.expanded .expander-drawer,
+.settings-expander[aria-expanded="true"] .expander-drawer {
+  display: flex;
+}
+
+.scard-nested {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 16px 10px 36px;
+  border-top: 1px solid var(--card-stroke, rgba(255, 255, 255, 0.06));
+  background: transparent;
+  transition: background 0.1s ease;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.scard-nested:first-child {
+  border-top: none;
+}
+
+.scard-nested:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.04));
+}
+

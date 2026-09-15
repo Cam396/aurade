@@ -1,0 +1,258 @@
+/* ==========================================================================
+   3. Open With Modal Dialog Styling
+   ========================================================================== */
+
+.open-with-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms cubic-bezier(0.1, 0.9, 0.2, 1.0);
+}
+
+.open-with-scrim.visible,
+.open-with-scrim:not([hidden]):not([style*="display: none"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.open-with-scrim[hidden] {
+  display: none !important;
+}
+
+.open-with-dialog {
+  background: var(--solid-base, #202020);
+  border: 1px solid var(--surface-stroke, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  width: 440px;
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font, "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif);
+  color: var(--text-1, #ffffff);
+  transform: scale(0.96);
+  transition: transform 180ms cubic-bezier(0.1, 0.9, 0.2, 1.0);
+}
+
+.open-with-scrim.visible .open-with-dialog,
+.open-with-scrim:not([hidden]):not([style*="display: none"]) .open-with-dialog {
+  transform: scale(1);
+}
+
+.open-with-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-1, #ffffff);
+  padding: 20px 24px 4px;
+  margin: 0;
+}
+
+.open-with-subtitle {
+  font-size: 13px;
+  color: var(--text-2, rgba(255, 255, 255, 0.75));
+  padding: 0 24px 16px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.open-with-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 20px 16px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.open-with-app {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--card, rgba(255, 255, 255, 0.03));
+  transition: background-color 83ms ease-out, border-color 83ms ease-out;
+}
+
+.open-with-app:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.07));
+}
+
+.open-with-app.selected {
+  background: color-mix(in srgb, var(--accent, #60cdff) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #60cdff) 40%, transparent);
+}
+
+.open-with-app-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.open-with-app-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.open-with-app-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.open-with-app-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1, #ffffff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.open-with-app-desc {
+  font-size: 12px;
+  color: var(--text-3, rgba(255, 255, 255, 0.55));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.open-with-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  background: var(--card-2, rgba(255, 255, 255, 0.02));
+  border-top: 1px solid var(--divider, rgba(255, 255, 255, 0.08));
+}
+
+.open-with-btn {
+  min-width: 88px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--r-ctl, 4px);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--control-stroke, rgba(255, 255, 255, 0.08));
+  background: var(--control-fill, rgba(255, 255, 255, 0.06));
+  color: var(--text-1, #ffffff);
+  transition: background-color 83ms ease-out, border-color 83ms ease-out, filter 83ms ease-out;
+}
+
+.open-with-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.open-with-btn:active {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.open-with-btn.primary {
+  background: var(--accent, #60cdff);
+  color: var(--on-accent, #000000);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.open-with-btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.open-with-btn.primary:active {
+  filter: brightness(0.92);
+}
+
+/* Light theme support for Open With dialog */
+body.light-theme .open-with-dialog,
+[data-theme="light"] .open-with-dialog {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  color: var(--text-1, #1b1b1b);
+}
+
+body.light-theme .open-with-title,
+[data-theme="light"] .open-with-title {
+  color: var(--text-1, #1b1b1b);
+}
+
+body.light-theme .open-with-subtitle,
+[data-theme="light"] .open-with-subtitle {
+  color: var(--text-2, rgba(0, 0, 0, 0.65));
+}
+
+body.light-theme .open-with-app,
+[data-theme="light"] .open-with-app {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+body.light-theme .open-with-app:hover,
+[data-theme="light"] .open-with-app:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+body.light-theme .open-with-app.selected,
+[data-theme="light"] .open-with-app.selected {
+  background: color-mix(in srgb, var(--accent, #005fb7) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #005fb7) 40%, transparent);
+}
+
+body.light-theme .open-with-app-name,
+[data-theme="light"] .open-with-app-name {
+  color: var(--text-1, #1b1b1b);
+}
+
+body.light-theme .open-with-app-desc,
+[data-theme="light"] .open-with-app-desc {
+  color: var(--text-3, rgba(0, 0, 0, 0.54));
+}
+
+body.light-theme .open-with-footer,
+[data-theme="light"] .open-with-footer {
+  background: #f9f9f9;
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light-theme .open-with-btn,
+[data-theme="light"] .open-with-btn {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: #fbfbfb;
+  color: var(--text-1, #1b1b1b);
+}
+
+body.light-theme .open-with-btn:hover,
+[data-theme="light"] .open-with-btn:hover {
+  background: #f0f0f0;
+}
+
+body.light-theme .open-with-btn.primary,
+[data-theme="light"] .open-with-btn.primary {
+  background: var(--accent, #005fb7);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+

@@ -1,0 +1,90 @@
+/* ==========================================================================
+   4. Cut Item Dimmed State
+   ========================================================================== */
+
+.cut {
+  opacity: 0.55 !important;
+  transition: opacity 120ms ease-out;
+}
+
+.cut .thumb,
+.cut .rico {
+  filter: grayscale(20%);
+}
+
+
+/* ==========================================================================
+   5. Action Toast Notifications
+   ========================================================================== */
+
+.action-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--solid-base, rgba(32, 32, 32, 0.88));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--surface-stroke, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  color: var(--text-1, #ffffff);
+  font-family: var(--font, "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif);
+  font-size: 13px;
+  z-index: 10001;
+  opacity: 0;
+  transform: translateY(16px);
+  pointer-events: none;
+  transition: opacity 200ms cubic-bezier(0.1, 0.9, 0.2, 1.0), transform 200ms cubic-bezier(0.1, 0.9, 0.2, 1.0);
+}
+
+.action-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.action-toast-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #60cdff);
+}
+
+.action-toast-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.action-toast-msg {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+/* Light theme support for Action Toasts */
+body.light-theme .action-toast,
+[data-theme="light"] .action-toast {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  color: var(--text-1, #1b1b1b);
+}
+
+body.light-theme .action-toast-icon,
+[data-theme="light"] .action-toast-icon {
+  color: var(--accent, #005fb7);
+}
+
+/* Wave C: Comprehensive WinUI 3 Settings Dialog Overhaul */
+/* Strict typography constraint: zero em dashes and zero en dashes. */
+

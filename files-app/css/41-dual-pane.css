@@ -1,0 +1,107 @@
+/* Wave 2: Dual Pane / Split View (P08) for AuraDE Files */
+/* Strict typography constraint: zero em dashes and zero en dashes. */
+
+/* Main dual pane flex container filling #filearea */
+.dual-pane-container {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* Base shell pane */
+.shell-pane {
+  flex: 1 1 0%;
+  min-width: 120px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  position: relative;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+  outline: none;
+}
+
+/* Active pane: elevated with accent border and card shadow */
+.shell-pane.active-pane {
+  border-color: var(--accent, #60cdff);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  z-index: 2;
+  background: var(--bg-card, #272727);
+  opacity: 1;
+}
+
+/* Inactive pane: subtle border and slight dimming */
+.shell-pane.inactive-pane {
+  border-color: var(--border-subtle, rgba(255, 255, 255, 0.08));
+  box-shadow: none;
+  z-index: 1;
+  opacity: 0.88;
+}
+
+/* Draggable splitter divider between left and right panes */
+.pane-splitter {
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+/* Splitter visual indicator line */
+.pane-splitter::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+/* Highlight splitter line on hover and when dragging */
+.pane-splitter:hover::after,
+.pane-splitter.dragging::after {
+  background: var(--accent, #60cdff);
+}
+
+/* Scrollable container for pane content */
+.pane-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Container override on #filearea when dual pane is active */
+#filearea.dual-pane-active,
+.filearea.dual-pane-active {
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: row !important;
+  padding: 0 !important;
+}
+
+/* Cursor and selection lock when resizing */
+body.dual-pane-resizing,
+body.dual-pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+

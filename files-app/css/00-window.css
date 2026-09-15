@@ -1,0 +1,834 @@
+/* :root: merged into the later definition of the same selector, which already won. */
+/* :root[data-theme="light"]: merged into the later definition of the same selector, which already won. */
+
+* { box-sizing:border-box; }
+html {height:100%; }
+body {
+  margin:0; font-family:var(--font); font-size:14px; color:var(--text-1);
+  background:var(--desktop); display:flex; align-items:center;
+  justify-content:center; -webkit-font-smoothing:antialiased; height:100%;
+}
+
+/* ---- window ---- */
+.win {
+  width:1180px; height:800px; border-radius:8px; overflow:hidden;
+  display:flex; flex-direction:column;
+  background:var(--solid-base);
+  box-shadow:0 32px 64px rgba(0,0,0,.42), 0 0 0 1px var(--surface-stroke);
+  position:relative;
+}
+
+/* Shelf. A pane the width of the reference's, on the same side as the
+   details pane and never at the same time as nothing: both can be open. */
+.shelf {
+  width:240px; flex:none; display:flex; flex-direction:column;
+  background:var(--card); border-left:1px solid var(--card-stroke);
+  overflow:hidden;
+}
+.shelf.drop { box-shadow:inset 0 0 0 2px var(--accent); }
+.shelf-head { padding:12px 12px 0; }
+.shelf-title {
+  text-align:center; font-size:13px; color:var(--text-3); padding-bottom:8px;
+}
+.shelf-div { height:1px; background:var(--divider); }
+.shelf-empty {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:16px; padding:0 16px; color:var(--text-3);
+}
+.shelf-art { width:64px; height:44px; opacity:.7; }
+.shelf-empty p {
+  margin:0; font-size:12px; line-height:17px; text-align:center;
+}
+.shelf-list { flex:1; overflow-y:auto; padding:4px 8px; }
+.shelf-list:empty { flex:0; padding:0; }
+.shelf-item {
+  display:flex; align-items:center; gap:8px; min-height:36px;
+  padding:0 6px; border-radius:var(--r-ctl); cursor:default;
+}
+.shelf-item:hover { background:var(--subtle-2); }
+.shelf-item.sel { background:var(--sel-fill); }
+.shelf-ico { width:16px; height:16px; flex:none; display:flex; }
+.shelf-ico svg { width:16px; height:16px; }
+.shelf-name {
+  flex:1; min-width:0; font-size:13px; color:var(--text-1);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.shelf-x {
+  width:20px; height:20px; flex:none; border:0; background:transparent;
+  color:var(--text-3); border-radius:var(--r-ctl); cursor:pointer;
+  font-size:14px; line-height:1; opacity:0;
+}
+.shelf-item:hover .shelf-x, .shelf-x:focus { opacity:1; }
+.shelf-x:hover { background:var(--subtle-2); color:var(--text-1); }
+.shelf-foot { padding:12px 12px 8px; }
+.shelf-link {
+  display:block; width:100%; margin-top:8px; padding:4px; border:0;
+  background:transparent; color:var(--accent); font:inherit; font-size:12px;
+  cursor:pointer; border-radius:var(--r-ctl);
+}
+.shelf-link:hover { background:var(--subtle-2); }
+.shelf-menu { right:12px; bottom:44px; top:auto; }
+
+/* Customization tab. One card, a chosen-icon row and the contact sheet, in
+   the same order the reference puts them. */
+.cust-card {
+  padding:0 0 12px; border-radius:var(--r-card);
+  background:var(--card); border:1px solid var(--card-stroke);
+}
+.cust-head {
+  display:flex; align-items:center; gap:8px; padding:12px 12px 8px;
+}
+.cust-title { flex:1; font-size:13px; color:var(--text-1); }
+.cust-row, .cust-file-row {
+  display:flex; align-items:center; gap:8px; padding:8px 12px 0;
+}
+.cust-path, .cust-file {
+  flex:1; min-width:0; height:30px; padding:0 8px;
+  border:1px solid var(--control-stroke); background:var(--control-fill);
+  border-radius:var(--r-ctl); color:var(--text-1); font:inherit;
+  font-size:13px; outline:none;
+}
+.cust-file:focus { border-color:var(--accent); }
+.cust-path { color:var(--text-2); }
+.cust-note {
+  margin:8px 12px 0; padding:8px 10px; font-size:12px; line-height:17px;
+  color:var(--text-2); background:var(--subtle-3);
+  border-left:2px solid var(--accent); border-radius:var(--r-ctl);
+}
+.cust-grid {
+  display:grid; gap:6px; padding:12px 12px 0; overflow-y:auto;
+  max-height:236px;
+  grid-template-columns:repeat(auto-fill, minmax(52px, 1fr));
+}
+.cust-ico {
+  display:flex; align-items:center; justify-content:center;
+  width:52px; height:52px; padding:8px; border-radius:var(--r-ctl);
+  background:transparent; border:1px solid transparent; cursor:pointer;
+}
+.cust-ico:hover { background:var(--subtle-2); }
+.cust-ico.on { background:var(--sel-fill); border-color:var(--accent); }
+.cust-ico svg { width:32px; height:32px; }
+
+/* ---- Mica ----------------------------------------------------------------
+   The backdrop is the desktop wallpaper, blurred past legibility and tinted,
+   so the window chrome takes the colour of what is behind it without ever
+   showing it. Two layers: the sample, and the tint over it. The tint alpha is
+   what separates the materials, and at Solid it is opaque, which is why Solid
+   needs no special case anywhere else.
+   The sample is 64 pixels wide. Upscaled under a 64px blur there is nothing
+   in a larger one to see, and this keeps the whole backdrop under two
+   kilobytes. -------------------------------------------------------------- */
+.win > * { position:relative; z-index:1; }
+.win::before, .win::after {
+  content:''; position:absolute; inset:0; z-index:0; pointer-events:none;
+}
+.win::before {
+  background-image:var(--mica-sample, none);
+  background-size:cover;
+  background-position:var(--mica-x, 50%) var(--mica-y, 50%);
+  filter:blur(var(--mica-blur, 0px)) saturate(var(--mica-sat, 1));
+  /* The blur softens the edges of its own layer, so it is drawn oversized
+     and the soft border is cropped away by the window's overflow. */
+  transform:scale(1.3);
+}
+.win::after {
+  background:var(--mica-tint, var(--solid-base));
+  opacity:var(--mica-a, 1);
+}
+/* At anything but Solid the title bar and the sidebar are the mica surface
+   itself rather than a colour painted on top of it. --sidebar-bg has to be
+   named here as well: it is declared as var(--mica) on :root, so it was
+   already substituted there and overriding --mica further down never reaches
+   it. The file area stays a translucent card, which is what gives the content
+   its edge against the backdrop. */
+html:not([data-material="solid"]) .win {
+  --mica:transparent; --sidebar-bg:transparent;
+}
+html[data-material="mica"] {
+  --mica-a:.84; --mica-blur:64px; --mica-sat:1.7;
+}
+html[data-material="micaalt"] {
+  --mica-a:.91; --mica-blur:88px; --mica-sat:1.15;
+}
+html[data-material="acrylic"] {
+  --mica-a:.70; --mica-blur:26px; --mica-sat:2;
+}
+html[data-material="solid"] {
+  --mica-a:1; --mica-blur:0px; --mica-sat:1;
+}
+
+/* ---- tab strip ---- */
+.titlebar { height:40px; display:flex; align-items:flex-end; padding-left:8px;
+  flex:none; background:var(--mica); }
+.tabs { display:flex; align-items:flex-end; gap:0; flex:1; min-width:0; }
+/* .tab: merged into the later definition of the same selector, which already won. */
+.tico { display:flex; align-items:center; flex:none; width:16px; height:16px; }
+/* .tab .tname: merged into the later definition of the same selector, which already won. */
+/* .tab.active: merged into the later definition of the same selector, which already won. */
+.tab.active::before { content:""; position:absolute; left:-4px; bottom:0; width:4px; height:4px;
+  background:radial-gradient(circle at 0 0, transparent 4px, var(--layer-mica-alt) 4px); pointer-events:none; }
+.tab.active::after { content:""; position:absolute; right:-4px; bottom:0; width:4px; height:4px;
+  background:radial-gradient(circle at 4px 0, transparent 4px, var(--layer-mica-alt) 4px); pointer-events:none; }
+/* .tab:not(.active):hover: merged into the later definition of the same selector, which already won. */
+.tab:not(.active)::after { content:""; position:absolute; right:0; top:8px; bottom:8px;
+  width:1px; background:var(--divider); }
+/* .tab .x: merged into the later definition of the same selector, which already won. */
+/* .tab .x:hover: merged into the later definition of the same selector, which already won. */
+/* .newtab: merged into the later definition of the same selector, which already won. */
+/* .newtab:hover: merged into the later definition of the same selector, which already won. */
+/* .newtab:active: merged into the later definition of the same selector, which already won. */
+.caption { display:flex; flex:none; align-self:flex-start; }
+.caption b { width:46px; height:32px; display:grid; place-items:center; font-weight:400;
+  color:var(--text-2); font-size:10px; transition:background-color 83ms ease-out, color 83ms ease-out; }
+.caption b:last-child:hover { background:#c42b1c; color:#fff; }
+
+/* ---- address bar ---- */
+.addressbar { height:48px; flex:none; padding:0 4px; display:flex; align-items:center; gap:4px;
+  background:var(--layer-mica-alt); }
+.nav { display:flex; gap:4px; }
+.nbtn { width:32px; height:32px; border:0; background:none; border-radius:var(--r-ctl);
+  display:grid; place-items:center; cursor:pointer;
+  transition:background-color 83ms ease-out; }
+.nbtn:hover { background:var(--subtle-2); }
+.nbtn:active { background:var(--subtle-3); }
+.nbtn.pane { width:36px; }
+.nbtn.off svg path { fill:var(--text-3); opacity:.45; }
+
+.omnibar { flex:1; min-width:0; height:36px; border-radius:18px;
+  background:var(--control-fill); display:flex; align-items:center; outline:none;
+  box-shadow:0 0 0 1px var(--control-stroke), 0 1px 0 var(--control-stroke);
+  transition:box-shadow 83ms ease-out, background-color 83ms ease-out; }
+.omnibar:hover { background:var(--subtle-2); }
+.omnibar:focus-within { background:var(--control-fill);
+  box-shadow:0 0 0 1px var(--control-stroke), 0 2px 0 0 var(--accent); }
+.crumbs { flex:1; min-width:0; display:flex; align-items:center; padding-left:6px; gap:2px;
+  overflow:hidden; }
+.crumb { display:flex; align-items:center; gap:6px; padding:0 6px; height:24px;
+  border-radius:2px; font-size:12px; color:var(--text-2); white-space:nowrap;
+  transition:background-color 83ms ease-out; }
+.crumb:first-child { border-radius:16px 2px 2px 16px; padding-left:8px; }
+.crumb.last { color:var(--text-1); }
+.crumb:hover { background:var(--subtle-2); }
+.csep { opacity:.5; display:grid; place-items:center; flex:none; margin:0 2px; }
+.cwrap { position:relative; display:flex; align-items:center; flex:none; }
+.cchev {
+  width:20px; height:20px; border:0; background:none; border-radius:var(--r-ctl);
+  display:grid; place-items:center; cursor:pointer; color:var(--text-3);
+  transition:background-color 83ms ease-out;
+}
+.cchev:hover { background:var(--subtle-2); color:var(--text-1); }
+.cwrap .menu {
+  top:calc(100% + 4px); left:0; max-height:300px; overflow:auto; min-width:200px;
+}
+
+/* ---- list layout (third view next to grid and details) ---- */
+.list { display:flex; flex-direction:column; padding:4px 0 8px; }
+.lrow {
+  min-height:28px; display:flex; align-items:center; gap:10px; padding:1px 12px;
+  border-radius:var(--r-ctl); margin:0 4px; font-size:14px; cursor:default;
+  user-select:none; transition:background-color 83ms ease-out;
+}
+.lrow:hover { background:var(--subtle-2); }
+.lrow.sel { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.lrow .lname {
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:pre;
+}
+
+/* ---- cards layout (large tiles) ---- */
+.cards { display:flex; flex-wrap:wrap; padding:12px 8px; align-content:flex-start; }
+.tile {
+  width:168px; padding:12px 8px; border-radius:var(--r-ctl);
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  border:1px solid transparent; outline:none;
+  transition:background-color 83ms ease-out, border-color 83ms ease-out;
+}
+.tile:hover { background:var(--subtle-2); }
+.tile.sel {
+  background:color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color:var(--accent);
+}
+.tile .thumb { height:96px; display:grid; place-items:center; }
+.tile .art { width:84px; height:84px; filter:drop-shadow(0 1px 1px rgba(0,0,0,.28)); }
+.tile .thumbimg { max-width:84px; max-height:84px; }
+.tile .cname {
+  font-size:13px; max-width:152px; text-align:center;
+  overflow:hidden; text-overflow:ellipsis; white-space:pre;
+}
+.tile .tsub { font-size:12px; color:var(--text-3); }
+
+/* ---- columns layout (Miller columns) ---- */
+.cols { display:flex; gap:8px; padding:8px; overflow-x:auto; min-height:100%; }
+.col {
+  width:230px; flex:none; display:flex; flex-direction:column;
+  background:var(--card-2); border:1px solid var(--card-stroke);
+  border-radius:var(--r-ctl); overflow-x:hidden; overflow-y:auto; align-self:flex-start;
+  max-height:100%;
+}
+.col-h {
+  padding:8px 12px; font-size:12px; font-weight:600; color:var(--text-3);
+  border-bottom:1px solid var(--divider); flex:none; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
+}
+.crow {
+  min-height:32px; display:flex; align-items:center; gap:10px; padding:2px 12px;
+  font-size:14px; cursor:default; user-select:none;
+  transition:background-color 83ms ease-out;
+}
+.crow:hover { background:var(--subtle-2); }
+.crow.sel { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.crow .lname {
+  flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:pre;
+}
+.omodes { display:flex; align-items:center; padding-right:2px; }
+.omode { width:46px; height:34px; border-radius:17px; border:0; background:none;
+  display:grid; place-items:center; cursor:pointer; color:var(--text-1);
+  transition:background-color 83ms ease-out; }
+.omode:hover { background:var(--subtle-2); }
+.osep { width:1px; height:20px; background:var(--divider); margin:0 4px; }
+
+/* ---- body split ---- */
+.body { flex:1; min-height:0; display:flex; }
+/*@@sidebar_css@@*/
+
+/* ---- content column ---- */
+.content { flex:1; min-width:0; display:flex; flex-direction:column;
+  padding:0 8px 0 0; }
+.toolbar { flex:none; height:48px; margin:0 0 4px; display:flex; align-items:center;
+  justify-content:space-between; padding:4px; gap:4px;
+  background:var(--card-2); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay); }
+.tbgroup { display:flex; align-items:center; gap:4px; min-width:0; }
+.tbtn { height:32px; min-width:32px; padding:0 4px; border:0; background:none;
+  border-radius:var(--r-ctl); display:flex; align-items:center; justify-content:center;
+  gap:6px; cursor:pointer; color:var(--text-1); font:inherit; font-size:14px;
+  transition:background-color 83ms ease-out, box-shadow 83ms ease-out; }
+.tbtn:hover { background:var(--subtle-2); box-shadow:0 0 0 1px var(--control-stroke); }
+.tbtn:active { background:var(--subtle-3); box-shadow:none; }
+.tbtn.wide { padding:0 10px 0 8px; }
+.tbtn.split { min-width:46px; padding:0 2px; }
+.caret { opacity:.75; margin-left:2px; }
+.tsep { width:1px; height:20px; background:var(--divider); margin:0 2px; }
+.tbtn[aria-pressed="true"] { background:var(--accent); color:var(--on-accent); }
+/* A pressed button paints its glyph in the on-accent colour and has to keep
+   the layers apart while doing it. Filling every path with one flat colour
+   turns a framed icon into a solid block, which is what the details pane
+   button became: its frame, its panel and its backing are three layers. */
+.tbtn[aria-pressed="true"] {
+  --ico-base:var(--on-accent);
+  --ico-alt:color-mix(in srgb, var(--on-accent) 30%, transparent);
+  --ico-accent:var(--on-accent);
+  --ico-contrast:var(--accent);
+}
+.tbtn[aria-pressed="true"]:hover { background:var(--accent-hover, var(--accent)); }
+.tbtn.dis, .tbtn[disabled] { opacity:.36; pointer-events:none; }
+.tbtn.dis svg, .tbtn[disabled] svg { filter:grayscale(1); }
+
+.statemsg { position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:8px; pointer-events:none; }
+.stateglyph { opacity:.75; }
+.statetitle { font-size:14px; color:var(--text-1); }
+.statebody { font-size:14px; color:var(--text-2); text-align:center;
+  max-width:340px; }
+.filearea { position:relative; flex:1; min-height:0; background:var(--card);
+  border:1px solid var(--card-stroke); border-radius:var(--r-overlay);
+  overflow:auto; margin-bottom:4px; }
+
+/* ---- grid layout ---- */
+.grid { display:flex; flex-wrap:wrap; padding:8px 7px; align-content:flex-start; }
+.cell { width:var(--cell-w, 120px); margin:0 4px; padding:0 0 6px; border-radius:var(--r-ctl);
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  border:1px solid transparent; outline:none;
+  transition:background-color 83ms ease-out, border-color 83ms ease-out; }
+.cell:hover { background:var(--subtle-2); }
+.cell.sel { background:color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color:var(--accent); }
+.thumb { height:var(--cell-thumb, 96px); display:grid; place-items:center; }
+.art { width:var(--cell-art, 66px); height:var(--cell-art, 66px);
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.28)); }
+/* Grid sizes. One step is the icon; the cell and its thumbnail box follow it,
+   so a size is three numbers in proportion rather than three that drift. */
+html[data-gridsize="small"] {
+  --cell-w:92px; --cell-thumb:64px; --cell-art:44px;
+}
+html[data-gridsize="medium"] {
+  --cell-w:120px; --cell-thumb:96px; --cell-art:66px;
+}
+html[data-gridsize="large"] {
+  --cell-w:168px; --cell-thumb:136px; --cell-art:98px;
+}
+/* Contain, not cover. The tile is square and photographs are not, and a
+   thumbnail that crops to fill has told you something false about the file. */
+/* A picture sits over the glyph that is always under it, so hiding the
+   picture uncovers a file icon rather than an empty square. */
+.thumb { position:relative; }
+.thumb .art { position:absolute; }
+.thumb .thumbimg { position:relative; z-index:1; }
+html.no-thumbs .thumbimg { display:none; }
+.thumbimg {
+  max-width:76px; max-height:76px; object-fit:contain; display:block;
+  border-radius:3px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35));
+}
+.cname { font-size:12px; line-height:16px; color:var(--text-1); text-align:center;
+  max-width:112px; overflow:hidden; text-overflow:ellipsis; white-space:pre; }
+
+/* ---- details layout (hidden by default) ---- */
+.rows { display:flex; flex-direction:column; }
+[hidden] { display:none !important; }
+.lay { display:inline-flex; }
+.dheader { height:40px; display:flex; align-items:center; padding:0 12px;
+  border-bottom:1px solid var(--divider); flex:none; box-sizing:border-box; }
+.dh-col { font-size:12px; font-weight:600; color:var(--text-3); display:flex;
+  align-items:center; gap:6px; user-select:none; cursor:pointer;
+  transition:color 83ms ease-out; }
+.dh-col:hover { color:var(--text-1); }
+.dh-name { flex:1 1 auto; min-width:var(--col-name, 180px); padding-left:30px; }
+.dh-tag { width:var(--col-tag, 140px); flex:none; }
+.dh-git { width:var(--col-git, 96px); flex:none; }
+.dh-when { width:var(--col-when, 200px); flex:none; }
+.dh-kind { width:var(--col-kind, 150px); flex:none; }
+.dh-size { width:var(--col-size, 100px); flex:none; justify-content:flex-end; text-align:right; }
+/* the indicator rides the column's right edge, not the label */
+.dh-sort { width:8px; height:5px; flex:none; margin-left:auto; padding-left:8px;
+  box-sizing:content-box; color:var(--text-1); }
+.dh-size .dh-sort { margin-left:8px; padding-left:0; }
+.dh-sort.desc { transform:rotate(180deg); }
+/* a column boundary, as in the running app */
+.dh-col + .dh-col { border-left:1px solid var(--divider); padding-left:12px; }
+/* The resize grip rides the right edge of its own column and overhangs it,
+   so the target is wider than the line a person sees. */
+.dh-grip {
+  width:9px; flex:none; align-self:stretch; margin-right:-11px; cursor:col-resize;
+  position:relative; z-index:2; margin-left:auto;
+}
+.dh-grip::after {
+  content:''; position:absolute; left:4px; top:10px; bottom:10px; width:1px;
+  background:transparent; transition:background 83ms ease-out;
+}
+.dh-grip:hover::after, .dh-grip.dragging::after {
+  background:var(--accent); left:3px; width:2px; top:6px; bottom:6px;
+}
+.dh-size .dh-grip { margin-right:-9px; }
+body.colresizing { cursor:col-resize; user-select:none; }
+
+.dbody { padding:4px 0 8px 0; }
+.rows .row { height:36px; display:flex; align-items:center; padding:0 12px;
+  border-radius:var(--r-ctl); margin:1px 4px; font-size:14px;
+  transition:background-color 83ms ease-out; cursor:default; user-select:none; }
+.rows .row:hover { background:var(--subtle-2); }
+.rows .row.sel { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.cell.kbd,.row.kbd,.lrow.kbd,.tile.kbd,.crow.kbd {
+  outline:2px solid var(--accent); outline-offset:-2px; }
+.c-name { flex:1 1 auto; min-width:var(--col-name, 180px); display:flex; align-items:center;
+  gap:10px; overflow:hidden; }
+.c-name span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:pre; }
+.rico { width:16px; height:16px; position:relative; display:grid; place-items:center; flex:none; }
+.ricobox { width:16px; height:16px; display:grid; place-items:center; transition:opacity 83ms ease-out; }
+.ricobox .art { width:16px; height:16px; filter:none; }
+.ricobox svg { width:16px; height:16px; }
+.rchk { width:16px; height:16px; display:grid; place-items:center; position:absolute; inset:0; opacity:0;
+  transition:opacity 83ms ease-out; }
+.chk-bg { fill:var(--control-fill); stroke:var(--control-stroke); stroke-width:1; }
+.chk-tick { display:none; }
+.rows .row:hover .rchk { opacity:1; }
+.rows .row:hover .ricobox { opacity:0; }
+.rows .row.sel .rchk { opacity:1; }
+.rows .row.sel .ricobox { opacity:0; }
+.rows .row.sel .chk-bg { fill:var(--accent); stroke:var(--accent); }
+.rows .row.sel .chk-tick { display:block; }
+.c-tag { width:var(--col-tag, 140px); flex:none; display:flex; align-items:center; gap:4px;
+  padding-left:12px; box-sizing:border-box; }
+/* Git status. Hidden outside a repository rather than shown empty: a column
+   of blanks says a repository is there and has nothing to report, which is a
+   different claim from there being no repository. */
+.c-git {
+  width:var(--col-git, 96px); flex:none; padding-left:12px;
+  box-sizing:border-box; font-size:12px; color:var(--text-2);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.c-git[data-git="M"] { color:var(--accent); }
+.c-git[data-git="A"] { color:#6ccb5f; }
+.c-git[data-git="D"] { color:#e06c6c; }
+.c-git[data-git="U"] { color:#e0a34a; }
+.c-git[data-git="?"] { color:var(--text-3); }
+html:not([data-git="1"]) .c-git,
+html:not([data-git="1"]) .dh-git { display:none; }
+.c-when { width:var(--col-when, 200px); flex:none; padding-left:12px; box-sizing:border-box;
+  color:var(--text-2); font-size:12px; opacity:0.6; }
+.c-kind { width:var(--col-kind, 150px); flex:none; padding-left:12px; box-sizing:border-box;
+  color:var(--text-2); font-size:12px; opacity:0.6; }
+.c-size { width:var(--col-size, 100px); flex:none; text-align:right; color:var(--text-2); font-size:12px; opacity:0.6;
+  font-variant-numeric:tabular-nums; }
+
+/* ---- status bar ---- */
+.status { min-height:32px; flex:none; padding:0 8px; display:flex; align-items:center;
+  gap:8px; border-top:1px solid var(--divider); font-size:12px; color:var(--text-2);
+  background:transparent; }
+.status .div { width:1px; height:18px; background:var(--divider); }
+.status .spacer { flex:1; }
+.sbtn { height:24px; padding:0 8px; border:0; background:none; border-radius:var(--r-ctl);
+  display:flex; align-items:center; gap:8px; color:var(--text-2); font:inherit;
+  font-size:12px; cursor:pointer; }
+.sbtn:hover { background:var(--subtle-2); }
+.status .twrap { position:relative; }
+.status .twrap .menu { top:auto; bottom:calc(100% + 4px); right:0; }
+/* ---- flyout menus: toolbar dropdowns and context menus ---- */
+.twrap { position:relative; }
+.menu {
+  position:absolute; top:calc(100% + 4px); left:0; z-index:40;
+  min-width:230px; max-width:300px; padding:4px;
+  background:var(--solid-3); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay);
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+}
+.tbgroup.right .twrap .menu { left:auto; right:0; }
+/* .mi: merged into the later definition of the same selector, which already won. */
+/* .mi:hover: merged into the later definition of the same selector, which already won. */
+/* .mi.dis: merged into the later definition of the same selector, which already won. */
+/* .mi.dis:hover: merged into the later definition of the same selector, which already won. */
+.mi svg { flex:none; }
+/* .mi-ic: merged into the later definition of the same selector, which already won. */
+/* .mi-t: merged into the later definition of the same selector, which already won. */
+.mi-arrow {
+  width:8px; height:8px; flex:none; border-right:1.2px solid currentColor;
+  border-bottom:1.2px solid currentColor; transform:rotate(-45deg); opacity:.7;
+}
+/* .msep: merged into the later definition of the same selector, which already won. */
+.mhead { font-size:12px; font-weight:600; color:var(--text-3); padding:6px 10px 2px; }
+.ck { width:16px; height:16px; display:block; }
+.ck.on {
+  background:var(--accent);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3.2 3.2L12.5 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3.2 3.2L12.5 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+.menu.sub { display:none; top:-4px; left:calc(100% - 2px); }
+.mi.sub:hover > .menu.sub { display:block; }
+/* .ctx: every property this rule set was set again by the later .ctx, which
+   won. Deleted rather than merged, because there was nothing left to carry. */
+
+/* ---- filter row under the toolbar ---- */
+.frow {
+  flex:none; display:flex; gap:8px; margin:0 0 4px; padding:6px 8px;
+  background:var(--card-2); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay);
+}
+.frow input {flex:1; min-width:0; height:30px; padding:0 10px; font:inherit; font-size:14px;
+  color:var(--text-1); background:var(--control-fill);
+  border:1px solid var(--control-stroke); border-radius:var(--r-ctl); outline:none;
+}
+.frow input:focus, .osearch:focus, .opath:focus, .pal input:focus {
+  box-shadow:0 0 0 1px var(--control-stroke), 0 2px 0 0 var(--accent);
+}
+.arc-note {flex:1 1 100%; min-height:14px; font-size:12px; color:var(--text-2);}
+.arc-note.bad {color:#ff99a4;}
+.opath {
+  height:28px; margin-left:6px; display:block; flex:1; min-width:0;
+  padding:0 10px; font:inherit; font-size:14px; color:var(--text-1);
+  background:var(--control-fill); border:1px solid var(--control-stroke);
+  border-radius:var(--r-ctl); outline:none;
+}
+.osearch {
+  height:28px; margin-left:6px; display:block; flex:1; min-width:0;
+  padding:0 10px; font:inherit; font-size:14px; color:var(--text-1);
+  background:var(--control-fill); border:1px solid var(--control-stroke);
+  border-radius:var(--r-ctl); outline:none;
+}
+.rubberband-selection {
+  position:absolute; pointer-events:none; z-index:999;
+  border:1px solid var(--accent, #0078d4);
+  background:color-mix(in srgb, var(--accent, #0078d4) 20%, transparent);
+  border-radius:2px;
+}
+#tb-context[hidden] { display:none !important; }
+
+/* Wave A Tabs, Wave B Menus, Wave C Settings */
+/* Wave A: Tabs (P09) - WinUI 3 Fluent Tabstrip Styling */
+/* Strict typography constraint: zero em dashes and zero en dashes. */
+
+/* :root: merged into the later definition of the same selector, which already won. */
+
+:root[data-theme="light"] {
+  --tab-bg-active:var(--layer-mica-alt); --tab-bg-hover:rgba(0, 0, 0, 0.04);
+  --tab-bg-active-press:rgba(0, 0, 0, 0.03);
+  --tab-accent:var(--accent, #005fb7); --tab-close-hover:rgba(0, 0, 0, 0.06);
+  --tab-close-active:rgba(0, 0, 0, 0.1); --ctx-bg:rgba(255, 255, 255, 0.96);
+  --ctx-border:rgba(0, 0, 0, 0.12);
+  --ctx-shadow:0 8px 24px rgba(0, 0, 0, 0.18);
+  --ctx-item-hover:rgba(0, 0, 0, 0.06); --ctx-sep:rgba(0, 0, 0, 0.08);
+  --solid-base:#f3f3f3; --solid-2:#eee; --solid-3:#fafafa; --mica:#e6e6e6;
+  --mica-tint:#e6e6e6;
+  --layer-mica-alt:#f3f3f3; --sidebar-bg:var(--layer-mica-alt);
+  --card:rgba(252,252,252,.7529); --card-2:rgba(246,246,246,.50);
+  --card-stroke:rgba(0,0,0,.0578); --surface-stroke:rgba(117,117,117,.40);
+  --control-stroke:rgba(0,0,0,.0578); --divider:rgba(0,0,0,.0578);
+  --flyout-stroke:rgba(0,0,0,.0578);
+  --subtle-2:rgba(0,0,0,.0373); --subtle-3:rgba(0,0,0,.0241);
+  --control-fill:rgba(255,255,255,.70); --text-1:rgba(0,0,0,.8956);
+  --text-2:rgba(0,0,0,.6063); --text-3:rgba(0,0,0,.4458); --accent:#005fb7;
+  --accent-base:#0078d4;
+  --on-accent:#fff; --sel-fill:#fdfbfb; --sel-stroke:rgba(0,0,0,.055);
+  --ico-base:rgba(22,22,22,.859); --ico-alt:rgba(240,240,240,.40);
+  --doc-face:#fff; --doc-edge:rgba(0,0,0,.18); --doc-fold:#dcdce0;
+  --doc-rule:rgba(0,0,0,.28); --ico-contrast:#fff; --pl-ink:#1b1b1f;
+  --desktop:#cfd6e4;
+}
+
+[data-theme="light"] .tab,
+body.light-theme .tab {
+  color: var(--text-2, rgba(0, 0, 0, 0.65));
+}
+
+[data-theme="light"] .tab:not(.active):hover,
+body.light-theme .tab:not(.active):hover {
+  color: var(--text-1, rgba(0, 0, 0, 0.9));
+}
+
+[data-theme="light"] .tab.active,
+body.light-theme .tab.active {
+  color: var(--text-1, rgba(0, 0, 0, 0.9));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] #ctx-tab,
+body.light-theme #ctx-tab {
+  color: var(--text-1, rgba(0, 0, 0, 0.9));
+}
+
+[data-theme="light"] #ctx-tab .mi,
+body.light-theme #ctx-tab .mi {
+  color: var(--text-1, rgba(0, 0, 0, 0.9));
+}
+
+/* Tab strip container matching WinUI 3 Fluent tabs */
+#tabstrip {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: row;
+  flex-shrink: 0;
+  height: 36px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  position: relative;
+  padding: 0 4px;
+  gap: 0;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+#tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual tabs */
+.tab {
+  min-width: 80px;
+  max-width: 240px;
+  flex: 1 1 240px;
+  height: var(--tab-height);
+  border-radius: var(--r-overlay) var(--r-overlay) 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  user-select: none;
+  cursor: default;
+  position: relative;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
+  border: 1px solid transparent;
+  border-bottom: none;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* Inactive tab hover and press states */
+.tab:not(.active):hover {
+  background: var(--tab-bg-hover);
+  color: var(--text-1, #ffffff);
+}
+
+.tab:not(.active):active {
+  background: var(--tab-bg-active-press);
+}
+
+/* Inactive tab vertical separator line */
+.tab:not(.active):not(:last-child)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--divider, rgba(255, 255, 255, 0.08));
+}
+
+/* Active tab elevation */
+.tab.active {
+  background:var(--tab-bg-active); color:var(--text-1, #ffffff);
+  font-weight:600; z-index:2;
+  box-shadow:1px 0 0 var(--control-stroke), -1px 0 0 var(--control-stroke);
+}
+
+/* Tab icon */
+.tab .tico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.tab .tico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* Tab title truncation with tooltip */
+.tab .tname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+/* Close button */
+.tab .x {
+  width:16px; height:16px; border-radius:4px; display:inline-flex;
+  align-items:center; justify-content:center; margin-left:auto;
+  flex-shrink:0; cursor:pointer; color:var(--text-1);
+  transition:background 0.15s ease, opacity 0.15s ease; place-items:center;
+  font-size:11px; line-height:1;
+}
+
+.tab .x svg {
+  display: block;
+  pointer-events: none;
+}
+
+/* Close button hover and active states */
+.tab .x:hover {
+  opacity:1; background:var(--tab-close-hover); color:var(--text-1);
+}
+
+.tab .x:active {
+  background: var(--tab-close-active);
+}
+
+/* Tab drag and drop indicators */
+.tab.dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+}
+
+.tab.drag-over-left {
+  box-shadow: -2px 0 0 0 var(--tab-accent) inset;
+}
+
+.tab.drag-over-right {
+  box-shadow: 2px 0 0 0 var(--tab-accent) inset;
+}
+
+/* New tab button */
+#btn-newtab {width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-2, rgba(255, 255, 255, 0.7));
+  margin-left: 2px;
+  flex-shrink: 0;
+  align-self: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.newtab {
+  width:32px; height:32px; border-radius:4px; display:inline-flex;
+  align-items:center; justify-content:center; background:transparent;
+  border:0; cursor:pointer; color:var(--text-2, rgba(255, 255, 255, 0.7));
+  margin-left:2px; flex-shrink:0; align-self:center;
+  transition:background 0.15s ease, color 0.15s ease; place-items:center;
+}
+
+#btn-newtab:hover,
+.newtab:hover {
+  background: var(--tab-bg-hover);
+  color: var(--text-1, #ffffff);
+}
+
+#btn-newtab:active,
+.newtab:active {
+  background: var(--tab-close-hover);
+}
+
+/* Tab context menu styling for #ctx-tab */
+#ctx-tab {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  background: var(--ctx-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 8px;
+  padding: 4px;
+  border: 1px solid var(--ctx-border);
+  box-shadow: var(--ctx-shadow);
+  color: var(--text-1, #ffffff);
+  box-sizing: border-box;
+}
+
+#ctx-tab[hidden] {
+  display: none !important;
+}
+
+#ctx-tab .mi {
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  color: var(--text-1, #ffffff);
+  transition: background 0.1s ease;
+}
+
+#ctx-tab .mi:hover {
+  background: var(--ctx-item-hover);
+}
+
+#ctx-tab .mi.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: default;
+}
+
+#ctx-tab .mi svg {
+  flex-shrink: 0;
+}
+
+#ctx-tab .mi .mi-t {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#ctx-tab .msep {
+  height: 1px;
+  background: var(--ctx-sep);
+  margin: 4px 6px;
+}
+
+/* Wave B: Menus and Actions (WinUI 3 Fluent Design System) */
+/* Typography constraint: zero em dashes and zero en dashes. */
+

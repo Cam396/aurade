@@ -1,0 +1,22 @@
+
+/* ---- shipped ---- */
+/* The prototype draws a 1180 by 800 window floating on a desktop, because
+   that is how the reference screenshot is framed and the only way to judge
+   the shadow and the corner radius. Shipped, the window IS the window: the
+   system window frame is the chrome, so the page fills it, keeps no radius
+   and casts no shadow, and there is no desktop left to see. Without this
+   the page is a fixed size box centred in a smaller frame and the top of
+   it, the tab strip and the toolbar, is clipped away with nothing to
+   scroll. This file is emitted only by the ship build. */
+body {
+  background:var(--solid-base); display:block; overflow:hidden;
+}
+.win {
+  width:100%; height:100%; border-radius:0; box-shadow:none;
+}
+
+/* The frame around the page already carries minimise, maximise and close,
+   and drawing a second set inside it is the page claiming a title bar it
+   does not own. The tab strip stays: those are the window's tabs, not the
+   system's. */
+.caption { display:none; }
