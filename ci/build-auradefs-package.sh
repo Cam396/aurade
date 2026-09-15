@@ -32,6 +32,11 @@ mkdir -p "${PACKAGE_SRC}/src"
 rsync -a --exclude target --exclude target-dev --exclude '*.before-*' \
   "${REPO_ROOT}/auradefs/workspace/" "${PACKAGE_SRC}/src/auradefs-src/"
 
+# makepkg builds in BUILDDIR, so ${srcdir} is under there and not beside the
+# PKGBUILD. The workspace was copied next to the PKGBUILD, which is the copy
+# the build has to read, so name it rather than leaving the PKGBUILD to guess
+# a path that BUILDDIR has already moved.
+export AURADEFS_SRC="${PACKAGE_SRC}/src/auradefs-src"
 export BUILDDIR="${WORKDIR}/build"
 export PKGDEST="${WORKDIR}/pkgdest"
 export SRCDEST="${WORKDIR}/srcdest"
