@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index 0a4019b..c3b3854 100644
+index 710304177bc6..ada24d537b6d 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-@@ -205,7 +205,16 @@ void InitializeDBus() {
+@@ -203,7 +203,16 @@ void InitializeDBus() {
    // Initialize Chrome dbus clients.
    dbus::Bus* bus = DBusThreadManager::Get()->GetSystemBus();
  
@@ -21,7 +21,7 @@ index 0a4019b..c3b3854 100644
    // NOTE: base::Feature is not initialized yet, so any non MultiProcessMash
    // dbus client initialization for Ash should be done in Shell::Init.
 diff --git a/chromeos/ash/components/dbus/shill/shill_clients.cc b/chromeos/ash/components/dbus/shill/shill_clients.cc
-index 23e6679..25c2bf6 100644
+index 23e6679b4a8f..25c2bf69d952 100644
 --- a/chromeos/ash/components/dbus/shill/shill_clients.cc
 +++ b/chromeos/ash/components/dbus/shill/shill_clients.cc
 @@ -47,6 +47,27 @@ void InitializeFakes() {
@@ -53,7 +53,7 @@ index 23e6679..25c2bf6 100644
    ShillThirdPartyVpnDriverClient::Shutdown();
    ShillServiceClient::Shutdown();
 diff --git a/chromeos/ash/components/dbus/shill/shill_clients.h b/chromeos/ash/components/dbus/shill/shill_clients.h
-index 54009a6..3e05cb0 100644
+index 54009a678880..3e05cb0dd04c 100644
 --- a/chromeos/ash/components/dbus/shill/shill_clients.h
 +++ b/chromeos/ash/components/dbus/shill/shill_clients.h
 @@ -19,6 +19,12 @@ COMPONENT_EXPORT(SHILL_CLIENT) void Initialize(dbus::Bus* system_bus);

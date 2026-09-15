@@ -1,7 +1,33 @@
+diff --git a/chromeos/ash/components/dbus/hermes/hermes_clients.cc b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
+index 880191984c8c..dcd650f83554 100644
+--- a/chromeos/ash/components/dbus/hermes/hermes_clients.cc
++++ b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
+@@ -11,10 +11,17 @@
+ namespace ash::hermes_clients {
+ 
+ void Initialize(dbus::Bus* system_bus) {
+-#if !defined(USE_REAL_DBUS_CLIENTS)
+-  if (!system_bus)
++  // AuraDE: the same fallback the flag used to compile out.
++  //
++  // ash_dbus_helper calls this unconditionally, with the bus from
++  // DBusThreadManager, which is null on generic Linux. Behind
++  // use_real_dbus_clients the early return above was compiled out and the
++  // DCHECK below became the abort instead, in a build with DCHECK_ALWAYS_ON.
++  // Hermes talks to eSIM hardware that no AuraDE target has, so fakes are the
++  // honest answer here rather than a workaround.
++  if (!system_bus) {
+     return InitializeFakes();
+-#endif
++  }
+   DCHECK(system_bus);
+   // The Hermes fake Manager client depends on fake Profile client
+   // to coordinate creating and managing of fake profile objects. The
 diff --git a/chromeos/dbus/init/initialize_dbus_client.h b/chromeos/dbus/init/initialize_dbus_client.h
+index 5f978f25455c..d025b8c97c6e 100644
 --- a/chromeos/dbus/init/initialize_dbus_client.h
 +++ b/chromeos/dbus/init/initialize_dbus_client.h
-@@ -15,7 +15,28 @@
+@@ -15,7 +15,28 @@ namespace chromeos {
  template <typename T>
  void InitializeDBusClient(dbus::Bus* bus) {
  #if defined(USE_REAL_DBUS_CLIENTS)
@@ -31,27 +57,3 @@ diff --git a/chromeos/dbus/init/initialize_dbus_client.h b/chromeos/dbus/init/in
  #else
    // TODO(hashimoto): Always use fakes after adding
    // use_real_dbus_clients=true to where needed. crbug.com/952745
-diff --git a/chromeos/ash/components/dbus/hermes/hermes_clients.cc b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
---- a/chromeos/ash/components/dbus/hermes/hermes_clients.cc
-+++ b/chromeos/ash/components/dbus/hermes/hermes_clients.cc
-@@ -11,10 +11,17 @@
- namespace ash::hermes_clients {
- 
- void Initialize(dbus::Bus* system_bus) {
--#if !defined(USE_REAL_DBUS_CLIENTS)
--  if (!system_bus)
-+  // AuraDE: the same fallback the flag used to compile out.
-+  //
-+  // ash_dbus_helper calls this unconditionally, with the bus from
-+  // DBusThreadManager, which is null on generic Linux. Behind
-+  // use_real_dbus_clients the early return above was compiled out and the
-+  // DCHECK below became the abort instead, in a build with DCHECK_ALWAYS_ON.
-+  // Hermes talks to eSIM hardware that no AuraDE target has, so fakes are the
-+  // honest answer here rather than a workaround.
-+  if (!system_bus) {
-     return InitializeFakes();
--#endif
-+  }
-   DCHECK(system_bus);
-   // The Hermes fake Manager client depends on fake Profile client
-   // to coordinate creating and managing of fake profile objects. The

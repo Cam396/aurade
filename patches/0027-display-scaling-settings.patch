@@ -1,5 +1,5 @@
 diff --git a/ash/display/cros_display_config.cc b/ash/display/cros_display_config.cc
-index 3030aeb6723c10b426bdae0256250cfdeee63e3d..49efc4ee00ed53ad743b32e918c8082ae6c4c10e 100644
+index 3030aeb6723c..49efc4ee00ed 100644
 --- a/ash/display/cros_display_config.cc
 +++ b/ash/display/cros_display_config.cc
 @@ -24,6 +24,7 @@
@@ -60,7 +60,7 @@ index 3030aeb6723c10b426bdae0256250cfdeee63e3d..49efc4ee00ed53ad743b32e918c8082a
  
    // Set the display mode. Note: if this returns an error, other properties
 diff --git a/ash/display/cursor_window_controller.cc b/ash/display/cursor_window_controller.cc
-index 48b9c13cf7974355f7ba24ec9f7d24ea520ca762..379387f6065ee5d4e15f85addceafed1fc55c999 100644
+index 69e09810d995..f5ef5e2a3179 100644
 --- a/ash/display/cursor_window_controller.cc
 +++ b/ash/display/cursor_window_controller.cc
 @@ -23,6 +23,7 @@
@@ -212,7 +212,7 @@ index 48b9c13cf7974355f7ba24ec9f7d24ea520ca762..379387f6065ee5d4e15f85addceafed1
    // support the inverted cursor feature.
    if (::features::IsAccessibilityInvertedMouseCursorEnabled() && is_inverted_) {
 diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
-index f010b52a70897fb8f03344e7f8a82fd50cc35cb1..d6f0fa28c91c80aa742cb35c0faaadb1f1dc836a 100644
+index f010b52a7089..d6f0fa28c91c 100644
 --- a/ash/display/display_configuration_controller.cc
 +++ b/ash/display/display_configuration_controller.cc
 @@ -52,6 +52,9 @@ display::DisplayPositionInUnifiedMatrix GetUnifiedModeShelfCellPosition() {
@@ -226,7 +226,7 @@ index f010b52a70897fb8f03344e7f8a82fd50cc35cb1..d6f0fa28c91c80aa742cb35c0faaadb1
  
    NOTREACHED();
 diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
-index 050fea7d427c4539020242d87f1f397b3b770d05..ddf94619fc8907a93f59d56e1a9cd720159e1646 100644
+index 050fea7d427c..ddf94619fc89 100644
 --- a/ash/display/root_window_transformers.cc
 +++ b/ash/display/root_window_transformers.cc
 @@ -106,6 +106,18 @@ class AshRootWindowTransformer : public RootWindowTransformer {
@@ -279,7 +279,7 @@ index 050fea7d427c4539020242d87f1f397b3b770d05..ddf94619fc8907a93f59d56e1a9cd720
      // |screen_bounds| is the unified desktop logical bounds.
      // Calculate the unified height scale value, and apply the same scale on the
 diff --git a/ash/display/window_tree_host_manager.cc b/ash/display/window_tree_host_manager.cc
-index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb101a63b6 100644
+index eaa350b7b029..9d5de8e0abdc 100644
 --- a/ash/display/window_tree_host_manager.cc
 +++ b/ash/display/window_tree_host_manager.cc
 @@ -30,12 +30,16 @@
@@ -405,7 +405,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    }
  
    void Restore() {
-@@ -377,16 +463,18 @@ void WindowTreeHostManager::Shutdown() {
+@@ -381,16 +467,18 @@ void WindowTreeHostManager::Shutdown() {
    for (aura::Window::Windows::iterator iter = root_windows.begin();
         iter != root_windows.end(); ++iter) {
      RootWindowController* rwc = RootWindowController::ForWindow(*iter);
@@ -427,7 +427,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    delete primary_rwc;
  }
  
-@@ -434,8 +522,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
+@@ -438,8 +526,9 @@ bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
  aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
    // If |primary_tree_host_for_replace_| is set, it means |primary_display_id|
    // is kInvalidDisplayId.
@@ -438,7 +438,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    return GetRootWindowForDisplayId(primary_display_id);
  }
  
-@@ -447,8 +536,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
+@@ -451,8 +540,9 @@ aura::Window* WindowTreeHostManager::GetRootWindowForDisplayId(int64_t id) {
  AshWindowTreeHost* WindowTreeHostManager::GetAshWindowTreeHostForDisplayId(
      int64_t display_id) {
    const auto host = window_tree_hosts_.find(display_id);
@@ -449,7 +449,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    return mirror_window_controller_->GetAshWindowTreeHostForDisplayId(
        display_id);
  }
-@@ -458,8 +548,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
+@@ -462,8 +552,9 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
    for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
         it != window_tree_hosts_.end(); ++it) {
      DCHECK(it->second);
@@ -460,7 +460,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    }
    return windows;
  }
-@@ -471,8 +562,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
+@@ -475,8 +566,9 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
         it != window_tree_hosts_.end(); ++it) {
      RootWindowController* controller =
          RootWindowController::ForWindow(GetWindow(it->second));
@@ -471,7 +471,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    }
    return controllers;
  }
-@@ -580,8 +672,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
+@@ -584,8 +676,9 @@ void WindowTreeHostManager::CreateDisplay(const display::Display& display) {
          display_info.bounds_in_native());
      SetDisplayPropertiesOnHost(ash_host, display);
    } else {
@@ -482,7 +482,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
      DCHECK(!window_tree_hosts_.empty());
      AshWindowTreeHost* ash_host =
          AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
-@@ -604,8 +697,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
+@@ -608,8 +701,9 @@ void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
    // Delete most of root window related objects, but don't delete
    // root window itself yet because the stack may be using it.
    controller->Shutdown(primary_root_after_host_deletion);
@@ -493,7 +493,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    DCHECK_EQ(primary_root_after_host_deletion, Shell::GetPrimaryRootWindow());
    if (Shell::GetRootWindowForNewWindows() == root_being_deleted) {
      Shell::SetRootWindowForNewWindows(primary_root_after_host_deletion);
-@@ -768,8 +862,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
+@@ -772,8 +866,12 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
        display::Screen::Get()->GetDisplayNearestWindow(host->window());
  
    display::DisplayManager* display_manager = GetDisplayManager();
@@ -508,7 +508,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
      mirror_window_controller_->UpdateWindow();
      cursor_window_controller_->UpdateContainer();
    }
-@@ -785,8 +883,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
+@@ -789,8 +887,9 @@ void WindowTreeHostManager::OnDisplaySecurityMaybeChanged(int64_t display_id,
                                                            bool secure) {
    AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(display_id);
    // No host for internal display in docked mode.
@@ -519,7 +519,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
  
    ui::Compositor* compositor = host->AsWindowTreeHost()->compositor();
    if (compositor->output_is_secure() == secure) {
-@@ -815,8 +914,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
+@@ -819,8 +918,9 @@ void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
    // display is drawn through compositor mirroring). Therefore, it's
    // unnecessary to handle the cursor_window at all. See:
    // http://crbug.com/412910
@@ -530,7 +530,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
  }
  
  void WindowTreeHostManager::PreDisplayConfigurationChange(bool clear_focus) {
-@@ -888,8 +988,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
+@@ -892,8 +992,9 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
    LOG_IF(ERROR, !non_primary_host)
        << "Unknown display is requested in SetPrimaryDisplay: id="
        << new_primary_id;
@@ -542,7 +542,7 @@ index 78918538ec233243050b39131ec6c23d8b62c52e..1cbfb748dca380ee70e038ec32a7eadb
    display::Display old_primary_display =
        display::Screen::Get()->GetPrimaryDisplay();
 diff --git a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
-index 1d523840e28de86c44af57235e5e2f9ecf6f406c..c30a3a2b39ca724c0bd043d037550296d7763f33 100644
+index 1d523840e28d..c30a3a2b39ca 100644
 --- a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
 @@ -103,6 +103,32 @@ export interface ExternalStorage {
@@ -628,7 +628,7 @@ index 1d523840e28de86c44af57235e5e2f9ecf6f406c..c30a3a2b39ca724c0bd043d037550296
      chrome.send('updateStorageInfo');
    }
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.html b/chrome/browser/resources/ash/settings/device_page/display.html
-index a65b096ea31076b5a3ff697c26042db3d065d43b..43867417f65294d6dcec594ceb99277f846af258 100644
+index a65b096ea310..43867417f652 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.html
 +++ b/chrome/browser/resources/ash/settings/device_page/display.html
 @@ -57,6 +57,20 @@
@@ -748,7 +748,7 @@ index a65b096ea31076b5a3ff697c26042db3d065d43b..43867417f65294d6dcec594ceb99277f
    <template is="dom-if"
        if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
-index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bcc9271393 100644
+index 38153b296f06..7a142147cacf 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/display.ts
 @@ -8,6 +8,7 @@
@@ -759,7 +759,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
  import 'chrome://resources/ash/common/cr_elements/cr_link_row/cr_link_row.js';
  import 'chrome://resources/ash/common/cr_elements/cr_slider/cr_slider.js';
  import 'chrome://resources/ash/common/cr_elements/cr_tabs/cr_tabs.js';
-@@ -48,7 +49,11 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+@@ -47,7 +48,11 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
  import type {Route} from '../router.js';
  import {routes} from '../router.js';
  
@@ -772,7 +772,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
  import {DevicePageBrowserProxyImpl, getDisplayApi} from './device_page_browser_proxy.js';
  import {getTemplate} from './display.html.js';
  import type {SettingsDisplayOverscanDialogElement} from './display_overscan_dialog.js';
-@@ -135,6 +140,90 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+@@ -134,6 +139,90 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
          },
        },
  
@@ -863,7 +863,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
        displays: Array,
  
        layouts: Array,
-@@ -306,6 +395,16 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+@@ -305,6 +394,16 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
    ]);
  
    declare private readonly ambientColorAvailable_: boolean;
@@ -880,7 +880,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
    private browserProxy_: DevicePageBrowserProxy;
    declare private brightnessSliderMax_: number;
    declare private brightnessSliderMin_: number;
-@@ -337,6 +436,11 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+@@ -336,6 +435,11 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
    declare private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
    declare private readonly unifiedDesktopAvailable_: boolean;
    declare private unifiedDesktopMode_: boolean;
@@ -892,7 +892,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
    declare private zoomValues_: SliderTick[];
  
    constructor() {
-@@ -395,6 +499,8 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+@@ -394,6 +498,8 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
      getDisplayApi().onDisplayChanged.addListener(this.displayChangedListener_);
  
      this.getDisplayInfo_();
@@ -901,7 +901,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
      this.$.displaySizeSlider.updateValueInstantly = false;
  
      const {isTabletMode} = await this.displaySettingsProvider.observeTabletMode(
-@@ -539,6 +645,219 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+@@ -538,6 +644,219 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
          (displays: DisplayUnitInfo[]) => this.displayInfoFetched_(displays));
    }
  
@@ -1122,7 +1122,7 @@ index 038d6b5a84f8d5245c78e2050b95eef163280fae..fe48efabde04eaba2986197c9d1807bc
      if (!displays.length) {
        return;
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
-index 1764a9516fc42616e211f0f2bb3973b7b81fb080..5fe3499233c6361acf485b17c6e331fdd9767ec9 100644
+index 1764a9516fc4..5fe3499233c6 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 @@ -4,16 +4,663 @@
@@ -1977,7 +1977,7 @@ index 1764a9516fc42616e211f0f2bb3973b7b81fb080..5fe3499233c6361acf485b17c6e331fd
 +
  }  // namespace ash::settings
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
-index ed341408420e3619a06129a55ea7690657e26502..c35d9d8f9a41725f90ed3cee10b8c3b9dbf597f7 100644
+index ed341408420e..c35d9d8f9a41 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
 @@ -5,7 +5,10 @@
@@ -2022,7 +2022,7 @@ index ed341408420e3619a06129a55ea7690657e26502..c35d9d8f9a41725f90ed3cee10b8c3b9
  
  }  // namespace ash::settings
 diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
-index 26b59f719f8dfe2422ad45f9dda9bc39901a47c1..7571a75d86f4df7e120f15c9a59a3f38427eb0e1 100644
+index 26b59f719f8d..7571a75d86f4 100644
 --- a/ui/display/manager/display_manager.cc
 +++ b/ui/display/manager/display_manager.cc
 @@ -782,8 +782,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {

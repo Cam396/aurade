@@ -1,5 +1,5 @@
 diff --git a/components/manta/BUILD.gn b/components/manta/BUILD.gn
-index 02bdc3c66f6727feaaa3607b6b7aec6bc3b4585f..5de0b041df38323628299ded38d05f3be84eb26d 100644
+index 02bdc3c66f67..5de0b041df38 100644
 --- a/components/manta/BUILD.gn
 +++ b/components/manta/BUILD.gn
 @@ -36,6 +36,10 @@ component("manta") {
@@ -23,7 +23,7 @@ index 02bdc3c66f6727feaaa3607b6b7aec6bc3b4585f..5de0b041df38323628299ded38d05f3b
  }
 diff --git a/components/manta/aurade_local_mahi_provider.cc b/components/manta/aurade_local_mahi_provider.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..323dee028b15b2c602cd6747615c453550f5794f
+index 000000000000..323dee028b15
 --- /dev/null
 +++ b/components/manta/aurade_local_mahi_provider.cc
 @@ -0,0 +1,266 @@
@@ -295,7 +295,7 @@ index 0000000000000000000000000000000000000000..323dee028b15b2c602cd6747615c4535
 +}  // namespace manta
 diff --git a/components/manta/aurade_local_mahi_provider.h b/components/manta/aurade_local_mahi_provider.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..27c7d91f044cf5b14c6dfc3982eb4915efd89598
+index 000000000000..27c7d91f044c
 --- /dev/null
 +++ b/components/manta/aurade_local_mahi_provider.h
 @@ -0,0 +1,62 @@
@@ -363,7 +363,7 @@ index 0000000000000000000000000000000000000000..27c7d91f044cf5b14c6dfc3982eb4915
 +#endif  // COMPONENTS_MANTA_AURADE_LOCAL_MAHI_PROVIDER_H_
 diff --git a/components/manta/aurade_local_orca_provider.cc b/components/manta/aurade_local_orca_provider.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..77f7428bf3f6942f95a17052dcb07fff20ffb3da
+index 000000000000..77f7428bf3f6
 --- /dev/null
 +++ b/components/manta/aurade_local_orca_provider.cc
 @@ -0,0 +1,263 @@
@@ -632,7 +632,7 @@ index 0000000000000000000000000000000000000000..77f7428bf3f6942f95a17052dcb07fff
 +}  // namespace manta
 diff --git a/components/manta/aurade_local_orca_provider.h b/components/manta/aurade_local_orca_provider.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..4f1cbfed3289fbd137ebf34d20d0a4102b0b32cf
+index 000000000000..4f1cbfed3289
 --- /dev/null
 +++ b/components/manta/aurade_local_orca_provider.h
 @@ -0,0 +1,47 @@
@@ -684,7 +684,7 @@ index 0000000000000000000000000000000000000000..4f1cbfed3289fbd137ebf34d20d0a410
 +
 +#endif  // COMPONENTS_MANTA_AURADE_LOCAL_ORCA_PROVIDER_H_
 diff --git a/components/manta/manta_service.cc b/components/manta/manta_service.cc
-index 1b84c890932f433c1b44002c0fd9ee275a9d2ab2..7708d842dc5af11f09e351cbcdbdc30c703cceae 100644
+index 1b84c890932f..7708d842dc5a 100644
 --- a/components/manta/manta_service.cc
 +++ b/components/manta/manta_service.cc
 @@ -7,7 +7,9 @@
@@ -779,7 +779,7 @@ index 1b84c890932f433c1b44002c0fd9ee275a9d2ab2..7708d842dc5af11f09e351cbcdbdc30c
      return nullptr;
    }
 diff --git a/components/manta/orca_provider.h b/components/manta/orca_provider.h
-index 26afb1ccc7368970ccdb0f177f028b83aefd7038..2e2b06e314bb7c8b91e55a584151ffe965bca9f3 100644
+index 26afb1ccc736..2e2b06e314bb 100644
 --- a/components/manta/orca_provider.h
 +++ b/components/manta/orca_provider.h
 @@ -49,8 +49,8 @@ class COMPONENT_EXPORT(MANTA) OrcaProvider : virtual public BaseProvider {

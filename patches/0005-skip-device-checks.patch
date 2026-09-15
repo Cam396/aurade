@@ -1,8 +1,8 @@
 diff --git a/ash/shell.cc b/ash/shell.cc
-index fdaeceeb32a120be68aba15abdaf028338284879..505d705f04c4d4621ee621ee98ba41d8d41c3463 100644
+index 9be568700870..04dd47c54d0d 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
-@@ -2103,24 +2103,9 @@ void Shell::OnFirstSessionStarted() {
+@@ -2093,24 +2093,9 @@ void Shell::OnFirstSessionStarted() {
  }
  
  void Shell::OnFirstSessionReady() {
@@ -31,7 +31,7 @@ index fdaeceeb32a120be68aba15abdaf028338284879..505d705f04c4d4621ee621ee98ba41d8
  
  void Shell::OnSessionStateChanged(session_manager::SessionState state) {
 diff --git a/chromeos/constants/devicetype.cc b/chromeos/constants/devicetype.cc
-index be187d587bd562e58a7665b8277051fe9e2221c4..b308d9dd3dc84851d82d70b5a7c2a2cb26898092 100644
+index be187d587bd5..b308d9dd3dc8 100644
 --- a/chromeos/constants/devicetype.cc
 +++ b/chromeos/constants/devicetype.cc
 @@ -41,12 +41,10 @@ DeviceType GetDeviceType() {

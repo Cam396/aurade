@@ -1,7 +1,8 @@
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
+index a6d6dfe2ec15..2bb7a3b92677 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
-@@ -37,11 +37,43 @@
+@@ -37,11 +37,43 @@ void OpenWithLinuxMimeHandler(base::FilePath path) {
  OpenLinuxVirtualTask::OpenLinuxVirtualTask() = default;
  OpenLinuxVirtualTask::~OpenLinuxVirtualTask() = default;
  
@@ -48,6 +49,7 @@ diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_ta
  
  std::string OpenLinuxVirtualTask::id() const {
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
+index dab99b9f04c0..dcf9872cfdff 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
 @@ -5,6 +5,7 @@
@@ -58,7 +60,7 @@ diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_ta
  #include "chrome/browser/ash/file_manager/virtual_file_tasks.h"
  
  namespace file_manager::file_tasks {
-@@ -26,6 +27,19 @@
+@@ -26,6 +27,19 @@ class OpenLinuxVirtualTask : public VirtualTask {
    std::string title() const override;
    bool IsDlpBlocked(
        const std::vector<std::string>& dlp_source_urls) const override;

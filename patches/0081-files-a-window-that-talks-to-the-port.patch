@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
-index 34aacd6..ed1e1dd 100644
+index 34aacd687ec1..ed1e1ddf1c35 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 @@ -4,6 +4,7 @@ import type {FileKey} from '../../port/types.js';
@@ -23,7 +23,7 @@ index 34aacd6..ed1e1dd 100644
  
  void main();
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
-index 8d46092..2d18edd 100644
+index 8d4609224963..2d18edd5d9f9 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
 @@ -263,6 +263,36 @@ const CASES: Case[] = [
@@ -65,7 +65,7 @@ index 8d46092..2d18edd 100644
      run() {
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 new file mode 100644
-index 0000000..22eb69a
+index 000000000000..22eb69a28dc2
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 @@ -0,0 +1,363 @@
@@ -433,7 +433,7 @@ index 0000000..22eb69a
 +  return results;
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.html b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
-index 65069a5..61409e5 100644
+index 65069a5ac370..61409e548aec 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/dom.html
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
 @@ -6,23 +6,31 @@
@@ -483,7 +483,7 @@ index 65069a5..61409e5 100644
 +  })();
  </script>
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.py b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
-index 403e619..5efe7d4 100755
+index 403e619f4319..5efe7d400ff8 100755
 --- a/ui/file_manager/file_manager/aurade/tests/harness/dom.py
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
 @@ -64,7 +64,7 @@ def main():
@@ -2339,7 +2339,7 @@ literal 0
 HcmV?d00001
 
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/index.html b/ui/file_manager/file_manager/aurade/tests/harness/index.html
-index 228a851..73acc02 100644
+index 228a851cff1d..73acc0243cb2 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/index.html
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/index.html
 @@ -26,22 +26,27 @@
@@ -2386,7 +2386,7 @@ index 228a851..73acc02 100644
 +  })();
  </script>
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
-index 2d8a570..3ff1683 100644
+index 2d8a570fee0c..3ff16835e6be 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 @@ -10,7 +10,9 @@ import {asFileKey} from '../../port/types.js';
@@ -2509,7 +2509,7 @@ index 2d8a570..3ff1683 100644
      name: 'list-selection-range',
 diff --git a/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
 new file mode 100644
-index 0000000..db1012c
+index 000000000000..db1012c0aa88
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
 @@ -0,0 +1,143 @@
@@ -2657,7 +2657,7 @@ index 0000000..db1012c
 +  return failures.length === 0;
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/file_list.ts b/ui/file_manager/file_manager/aurade/ui/file_list.ts
-index e6b4ae7..81c55f6 100644
+index e6b4ae78b66c..81c55f6e8f50 100644
 --- a/ui/file_manager/file_manager/aurade/ui/file_list.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/file_list.ts
 @@ -23,6 +23,13 @@ export interface FileListOptions {
@@ -2684,7 +2684,7 @@ index e6b4ae7..81c55f6 100644
    private paint(first: number, count: number): void {
 diff --git a/ui/file_manager/file_manager/aurade/ui/places.ts b/ui/file_manager/file_manager/aurade/ui/places.ts
 new file mode 100644
-index 0000000..bfe6b1b
+index 000000000000..bfe6b1b3599d
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/places.ts
 @@ -0,0 +1,69 @@
@@ -2759,7 +2759,7 @@ index 0000000..bfe6b1b
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/shell.ts b/ui/file_manager/file_manager/aurade/ui/shell.ts
 new file mode 100644
-index 0000000..defcb23
+index 000000000000..defcb2356475
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/shell.ts
 @@ -0,0 +1,198 @@
@@ -2962,7 +2962,7 @@ index 0000000..defcb23
 +  }
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/sidebar.ts b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
-index 3548b95..1aff1aa 100644
+index 3548b9538a21..1aff1aa6cf22 100644
 --- a/ui/file_manager/file_manager/aurade/ui/sidebar.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
 @@ -15,7 +15,8 @@
@@ -3016,7 +3016,7 @@ index 3548b95..1aff1aa 100644
        out.push({title: 'Gathered', places: basket});
      }
 diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
-index d608ed3..bee13f6 100644
+index d608ed352619..bee13f681f1d 100644
 --- a/ui/file_manager/file_manager/aurade/ui/tokens.css
 +++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
 @@ -211,6 +211,11 @@

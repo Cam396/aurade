@@ -1,14 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+index 662ea386bf78..074d15e63cab 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -414,20 +414,100 @@ export class FileTransferController {
-     this.document_.addEventListener(
-         'copy', this.onCutOrCopy_.bind(this, false /* not move operation */));
-     this.document_.addEventListener(
-         'beforecut',
-         this.onBeforeCutOrCopy_.bind(this, true /* move operation */));
-     this.document_.addEventListener(
-         'cut', this.onCutOrCopy_.bind(this, true /* move operation */));
+@@ -421,6 +421,86 @@ export class FileTransferController {
      this.document_.addEventListener(
          'onbeforepaste', this.onBeforePaste_.bind(this));
      this.document_.addEventListener('paste', this.onPaste_.bind(this));
@@ -95,10 +89,3 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
    }
  
    /**
-    * Write the current selection to system clipboard.
-    */
-   private cutOrCopy_(
-       clipboardData: DataTransfer|null,
-       effectAllowed: DataTransfer['effectAllowed']) {
-     const currentDirEntry = this.directoryModel_.getCurrentDirEntry();
-     if (!currentDirEntry) {

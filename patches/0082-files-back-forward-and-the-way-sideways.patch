@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
-index ed1e1dd..24976db 100644
+index ed1e1ddf1c35..24976db24bdd 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 @@ -4,6 +4,7 @@ import type {FileKey} from '../../port/types.js';
@@ -23,7 +23,7 @@ index ed1e1dd..24976db 100644
  
  void main();
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
-index 22eb69a..853cc0a 100644
+index 22eb69a28dc2..853cc0a28fff 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 @@ -117,7 +117,11 @@ function backendWith(fileCount = 6): MockBackend {
@@ -5127,7 +5127,7 @@ literal 0
 HcmV?d00001
 
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
-index 3ff1683..4ed4698 100644
+index 3ff16835e6be..4ed469827123 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 @@ -185,7 +185,14 @@ function sidebar(root: HTMLElement, selected?: string): void {
@@ -5231,7 +5231,7 @@ index 3ff1683..4ed4698 100644
      width: 268,
 diff --git a/ui/file_manager/file_manager/aurade/tests/ui/history_test.ts b/ui/file_manager/file_manager/aurade/tests/ui/history_test.ts
 new file mode 100644
-index 0000000..253762d
+index 000000000000..253762dfcef4
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/ui/history_test.ts
 @@ -0,0 +1,129 @@
@@ -5366,7 +5366,7 @@ index 0000000..253762d
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/history.ts b/ui/file_manager/file_manager/aurade/ui/history.ts
 new file mode 100644
-index 0000000..ecc8995
+index 000000000000..ecc8995a5164
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/history.ts
 @@ -0,0 +1,88 @@
@@ -5460,7 +5460,7 @@ index 0000000..ecc8995
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/path_bar.ts b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
 new file mode 100644
-index 0000000..eb3c609
+index 000000000000..eb3c6095e96e
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
 @@ -0,0 +1,266 @@
@@ -5731,7 +5731,7 @@ index 0000000..eb3c609
 +  }
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/shell.ts b/ui/file_manager/file_manager/aurade/ui/shell.ts
-index defcb23..15805df 100644
+index defcb2356475..15805df04101 100644
 --- a/ui/file_manager/file_manager/aurade/ui/shell.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/shell.ts
 @@ -18,9 +18,12 @@ import type {SessionState} from '../session/navigation_session.js';
@@ -5870,7 +5870,7 @@ index defcb23..15805df 100644
      this.unsubscribe = null;
      this.session.dispose();
 diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
-index bee13f6..e7be9ff 100644
+index bee13f681f1d..e7be9ff40868 100644
 --- a/ui/file_manager/file_manager/aurade/ui/tokens.css
 +++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
 @@ -410,3 +410,150 @@
@@ -6026,7 +6026,7 @@ index bee13f6..e7be9ff 100644
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/toolbar.ts b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
 new file mode 100644
-index 0000000..583993a
+index 000000000000..583993ab8b40
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
 @@ -0,0 +1,83 @@

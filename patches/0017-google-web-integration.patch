@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
-index 9cbe27a2f20bfe7a97dc20c7afd98b4c13e8fed6..6587d7f2e67844292dbb514e42a5a3f994ad7dec 100644
+index 9cbe27a2f20b..6587d7f2e678 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 @@ -16,6 +16,7 @@
@@ -58,7 +58,7 @@ index 9cbe27a2f20bfe7a97dc20c7afd98b4c13e8fed6..6587d7f2e67844292dbb514e42a5a3f9
  }
  
 diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
-index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f91e23aff4 100644
+index 76a5ab0167b9..d50b6ca7ef92 100644
 --- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 @@ -11,12 +11,19 @@
@@ -89,7 +89,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
  
  #if BUILDFLAG(IS_CHROMEOS)
  #include "ash/constants/ash_extension_constants.h"
-@@ -45,8 +53,6 @@
+@@ -42,8 +50,6 @@
  #include "google_apis/gaia/gaia_auth_util.h"
  #endif  // BUILDFLAG(IS_CHROMEOS)
  
@@ -98,7 +98,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
  namespace web_app {
  namespace {
  
-@@ -68,13 +74,13 @@ BASE_FEATURE_PARAM(bool,
+@@ -65,13 +71,13 @@ BASE_FEATURE_PARAM(bool,
  #if BUILDFLAG(IS_CHROMEOS)
  bool IsGoogleInternalAccount() {
    Profile* profile = ProfileManager::GetActiveUserProfile();
@@ -114,7 +114,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
  std::vector<ExternalInstallOptions> GetChromeBrandedApps(
      Profile& profile,
      const std::optional<DeviceInfo>& device_info) {
-@@ -125,6 +131,108 @@ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
+@@ -116,6 +122,108 @@ std::vector<ExternalInstallOptions> GetChromeBrandedApps(
  }
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  
@@ -223,7 +223,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
  }  // namespace
  
  DeviceInfo::DeviceInfo() = default;
-@@ -159,11 +267,13 @@ bool PreinstalledWebAppsDisabled() {
+@@ -150,11 +258,13 @@ bool PreinstalledWebAppsDisabled() {
  std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
      Profile& profile,
      const std::optional<DeviceInfo>& device_info) {
@@ -239,7 +239,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
  
  #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -178,6 +288,11 @@ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
+@@ -169,6 +279,11 @@ std::vector<ExternalInstallOptions> GetPreinstalledWebApps(
  
    return GetChromeBrandedApps(profile, device_info);
  #else
@@ -251,7 +251,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
    return {};
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  }
-@@ -202,13 +317,15 @@ std::vector<PreinstalledWebAppMigration> GetPreinstalledWebAppMigrations(
+@@ -193,13 +308,15 @@ std::vector<PreinstalledWebAppMigration> GetPreinstalledWebAppMigrations(
    std::vector<PreinstalledWebAppMigration> migrations;
    for (const ExternalInstallOptions& options :
         GetPreinstalledWebApps(profile)) {
@@ -270,7 +270,7 @@ index 917bab152c98e983f24d2f1bb4b9eb6a962a15c2..f7e4017d7335895f31ee154f7b5845f9
      if (options.gate_on_feature &&
          !IsPreinstalledAppInstallFeatureEnabled(*options.gate_on_feature)) {
 diff --git a/components/signin/core/browser/signin_header_helper.cc b/components/signin/core/browser/signin_header_helper.cc
-index 1a352d3b9d47148153f9d11349ab0448213965f2..640cf8576c06da2ab356b963d4df176c9ce6910f 100644
+index 1a352d3b9d47..640cf8576c06 100644
 --- a/components/signin/core/browser/signin_header_helper.cc
 +++ b/components/signin/core/browser/signin_header_helper.cc
 @@ -14,6 +14,7 @@

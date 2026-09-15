@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
-index 267a99ef0fd18181afc763eb1f25310867417aa2..60848f07f700d6ebcf80463aedd22ea55d41a95b 100644
+index 267a99ef0fd1..60848f07f700 100644
 --- a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
 +++ b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
 @@ -8,12 +8,14 @@
@@ -46,7 +46,7 @@ index 267a99ef0fd18181afc763eb1f25310867417aa2..60848f07f700d6ebcf80463aedd22ea5
          Error("Cannot get virtual path for volume with ID '*'", volume_id));
    }
 diff --git a/chrome/browser/ash/extensions/file_manager/private_api_util.cc b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
-index 4ecb969d1dcbf06263d093f9e88d4a396ad6644a..bbf8879e7d299342470dcfb229b12e0d1582ddd7 100644
+index 4ecb969d1dcb..bbf8879e7d29 100644
 --- a/chrome/browser/ash/extensions/file_manager/private_api_util.cc
 +++ b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
 @@ -670,6 +670,9 @@ void VolumeToVolumeMetadata(Profile* profile,
@@ -60,7 +60,7 @@ index 4ecb969d1dcbf06263d093f9e88d4a396ad6644a..bbf8879e7d299342470dcfb229b12e0d
        NOTREACHED();
    }
 diff --git a/chrome/browser/ash/file_manager/path_util.cc b/chrome/browser/ash/file_manager/path_util.cc
-index 2c9bd1e3bac61fe424f0b6424a2f0feb99a0708f..c38cf56a66317e6c7fb009f658136b6232b0470f 100644
+index 2c9bd1e3bac6..c38cf56a6631 100644
 --- a/chrome/browser/ash/file_manager/path_util.cc
 +++ b/chrome/browser/ash/file_manager/path_util.cc
 @@ -12,6 +12,8 @@
@@ -118,7 +118,7 @@ index 2c9bd1e3bac61fe424f0b6424a2f0feb99a0708f..c38cf56a66317e6c7fb009f658136b62
        break;
      case VOLUME_TYPE_TESTING:
 diff --git a/chrome/browser/ash/file_manager/volume.cc b/chrome/browser/ash/file_manager/volume.cc
-index c12bf6fcd555692382b1de9962c2c271b593a358..64e0c54b60bf83499854381a6773114fadd46e07 100644
+index c12bf6fcd555..64e0c54b60bf 100644
 --- a/chrome/browser/ash/file_manager/volume.cc
 +++ b/chrome/browser/ash/file_manager/volume.cc
 @@ -71,6 +71,8 @@ std::string_view VolumeTypeToString(const VolumeType type) {
@@ -165,7 +165,7 @@ index c12bf6fcd555692382b1de9962c2c271b593a358..64e0c54b60bf83499854381a6773114f
  std::unique_ptr<Volume> Volume::CreateForTesting(base::FilePath path,
                                                   VolumeType volume_type,
 diff --git a/chrome/browser/ash/file_manager/volume.h b/chrome/browser/ash/file_manager/volume.h
-index 5d47538b887c223b1b51f89e4f86f855f2ff3d29..ba9ff2a26a14e284f744946b81f89c4a975ddd80 100644
+index 5d47538b887c..ba9ff2a26a14 100644
 --- a/chrome/browser/ash/file_manager/volume.h
 +++ b/chrome/browser/ash/file_manager/volume.h
 @@ -37,6 +37,7 @@ enum VolumeType {
@@ -188,10 +188,10 @@ index 5d47538b887c223b1b51f89e4f86f855f2ff3d29..ba9ff2a26a14e284f744946b81f89c4a
        base::FilePath path,
        VolumeType volume_type,
 diff --git a/chrome/browser/ash/file_manager/volume_manager.cc b/chrome/browser/ash/file_manager/volume_manager.cc
-index 876cea288726ff9a56cb95abe30a5d513f6e2ad8..1cfe6b29b56e39a8557072abe7e628537e03dec5 100644
+index 1db3a1d881e1..d95f034986f4 100644
 --- a/chrome/browser/ash/file_manager/volume_manager.cc
 +++ b/chrome/browser/ash/file_manager/volume_manager.cc
-@@ -298,6 +298,20 @@ void VolumeManager::Initialize() {
+@@ -330,6 +330,20 @@ void VolumeManager::Initialize() {
    } else {
      OnLocalUserFilesDisabled();
    }
@@ -265,10 +265,10 @@ index 876cea288726ff9a56cb95abe30a5d513f6e2ad8..1cfe6b29b56e39a8557072abe7e62853
    DCHECK(IsArcEnabled(profile_));
    if (arc_volumes_mounted_) {
 diff --git a/chrome/browser/ash/file_manager/volume_manager.h b/chrome/browser/ash/file_manager/volume_manager.h
-index ba25b587a1b0babf99bcc911cee508d38d41c12f..98b9b9186ada037ee35f9d12172e7cc39d8841bb 100644
+index b87b3b60f116..656b8b0b7d48 100644
 --- a/chrome/browser/ash/file_manager/volume_manager.h
 +++ b/chrome/browser/ash/file_manager/volume_manager.h
-@@ -368,6 +368,14 @@ class VolumeManager
+@@ -359,6 +359,14 @@ class VolumeManager
    // Unmounts and revokes the downloads volume.
    void UnmountDownloadsVolume();
  
@@ -284,7 +284,7 @@ index ba25b587a1b0babf99bcc911cee508d38d41c12f..98b9b9186ada037ee35f9d12172e7cc3
    void MountArcRoots();
  
 diff --git a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
-index 0675d4fe03e9375460524d5e872f9da42cfa2957..5ae1ea7e00a98fe20df352d9b31d281468e187de 100644
+index 0675d4fe03e9..5ae1ea7e00a9 100644
 --- a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
 +++ b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
 @@ -100,6 +100,7 @@ SourceDestinationMatcherAsh::FsType SourceDestinationMatcherAsh::VolumeToFsType(
@@ -296,7 +296,7 @@ index 0675d4fe03e9375460524d5e872f9da42cfa2957..5ae1ea7e00a98fe20df352d9b31d2814
      case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
      case file_manager::VOLUME_TYPE_GUEST_OS:
 diff --git a/chrome/common/extensions/api/file_manager_private.idl b/chrome/common/extensions/api/file_manager_private.idl
-index 90a3a3fb3ffd14e07ffe5c5b2e659704190fec0f..b22411aefa9d4656d09caa6bd1689a6ab0a1a4d5 100644
+index 8ddf427d2cf0..bad7312496f2 100644
 --- a/chrome/common/extensions/api/file_manager_private.idl
 +++ b/chrome/common/extensions/api/file_manager_private.idl
 @@ -49,7 +49,8 @@ namespace fileManagerPrivate {
@@ -310,7 +310,7 @@ index 90a3a3fb3ffd14e07ffe5c5b2e659704190fec0f..b22411aefa9d4656d09caa6bd1689a6a
  // Device type. Available if this is removable volume.
  enum DeviceType { usb, sd, optical, mobile, unknown };
 diff --git a/storage/browser/file_system/external_mount_points.cc b/storage/browser/file_system/external_mount_points.cc
-index b38872766fddb37012f7c89a9661e686704f604f..e67b6e9c228c4a3f280c4d6a5c0c198d23331801 100644
+index b38872766fdd..e67b6e9c228c 100644
 --- a/storage/browser/file_system/external_mount_points.cc
 +++ b/storage/browser/file_system/external_mount_points.cc
 @@ -11,6 +11,7 @@
@@ -375,7 +375,7 @@ index b38872766fddb37012f7c89a9661e686704f604f..e67b6e9c228c4a3f280c4d6a5c0c198d
      std::map<base::FilePath, std::string>::reverse_iterator potential_parent(
          path_to_name_map_.upper_bound(path));
 diff --git a/ui/file_manager/file_manager/common/js/files_app_entry_types.ts b/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
-index 528525f446f0d830a35e278e4fe44e1b2d445e2c..a850aa8bb4c9d9f65402a52c8aedc2f3b59d8019 100644
+index 528525f446f0..a850aa8bb4c9 100644
 --- a/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
 +++ b/ui/file_manager/file_manager/common/js/files_app_entry_types.ts
 @@ -30,6 +30,25 @@ import {isSameEntry} from './entry_utils.js';
@@ -415,7 +415,7 @@ index 528525f446f0d830a35e278e4fe44e1b2d445e2c..a850aa8bb4c9d9f65402a52c8aedc2f3
    }
  
 diff --git a/ui/file_manager/file_manager/common/js/shared_types.ts b/ui/file_manager/file_manager/common/js/shared_types.ts
-index e5290218a55188297d5c4f3e8a71ce22590f8fbd..a55c36f03245fa6bcfa98b098d54db4fe138dbf8 100644
+index e5290218a551..a55c36f03245 100644
 --- a/ui/file_manager/file_manager/common/js/shared_types.ts
 +++ b/ui/file_manager/file_manager/common/js/shared_types.ts
 @@ -33,6 +33,7 @@ export enum VolumeType {
@@ -427,7 +427,7 @@ index e5290218a55188297d5c4f3e8a71ce22590f8fbd..a55c36f03245fa6bcfa98b098d54db4f
  
  /**
 diff --git a/ui/file_manager/file_manager/common/js/translations.ts b/ui/file_manager/file_manager/common/js/translations.ts
-index b07c4332c57e80024885323168c97a0929abc0cf..e61a7b1aeab0a4e9b1dafbca85d863b05d1fcfee 100644
+index b07c4332c57e..e61a7b1aeab0 100644
 --- a/ui/file_manager/file_manager/common/js/translations.ts
 +++ b/ui/file_manager/file_manager/common/js/translations.ts
 @@ -186,7 +186,8 @@ export function getRootTypeLabel(locationInfo: EntryLocation) {
@@ -441,7 +441,7 @@ index b07c4332c57e80024885323168c97a0929abc0cf..e61a7b1aeab0a4e9b1dafbca85d863b0
        console.error('Unsupported root type: ' + locationInfo.rootType);
        return volumeInfoLabel;
 diff --git a/ui/file_manager/file_manager/common/js/volume_manager_types.ts b/ui/file_manager/file_manager/common/js/volume_manager_types.ts
-index 2b80c8a7ca4ddd11a9ee0fca8545bb77b81c7440..51388f9046ed4295f8efd8c0ae547e108d12332b 100644
+index 2b80c8a7ca4d..51388f9046ed 100644
 --- a/ui/file_manager/file_manager/common/js/volume_manager_types.ts
 +++ b/ui/file_manager/file_manager/common/js/volume_manager_types.ts
 @@ -94,6 +94,9 @@ export enum RootType {
@@ -491,7 +491,7 @@ index 2b80c8a7ca4ddd11a9ee0fca8545bb77b81c7440..51388f9046ed4295f8efd8c0ae547e10
        assertNotReachedCase(volumeType, 'Unknown volume type: ' + volumeType);
    }
 diff --git a/ui/file_manager/file_manager/state/ducks/all_entries.ts b/ui/file_manager/file_manager/state/ducks/all_entries.ts
-index 0f8f4ce3b2ec57212958cbcbf3c1b0369a43a666..f5b5acd63c170a307918c40d8cb6455b2001c349 100644
+index 0f8f4ce3b2ec..f5b5acd63c17 100644
 --- a/ui/file_manager/file_manager/state/ducks/all_entries.ts
 +++ b/ui/file_manager/file_manager/state/ducks/all_entries.ts
 @@ -10,7 +10,7 @@ import {getParentEntry} from '../../common/js/api.js';
@@ -530,7 +530,7 @@ index 0f8f4ce3b2ec57212958cbcbf3c1b0369a43a666..f5b5acd63c170a307918c40d8cb6455b
          return ICON_TYPES.SMB;
        case VolumeType.PROVIDED:
 diff --git a/ui/file_manager/file_manager/state/ducks/navigation.ts b/ui/file_manager/file_manager/state/ducks/navigation.ts
-index f362b029e9812a839180e385654f75a35b75e0dc..81c653c793e48776a8c2b89b9f248c09a44f20bf 100644
+index f362b029e981..81c653c793e4 100644
 --- a/ui/file_manager/file_manager/state/ducks/navigation.ts
 +++ b/ui/file_manager/file_manager/state/ducks/navigation.ts
 @@ -9,7 +9,7 @@ import {VolumeType} from '../../common/js/volume_manager_types.js';
@@ -604,7 +604,7 @@ index f362b029e9812a839180e385654f75a35b75e0dc..81c653c793e48776a8c2b89b9f248c09
                        })
                        .sort((v1, v2) => {
 diff --git a/ui/file_manager/file_manager/state/ducks/volumes.ts b/ui/file_manager/file_manager/state/ducks/volumes.ts
-index dfe69ad70ad0af0e78cc2b12d920feaf71cc2485..b1345f7c5b0cc443551cf30a0b3bc5c79b579b37 100644
+index ea675d31a98b..82700494092f 100644
 --- a/ui/file_manager/file_manager/state/ducks/volumes.ts
 +++ b/ui/file_manager/file_manager/state/ducks/volumes.ts
 @@ -34,6 +34,8 @@ export const drivePlaceHolderKey = `fake-entry://${RootType.DRIVE_FAKE_ROOT}`;
@@ -635,8 +635,8 @@ index dfe69ad70ad0af0e78cc2b12d920feaf71cc2485..b1345f7c5b0cc443551cf30a0b3bc5c7
 +
  /**
   * Given a volume info, check if we need to group it into a wrapper.
-  *
-@@ -230,6 +245,14 @@ function addVolumeReducer(currentState: State, payload: {
+  * Grouping only happens when there are more than 1 partition in the same
+@@ -225,6 +240,14 @@ function addVolumeReducer(currentState: State, payload: {
      }
    }
  
@@ -651,7 +651,7 @@ index dfe69ad70ad0af0e78cc2b12d920feaf71cc2485..b1345f7c5b0cc443551cf30a0b3bc5c7
    // Handles Drive volume.
    // It nests the Drive root (aka MyDrive) inside a EntryList for "Google
    // Drive", and also the fake entries for "Offline" and "Shared with me".
-@@ -422,6 +445,10 @@ export async function*
+@@ -417,6 +440,10 @@ export async function*
      }
    }
  

@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+index eed159d1cb4f..fbf19859b935 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
-@@ -566,7 +566,7 @@
+@@ -566,7 +566,7 @@ export class FileManager {
      this.toolbarController_ = new ToolbarController(
          this.ui.toolbar, this.ui.dialogNavigationList, this.ui.listContainer,
          this.selectionHandler_, this.directoryModel_, this.volumeManager_,
@@ -11,9 +12,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/fil
          this.volumeManager_, this.metadataModel_, this.folderShortcutsModel_,
          this.selectionHandler_, this.ui_);
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index 1222e622b78a..951541383b60 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -6,6 +6,7 @@
+@@ -6,6 +6,7 @@ import type {CrToggleElement} from 'chrome://resources/ash/common/cr_elements/cr
  import type {Switch} from 'chrome://resources/cros_components/switch/switch.js';
  import {assertInstanceof} from 'chrome://resources/js/assert.js';
  
@@ -21,7 +23,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  import type {VolumeManager} from '../../background/js/volume_manager.js';
  import {getSizeStats} from '../../common/js/api.js';
  import {queryRequiredElement} from '../../common/js/dom_utils.js';
-@@ -20,6 +21,7 @@
+@@ -20,6 +21,7 @@ import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
  import {ICON_TYPES} from './constants.js';
  import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
  import type {FileSelectionHandler} from './file_selection.js';
@@ -29,7 +31,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  import {EventType} from './file_selection.js';
  import type {A11yAnnounce} from './ui/a11y_announce.js';
  import {Command} from './ui/command.js';
-@@ -96,12 +98,29 @@
+@@ -96,12 +98,29 @@ export class ToolbarController {
     */
    private auraDeSpaceRequest_ = 0;
  
@@ -60,7 +62,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
      // HTML elements.
      this.cancelSelectionButton_ =
          queryRequiredElement('#cancel-selection-button', this.toolbar_);
-@@ -302,7 +321,102 @@
+@@ -302,7 +321,102 @@ export class ToolbarController {
      // else. The count stays true, the layout does not move, and almost nobody
      // will ever see it. That is the point of it.
      this.filesSelectedLabel_.title = count === 42 ? 'The answer.' : '';
@@ -164,7 +166,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    }
  
    /**
-@@ -384,7 +498,10 @@
+@@ -384,7 +498,10 @@ export class ToolbarController {
      const summary = this.auraDeDirectorySummary_();
      // An empty folder still says so. A blank bar reads as broken.
      count.textContent = summary || 'Empty folder';

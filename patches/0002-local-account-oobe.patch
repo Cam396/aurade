@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/login/screens/BUILD.gn b/chrome/browser/ash/login/screens/BUILD.gn
-index 11525cc2d6c6f59eca2aa75ac4aa80fecab1fe0a..f2fdedb7dee4e92ede9b43dbacfbdbe71590cd4d 100644
+index 06f25aff2b5a..32320bf8e1c1 100644
 --- a/chrome/browser/ash/login/screens/BUILD.gn
 +++ b/chrome/browser/ash/login/screens/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("screens") {
@@ -13,7 +13,7 @@ index 11525cc2d6c6f59eca2aa75ac4aa80fecab1fe0a..f2fdedb7dee4e92ede9b43dbacfbdbe7
      "categories_selection_screen.cc",
 diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.cc b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a80a923a013ea3a6d2a36f2a7980017dc1ff8ac1
+index 000000000000..a80a923a013e
 --- /dev/null
 +++ b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
 @@ -0,0 +1,154 @@
@@ -173,7 +173,7 @@ index 0000000000000000000000000000000000000000..a80a923a013ea3a6d2a36f2a7980017d
 +}  // namespace ash
 diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.h b/chrome/browser/ash/login/screens/aura_local_account_screen.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..1db2554348c6f4fdc05b2e9e2abe2f4b0b73e08d
+index 000000000000..1db2554348c6
 --- /dev/null
 +++ b/chrome/browser/ash/login/screens/aura_local_account_screen.h
 @@ -0,0 +1,54 @@
@@ -232,7 +232,7 @@ index 0000000000000000000000000000000000000000..1db2554348c6f4fdc05b2e9e2abe2f4b
 +
 +#endif  // CHROME_BROWSER_ASH_LOGIN_SCREENS_AURA_LOCAL_ACCOUNT_SCREEN_H_
 diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
-index e49b9449d389e875315e31200b074ea0e0727af6..417c796338b93b8c08d25ef182d3499a8326113f 100644
+index e49b9449d389..417c796338b9 100644
 --- a/chrome/browser/ash/login/screens/user_creation_screen.cc
 +++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
 @@ -4,6 +4,11 @@
@@ -339,7 +339,7 @@ index e49b9449d389e875315e31200b074ea0e0727af6..417c796338b93b8c08d25ef182d3499a
    if (state != NetworkStateInformer::ONLINE ||
        reason == NetworkError::ERROR_REASON_LOADING_TIMEOUT) {
 diff --git a/chrome/browser/ash/login/screens/user_creation_screen.h b/chrome/browser/ash/login/screens/user_creation_screen.h
-index 6677e6b8517df4212707862eef477560e316787d..ca40b8ff82a808353228ed67a968791149cdbc12 100644
+index 6677e6b8517d..ca40b8ff82a8 100644
 --- a/chrome/browser/ash/login/screens/user_creation_screen.h
 +++ b/chrome/browser/ash/login/screens/user_creation_screen.h
 @@ -24,6 +24,7 @@ class UserCreationScreen
@@ -351,7 +351,7 @@ index 6677e6b8517df4212707862eef477560e316787d..ca40b8ff82a808353228ed67a9687911
      SIGNIN_TRIAGE,
      ADD_CHILD,
 diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
-index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e7e2a6c21 100644
+index f7f2fdfd0c84..9078e2d341dc 100644
 --- a/chrome/browser/ash/login/wizard_controller.cc
 +++ b/chrome/browser/ash/login/wizard_controller.cc
 @@ -25,6 +25,7 @@
@@ -454,7 +454,7 @@ index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e
  bool IsResumableOobeScreen(OobeScreenId screen_id) {
    for (const auto& resumable_screen : kResumableOobeScreens) {
      if (screen_id == resumable_screen) {
-@@ -917,6 +956,11 @@ WizardController::CreateScreens() {
+@@ -926,6 +965,11 @@ WizardController::CreateScreens() {
        base::BindRepeating(&WizardController::OnUserCreationScreenExit,
                            weak_factory_.GetWeakPtr())));
  
@@ -466,7 +466,7 @@ index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e
    append(std::make_unique<AddChildScreen>(
        oobe_ui->GetView<AddChildScreenHandler>()->AsWeakPtr(),
        oobe_ui->GetErrorScreen(),
-@@ -1535,6 +1579,9 @@ void WizardController::OnUserCreationScreenExit(
+@@ -1544,6 +1588,9 @@ void WizardController::OnUserCreationScreenExit(
    OnScreenExit(UserCreationView::kScreenId,
                 UserCreationScreen::GetResultString(result));
    switch (result) {
@@ -476,7 +476,7 @@ index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e
      case UserCreationScreen::Result::SIGNIN_SCHOOL:
        MaybeAbortQuickStartFlow(
            quick_start::QuickStartController::AbortFlowReason::SIGNIN_SCHOOL);
-@@ -1591,6 +1638,49 @@ void WizardController::OnUserCreationScreenExit(
+@@ -1600,6 +1647,49 @@ void WizardController::OnUserCreationScreenExit(
    }
  }
  
@@ -526,7 +526,7 @@ index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e
  void WizardController::OnConsumerUpdateScreenExit(
      ConsumerUpdateScreen::Result result) {
    OnScreenExit(ConsumerUpdateScreenView::kScreenId,
-@@ -3727,6 +3817,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
+@@ -3736,6 +3826,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
               screen_id == FamilyLinkNoticeView::kScreenId ||
               screen_id == GaiaView::kScreenId ||
               screen_id == UserCreationView::kScreenId ||
@@ -535,7 +535,7 @@ index 2433a222a04d6db2b1840b084bfa3af43a2a5060..dd232781e2b988cd6ba782bf77ee656e
               screen_id == UserAllowlistCheckScreenView::kScreenId ||
               screen_id == LocaleSwitchView::kScreenId ||
 diff --git a/chrome/browser/ash/login/wizard_controller.h b/chrome/browser/ash/login/wizard_controller.h
-index 3b80b2a1c9dbb4f6378ae16c62623ec90668e914..eeec6ada0528d0f7e7fd61149ed1439772f06a67 100644
+index cd2c3d56dc2d..82e9577af9ea 100644
 --- a/chrome/browser/ash/login/wizard_controller.h
 +++ b/chrome/browser/ash/login/wizard_controller.h
 @@ -68,6 +68,7 @@
@@ -546,7 +546,7 @@ index 3b80b2a1c9dbb4f6378ae16c62623ec90668e914..eeec6ada0528d0f7e7fd61149ed14397
  #include "chrome/browser/ash/login/screens/packaged_license_screen.h"
  #include "chrome/browser/ash/login/screens/parental_handoff_screen.h"
  #include "chrome/browser/ash/login/screens/perks_discovery_screen.h"
-@@ -448,6 +449,7 @@ class WizardController : public OobeUI::Observer {
+@@ -453,6 +454,7 @@ class WizardController : public OobeUI::Observer {
    void OnEnableDebuggingScreenExit();
    void OnDemoPreferencesScreenExit(DemoPreferencesScreen::Result result);
    void OnDemoSetupScreenExit(DemoSetupScreen::Result result);
@@ -555,7 +555,7 @@ index 3b80b2a1c9dbb4f6378ae16c62623ec90668e914..eeec6ada0528d0f7e7fd61149ed14397
    // Start of online authentication sub-group
    void OnGaiaScreenExit(GaiaScreen::Result result);
 diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/resources/chromeos/login/BUILD.gn
-index 3c374df6258cc587f5e3aae886a7cd8297ffed4e..9f83cc9c2004dbd4310fb32e830831674c08a98d 100644
+index 3c374df6258c..9f83cc9c2004 100644
 --- a/chrome/browser/resources/chromeos/login/BUILD.gn
 +++ b/chrome/browser/resources/chromeos/login/BUILD.gn
 @@ -92,6 +92,7 @@ build_webui("build") {
@@ -567,7 +567,7 @@ index 3c374df6258cc587f5e3aae886a7cd8297ffed4e..9f83cc9c2004dbd4310fb32e83083167
      "screens/common/choobe.ts",
      "screens/common/consolidated_consent.ts",
 diff --git a/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts b/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
-index b91210e53484774cefcc435a45d8bfc4ef52ec2a..2367632553a560ed27be68e484d83f52dc49514b 100644
+index b91210e53484..2367632553a5 100644
 --- a/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
 +++ b/chrome/browser/resources/chromeos/login/components/dialogs/oobe_modal_dialog.ts
 @@ -119,6 +119,9 @@ export class OobeModalDialog extends OobeModalDialogBase {
@@ -581,7 +581,7 @@ index b91210e53484774cefcc435a45d8bfc4ef52ec2a..2367632553a560ed27be68e484d83f52
    }
  
 diff --git a/chrome/browser/resources/chromeos/login/components/oobe_icons.html b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
-index 22917bdf4a6423a3f21c175b81a08bff831a2c57..e2e3a21adc17ba2829b8bbd2bbad8ca82d3d1311 100644
+index 22917bdf4a64..e2e3a21adc17 100644
 --- a/chrome/browser/resources/chromeos/login/components/oobe_icons.html
 +++ b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
 @@ -418,6 +418,9 @@ found in the LICENSE file.
@@ -605,7 +605,7 @@ index 22917bdf4a6423a3f21c175b81a08bff831a2c57..e2e3a21adc17ba2829b8bbd2bbad8ca8
          <path fill-rule="evenodd" clip-rule="evenodd" d="M48 7.55566C54.6 7.55566 60 12.9557 60 19.5557C60 26.1557 54.6 31.5557 48 31.5557C41.4 31.5557 36 26.1557 36 19.5557C36 12.9557 41.4 7.55566 48 7.55566ZM22 49.9957C22 41.7957 35.68 35.5557 48 35.5557C60.32 35.5557 74 41.7957 74 49.9957V73.0757C74 77.7157 69.64 81.7557 63.6 84.3557V75.4357C63.6 71.6757 58.76 68.5957 53.2 67.3557C51.48 66.9557 49.72 66.7557 48 66.7557C41.32 66.7557 33.96 69.8357 32.64 74.0757C37.24 75.9957 42.72 77.1557 48 77.1557C49.32 77.1557 50.68 77.0357 52 76.8757V87.2757C50.68 87.4357 49.32 87.5557 48 87.5557C42.64 87.5557 37.04 86.3557 32.4 84.3557C26.36 81.7157 22 77.7157 22 73.0757V49.9957ZM56 51.5557C56 55.9739 52.4183 59.5557 48 59.5557C43.5817 59.5557 40 55.9739 40 51.5557C40 47.1374 43.5817 43.5557 48 43.5557C52.4183 43.5557 56 47.1374 56 51.5557Z" fill="var(--oobe-card-radio-button-icon-color)"></path>
        </g>
 diff --git a/chrome/browser/resources/chromeos/login/screens.ts b/chrome/browser/resources/chromeos/login/screens.ts
-index eb917e4b0d3d5a6418e8aa6c2d68f03a0cccadcd..a18b3b88f7715d288cc31b8ff1a610435c347d64 100644
+index eb917e4b0d3d..a18b3b88f771 100644
 --- a/chrome/browser/resources/chromeos/login/screens.ts
 +++ b/chrome/browser/resources/chromeos/login/screens.ts
 @@ -11,6 +11,7 @@ import './screens/common/add_child.js';
@@ -630,7 +630,7 @@ index eb917e4b0d3d5a6418e8aa6c2d68f03a0cccadcd..a18b3b88f7715d288cc31b8ff1a61043
      id: 'apply-online-password',
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html
 new file mode 100644
-index 0000000000000000000000000000000000000000..e1c4394dedfa3a19b8c70d32f63bd6fc4e023639
+index 000000000000..e1c4394dedfa
 --- /dev/null
 +++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.html
 @@ -0,0 +1,71 @@
@@ -707,7 +707,7 @@ index 0000000000000000000000000000000000000000..e1c4394dedfa3a19b8c70d32f63bd6fc
 +</oobe-adaptive-dialog>
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..23707a59344f03ce0cb2d4445a772eef8c7419e9
+index 000000000000..23707a59344f
 --- /dev/null
 +++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
 @@ -0,0 +1,84 @@
@@ -796,7 +796,7 @@ index 0000000000000000000000000000000000000000..23707a59344f03ce0cb2d4445a772eef
 +
 +customElements.define(AuraLocalAccount.is, AuraLocalAccount);
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
-index 56a41696838b98ce1c45fe6aa63224ac136e4214..815b8de3ac5d7e568b98be491f82bbbf7bfb8e1a 100644
+index 56a41696838b..815b8de3ac5d 100644
 --- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
 +++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
 @@ -25,6 +25,46 @@ found in the LICENSE file.
@@ -890,7 +890,7 @@ index 56a41696838b98ce1c45fe6aa63224ac136e4214..815b8de3ac5d7e568b98be491f82bbbf
    <div slot="back-navigation">
      <oobe-back-button id="backButton" on-click="onBackClicked_"
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
-index 98cfd9173c428c40189f6b2bb9a81b2c2f4430e6..6bda2a9cc7aee673477e42793236c4d01a709e6b 100644
+index 98cfd9173c42..6bda2a9cc7ae 100644
 --- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
 +++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
 @@ -56,6 +56,7 @@ enum UserCreationUIState {
@@ -995,7 +995,7 @@ index 98cfd9173c428c40189f6b2bb9a81b2c2f4430e6..6bda2a9cc7aee673477e42793236c4d0
      if (this.isOobeSoftwareUpdateEnabled_) {
        return this.i18nDynamic(locale, 'userCreationChildButtonTitle');
 diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts b/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
-index 9811fcccdc088e0c576343289ff0a531dc5e68f4..3e849f786c69417ffd59d9d58323eb59c0758fd0 100644
+index 6ac20c3e9a38..64adeceeb4af 100644
 --- a/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
 +++ b/chrome/browser/resources/chromeos/login/screens/oobe/welcome.ts
 @@ -293,6 +293,8 @@ export class OobeWelcomeScreen extends OobeWelcomeScreenBase {
@@ -1008,7 +1008,7 @@ index 9811fcccdc088e0c576343289ff0a531dc5e68f4..3e849f786c69417ffd59d9d58323eb59
  
    private cancel(): void {
 diff --git a/chrome/browser/ui/webui/ash/login/BUILD.gn b/chrome/browser/ui/webui/ash/login/BUILD.gn
-index a81c34aabf203d47e8b51fed728505e9c6d02535..49228216d82ffb9aba44327eda740fd16941a3dd 100644
+index 282254485ba7..650c034b8803 100644
 --- a/chrome/browser/ui/webui/ash/login/BUILD.gn
 +++ b/chrome/browser/ui/webui/ash/login/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("login") {
@@ -1022,7 +1022,7 @@ index a81c34aabf203d47e8b51fed728505e9c6d02535..49228216d82ffb9aba44327eda740fd1
      "base_screen_handler.cc",
 diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c41931232a166495fb661f5d636c8cc4f2711a38
+index 000000000000..c41931232a16
 --- /dev/null
 +++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
 @@ -0,0 +1,41 @@
@@ -1069,7 +1069,7 @@ index 0000000000000000000000000000000000000000..c41931232a166495fb661f5d636c8cc4
 +}  // namespace ash
 diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..5fd1e6bfa3d2b6fcaeb49beccf5205f22df92f4b
+index 000000000000..5fd1e6bfa3d2
 --- /dev/null
 +++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h
 @@ -0,0 +1,50 @@
@@ -1124,10 +1124,10 @@ index 0000000000000000000000000000000000000000..5fd1e6bfa3d2b6fcaeb49beccf5205f2
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
 diff --git a/chrome/browser/ui/webui/ash/login/oobe_ui.cc b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
-index 3bccec32866e405308a5e2e381cb51934d4288e9..1fff2ff4214448ce7659d38cfc2beb141afd88d1 100644
+index 1aa16d897184..2eaa74baaabb 100644
 --- a/chrome/browser/ui/webui/ash/login/oobe_ui.cc
 +++ b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
-@@ -56,6 +56,7 @@
+@@ -54,6 +54,7 @@
  #include "chrome/browser/ui/webui/ash/login/ai_intro_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/app_downloading_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
@@ -1135,7 +1135,7 @@ index 3bccec32866e405308a5e2e381cb51934d4288e9..1fff2ff4214448ce7659d38cfc2beb14
  #include "chrome/browser/ui/webui/ash/login/auto_enrollment_check_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/base_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/categories_selection_screen_handler.h"
-@@ -352,6 +353,9 @@ void CreateAndAddOobeUIDataSource(Profile* profile,
+@@ -349,6 +350,9 @@ void CreateAndAddOobeUIDataSource(const PrefService& local_state,
  
    source->AddBoolean("isOobeSoftwareUpdateEnabled",
                       features::IsOobeSoftwareUpdateEnabled());
@@ -1145,7 +1145,7 @@ index 3bccec32866e405308a5e2e381cb51934d4288e9..1fff2ff4214448ce7659d38cfc2beb14
  
    source->AddBoolean("isSplitModifierKeyboardInfoEnabled",
                       features::IsOobeSplitModifierKeyboardInfoEnabled());
-@@ -512,6 +516,7 @@ void OobeUI::ConfigureOobeDisplay() {
+@@ -531,6 +535,7 @@ void OobeUI::ConfigureOobeDisplay(
    AddWebUIHandler(std::make_unique<SshConfiguredHandler>());
  
    AddScreenHandler(std::make_unique<AppLaunchSplashScreenHandler>());
@@ -1154,7 +1154,7 @@ index 3bccec32866e405308a5e2e381cb51934d4288e9..1fff2ff4214448ce7659d38cfc2beb14
    AddScreenHandler(std::make_unique<DeviceDisabledScreenHandler>());
  
 diff --git a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
-index 7c1360037744a014b23803fcad844d41d0024bfa..d7c3df800edfea4f62a87bc6b9cbaf57abf5b9fe 100644
+index 7c1360037744..d7c3df800edf 100644
 --- a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
 @@ -43,6 +43,9 @@ void UserCreationScreenHandler::DeclareLocalizedValues(

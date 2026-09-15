@@ -1,6 +1,8 @@
+diff --git a/chrome/browser/ash/login/screens/aura_local_account_screen.cc b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
+index a80a923a013e..7582cbd2dd66 100644
 --- a/chrome/browser/ash/login/screens/aura_local_account_screen.cc
 +++ b/chrome/browser/ash/login/screens/aura_local_account_screen.cc
-@@ -121,6 +121,11 @@
+@@ -121,6 +121,11 @@ void AuraLocalAccountScreen::ShowImpl() {
  void AuraLocalAccountScreen::HideImpl() {}
  
  void AuraLocalAccountScreen::OnUserAction(const base::ListValue& args) {
@@ -12,9 +14,11 @@
    const std::string& action_id = args[0].GetString();
    if (action_id == kUserActionBack) {
      exit_callback_.Run(Result::BACK);
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
+index 417c796338b9..e7135c2df3cb 100644
 --- a/chrome/browser/ash/login/screens/user_creation_screen.cc
 +++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
-@@ -153,6 +153,11 @@
+@@ -153,6 +153,11 @@ void UserCreationScreen::SetChildSetupStep() {
  }
  
  void UserCreationScreen::OnUserAction(const base::ListValue& args) {

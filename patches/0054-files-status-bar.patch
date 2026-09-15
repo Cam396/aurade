@@ -1,21 +1,8 @@
-diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
---- a/ui/file_manager/file_manager/main.html
-+++ b/ui/file_manager/file_manager/main.html
-@@ -482,6 +482,10 @@
-                   <files-spinner class="loading-indicator" hidden></files-spinner>
-                   <div class="drive-welcome page"></div>
-                 </div>
-+                <div id="aurade-status-bar" visibleif="full-page">
-+                  <span id="aurade-status-count"></span>
-+                  <span id="aurade-status-selection"></span>
-+                </div>
-               </div>
-             </div>
-           </div>
 diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index c16d8ad8be8e..3d8136153c1a 100644
 --- a/ui/file_manager/file_manager/foreground/css/file_manager.css
 +++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2290,3 +2290,49 @@
+@@ -2290,3 +2290,49 @@ body {
      --cros-sys-ripple_primary: color-mix(in srgb, #d1bcff 12%, transparent);
    }
  }
@@ -66,9 +53,10 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
 +  text-align: end;
 +}
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index 680284f60427..d2ad199ccdbd 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -66,6 +66,14 @@
+@@ -66,6 +66,14 @@ export class ToolbarController {
    private bulkPinningEnabled_: boolean;
    private store_: Store;
  
@@ -83,7 +71,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    constructor(
        private toolbar_: HTMLElement, _navigationList: HTMLElement,
        private listContainer_: ListContainer,
-@@ -308,6 +316,43 @@
+@@ -308,6 +316,43 @@ export class ToolbarController {
      }
  
      this.filesSelectedLabel_.textContent = text;
@@ -127,3 +115,18 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    }
  
    /**
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index 5fe97b157238..b8d91b5a44d3 100644
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -479,6 +479,10 @@ found in the LICENSE file.
+                   <files-spinner class="loading-indicator" hidden></files-spinner>
+                   <div class="drive-welcome page"></div>
+                 </div>
++                <div id="aurade-status-bar" visibleif="full-page">
++                  <span id="aurade-status-count"></span>
++                  <span id="aurade-status-selection"></span>
++                </div>
+               </div>
+             </div>
+           </div>

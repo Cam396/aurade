@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+index df46e3c6331b..5a90bb8668af 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
-@@ -58,6 +58,36 @@
+@@ -58,6 +58,36 @@ export function auraDeExactBytes(
    return exact === 1 ? '1 byte' : `${grouped} bytes`;
  }
  
@@ -38,7 +39,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/fi
  export class FileTableColumnModel extends TableColumnModel {
    private snapshot_: ColumnSnapshot|null = null;
  
-@@ -924,6 +954,10 @@
+@@ -924,6 +954,10 @@ export class FileTable extends Table {
          item.modificationTime;
  
      div.textContent = this.formatter_!.formatModDate(modTime);

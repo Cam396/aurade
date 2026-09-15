@@ -1,14 +1,56 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index fbf90177f48b..a287e962f115 100644
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2330,16 +2330,22 @@ body {
+   user-select: none;
+ }
+ 
+-/* The bar holds three spans and the right hand two share one slot, so
+- * space-between is wrong here: with the middle span empty it would centre
+- * whichever one had text. Pushing the count away from the others puts the
+- * count at the start and packs the rest at the end, which reads correctly
+- * whichever of the two is the one carrying text. */
+-#aurade-status-count {
++/* The bar holds four spans and the right hand two share one slot, so
++ * space-between is wrong here: with a middle span empty it would centre
++ * whichever one had text. Pushing everything after the clipboard note away
++ * puts the count and the note together at the start and packs the rest at the
++ * end, which reads correctly whichever of the two is carrying text.
++ *
++ * The auto margin is on the clipboard note rather than on the count, so the
++ * note sits beside what is in this folder rather than out at the far end with
++ * the free space. What is here and what is pending belong together; how much
++ * room is left is a different subject. */
++#aurade-status-clipboard {
+   margin-inline-end: auto;
+ }
+ 
+ #aurade-status-count,
++#aurade-status-clipboard,
+ #aurade-status-space,
+ #aurade-status-selection {
+   /* These are numbers that change in place as you move through a folder.
+@@ -2350,6 +2356,14 @@ body {
+   white-space: nowrap;
+ }
+ 
++/* Left in the bar's own on_surface_variant deliberately. The dimmed rows are
++ * the loud half of a cut; this is the quiet reference you go looking for once
++ * you have walked away from them, and it should not shout from every folder
++ * you pass through on the way. */
++#aurade-status-clipboard {
++  font-style: italic;
++}
++
+ #aurade-status-space {
+   /* Inherits the bar's own on_surface_variant. Free space is background
+    * information that should never compete with the selection for attention. */
 diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
+index ab57790a9fd7..67b650656c08 100644
 --- a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
 +++ b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
-@@ -40,19 +40,30 @@ export function auraDeMarkCut(entries: Array<Entry|FilesAppEntry>) {
-  * caller can skip a redraw it does not need.
-  */
- export function auraDeClearCut(): boolean {
-   if (cutUrls.size === 0) {
-     return false;
-   }
-   cutUrls.clear();
+@@ -47,6 +47,17 @@ export function auraDeClearCut(): boolean {
    return true;
  }
  
@@ -26,23 +68,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui
  /**
   * Whether this entry is waiting to be moved.
   */
- export function auraDeIsCut(entry: Entry|FilesAppEntry): boolean {
-   if (cutUrls.size === 0) {
-     return false;
-   }
-   return cutUrls.has(entry.toURL());
- }
 diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
+index 074d15e63cab..af54ac24e47f 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -1283,33 +1283,40 @@ export class FileTransferController {
-    * view afterwards, which is worse than dimming none of them.
-    *
-    * So the rows on screen are toggled directly and the render path keeps
-    * handling the ones that arrive later. Both are needed: this one cannot see
-    * rows that do not exist yet, and that one does not run for rows that
-    * already do.
-    */
+@@ -1290,19 +1290,26 @@ export class FileTransferController {
    private auraDeRedrawForCutMarks_() {
      const list = this.listContainer_.currentList;
      const model = list.dataModel;
@@ -80,24 +110,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
    }
  
    /**
-    * Performs cut or copy operation dispatched from directory tree.
-    */
-   cutOrCopyFromDirectoryTree(
-       focusedItem: XfTreeItem|null, clipboardData: DataTransfer|null,
-       effectAllowed: DataTransfer['effectAllowed']) {
-     if (focusedItem === null) {
-       return;
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index 951541383b60..b2ccf5a33b60 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -11,20 +11,21 @@ import type {VolumeManager} from '../../background/js/volume_manager.js';
- import {getSizeStats} from '../../common/js/api.js';
- import {queryRequiredElement} from '../../common/js/dom_utils.js';
- import {isCrosComponentsEnabled} from '../../common/js/flags.js';
- import {bytesToString, str, strf} from '../../common/js/translations.js';
- import {canBulkPinningCloudPanelShow} from '../../common/js/util.js';
- import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
- import {type State} from '../../state/state.js';
+@@ -18,6 +18,7 @@ import {type State} from '../../state/state.js';
  import {getStore, type Store} from '../../state/store.js';
  import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
  
@@ -105,21 +122,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  import {ICON_TYPES} from './constants.js';
  import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
  import type {FileSelectionHandler} from './file_selection.js';
- import type {MetadataModel} from './metadata/metadata_model.js';
- import {EventType} from './file_selection.js';
- import type {A11yAnnounce} from './ui/a11y_announce.js';
- import {Command} from './ui/command.js';
- import type {FileListSelectionModel} from './ui/file_list_selection_model.js';
- import type {ListContainer} from './ui/list_container.js';
- 
-@@ -70,20 +71,21 @@ export class ToolbarController {
-   private store_: Store;
- 
-   /**
-    * AuraDE: the status bar's two halves, looked up on first use rather than in
-    * the constructor. The dialog variants of this document have no status bar,
-    * so a queryRequiredElement here would throw in the file picker.
-    */
+@@ -77,6 +78,7 @@ export class ToolbarController {
    private auraDeStatusCount_: HTMLElement|null = null;
    private auraDeStatusSelection_: HTMLElement|null = null;
    private auraDeStatusSpace_: HTMLElement|null = null;
@@ -127,21 +130,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
    /**
     * AuraDE: the last free space answer, kept so that selecting and deselecting
-    * repaints from memory instead of asking the filesystem again.
-    */
-   private auraDeSpaceText_ = '';
- 
-   /**
-    * AuraDE: the hover detail and the low water flag, remembered alongside the
-    * text so that deselecting repaints all three from memory rather than asking
-@@ -199,20 +201,24 @@ export class ToolbarController {
-     // refresh is not hung off the selection change that drives the rest of
-     // this bar: selecting a file cannot change how much room is left, and
-     // asking the filesystem every time somebody arrows down a list would be a
-     // query per keypress.
-     this.directoryModel_.addEventListener(
-         'cur-dir-scan-completed', this.auraDeRefreshFreeSpace_.bind(this));
-     this.directoryModel_.addEventListener(
+@@ -206,6 +208,10 @@ export class ToolbarController {
          'cur-dir-rescan-completed', this.auraDeRefreshFreeSpace_.bind(this));
      this.directoryModel_.getFileList().addEventListener(
          'splice', this.auraDeRefreshFreeSpace_.bind(this));
@@ -152,21 +141,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
      chrome.fileManagerPrivate.onAppsUpdated.addListener(
          this.updateSharesheetCommand_.bind(this));
- 
-     this.cancelSelectionButton_.addEventListener(
-         'click', this.onCancelSelectionButtonClicked_.bind(this));
- 
-     this.deleteButton_.addEventListener(
-         'click', this.onDeleteButtonClicked_.bind(this));
- 
-@@ -474,33 +480,69 @@ export class ToolbarController {
-    * The elements are held in locals rather than read back off this between the
-    * null check and the use. auraDeDirectorySummary_ is a method call, and a
-    * method call invalidates narrowing on a mutable property, so the checked
-    * fields would be nullable again by the time they were assigned to.
-    *
-    * The count is asked for on every update, including when something is
-    * selected, because auraDeDirectorySummary_ is what sets the title that
+@@ -481,6 +487,39 @@ export class ToolbarController {
     * carries the forty two note. Reading the title before that call would show
     * whatever the previous folder left behind.
     */
@@ -206,13 +181,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    private auraDeUpdateStatusBar_(selectionText: string) {
      const count = this.auraDeStatusCount_ ??
          document.querySelector<HTMLElement>('#aurade-status-count');
-     const selectionEl = this.auraDeStatusSelection_ ??
-         document.querySelector<HTMLElement>('#aurade-status-selection');
-     const spaceEl = this.auraDeStatusSpace_ ??
-         document.querySelector<HTMLElement>('#aurade-status-space');
-     if (!count || !selectionEl) {
-       return;
-     }
+@@ -494,6 +533,9 @@ export class ToolbarController {
      this.auraDeStatusCount_ = count;
      this.auraDeStatusSelection_ = selectionEl;
      this.auraDeStatusSpace_ = spaceEl;
@@ -222,88 +191,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
      const summary = this.auraDeDirectorySummary_();
      // An empty folder still says so. A blank bar reads as broken.
-     count.textContent = summary || 'Empty folder';
-     // The forty two note wins when it applies. It is rarer, it is the more
-     // interesting of the two, and a folder of forty two things that also holds
-     // folders would otherwise lose it to a housekeeping hint.
-     count.title = this.filesSelectedLabel_.title || this.auraDeCountDetail_;
- 
-     // The toolbar already shows the selection in full when there is one, so
-diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
---- a/ui/file_manager/file_manager/foreground/css/file_manager.css
-+++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2323,40 +2323,54 @@ body {
-   color: var(--cros-sys-on_surface_variant);
-   display: flex;
-   flex: none;
-   font-size: 12px;
-   gap: 16px;
-   height: 28px;
-   padding: 0 16px;
-   user-select: none;
- }
- 
--/* The bar holds three spans and the right hand two share one slot, so
-- * space-between is wrong here: with the middle span empty it would centre
-- * whichever one had text. Pushing the count away from the others puts the
-- * count at the start and packs the rest at the end, which reads correctly
-- * whichever of the two is the one carrying text. */
--#aurade-status-count {
-+/* The bar holds four spans and the right hand two share one slot, so
-+ * space-between is wrong here: with a middle span empty it would centre
-+ * whichever one had text. Pushing everything after the clipboard note away
-+ * puts the count and the note together at the start and packs the rest at the
-+ * end, which reads correctly whichever of the two is carrying text.
-+ *
-+ * The auto margin is on the clipboard note rather than on the count, so the
-+ * note sits beside what is in this folder rather than out at the far end with
-+ * the free space. What is here and what is pending belong together; how much
-+ * room is left is a different subject. */
-+#aurade-status-clipboard {
-   margin-inline-end: auto;
- }
- 
- #aurade-status-count,
-+#aurade-status-clipboard,
- #aurade-status-space,
- #aurade-status-selection {
-   /* These are numbers that change in place as you move through a folder.
-    * Proportional digits make the text jitter every time the count ticks. */
-   font-variant-numeric: tabular-nums;
-   overflow: hidden;
-   text-overflow: ellipsis;
-   white-space: nowrap;
- }
- 
-+/* Left in the bar's own on_surface_variant deliberately. The dimmed rows are
-+ * the loud half of a cut; this is the quiet reference you go looking for once
-+ * you have walked away from them, and it should not shout from every folder
-+ * you pass through on the way. */
-+#aurade-status-clipboard {
-+  font-style: italic;
-+}
-+
- #aurade-status-space {
-   /* Inherits the bar's own on_surface_variant. Free space is background
-    * information that should never compete with the selection for attention. */
-   text-align: end;
- }
- 
- /* The one time it should compete. Warning rather than error, because a full
-  * disk is a thing to see coming, not a failure that has already happened. */
- #aurade-status-space.aurade-space-low {
-   color: var(--cros-sys-warning);
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index f81736245b7c..1fd0214d8015 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -485,20 +485,21 @@ found in the LICENSE file.
-                   <grid class="thumbnail-grid" tabindex="0" hidden></grid>
-                   <files-spinner class="loading-indicator" hidden></files-spinner>
-                   <div class="drive-welcome page"></div>
-                 </div>
-                 <div id="aurade-devices" visibleif="full-page" hidden>
-                   <div id="aurade-devices-title">Devices</div>
-                   <div id="aurade-devices-list"></div>
+@@ -489,6 +489,7 @@ found in the LICENSE file.
                  </div>
                  <div id="aurade-status-bar" visibleif="full-page">
                    <span id="aurade-status-count"></span>
@@ -311,10 +203,3 @@ diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manag
                    <span id="aurade-status-space"></span>
                    <span id="aurade-status-selection"></span>
                  </div>
-               </div>
-             </div>
-           </div>
-           <div id="path-display-container"></div>
-           <div class="files-feedback-panels" visibleif="full-page">
-             <xf-display-panel id="progress-panel" role="complementary"
-                               aria-label="$i18n{FILES_FEEDBACK_WINDOW}">

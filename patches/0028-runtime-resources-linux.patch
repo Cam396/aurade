@@ -1,5 +1,5 @@
 diff --git a/ash/webui/settings/public/constants/gen_routes.py b/ash/webui/settings/public/constants/gen_routes.py
-index f5ff2a32b9122313396942bfa6a1634fe79db062..621b70c6d249234d20cb22485a3915582a6638d6 100755
+index f5ff2a32b912..621b70c6d249 100755
 --- a/ash/webui/settings/public/constants/gen_routes.py
 +++ b/ash/webui/settings/public/constants/gen_routes.py
 @@ -18,15 +18,8 @@ import sys
@@ -21,12 +21,12 @@ index f5ff2a32b9122313396942bfa6a1634fe79db062..621b70c6d249234d20cb22485a391558
  # Insert chromium mojom path to beginning to make sure we prefer this one.
  # https://crbug.com/1422422
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index cca1fc040aba8ec8e9f02d806ceb947266c35163..f3a15feefa6bddd8932e884f67e3432464cd62ca 100644
+index 5ce078e14bfb..d901bd58f7e6 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
-@@ -92,6 +92,15 @@ void AdjustParagraphDirectionality(std::u16string* paragraph) {
- #endif
- }
+@@ -170,6 +170,15 @@ std::vector<LanguageTag> GetCandidates() {
+ 
+ #endif  // !BUILDFLAG(IS_APPLE)
  
 +bool ShouldRelaxPlaceholderDChecksForAuraDE() {
 +  // AuraDE compatibility: standalone Linux sessions can enable ChromeOS
@@ -37,10 +37,10 @@ index cca1fc040aba8ec8e9f02d806ceb947266c35163..f3a15feefa6bddd8932e884f67e34324
 +             "aurade-enable-local-accounts");
 +}
 +
- }  // namespace
- 
- std::string_view GetLanguage(std::string_view locale) {
-@@ -405,23 +414,26 @@ std::u16string FormatString(const std::u16string& format_string,
+ // Preferred locales are enabled everywhere but Linux systems with GLib. This
+ // function parses `preferred_locale` into a `LanguageTag` if they are enabled.
+ std::optional<LanguageTag> GetPreferredTag(std::string_view preferred_locale) {
+@@ -397,23 +406,26 @@ std::u16string FormatString(const std::u16string& format_string,
                              const std::vector<std::u16string>& replacements,
                              std::vector<size_t>* offsets) {
  #if DCHECK_IS_ON()
@@ -84,7 +84,7 @@ index cca1fc040aba8ec8e9f02d806ceb947266c35163..f3a15feefa6bddd8932e884f67e34324
      }
    }
  #endif
-@@ -516,8 +528,12 @@ std::u16string GetStringFUTF16(int message_id,
+@@ -508,8 +520,12 @@ std::u16string GetStringFUTF16(int message_id,
    std::vector<size_t> offsets;
    std::vector<std::u16string> replacements = {a};
    std::u16string result = GetStringFUTF16(message_id, replacements, &offsets);
@@ -100,7 +100,7 @@ index cca1fc040aba8ec8e9f02d806ceb947266c35163..f3a15feefa6bddd8932e884f67e34324
  }
  
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index d1ee6814618c7cdcdb7fda0faa57a94a75dd7c98..9ba8c3d486d93f8f30b5cf4dd2b9d4b6d179ade9 100644
+index d1ee6814618c..9ba8c3d486d9 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -35,6 +35,7 @@

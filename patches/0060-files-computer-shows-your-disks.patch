@@ -1,5 +1,167 @@
+diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index 784757e490ea..aae03f62df81 100644
+--- a/ui/file_manager/file_manager/foreground/css/file_manager.css
++++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
+@@ -2357,3 +2357,156 @@ body {
+   color: var(--cros-sys-primary);
+   text-align: end;
+ }
++
++/* AuraDE: the Devices panel, shown only in Computer.
++ *
++ * It sits above the list in the same column flexbox the status bar pins itself
++ * to the bottom of, so it takes its height from the list rather than floating
++ * over it. flex: none for the same reason: a panel that grew with the window
++ * would push the listing out of view on a short screen.
++ *
++ * The artwork is the volume set already in the tree, drawn as masks so a disk
++ * icon takes a colour from the theme like every other icon in the app rather
++ * than arriving as a fixed-colour picture that looks wrong in one scheme.
++ */
++#aurade-devices {
++  border-bottom: 1px solid var(--cros-sys-separator);
++  box-sizing: border-box;
++  flex: none;
++  padding: 12px 16px 14px;
++}
++
++#aurade-devices[hidden] {
++  display: none;
++}
++
++#aurade-devices-title {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  font-weight: 500;
++  letter-spacing: 0.06em;
++  margin-bottom: 10px;
++  text-transform: uppercase;
++}
++
++#aurade-devices-list {
++  display: grid;
++  gap: 8px;
++  /* Wide enough for a name, a filesystem and a capacity bar without wrapping,
++   * and it reflows to one column on a narrow window instead of clipping. */
++  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
++}
++
++.aurade-device {
++  align-items: center;
++  background: var(--cros-sys-app_base_shaded);
++  border-radius: 12px;
++  display: flex;
++  gap: 12px;
++  padding: 10px 14px;
++}
++
++#aurade-devices [aurade-device-icon] {
++  background-color: var(--cros-sys-primary);
++  flex: none;
++  height: 20px;
++  -webkit-mask-position: center;
++  -webkit-mask-repeat: no-repeat;
++  -webkit-mask-size: 20px;
++  width: 20px;
++}
++
++#aurade-devices [aurade-device-icon='hdd'] {
++  -webkit-mask-image: url(../images/volumes/hard_drive.svg);
++}
++
++#aurade-devices [aurade-device-icon='usb'] {
++  -webkit-mask-image: url(../images/volumes/usb.svg);
++}
++
++#aurade-devices [aurade-device-icon='sd'] {
++  -webkit-mask-image: url(../images/volumes/sd.svg);
++}
++
++#aurade-devices [aurade-device-icon='optical'] {
++  -webkit-mask-image: url(../images/volumes/cd.svg);
++}
++
++#aurade-devices [aurade-device-icon='mobile'] {
++  -webkit-mask-image: url(../images/volumes/phone.svg);
++}
++
++#aurade-devices [aurade-device-icon='computer'] {
++  -webkit-mask-image: url(../images/volumes/computer.svg);
++}
++
++#aurade-devices [aurade-device-icon='smb'] {
++  -webkit-mask-image: url(../images/volumes/smb.svg);
++}
++
++#aurade-devices [aurade-device-icon='archive'] {
++  -webkit-mask-image: url(../images/volumes/archive.svg);
++}
++
++.aurade-device-text {
++  flex: auto;
++  min-width: 0;
++}
++
++.aurade-device-name {
++  color: var(--cros-sys-on_surface);
++  font-size: 13px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.aurade-device-detail {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.aurade-device-meter {
++  flex: none;
++  /* Wide enough that "999.9 GB of 999.9 GB" stays on one line. Narrower and
++   * the unit wraps onto a line of its own, which reads as a broken layout
++   * rather than a tight one. */
++  width: 132px;
++}
++
++.aurade-device-meter[hidden] {
++  display: none;
++}
++
++.aurade-device-bar {
++  background: var(--cros-sys-separator);
++  border-radius: 3px;
++  height: 4px;
++  overflow: hidden;
++}
++
++.aurade-device-fill {
++  background: var(--cros-sys-primary);
++  height: 100%;
++  width: 0;
++}
++
++/* A disk with almost nothing left is the one case where this panel should
++ * raise its voice. Warning rather than error: it is a thing to see coming. */
++.aurade-device-low .aurade-device-fill {
++  background: var(--cros-sys-warning);
++}
++
++.aurade-device-figure {
++  color: var(--cros-sys-on_surface_variant);
++  font-size: 11px;
++  font-variant-numeric: tabular-nums;
++  margin-top: 5px;
++  overflow: hidden;
++  text-align: end;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
 diff --git a/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts b/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts
 new file mode 100644
+index 000000000000..1a4203d89a5a
 --- /dev/null
 +++ b/ui/file_manager/file_manager/foreground/js/aurade_devices_controller.ts
 @@ -0,0 +1,225 @@
@@ -228,21 +390,32 @@ new file mode 100644
 +    meter.classList.toggle('aurade-device-low', ratio >= 0.9);
 +  }
 +}
-diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
---- a/ui/file_manager/file_names.gni
-+++ b/ui/file_manager/file_names.gni
-@@ -218,6 +218,7 @@
-   "file_manager/foreground/js/actions_model.ts",
-   "file_manager/foreground/js/android_app_list_model.ts",
-   "file_manager/foreground/js/app_state_controller.ts",
-+  "file_manager/foreground/js/aurade_devices_controller.ts",
-   "file_manager/foreground/js/banner_controller.ts",
-   "file_manager/foreground/js/command_handler.ts",
-   "file_manager/foreground/js/constants.ts",
+diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+index 978cb4e081c2..eed159d1cb4f 100644
+--- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
++++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+@@ -49,6 +49,7 @@ import {getEmptyState, getEntry, getStore, getVolume} from '../../state/store.js
+ import {ActionsController} from './actions_controller.js';
+ import {AndroidAppListModel} from './android_app_list_model.js';
+ import {AppStateController} from './app_state_controller.js';
++import {AuraDeDevicesController} from './aurade_devices_controller.js';
+ import {BannerController} from './banner_controller.js';
+ import {CommandHandler} from './command_handler.js';
+ import {findQueryMatchedDirectoryEntry} from './crossover_search_utils.js';
+@@ -1054,6 +1055,8 @@ export class FileManager {
+     this.emptyFolderController_ = new EmptyFolderController(
+         this.ui_.emptyFolder, this.directoryModel_, this.providersModel_,
+         this.recentEntry_);
++    // AuraDE: Computer shows the machine's disks rather than a list of places.
++    new AuraDeDevicesController(this.directoryModel_);
+ 
+ 
+     return directoryTreePromise;
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index 5c1ee95c4de4..77d0e21ac107 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -482,6 +482,10 @@
+@@ -479,6 +479,10 @@ found in the LICENSE file.
                    <files-spinner class="loading-indicator" hidden></files-spinner>
                    <div class="drive-welcome page"></div>
                  </div>
@@ -253,183 +426,15 @@ diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manag
                  <div id="aurade-status-bar" visibleif="full-page">
                    <span id="aurade-status-count"></span>
                    <span id="aurade-status-space"></span>
-diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
---- a/ui/file_manager/file_manager/foreground/css/file_manager.css
-+++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2357,3 +2357,156 @@
-   color: var(--cros-sys-primary);
-   text-align: end;
- }
-+
-+/* AuraDE: the Devices panel, shown only in Computer.
-+ *
-+ * It sits above the list in the same column flexbox the status bar pins itself
-+ * to the bottom of, so it takes its height from the list rather than floating
-+ * over it. flex: none for the same reason: a panel that grew with the window
-+ * would push the listing out of view on a short screen.
-+ *
-+ * The artwork is the volume set already in the tree, drawn as masks so a disk
-+ * icon takes a colour from the theme like every other icon in the app rather
-+ * than arriving as a fixed-colour picture that looks wrong in one scheme.
-+ */
-+#aurade-devices {
-+  border-bottom: 1px solid var(--cros-sys-separator);
-+  box-sizing: border-box;
-+  flex: none;
-+  padding: 12px 16px 14px;
-+}
-+
-+#aurade-devices[hidden] {
-+  display: none;
-+}
-+
-+#aurade-devices-title {
-+  color: var(--cros-sys-on_surface_variant);
-+  font-size: 11px;
-+  font-weight: 500;
-+  letter-spacing: 0.06em;
-+  margin-bottom: 10px;
-+  text-transform: uppercase;
-+}
-+
-+#aurade-devices-list {
-+  display: grid;
-+  gap: 8px;
-+  /* Wide enough for a name, a filesystem and a capacity bar without wrapping,
-+   * and it reflows to one column on a narrow window instead of clipping. */
-+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-+}
-+
-+.aurade-device {
-+  align-items: center;
-+  background: var(--cros-sys-app_base_shaded);
-+  border-radius: 12px;
-+  display: flex;
-+  gap: 12px;
-+  padding: 10px 14px;
-+}
-+
-+#aurade-devices [aurade-device-icon] {
-+  background-color: var(--cros-sys-primary);
-+  flex: none;
-+  height: 20px;
-+  -webkit-mask-position: center;
-+  -webkit-mask-repeat: no-repeat;
-+  -webkit-mask-size: 20px;
-+  width: 20px;
-+}
-+
-+#aurade-devices [aurade-device-icon='hdd'] {
-+  -webkit-mask-image: url(../images/volumes/hard_drive.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='usb'] {
-+  -webkit-mask-image: url(../images/volumes/usb.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='sd'] {
-+  -webkit-mask-image: url(../images/volumes/sd.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='optical'] {
-+  -webkit-mask-image: url(../images/volumes/cd.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='mobile'] {
-+  -webkit-mask-image: url(../images/volumes/phone.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='computer'] {
-+  -webkit-mask-image: url(../images/volumes/computer.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='smb'] {
-+  -webkit-mask-image: url(../images/volumes/smb.svg);
-+}
-+
-+#aurade-devices [aurade-device-icon='archive'] {
-+  -webkit-mask-image: url(../images/volumes/archive.svg);
-+}
-+
-+.aurade-device-text {
-+  flex: auto;
-+  min-width: 0;
-+}
-+
-+.aurade-device-name {
-+  color: var(--cros-sys-on_surface);
-+  font-size: 13px;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.aurade-device-detail {
-+  color: var(--cros-sys-on_surface_variant);
-+  font-size: 11px;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.aurade-device-meter {
-+  flex: none;
-+  /* Wide enough that "999.9 GB of 999.9 GB" stays on one line. Narrower and
-+   * the unit wraps onto a line of its own, which reads as a broken layout
-+   * rather than a tight one. */
-+  width: 132px;
-+}
-+
-+.aurade-device-meter[hidden] {
-+  display: none;
-+}
-+
-+.aurade-device-bar {
-+  background: var(--cros-sys-separator);
-+  border-radius: 3px;
-+  height: 4px;
-+  overflow: hidden;
-+}
-+
-+.aurade-device-fill {
-+  background: var(--cros-sys-primary);
-+  height: 100%;
-+  width: 0;
-+}
-+
-+/* A disk with almost nothing left is the one case where this panel should
-+ * raise its voice. Warning rather than error: it is a thing to see coming. */
-+.aurade-device-low .aurade-device-fill {
-+  background: var(--cros-sys-warning);
-+}
-+
-+.aurade-device-figure {
-+  color: var(--cros-sys-on_surface_variant);
-+  font-size: 11px;
-+  font-variant-numeric: tabular-nums;
-+  margin-top: 5px;
-+  overflow: hidden;
-+  text-align: end;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
---- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
-+++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
-@@ -49,6 +49,7 @@
- import {ActionsController} from './actions_controller.js';
- import {AndroidAppListModel} from './android_app_list_model.js';
- import {AppStateController} from './app_state_controller.js';
-+import {AuraDeDevicesController} from './aurade_devices_controller.js';
- import {BannerController} from './banner_controller.js';
- import {CommandHandler} from './command_handler.js';
- import {findQueryMatchedDirectoryEntry} from './crossover_search_utils.js';
-@@ -1054,6 +1055,8 @@
-     this.emptyFolderController_ = new EmptyFolderController(
-         this.ui_.emptyFolder, this.directoryModel_, this.providersModel_,
-         this.recentEntry_);
-+    // AuraDE: Computer shows the machine's disks rather than a list of places.
-+    new AuraDeDevicesController(this.directoryModel_);
- 
- 
-     return directoryTreePromise;
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+index cf7d031e339d..a09a36c81624 100644
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -218,6 +218,7 @@ ts_files = [
+   "file_manager/foreground/js/actions_model.ts",
+   "file_manager/foreground/js/android_app_list_model.ts",
+   "file_manager/foreground/js/app_state_controller.ts",
++  "file_manager/foreground/js/aurade_devices_controller.ts",
+   "file_manager/foreground/js/banner_controller.ts",
+   "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",

@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index cf7cd238f06c..784757e490ea 100644
 --- a/ui/file_manager/file_manager/foreground/css/file_manager.css
 +++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2347,6 +2347,12 @@
+@@ -2347,6 +2347,12 @@ body {
    text-align: end;
  }
  
@@ -15,12 +16,14 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
    color: var(--cros-sys-primary);
    text-align: end;
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index 89c8b1bfa4e3..1222e622b78a 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -83,6 +83,14 @@
+@@ -82,6 +82,14 @@ export class ToolbarController {
+    */
    private auraDeSpaceText_ = '';
  
-   /**
++  /**
 +   * AuraDE: the hover detail and the low water flag, remembered alongside the
 +   * text so that deselecting repaints all three from memory rather than asking
 +   * the filesystem again.
@@ -28,11 +31,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
 +  private auraDeSpaceDetail_ = '';
 +  private auraDeSpaceLow_ = false;
 +
-+  /**
+   /**
     * AuraDE: guards a slow answer from painting over a newer one. Each request
     * takes the next number and only the newest is allowed to write.
-    */
-@@ -388,7 +396,13 @@
+@@ -388,7 +396,13 @@ export class ToolbarController {
      // is selected is the more urgent of the two and is also the thing that is
      // about to be acted on, so it takes the slot while it exists.
      if (spaceEl) {
@@ -46,7 +48,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
      }
    }
  
-@@ -414,7 +428,7 @@
+@@ -414,7 +428,7 @@ export class ToolbarController {
          volumeInfo.volumeType === VolumeType.MEDIA_VIEW ||
          volumeInfo.volumeType === VolumeType.ARCHIVE ||
          volumeInfo.volumeType === VolumeType.DRIVE) {
@@ -55,7 +57,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
        return;
      }
  
-@@ -429,15 +443,33 @@
+@@ -429,15 +443,33 @@ export class ToolbarController {
      // a query failed. The gear menu says so when it is opened on purpose; here
      // the honest thing is to say nothing at all.
      if (!stats || !stats.totalSize) {
@@ -95,7 +97,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    }
  
    /**
-@@ -447,11 +479,14 @@
+@@ -447,11 +479,14 @@ export class ToolbarController {
     * the two are driven by separate listeners and nothing guarantees which of
     * them runs first on the very first directory scan.
     */
@@ -111,7 +113,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
      const spaceEl = this.auraDeStatusSpace_ ??
          document.querySelector<HTMLElement>('#aurade-status-space');
-@@ -461,6 +496,8 @@
+@@ -461,6 +496,8 @@ export class ToolbarController {
      this.auraDeStatusSpace_ = spaceEl;
      if (this.selectionHandler_.selection.totalCount === 0) {
        spaceEl.textContent = text;

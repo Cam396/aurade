@@ -1,5 +1,5 @@
 diff --git a/ash/public/cpp/accelerators.h b/ash/public/cpp/accelerators.h
-index 4555a096ffcc6389b61c1193e50f8c7da67335e9..7dd3d428051b03c603190082d1d7dae534615801 100644
+index 4555a096ffcc..7dd3d428051b 100644
 --- a/ash/public/cpp/accelerators.h
 +++ b/ash/public/cpp/accelerators.h
 @@ -51,8 +51,11 @@ ASH_PUBLIC_EXPORT inline constexpr auto kAcceleratorData = std::to_array<
@@ -30,7 +30,7 @@ index 4555a096ffcc6389b61c1193e50f8c7da67335e9..7dd3d428051b03c603190082d1d7dae5
       AcceleratorAction::kFocusCameraPreview},
      {true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
 diff --git a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
-index e3772c5604f860e7c601510edbe469df7e0f64f6..766ef20188183eb405e96f8a37d6e5e1e31bd4bb 100644
+index e3772c5604f8..766ef2018818 100644
 --- a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
 +++ b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
 @@ -223,6 +223,14 @@ std::vector<mojom::TextAcceleratorPartPtr> GenerateTextAcceleratorParts(
@@ -102,7 +102,7 @@ index e3772c5604f860e7c601510edbe469df7e0f64f6..766ef20188183eb405e96f8a37d6e5e1
        std::move(text_accelerator_parts));
  }
 diff --git a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
-index c037c63ab8a65337acc22cf77050d4866bcf8afa..f377d62610981245bce842ea5b2b0bf413e74eb0 100644
+index c037c63ab8a6..f377d6261098 100644
 --- a/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
 +++ b/chrome/browser/ui/ash/accelerator/chrome_accelerator_prefs_delegate.cc
 @@ -9,13 +9,5 @@

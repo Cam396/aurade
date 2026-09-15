@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts b/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
+index 2b8d156f82f7..77a8bc8c2c01 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatter.ts
-@@ -10,6 +10,51 @@
+@@ -10,6 +10,51 @@ import {bytesToString, getCurrentLocaleOrDefault, strf} from '../../../common/js
  /**
   * Formatter class for file metadatas.
   */
@@ -53,7 +54,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_metadata_formatt
  export class FileMetadataFormatter extends EventTarget {
    private timeFormatter_: Intl.DateTimeFormat|null = null;
  
-@@ -75,7 +120,18 @@
+@@ -75,7 +120,18 @@ export class FileMetadataFormatter extends EventTarget {
      if (isNaN(modTime.getTime())) {
        // In case of 'Invalid Date'.
        return '--';

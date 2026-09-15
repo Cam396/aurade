@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
-index 42831ca..6b10510 100644
+index 42831ca33e9c..6b1051037d2e 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 @@ -14,11 +14,17 @@
@@ -249,7 +249,7 @@ index 42831ca..6b10510 100644
  
    async cancelDialog(): Promise<void> {
 diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
-index 123a655..150c629 100644
+index 123a655cd0c6..150c629c50eb 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
 @@ -1,14 +1,16 @@
@@ -503,7 +503,7 @@ index 123a655..150c629 100644
    cancelDialog(): void;
  }
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
-index 2a784cf..7aabbc0 100644
+index 2a784cfef7e6..7aabbc09e9ae 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 @@ -10,6 +10,7 @@ import {ChromeOsBackend} from '../../adapter/chromeos_backend.js';
@@ -639,7 +639,7 @@ index 2a784cf..7aabbc0 100644
  
  export async function runAdapterTests(): Promise<boolean> {
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
-index 9483836..57950c4 100644
+index 948383615906..57950c460d39 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 @@ -5,13 +5,18 @@
@@ -794,7 +794,7 @@ index 9483836..57950c4 100644
  
    cancelDialog(): void {
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
-index 909f1da..94af8f2 100644
+index 909f1da8a210..94af8f2dea9b 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 @@ -84,6 +84,23 @@ async function rejects(
@@ -850,7 +850,7 @@ index 909f1da..94af8f2 100644
        controller.abort();
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js b/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js
 new file mode 100644
-index 0000000..52580dd
+index 000000000000..52580dd41871
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/platform_probe.js
 @@ -0,0 +1,253 @@

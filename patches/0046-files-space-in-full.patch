@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts b/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
+index 5911121e4d9a..9c2ea45b5f92 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts
-@@ -105,6 +105,7 @@
+@@ -105,6 +105,7 @@ export class GearMenu {
  
      if (!spaceInfo) {
        this.volumeSpaceInfoLabel_.textContent = str('FAILED_SPACE_INFO');
@@ -9,7 +10,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/gear_menu.ts b/ui/fil
        return;
      }
  
-@@ -122,10 +123,20 @@
+@@ -122,10 +123,20 @@ export class GearMenu {
  
        this.volumeSpaceInfoLabel_.textContent =
            strf('SPACE_AVAILABLE', bytesToString(Math.max(0, remainingSize)));

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/guest_os/guest_os_terminal.cc b/chrome/browser/ash/guest_os/guest_os_terminal.cc
-index eca9fc53975dbc19d3d2ee4fb24de42e08a65f21..49270f8e247296bf8fa115840ada03f6370aba1e 100644
+index cc4e30c208b1..44bdbdeb9bc3 100644
 --- a/chrome/browser/ash/guest_os/guest_os_terminal.cc
 +++ b/chrome/browser/ash/guest_os/guest_os_terminal.cc
 @@ -10,6 +10,7 @@
@@ -10,7 +10,7 @@ index eca9fc53975dbc19d3d2ee4fb24de42e08a65f21..49270f8e247296bf8fa115840ada03f6
  #include "base/functional/bind.h"
  #include "base/json/json_reader.h"
  #include "base/json/json_writer.h"
-@@ -62,6 +63,7 @@ namespace guest_os {
+@@ -63,6 +64,7 @@ namespace guest_os {
  const char kTerminalSystemAppId[] = "fhicihalidkgcimdmhpohldehjmcabcf";
  
  const char kTerminalHomePath[] = "html/terminal.html#home";
@@ -18,7 +18,7 @@ index eca9fc53975dbc19d3d2ee4fb24de42e08a65f21..49270f8e247296bf8fa115840ada03f6
  
  const char kShortcutKey[] = "shortcut";
  const char kShortcutValueSSH[] = "ssh";
-@@ -85,6 +87,13 @@ constexpr char kDefaultBackgroundColor[] = "#202124";
+@@ -86,6 +88,13 @@ constexpr char kDefaultBackgroundColor[] = "#202124";
  constexpr char kSettingPassCtrlW[] = "/hterm/profiles/default/pass-ctrl-w";
  constexpr bool kDefaultPassCtrlW = false;
  
@@ -32,7 +32,7 @@ index eca9fc53975dbc19d3d2ee4fb24de42e08a65f21..49270f8e247296bf8fa115840ada03f6
  std::string GetSettingsKey(const std::string& prefix,
                             const std::string& profile,
                             const std::string& key) {
-@@ -147,6 +156,11 @@ void LaunchTerminalImpl(Profile* profile,
+@@ -148,6 +157,11 @@ void LaunchTerminalImpl(Profile* profile,
  const std::string& GetTerminalHomeUrl() {
    static const base::NoDestructor<std::string> url(
        base::StrCat({ash::kChromeUIUntrustedTerminalURL, kTerminalHomePath}));
@@ -45,7 +45,7 @@ index eca9fc53975dbc19d3d2ee4fb24de42e08a65f21..49270f8e247296bf8fa115840ada03f6
  }
  
 diff --git a/chrome/browser/ash/system_web_apps/apps/BUILD.gn b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
-index a834d42ef91a3ef50dc65b46d90204bbbc49867e..ffbcc646aeb01ad4c918c2e6caac99bc737a077c 100644
+index c86dc6d2f2c5..9d44e044f099 100644
 --- a/chrome/browser/ash/system_web_apps/apps/BUILD.gn
 +++ b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
 @@ -91,6 +91,7 @@ static_library("apps") {
@@ -58,7 +58,7 @@ index a834d42ef91a3ef50dc65b46d90204bbbc49867e..ffbcc646aeb01ad4c918c2e6caac99bc
      "//ash/public/cpp/resources:ash_public_unscaled_resources_grit",
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/BUILD.gn b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..9b90ad607b230710669a11b4ccc0070f4481b66e
+index 000000000000..9b90ad607b23
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/BUILD.gn
 @@ -0,0 +1,24 @@
@@ -88,7 +88,7 @@ index 0000000000000000000000000000000000000000..9b90ad607b230710669a11b4ccc0070f
 +}
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/README.md b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/README.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..5f099d75843b208bfb99b74f16e9e128afe8b497
+index 000000000000..5fd39d5a18c7
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/README.md
 @@ -0,0 +1,36 @@
@@ -130,7 +130,7 @@ index 0000000000000000000000000000000000000000..5f099d75843b208bfb99b74f16e9e128
 +   session (resize, colors, Unicode, sudo) before deploying.
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/embed_assets.py b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/embed_assets.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7347cc19651c96a87ad3ad4ac22567cb4f0a289e
+index 000000000000..7347cc19651c
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/embed_assets.py
 @@ -0,0 +1,61 @@
@@ -197,7 +197,7 @@ index 0000000000000000000000000000000000000000..7347cc19651c96a87ad3ad4ac22567cb
 +    sys.exit(main())
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm-addon-fit.js b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm-addon-fit.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..7cfd9de082a639baf6dbd444117f215467683634
+index 000000000000..7cfd9de082a6
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm-addon-fit.js
 @@ -0,0 +1,2 @@
@@ -206,7 +206,7 @@ index 0000000000000000000000000000000000000000..7cfd9de082a639baf6dbd444117f2154
 \ No newline at end of file
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.css b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.css
 new file mode 100644
-index 0000000000000000000000000000000000000000..74acc26708829de31d158bf08ce690d811590b8e
+index 000000000000..74acc2670882
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.css
 @@ -0,0 +1,209 @@
@@ -421,7 +421,7 @@ index 0000000000000000000000000000000000000000..74acc26708829de31d158bf08ce690d8
 +}
 diff --git a/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.js b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..a68eae6ce1ca32f17fc7150b2dffa628d7b71099
+index 000000000000..a68eae6ce1ca
 --- /dev/null
 +++ b/chrome/browser/ash/system_web_apps/apps/aurade_terminal/xterm.js
 @@ -0,0 +1,2 @@
@@ -429,7 +429,7 @@ index 0000000000000000000000000000000000000000..a68eae6ce1ca32f17fc7150b2dffa628
 +//# sourceMappingURL=xterm.js.map
 \ No newline at end of file
 diff --git a/chrome/browser/ash/system_web_apps/apps/terminal_source.cc b/chrome/browser/ash/system_web_apps/apps/terminal_source.cc
-index 4f8c1e55c57af3b406cf11d810b2e6490f159bae..642b3a4f99c727f5ac42ad5498a7b0df3b26d91a 100644
+index 42e628f46c81..4a4893832d3c 100644
 --- a/chrome/browser/ash/system_web_apps/apps/terminal_source.cc
 +++ b/chrome/browser/ash/system_web_apps/apps/terminal_source.cc
 @@ -2,6 +2,7 @@
@@ -974,17 +974,17 @@ index 4f8c1e55c57af3b406cf11d810b2e6490f159bae..642b3a4f99c727f5ac42ad5498a7b0df
      if (it != kTestFiles.end()) {
        content = it->second;
 diff --git a/chrome/browser/ash/system_web_apps/apps/terminal_system_web_app_info.cc b/chrome/browser/ash/system_web_apps/apps/terminal_system_web_app_info.cc
-index 80d770ed1a0f28ef37d1b74b23ca0420c2390a52..10ba15c9ec6f933ca0e786f34cdf3a15d274ec84 100644
+index db4260a9e4ce..971b1c870974 100644
 --- a/chrome/browser/ash/system_web_apps/apps/terminal_system_web_app_info.cc
 +++ b/chrome/browser/ash/system_web_apps/apps/terminal_system_web_app_info.cc
-@@ -8,6 +8,7 @@
- 
+@@ -9,6 +9,7 @@
  #include "ash/constants/webui_url_constants.h"
  #include "ash/strings/grit/ash_strings.h"
+ #include "base/containers/flat_set.h"
 +#include "base/command_line.h"
  #include "base/strings/strcat.h"
- #include "chrome/browser/ash/browser_delegate/browser_delegate.h"
  #include "chrome/browser/ash/crostini/crostini_features.h"
+ #include "chrome/browser/ash/crostini/crostini_pref_names.h"
 @@ -34,7 +35,14 @@
  namespace {
  constexpr gfx::Rect TERMINAL_DEFAULT_BOUNDS(gfx::Point(64, 64),
@@ -1025,7 +1025,7 @@ index 80d770ed1a0f28ef37d1b74b23ca0420c2390a52..10ba15c9ec6f933ca0e786f34cdf3a15
  }
  
 diff --git a/chrome/browser/extensions/api/terminal/terminal_private_api.cc b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
-index 304386fd4f0a41e222780f8d94d6fec9ee710c1c..f4143261f3a9a9e479bfd8e8e19299f10601e01f 100644
+index 598505c9c7d0..bbfe89d14fea 100644
 --- a/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 +++ b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 @@ -96,6 +96,26 @@ const char kCroshName[] = "crosh";
@@ -1074,7 +1074,7 @@ index 304386fd4f0a41e222780f8d94d6fec9ee710c1c..f4143261f3a9a9e479bfd8e8e19299f1
  void CloseTerminal(const std::string& terminal_id,
                     base::OnceCallback<void(bool)> callback) {
    chromeos::ProcessProxyRegistry::GetTaskRunner()->PostTaskAndReplyWithResult(
-@@ -331,8 +363,11 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
+@@ -332,8 +364,11 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
        return RespondNow(Error("crosh not allowed"));
      }
  
@@ -1088,7 +1088,7 @@ index 304386fd4f0a41e222780f8d94d6fec9ee710c1c..f4143261f3a9a9e479bfd8e8e19299f1
        OpenProcess(user_id_hash,
                    base::CommandLine(base::FilePath(kCroshCommand)));
      } else {
-@@ -576,6 +611,10 @@ TerminalPrivateOpenVmshellProcessFunction::Run() {
+@@ -577,6 +612,10 @@ TerminalPrivateOpenVmshellProcessFunction::Run() {
        OpenVmshellProcess::Params::Create(args());
    EXTENSION_FUNCTION_VALIDATE(params);
  
@@ -1099,7 +1099,7 @@ index 304386fd4f0a41e222780f8d94d6fec9ee710c1c..f4143261f3a9a9e479bfd8e8e19299f1
    // Only opens 'vmshell'.
    return OpenProcess(kVmShellName, std::move(params->args));
  }
-@@ -592,7 +631,6 @@ ExtensionFunction::ResponseAction TerminalPrivateSendInputFunction::Run() {
+@@ -593,7 +632,6 @@ ExtensionFunction::ResponseAction TerminalPrivateSendInputFunction::Run() {
      return RespondNow(Error("invalid terminal id"));
    }
  
@@ -1108,7 +1108,7 @@ index 304386fd4f0a41e222780f8d94d6fec9ee710c1c..f4143261f3a9a9e479bfd8e8e19299f1
    chromeos::ProcessProxyRegistry::GetTaskRunner()->PostTask(
        FROM_HERE,
 diff --git a/chromeos/process_proxy/process_proxy.cc b/chromeos/process_proxy/process_proxy.cc
-index ddbd29a381acb93ec532fd512a8083a286f42214..14fda3bd645ece8775076fd5c86d8be8f214ac6c 100644
+index ddbd29a381ac..14fda3bd645e 100644
 --- a/chromeos/process_proxy/process_proxy.cc
 +++ b/chromeos/process_proxy/process_proxy.cc
 @@ -24,6 +24,7 @@

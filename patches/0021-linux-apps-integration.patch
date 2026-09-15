@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746bd2ebeba 100644
+index 0f6b7df534c8..4e388a0384e4 100644
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 +++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 @@ -4,17 +4,35 @@
@@ -37,8 +37,8 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
 +#include "chromeos/ash/components/dbus/vm_applications/apps.pb.h"
  #include "components/services/app_service/public/cpp/app_types.h"
  #include "components/services/app_service/public/cpp/intent.h"
- #include "ui/display/display.h"
-@@ -39,6 +57,543 @@ bool ShouldShowDisplayDensityMenuItem(const std::string& app_id,
+ #include "ui/base/window_open_disposition.h"
+@@ -41,6 +59,543 @@ bool ShouldShowDisplayDensityMenuItem(const std::string& app_id,
    return d.device_scale_factor() != 1.0;
  }
  
@@ -582,7 +582,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
  }  // namespace
  
  namespace apps {
-@@ -47,7 +602,17 @@ CrostiniApps::CrostiniApps(AppServiceProxy* proxy) : GuestOSApps(proxy) {}
+@@ -49,7 +604,17 @@ CrostiniApps::CrostiniApps(AppServiceProxy* proxy) : GuestOSApps(proxy) {}
  
  CrostiniApps::~CrostiniApps() = default;
  
@@ -600,7 +600,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
    return crostini::CrostiniFeatures::Get()->CouldBeAllowed(profile());
  }
  
-@@ -67,6 +632,10 @@ void CrostiniApps::Launch(const std::string& app_id,
+@@ -69,6 +634,10 @@ void CrostiniApps::Launch(const std::string& app_id,
                            int32_t event_flags,
                            LaunchSource launch_source,
                            WindowInfoPtr window_info) {
@@ -611,7 +611,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
    crostini::LaunchCrostiniApp(
        profile(), app_id,
        window_info ? window_info->display_id : display::kInvalidDisplayId);
-@@ -78,6 +647,11 @@ void CrostiniApps::LaunchAppWithIntent(const std::string& app_id,
+@@ -80,6 +649,11 @@ void CrostiniApps::LaunchAppWithIntent(const std::string& app_id,
                                         LaunchSource launch_source,
                                         WindowInfoPtr window_info,
                                         LaunchCallback callback) {
@@ -623,7 +623,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
    // Retrieve URLs from the files in the intent.
    auto args = ArgsFromIntent(intent.get());
    crostini::LaunchCrostiniAppWithIntent(
-@@ -95,6 +669,7 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+@@ -97,6 +671,7 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
                                  int64_t display_id,
                                  base::OnceCallback<void(MenuItems)> callback) {
    MenuItems menu_items;
@@ -631,7 +631,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
  
    if (menu_type == MenuType::kShelf) {
      AddCommandItem(ash::APP_CONTEXT_MENU_NEW_WINDOW, IDS_APP_LIST_NEW_WINDOW,
-@@ -128,15 +703,161 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+@@ -130,15 +705,161 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
      }
    }
  
@@ -796,7 +796,7 @@ index c9080f3c22dfcee29f6cfa2835d798bf2fd1eebe..fd30805309e5012295284185478fa746
  
  }  // namespace apps
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
-index df9db4317d9ed575f7ed4d50f1d1f169141f099c..75182df1d2335eb6d237e2b454214acf13c966a9 100644
+index df9db4317d9e..75182df1d233 100644
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
 +++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
 @@ -5,10 +5,12 @@
@@ -862,7 +862,7 @@ index df9db4317d9ed575f7ed4d50f1d1f169141f099c..75182df1d2335eb6d237e2b454214acf
  };
  
 diff --git a/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc b/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
-index 6fe976dc60cd2141b79a3bfa8cee1a2e48a63234..026e2e7efc6bf28d8124fdfc453e7bc48759d0cc 100644
+index 6fe976dc60cd..026e2e7efc6b 100644
 --- a/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
 +++ b/chrome/browser/ash/guest_os/guest_os_shelf_utils.cc
 @@ -9,6 +9,7 @@
@@ -910,10 +910,10 @@ index 6fe976dc60cd2141b79a3bfa8cee1a2e48a63234..026e2e7efc6bf28d8124fdfc453e7bc4
                 << " provided is not prefixed with "
                 << kGuestOsWindowAppIdPrefix;
 diff --git a/chrome/browser/resources/app_settings/app.html.ts b/chrome/browser/resources/app_settings/app.html.ts
-index 7114e53f7b0e42dab2664774560f5693a67d25b7..58e77247c783741ea78b4203ba42bb8de058c021 100644
+index 71f200673796..785b2cef180e 100644
 --- a/chrome/browser/resources/app_settings/app.html.ts
 +++ b/chrome/browser/resources/app_settings/app.html.ts
-@@ -23,7 +23,29 @@ export function getHtml(this: AppElement) {
+@@ -22,7 +22,29 @@ export function getHtml(this: AppElement) {
      </app-management-uninstall-button>
    </div>
    <div class="permission-list">
@@ -945,7 +945,7 @@ index 7114e53f7b0e42dab2664774560f5693a67d25b7..58e77247c783741ea78b4203ba42bb8d
          <div class="app-detail">
            <div>$i18n{appManagementAppVersionTitle}</div>
 diff --git a/chrome/browser/resources/app_settings/app.ts b/chrome/browser/resources/app_settings/app.ts
-index 9766c816d7fd2315b82c4bbaca94449145b51840..982a00b8fffe7aaab96bf1237b59723a15fae3f7 100644
+index 9766c816d7fd..982a00b8fffe 100644
 --- a/chrome/browser/resources/app_settings/app.ts
 +++ b/chrome/browser/resources/app_settings/app.ts
 @@ -142,10 +142,26 @@ export class AppElement extends AppElementBase {
@@ -976,7 +976,7 @@ index 9766c816d7fd2315b82c4bbaca94449145b51840..982a00b8fffe7aaab96bf1237b59723a
        e: CustomEvent<{event: Event}>): void {
      // A place holder href with the value "#" is used to have a compliant link.
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
-index 16e75fd7665f51d32f20d3c5939beb452aa994b4..47855033f82b08709334ed7a7f65d1d8e46a743c 100644
+index 16e75fd7665f..47855033f82b 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_detail_view.ts
 @@ -116,6 +116,7 @@ export class AppManagementAppDetailViewElement extends
@@ -988,10 +988,10 @@ index 16e75fd7665f51d32f20d3c5939beb452aa994b4..47855033f82b08709334ed7a7f65d1d8
        case (AppType.kArc):
          return 'arc-detail-view';
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
-index 59048731223a350ea413b576fb1b9972f0fc7681..c1683ca1823723b3218bf6ce47256a89d7a1a037 100644
+index be186e1e23b1..d1b6855509a9 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
-@@ -97,6 +97,24 @@
+@@ -98,6 +98,24 @@
      [[getSubappDataSharingExplanationString_(app, apps_, subAppToParentAppId_)]]
    </div>
  </template>
@@ -1017,7 +1017,7 @@ index 59048731223a350ea413b576fb1b9972f0fc7681..c1683ca1823723b3218bf6ce47256a89
    <div class="indented-app-details" id="version">
      [[i18n('appManagementAppDetailsVersion', app.version)]]
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
-index 6dda848475dfa7e923224c8126fd1659e3c47fba..41db8151ded0fc29fb17931d74335acc4492e72b 100644
+index cc79b2c11b8d..50d0c01f4c18 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
 @@ -125,12 +125,19 @@ export class AppManagementAppDetailsItem extends
@@ -1083,7 +1083,7 @@ index 6dda848475dfa7e923224c8126fd1659e3c47fba..41db8151ded0fc29fb17931d74335acc
        return this.getTypeString_(app, 'InstallReasonPolicy');
      }
 diff --git a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
-index 73d8a22ef739ed77e7ba5c1ac9e8bf830152d7f3..f8fd31c5b64d081977286cedb4c66e224d2f124b 100644
+index 9815e6e14880..bbd91358d63b 100644
 --- a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
 +++ b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_shelf_controller.cc
 @@ -15,6 +15,7 @@
@@ -1105,7 +1105,7 @@ index 73d8a22ef739ed77e7ba5c1ac9e8bf830152d7f3..f8fd31c5b64d081977286cedb4c66e22
          std::make_unique<AppServiceAppWindowCrostiniTracker>(this);
    }
 diff --git a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
-index 6cbe7f0436d6ea308ce35e4c1d32df2b4f424e98..b26a6a0ee975af91f902805d6eb8b1559b5c4892 100644
+index 6cbe7f0436d6..b26a6a0ee975 100644
 --- a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
 +++ b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
 @@ -249,6 +249,8 @@ AppManagementPageHandlerBase::CreateAppFromAppUpdate(

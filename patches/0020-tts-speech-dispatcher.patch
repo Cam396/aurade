@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
-index bca5565e08c62ee383a2a8bb3482cb88bba02ae1..06029558e437bb0164c4202b11380f7b78c830c5 100644
+index bca5565e08c6..06029558e437 100644
 --- a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
 +++ b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
 @@ -125,6 +125,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
@@ -35,10 +35,10 @@ index bca5565e08c62ee383a2a8bb3482cb88bba02ae1..06029558e437bb0164c4202b11380f7b
  
  void TtsExtensionEngineChromeOS::OnStart() {
 diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
-index e7e168a10b7b9051b74d0964b1b51fe96b10f142..dae0e0ce50ea9a7b985c00230eeaa4bbb767a228 100644
+index 2d52286614d5..d5bec7087756 100644
 --- a/content/browser/BUILD.gn
 +++ b/content/browser/BUILD.gn
-@@ -2539,7 +2539,10 @@ source_set("browser") {
+@@ -2558,7 +2558,10 @@ source_set("browser") {
      ]
    }
  
@@ -51,7 +51,7 @@ index e7e168a10b7b9051b74d0964b1b51fe96b10f142..dae0e0ce50ea9a7b985c00230eeaa4bb
      deps += [
        "//third_party/speech-dispatcher",
 diff --git a/content/browser/speech/tts_linux.cc b/content/browser/speech/tts_linux.cc
-index dcfb2d419ccbaca3387672247643952c1a1708ef..c8b91ef3a4166e68634052b48a476dead871aa30 100644
+index f613b03e8917..52afa4d32eff 100644
 --- a/content/browser/speech/tts_linux.cc
 +++ b/content/browser/speech/tts_linux.cc
 @@ -8,6 +8,7 @@
@@ -164,8 +164,8 @@ index dcfb2d419ccbaca3387672247643952c1a1708ef..c8b91ef3a4166e68634052b48a476dea
    }
  }
  
-@@ -405,7 +441,7 @@ TtsPlatformImplLinux::TtsPlatformImplLinux()
-   DCHECK(BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+@@ -406,7 +442,7 @@ TtsPlatformImplLinux::TtsPlatformImplLinux()
+         base::NotFatalUntil::M159);
    const base::CommandLine& command_line =
        *base::CommandLine::ForCurrentProcess();
 -  if (!command_line.HasSwitch(switches::kEnableSpeechDispatcher))
@@ -173,9 +173,9 @@ index dcfb2d419ccbaca3387672247643952c1a1708ef..c8b91ef3a4166e68634052b48a476dea
      return;
  
    // The TTS platform is supported. The Tts platform initialisation will happen
-@@ -496,6 +532,9 @@ void TtsPlatformImplLinux::GetVoices(std::vector<VoiceData>* out_voices) {
-   DCHECK(BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-   DCHECK(PlatformImplInitialized());
+@@ -502,6 +538,9 @@ void TtsPlatformImplLinux::GetVoices(std::vector<VoiceData>* out_voices) {
+         base::NotFatalUntil::M159);
+   CHECK(PlatformImplInitialized(), base::NotFatalUntil::M159);
  
 +  // AuraDE compatibility: diagnostic for the generic-Linux TTS bring-up.
 +  VLOG(0) << "AuraDE TTS: GetVoices returning " << voices_.size()
@@ -184,7 +184,7 @@ index dcfb2d419ccbaca3387672247643952c1a1708ef..c8b91ef3a4166e68634052b48a476dea
      out_voices->push_back(VoiceData());
      VoiceData& voice = out_voices->back();
 diff --git a/content/browser/speech/tts_platform_impl.cc b/content/browser/speech/tts_platform_impl.cc
-index 2a2c89228d7a5e8c10474ffb4d7ae68f9e85b0ce..c80057adc0bb0010d982207ee8f8ee3e1dd70510 100644
+index 2a2c89228d7a..c80057adc0bb 100644
 --- a/content/browser/speech/tts_platform_impl.cc
 +++ b/content/browser/speech/tts_platform_impl.cc
 @@ -4,24 +4,33 @@

@@ -1,16 +1,17 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+index f7f4cbcdf644..8c8693d573a1 100644
 --- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
 +++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
-@@ -18,7 +18,7 @@
+@@ -18,7 +18,7 @@ import {DEFAULT_BRUSCHETTA_VM, DEFAULT_CROSTINI_VM} from './constants.js';
  import type {FileFilter} from './directory_contents.js';
  import type {DirectoryModel} from './directory_model.js';
  import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
--import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
-+import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+-import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
  import {shouldIgnoreEvents} from './file_manager_commands_util.js';
  import type {FileSelection, FileSelectionHandler} from './file_selection.js';
  import type {FileTransferController} from './file_transfer_controller.js';
-@@ -162,6 +162,7 @@
+@@ -161,6 +161,7 @@ const FilesCommands = {
    'set-wallpaper': new SetWallpaperCommand(),
    'volume-storage': new VolumeStorageCommand(),
    'copy-name': new CopyNameCommand(),
@@ -19,12 +20,14 @@ diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/
    'volume-switch-1': new VolumeSwitchCommand(1),
    'volume-switch-2': new VolumeSwitchCommand(2),
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+index 0d2a557871e3..27966e3d9df4 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
-@@ -2508,6 +2508,71 @@
+@@ -2458,6 +2458,71 @@ export class CopyNameCommand extends FilesCommand {
+   }
  }
  
- /**
++/**
 + * AuraDE: the location of an entry the way Files itself writes it, for
 + * example My files/Downloads/report.pdf. Returns the empty string when the
 + * entry sits on no volume Files can place, which happens for fake roots and
@@ -89,14 +92,14 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 +  }
 +}
 +
-+/**
+ /**
   * Opens "providers menu" to allow users to use providers/FSPs.
   */
- export class ShowProvidersSubmenuCommand extends FilesCommand {
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index b4c66422238c..5fe97b157238 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,7 @@ found in the LICENSE file.
             below, and quietly taking a key somebody already uses is a worse
             trade than one extra trip to the context menu. -->
        <command id="copy-name" label="Copy name">
@@ -104,7 +107,7 @@ diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manag
        <command id="paste" label="$i18n{PASTE_BUTTON_LABEL}"
                 shortcut="v|Ctrl">
        <command id="paste-into-current-folder" label="$i18n{PASTE_BUTTON_LABEL}"
-@@ -179,6 +180,7 @@
+@@ -178,6 +179,7 @@ found in the LICENSE file.
          <cr-menu-item command="#cut" visibleif="full-page"></cr-menu-item>
          <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
          <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>

@@ -1,18 +1,8 @@
-diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
---- a/ui/file_manager/file_manager/main.html
-+++ b/ui/file_manager/file_manager/main.html
-@@ -484,6 +484,7 @@
-                 </div>
-                 <div id="aurade-status-bar" visibleif="full-page">
-                   <span id="aurade-status-count"></span>
-+                  <span id="aurade-status-space"></span>
-                   <span id="aurade-status-selection"></span>
-                 </div>
-               </div>
 diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index 3d8136153c1a..cf7cd238f06c 100644
 --- a/ui/file_manager/file_manager/foreground/css/file_manager.css
 +++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2317,12 +2317,21 @@
+@@ -2317,12 +2317,21 @@ body {
    font-size: 12px;
    gap: 16px;
    height: 28px;
@@ -35,7 +25,7 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
  #aurade-status-selection {
    /* These are numbers that change in place as you move through a folder.
     * Proportional digits make the text jitter every time the count ticks. */
-@@ -2332,6 +2341,12 @@
+@@ -2332,6 +2341,12 @@ body {
    white-space: nowrap;
  }
  
@@ -49,9 +39,10 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
    color: var(--cros-sys-primary);
    text-align: end;
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index d2ad199ccdbd..89c8b1bfa4e3 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -7,11 +7,12 @@
+@@ -7,11 +7,12 @@ import type {Switch} from 'chrome://resources/cros_components/switch/switch.js';
  import {assertInstanceof} from 'chrome://resources/js/assert.js';
  
  import type {VolumeManager} from '../../background/js/volume_manager.js';
@@ -65,7 +56,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  import {type State} from '../../state/state.js';
  import {getStore, type Store} from '../../state/store.js';
  import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
-@@ -73,6 +74,19 @@
+@@ -73,6 +74,19 @@ export class ToolbarController {
     */
    private auraDeStatusCount_: HTMLElement|null = null;
    private auraDeStatusSelection_: HTMLElement|null = null;
@@ -85,7 +76,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
    constructor(
        private toolbar_: HTMLElement, _navigationList: HTMLElement,
-@@ -153,6 +167,19 @@
+@@ -153,6 +167,19 @@ export class ToolbarController {
      this.directoryModel_.getFileList().addEventListener(
          'splice', this.updateSelectionLabel_.bind(this));
  
@@ -105,7 +96,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
      chrome.fileManagerPrivate.onAppsUpdated.addListener(
          this.updateSharesheetCommand_.bind(this));
  
-@@ -337,11 +364,14 @@
+@@ -337,11 +364,14 @@ export class ToolbarController {
          document.querySelector<HTMLElement>('#aurade-status-count');
      const selectionEl = this.auraDeStatusSelection_ ??
          document.querySelector<HTMLElement>('#aurade-status-selection');
@@ -120,7 +111,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
  
      const summary = this.auraDeDirectorySummary_();
      // An empty folder still says so. A blank bar reads as broken.
-@@ -351,8 +381,87 @@
+@@ -351,8 +381,87 @@ export class ToolbarController {
      // The toolbar already shows the selection in full when there is one, so
      // repeating it here would be noise; this half stays empty until there is
      // something to say.
@@ -210,3 +201,15 @@ diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/
    }
  
    /**
+diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index b8d91b5a44d3..5c1ee95c4de4 100644
+--- a/ui/file_manager/file_manager/main.html
++++ b/ui/file_manager/file_manager/main.html
+@@ -481,6 +481,7 @@ found in the LICENSE file.
+                 </div>
+                 <div id="aurade-status-bar" visibleif="full-page">
+                   <span id="aurade-status-count"></span>
++                  <span id="aurade-status-space"></span>
+                   <span id="aurade-status-selection"></span>
+                 </div>
+               </div>

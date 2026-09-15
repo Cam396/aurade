@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/app_restore/full_restore_service_factory.cc b/chrome/browser/ash/app_restore/full_restore_service_factory.cc
-index c423f408f391391856155d50ccf7a42002ef7be8..cdaa2a56e39318780777ef048b846511412fcaa6 100644
+index 4fe0edda5ac1..dae57f9d85bb 100644
 --- a/chrome/browser/ash/app_restore/full_restore_service_factory.cc
 +++ b/chrome/browser/ash/app_restore/full_restore_service_factory.cc
 @@ -5,6 +5,7 @@
@@ -10,7 +10,7 @@ index c423f408f391391856155d50ccf7a42002ef7be8..cdaa2a56e39318780777ef048b846511
  #include "base/trace_event/trace_event.h"
  #include "chrome/browser/app_mode/app_mode_utils.h"
  #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
-@@ -22,6 +23,14 @@ namespace ash::full_restore {
+@@ -21,6 +22,14 @@ namespace ash::full_restore {
  // static
  bool FullRestoreServiceFactory::IsFullRestoreAvailableForProfile(
      const Profile* profile) {
@@ -26,7 +26,7 @@ index c423f408f391391856155d50ccf7a42002ef7be8..cdaa2a56e39318780777ef048b846511
      return false;
    }
 diff --git a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
-index 486516df24744685124ab08d925e4b6480e99563..a73fda2a3271b403f6663ea1c393dc7c5047378c 100644
+index 486516df2474..a73fda2a3271 100644
 --- a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
 +++ b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
 @@ -12,6 +12,7 @@
@@ -76,7 +76,7 @@ index 486516df24744685124ab08d925e4b6480e99563..a73fda2a3271b403f6663ea1c393dc7c
    VLOG(0) << "One-time key permissions migration started for token: "
            << static_cast<int>(token_id_) << ".";
 diff --git a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-index c781a2a569d66e798158465d1254b2896aeeff8c..1957ff98538c9f7a44030049505387473104bb77 100644
+index be60ecfa787c..9e7bacb90b5e 100644
 --- a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
 +++ b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
 @@ -141,6 +141,7 @@ void ChromeMediaAppUIDelegate::IsFileArcWritableImpl(
@@ -88,7 +88,7 @@ index c781a2a569d66e798158465d1254b2896aeeff8c..1957ff98538c9f7a4403004950538747
        return;
      case VolumeType::NUM_VOLUME_TYPE:
 diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
-index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072dfd5f5269d 100644
+index a05f8507ea25..de649ff67356 100644
 --- a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
 +++ b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
 @@ -26,6 +26,7 @@
@@ -116,7 +116,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/profiles/profiles_state.h"
  #include "chrome/browser/web_applications/external_install_options.h"
-@@ -103,6 +107,52 @@ namespace ash {
+@@ -102,6 +106,52 @@ namespace ash {
  
  namespace {
  
@@ -169,7 +169,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
  SystemWebAppDelegateMap CreateSystemWebApps(Profile* profile) {
    std::vector<std::unique_ptr<SystemWebAppDelegate>> info_vec;
    info_vec.push_back(std::make_unique<CameraSystemAppDelegate>(profile));
-@@ -150,7 +200,9 @@ SystemWebAppDelegateMap CreateSystemWebApps(Profile* profile) {
+@@ -149,7 +199,9 @@ SystemWebAppDelegateMap CreateSystemWebApps(Profile* profile) {
    }
  
  #if !defined(OFFICIAL_BUILD)
@@ -180,7 +180,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
  #endif  // !defined(OFFICIAL_BUILD)
  
    SystemWebAppDelegateMap delegate_map;
-@@ -364,6 +416,15 @@ void SystemWebAppManager::Start() {
+@@ -373,6 +425,15 @@ void SystemWebAppManager::Start() {
    if (should_force_install_apps) {
      UpdateLastAttemptedInfo();
    }
@@ -196,7 +196,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
  
    const auto& disabled_system_apps =
        provider_->policy_manager().GetDisabledSystemWebApps();
-@@ -374,7 +435,8 @@ void SystemWebAppManager::Start() {
+@@ -383,7 +444,8 @@ void SystemWebAppManager::Start() {
          app.first, *app.second, should_force_install_apps, is_disabled));
    }
  
@@ -206,7 +206,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
    if (exceeded_retries) {
      LOG(ERROR)
          << "Exceeded SWA install retry attempts.  Skipping installation, will "
-@@ -382,6 +444,15 @@ void SystemWebAppManager::Start() {
+@@ -391,6 +453,15 @@ void SystemWebAppManager::Start() {
      SCOPED_CRASH_KEY_BOOL("SystemWebAppManager", "broken_icons",
                            PreviousSessionHadBrokenIcons());
      base::debug::DumpWithoutCrashing();
@@ -223,7 +223,7 @@ index ad79677ca098cac17fbb682e010459523cc0b09f..6351e9dec75047d8db8ea2d7c69072df
    }
  
 diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
-index d530a784337f9fc988f88d3d74dfba47a8c3806c..7e50f93ff996f7cd005c419b1cdc34cb2a68a601 100644
+index d530a784337f..7e50f93ff996 100644
 --- a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
 +++ b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
 @@ -5,6 +5,7 @@
@@ -260,7 +260,7 @@ index d530a784337f9fc988f88d3d74dfba47a8c3806c..7e50f93ff996f7cd005c419b1cdc34cb
  
  void SystemWebAppManagerFactory::RegisterProfilePrefs(
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 7f828a0e0858a0c00baa1baa9859a70a594d337e..c7bfdea39913f59b9c1fc99f7b36b0fae82ec1b1 100644
+index 19045777b3d8..6c7f5fe0e71a 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -47,6 +47,7 @@
@@ -271,7 +271,7 @@ index 7f828a0e0858a0c00baa1baa9859a70a594d337e..c7bfdea39913f59b9c1fc99f7b36b0fa
  #include "base/task/sequenced_task_runner.h"
  #include "base/types/expected.h"
  #include "base/types/expected_macros.h"
-@@ -4541,6 +4542,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
+@@ -4542,6 +4543,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
        TtsExtensionEngine::GetInstance());
  #endif
  #if BUILDFLAG(IS_CHROMEOS)
@@ -285,10 +285,10 @@ index 7f828a0e0858a0c00baa1baa9859a70a594d337e..c7bfdea39913f59b9c1fc99f7b36b0fa
  #else
    return nullptr;
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fcd23f10b9 100644
+index 80927be5adaa..93f20700221f 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
-@@ -408,6 +408,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
+@@ -555,6 +555,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
  }
  
  void ComponentLoader::AddGlicExtension() {
@@ -305,7 +305,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
    if (IsApiGlicPrivateEnabled()) {
      Add(IDR_GLIC_EXTENSION_MANIFEST,
          base::FilePath(FILE_PATH_LITERAL("glic_extension")));
-@@ -415,6 +425,16 @@ void ComponentLoader::AddGlicExtension() {
+@@ -562,6 +572,16 @@ void ComponentLoader::AddGlicExtension() {
  }
  
  void ComponentLoader::AddContextualTasksExtension() {
@@ -322,7 +322,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
    if (base::FeatureList::IsEnabled(
            extensions_features::kApiContextualTasksPrivate)) {
      Add(IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST_JSON,
-@@ -484,6 +504,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
+@@ -631,6 +651,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
  }
  
  void ComponentLoader::AddKeyboardApp() {
@@ -340,7 +340,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
    Add(IDR_KEYBOARD_MANIFEST, base::FilePath(FILE_PATH_LITERAL("keyboard")));
  }
  
-@@ -605,14 +636,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -752,14 +783,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
  
    if (!skip_session_components) {
  #if BUILDFLAG(IS_CHROMEOS)
@@ -370,7 +370,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
  #endif  // BUILDFLAG(IS_CHROMEOS)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -631,8 +671,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -778,8 +818,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
      }
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  
@@ -389,7 +389,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
  #endif  // BUILDFLAG(IS_CHROMEOS)
    }
  
-@@ -758,14 +806,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
+@@ -905,14 +953,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
  }
  
  void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
@@ -417,7 +417,7 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
          base::BindRepeating(
              &ComponentLoader::FinishLoadSpeechSynthesisExtension,
              weak_factory_.GetWeakPtr(),
-@@ -773,12 +831,12 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
+@@ -920,10 +978,12 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
    }
  
    if (!ExistsOrPendingAdd(extension_misc::kEspeakSpeechSynthesisExtensionId)) {
@@ -427,16 +427,14 @@ index e926dac16915aa29bccd3f63d60c25edc8f0b540..f6ac427a0481c15fb975f55f45bee2fc
 +            : extension_misc::kEspeakSpeechSynthesisExtensionPath);
      AddComponentFromDir(
 -        base::FilePath(
--            ::features::IsAccessibilityManifestV3EnabledForEspeakNGTts()
--                ? extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath
--                : extension_misc::kEspeakSpeechSynthesisExtensionPath),
+-            extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath),
 -        extension_misc::kEspeakSpeechSynthesisExtensionId,
 +        espeak_tts_path, extension_misc::kEspeakSpeechSynthesisExtensionId,
          base::BindRepeating(
              &ComponentLoader::FinishLoadSpeechSynthesisExtension,
              weak_factory_.GetWeakPtr(),
 diff --git a/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc b/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
-index e285d527d61f489da0d4f5870e141706522de69b..8bdf864f5905ea7b83b5a29b2c66291d1a699286 100644
+index e285d527d61f..8bdf864f5905 100644
 --- a/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
 +++ b/chromeos/ash/services/multidevice_setup/host_status_provider_impl.cc
 @@ -6,6 +6,7 @@
@@ -486,7 +484,7 @@ index e285d527d61f489da0d4f5870e141706522de69b..8bdf864f5905ea7b83b5a29b2c66291d
      return HostStatusWithDevice(
          mojom::HostStatus::kHostVerified,
 diff --git a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
-index 3c7b2b34db396e96d02ea4a0f2ac88053ed359c1..68d10747a780109fbfb8a083c42b59d38cc50322 100644
+index 3c7b2b34db39..68d10747a780 100644
 --- a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
 +++ b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.cc
 @@ -5,8 +5,11 @@
@@ -688,7 +686,7 @@ index 3c7b2b34db396e96d02ea4a0f2ac88053ed359c1..68d10747a780109fbfb8a083c42b59d3
    PA_LOG(INFO) << "Feature states have changed. New feature map: "
                 << FeatureStatesMapToString(feature_states_map);
 diff --git a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
-index a0fad3c05abcea04d0150385736aa1785328c727..0cc24b020c5889fef504c9bdcfcab099dfdea0c4 100644
+index a0fad3c05abc..0cc24b020c58 100644
 --- a/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
 +++ b/chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client_impl.h
 @@ -94,6 +94,7 @@ class MultiDeviceSetupClientImpl : public MultiDeviceSetupClient,
@@ -710,7 +708,7 @@ index a0fad3c05abcea04d0150385736aa1785328c727..0cc24b020c5889fef504c9bdcfcab099
    // We want to delay the initial logging of the feature states map to better
    // understand the frequency of when the client is not ready, and we are stuck
 diff --git a/components/exo/wayland/server.cc b/components/exo/wayland/server.cc
-index 8197dbab5f6470ce20251c32c1ca7e2a80b8ac13..d074d45d1aff03a7e0e637b008dddf9777148a91 100644
+index 8197dbab5f64..d074d45d1aff 100644
 --- a/components/exo/wayland/server.cc
 +++ b/components/exo/wayland/server.cc
 @@ -32,6 +32,7 @@
@@ -744,7 +742,7 @@ index 8197dbab5f6470ce20251c32c1ca7e2a80b8ac13..d074d45d1aff03a7e0e637b008dddf97
    } else {
      LOG(WARNING) << "Group '" << kWaylandSocketGroup << "' not found";
 diff --git a/device/bluetooth/floss/floss_dbus_manager.cc b/device/bluetooth/floss/floss_dbus_manager.cc
-index 3f747c6b760fb29910f86b899d2a2b4d16fee7df..467252812e40dfc082ea9070cc83529bc2221228 100644
+index 3f747c6b760f..467252812e40 100644
 --- a/device/bluetooth/floss/floss_dbus_manager.cc
 +++ b/device/bluetooth/floss/floss_dbus_manager.cc
 @@ -6,9 +6,12 @@

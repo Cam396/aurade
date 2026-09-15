@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+index 718dbef378d6..c431603b7348 100644
 --- a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
-@@ -32,6 +32,25 @@
+@@ -32,6 +32,25 @@ export class AppStateController {
     */
    private fileListSortDirection_: string|null = DEFAULT_SORT_DIRECTION;
  
@@ -27,7 +28,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
    constructor(dialogType: DialogType) {
      this.viewOptionStorageKey_ = 'file-manager-' + dialogType;
    }
-@@ -96,6 +115,8 @@
+@@ -96,6 +115,8 @@ export class AppStateController {
          'changed', this.onFileFilterChanged_.bind(this));
      directoryModel.addEventListener(
          'directory-changed', this.onDirectoryChanged_.bind(this));
@@ -36,7 +37,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
    }
  
    /**
-@@ -151,6 +172,11 @@
+@@ -151,6 +172,11 @@ export class AppStateController {
      assert(this.directoryModel_);
      assert(this.ui_);
  
@@ -48,7 +49,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
      // Sort the file list by:
      // 1) 'date-modified' and 'desc' order on Recent folder.
      // 2) preferred field and direction on other folders.
-@@ -183,9 +209,88 @@
+@@ -183,8 +209,87 @@ export class AppStateController {
        }
      }
    }
@@ -124,7 +125,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
 +  }
  }
  
- /**
++/**
 + * AuraDE: how many folders keep a remembered scroll position.
 + *
 + * Enough that moving around a tree feels like the app is paying attention, and
@@ -133,7 +134,6 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
 + */
 +const AURADE_SCROLL_MEMORY_LIMIT = 64;
 +
-+/**
+ /**
   * Default sort field of the file list.
   */
- const DEFAULT_SORT_FIELD = 'modificationTime';

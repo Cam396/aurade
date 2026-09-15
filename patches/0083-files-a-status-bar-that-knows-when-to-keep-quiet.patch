@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
-index 853cc0a..dc909f5 100644
+index 853cc0a28fff..dc909f5c8e57 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 @@ -137,6 +137,9 @@ interface Harness {
@@ -2652,7 +2652,7 @@ zH^U#?f0oIag|}cqkQTfl6~sLn-1m-;8+|j<ujh~Xv!WV=YeoMSL98OmuleJa_`m#u
 p9^V0_-rYqAK16Mc(NP_Z1`79_>}__)7X^-h6l7FheU&ox`)`x=>VE(L
 
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
-index 4ed4698..4fd6643 100644
+index 4ed469827123..4fd6643f7bba 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 @@ -226,7 +226,7 @@ async function shell(root: HTMLElement, story: ShellStory = {}): Promise<void> {
@@ -2698,7 +2698,7 @@ index 4ed4698..4fd6643 100644
      render: root => shell(root, {into: ['Documents'], popover: 0}),
    },
 diff --git a/ui/file_manager/file_manager/aurade/ui/shell.ts b/ui/file_manager/file_manager/aurade/ui/shell.ts
-index 15805df..c9a8b51 100644
+index 15805df04101..c9a8b5130550 100644
 --- a/ui/file_manager/file_manager/aurade/ui/shell.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/shell.ts
 @@ -12,7 +12,7 @@
@@ -2826,7 +2826,7 @@ index 15805df..c9a8b51 100644
      this.unsubscribe = null;
 diff --git a/ui/file_manager/file_manager/aurade/ui/status_bar.ts b/ui/file_manager/file_manager/aurade/ui/status_bar.ts
 new file mode 100644
-index 0000000..57254a4
+index 000000000000..57254a4ad446
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/status_bar.ts
 @@ -0,0 +1,107 @@
@@ -2938,7 +2938,7 @@ index 0000000..57254a4
 +  }
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
-index e7be9ff..0a5ae62 100644
+index e7be9ff40868..0a5ae6292f34 100644
 --- a/ui/file_manager/file_manager/aurade/ui/tokens.css
 +++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
 @@ -557,3 +557,46 @@

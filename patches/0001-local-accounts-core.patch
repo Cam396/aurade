@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ash/drive/file_system_util.cc b/chrome/browser/ash/drive/file_system_util.cc
-index 560d9e579b..69085f7119 100644
+index 6af39e7e2a9d..4fed5cca51fe 100644
 --- a/chrome/browser/ash/drive/file_system_util.cc
 +++ b/chrome/browser/ash/drive/file_system_util.cc
-@@ -48,6 +48,16 @@ using user_manager::UserManager;
+@@ -47,6 +47,16 @@ using user_manager::UserManager;
  
  namespace {
  
@@ -19,7 +19,7 @@ index 560d9e579b..69085f7119 100644
  ConnectionStatus GetDeviceOnlineStatus() {
    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
    using enum ConnectionStatus;
-@@ -152,6 +162,9 @@ DriveAvailability CheckDriveAvailabilityForProfile(
+@@ -151,6 +161,9 @@ DriveAvailability CheckDriveAvailabilityForProfile(
    if (!user || !user->HasGaiaAccount()) {
      return DriveAvailability::kNotAvailableForAccountType;
    }
@@ -30,10 +30,10 @@ index 560d9e579b..69085f7119 100644
    // Disable Drive if the flag has been passed and it is a test image.
    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
 diff --git a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
-index 9e017fba6c..eea333f3d7 100644
+index 8ec7c9766432..4d916c514a01 100644
 --- a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
 +++ b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
-@@ -68,6 +68,16 @@ static bool g_skip_profile_download = false;
+@@ -69,6 +69,16 @@ static bool g_skip_profile_download = false;
  
  static bool g_skip_default_user_image_download = false;
  
@@ -70,7 +70,7 @@ index 9e017fba6c..eea333f3d7 100644
  
  bool UserImageManagerImpl::IsCustomizationSelectorsPrefEnabled() const {
 diff --git a/chrome/browser/ash/login/users/user_manager_delegate_impl.cc b/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
-index d02c610dda..65411e53f6 100644
+index d02c610dda99..65411e53f675 100644
 --- a/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
 +++ b/chrome/browser/ash/login/users/user_manager_delegate_impl.cc
 @@ -14,6 +14,7 @@
@@ -114,7 +114,7 @@ index d02c610dda..65411e53f6 100644
  
  void UserManagerDelegateImpl::RemoveProfileByAccountId(
 diff --git a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
-index d76a89d551..c07d9b2c79 100644
+index d76a89d55145..c07d9b2c7999 100644
 --- a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
 +++ b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
 @@ -14,6 +14,7 @@
@@ -158,7 +158,7 @@ index d76a89d551..c07d9b2c79 100644
        !signin::AccountManagedStatusFinder::MayBeEnterpriseUserBasedOnEmail(
            account_id.GetUserEmail())) {
 diff --git a/components/signin/internal/identity_manager/account_fetcher_service.cc b/components/signin/internal/identity_manager/account_fetcher_service.cc
-index de9aecddc3..5d6141881e 100644
+index 8e4ffe52bdb1..65e84cf0ab0d 100644
 --- a/components/signin/internal/identity_manager/account_fetcher_service.cc
 +++ b/components/signin/internal/identity_manager/account_fetcher_service.cc
 @@ -4,6 +4,7 @@
@@ -229,7 +229,7 @@ index de9aecddc3..5d6141881e 100644
  
  }  // namespace
  
-@@ -255,6 +302,11 @@ void AccountFetcherService::RefreshAccountInfo(const CoreAccountId& account_id,
+@@ -257,6 +304,11 @@ void AccountFetcherService::RefreshAccountInfo(const CoreAccountId& account_id,
    account_tracker_service_->StartTrackingAccount(account_id);
  
    AccountInfo info = account_tracker_service_->GetAccountInfo(account_id);
@@ -242,7 +242,7 @@ index de9aecddc3..5d6141881e 100644
    if (!only_fetch_if_invalid ||
        !info.GetAccountCapabilities().AreAllCapabilitiesKnown()) {
 diff --git a/components/user_manager/user.h b/components/user_manager/user.h
-index 871f9ab188..9c258b385d 100644
+index 871f9ab18806..9c258b385dcd 100644
 --- a/components/user_manager/user.h
 +++ b/components/user_manager/user.h
 @@ -206,6 +206,7 @@ class USER_MANAGER_EXPORT User {
@@ -254,7 +254,7 @@ index 871f9ab188..9c258b385d 100644
    friend class ash::FakeChromeUserManager;
    friend class ash::UserAddingScreenTest;
 diff --git a/components/user_manager/user_manager_impl.cc b/components/user_manager/user_manager_impl.cc
-index f4d6da255e..d2e2a27a4d 100644
+index c872d1b9568a..32e069c96f6f 100644
 --- a/components/user_manager/user_manager_impl.cc
 +++ b/components/user_manager/user_manager_impl.cc
 @@ -42,6 +42,7 @@
@@ -286,7 +286,7 @@ index f4d6da255e..d2e2a27a4d 100644
  // This reads integer value from kUserType Local State preference and
  // interprets it as UserType. It is used in initial users load.
  UserType GetStoredUserType(const base::DictValue& prefs_user_types,
-@@ -717,6 +728,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
+@@ -716,6 +727,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
      const AccountId& account_id,
      User::OAuthTokenStatus oauth_token_status) {
    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -296,7 +296,7 @@ index f4d6da255e..d2e2a27a4d 100644
  
    DVLOG(1) << "Saving user OAuth token status in Local State";
    User* user = FindUserAndModify(account_id);
-@@ -742,6 +756,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
+@@ -741,6 +755,9 @@ void UserManagerImpl::SaveUserOAuthStatus(
  void UserManagerImpl::SaveForceOnlineSignin(const AccountId& account_id,
                                              bool force_online_signin) {
    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -306,7 +306,7 @@ index f4d6da255e..d2e2a27a4d 100644
  
    User* const user = FindUserAndModify(account_id);
    if (user) {
-@@ -1455,9 +1472,8 @@ User* UserManagerImpl::AddGaiaUser(const AccountId& account_id,
+@@ -1454,9 +1471,8 @@ User* UserManagerImpl::AddGaiaUser(const AccountId& account_id,
    SaveUserType(user);
  
    user->set_oauth_token_status(LoadUserOAuthStatus(account_id));
@@ -318,7 +318,7 @@ index f4d6da255e..d2e2a27a4d 100644
  
    // Add to the persisted list.
    persisted_users_.push_back(user);
-@@ -1568,6 +1584,9 @@ void UserManagerImpl::NotifyOnLogin() {
+@@ -1567,6 +1583,9 @@ void UserManagerImpl::NotifyOnLogin() {
  User::OAuthTokenStatus UserManagerImpl::LoadUserOAuthStatus(
      const AccountId& account_id) const {
    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -328,7 +328,7 @@ index f4d6da255e..d2e2a27a4d 100644
  
    const base::DictValue& prefs_oauth_status =
        local_state_->GetDict(prefs::kUserOAuthTokenStatus);
-@@ -1583,6 +1602,9 @@ User::OAuthTokenStatus UserManagerImpl::LoadUserOAuthStatus(
+@@ -1582,6 +1601,9 @@ User::OAuthTokenStatus UserManagerImpl::LoadUserOAuthStatus(
  
  bool UserManagerImpl::LoadForceOnlineSignin(const AccountId& account_id) const {
    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);

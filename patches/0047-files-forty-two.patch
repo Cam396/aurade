@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
+index ceb276e66e17..680284f60427 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -255,6 +255,10 @@
+@@ -255,6 +255,10 @@ export class ToolbarController {
      if (!count) {
        return '';
      }

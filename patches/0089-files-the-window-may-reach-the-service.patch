@@ -22,10 +22,10 @@ index a44855486bad..599b0dc24b77 100644
  }
  
 diff --git a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
-index c3020dfdea16..a46d67090ad2 100644
+index 08682b2b89f0..9a889f22ad9a 100644
 --- a/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_controller_factory.cc
-@@ -354,7 +354,19 @@ bool ChromeWebUIControllerFactory::IsWebUIAllowedToMakeNetworkRequests(
+@@ -352,7 +352,19 @@ bool ChromeWebUIControllerFactory::IsWebUIAllowedToMakeNetworkRequests(
        // https://crbug.com/376417346
        origin.host() == chrome::kChromeUIExtensionsHost ||
        // https://crbug.com/509216218

@@ -1,5 +1,5 @@
 diff --git a/ash/app_list/app_list_bubble_presenter.cc b/ash/app_list/app_list_bubble_presenter.cc
-index c0beef7153bdfbdf8a07b60096fb67708c675d79..1f7d79575cad37a2c6feb623ab82c947a1f16fa3 100644
+index c0beef7153bd..1f7d79575cad 100644
 --- a/ash/app_list/app_list_bubble_presenter.cc
 +++ b/ash/app_list/app_list_bubble_presenter.cc
 @@ -137,6 +137,13 @@ gfx::Rect ComputeBubbleBounds(aura::Window* root_window,
@@ -17,7 +17,7 @@ index c0beef7153bdfbdf8a07b60096fb67708c675d79..1f7d79575cad37a2c6feb623ab82c947
    return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
  }
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 7ee10e62ba7d3e1c3d936f06c521191e312b55ea..da7a1d238d765da5a60614b6a54584cef165c67a 100644
+index 7ee10e62ba7d..da7a1d238d76 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -282,6 +282,9 @@ Style notes:
@@ -64,7 +64,7 @@ index 7ee10e62ba7d3e1c3d936f06c521191e312b55ea..da7a1d238d765da5a60614b6a54584ce
          Shut down
        </message>
 diff --git a/ash/public/cpp/shelf_config.h b/ash/public/cpp/shelf_config.h
-index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f1819e444 100644
+index e9f8a993ee14..e3fd19835408 100644
 --- a/ash/public/cpp/shelf_config.h
 +++ b/ash/public/cpp/shelf_config.h
 @@ -5,6 +5,7 @@
@@ -75,7 +75,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
  #include <optional>
  
  #include "ash/ash_export.h"
-@@ -22,6 +23,8 @@
+@@ -21,6 +22,8 @@
  #include "ui/display/display_observer.h"
  #include "ui/gfx/animation/tween.h"
  
@@ -84,7 +84,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
  namespace base {
  class TimeDelta;
  }
-@@ -73,6 +76,7 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -72,6 +75,7 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
  
    // SessionObserver:
    void OnSessionStateChanged(session_manager::SessionState state) override;
@@ -92,7 +92,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
  
    // DisplayObserver:
    void OnDisplayMetricsChanged(const display::Display& display,
-@@ -204,6 +208,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -191,6 +195,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
  
    bool is_dense() const { return is_dense_; }
  
@@ -101,7 +101,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
    bool is_in_app() const { return is_in_app_; }
  
    bool in_split_view_with_overview() const {
-@@ -267,6 +273,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -254,6 +260,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Updates 'elevate_tablet_mode_app_bar_' for `inline_app_bar_size`.
    void UpdateShowElevatedAppBar(const gfx::Size& inline_app_bar_size);
  
@@ -110,7 +110,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
   private:
    friend class ShelfConfigTest;
  
-@@ -316,6 +324,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -299,6 +307,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Whether shelf is currently standard or dense.
    bool is_dense_ = false;
  
@@ -120,7 +120,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
    // Whether the shelf is currently in in-app state.
    bool is_in_app_ = false;
  
-@@ -332,8 +343,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -315,8 +326,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Whether the app list (or home launcher in tablet mode) is visible.
    bool is_app_list_visible_ = false;
  
@@ -132,7 +132,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
    const int shelf_button_icon_size_median_;
    const int shelf_button_icon_size_dense_;
  
-@@ -353,12 +366,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -336,12 +349,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    const int shelf_shortcut_teardrop_corner_radius_;
  
    // Size allocated for each app button on the shelf.
@@ -148,7 +148,7 @@ index 06025c3a4864ea857bda72813b8af54b54f9041c..363016d7fefa536f16559876bf94ce7f
    // The extra padding added to status area tray buttons on the shelf.
    const int shelf_status_area_hit_region_padding_;
 diff --git a/ash/public/cpp/shelf_prefs.cc b/ash/public/cpp/shelf_prefs.cc
-index 4c68813bfcdda6591fdb8f51db608ae1afd0ffe1..f3434286db2b53a096160cbf9ad3f63ba616725b 100644
+index 4c68813bfcdd..f3434286db2b 100644
 --- a/ash/public/cpp/shelf_prefs.cc
 +++ b/ash/public/cpp/shelf_prefs.cc
 @@ -19,6 +19,10 @@
@@ -189,7 +189,7 @@ index 4c68813bfcdda6591fdb8f51db608ae1afd0ffe1..f3434286db2b53a096160cbf9ad3f63b
        // This should not be a valid preference option for now. We only want to
        // lock the shelf during login or when adding a user.
 diff --git a/ash/public/cpp/shelf_prefs.h b/ash/public/cpp/shelf_prefs.h
-index 57aedbf21bda386804114021ceda65d844fb2499..08d09609b09b491d2a64b137c9e784f90790a9c3 100644
+index 57aedbf21bda..08d09609b09b 100644
 --- a/ash/public/cpp/shelf_prefs.h
 +++ b/ash/public/cpp/shelf_prefs.h
 @@ -12,6 +12,10 @@ class PrefService;
@@ -204,7 +204,7 @@ index 57aedbf21bda386804114021ceda65d844fb2499..08d09609b09b491d2a64b137c9e784f9
  ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorAlways[];
  ASH_PUBLIC_EXPORT extern const char kShelfAutoHideBehaviorNever[];
 diff --git a/ash/public/cpp/shelf_types.cc b/ash/public/cpp/shelf_types.cc
-index d843e45944c3749c075aab7353033b57bd88ad14..95c8206f0c6ab6e01e2a5f8bde6fd1d058b4f409 100644
+index d843e45944c3..95c8206f0c6a 100644
 --- a/ash/public/cpp/shelf_types.cc
 +++ b/ash/public/cpp/shelf_types.cc
 @@ -28,6 +28,8 @@ std::ostream& operator<<(std::ostream& out, ShelfAlignment alignment) {
@@ -217,7 +217,7 @@ index d843e45944c3749c075aab7353033b57bd88ad14..95c8206f0c6ab6e01e2a5f8bde6fd1d0
  }
  
 diff --git a/ash/public/cpp/shelf_types.h b/ash/public/cpp/shelf_types.h
-index 620246e153d6bb09464c798ab44ed97d6e21c204..6595e7d8454f14cdbe51d02c267c8ffbe075a92c 100644
+index 620246e153d6..6595e7d8454f 100644
 --- a/ash/public/cpp/shelf_types.h
 +++ b/ash/public/cpp/shelf_types.h
 @@ -17,7 +17,7 @@ enum class ShelfAlignment {
@@ -230,7 +230,7 @@ index 620246e153d6bb09464c798ab44ed97d6e21c204..6595e7d8454f14cdbe51d02c267c8ffb
    // The locked alignment is set temporarily and not saved to preferences.
    kBottomLocked,
 diff --git a/ash/shelf/home_button.cc b/ash/shelf/home_button.cc
-index a8f8005993847aae221ca3f49a30ec98232ce9e2..5e76c204ee51e0a922eaf777d0a4af1dc17ed445 100644
+index 34a4b67fd3c1..85b3d94a1c30 100644
 --- a/ash/shelf/home_button.cc
 +++ b/ash/shelf/home_button.cc
 @@ -812,11 +812,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
@@ -250,7 +250,7 @@ index a8f8005993847aae221ca3f49a30ec98232ce9e2..5e76c204ee51e0a922eaf777d0a4af1d
    gfx::Transform move_up;
    move_up.Translate(bounce_up_point.x(), bounce_up_point.y());
 diff --git a/ash/shelf/hotseat_widget.cc b/ash/shelf/hotseat_widget.cc
-index 1ea5906c4a1e76b3de53bb2451521997b4013f24..d073cc3819f5356d2cf14fe92af59290c49f4059 100644
+index f76c27d4f99c..d13e53780077 100644
 --- a/ash/shelf/hotseat_widget.cc
 +++ b/ash/shelf/hotseat_widget.cc
 @@ -4,6 +4,7 @@
@@ -261,7 +261,7 @@ index 1ea5906c4a1e76b3de53bb2451521997b4013f24..d073cc3819f5356d2cf14fe92af59290
  #include <memory>
  #include <utility>
  
-@@ -851,6 +852,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
+@@ -852,6 +853,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
    DCHECK(shelf_->IsHorizontalAlignment());
    int hotseat_distance_from_bottom_of_display = 0;
    const int hotseat_size = GetHotseatSize();
@@ -300,7 +300,7 @@ index 1ea5906c4a1e76b3de53bb2451521997b4013f24..d073cc3819f5356d2cf14fe92af59290
    switch (hotseat_target_state) {
      case HotseatState::kShownClamshell:
        hotseat_distance_from_bottom_of_display = hotseat_size;
-@@ -883,11 +916,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
+@@ -884,11 +917,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
      case HotseatState::kNone:
        NOTREACHED();
    }
@@ -313,10 +313,10 @@ index 1ea5906c4a1e76b3de53bb2451521997b4013f24..d073cc3819f5356d2cf14fe92af59290
  }
  
 diff --git a/ash/shelf/kiosk_app_instruction_bubble.cc b/ash/shelf/kiosk_app_instruction_bubble.cc
-index 9b4308272f07bdc279c07ddfb0b3626a31c9bdf5..5cbe4c53af9c099044e655e1e248728c958d52a3 100644
+index fdc584f96d20..e69b4512c448 100644
 --- a/ash/shelf/kiosk_app_instruction_bubble.cc
 +++ b/ash/shelf/kiosk_app_instruction_bubble.cc
-@@ -38,6 +38,8 @@ views::BubbleBorder::Arrow GetArrow(ShelfAlignment alignment) {
+@@ -37,6 +37,8 @@ views::BubbleBorder::Arrow GetArrow(ShelfAlignment alignment) {
        return views::BubbleBorder::LEFT_TOP;
      case ShelfAlignment::kRight:
        return views::BubbleBorder::RIGHT_TOP;
@@ -326,7 +326,7 @@ index 9b4308272f07bdc279c07ddfb0b3626a31c9bdf5..5cbe4c53af9c099044e655e1e248728c
    return views::BubbleBorder::Arrow::NONE;
  }
 diff --git a/ash/shelf/shelf.cc b/ash/shelf/shelf.cc
-index f9257db9ce85053b4140b39fae47626767863e87..b651c921c70ec1463e64c719698b362a986b72fd 100644
+index f9257db9ce85..b651c921c70e 100644
 --- a/ash/shelf/shelf.cc
 +++ b/ash/shelf/shelf.cc
 @@ -550,6 +550,7 @@ bool IsHorizontalAlignment(ShelfAlignment alignment) {
@@ -350,7 +350,7 @@ index f9257db9ce85053b4140b39fae47626767863e87..b651c921c70ec1463e64c719698b362a
    NOTREACHED();
  }
 diff --git a/ash/shelf/shelf.h b/ash/shelf/shelf.h
-index 1fc09e689e24bbc88d74c28747c2929ab59499ff..24a3b45a9d98e2b87f89772568f970300e4ac763 100644
+index 1fc09e689e24..24a3b45a9d98 100644
 --- a/ash/shelf/shelf.h
 +++ b/ash/shelf/shelf.h
 @@ -58,7 +58,8 @@ template <typename T>
@@ -399,7 +399,7 @@ index 1fc09e689e24bbc88d74c28747c2929ab59499ff..24a3b45a9d98e2b87f89772568f97030
  
    // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
 diff --git a/ash/shelf/shelf_app_button.cc b/ash/shelf/shelf_app_button.cc
-index de7315c0a3ecd877fcf655fb0c3c1512b6780b55..42b8001cfad8ea20dd3aab23e78634ee6041bf61 100644
+index 15b8a00383a8..f5d8f35f14be 100644
 --- a/ash/shelf/shelf_app_button.cc
 +++ b/ash/shelf/shelf_app_button.cc
 @@ -1043,6 +1043,10 @@ void ShelfAppButton::Layout(PassKey) {
@@ -414,7 +414,7 @@ index de7315c0a3ecd877fcf655fb0c3c1512b6780b55..42b8001cfad8ea20dd3aab23e78634ee
  
    gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
 diff --git a/ash/shelf/shelf_bubble.cc b/ash/shelf/shelf_bubble.cc
-index d54514e3f18d4607968cbe7c40ab475997d871d8..b9bf5565eb2f56bf11c82b94335a0c440a471c5d 100644
+index d54514e3f18d..b9bf5565eb2f 100644
 --- a/ash/shelf/shelf_bubble.cc
 +++ b/ash/shelf/shelf_bubble.cc
 @@ -29,6 +29,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
@@ -427,7 +427,7 @@ index d54514e3f18d4607968cbe7c40ab475997d871d8..b9bf5565eb2f56bf11c82b94335a0c44
    return views::BubbleBorder::Arrow::NONE;
  }
 diff --git a/ash/shelf/shelf_config.cc b/ash/shelf/shelf_config.cc
-index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16f902f967 100644
+index 7bc8b9d3ac4a..5fc000668026 100644
 --- a/ash/shelf/shelf_config.cc
 +++ b/ash/shelf/shelf_config.cc
 @@ -6,6 +6,9 @@
@@ -448,7 +448,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
  #include "ui/display/tablet_state.h"
  
-@@ -173,6 +177,7 @@ void ShelfConfig::Init() {
+@@ -169,6 +173,7 @@ void ShelfConfig::Init() {
  void ShelfConfig::Shutdown() {
    Shell* const shell = Shell::Get();
  
@@ -456,7 +456,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
    shell->session_controller()->RemoveObserver(this);
    shell->overview_controller()->RemoveObserver(this);
    shell->system_tray_model()->virtual_keyboard()->RemoveObserver(this);
-@@ -212,6 +217,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
+@@ -208,6 +213,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
    UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
  }
  
@@ -473,7 +473,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  void ShelfConfig::UpdateForTabletMode(bool in_tablet_mode) {
    in_tablet_mode_ = in_tablet_mode;
    UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/true);
-@@ -250,7 +265,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
+@@ -243,7 +258,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
  
  int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
    if (is_dense_)
@@ -482,7 +482,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  
    switch (density) {
      case HotseatDensity::kNormal:
-@@ -264,7 +279,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
+@@ -257,7 +272,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
  
  int ShelfConfig::GetShelfButtonIconSize(HotseatDensity density) const {
    if (is_dense_)
@@ -491,7 +491,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  
    switch (density) {
      case HotseatDensity::kNormal:
-@@ -312,6 +327,8 @@ int ShelfConfig::shelf_size() const {
+@@ -305,6 +320,8 @@ int ShelfConfig::shelf_size() const {
  }
  
  int ShelfConfig::in_app_shelf_size() const {
@@ -500,7 +500,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
    return is_dense_ ? 36 : 40;
  }
  
-@@ -337,7 +354,7 @@ int ShelfConfig::button_spacing() const {
+@@ -330,7 +347,7 @@ int ShelfConfig::button_spacing() const {
  
  int ShelfConfig::control_size() const {
    if (!in_tablet_mode_)
@@ -509,7 +509,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  
    return is_dense_ ? 36 : 40;
  }
-@@ -397,12 +414,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+@@ -390,12 +407,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
    const bool new_is_in_app =
        CalculateIsInApp(new_is_app_list_visible, new_is_virtual_keyboard_shown);
  
@@ -529,7 +529,7 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
  
    if (!changed)
      return;
-@@ -412,14 +435,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+@@ -405,14 +428,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
    is_virtual_keyboard_shown_ = new_is_virtual_keyboard_shown;
    is_app_list_visible_ = new_is_app_list_visible;
    is_in_app_ = new_is_in_app;
@@ -557,10 +557,10 @@ index bbef09d937cd8d2c6d9472d6eb79e0d56fc73557..4d287752440e575f61af832fe0537b16
    // Use in app shelf when split view is enabled.
    if (!ignore_in_app_state && (is_in_app_ || in_split_view_with_overview_))
 diff --git a/ash/shelf/shelf_context_menu_model.cc b/ash/shelf/shelf_context_menu_model.cc
-index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71b46cf320 100644
+index 3e4dc0985715..71b272fb3ad7 100644
 --- a/ash/shelf/shelf_context_menu_model.cc
 +++ b/ash/shelf/shelf_context_menu_model.cc
-@@ -48,6 +48,12 @@ bool IsFullScreenMode(int64_t display_id) {
+@@ -49,6 +49,12 @@ bool IsFullScreenMode(int64_t display_id) {
    return controller && controller->GetWindowForFullscreenMode();
  }
  
@@ -573,7 +573,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
  }  // namespace
  
  ShelfContextMenuModel::ShelfContextMenuModel(ShelfItemDelegate* delegate,
-@@ -67,9 +73,9 @@ ShelfContextMenuModel::~ShelfContextMenuModel() = default;
+@@ -68,9 +74,9 @@ ShelfContextMenuModel::~ShelfContextMenuModel() = default;
  bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
    if (command_id == MENU_ALIGNMENT_LEFT ||
        command_id == MENU_ALIGNMENT_BOTTOM ||
@@ -586,7 +586,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
      const ShelfAlignment alignment = GetShelfAlignmentPref(prefs, display_id_);
      if (command_id == MENU_ALIGNMENT_LEFT)
        return alignment == ShelfAlignment::kLeft;
-@@ -79,6 +85,8 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
+@@ -80,6 +86,8 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
      }
      if (command_id == MENU_ALIGNMENT_RIGHT)
        return alignment == ShelfAlignment::kRight;
@@ -595,7 +595,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
    }
  
    return SimpleMenuModel::Delegate::IsCommandIdChecked(command_id);
-@@ -87,36 +95,54 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
+@@ -88,36 +96,54 @@ bool ShelfContextMenuModel::IsCommandIdChecked(int command_id) const {
  void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
    DCHECK(IsCommandIdEnabled(command_id));
    Shell* shell = Shell::Get();
@@ -666,7 +666,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
        break;
      case MENU_PERSONALIZATION_HUB:
        NewWindowDelegate::GetInstance()->OpenPersonalizationHub();
-@@ -130,11 +156,15 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+@@ -131,11 +157,15 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
        shell->app_list_controller()->SetHideContinueSection(false);
        break;
      case MENU_HIDE_DESK_NAME:
@@ -685,7 +685,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
        break;
      case MENU_TASK_MANAGER:
        base::RecordAction(
-@@ -142,6 +172,12 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+@@ -143,6 +173,12 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
        NewWindowDelegate::GetInstance()->ShowTaskManager(
            /*from_context_menu=*/true);
        break;
@@ -698,7 +698,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
      // Using reorder CommandId in ash/public/cpp/app_menu_constants.h
      case REORDER_BY_NAME_ALPHABETICAL:
        AppListModelProvider::Get()->model()->delegate()->RequestAppListSort(
-@@ -164,27 +200,30 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
+@@ -165,27 +201,30 @@ void ShelfContextMenuModel::ExecuteCommand(int command_id, int event_flags) {
  }
  
  void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
@@ -749,7 +749,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
    }
  
    // Only allow shelf alignment modifications by the logged in Gaia users
-@@ -192,7 +231,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+@@ -193,7 +232,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
    // is not shown.
    LoginStatus status = Shell::Get()->session_controller()->login_status();
    const bool in_tablet_mode = display::Screen::Get()->InTabletMode();
@@ -758,7 +758,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
        !in_tablet_mode &&
        prefs->FindPreference(prefs::kShelfAlignmentLocal)->IsUserModifiable()) {
      alignment_submenu_ = std::make_unique<ui::SimpleMenuModel>(this);
-@@ -204,6 +243,8 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+@@ -205,6 +244,8 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
          MENU_ALIGNMENT_BOTTOM, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_BOTTOM, group);
      alignment_submenu_->AddRadioItemWithStringId(
          MENU_ALIGNMENT_RIGHT, IDS_ASH_SHELF_CONTEXT_MENU_ALIGN_RIGHT, group);
@@ -767,7 +767,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
  
      AddSubMenuWithStringIdAndIcon(
          MENU_ALIGNMENT_MENU, IDS_ASH_SHELF_CONTEXT_MENU_POSITION,
-@@ -219,7 +260,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+@@ -220,7 +261,7 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
  
    // Only add the desk button items if the context menu was spawned on the
    // shelf, tablet mode is not enabled, and full screen is not enabled.
@@ -776,10 +776,10 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
      // If the button is visible for any reason, show the option to hide it
      // manually. If it isn't visible show the option to show it.
      if (GetDeskButtonVisibility(prefs)) {
-@@ -237,6 +278,18 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
- 
-   AddItemWithStringId(MENU_TASK_MANAGER,
-                       IDS_ASH_SHELF_CONTEXT_MENU_TASK_MANAGER);
+@@ -241,6 +282,18 @@ void ShelfContextMenuModel::AddShelfAndWallpaperItems() {
+       ui::ImageModel::FromVectorIcon(vector_icons::kTableChartIcon,
+                                      ui::kColorAshSystemUIMenuIcon,
+                                      kAppContextMenuIconSize));
 +
 +  // Compact mode toggle, only meaningful in clamshell mode.
 +  if (!in_tablet_mode) {
@@ -796,7 +796,7 @@ index b6223265c32d667ce43b3b5e8f5f5a892ece17a6..910b93d55326074187d2828752014a71
  
  }  // namespace ash
 diff --git a/ash/shelf/shelf_context_menu_model.h b/ash/shelf/shelf_context_menu_model.h
-index 2d9c97bbdcefd37d9651ba8a286584756b46cb3d..a8b9ad0e50be4b9f00680a92effb9a0f438b98b9 100644
+index 2d9c97bbdcef..a8b9ad0e50be 100644
 --- a/ash/shelf/shelf_context_menu_model.h
 +++ b/ash/shelf/shelf_context_menu_model.h
 @@ -42,6 +42,8 @@ class ASH_EXPORT ShelfContextMenuModel : public ui::SimpleMenuModel,
@@ -809,7 +809,7 @@ index 2d9c97bbdcefd37d9651ba8a286584756b46cb3d..a8b9ad0e50be4b9f00680a92effb9a0f
    };
    // LINT.ThenChange(//tools/metrics/histograms/metadata/apps/enums.xml:ChromeOSUICommands)
 diff --git a/ash/shelf/shelf_controller.cc b/ash/shelf/shelf_controller.cc
-index 82fdf6bb2d063ff05b977e4640af7976ecfe980f..474161baf795750d95167dbd2e4cd5e9b29ea945 100644
+index 82fdf6bb2d06..474161baf795 100644
 --- a/ash/shelf/shelf_controller.cc
 +++ b/ash/shelf/shelf_controller.cc
 @@ -161,6 +161,7 @@ void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
@@ -833,7 +833,7 @@ index 82fdf6bb2d063ff05b977e4640af7976ecfe980f..474161baf795750d95167dbd2e4cd5e9
    pref_change_registrar_->Add(
        prefs::kAppNotificationBadgingEnabled,
 diff --git a/ash/shelf/shelf_layout_manager.cc b/ash/shelf/shelf_layout_manager.cc
-index e7cf6b4954d5b7b88811b42638b34fa275f68808..30ba33ec02ffdf83e0c5c16beca3acfade32f477 100644
+index e7cf6b4954d5..30ba33ec02ff 100644
 --- a/ash/shelf/shelf_layout_manager.cc
 +++ b/ash/shelf/shelf_layout_manager.cc
 @@ -238,7 +238,8 @@ gfx::Insets CalculateShelfInsets(ShelfAlignment alignment,
@@ -917,10 +917,10 @@ index e7cf6b4954d5b7b88811b42638b34fa275f68808..30ba33ec02ffdf83e0c5c16beca3acfa
          return drag_amount_ < 0;
        return drag_amount_ > 0;
 diff --git a/ash/shelf/shelf_view.cc b/ash/shelf/shelf_view.cc
-index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87a2435105 100644
+index 1dc8781f613f..dbc0b20160e5 100644
 --- a/ash/shelf/shelf_view.cc
 +++ b/ash/shelf/shelf_view.cc
-@@ -1281,7 +1281,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
+@@ -1254,7 +1254,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
                                  shelf_->SelectValueForShelfAlignment(
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
@@ -930,7 +930,7 @@ index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87
                              SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
  }
  
-@@ -1997,6 +1998,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
+@@ -1970,6 +1971,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
      case ShelfAlignment::kRight:
        origin = gfx::Point(shelf_bounds_in_screen.x(), location.y());
        break;
@@ -940,7 +940,7 @@ index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87
    }
    return gfx::Rect(origin, gfx::Size());
  }
-@@ -2014,6 +2018,9 @@ void ShelfView::AnnounceShelfAlignment() {
+@@ -1987,6 +1991,9 @@ void ShelfView::AnnounceShelfAlignment() {
      case ShelfAlignment::kRight:
        announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_RIGHT);
        break;
@@ -950,7 +950,7 @@ index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87
    }
    announcement_view_->GetViewAccessibility().AnnounceText(announcement);
  }
-@@ -2668,9 +2675,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
+@@ -2641,9 +2648,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
  
  int ShelfView::CalculateShelfDistance(const gfx::Point& coordinate) const {
    const gfx::Rect bounds = GetBoundsInScreen();
@@ -964,7 +964,7 @@ index f23c8cd821cb8cc3828e59bcb3fc89dbd9e73254..91bb6a28060888e7ccb4cb801a561c87
  }
  
 diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
-index 9876d5f93e83a0b7f798728e808138e87497d31d..c5153b1cfa74b5d2202b2cc0c904883a298d964c 100644
+index 89c4920f1652..b66b3892a288 100644
 --- a/ash/shelf/shelf_widget.cc
 +++ b/ash/shelf/shelf_widget.cc
 @@ -34,6 +34,7 @@
@@ -1095,7 +1095,7 @@ index 9876d5f93e83a0b7f798728e808138e87497d31d..c5153b1cfa74b5d2202b2cc0c904883a
      hotseat_transition_animator_->SetAnimationsEnabledInSessionState(
          show_hotseat);
 diff --git a/ash/system/holding_space/holding_space_tray_bubble.cc b/ash/system/holding_space/holding_space_tray_bubble.cc
-index 891d8661be58c28842c15f15ba36a0125993824e..2da7246fdd2d513ebf1503b35b3278e5fb850e03 100644
+index 891d8661be58..2da7246fdd2d 100644
 --- a/ash/system/holding_space/holding_space_tray_bubble.cc
 +++ b/ash/system/holding_space/holding_space_tray_bubble.cc
 @@ -4,6 +4,7 @@
@@ -1143,10 +1143,10 @@ index 891d8661be58c28842c15f15ba36a0125993824e..2da7246fdd2d513ebf1503b35b3278e5
  
  int HoldingSpaceTrayBubble::CalculateChildBubbleContainerMaxHeight() const {
 diff --git a/ash/system/holding_space/holding_space_tray_icon_preview.cc b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-index 4540fbc9b2bae1e01887217180f677470e520070..e18dbcd5e522d888131fded40297eaab3f87cd4d 100644
+index 40fa2ec66c22..9ccd25333b79 100644
 --- a/ash/system/holding_space/holding_space_tray_icon_preview.cc
 +++ b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-@@ -115,6 +115,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
+@@ -88,6 +88,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
    switch (shelf_alignment) {
      case ShelfAlignment::kBottom:
      case ShelfAlignment::kBottomLocked:
@@ -1155,7 +1155,7 @@ index 4540fbc9b2bae1e01887217180f677470e520070..e18dbcd5e522d888131fded40297eaab
      case ShelfAlignment::kLeft:
      case ShelfAlignment::kRight:
 diff --git a/ash/system/notification_center/ash_message_popup_collection.cc b/ash/system/notification_center/ash_message_popup_collection.cc
-index 96a4f3a0254a33a62c32fcebb86b190958e2d848..960e819583f4bd7e11ab50ba5b51c0b4830c5235 100644
+index 96a4f3a0254a..960e819583f4 100644
 --- a/ash/system/notification_center/ash_message_popup_collection.cc
 +++ b/ash/system/notification_center/ash_message_popup_collection.cc
 @@ -105,8 +105,7 @@ void AshMessagePopupCollection::NotifierCollisionHandler::
@@ -1224,7 +1224,7 @@ index 96a4f3a0254a33a62c32fcebb86b190958e2d848..960e819583f4bd7e11ab50ba5b51c0b4
    if (popups_animating_ == 0 && last_pop_up_added_) {
      // Since all the popup widgets use the same compositor, we only need to set
 diff --git a/ash/system/notification_center/ash_message_popup_collection.h b/ash/system/notification_center/ash_message_popup_collection.h
-index bace01f2a9717432ae14a9bb0c9c78b8929b8f78..3e9e38692b19b0f6c617a94e24c761f49de4beb4 100644
+index bace01f2a971..3e9e38692b19 100644
 --- a/ash/system/notification_center/ash_message_popup_collection.h
 +++ b/ash/system/notification_center/ash_message_popup_collection.h
 @@ -206,6 +206,10 @@ class ASH_EXPORT AshMessagePopupCollection
@@ -1239,10 +1239,10 @@ index bace01f2a9717432ae14a9bb0c9c78b8929b8f78..3e9e38692b19b0f6c617a94e24c761f4
    void OnDisplayMetricsChanged(const display::Display& display,
                                 uint32_t metrics) override;
 diff --git a/ash/system/palette/palette_tray.cc b/ash/system/palette/palette_tray.cc
-index 622af2358dce8817f32916fc5d47b72935f088a1..5cb07b8afbab0254246d1eaac791ca48bfa97853 100644
+index ccb93d04bc35..da0c9c74c8ce 100644
 --- a/ash/system/palette/palette_tray.cc
 +++ b/ash/system/palette/palette_tray.cc
-@@ -712,6 +712,11 @@ void PaletteTray::OnAutoHideStateChanged(ShelfAutoHideState state) {
+@@ -711,6 +711,11 @@ void PaletteTray::OnAutoHideStateChanged(ShelfAutoHideState state) {
      case ShelfAlignment::kRight:
        anchor_rect = gfx::Rect(work_area.right(), tray_anchor.bottom(), 0, 0);
        break;
@@ -1255,7 +1255,7 @@ index 622af2358dce8817f32916fc5d47b72935f088a1..5cb07b8afbab0254246d1eaac791ca48
  
    bubble_->bubble_view()->ChangeAnchorRect(anchor_rect);
 diff --git a/ash/system/toast/anchored_nudge.cc b/ash/system/toast/anchored_nudge.cc
-index a7bb13b5a6aacbbff57ed4deb0157f04073a5555..557bf32c14142cdacf1aeee1a5144bd85e852490 100644
+index a7bb13b5a6aa..557bf32c1414 100644
 --- a/ash/system/toast/anchored_nudge.cc
 +++ b/ash/system/toast/anchored_nudge.cc
 @@ -350,11 +350,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
@@ -1273,7 +1273,7 @@ index a7bb13b5a6aacbbff57ed4deb0157f04073a5555..557bf32c14142cdacf1aeee1a5144bd8
  }
  
 diff --git a/ash/system/tray/tray_background_view.cc b/ash/system/tray/tray_background_view.cc
-index dd2a2ad94d57b3ca0f590449608300c94e714e62..52948fd6f825097fc5230ee97d96a4bc2656c661 100644
+index a103119cfe50..bc6d70e47eef 100644
 --- a/ash/system/tray/tray_background_view.cc
 +++ b/ash/system/tray/tray_background_view.cc
 @@ -579,6 +579,9 @@ void TrayBackgroundView::ShowContextMenuForViewImpl(
@@ -1287,7 +1287,7 @@ index dd2a2ad94d57b3ca0f590449608300c94e714e62..52948fd6f825097fc5230ee97d96a4bc
  
    context_menu_runner_->RunMenuAt(
 diff --git a/ash/system/tray/tray_bubble_view.cc b/ash/system/tray/tray_bubble_view.cc
-index 3402fb3e6c6394bef060ee799f938d41c18e31bc..9bd09c6a6be10b681bebddfe48fb008eb4d37b7c 100644
+index 2f2cbdb5e1a8..5c79b0ddfaa9 100644
 --- a/ash/system/tray/tray_bubble_view.cc
 +++ b/ash/system/tray/tray_bubble_view.cc
 @@ -82,6 +82,9 @@ BubbleBorder::Arrow GetArrowAlignment(ash::ShelfAlignment alignment) {
@@ -1301,7 +1301,7 @@ index 3402fb3e6c6394bef060ee799f938d41c18e31bc..9bd09c6a6be10b681bebddfe48fb008e
  }
  
 diff --git a/ash/system/tray/tray_utils.cc b/ash/system/tray/tray_utils.cc
-index 5cc85c10d6ae619b92872a8fbc6465bc7807cc7a..05d41680e2cab7dfd1796e27bcdb1855c90ddef8 100644
+index 5cc85c10d6ae..05d41680e2ca 100644
 --- a/ash/system/tray/tray_utils.cc
 +++ b/ash/system/tray/tray_utils.cc
 @@ -4,6 +4,7 @@
@@ -1374,7 +1374,7 @@ index 5cc85c10d6ae619b92872a8fbc6465bc7807cc7a..05d41680e2cab7dfd1796e27bcdb1855
  
  TrayBubbleView::InitParams CreateInitParamsForTrayBubble(
 diff --git a/ash/system/video_conference/video_conference_tray.cc b/ash/system/video_conference/video_conference_tray.cc
-index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6bdf1959ef 100644
+index ecb7c382ae9c..2307bfb9aac6 100644
 --- a/ash/system/video_conference/video_conference_tray.cc
 +++ b/ash/system/video_conference/video_conference_tray.cc
 @@ -30,6 +30,7 @@
@@ -1385,7 +1385,7 @@ index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6b
  #include "components/session_manager/session_manager_types.h"
  #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
  #include "ui/base/l10n/l10n_util.h"
-@@ -230,6 +231,14 @@ void VideoConferenceTrayButton::PaintButtonContents(gfx::Canvas* canvas) {
+@@ -231,6 +232,14 @@ void VideoConferenceTrayButton::PaintButtonContents(gfx::Canvas* canvas) {
  }
  
  void VideoConferenceTrayButton::UpdateTooltip() {
@@ -1400,7 +1400,7 @@ index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6b
    int capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_OFF;
    if (show_privacy_indicator_) {
      capture_state_id = IDS_VIDEO_CONFERENCE_TOGGLE_BUTTON_STATE_ON_AND_IN_USE;
-@@ -423,6 +432,8 @@ SkScalar VideoConferenceTray::GetRotationValueForToggleBubbleButton() {
+@@ -424,6 +433,8 @@ SkScalar VideoConferenceTray::GetRotationValueForToggleBubbleButton() {
        return bubble_ ? 270 : 90;
      case ShelfAlignment::kRight:
        return bubble_ ? 90 : 270;
@@ -1410,7 +1410,7 @@ index ba11ad330cba7f7e31b93554cbfa939145a01730..141acf788bf50c55704c401aabedbe6b
  }
  
 diff --git a/ash/wm/desks/desk_bar_view.cc b/ash/wm/desks/desk_bar_view.cc
-index 353c238afed632d728723fab7c2850dcc51b6470..2a80ec716f0dde8deddf11989accc594ef40f642 100644
+index 353c238afed6..2a80ec716f0d 100644
 --- a/ash/wm/desks/desk_bar_view.cc
 +++ b/ash/wm/desks/desk_bar_view.cc
 @@ -124,6 +124,11 @@ gfx::Rect DeskBarView::GetAvailableBounds() const {
@@ -1436,7 +1436,7 @@ index 353c238afed632d728723fab7c2850dcc51b6470..2a80ec716f0dde8deddf11989accc594
    GetWidget()->SetBounds(new_bounds);
  }
 diff --git a/ash/wm/window_animations.cc b/ash/wm/window_animations.cc
-index 3308b2d26c12141e5dcd63904c220f70eb1067b1..630f141c0ba84702532dbce9eba91e981e7d8feb 100644
+index 3308b2d26c12..630f141c0ba8 100644
 --- a/ash/wm/window_animations.cc
 +++ b/ash/wm/window_animations.cc
 @@ -736,6 +736,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
@@ -1458,10 +1458,10 @@ index 3308b2d26c12141e5dcd63904c220f70eb1067b1..630f141c0ba84702532dbce9eba91e98
    NOTREACHED();
  }
 diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-index 7f16953d7dceeec4362e9807f4f8e029100f702d..e81b19158f98232fc80d0ccb1e654cc52351aaa9 100644
+index 04937db0552e..558725b7f9e7 100644
 --- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
 +++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-@@ -3486,6 +3486,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
+@@ -3496,6 +3496,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
      case ash::ShelfAlignment::kRight:
        alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
        break;
@@ -1471,7 +1471,7 @@ index 7f16953d7dceeec4362e9807f4f8e029100f702d..e81b19158f98232fc80d0ccb1e654cc5
      case ash::ShelfAlignment::kBottomLocked:
        // ShelfAlignment::kBottomLocked not supported by
        // shelf_prefs.cc
-@@ -3524,10 +3527,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
+@@ -3534,10 +3537,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
      case api::autotest_private::ShelfAlignmentType::kRight:
        alignment = ash::ShelfAlignment::kRight;
        break;
@@ -1488,7 +1488,7 @@ index 7f16953d7dceeec4362e9807f4f8e029100f702d..e81b19158f98232fc80d0ccb1e654cc5
    int64_t display_id;
    if (!base::StringToInt64(params->display_id, &display_id)) {
 diff --git a/chrome/common/extensions/api/autotest_private.webidl b/chrome/common/extensions/api/autotest_private.webidl
-index 986a364925c0584d02bdab3fa26c99848a249e67..f96e6969ac58c82e2aa1a041fc7b3323dcad65e7 100644
+index 986a364925c0..f96e6969ac58 100644
 --- a/chrome/common/extensions/api/autotest_private.webidl
 +++ b/chrome/common/extensions/api/autotest_private.webidl
 @@ -9,7 +9,8 @@ enum ShelfAlignmentType {

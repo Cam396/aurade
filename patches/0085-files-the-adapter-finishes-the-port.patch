@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
-index 2ffbf3d..42831ca 100644
+index 2ffbf3d3dd29..42831ca33e9c 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 @@ -12,9 +12,9 @@
@@ -310,7 +310,7 @@ index 2ffbf3d..42831ca 100644
    }
  }
 diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
-index 36f9233..123a655 100644
+index 36f923320f1c..123a655cd0c6 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
 @@ -68,6 +68,53 @@ export interface PlatformWatchEvent {
@@ -397,7 +397,7 @@ index 36f9233..123a655 100644
 +  cancelDialog(): void;
  }
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
-index 6268704..2a784cf 100644
+index 62687043458a..2a784cfef7e6 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 @@ -7,7 +7,7 @@
@@ -632,7 +632,7 @@ index 6268704..2a784cf 100644
      name: 'walking away from a watch releases it on the platform',
      async run() {
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
-index 8451c80..9483836 100644
+index 8451c80bc993..948383615906 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 @@ -11,7 +11,7 @@
@@ -851,7 +851,7 @@ index 8451c80..9483836 100644
 +  }
  }
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
-index a3603a2..ced644d 100644
+index a3603a22604e..ced644d7193c 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
 @@ -28,8 +28,12 @@ const DOM_NAMES: Record<string, string> = {
@@ -881,7 +881,7 @@ index a3603a2..ced644d 100644
  }
  
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
-index 043399c..909f1da 100644
+index 043399c026c1..909f1da8a210 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 @@ -29,8 +29,18 @@ export interface Fixture {

@@ -1,5 +1,6 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts b/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts
 new file mode 100644
+index 000000000000..2f60f1c16efb
 --- /dev/null
 +++ b/ui/file_manager/file_manager/foreground/js/aurade_folder_size.ts
 @@ -0,0 +1,141 @@
@@ -144,30 +145,20 @@ new file mode 100644
 +  folderSizes.clear();
 +  inFlight.clear();
 +}
-diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
---- a/ui/file_manager/file_names.gni
-+++ b/ui/file_manager/file_names.gni
-@@ -219,6 +219,7 @@
-   "file_manager/foreground/js/android_app_list_model.ts",
-   "file_manager/foreground/js/app_state_controller.ts",
-   "file_manager/foreground/js/aurade_devices_controller.ts",
-+  "file_manager/foreground/js/aurade_folder_size.ts",
-   "file_manager/foreground/js/banner_controller.ts",
-   "file_manager/foreground/js/command_handler.ts",
-   "file_manager/foreground/js/constants.ts",
 diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
+index 8c8693d573a1..f65180766bba 100644
 --- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
 +++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
-@@ -18,7 +18,7 @@
+@@ -18,7 +18,7 @@ import {DEFAULT_BRUSCHETTA_VM, DEFAULT_CROSTINI_VM} from './constants.js';
  import type {FileFilter} from './directory_contents.js';
  import type {DirectoryModel} from './directory_model.js';
  import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
--import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
-+import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CalculateSizeCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, EraseDeviceCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+-import {BrowserBackCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {BrowserBackCommand, CalculateSizeCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
  import {shouldIgnoreEvents} from './file_manager_commands_util.js';
  import type {FileSelection, FileSelectionHandler} from './file_selection.js';
  import type {FileTransferController} from './file_transfer_controller.js';
-@@ -163,6 +163,7 @@
+@@ -162,6 +162,7 @@ const FilesCommands = {
    'volume-storage': new VolumeStorageCommand(),
    'copy-name': new CopyNameCommand(),
    'copy-path': new CopyPathCommand(),
@@ -176,26 +167,27 @@ diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/
    'volume-switch-1': new VolumeSwitchCommand(1),
    'volume-switch-2': new VolumeSwitchCommand(2),
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
+index 8a1c4162d37f..6442295f8ddb 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
-@@ -19,7 +19,7 @@
+@@ -19,7 +19,7 @@ import type {FakeEntry, FilesAppDirEntry, FilesAppEntry} from '../../common/js/f
  import {EntryList} from '../../common/js/files_app_entry_types.js';
- import {isDlpEnabled, isDriveFsBulkPinningEnabled, isMirrorSyncEnabled, isSinglePartitionFormatEnabled} from '../../common/js/flags.js';
+ import {isDlpEnabled, isDriveFsBulkPinningEnabled, isMirrorSyncEnabled} from '../../common/js/flags.js';
  import {recordEnum, recordUserAction} from '../../common/js/metrics.js';
 -import {getFileErrorString, str, strf} from '../../common/js/translations.js';
 +import {bytesToString, getFileErrorString, str, strf} from '../../common/js/translations.js';
  import type {TrashEntry} from '../../common/js/trash.js';
  import {deleteIsForever, RestoreFailedType, RestoreFailedTypesUMA, RestoreFailedUMA, shouldMoveToTrash} from '../../common/js/trash.js';
  import {debug, isNullOrUndefined, visitURL} from '../../common/js/util.js';
-@@ -31,6 +31,7 @@
+@@ -31,6 +31,7 @@ import {getStore} from '../../state/store.js';
  import {isTreeItem, isXfTree} from '../../widgets/xf_tree_util.js';
  import type {FilesTooltip} from '../elements/files_tooltip.js';
  
 +import {auraDeCanMeasureSize, auraDeMeasureFolderSize} from './aurade_folder_size.js';
  import {type ActionsModel, CommonActionId, InternalActionId} from './actions_model.js';
  import {type CommandHandlerDeps, MenuCommandsForUma, recordMenuItemSelected} from './command_handler.js';
- import {canExecuteVisibleOnDriveInNormalAppModeOnly, containsNonInteractiveEntry, currentVolumeIsInteractive, getCommandEntries, getCommandEntry, getElementVolumeInfo, getEventEntry, getOnlyOneSelectedDirectory, getParentEntry, getSharesheetLaunchSource, hasCapability, isDriveEntries, isFromSelectionMenu, isOnlyMyDriveEntries, isOnTrashRoot, isRootEntry, shouldIgnoreEvents, shouldShowMenuItemsForEntry} from './file_manager_commands_util.js';
-@@ -2606,6 +2607,70 @@
+ import {canExecuteVisibleOnDriveInNormalAppModeOnly, containsNonInteractiveEntry, currentVolumeIsInteractive, getCommandEntries, getCommandEntry, getElementVolumeInfo, getOnlyOneSelectedDirectory, getParentEntry, getSharesheetLaunchSource, hasCapability, isDriveEntries, isFromSelectionMenu, isOnlyMyDriveEntries, isOnTrashRoot, isRootEntry, shouldIgnoreEvents, shouldShowMenuItemsForEntry} from './file_manager_commands_util.js';
+@@ -2557,6 +2558,70 @@ export class CopyPathCommand extends FilesCommand {
    }
  }
  
@@ -267,9 +259,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
   * Opens "providers menu" to allow users to use providers/FSPs.
   */
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+index 5a90bb8668af..9701e201d24a 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
-@@ -14,6 +14,7 @@
+@@ -14,6 +14,7 @@ import {getType, isAudio, isEncrypted, isImage, isPDF, isRaw, isVideo} from '../
  import type {FilesAppEntry} from '../../../common/js/files_app_entry_types.js';
  import {isDlpEnabled} from '../../../common/js/flags.js';
  import {getEntryLabel, str, strf} from '../../../common/js/translations.js';
@@ -277,7 +270,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/fi
  import {FileListModel, GROUP_BY_FIELD_MODIFICATION_TIME} from '../file_list_model.js';
  import type {ListThumbnailLoader} from '../list_thumbnail_loader.js';
  import {type ThumbnailLoadedEvent} from '../list_thumbnail_loader.js';
-@@ -879,9 +880,14 @@
+@@ -879,9 +880,14 @@ export class FileTable extends Table {
    private updateSize_(div: HTMLElement, entry: Entry|FilesAppEntry) {
      const metadata = this.metadataModel_!.getCache(
          [entry], ['size', 'hosted', 'contentMimeType'])[0]!;
@@ -294,9 +287,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/fi
      // AuraDE: the rounded size is the right thing to read and the wrong thing
      // to trust, so the exact count lives on hover. Cells are reused as the list
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index 77d0e21ac107..1733a333ce2d 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -39,6 +39,7 @@
+@@ -39,6 +39,7 @@ found in the LICENSE file.
             trade than one extra trip to the context menu. -->
        <command id="copy-name" label="Copy name">
        <command id="copy-path" label="Copy path">
@@ -304,7 +298,7 @@ diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manag
        <command id="paste" label="$i18n{PASTE_BUTTON_LABEL}"
                 shortcut="v|Ctrl">
        <command id="paste-into-current-folder" label="$i18n{PASTE_BUTTON_LABEL}"
-@@ -181,6 +182,7 @@
+@@ -180,6 +181,7 @@ found in the LICENSE file.
          <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
          <cr-menu-item command="#copy-name" visibleif="full-page"></cr-menu-item>
          <cr-menu-item command="#copy-path" visibleif="full-page"></cr-menu-item>
@@ -312,3 +306,15 @@ diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manag
          <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
          <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
          <hr visibleif="full-page">
+diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
+index a09a36c81624..032a8cb6e90d 100644
+--- a/ui/file_manager/file_names.gni
++++ b/ui/file_manager/file_names.gni
+@@ -219,6 +219,7 @@ ts_files = [
+   "file_manager/foreground/js/android_app_list_model.ts",
+   "file_manager/foreground/js/app_state_controller.ts",
+   "file_manager/foreground/js/aurade_devices_controller.ts",
++  "file_manager/foreground/js/aurade_folder_size.ts",
+   "file_manager/foreground/js/banner_controller.ts",
+   "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",

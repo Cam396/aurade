@@ -1,14 +1,8 @@
 diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_strings.grdp
+index c3b5f23e2ed7..2635fc25f5ee 100644
 --- a/ui/chromeos/file_manager_strings.grdp
 +++ b/ui/chromeos/file_manager_strings.grdp
-@@ -925,20 +925,29 @@
-  </message>
-  <message name="IDS_FILE_BROWSER_MOVE_TO_TRASH_FILE_NAME" desc="Showing progress that a single item is being moved to trash.">
-    Moving <ph name="FILE_NAME">$1<ex>file.txt</ex></ph> to the trash
-  </message>
-  <message name="IDS_FILE_BROWSER_MOVE_TO_TRASH_ITEMS_REMAINING" desc="Showing progress that multiple items are being moved to trash.">
-    Moving <ph name="NUMBER_OF_ITEMS">$1<ex>3</ex></ph> items to the trash
-  </message>
+@@ -929,6 +929,15 @@
   <message name="IDS_FILE_BROWSER_UNDO_DELETE_ACTION_LABEL" desc="Undo label shown on toast to undo delete operation">
     Undo
   </message>
@@ -24,24 +18,11 @@ diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_st
   <message name="IDS_FILE_BROWSER_RESTORE_ACTION_LABEL" desc="Restore label shown on dialog when trying to open files that are in Trash">
     Restore
   </message>
-  <message name="IDS_FILE_BROWSER_CONFIRM_EMPTY_TRASH_TITLE" desc="Asks the user if they are sure they want to empty the trash / recylce bin.">
-    Permanently delete these files?
-  </message>
-  <message name="IDS_FILE_BROWSER_CONFIRM_EMPTY_TRASH_DESC" desc="Asks the user if they are sure they want to empty the trash / recylce bin.">
-    All items in trash will be deleted and you won't be able to restore them.
-  </message>
-  <message name="IDS_FILE_BROWSER_EMPTY_TRASH_DELETE_FOREVER" desc="Button label the users confirms empty trash">
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/file_manager/file_manager/foreground/js/file_manager.ts
+index fbf19859b935..43d6ac6cd25d 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager.ts
-@@ -1017,21 +1017,22 @@
-     this.appStateController_.initialize(this.ui_, this.directoryModel_);
- 
-     // Create metadata update controller.
-     this.metadataUpdateController_ = new MetadataUpdateController(
-         this.ui_.listContainer, this.directoryModel_, this.metadataModel_,
-         this.fileMetadataFormatter_);
- 
+@@ -1024,7 +1024,8 @@ export class FileManager {
      // Create naming controller.
      this.namingController_ = new NamingController(
          this.ui_.listContainer, this.ui_.alertDialog, this.ui_.confirmDialog,
@@ -51,24 +32,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_manager.ts b/ui/fil
  
      // Create task controller.
      this.taskController_ = new TaskController(
-         this.volumeManager_, this.ui_, this.metadataModel_,
-         this.directoryModel_, this.selectionHandler_,
-         this.metadataUpdateController_, this.progressCenter);
- 
-     // Create directory tree naming controller.
-     this.directoryTreeNamingController_ = new DirectoryTreeNamingController(
-         this.directoryModel_, this.ui_.directoryTree,
 diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+index ca916ad57c1e..f9d70684be72 100644
 --- a/ui/file_manager/file_manager/foreground/js/naming_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
-@@ -2,34 +2,35 @@
- // Use of this source code is governed by a BSD-style license that can be
- // found in the LICENSE file.
- 
- import {assert} from 'chrome://resources/js/assert.js';
- 
- import type {VolumeInfo} from '../../background/js/volume_info.js';
- import {getFile} from '../../common/js/api.js';
+@@ -9,7 +9,7 @@ import {getFile} from '../../common/js/api.js';
  import {getKeyModifiers} from '../../common/js/dom_utils.js';
  import {isFakeEntry, isSameEntry} from '../../common/js/entry_utils.js';
  import type {FilesAppDirEntry, FilesAppEntry} from '../../common/js/files_app_entry_types.js';
@@ -77,13 +45,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
  import {FileErrorToDomError, UserCanceledError} from '../../common/js/util.js';
  
  import type {FileFilter} from './directory_contents.js';
- import type {DirectoryModel} from './directory_model.js';
- import {renameEntry, validateEntryName, validateFileName} from './file_rename.js';
- import type {FileSelectionHandler} from './file_selection.js';
- import type {WithContextMenu} from './ui/context_menu_handler.js';
- import type {ConfirmDialog} from './ui/dialogs.js';
- import type {FilesAlertDialog} from './ui/files_alert_dialog.js';
- import {type ListContainer, ListType} from './ui/list_container.js';
+@@ -23,6 +23,7 @@ import {type ListContainer, ListType} from './ui/list_container.js';
  import type {ListItem} from './ui/list_item.js';
  import type {ListSelectionModel} from './ui/list_selection_model.js';
  import type {ListSingleSelectionModel} from './ui/list_single_selection_model.js';
@@ -91,21 +53,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
  
  
  // TODO(b/289003444): Fix this by using proper custom element.
- type XfRenameInput = HTMLInputElement&{
-   currentEntry: Entry | FilesAppEntry | null,
-   validation: boolean,
- }&WithContextMenu;
- 
- /**
-  * Controller to handle naming.
-@@ -42,21 +43,22 @@
-   private isRemovableRoot_: boolean = false;
- 
-   private volumeInfo_: VolumeInfo|null = null;
- 
-   constructor(
-       private readonly listContainer_: ListContainer,
-       private readonly alertDialog_: FilesAlertDialog,
+@@ -49,7 +50,8 @@ export class NamingController {
        private readonly confirmDialog_: ConfirmDialog,
        private readonly directoryModel_: DirectoryModel,
        private readonly fileFilter_: FileFilter,
@@ -115,21 +63,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
      // Register events.
      this.listContainer_.renameInput.addEventListener(
          'keydown', this.onRenameInputKeyDown_.bind(this));
-     this.listContainer_.renameInput.addEventListener(
-         'blur', this.onRenameInputBlur_.bind(this));
-   }
- 
-   /**
-    * Verifies the user entered name for file or folder to be created or
-    * renamed to. See also validateFileName.
-@@ -218,20 +220,56 @@
-   }
- 
-   /**
-    * Convenience method to access HTMLInputElement with the type that contains
-    * all extra properties we set on it.
-    */
-   private getRenameInput_(): XfRenameInput {
+@@ -225,6 +227,42 @@ export class NamingController {
      return this.listContainer_.renameInput as XfRenameInput;
    }
  
@@ -172,21 +106,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
    private onRenameInputKeyDown_(event: KeyboardEvent) {
      if (!this.isRenamingInProgress()) {
        return;
-     }
- 
-     // Do not move selection or lead item in list during rename.
-     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-       event.stopPropagation();
-     }
- 
-@@ -302,20 +340,23 @@
-       input.validation = false;
-     }
- 
-     // Validation succeeded. Do renaming.
-     this.getRenameInput_().currentEntry = null;
-     if (this.listContainer_.renameInput.parentNode) {
-       this.listContainer_.renameInput.parentNode.removeChild(
+@@ -309,6 +347,9 @@ export class NamingController {
            this.listContainer_.renameInput);
      }
  
@@ -196,21 +116,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
      // Optimistically apply new name immediately to avoid flickering in
      // case of success.
      nameNode!.textContent = newName;
- 
-     try {
-       const newEntry =
-           await renameEntry(entry, newName, volumeInfo, isRemovableRoot);
- 
-       // RemovableRoot doesn't have a callback to report renaming is done.
-       if (!isRemovableRoot) {
-@@ -329,20 +370,27 @@
-       selectionModel.selectedIndex =
-           this.directoryModel_.getFileList().indexOf(newEntry);
-       // Force to update selection immediately.
-       this.selectionHandler_.onFileSelectionChanged();
- 
-       renamedItemElement.removeAttribute('renaming');
-       this.listContainer_.endBatchUpdates();
+@@ -336,6 +377,13 @@ export class NamingController {
  
        // Focus may go out of the list. Back it to the list.
        this.listContainer_.currentList.focus();
@@ -224,10 +130,3 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
      } catch (error: any) {
        // Write back to the old name.
        nameNode!.textContent = entry.name;
-       renamedItemElement.removeAttribute('renaming');
-       this.listContainer_.endBatchUpdates();
- 
-       // Show error dialog.
-       this.alertDialog_.show(error.message);
-     }
-   }

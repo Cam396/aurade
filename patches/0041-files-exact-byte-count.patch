@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
+index e8ff4dcb2fa8..df46e3c6331b 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/file_table.ts
-@@ -40,6 +40,24 @@
+@@ -40,6 +40,24 @@ interface ColumnHitResult {
  /**
   * Custom column model for advanced auto-resizing.
   */
@@ -26,7 +27,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table.ts b/ui/fi
  export class FileTableColumnModel extends TableColumnModel {
    private snapshot_: ColumnSnapshot|null = null;
  
-@@ -835,6 +853,11 @@
+@@ -835,6 +853,11 @@ export class FileTable extends Table {
      const special =
          metadata.hosted || isEncrypted(entry, metadata.contentMimeType);
      div.textContent = this.formatter_!.formatSize(size, special);

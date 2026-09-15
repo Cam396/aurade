@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
-index ef3b886d3ab6b1803ed77588b021b658b17333ad..3d48da0d6c142e90d94cae8549ae37dbe3f7ad7f 100644
+index dc6e973a495b..aebd68b8e73d 100644
 --- a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 +++ b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 @@ -15,8 +15,11 @@
@@ -112,7 +112,7 @@ index ef3b886d3ab6b1803ed77588b021b658b17333ad..3d48da0d6c142e90d94cae8549ae37db
        ChromeShelfController::instance()->OnUserProfileReadyToSwitch(profile);
      }
 diff --git a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
-index 37115f2b088fc1eb1c7e7fa7e06808698211f4eb..87424fe087ce039c288a571c5ee772eabf0049e2 100644
+index 0f5977e4d747..a9c0479941a4 100644
 --- a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
 +++ b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
 @@ -304,7 +304,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,

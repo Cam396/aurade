@@ -12,7 +12,7 @@ cannot drift apart quietly.
   `chrome/VERSION`. The Chromium package's `pkgver` must equal it.
 
 They were allowed to disagree once. The pin held a 152 revision while the
-package declared 154.0.8015.0 and the tree that had actually been built was a
+package declared a 154 version and the tree that had actually been built was a
 third thing, so anybody following the build instructions would have fetched
 152 and packaged it as 154. The artifact was not traceable to a source, which
 is the plainest possible definition of not being releasable.

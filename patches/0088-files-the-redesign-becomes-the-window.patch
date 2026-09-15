@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
-index e3ab1f0..c75070e 100644
+index e3ab1f0c1a9b..c75070e2c688 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 @@ -12,11 +12,69 @@
@@ -108,7 +108,7 @@ index e3ab1f0..c75070e 100644
        root = await this.platform.resolve(scope);
      } catch (error) {
 diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
-index d9f1793..2d2a444 100644
+index d9f1793ed4a3..2d2a444cf224 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_platform.ts
 @@ -24,6 +24,34 @@ interface ChromeEvent<T> {
@@ -224,7 +224,7 @@ index d9f1793..2d2a444 100644
  
    async getLaunchDialog(): Promise<PlatformLaunchDialog|null> {
 diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
-index 150c629..2aeb1f9 100644
+index 150c629c50eb..2aeb1f95d330 100644
 --- a/ui/file_manager/file_manager/aurade/adapter/platform.ts
 +++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
 @@ -206,7 +206,15 @@ export interface Platform {
@@ -246,7 +246,7 @@ index 150c629..2aeb1f9 100644
      maxResults: number,
 diff --git a/ui/file_manager/file_manager/aurade/app/mount.ts b/ui/file_manager/file_manager/aurade/app/mount.ts
 new file mode 100644
-index 0000000..92f9cf5
+index 000000000000..92f9cf52b407
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/app/mount.ts
 @@ -0,0 +1,97 @@
@@ -348,7 +348,7 @@ index 0000000..92f9cf5
 +  }
 +}
 diff --git a/ui/file_manager/file_manager/aurade/port/mock_backend.ts b/ui/file_manager/file_manager/aurade/port/mock_backend.ts
-index 18e1a24..b761ff2 100644
+index 18e1a24a5d64..b761ff2fd7de 100644
 --- a/ui/file_manager/file_manager/aurade/port/mock_backend.ts
 +++ b/ui/file_manager/file_manager/aurade/port/mock_backend.ts
 @@ -319,6 +319,12 @@ export class MockBackend implements FilesBackendPort {
@@ -365,7 +365,7 @@ index 18e1a24..b761ff2 100644
  
    async startIo(request: IoRequest): Promise<TaskId> {
 diff --git a/ui/file_manager/file_manager/aurade/port/types.ts b/ui/file_manager/file_manager/aurade/port/types.ts
-index a6bdad2..9bb4989 100644
+index a6bdad296e53..9bb4989cce25 100644
 --- a/ui/file_manager/file_manager/aurade/port/types.ts
 +++ b/ui/file_manager/file_manager/aurade/port/types.ts
 @@ -58,6 +58,18 @@ export type MetadataSnapshot = ReadonlyMap<FileKey, Metadata>;
@@ -396,7 +396,7 @@ index a6bdad2..9bb4989 100644
  
  /**
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
-index 4e88a09..f415fc4 100644
+index 4e88a09f1edd..f415fc420731 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 @@ -535,6 +535,95 @@ const CHECKS: Check[] = [
@@ -496,7 +496,7 @@ index 4e88a09..f415fc4 100644
      name: 'restriction is asked for by the name the platform knows',
      async run() {
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
-index 57950c4..335615d 100644
+index 57950c460d39..335615d851bd 100644
 --- a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 @@ -241,7 +241,15 @@ export class FakePlatform implements Platform {
@@ -531,7 +531,7 @@ index 57950c4..335615d 100644
      return this.taskResult;
    }
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
-index afb7ba8..7103c14 100644
+index afb7ba8b1f71..7103c14c7644 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 @@ -337,6 +337,16 @@ export const CASES: Case[] = [
@@ -552,7 +552,7 @@ index afb7ba8..7103c14 100644
      name: 'a task can be handed to whatever handles it',
      capability: 'task-execution',
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
-index 2d18edd..f0a13d5 100644
+index 2d18edd5d9f9..f0a13d585ebc 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
 @@ -41,20 +41,36 @@ interface Harness {
@@ -642,7 +642,7 @@ index 2d18edd..f0a13d5 100644
      name: 'a selection set programmatically reads back as those entries',
      run() {
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
-index dc909f5..eb573f3 100644
+index dc909f5c8e57..eb573f35a4ba 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/shell_test.ts
 @@ -33,6 +33,8 @@ function equal<T>(actual: T, expected: T, message: string): void {
@@ -696,7 +696,7 @@ index dc909f5..eb573f3 100644
      name: 'the window asks the backend what places exist',
      run: async () => {
 diff --git a/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
-index d42d73d..030843c 100644
+index d42d73d1a144..030843c589a1 100644
 --- a/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/dom/sidebar_test.ts
 @@ -56,8 +56,24 @@ function places(): Place[] {
@@ -770,7 +770,7 @@ index d42d73d..030843c 100644
      name: 'a place with no notion of capacity draws none',
      run: () => {
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.html b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
-index 61409e5..3dcde2d 100644
+index 61409e548aec..3dcde2ddaf84 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/dom.html
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.html
 @@ -1,5 +1,7 @@
@@ -782,7 +782,7 @@ index 61409e5..3dcde2d 100644
  <link rel="stylesheet" href="../../ui/tokens.css">
  <style>html, body { margin: 0; background: var(--aurade-ground); }</style>
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/golden.py b/ui/file_manager/file_manager/aurade/tests/harness/golden.py
-index 505a80e..c8cc54b 100755
+index 505a80ee218e..c8cc54b2d39f 100755
 --- a/ui/file_manager/file_manager/aurade/tests/harness/golden.py
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/golden.py
 @@ -264,6 +264,7 @@ def main():
@@ -1010,7 +1010,7 @@ literal 0
 HcmV?d00001
 
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/index.html b/ui/file_manager/file_manager/aurade/tests/harness/index.html
-index 73acc02..ac92ada 100644
+index 73acc0243cb2..ac92ada728c2 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/index.html
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/index.html
 @@ -1,5 +1,7 @@
@@ -1023,7 +1023,7 @@ index 73acc02..ac92ada 100644
  <style>
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js
 new file mode 100644
-index 0000000..cf6b816
+index 000000000000..cf6b816fbe40
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.js
 @@ -0,0 +1,90 @@
@@ -1119,7 +1119,7 @@ index 0000000..cf6b816
 +})()
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py
 new file mode 100644
-index 0000000..c67084a
+index 000000000000..c67084a581ad
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/live_shell.py
 @@ -0,0 +1,90 @@
@@ -1214,7 +1214,7 @@ index 0000000..c67084a
 +if __name__ == "__main__":
 +    raise SystemExit(main())
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/perf.html b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
-index c3fecb3..b1398fe 100644
+index c3fecb30be2f..b1398fe8646c 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/perf.html
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/perf.html
 @@ -1,5 +1,7 @@
@@ -1226,7 +1226,7 @@ index c3fecb3..b1398fe 100644
  <link rel="stylesheet" href="../../ui/tokens.css">
  <style>
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
-index 4fd6643..b6d95e3 100644
+index 4fd6643f7bba..b6d95e316e79 100644
 --- a/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/stories.ts
 @@ -5,7 +5,7 @@
@@ -1325,7 +1325,7 @@ index 4fd6643..b6d95e3 100644
      name: 'rows-light',
      width: 720,
 diff --git a/ui/file_manager/file_manager/aurade/tests/run.sh b/ui/file_manager/file_manager/aurade/tests/run.sh
-index f639262..520f8e2 100755
+index f639262bf117..520f8e2920bd 100755
 --- a/ui/file_manager/file_manager/aurade/tests/run.sh
 +++ b/ui/file_manager/file_manager/aurade/tests/run.sh
 @@ -21,11 +21,22 @@ fail() { printf 'aurade port contract: %s\n' "$*" >&2; exit 1; }
@@ -1353,7 +1353,7 @@ index f639262..520f8e2 100755
    "$AURADE"/tests/ui/*.ts "$AURADE"/tests/adapter/*.ts \
    || fail "the types do not check"
 diff --git a/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
-index db1012c..81a70fc 100644
+index db1012c0aa88..81a70fcb8766 100644
 --- a/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/ui/places_test.ts
 @@ -97,9 +97,45 @@ const CHECKS: Check[] = [
@@ -1405,7 +1405,7 @@ index db1012c..81a70fc 100644
    {
 diff --git a/ui/file_manager/file_manager/aurade/tools/gen_tokens.py b/ui/file_manager/file_manager/aurade/tools/gen_tokens.py
 new file mode 100755
-index 0000000..2f422c2
+index 000000000000..2f422c2e5bef
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tools/gen_tokens.py
 @@ -0,0 +1,69 @@
@@ -1479,7 +1479,7 @@ index 0000000..2f422c2
 +if __name__ == "__main__":
 +    raise SystemExit(main())
 diff --git a/ui/file_manager/file_manager/aurade/ui/file_list.ts b/ui/file_manager/file_manager/aurade/ui/file_list.ts
-index 81c55f6..b6066de 100644
+index 81c55f6e8f50..b6066defa04e 100644
 --- a/ui/file_manager/file_manager/aurade/ui/file_list.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/file_list.ts
 @@ -78,8 +78,11 @@ export class FileList {
@@ -1508,7 +1508,7 @@ index 81c55f6..b6066de 100644
      this.renderEmpty();
      this.render();
 diff --git a/ui/file_manager/file_manager/aurade/ui/file_row.ts b/ui/file_manager/file_manager/aurade/ui/file_row.ts
-index 5624683..5ce7fca 100644
+index 5624683207a5..5ce7fcaf4a2d 100644
 --- a/ui/file_manager/file_manager/aurade/ui/file_row.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/file_row.ts
 @@ -14,6 +14,7 @@
@@ -1565,7 +1565,7 @@ index 5624683..5ce7fca 100644
    row.querySelector('.aurade-name')!.textContent = entry.name;
    // A folder has no meaningful size of its own, and printing a dash for one is
 diff --git a/ui/file_manager/file_manager/aurade/ui/path_bar.ts b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
-index eb3c609..eb2664c 100644
+index eb3c6095e96e..eb2664c0eb62 100644
 --- a/ui/file_manager/file_manager/aurade/ui/path_bar.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/path_bar.ts
 @@ -11,6 +11,7 @@
@@ -1602,7 +1602,7 @@ index eb3c609..eb2664c 100644
      return item;
    }
 diff --git a/ui/file_manager/file_manager/aurade/ui/places.ts b/ui/file_manager/file_manager/aurade/ui/places.ts
-index bfe6b1b..0e3823e 100644
+index bfe6b1b3599d..0e3823ed8a8b 100644
 --- a/ui/file_manager/file_manager/aurade/ui/places.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/places.ts
 @@ -30,6 +30,36 @@ export function placeKindFor(volume: Volume): PlaceKind {
@@ -1668,7 +1668,7 @@ index bfe6b1b..0e3823e 100644
    if (basketCount !== undefined && basketKey !== undefined) {
      places.push({
 diff --git a/ui/file_manager/file_manager/aurade/ui/shell.ts b/ui/file_manager/file_manager/aurade/ui/shell.ts
-index c9a8b51..ffdbb39 100644
+index c9a8b5130550..ffdbb39d7d6e 100644
 --- a/ui/file_manager/file_manager/aurade/ui/shell.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/shell.ts
 @@ -71,7 +71,6 @@ export class FilesShell {
@@ -1699,7 +1699,7 @@ index c9a8b51..ffdbb39 100644
      const wanted = this.entries.slice(first, first + count)
                         .filter(entry => !this.metadata.has(entry.key))
 diff --git a/ui/file_manager/file_manager/aurade/ui/sidebar.ts b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
-index 1aff1aa..12f8819 100644
+index 1aff1aa6cf22..12f8819b2fb6 100644
 --- a/ui/file_manager/file_manager/aurade/ui/sidebar.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/sidebar.ts
 @@ -12,8 +12,9 @@
@@ -1803,7 +1803,7 @@ index 1aff1aa..12f8819 100644
        // bar on its own is poor for comparison and worse for anybody who cannot
 diff --git a/ui/file_manager/file_manager/aurade/ui/svg.ts b/ui/file_manager/file_manager/aurade/ui/svg.ts
 new file mode 100644
-index 0000000..c5d41fd
+index 000000000000..c5d41fd165e7
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/svg.ts
 @@ -0,0 +1,73 @@
@@ -1881,7 +1881,7 @@ index 0000000..c5d41fd
 +  return svg;
 +}
 diff --git a/ui/file_manager/file_manager/aurade/ui/tokens.css b/ui/file_manager/file_manager/aurade/ui/tokens.css
-index 0a5ae62..fd03e4b 100644
+index 0a5ae6292f34..fd03e4bf2e14 100644
 --- a/ui/file_manager/file_manager/aurade/ui/tokens.css
 +++ b/ui/file_manager/file_manager/aurade/ui/tokens.css
 @@ -364,6 +364,21 @@
@@ -1908,7 +1908,7 @@ index 0a5ae62..fd03e4b 100644
     and it is what stops a file manager reading as one undifferentiated grid. */
 diff --git a/ui/file_manager/file_manager/aurade/ui/tokens_css.ts b/ui/file_manager/file_manager/aurade/ui/tokens_css.ts
 new file mode 100644
-index 0000000..3a5ca56
+index 000000000000..3a5ca568b384
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/ui/tokens_css.ts
 @@ -0,0 +1,11 @@
@@ -1924,7 +1924,7 @@ index 0000000..3a5ca56
 + */
 +export const TOKENS_CSS = "/**\n * The AuraDE surface vocabulary.\n *\n * The accent is not a new decision. The greeter already defines it, in GTK\n * theme variables rather than in its stylesheet: accent_bg_color is #6d4ea1 in\n * theme.css and #d1bcff in theme-dark.css, and the installer's token table\n * carries the same pair. Counting literal hex in greeter.css and concluding the\n * greeter was achromatic was a mistake; it uses @accent_color for focus rings\n * and the active pod.\n *\n * Surfaces are taken from the greeter's own values: translucent grounds, white\n * hairlines, white overlay interactive states, and deep soft shadows.\n */\n\n:root {\n  --aurade-accent: #6d4ea1;\n  --aurade-on-accent: #ffffff;\n\n  --aurade-ground: #f4f2f9;\n  --aurade-panel: #ffffff;\n  --aurade-line: #e6e2f0;\n  --aurade-ink: #1c1a24;\n  --aurade-quiet: #6b6580;\n\n  --aurade-row-hover: rgba(0, 0, 0, .04);\n  --aurade-row-selected: rgba(109, 78, 161, .12);\n  --aurade-tile: #f0edf7;\n  --aurade-tile-dir: #e4dbf8;\n  --aurade-tile-selected: #dbcdf6;\n  --aurade-glyph: #6f6885;\n  --aurade-tag-bg: #f7f5fc;\n  --aurade-warn: #a1651a;\n  --aurade-danger: #b3261e;\n\n  --aurade-radius-row: 11px;\n  --aurade-radius-tile: 11px;\n  --aurade-radius-panel: 16px;\n  --aurade-radius-pill: 999px;\n\n  --aurade-row-height: 40px;\n  --aurade-tile-size: 32px;\n}\n\n@media (prefers-color-scheme: dark) {\n  :root:not([data-aurade-theme=\"light\"]) {\n    --aurade-accent: #d1bcff;\n    --aurade-on-accent: #3f1d6c;\n\n    --aurade-ground: #100f16;\n    --aurade-panel: #191823;\n    --aurade-line: #262433;\n    --aurade-ink: #efecf8;\n    --aurade-quiet: #948ea8;\n\n    --aurade-row-hover: rgba(255, 255, 255, .06);\n    --aurade-row-selected: rgba(209, 188, 255, .16);\n    --aurade-tile: #23212f;\n    --aurade-tile-dir: #372c57;\n    --aurade-tile-selected: #4a3b74;\n    --aurade-glyph: #a79dc4;\n    --aurade-tag-bg: #211f2c;\n  --aurade-warn: #e6b062;\n  --aurade-danger: #f2b8b5;\n  }\n}\n\n/* Repeated rather than shared, because a media query and an attribute cannot\n   select the same block. The attribute form is what lets both themes be\n   rendered and diffed without emulating the reader's system setting. */\n:root[data-aurade-theme=\"dark\"] {\n    --aurade-accent: #d1bcff;\n    --aurade-on-accent: #3f1d6c;\n\n    --aurade-ground: #100f16;\n    --aurade-panel: #191823;\n    --aurade-line: #262433;\n    --aurade-ink: #efecf8;\n    --aurade-quiet: #948ea8;\n\n    --aurade-row-hover: rgba(255, 255, 255, .06);\n    --aurade-row-selected: rgba(209, 188, 255, .16);\n    --aurade-tile: #23212f;\n    --aurade-tile-dir: #372c57;\n    --aurade-tile-selected: #4a3b74;\n    --aurade-glyph: #a79dc4;\n    --aurade-tag-bg: #211f2c;\n  --aurade-warn: #e6b062;\n  --aurade-danger: #f2b8b5;\n}\n\n/* Density is fixed per mode, never measured. Dynamic row heights across a\n   hundred thousand entries make the scrollbar thumb jitter and drop frames. */\n:root[data-aurade-density=\"compact\"] { --aurade-row-height: 32px; --aurade-tile-size: 26px; }\n:root[data-aurade-density=\"relaxed\"] { --aurade-row-height: 52px; --aurade-tile-size: 38px; }\n\n.aurade-row {\n  align-items: center;\n  block-size: var(--aurade-row-height);\n  border-radius: var(--aurade-radius-row);\n  box-sizing: border-box;\n  color: var(--aurade-ink);\n  display: grid;\n  gap: 12px;\n  grid-template-columns: var(--aurade-tile-size) 1fr 84px 96px 132px;\n  margin-inline: 8px;\n  padding-inline: 8px;\n  position: relative;\n  user-select: none;\n}\n\n.aurade-row:hover { background: var(--aurade-row-hover); }\n\n/* Selection and focus differ by shape as well as colour, because colour alone\n   is not a distinction everyone can see. */\n.aurade-row[aria-selected=\"true\"] {\n  background: var(--aurade-row-selected);\n  box-shadow: inset 3px 0 0 0 var(--aurade-accent);\n}\n.aurade-row:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n\n/* A cut entry is dashed as well as dimmed, so it reads as pending rather than\n   as disabled. */\n.aurade-row[data-cut=\"true\"] { opacity: .55; }\n.aurade-row[data-cut=\"true\"] .aurade-tile {\n  border: 1px dashed var(--aurade-quiet);\n}\n\n.aurade-tile {\n  align-items: center;\n  background: var(--aurade-tile);\n  block-size: var(--aurade-tile-size);\n  border-radius: var(--aurade-radius-tile);\n  box-sizing: border-box;\n  display: flex;\n  inline-size: var(--aurade-tile-size);\n  justify-content: center;\n}\n.aurade-row[data-directory=\"true\"] .aurade-tile { background: var(--aurade-tile-dir); }\n.aurade-row[aria-selected=\"true\"] .aurade-tile { background: var(--aurade-tile-selected); }\n\n.aurade-glyph {\n  block-size: 18px;\n  color: var(--aurade-glyph);\n  inline-size: 18px;\n}\n.aurade-row[data-directory=\"true\"] .aurade-glyph { color: var(--aurade-accent); }\n\n.aurade-name {\n  font-size: 13px;\n  font-weight: 550;\n  letter-spacing: -.005em;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.aurade-size, .aurade-date {\n  color: var(--aurade-quiet);\n  font-size: 12px;\n  font-variant-numeric: tabular-nums;\n}\n\n/* A quiet proportional bar behind the size, so the large item in a folder of\n   five hundred is visible without reading a digit. */\n.aurade-size { position: relative; }\n.aurade-size::before {\n  background: currentColor;\n  block-size: 100%;\n  content: '';\n  inset-block-start: 0;\n  inset-inline-start: 0;\n  inline-size: var(--aurade-share, 0%);\n  opacity: .10;\n  position: absolute;\n  border-radius: 3px;\n}\n\n.aurade-type {\n  background: var(--aurade-tag-bg);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-pill);\n  color: var(--aurade-quiet);\n  font-size: 10.5px;\n  font-weight: 600;\n  justify-self: start;\n  letter-spacing: .04em;\n  line-height: 15px;\n  padding: 2px 9px;\n}\n\n/* The list owns its scrolling. The spacer carries the full extent so the\n   scrollbar is honest about how much there is, and the surface holding the\n   recycled rows is moved rather than repositioned per row. */\n.aurade-list {\n  block-size: 100%;\n  overflow-y: auto;\n  overflow-x: hidden;\n  position: relative;\n}\n.aurade-list:focus-visible { outline: none; }\n.aurade-list-spacer { position: relative; }\n.aurade-list-surface {\n  inset-block-start: 0;\n  inset-inline: 0;\n  position: absolute;\n  will-change: transform;\n}\n\n/* An empty view should read as prepared rather than abandoned, so it is\n   centred and quiet rather than a message pinned to the top left. */\n/* An author `display` beats the user agent's `[hidden] { display: none }`\n   regardless of specificity, because author styles win on origin. So setting\n   .hidden on this element did nothing at all and every folder with files in it\n   also announced that it was empty. */\n.aurade-empty[hidden] { display: none; }\n.aurade-empty {\n  align-items: center;\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  justify-content: center;\n  min-block-size: 220px;\n  padding: 32px 24px;\n  text-align: center;\n}\n.aurade-empty-title {\n  color: var(--aurade-ink);\n  font-size: 14px;\n  font-weight: 600;\n  margin: 0;\n}\n.aurade-empty-detail {\n  color: var(--aurade-quiet);\n  font-size: 13px;\n  margin: 0;\n  /* Wide enough that a two line detail breaks after a clause rather than\n     stranding \"files.\" on its own. */\n  max-inline-size: 48ch;\n}\n\n\n/* The sidebar: where you can go, as opposed to what is in front of you.\n\n   Group headings are quiet and small rather than uppercase and tracked out.\n   Small caps at this size is a legibility cost paid for a filing cabinet\n   aesthetic nobody asked for, and these are three or four words that want to\n   be skimmed past on the way to the thing underneath. */\n.aurade-sidebar {\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 18px;\n  inline-size: 232px;\n  overflow-y: auto;\n  padding: 12px 10px;\n}\n.aurade-place-heading {\n  color: var(--aurade-quiet);\n  font-size: 11px;\n  font-weight: 600;\n  letter-spacing: .01em;\n  margin: 0 0 4px;\n  padding-inline: 10px;\n}\n.aurade-place-list {\n  display: flex;\n  flex-direction: column;\n  gap: 1px;\n  list-style: none;\n  margin: 0;\n  padding: 0;\n}\n.aurade-place {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-row);\n  color: var(--aurade-ink);\n  cursor: default;\n  display: flex;\n  font: inherit;\n  gap: 10px;\n  inline-size: 100%;\n  padding: 7px 10px;\n  position: relative;\n  text-align: start;\n}\n.aurade-place:hover { background: var(--aurade-row-hover); }\n.aurade-place:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n.aurade-place[aria-current=\"page\"] {\n  background: var(--aurade-row-selected);\n  color: var(--aurade-accent);\n  font-weight: 600;\n}\n/* A rail rather than a full bleed fill. The fill alone reads as a hover that\n   got stuck; the rail is what says this is where you are. */\n.aurade-place[aria-current=\"page\"]::before {\n  background: var(--aurade-accent);\n  block-size: 16px;\n  border-radius: var(--aurade-radius-pill);\n  content: \"\";\n  inline-size: 3px;\n  inset-block-start: 50%;\n  inset-inline-start: 1px;\n  position: absolute;\n  translate: 0 -50%;\n}\n.aurade-place-glyph {\n  block-size: 18px;\n  color: var(--aurade-glyph);\n  flex: none;\n  inline-size: 18px;\n}\n.aurade-place[aria-current=\"page\"] .aurade-place-glyph { color: inherit; }\n.aurade-place-label {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-place-badge {\n  background: var(--aurade-tag-bg);\n  border-radius: var(--aurade-radius-pill);\n  color: var(--aurade-quiet);\n  font-size: 11px;\n  font-variant-numeric: tabular-nums;\n  margin-inline-start: auto;\n  padding: 1px 7px;\n}\n.aurade-place[aria-current=\"page\"] .aurade-place-badge {\n  background: var(--aurade-panel);\n  color: var(--aurade-accent);\n}\n\n/* Capacity sits under the drive it belongs to, indented to the label rather\n   than the glyph, so the eye reads it as a note about that row. */\n.aurade-place-capacity {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  padding: 1px 10px 6px 38px;\n}\n.aurade-place-free {\n  color: var(--aurade-quiet);\n  font-size: 11px;\n}\n.aurade-place-bar {\n  background: var(--aurade-line);\n  block-size: 3px;\n  border-radius: var(--aurade-radius-pill);\n  overflow: hidden;\n}\n.aurade-place-bar-fill {\n  background: var(--aurade-accent);\n  block-size: 100%;\n  border-radius: inherit;\n}\n.aurade-place-bar-fill[data-level=\"high\"] { background: var(--aurade-warn); }\n.aurade-place-bar-fill[data-level=\"full\"] { background: var(--aurade-danger); }\n\n\n/* Where the app mounts us.\n\n   Opaque and over everything, because the stock window is still underneath and\n   still running: it owns the dialogs, the progress panel and the menus we have\n   not replaced. Drawing over it rather than deleting it is what makes this\n   reversible, and `mountAuradeShell` removes this element if the shell fails\n   to start, which puts the old window straight back. */\n#aurade-shell {\n  background: var(--aurade-ground);\n  inset: 0;\n  overflow: hidden;\n  position: fixed;\n  z-index: 2147483647;\n}\n\n/* The window. Places on the left, what is in them on the right, each on its\n   own panel so the ground shows between them: the greeter does the same thing,\n   and it is what stops a file manager reading as one undifferentiated grid. */\n.aurade-shell {\n  background: var(--aurade-ground);\n  block-size: 100%;\n  box-sizing: border-box;\n  display: flex;\n  gap: 8px;\n  padding: 8px;\n}\n.aurade-shell-aside {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  display: flex;\n  flex: none;\n  overflow: hidden;\n}\n.aurade-shell-main {\n  display: flex;\n  flex: 1;\n  flex-direction: column;\n  gap: 8px;\n  /* Without this a long file name makes the whole window wider instead of\n     being truncated, and the sidebar gets pushed off the left edge. */\n  min-inline-size: 0;\n}\n.aurade-shell-list {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  flex: 1;\n  min-block-size: 0;\n  overflow: hidden;\n  padding: 4px 0;\n}\n.aurade-shell-notice {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  color: var(--aurade-quiet);\n  font-size: 13px;\n  margin: 0;\n  padding: 11px 15px;\n}\n\n\n/* The toolbar. Back, forward, up, then where you are.\n\n   The buttons are disabled rather than removed when there is nowhere to go: a\n   control that appears and disappears shifts everything beside it, and the one\n   thing you need from back and forward is that they are always in the same\n   place. */\n.aurade-toolbar {\n  align-items: center;\n  /* The containing block for a sibling popover, which cannot live inside the\n     path bar because that clips. */\n  position: relative;\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  display: flex;\n  flex: none;\n  gap: 8px;\n  min-block-size: 44px;\n  padding: 5px 8px;\n}\n.aurade-tool-group {\n  display: flex;\n  flex: none;\n  gap: 2px;\n}\n.aurade-tool {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  block-size: 30px;\n  color: var(--aurade-glyph);\n  cursor: default;\n  display: flex;\n  inline-size: 30px;\n  justify-content: center;\n  padding: 0;\n}\n.aurade-tool:hover:not(:disabled) {\n  background: var(--aurade-row-hover);\n  color: var(--aurade-ink);\n}\n.aurade-tool:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n/* Not display:none and not 0.3 either. A disabled control still has to read as\n   a control, or the row looks like it lost something. */\n.aurade-tool:disabled { opacity: .38; }\n.aurade-tool-glyph { block-size: 18px; inline-size: 18px; }\n\n.aurade-path {\n  flex: 1;\n  min-inline-size: 0;\n  overflow: hidden;\n}\n.aurade-path-list {\n  align-items: center;\n  display: flex;\n  list-style: none;\n  margin: 0;\n  padding: 0;\n}\n.aurade-path-list > li { display: flex; position: relative; }\n.aurade-crumb {\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  color: var(--aurade-quiet);\n  cursor: default;\n  font: inherit;\n  max-inline-size: 22ch;\n  overflow: hidden;\n  padding: 5px 8px;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-crumb:hover { background: var(--aurade-row-hover); }\n.aurade-crumb:focus-visible,\n.aurade-chevron:focus-visible,\n.aurade-path-option:focus-visible {\n  outline: 2px solid var(--aurade-accent);\n  outline-offset: -2px;\n}\n/* Where you are is the one crumb that is not a link to somewhere else, so it\n   is the one that reads as text rather than as an action. */\n.aurade-crumb[aria-current=\"page\"] {\n  color: var(--aurade-ink);\n  font-weight: 600;\n}\n.aurade-chevron {\n  align-items: center;\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  block-size: 24px;\n  color: var(--aurade-glyph);\n  cursor: default;\n  display: flex;\n  inline-size: 20px;\n  justify-content: center;\n  opacity: .6;\n  padding: 0;\n}\n.aurade-chevron:hover,\n.aurade-chevron[aria-expanded=\"true\"] {\n  background: var(--aurade-row-hover);\n  color: var(--aurade-ink);\n  opacity: 1;\n}\n.aurade-chevron-glyph { block-size: 16px; inline-size: 16px; }\n\n.aurade-path-popover {\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-tile);\n  box-shadow: 0 12px 32px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .12);\n  display: flex;\n  flex-direction: column;\n  max-block-size: 320px;\n  min-inline-size: 200px;\n  overflow-y: auto;\n  padding: 5px;\n  position: absolute;\n  z-index: 20;\n}\n.aurade-path-option {\n  background: none;\n  border: 0;\n  border-radius: var(--aurade-radius-tile);\n  color: var(--aurade-ink);\n  cursor: default;\n  font: inherit;\n  overflow: hidden;\n  padding: 7px 10px;\n  text-align: start;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-path-option:hover { background: var(--aurade-row-hover); }\n.aurade-path-popover-empty {\n  color: var(--aurade-quiet);\n  margin: 0;\n  padding: 8px 10px;\n}\n\n\n/* The status bar. What is in front of you on the left, how much room is left\n   on the right, and nothing in the middle until there is an undo to put there. */\n.aurade-status {\n  align-items: center;\n  background: var(--aurade-panel);\n  border: 1px solid var(--aurade-line);\n  border-radius: var(--aurade-radius-panel);\n  color: var(--aurade-quiet);\n  display: flex;\n  flex: none;\n  font-size: 12px;\n  gap: 16px;\n  justify-content: space-between;\n  min-block-size: 34px;\n  padding: 6px 14px;\n}\n.aurade-status-summary {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.aurade-status-space {\n  align-items: center;\n  display: flex;\n  flex: none;\n  gap: 8px;\n}\n.aurade-status-track {\n  background: var(--aurade-line);\n  block-size: 3px;\n  border-radius: var(--aurade-radius-pill);\n  inline-size: 72px;\n  overflow: hidden;\n}\n.aurade-status-fill {\n  background: var(--aurade-accent);\n  block-size: 100%;\n  border-radius: inherit;\n}\n.aurade-status-fill[data-level=\"high\"] { background: var(--aurade-warn); }\n.aurade-status-fill[data-level=\"full\"] { background: var(--aurade-danger); }\n";
 diff --git a/ui/file_manager/file_manager/aurade/ui/toolbar.ts b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
-index 583993a..42db48b 100644
+index 583993ab8b40..42db48b6183d 100644
 --- a/ui/file_manager/file_manager/aurade/ui/toolbar.ts
 +++ b/ui/file_manager/file_manager/aurade/ui/toolbar.ts
 @@ -8,6 +8,7 @@
@@ -1949,7 +1949,7 @@ index 583993a..42db48b 100644
  }
  
 diff --git a/ui/file_manager/file_manager/foreground/js/main.ts b/ui/file_manager/file_manager/foreground/js/main.ts
-index a932566..d1388cc 100644
+index a93256608114..d1388ccdaded 100644
 --- a/ui/file_manager/file_manager/foreground/js/main.ts
 +++ b/ui/file_manager/file_manager/foreground/js/main.ts
 @@ -13,7 +13,9 @@ import '/strings.m.js';
@@ -1992,7 +1992,7 @@ index a932566..d1388cc 100644
    });
  });
 diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
-index 33103db..15f2955 100644
+index 33103db76c02..15f29551d2dc 100644
 --- a/ui/file_manager/file_names.gni
 +++ b/ui/file_manager/file_names.gni
 @@ -34,6 +34,30 @@ foreach(_f, image_loader_ts) {

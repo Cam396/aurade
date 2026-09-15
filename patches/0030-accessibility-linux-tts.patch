@@ -1,5 +1,5 @@
 diff --git a/ash/accessibility/accessibility_controller.cc b/ash/accessibility/accessibility_controller.cc
-index eb252cf24cfaa9729826dc5cce448785727cdf48..20f092b84681fb9973a993566e313a924230a6a6 100644
+index dfed1f3009ce..54c08caebe25 100644
 --- a/ash/accessibility/accessibility_controller.cc
 +++ b/ash/accessibility/accessibility_controller.cc
 @@ -82,6 +82,7 @@
@@ -24,7 +24,7 @@ index eb252cf24cfaa9729826dc5cce448785727cdf48..20f092b84681fb9973a993566e313a92
    registry->RegisterBooleanPref(
        prefs::kAccessibilitySelectToSpeakBackgroundShading,
 diff --git a/ash/accessibility/accessibility_controller_unittest.cc b/ash/accessibility/accessibility_controller_unittest.cc
-index 80293cb9f6d8cc20f1a60f7efc6537eb1ffb5a34..3452ae83fc3b50f37f3f1ee045d0de4ae33a598f 100644
+index 3a2a62e72af8..f7d483d9d70b 100644
 --- a/ash/accessibility/accessibility_controller_unittest.cc
 +++ b/ash/accessibility/accessibility_controller_unittest.cc
 @@ -48,6 +48,7 @@
@@ -35,7 +35,7 @@ index 80293cb9f6d8cc20f1a60f7efc6537eb1ffb5a34..3452ae83fc3b50f37f3f1ee045d0de4a
  #include "base/test/bind.h"
  #include "base/test/metrics/histogram_tester.h"
  #include "base/test/scoped_feature_list.h"
-@@ -329,6 +330,9 @@ TEST_F(AccessibilityControllerTest, PrefsAreRegistered) {
+@@ -327,6 +328,9 @@ TEST_F(AccessibilityControllerTest, PrefsAreRegistered) {
        prefs()->FindPreference(prefs::kAccessibilityVirtualKeyboardEnabled));
    EXPECT_TRUE(prefs()->FindPreference(
        prefs::kAccessibilityEnhancedNetworkVoicesInSelectToSpeakAllowed));

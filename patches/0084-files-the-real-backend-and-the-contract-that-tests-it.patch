@@ -1,6 +1,6 @@
 diff --git a/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 new file mode 100644
-index 0000000..2ffbf3d
+index 000000000000..2ffbf3d3dd29
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/adapter/chromeos_backend.ts
 @@ -0,0 +1,508 @@
@@ -514,7 +514,7 @@ index 0000000..2ffbf3d
 +}
 diff --git a/ui/file_manager/file_manager/aurade/adapter/platform.ts b/ui/file_manager/file_manager/aurade/adapter/platform.ts
 new file mode 100644
-index 0000000..36f9233
+index 000000000000..36f923320f1c
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/adapter/platform.ts
 @@ -0,0 +1,86 @@
@@ -606,7 +606,7 @@ index 0000000..36f9233
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 new file mode 100644
-index 0000000..6268704
+index 000000000000..62687043458a
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/adapter_test.ts
 @@ -0,0 +1,330 @@
@@ -942,7 +942,7 @@ index 0000000..6268704
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 new file mode 100644
-index 0000000..8451c80
+index 000000000000..8451c80bc993
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/fake_platform.ts
 @@ -0,0 +1,206 @@
@@ -1154,7 +1154,7 @@ index 0000000..8451c80
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
 new file mode 100644
-index 0000000..a3603a2
+index 000000000000..a3603a22604e
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/adapter/run_adapter.ts
 @@ -0,0 +1,63 @@
@@ -1222,7 +1222,7 @@ index 0000000..a3603a2
 +  return runContract('ChromeOsBackend', makeAdapterFixture, IMPLEMENTED);
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
-index 05b9583..043399c 100644
+index 05b9583a757f..043399c026c1 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/port_contract.ts
 @@ -9,6 +9,7 @@
@@ -1427,7 +1427,7 @@ index 05b9583..043399c 100644
    return results;
  }
 diff --git a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
-index 24976db..afe960f 100644
+index 24976db24bdd..afe960fc4b92 100644
 --- a/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 +++ b/ui/file_manager/file_manager/aurade/tests/contract/run_mock.ts
 @@ -9,6 +9,9 @@ import {runPlacesTests} from '../ui/places_test.js';
@@ -1482,7 +1482,7 @@ index 24976db..afe960f 100644
  }
  
 diff --git a/ui/file_manager/file_manager/aurade/tests/harness/dom.py b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
-index 5efe7d4..9b26b68 100755
+index 5efe7d400ff8..9b26b683b039 100755
 --- a/ui/file_manager/file_manager/aurade/tests/harness/dom.py
 +++ b/ui/file_manager/file_manager/aurade/tests/harness/dom.py
 @@ -64,7 +64,10 @@ def main():
@@ -1499,7 +1499,7 @@ index 5efe7d4..9b26b68 100755
                  answer = browser.call(
 diff --git a/ui/file_manager/file_manager/aurade/tests/progress.ts b/ui/file_manager/file_manager/aurade/tests/progress.ts
 new file mode 100644
-index 0000000..682f6db
+index 000000000000..682f6dbf835a
 --- /dev/null
 +++ b/ui/file_manager/file_manager/aurade/tests/progress.ts
 @@ -0,0 +1,18 @@
@@ -1522,7 +1522,7 @@ index 0000000..682f6db
 +  return inFlight;
 +}
 diff --git a/ui/file_manager/file_manager/aurade/tests/run.sh b/ui/file_manager/file_manager/aurade/tests/run.sh
-index 752e049..f639262 100755
+index 752e049a005a..f639262bf117 100755
 --- a/ui/file_manager/file_manager/aurade/tests/run.sh
 +++ b/ui/file_manager/file_manager/aurade/tests/run.sh
 @@ -25,8 +25,9 @@ echo "==> check and emit"

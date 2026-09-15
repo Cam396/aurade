@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/file_manager/file_manager/foreground/css/file_manager.css
+index a287e962f115..5a8e30ed7406 100644
 --- a/ui/file_manager/file_manager/foreground/css/file_manager.css
 +++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -2533,3 +2533,226 @@
+@@ -2533,3 +2533,226 @@ body {
    text-overflow: ellipsis;
    white-space: nowrap;
  }
@@ -229,9 +230,10 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
 +  background: var(--aurade-thumb-hover) !important;
 +}
 diff --git a/ui/file_manager/file_manager/widgets/xf_tree_item.ts b/ui/file_manager/file_manager/widgets/xf_tree_item.ts
+index 61418f7e1a8c..d0f22e15fbb6 100644
 --- a/ui/file_manager/file_manager/widgets/xf_tree_item.ts
 +++ b/ui/file_manager/file_manager/widgets/xf_tree_item.ts
-@@ -595,6 +595,49 @@
+@@ -595,6 +595,49 @@ function getCSS() {
      :host([selected]) slot[name="trailingIcon"]::slotted(.root-eject:active) {
        --ink-color: var(--cros-sys-ripple_neutral_on_prominent);
      }

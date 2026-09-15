@@ -1,5 +1,5 @@
 diff --git a/ash/public/cpp/bluetooth_config_service.cc b/ash/public/cpp/bluetooth_config_service.cc
-index 958e428a58d0bd681c0aedc12e5a2c446e5c45f0..fa7f85f1dbe13eb9bb7dc851148a4a18c7a1cace 100644
+index 958e428a58d0..fa7f85f1dbe1 100644
 --- a/ash/public/cpp/bluetooth_config_service.cc
 +++ b/ash/public/cpp/bluetooth_config_service.cc
 @@ -4,13 +4,33 @@
@@ -37,7 +37,7 @@ index 958e428a58d0bd681c0aedc12e5a2c446e5c45f0..fa7f85f1dbe13eb9bb7dc851148a4a18
  }
  
 diff --git a/ash/public/cpp/bluetooth_config_service.h b/ash/public/cpp/bluetooth_config_service.h
-index 7c5187937c2d9f791e80b739ca2635756028ea26..63bdfa8a147479044c63f5bc01b21fb0b69efd23 100644
+index 7c5187937c2d..63bdfa8a1474 100644
 --- a/ash/public/cpp/bluetooth_config_service.h
 +++ b/ash/public/cpp/bluetooth_config_service.h
 @@ -6,11 +6,21 @@
@@ -63,7 +63,7 @@ index 7c5187937c2d9f791e80b739ca2635756028ea26..63bdfa8a147479044c63f5bc01b21fb0
  // function as the main entrypoint to the Mojo API.
  //
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index d6fdaf14653c1f316ee264a0b944ca0787dd0924..cbda58345eef9e72423d01967e6772d2dad47248 100644
+index d6fdaf14653c..cbda58345eef 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -16,6 +16,8 @@ static_library("dbus") {
@@ -119,7 +119,7 @@ index d6fdaf14653c1f316ee264a0b944ca0787dd0924..cbda58345eef9e72423d01967e6772d2
  
 diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service.cc b/chrome/browser/ash/dbus/aurade_bluetooth_service.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd04575c02ce2
+index 000000000000..cee17193dfef
 --- /dev/null
 +++ b/chrome/browser/ash/dbus/aurade_bluetooth_service.cc
 @@ -0,0 +1,960 @@
@@ -1085,7 +1085,7 @@ index 0000000000000000000000000000000000000000..6a5da79e7d4eca5e0ea1f5a559bbd045
 +}  // namespace ash
 diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service.h b/chrome/browser/ash/dbus/aurade_bluetooth_service.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..f0da47e17895dc6e138fd25dc775e644ec81050e
+index 000000000000..8ddb6b04756b
 --- /dev/null
 +++ b/chrome/browser/ash/dbus/aurade_bluetooth_service.h
 @@ -0,0 +1,211 @@
@@ -1302,7 +1302,7 @@ index 0000000000000000000000000000000000000000..f0da47e17895dc6e138fd25dc775e644
 +#endif  // CHROME_BROWSER_ASH_DBUS_AURADE_BLUETOOTH_SERVICE_H_
 diff --git a/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc b/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..71af2a5d71810db1b78a87c277274ca0d67fb8b9
+index 000000000000..71af2a5d7181
 --- /dev/null
 +++ b/chrome/browser/ash/dbus/aurade_bluetooth_service_unittest.cc
 @@ -0,0 +1,189 @@
@@ -1496,7 +1496,7 @@ index 0000000000000000000000000000000000000000..71af2a5d71810db1b78a87c277274ca0
 +
 +}  // namespace ash
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b5bcc6072 100644
+index 8e01bd25d6fb..4db9aec721bd 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 @@ -18,6 +18,7 @@
@@ -1507,7 +1507,7 @@ index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b
  #include "ash/public/cpp/event_rewriter_controller.h"
  #include "ash/public/cpp/keyboard/keyboard_controller.h"
  #include "ash/public/cpp/session/session_controller.h"
-@@ -74,6 +75,7 @@
+@@ -80,6 +81,7 @@
  #include "chrome/browser/ash/dbus/arc_crosh_service_provider.h"
  #include "chrome/browser/ash/dbus/arc_tracing_service_provider.h"
  #include "chrome/browser/ash/dbus/ash_dbus_helper.h"
@@ -1515,7 +1515,7 @@ index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
-@@ -404,6 +406,15 @@ class DBusServices {
+@@ -411,6 +413,15 @@ class DBusServices {
              std::make_unique<ScreenLockServiceProvider>()));
  
      if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -1531,7 +1531,7 @@ index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b
        // AuraDE compatibility: Linux applications send notifications on the
        // user's session bus. Keep that unprivileged connection separate from
        // the system services above, then translate requests into Ash state.
-@@ -602,6 +613,8 @@ class DBusServices {
+@@ -609,6 +620,8 @@ class DBusServices {
    DBusServices& operator=(const DBusServices&) = delete;
  
    ~DBusServices() {
@@ -1540,7 +1540,7 @@ index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b
      rollback_network_config::Shutdown();
      chromeos::sensors::SensorHalDispatcher::Shutdown();
      NetworkHandler::Shutdown();
-@@ -640,6 +653,8 @@ class DBusServices {
+@@ -647,6 +660,8 @@ class DBusServices {
  
    void PreAshShutdown() {
      // Services depending on ash should be released here.
@@ -1549,7 +1549,7 @@ index a148934afc1b580f3e7e469aac0be5567fad5cd1..914edab79f3f7b13fa39169328f6222b
      desktop_notification_service_host_.reset();
      machine_learning_decision_service_.reset();
    }
-@@ -649,6 +664,7 @@ class DBusServices {
+@@ -656,6 +671,7 @@ class DBusServices {
    std::unique_ptr<CrosDBusService> kiosk_info_service_;
    std::unique_ptr<CrosDBusService> printers_service_;
    std::unique_ptr<CrosDBusService> screen_lock_service_;

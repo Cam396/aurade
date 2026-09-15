@@ -1,14 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
+index 4accb2f8f2fe..49570ee5ba71 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
-@@ -19,20 +19,29 @@
- import {ListSelectionModel} from './list_selection_model.js';
- 
- class TextSearchState {
-   text: string = '';
-   date: Date = new Date();
- }
- 
+@@ -26,6 +26,15 @@ class TextSearchState {
  /**
   * List container for the file table and the grid view.
   */
@@ -24,21 +18,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/u
  export class ListContainer {
    currentListType: ListType = ListType.UNINITIALIZED;
  
-   /**
-    * The input element to rename entry.
-    */
-   readonly renameInput: HTMLInputElement;
- 
-   /**
-    * Spinner on file list which is shown while loading.
-@@ -116,20 +125,24 @@
-       }
-     }, {passive: true});
-     this.element.addEventListener('touchend', (e: TouchEvent) => {
-       if (e.touches.length === 0) {
-         // contextmenu event will be sent right after touchend.
-         setTimeout(() => this.allowContextMenuByTouch_ = false);
-       }
+@@ -123,6 +132,10 @@ export class ListContainer {
      });
    }
  
@@ -49,21 +29,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/u
    get currentView(): FileTable|FileGrid {
      switch (this.currentListType) {
        case ListType.DETAIL:
-         return this.table;
-       case ListType.THUMBNAIL:
-         return this.grid;
-       case ListType.UNINITIALIZED:
-         assertNotReached();
-       default:
-         assertNotReachedCase(this.currentListType);
-@@ -282,20 +295,101 @@
-    * KeyDown event handler for the div#list-container element.
-    * @param event Key event.
-    */
-   private onKeyDown_(event: Event) {
-     // Ignore keydown handler in the rename input box.
-     const srcElement = event.srcElement as HTMLElement | null;
-     if (srcElement?.tagName === 'INPUT') {
+@@ -289,6 +302,87 @@ export class ListContainer {
        event.stopImmediatePropagation();
        return;
      }
@@ -151,10 +117,3 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/u
    }
  
    /**
-    * KeyPress event handler for the div#list-container element.
-    * @param event Key event.
-    */
-   private onKeyPress_(event: KeyboardEvent) {
-     const srcElement = event.srcElement as HTMLElement | null;
- 
-     // Ignore keypress handler in the rename input box.

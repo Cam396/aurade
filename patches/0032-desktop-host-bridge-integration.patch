@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af424179abfca8b 100644
+index 4e388a0384e4..97bc6d4b43dd 100644
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 +++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 @@ -4,6 +4,7 @@
@@ -25,7 +25,7 @@ index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af42417
  #include "base/time/time.h"
  #include "chrome/browser/apps/app_service/app_service_proxy.h"
  #include "chrome/browser/apps/app_service/menu_util.h"
-@@ -505,6 +508,67 @@ bool IsAuraDeHostRegistration(
+@@ -507,6 +510,67 @@ bool IsAuraDeHostRegistration(
           registration.ContainerName() == kAuraDeHostContainerName;
  }
  
@@ -93,7 +93,7 @@ index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af42417
  std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
    std::vector<base::FilePath> dirs;
    auto environment = base::Environment::Create();
-@@ -704,6 +768,11 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
+@@ -706,6 +770,11 @@ void CrostiniApps::GetMenuModel(const std::string& app_id,
    }
  
    if (is_aurade_host_app) {
@@ -105,7 +105,7 @@ index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af42417
      AddCommandItem(ash::SHOW_APP_INFO, IDS_APP_CONTEXT_MENU_SHOW_INFO,
                     menu_items);
    }
-@@ -728,7 +797,10 @@ void CrostiniApps::CreateAppOverrides(
+@@ -730,7 +799,10 @@ void CrostiniApps::CreateAppOverrides(
    app->window_mode = WindowMode::kWindow;
    app->allow_window_mode_selection = false;
    app->resize_locked = false;
@@ -117,7 +117,7 @@ index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af42417
    app->SetExtraField("aurade_host_app", true);
  
    if (host_app == aurade_host_apps_.end()) {
-@@ -860,4 +932,31 @@ bool CrostiniApps::LaunchAuraDeHostApp(const std::string& app_id) {
+@@ -862,4 +934,31 @@ bool CrostiniApps::LaunchAuraDeHostApp(const std::string& app_id) {
    return true;
  }
  
@@ -150,7 +150,7 @@ index fd30805309e5012295284185478fa746bd2ebeba..962f3eee2aebb72ea929061f8af42417
 +
  }  // namespace apps
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
-index 75182df1d2335eb6d237e2b454214acf13c966a9..a544a090f315d1aaa6635b6bd8fc1217bccd834b 100644
+index 75182df1d233..a544a090f315 100644
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
 +++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
 @@ -72,6 +72,10 @@ class CrostiniApps : public GuestOSApps {
@@ -173,7 +173,7 @@ index 75182df1d2335eb6d237e2b454214acf13c966a9..a544a090f315d1aaa6635b6bd8fc1217
    std::map<std::string, std::string> aurade_host_execs_;
    std::map<std::string, AuraDeHostDesktopApp> aurade_host_apps_;
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index c2a20f3a39337069c2eb47f3b18f94b13e514738..4f79057f321099e1264df45457ac1748bb7c7729 100644
+index c2a20f3a3933..4f79057f3210 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -168,6 +168,10 @@ void ShutdownAuraDeBluezSystemBus() {
@@ -188,7 +188,7 @@ index c2a20f3a39337069c2eb47f3b18f94b13e514738..4f79057f321099e1264df45457ac1748
  
  // static
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.h b/chrome/browser/ash/dbus/ash_dbus_helper.h
-index 1c328904f643d76dd934393690fefef9c3536f45..51e8e0ba579cfbc9d37d47febf960922897681b7 100644
+index 1c328904f643..51e8e0ba579c 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.h
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.h
 @@ -5,6 +5,10 @@
@@ -215,7 +215,7 @@ index 1c328904f643d76dd934393690fefef9c3536f45..51e8e0ba579cfbc9d37d47febf960922
  
  #endif  // CHROME_BROWSER_ASH_DBUS_ASH_DBUS_HELPER_H_
 diff --git a/chrome/browser/ash/extensions/file_manager/private_api_mount.cc b/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
-index 72bfd1b92f9d367ec4cbb6b1edb75a46d14c94b1..5ff99577dc4c2918a25aae509cf926ac13c44389 100644
+index 72bfd1b92f9d..5ff99577dc4c 100644
 --- a/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
 +++ b/chrome/browser/ash/extensions/file_manager/private_api_mount.cc
 @@ -224,6 +224,12 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
@@ -232,7 +232,7 @@ index 72bfd1b92f9d367ec4cbb6b1edb75a46d14c94b1..5ff99577dc4c2918a25aae509cf926ac
        DiskMountManager::GetInstance()->UnmountPath(
            volume->mount_path().value(),
 diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-index 5a5bc281245b8c81a901da06ad8eb81f457b97d6..7723e422af22f8f96240514dde98a5af81186e5c 100644
+index 5a5bc281245b..7723e422af22 100644
 --- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 +++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 @@ -14,6 +14,7 @@
@@ -252,7 +252,7 @@ index 5a5bc281245b8c81a901da06ad8eb81f457b97d6..7723e422af22f8f96240514dde98a5af
            new DocsUploadVirtualTask(),
            new SheetsUploadVirtualTask(),
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-index fd7bf21307f43b300dac3f3c2283495ebbc232f6..3e385fce06f2670132c4a00fa40b5fb6291fae71 100644
+index fd7bf21307f4..3e385fce06f2 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 @@ -15,6 +15,8 @@ static_library("virtual_tasks") {
@@ -265,7 +265,7 @@ index fd7bf21307f43b300dac3f3c2283495ebbc232f6..3e385fce06f2670132c4a00fa40b5fb6
  
    public_deps = [ "//chrome/browser:browser_public_dependencies" ]
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
-index e4020a50c603e8f0d12adfb65fb51a7ba4289fb4..c651152c60aaf18d47b9e996845ca127f8d80cf6 100644
+index e4020a50c603..c651152c60aa 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
 @@ -12,6 +12,8 @@ inline constexpr char kActionIdInstallIsolatedWebApp[] =
@@ -279,7 +279,7 @@ index e4020a50c603e8f0d12adfb65fb51a7ba4289fb4..c651152c60aaf18d47b9e996845ca127
  #endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_ID_CONSTANTS_H_
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a6d6dfe2ec159999aaf01123e386070ce685790a
+index 000000000000..a6d6dfe2ec15
 --- /dev/null
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.cc
 @@ -0,0 +1,97 @@
@@ -382,7 +382,7 @@ index 0000000000000000000000000000000000000000..a6d6dfe2ec159999aaf01123e386070c
 +}  // namespace file_manager::file_tasks
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..dab99b9f04c0c83e3e40ee387ccc903a281be967
+index 000000000000..dab99b9f04c0
 --- /dev/null
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/open_linux_virtual_task.h
 @@ -0,0 +1,33 @@
@@ -420,10 +420,10 @@ index 0000000000000000000000000000000000000000..dab99b9f04c0c83e3e40ee387ccc903a
 +
 +#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 3b2ccdd690cac6c365a504706875d04033f4d40b..969cd4d7fe38c2c7d9aac68c7a7bce86a36114b4 100644
+index 0e25bb5aac45..ae68e8655646 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -555,7 +555,14 @@ class DBusServices {
+@@ -562,7 +562,14 @@ class DBusServices {
      TPMTokenLoader::Initialize();
      NetworkCertLoader::Initialize();
  
@@ -440,7 +440,7 @@ index 3b2ccdd690cac6c365a504706875d04033f4d40b..969cd4d7fe38c2c7d9aac68c7a7bce86
      WifiP2PController::Initialize();
      NetworkHandler::Initialize();
 diff --git a/chromeos/ash/components/disks/disk.cc b/chromeos/ash/components/disks/disk.cc
-index e00dc5d335d821fc1ca0ba4f9664fa4e910bc5bb..1d6c3efb143ec562484afdf94a55efcc7ab19e7d 100644
+index e00dc5d335d8..1d6c3efb143e 100644
 --- a/chromeos/ash/components/disks/disk.cc
 +++ b/chromeos/ash/components/disks/disk.cc
 @@ -56,8 +56,9 @@ Disk::~Disk() = default;
@@ -467,7 +467,7 @@ index e00dc5d335d821fc1ca0ba4f9664fa4e910bc5bb..1d6c3efb143ec562484afdf94a55efcc
      const std::string& file_system_type) {
    disk_->file_system_type_ = file_system_type;
 diff --git a/chromeos/ash/components/disks/disk.h b/chromeos/ash/components/disks/disk.h
-index 0e3d71071940b9bb7964ff2ea10c08cd4f1bd97e..dce4f52e268addccee2441082da27bb7e070ffd4 100644
+index 0e3d71071940..dce4f52e268a 100644
 --- a/chromeos/ash/components/disks/disk.h
 +++ b/chromeos/ash/components/disks/disk.h
 @@ -207,6 +207,7 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) Disk::Builder {
@@ -479,7 +479,7 @@ index 0e3d71071940b9bb7964ff2ea10c08cd4f1bd97e..dce4f52e268addccee2441082da27bb7
    Builder& SetBaseMountPath(const std::string& base_mount_path);
    Builder& SetIsMounted(bool is_mounted);
 diff --git a/chromeos/ash/components/disks/disk_mount_manager.cc b/chromeos/ash/components/disks/disk_mount_manager.cc
-index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b29085996 100644
+index 6faa9a2e00a6..c1fc21dbfd67 100644
 --- a/chromeos/ash/components/disks/disk_mount_manager.cc
 +++ b/chromeos/ash/components/disks/disk_mount_manager.cc
 @@ -9,8 +9,10 @@
@@ -594,7 +594,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
  struct UnmountDeviceRecursivelyCallbackData {
    explicit UnmountDeviceRecursivelyCallbackData(
        DiskMountManager::UnmountDeviceRecursivelyCallbackType in_callback)
-@@ -240,8 +319,29 @@ void FixPermissions(const std::string_view path) {
+@@ -241,8 +320,29 @@ void FixPermissions(const std::string_view path) {
  class DiskMountManagerImpl : public DiskMountManager,
                               public CrosDisksClient::Observer {
   public:
@@ -625,7 +625,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
    }
  
    DiskMountManagerImpl(const DiskMountManagerImpl&) = delete;
-@@ -313,6 +413,17 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -314,6 +414,17 @@ class DiskMountManagerImpl : public DiskMountManager,
        const MountType type,
        const MountAccessMode access_mode) {
      VLOG(1) << "Mounting '" << source_path << "'...";
@@ -643,7 +643,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
      cros_disks_client_->Mount(
          source_path, source_format, mount_label, mount_options, access_mode,
          RemountOption::kMountNewDevice,
-@@ -341,12 +452,56 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -342,12 +453,56 @@ class DiskMountManagerImpl : public DiskMountManager,
      UnmountPathContinue(mount_path, std::move(callback), true /* success */);
    }
  
@@ -700,7 +700,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
      cros_disks_client_->Unmount(mount_path,
                                  BindOnce(&DiskMountManagerImpl::OnUnmountPath,
                                           weak_ptr_factory_.GetWeakPtr(),
-@@ -389,6 +544,11 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -390,6 +545,11 @@ class DiskMountManagerImpl : public DiskMountManager,
        return;
      }
  
@@ -712,7 +712,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
      UnmountPath(disk->get()->mount_path(),
                  BindOnce(&DiskMountManagerImpl::OnUnmountPathForFormat,
                           weak_ptr_factory_.GetWeakPtr(), device_path,
-@@ -492,6 +652,20 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -474,6 +634,20 @@ class DiskMountManagerImpl : public DiskMountManager,
  
      for (const std::string& device : devices_to_unmount) {
        VLOG(1) << "Unmounting '" << device << "'...";
@@ -733,7 +733,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
        cros_disks_client_->Unmount(
            device, BindOnce(&DiskMountManagerImpl::OnUnmountDeviceRecursively,
                             weak_ptr_factory_.GetWeakPtr(), raw_cb_data, device,
-@@ -509,6 +683,10 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -491,6 +665,10 @@ class DiskMountManagerImpl : public DiskMountManager,
  
      refresh_callbacks_.push_back(std::move(callback));
      if (refresh_callbacks_.size() == 1) {
@@ -744,7 +744,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
        // If there's no in-flight refreshing task, start it.
        cros_disks_client_->EnumerateDevices(
            BindOnce(&DiskMountManagerImpl::RefreshAfterEnumerateDevices,
-@@ -590,6 +768,307 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -568,6 +746,307 @@ class DiskMountManagerImpl : public DiskMountManager,
      OnMountCompleted({source_path, {}, type, MountError::kInternalError});
    }
  
@@ -1052,7 +1052,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
    void RemountRemovableDrive(const Disk& disk,
                               MountAccessMode access_mode) override {
      // TODO(yamaguchi): Retry for tentative remount failures. crbug.com/661455
-@@ -612,6 +1091,28 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -590,6 +1069,28 @@ class DiskMountManagerImpl : public DiskMountManager,
        return;
      }
  
@@ -1081,7 +1081,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
      cros_disks_client_->Mount(
          mount_point->source_path, std::string(), std::string(), {}, access_mode,
          RemountOption::kRemountExistingDevice,
-@@ -869,6 +1370,22 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -834,6 +1335,22 @@ class DiskMountManagerImpl : public DiskMountManager,
      base::UmaHistogramEnumeration("FileBrowser.FormatFileSystemType",
                                    filesystem);
  
@@ -1104,7 +1104,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
      cros_disks_client_->Format(
          device_path, FormatFileSystemTypeToString(filesystem), label,
          BindOnce(&DiskMountManagerImpl::OnFormatStarted,
-@@ -1348,6 +1865,12 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -1190,6 +1707,12 @@ class DiskMountManagerImpl : public DiskMountManager,
    base::ScopedObservation<CrosDisksClient, CrosDisksClient::Observer>
        cros_disks_client_observation_{this};
  
@@ -1117,7 +1117,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
    base::WeakPtrFactory<DiskMountManagerImpl> weak_ptr_factory_{this};
  };
  
-@@ -1364,6 +1887,12 @@ bool DiskMountManager::AddDiskForTest(std::unique_ptr<Disk> disk) {
+@@ -1206,6 +1729,12 @@ bool DiskMountManager::AddDiskForTest(std::unique_ptr<Disk> disk) {
  bool DiskMountManager::AddMountPointForTest(const MountPoint& mount_point) {
    return false;
  }
@@ -1130,7 +1130,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
  // static
  void DiskMountManager::Initialize() {
    if (g_disk_mount_manager) {
-@@ -1374,6 +1903,16 @@ void DiskMountManager::Initialize() {
+@@ -1216,6 +1745,16 @@ void DiskMountManager::Initialize() {
    VLOG(1) << "DiskMountManager initialized";
  }
  
@@ -1148,7 +1148,7 @@ index 855a26fd009351d2a37c1f0a6e30644f94eb03e4..a39c1d3717371efb56b79f15d076cb0b
  void DiskMountManager::InitializeForTesting(
      DiskMountManager* disk_mount_manager) {
 diff --git a/chromeos/ash/components/disks/disk_mount_manager.h b/chromeos/ash/components/disks/disk_mount_manager.h
-index e939b0e8a925d905a3770b10687807f4b6465a4d..02b3313d5c69175be1891f17509c536a5a4bf8a6 100644
+index 49348d8ca74c..e72d8e8974ca 100644
 --- a/chromeos/ash/components/disks/disk_mount_manager.h
 +++ b/chromeos/ash/components/disks/disk_mount_manager.h
 @@ -18,6 +18,10 @@
@@ -1162,7 +1162,7 @@ index e939b0e8a925d905a3770b10687807f4b6465a4d..02b3313d5c69175be1891f17509c536a
  namespace ash::disks {
  
  // Possible filesystem types that can be passed to FormatMountedDevice.
-@@ -212,6 +216,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
+@@ -203,6 +207,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
    virtual void UnmountPath(const std::string& mount_path,
                             UnmountPathCallback callback) = 0;
  
@@ -1174,7 +1174,7 @@ index e939b0e8a925d905a3770b10687807f4b6465a4d..02b3313d5c69175be1891f17509c536a
    // Remounts mounted removable device to change the read-only mount option.
    // Device that can be mounted only in its read-only mode will be ignored.
    virtual void RemountRemovableDrive(const Disk& disk,
-@@ -260,6 +269,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
+@@ -239,6 +248,11 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_DISKS) DiskMountManager {
    // Creates the global DiskMountManager instance.
    static void Initialize();
  

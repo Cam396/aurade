@@ -1,10 +1,12 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts b/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
+index 23fdca4a8752..4ab50bf0b34c 100644
 --- a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/empty_folder_controller.ts
-@@ -54,6 +54,83 @@
+@@ -53,6 +53,83 @@ const ODFS_REAUTHENTICATION_REQUIRED = 'foreground/images/files/ui/' +
+ const ODFS_FROZEN_ACCOUNT = 'foreground/images/files/ui/' +
      'odfs_frozen_account.svg#odfs_frozen_account';
  
- /**
++/**
 + * AuraDE: the empty state for an ordinary folder.
 + *
 + * Upstream leaves svgRef null for a plain directory, so updateUi_ returns
@@ -81,11 +83,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
 +  return options[auraDeVariantIndex(fileKey || String(rootType), options.length)]!;
 +}
 +
-+/**
+ /**
   * The state of the user's OneDrive account. Matches the enum in ODFS.
   */
- enum OdfsAccountState {
-@@ -399,6 +476,7 @@
+@@ -399,6 +476,7 @@ export class EmptyFolderController {
        return;
      }
      const currentRootType = this.directoryModel_.getCurrentRootType();
@@ -93,7 +94,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
  
      if (isRecentRootType(currentRootType)) {
        svgRef = RECENTS_EMPTY_FOLDER;
-@@ -411,6 +489,13 @@
+@@ -411,6 +489,13 @@ export class EmptyFolderController {
        const {search} = getStore().getState();
        if (search && search.query) {
          svgRef = SEARCH_EMPTY_RESULTS;
@@ -107,7 +108,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
        }
      }
  
-@@ -445,12 +530,29 @@
+@@ -445,12 +530,29 @@ export class EmptyFolderController {
      }
  
      if (svgRef === SEARCH_EMPTY_RESULTS) {
@@ -138,9 +139,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/empty_folder_controller.
        case chrome.fileManagerPrivate.FileCategory.AUDIO:
          this.showMessage_(str('RECENT_EMPTY_AUDIO_FOLDER'));
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index aec0a7503946..170b6fdcc62f 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -97,9 +97,14 @@
+@@ -96,9 +96,14 @@ found in the LICENSE file.
                 label="$i18n{DRIVE_VISIT_DRIVE_GOOGLE_COM}">
  
        <command id="toggle-pinned" label="$i18n{OFFLINE_COLUMN_LABEL}">

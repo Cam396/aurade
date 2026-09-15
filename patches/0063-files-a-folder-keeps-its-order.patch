@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
+index c431603b7348..fa01e86d971e 100644
 --- a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/app_state_controller.ts
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,7 @@ import {storage} from '../../common/js/storage.js';
  import type {DialogType} from '../../state/state.js';
  
  import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
@@ -9,10 +10,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
  import {GROUP_BY_FIELD_DIRECTORY, GROUP_BY_FIELD_MODIFICATION_TIME} from './file_list_model.js';
  import type {FileManagerUI} from './ui/file_manager_ui.js';
  import type {FileTableColumnModel} from './ui/file_table.js';
-@@ -43,6 +44,32 @@
+@@ -42,6 +43,32 @@ export class AppStateController {
+    */
    private auraDeScrollTops_ = new Map<string, number>();
  
-   /**
++  /**
 +   * AuraDE: the order each folder was last put in, by file key.
 +   *
 +   * Bounded and least recently used, for the same reasons and by the same
@@ -38,11 +40,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
 +   */
 +  private auraDeApplyingSort_ = false;
 +
-+  /**
+   /**
     * AuraDE: the folder whose position is waiting to be restored.
     *
-    * directory-changed fires while the list still holds the previous folder's
-@@ -142,6 +169,11 @@
+@@ -142,6 +169,11 @@ export class AppStateController {
  
    private async onFileListSorted_() {
      assert(this.directoryModel_);
@@ -54,7 +55,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
      const currentDirectory = this.directoryModel_.getCurrentDirEntry();
      if (!currentDirectory) {
        return;
-@@ -153,6 +185,7 @@
+@@ -153,6 +185,7 @@ export class AppStateController {
        const currentSortStatus = this.directoryModel_.getFileList().sortStatus;
        this.fileListSortField_ = currentSortStatus.field;
        this.fileListSortDirection_ = currentSortStatus.direction;
@@ -62,7 +63,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
      }
      this.saveViewOptions();
    }
-@@ -208,6 +241,75 @@
+@@ -208,6 +241,75 @@ export class AppStateController {
              this.fileListSortField_!, this.fileListSortDirection_!);
        }
      }
@@ -138,10 +139,11 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
    }
  
    /**
-@@ -291,6 +393,15 @@
+@@ -290,6 +392,15 @@ export class AppStateController {
+  */
  const AURADE_SCROLL_MEMORY_LIMIT = 64;
  
- /**
++/**
 + * AuraDE: how many folders keep a remembered order.
 + *
 + * The same sixty four as the scroll memory, and for the same reason: enough to
@@ -150,7 +152,6 @@ diff --git a/ui/file_manager/file_manager/foreground/js/app_state_controller.ts 
 + */
 +const AURADE_SORT_MEMORY_LIMIT = 64;
 +
-+/**
+ /**
   * Default sort field of the file list.
   */
- const DEFAULT_SORT_FIELD = 'modificationTime';

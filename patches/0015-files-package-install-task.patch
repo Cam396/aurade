@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-index ee23cdd2903b176818758e67cd0ff18e34e4346d..5a5bc281245b8c81a901da06ad8eb81f457b97d6 100644
+index ee23cdd2903b..5a5bc281245b 100644
 --- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 +++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 @@ -12,6 +12,7 @@
@@ -19,7 +19,7 @@ index ee23cdd2903b176818758e67cd0ff18e34e4346d..5a5bc281245b8c81a901da06ad8eb81f
            new DocsUploadVirtualTask(),
            new SheetsUploadVirtualTask(),
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-index 9197de05b49ebbd481c071774e1b75460a14dffd..fd7bf21307f43b300dac3f3c2283495ebbc232f6 100644
+index 9197de05b49e..fd7bf21307f4 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 @@ -11,6 +11,8 @@ static_library("virtual_tasks") {
@@ -32,7 +32,7 @@ index 9197de05b49ebbd481c071774e1b75460a14dffd..fd7bf21307f43b300dac3f3c2283495e
      "ms365_virtual_task.h",
    ]
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
-index d6a8b7a8444ae6f0686afef2f09be8b6720d1746..e4020a50c603e8f0d12adfb65fb51a7ba4289fb4 100644
+index d6a8b7a8444a..e4020a50c603 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
 @@ -10,6 +10,8 @@ namespace file_manager::file_tasks {
@@ -46,7 +46,7 @@ index d6a8b7a8444ae6f0686afef2f09be8b6720d1746..e4020a50c603e8f0d12adfb65fb51a7b
  #endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_ID_CONSTANTS_H_
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..88dbf01c0d186492a4fe19164d8e4b01c051dd7b
+index 000000000000..88dbf01c0d18
 --- /dev/null
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.cc
 @@ -0,0 +1,119 @@
@@ -171,7 +171,7 @@ index 0000000000000000000000000000000000000000..88dbf01c0d186492a4fe19164d8e4b01
 +}  // namespace file_manager::file_tasks
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..c06ab759cc69a7d978170490f4e164f5c7ddc62a
+index 000000000000..c06ab759cc69
 --- /dev/null
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h
 @@ -0,0 +1,52 @@

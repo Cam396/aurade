@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/resources/ash/settings/device_page/audio.html b/chrome/browser/resources/ash/settings/device_page/audio.html
-index b16b702376a2014e1120b9ad964a9af0898b4c4a..60f9cd69df2f53ce0af2900e8fea8dc7cf69d226 100644
+index b16b702376a2..60f9cd69df2f 100644
 --- a/chrome/browser/resources/ash/settings/device_page/audio.html
 +++ b/chrome/browser/resources/ash/settings/device_page/audio.html
 @@ -81,6 +81,25 @@
@@ -229,7 +229,7 @@ index b16b702376a2014e1120b9ad964a9af0898b4c4a..60f9cd69df2f53ce0af2900e8fea8dc7
    <h2>$i18n{deviceSoundsTitle}</h2>
    <div id="deviceSoundsSection" class="subsection">
 diff --git a/chrome/browser/resources/ash/settings/device_page/audio.ts b/chrome/browser/resources/ash/settings/device_page/audio.ts
-index b34860a9c3a5af6cacc07924c2b13b348ebcb56a..d9513b6f1bda4ce56777015a84e75aa49eba22ab 100644
+index b34860a9c3a5..d9513b6f1bda 100644
 --- a/chrome/browser/resources/ash/settings/device_page/audio.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/audio.ts
 @@ -29,7 +29,7 @@ import {DeepLinkingMixin} from '../common/deep_linking_mixin.js';
@@ -324,7 +324,7 @@ index b34860a9c3a5af6cacc07924c2b13b348ebcb56a..d9513b6f1bda4ce56777015a84e75aa4
      this.startupSoundEnabled_ = !this.startupSoundEnabled_;
      this.audioAndCaptionsBrowserProxy_.setStartupSoundEnabled(
 diff --git a/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts b/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
-index 70f14bd94d59d2b8f600485d4844711efa6aac0c..05dc3e51d7b45406cf532081b97db85d374e2a2e 100644
+index 70f14bd94d59..05dc3e51d7b4 100644
 --- a/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/fake_cros_audio_config.ts
 @@ -10,7 +10,7 @@
@@ -361,10 +361,10 @@ index 70f14bd94d59d2b8f600485d4844711efa6aac0c..05dc3e51d7b45406cf532081b97db85d
     * Returns true if hfpMicSrState is enabled on the device with id `deviceId`.
     */
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-index a17bba61faafacf448748a2ec2da8afcfd08af1c..a12ba8f7229db29e7e1e1fc2627beeeb79955d27 100644
+index 871635959964..51ee7453b0ac 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-@@ -818,6 +818,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
+@@ -792,6 +792,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
  
    html_source->AddLocalizedStrings(kAudioStrings);
  
@@ -408,7 +408,7 @@ index a17bba61faafacf448748a2ec2da8afcfd08af1c..a12ba8f7229db29e7e1e1fc2627beeeb
        "voiceIsolationLearnMoreLink",
        DeviceSection::GetHelpUrlWithBoard(ash::external_urls::kVcLearnMoreURL));
 diff --git a/chromeos/ash/components/audio/audio_device.cc b/chromeos/ash/components/audio/audio_device.cc
-index 06329e7b8628606e4a3b2b4e318fd0e58d6ee4d3..071e25c946cec97a57cdb485a8e5e8d46163cfbb 100644
+index 06329e7b8628..071e25c946ce 100644
 --- a/chromeos/ash/components/audio/audio_device.cc
 +++ b/chromeos/ash/components/audio/audio_device.cc
 @@ -160,6 +160,8 @@ AudioDevice::AudioDevice(const AudioNode& node) {
@@ -421,7 +421,7 @@ index 06329e7b8628606e4a3b2b4e318fd0e58d6ee4d3..071e25c946cec97a57cdb485a8e5e8d4
  
  AudioDevice::AudioDevice(const AudioDevice& other) = default;
 diff --git a/chromeos/ash/components/audio/audio_device.h b/chromeos/ash/components/audio/audio_device.h
-index 0344a90b0df6ae200330f17c3831b9a62c341495..6fc39c89d9d72830448e6156976d098a27ecc7e5 100644
+index 0344a90b0df6..6fc39c89d9d7 100644
 --- a/chromeos/ash/components/audio/audio_device.h
 +++ b/chromeos/ash/components/audio/audio_device.h
 @@ -127,6 +127,8 @@ struct COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) AudioDevice {
@@ -434,7 +434,7 @@ index 0344a90b0df6ae200330f17c3831b9a62c341495..6fc39c89d9d72830448e6156976d098a
    uint32_t user_priority = kUserPriorityNone;
  };
 diff --git a/chromeos/ash/components/audio/cros_audio_config.cc b/chromeos/ash/components/audio/cros_audio_config.cc
-index 20a1d00fd1a50f2cc0223e91f8ac2eb27be85ab8..5f97dc11e398f094d60ff7ac6d9b3864d23968a5 100644
+index 20a1d00fd1a5..5f97dc11e398 100644
 --- a/chromeos/ash/components/audio/cros_audio_config.cc
 +++ b/chromeos/ash/components/audio/cros_audio_config.cc
 @@ -17,6 +17,11 @@ void CrosAudioConfig::ObserveAudioSystemProperties(
@@ -458,7 +458,7 @@ index 20a1d00fd1a50f2cc0223e91f8ac2eb27be85ab8..5f97dc11e398f094d60ff7ac6d9b3864
    return properties;
  }
 diff --git a/chromeos/ash/components/audio/cros_audio_config.h b/chromeos/ash/components/audio/cros_audio_config.h
-index 1502ccbb92c7cb4f5cb2d8f59b3ef583bf3b19b0..d5d5c7be1bee07d9dcbc5baa274a8234e5481f13 100644
+index 1502ccbb92c7..d5d5c7be1bee 100644
 --- a/chromeos/ash/components/audio/cros_audio_config.h
 +++ b/chromeos/ash/components/audio/cros_audio_config.h
 @@ -40,6 +40,7 @@ class COMPONENT_EXPORT(CHROMEOS_ASH_COMPONENTS_AUDIO) CrosAudioConfig
@@ -470,7 +470,7 @@ index 1502ccbb92c7cb4f5cb2d8f59b3ef583bf3b19b0..d5d5c7be1bee07d9dcbc5baa274a8234
   private:
    // mojom::CrosAudioConfig:
 diff --git a/chromeos/ash/components/audio/cros_audio_config_impl.cc b/chromeos/ash/components/audio/cros_audio_config_impl.cc
-index 8fb0be20aa13e656b6803333f6678c7a8b1dee89..b8f9f087291cd98fd370dd6c47a50c9ce86f1e78 100644
+index 8fb0be20aa13..b8f9f087291c 100644
 --- a/chromeos/ash/components/audio/cros_audio_config_impl.cc
 +++ b/chromeos/ash/components/audio/cros_audio_config_impl.cc
 @@ -4,8 +4,17 @@
@@ -700,7 +700,7 @@ index 8fb0be20aa13e656b6803333f6678c7a8b1dee89..b8f9f087291cd98fd370dd6c47a50c9c
                                                      int volume) {
    NotifyObserversAudioSystemPropertiesChanged();
 diff --git a/chromeos/ash/components/audio/cros_audio_config_impl.h b/chromeos/ash/components/audio/cros_audio_config_impl.h
-index 609c503a4b3e6b581a6a5fb394cb15d69b9818fa..0b87150128b95201996e720e5ce60b09008126e9 100644
+index 609c503a4b3e..0b87150128b9 100644
 --- a/chromeos/ash/components/audio/cros_audio_config_impl.h
 +++ b/chromeos/ash/components/audio/cros_audio_config_impl.h
 @@ -6,6 +6,7 @@
@@ -744,7 +744,7 @@ index 609c503a4b3e6b581a6a5fb394cb15d69b9818fa..0b87150128b95201996e720e5ce60b09
  
  }  // namespace ash::audio_config
 diff --git a/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom b/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
-index ed917ec58f5196b52e6ddae8ff9b6c530d769cad..75f38c306e3fe8252dd698211a9011f4cbd2f1a7 100644
+index ed917ec58f51..75f38c306e3f 100644
 --- a/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
 +++ b/chromeos/ash/components/audio/public/mojom/cros_audio_config.mojom
 @@ -78,6 +78,54 @@ struct VoiceIsolationUIAppearance {
@@ -821,7 +821,7 @@ index ed917ec58f5196b52e6ddae8ff9b6c530d769cad..75f38c306e3fe8252dd698211a9011f4
 +  SetLinuxAudioQualityProfile(LinuxAudioQualityProfile profile);
  };
 diff --git a/chromeos/ash/components/dbus/audio/BUILD.gn b/chromeos/ash/components/dbus/audio/BUILD.gn
-index 1d0982fb523d71d560d284642f93757b8ef31be7..5f4e2ddf901abe3c2051b407c3aea68074246d4f 100644
+index 1d0982fb523d..5f4e2ddf901a 100644
 --- a/chromeos/ash/components/dbus/audio/BUILD.gn
 +++ b/chromeos/ash/components/dbus/audio/BUILD.gn
 @@ -2,13 +2,22 @@
@@ -857,7 +857,7 @@ index 1d0982fb523d71d560d284642f93757b8ef31be7..5f4e2ddf901abe3c2051b407c3aea680
      "voice_isolation_ui_appearance.h",
      "volume_state.cc",
 diff --git a/chromeos/ash/components/dbus/audio/audio_node.cc b/chromeos/ash/components/dbus/audio/audio_node.cc
-index 6d53f7d7a6f44f29d35e2a9aea4d533267518a23..fc2ffbd4030c338ba58f0423319a266671b523f5 100644
+index 6d53f7d7a6f4..fc2ffbd4030c 100644
 --- a/chromeos/ash/components/dbus/audio/audio_node.cc
 +++ b/chromeos/ash/components/dbus/audio/audio_node.cc
 @@ -28,7 +28,9 @@ AudioNode::AudioNode(bool is_input,
@@ -896,7 +896,7 @@ index 6d53f7d7a6f44f29d35e2a9aea4d533267518a23..fc2ffbd4030c338ba58f0423319a2666
  }
  
 diff --git a/chromeos/ash/components/dbus/audio/audio_node.h b/chromeos/ash/components/dbus/audio/audio_node.h
-index bbf8e6fc67cda567866561ce2ff71315e252bd98..f13505fcade3b78c7b0c038a1306576b30ebe37e 100644
+index bbf8e6fc67cd..f13505fcade3 100644
 --- a/chromeos/ash/components/dbus/audio/audio_node.h
 +++ b/chromeos/ash/components/dbus/audio/audio_node.h
 @@ -41,6 +41,10 @@ struct COMPONENT_EXPORT(DBUS_AUDIO) AudioNode {
@@ -922,7 +922,7 @@ index bbf8e6fc67cda567866561ce2ff71315e252bd98..f13505fcade3b78c7b0c038a1306576b
    ~AudioNode();
  
 diff --git a/chromeos/ash/components/dbus/audio/cras_audio_client.cc b/chromeos/ash/components/dbus/audio/cras_audio_client.cc
-index 4f8bc89d313e0823ef48a017e847bc181c987e94..9d85317e5e6730ffe2890f76de4b69df2aeab99d 100644
+index 4f8bc89d313e..9d85317e5e67 100644
 --- a/chromeos/ash/components/dbus/audio/cras_audio_client.cc
 +++ b/chromeos/ash/components/dbus/audio/cras_audio_client.cc
 @@ -13,7 +13,9 @@
@@ -949,7 +949,7 @@ index 4f8bc89d313e0823ef48a017e847bc181c987e94..9d85317e5e6730ffe2890f76de4b69df
  }
  
 diff --git a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
-index 55be4c6dbb422c4e4d699645f78ed4b1e75a8f05..7abb69e3dbb062202e7cc79c881003dfc0d4cba4 100644
+index 55be4c6dbb42..7abb69e3dbb0 100644
 --- a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
 +++ b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.cc
 @@ -5,6 +5,7 @@
@@ -961,7 +961,7 @@ index 55be4c6dbb422c4e4d699645f78ed4b1e75a8f05..7abb69e3dbb062202e7cc79c881003df
  
  #include "base/functional/bind.h"
 diff --git a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
-index c2f4beab73a84c6292e59c7f081f9e3e9cacc53d..e04e91f7807e185d721da6b51857abb868ca6c82 100644
+index c2f4beab73a8..e04e91f7807e 100644
 --- a/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
 +++ b/chromeos/ash/components/dbus/audio/fake_cras_audio_client.h
 @@ -7,6 +7,8 @@
@@ -974,7 +974,7 @@ index c2f4beab73a84c6292e59c7f081f9e3e9cacc53d..e04e91f7807e185d721da6b51857abb8
  
  #include "base/component_export.h"
 diff --git a/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc b/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
-index 27583dcf420a04032374f4107419b99f7d013818..6de3c78415dfbe6bbf736a562d00a7f04d94651b 100644
+index 27583dcf420a..6de3c78415df 100644
 --- a/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
 +++ b/chromeos/ash/components/dbus/audio/fake_floss_media_client.cc
 @@ -8,7 +8,6 @@
@@ -1017,7 +1017,7 @@ index 27583dcf420a04032374f4107419b99f7d013818..6de3c78415dfbe6bbf736a562d00a7f0
  
  }  // namespace ash
 diff --git a/chromeos/ash/components/dbus/audio/fake_floss_media_client.h b/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
-index 5fe22265d4d60b7ee0c2d0971d20a23360814373..62083bbeb88f34d2980b16be0fc7295ed53c0ea6 100644
+index 5fe22265d4d6..62083bbeb88f 100644
 --- a/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
 +++ b/chromeos/ash/components/dbus/audio/fake_floss_media_client.h
 @@ -7,6 +7,9 @@
@@ -1046,7 +1046,7 @@ index 5fe22265d4d60b7ee0c2d0971d20a23360814373..62083bbeb88f34d2980b16be0fc7295e
  }  // namespace ash
 diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..047fb816b5d81d0d8083936d3bca928394085585
+index 000000000000..047fb816b5d8
 --- /dev/null
 +++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
 @@ -0,0 +1,1442 @@
@@ -2494,7 +2494,7 @@ index 0000000000000000000000000000000000000000..047fb816b5d81d0d8083936d3bca9283
 +}  // namespace ash
 diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..db6d4bb5a9aca904bf28da21b749e9333b4cb5ad
+index 000000000000..db6d4bb5a9ac
 --- /dev/null
 +++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h
 @@ -0,0 +1,145 @@

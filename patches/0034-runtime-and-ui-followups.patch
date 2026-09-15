@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc b/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
-index 35f50e679cbc4da54e47457deb7ac0a9ae18d757..42e3ea80ae8575c688e3d82d0ae69e7aaca990da 100644
+index 35f50e679cbc..42e3ea80ae85 100644
 --- a/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
 +++ b/chrome/browser/ash/bluetooth/debug_logs_manager_factory.cc
 @@ -5,6 +5,7 @@
@@ -43,7 +43,7 @@ index 35f50e679cbc4da54e47457deb7ac0a9ae18d757..42e3ea80ae8575c688e3d82d0ae69e7a
    return std::make_unique<DebugLogsManagerService>(profile);
  }
 diff --git a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
-index 73fe634d5a31555b794eea9ff1c5cbaa32c2c9d3..7e8c9ce75346a44020f6215c4ddf2d272c282639 100644
+index 73fe634d5a31..7e8c9ce75346 100644
 --- a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
 +++ b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.ts
 @@ -587,6 +587,15 @@ export class OsAboutPageElement extends OsAboutPageBase {
@@ -63,7 +63,7 @@ index 73fe634d5a31555b794eea9ff1c5cbaa32c2c9d3..7e8c9ce75346a44020f6215c4ddf2d27
          let result = '';
          const message = this.currentUpdateStatusEvent_.message;
 diff --git a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
-index a0d01bf1968a509ad00b3ae36a09c30452feca16..370a1b128b15a6d0fd34a992c8856e220773c419 100644
+index a0d01bf1968a..370a1b128b15 100644
 --- a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
 +++ b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
 @@ -54,8 +54,14 @@ namespace chromeos::editor_menu {
@@ -97,7 +97,7 @@ index a0d01bf1968a509ad00b3ae36a09c30452feca16..370a1b128b15a6d0fd34a992c8856e22
    }
  
 diff --git a/chrome/browser/ui/ash/read_write_cards/BUILD.gn b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
-index d8ffa567a7c2c56414f0a6f70f582233d3e88d79..3715d63f441af93f56e213b3ef489f5d737424cf 100644
+index d8ffa567a7c2..3715d63f441a 100644
 --- a/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 +++ b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 @@ -59,6 +59,7 @@ source_set("unit_tests") {
@@ -117,7 +117,7 @@ index d8ffa567a7c2c56414f0a6f70f582233d3e88d79..3715d63f441af93f56e213b3ef489f5d
      "//ui/views",
    ]
 diff --git a/chrome/browser/ui/webui/help/version_updater_chromeos.cc b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
-index e64eb19cb598d2ca6718295be4ba2c59828b0e0f..244979ce6ac0b080a50c674e0a99055516487c5d 100644
+index e64eb19cb598..244979ce6ac0 100644
 --- a/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 +++ b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 @@ -15,6 +15,7 @@
@@ -156,7 +156,7 @@ index e64eb19cb598d2ca6718295be4ba2c59828b0e0f..244979ce6ac0b080a50c674e0a990555
        break;
      case update_engine::Operation::CHECKING_FOR_UPDATE:
 diff --git a/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc b/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
-index f6483434ca6c5982f3b4419a709ef693b3ad4118..432fbe6e5eb96977b2ce3fd94a0563e8bd0cd6e4 100644
+index f6483434ca6c..432fbe6e5eb9 100644
 --- a/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
 +++ b/chrome/browser/ui/webui/help/version_updater_chromeos_unittest.cc
 @@ -13,6 +13,8 @@
@@ -251,7 +251,7 @@ index f6483434ca6c5982f3b4419a709ef693b3ad4118..432fbe6e5eb96977b2ce3fd94a0563e8
 +
  }  // namespace chromeos
 diff --git a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
-index 9e48bbb95e2918fcb5d3672ecd4d1d3037c0515a..8a18f21d57b0a69d1a2d885ffecf1618c4d2b2d0 100644
+index 9e48bbb95e29..8a18f21d57b0 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 @@ -226,6 +226,7 @@ suite('<settings-device-page>', () => {
@@ -399,7 +399,7 @@ index 9e48bbb95e2918fcb5d3672ecd4d1d3037c0515a..8a18f21d57b0a69d1a2d885ffecf1618
  
      setup(async () => {
 diff --git a/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
-index 6bb6f96d3ad6bc61378b283d23516aa469c47279..602cdd0a83bdedc2908635344a7f152f5e19522f 100644
+index 6bb6f96d3ad6..602cdd0a83bd 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/fake_cros_audio_config_test.ts
 @@ -58,6 +58,7 @@ suite('FakeCrosAudioConfig', () => {
@@ -491,7 +491,7 @@ index 6bb6f96d3ad6bc61378b283d23516aa469c47279..602cdd0a83bdedc2908635344a7f152f
          };
          crosAudioConfig.setAudioSystemProperties(noNoiseCancellation);
 diff --git a/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts b/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
-index cb7a6bc37fa28c518979c9a6782ae42682172c68..71aa5eea2dd45f25c133b531d43142b73e25fca8 100644
+index cb7a6bc37fa2..71aa5eea2dd4 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/test_device_page_browser_proxy.ts
 @@ -7,10 +7,39 @@ import {assert} from 'chrome://resources/js/assert.js';
@@ -585,7 +585,7 @@ index cb7a6bc37fa28c518979c9a6782ae42682172c68..71aa5eea2dd45f25c133b531d43142b7
  
    openBrowsingDataSettings() {}
 diff --git a/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts b/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
-index 69cb791ed3996bf4ed24ea8539ae915b25d5739a..8fb7e5745515fb7e8c7e101ff08abbda7aad3f5a 100644
+index 69cb791ed399..8fb7e5745515 100644
 --- a/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/os_about_page/os_about_page_test.ts
 @@ -162,7 +162,9 @@ suite('<os-about-page> AllBuilds', () => {
@@ -600,7 +600,7 @@ index 69cb791ed3996bf4ed24ea8539ae915b25d5739a..8fb7e5745515fb7e8c7e101ff08abbda
          fireStatusChanged(UpdateStatus.DISABLED);
          assertNull(updateRowIcon.src);
 diff --git a/chromeos/ash/components/dbus/BUILD.gn b/chromeos/ash/components/dbus/BUILD.gn
-index 29e241e55fad15966acd879304b1d1f6203cc684..24c1052cf354a30582e766c6f521913c41ea9722 100644
+index 29e241e55fad..24c1052cf354 100644
 --- a/chromeos/ash/components/dbus/BUILD.gn
 +++ b/chromeos/ash/components/dbus/BUILD.gn
 @@ -73,6 +73,7 @@ source_set("unit_tests") {
@@ -612,7 +612,7 @@ index 29e241e55fad15966acd879304b1d1f6203cc684..24c1052cf354a30582e766c6f521913c
      "//chromeos/ash/components/dbus/userdataauth:userdataauth_proto",
      "//chromeos/ash/components/install_attributes:test_support",
 diff --git a/chromeos/ash/components/dbus/update_engine/BUILD.gn b/chromeos/ash/components/dbus/update_engine/BUILD.gn
-index 2c9533d3d074e3f351d0b57ccd24d17fb39bdbd4..4201ffb83bfa67c400c72f2070e779c7dde92ab7 100644
+index 2c9533d3d074..4201ffb83bfa 100644
 --- a/chromeos/ash/components/dbus/update_engine/BUILD.gn
 +++ b/chromeos/ash/components/dbus/update_engine/BUILD.gn
 @@ -25,6 +25,20 @@ component("update_engine") {
@@ -637,7 +637,7 @@ index 2c9533d3d074e3f351d0b57ccd24d17fb39bdbd4..4201ffb83bfa67c400c72f2070e779c7
    sources =
        [ "//third_party/cros_system_api/dbus/update_engine/update_engine.proto" ]
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
-index e221755af1fb4b1e1c2a209ce2e6c4503b157faf..9df5c3215b93586b8ee4f99f59a7beb733cc71ce 100644
+index e221755af1fb..9df5c3215b93 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 @@ -424,8 +424,9 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
@@ -788,7 +788,7 @@ index e221755af1fb4b1e1c2a209ce2e6c4503b157faf..9df5c3215b93586b8ee4f99f59a7beb7
  
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..fa0105f1ab0e8d2736e828310e507f1b75a0e67a
+index 000000000000..fa0105f1ab0e
 --- /dev/null
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client_unittest.cc
 @@ -0,0 +1,306 @@
@@ -1099,7 +1099,7 @@ index 0000000000000000000000000000000000000000..fa0105f1ab0e8d2736e828310e507f1b
 +
 +}  // namespace ash
 diff --git a/chromeos/ash/components/disks/disk_mount_manager.cc b/chromeos/ash/components/disks/disk_mount_manager.cc
-index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc98ec6fe9 100644
+index c1fc21dbfd67..469521736fb4 100644
 --- a/chromeos/ash/components/disks/disk_mount_manager.cc
 +++ b/chromeos/ash/components/disks/disk_mount_manager.cc
 @@ -43,8 +43,8 @@
@@ -1112,7 +1112,7 @@ index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc
  #include "dbus/message.h"
  #include "dbus/object_path.h"
  #include "dbus/object_proxy.h"
-@@ -791,7 +791,12 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -769,7 +769,12 @@ class DiskMountManagerImpl : public DiskMountManager,
      }
      OnMountCompleted(
          {source_path, resolved_mount_path, type, error, 100, read_only});
@@ -1126,7 +1126,7 @@ index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc
    }
  
    void OnAuraDeUnmount(UnmountPathCallback callback,
-@@ -866,7 +871,7 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -844,7 +849,7 @@ class DiskMountManagerImpl : public DiskMountManager,
      std::optional<base::Value> event =
          base::JSONReader::Read(json, base::JSON_PARSE_RFC);
      if (!event || !event->is_dict() ||
@@ -1135,7 +1135,7 @@ index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc
        return;
      }
      aurade_refresh_timer_.Start(
-@@ -1262,8 +1267,16 @@ class DiskMountManagerImpl : public DiskMountManager,
+@@ -1240,8 +1245,16 @@ class DiskMountManagerImpl : public DiskMountManager,
        DCHECK(disk_it != disks_.end());
        disk->set_is_first_mount(false);
        if (!want_to_keep) {
@@ -1155,7 +1155,7 @@ index a39c1d3717371efb56b79f15d076cb0b29085996..250e873117a621b355cc1af6b58a88dc
      }
    }
 diff --git a/components/history_embeddings/content/history_embeddings_service.cc b/components/history_embeddings/content/history_embeddings_service.cc
-index f42c3c00ec9da7ac19430d17ec3e9f516445568f..4e53cd10ec49561a2758755add6329092810b562 100644
+index f42c3c00ec9d..4e53cd10ec49 100644
 --- a/components/history_embeddings/content/history_embeddings_service.cc
 +++ b/components/history_embeddings/content/history_embeddings_service.cc
 @@ -16,6 +16,7 @@
@@ -1205,7 +1205,7 @@ index f42c3c00ec9da7ac19430d17ec3e9f516445568f..4e53cd10ec49561a2758755add632909
      CHECK_EQ(scored_url_rows.size(), annotation_results.size());
  
 diff --git a/components/history_embeddings/content/history_embeddings_service.h b/components/history_embeddings/content/history_embeddings_service.h
-index 85aa57b15d4a692dd8c8d1fb40a7c4b0fea9b8c3..491b14258eeb7a4e0dde3fbfdf4241d9e06d26c6 100644
+index 85aa57b15d4a..491b14258eeb 100644
 --- a/components/history_embeddings/content/history_embeddings_service.h
 +++ b/components/history_embeddings/content/history_embeddings_service.h
 @@ -276,6 +276,7 @@ class HistoryEmbeddingsService
@@ -1217,7 +1217,7 @@ index 85aa57b15d4a692dd8c8d1fb40a7c4b0fea9b8c3..491b14258eeb7a4e0dde3fbfdf4241d9
            annotation_results);
  
 diff --git a/components/history_embeddings/content/history_embeddings_service_unittest.cc b/components/history_embeddings/content/history_embeddings_service_unittest.cc
-index 2560987fd48e242427170f496aeb4c3e4d82b634..30858845391d920c4837c8cdb6e4a1764d16091a 100644
+index 2560987fd48e..30858845391d 100644
 --- a/components/history_embeddings/content/history_embeddings_service_unittest.cc
 +++ b/components/history_embeddings/content/history_embeddings_service_unittest.cc
 @@ -12,10 +12,12 @@

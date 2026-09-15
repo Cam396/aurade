@@ -1,5 +1,5 @@
 diff --git a/ash/login/ui/login_expanded_public_account_view.cc b/ash/login/ui/login_expanded_public_account_view.cc
-index 9e5414fee1bdd9572be8a45db18de683cbda42a3..4b0bf455c4354a0861cd7a32a36787ed5aeb4a1d 100644
+index 9e5414fee1bd..4b0bf455c435 100644
 --- a/ash/login/ui/login_expanded_public_account_view.cc
 +++ b/ash/login/ui/login_expanded_public_account_view.cc
 @@ -436,14 +436,19 @@ class RightPaneView : public NonAccessibleView {
@@ -26,7 +26,7 @@ index 9e5414fee1bdd9572be8a45db18de683cbda42a3..4b0bf455c4354a0861cd7a32a36787ed
  
      learn_more_label_->SetProperty(
 diff --git a/chrome/browser/ash/login/auth/chrome_login_performer.cc b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-index 583eb57c09c48f247418998c708b93eb237db660..da0b5dda9a5ae8bc650c250225f3987425163d29 100644
+index 583eb57c09c4..da0b5dda9a5a 100644
 --- a/chrome/browser/ash/login/auth/chrome_login_performer.cc
 +++ b/chrome/browser/ash/login/auth/chrome_login_performer.cc
 @@ -10,8 +10,11 @@
@@ -54,7 +54,7 @@ index 583eb57c09c48f247418998c708b93eb237db660..da0b5dda9a5ae8bc650c250225f39874
    // Use TaskPriority::HIGHEST as this operation blocks
    // user login flow.
 diff --git a/chrome/browser/ash/login/existing_user_controller.cc b/chrome/browser/ash/login/existing_user_controller.cc
-index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c58cb93795 100644
+index b9489a56d821..6ff79597dfe0 100644
 --- a/chrome/browser/ash/login/existing_user_controller.cc
 +++ b/chrome/browser/ash/login/existing_user_controller.cc
 @@ -26,16 +26,19 @@
@@ -77,7 +77,7 @@ index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c5
  #include "base/timer/elapsed_timer.h"
  #include "base/values.h"
  #include "base/version.h"
-@@ -89,6 +92,7 @@
+@@ -87,6 +90,7 @@
  #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
  #include "chromeos/ash/components/demo_mode/utils/demo_session_utils.h"
  #include "chromeos/ash/components/install_attributes/install_attributes.h"
@@ -85,14 +85,14 @@ index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c5
  #include "chromeos/ash/components/login/auth/public/auth_failure.h"
  #include "chromeos/ash/components/login/auth/public/key.h"
  #include "chromeos/ash/components/login/session/session_termination_manager.h"
-@@ -122,6 +126,7 @@
+@@ -120,6 +124,7 @@
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/storage_partition.h"
  #include "google_apis/gaia/gaia_auth_util.h"
 +#include "google_apis/gaia/gaia_id.h"
  #include "google_apis/gaia/google_service_auth_error.h"
+ #include "services/network/public/cpp/shared_url_loader_factory.h"
  #include "services/network/public/mojom/network_context.mojom.h"
- #include "ui/base/l10n/l10n_util.h"
 @@ -150,6 +155,73 @@ const char kAutoLaunchNotifierId[] = "ash.managed_guest_session-auto_launch";
  // Delay for restarting the ui if safe-mode login has failed.
  const long int kSafeModeRestartUiDelayMs = 30000;
@@ -167,7 +167,7 @@ index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c5
  // Makes a call to the policy subsystem to reload the policy when we detect
  // authentication change.
  void RefreshPoliciesOnUIThread(policy::PolicyService& policy_service) {
-@@ -452,6 +524,33 @@ ExistingUserController::ExistingUserController(
+@@ -453,6 +525,33 @@ ExistingUserController::ExistingUserController(
  void ExistingUserController::Init(const user_manager::UserList& users) {
    timer_init_ = std::make_unique<base::ElapsedTimer>();
    UpdateLoginDisplay(users);
@@ -202,7 +202,7 @@ index 5489daedd40fdbb188f2e248f7968e6f5335273e..d3ae3cc8ebf74d03bbb8c5fe524eb2c5
  }
  
 diff --git a/chrome/browser/ash/login/reauth_stats.cc b/chrome/browser/ash/login/reauth_stats.cc
-index 3519a3c37d05564fff61eb6b807fae507dfcb8a8..ef765e1bc69d977357575a6976d822b8c713cea0 100644
+index 3519a3c37d05..ef765e1bc69d 100644
 --- a/chrome/browser/ash/login/reauth_stats.cc
 +++ b/chrome/browser/ash/login/reauth_stats.cc
 @@ -6,13 +6,25 @@
@@ -259,10 +259,10 @@ index 3519a3c37d05564fff61eb6b807fae507dfcb8a8..ef765e1bc69d977357575a6976d822b8
      base::UmaHistogramEnumeration("Login.PasswordChanged.ReauthReason",
                                    reauth_reason,
 diff --git a/chrome/browser/ash/login/screens/sync_consent_screen.cc b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-index 0b432f298d20de0c989359dee422f474012995f8..54853345d8b3d826a0f4676fa046b488ecde6f24 100644
+index d664ffdd06c8..cf2c1aadb084 100644
 --- a/chrome/browser/ash/login/screens/sync_consent_screen.cc
 +++ b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-@@ -426,6 +426,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
+@@ -433,6 +433,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
  
  void SyncConsentScreen::SetSyncEverythingEnabled(bool enabled) {
    syncer::SyncService* sync_service = GetSyncService(profile_);
@@ -273,7 +273,7 @@ index 0b432f298d20de0c989359dee422f474012995f8..54853345d8b3d826a0f4676fa046b488
    if (enabled != sync_settings->IsSyncEverythingEnabled()) {
      syncer::UserSelectableTypeSet empty_set;
 diff --git a/chrome/browser/ash/login/screens/user_selection_screen.cc b/chrome/browser/ash/login/screens/user_selection_screen.cc
-index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a2012198eca4 100644
+index 3868fd153c4d..f4e2cfafb63b 100644
 --- a/chrome/browser/ash/login/screens/user_selection_screen.cc
 +++ b/chrome/browser/ash/login/screens/user_selection_screen.cc
 @@ -26,6 +26,7 @@
@@ -284,7 +284,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
  #include "base/strings/utf_string_conversions.h"
  #include "base/time/time.h"
  #include "base/trace_event/trace_event.h"
-@@ -87,6 +88,15 @@ namespace {
+@@ -85,6 +86,15 @@ namespace {
  
  const char kWakeLockReason[] = "TPMLockedIssue";
  const int kWaitingOvertimeInSeconds = 1;
@@ -300,7 +300,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
  
  // Max number of users to show.
  // Please keep synced with one in signin_userlist_unittest.cc.
-@@ -224,6 +234,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+@@ -221,6 +231,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
    const bool is_public_session =
        user->GetType() == user_manager::UserType::kPublicAccount;
    const bool has_gaia_account = user->HasGaiaAccount();
@@ -308,7 +308,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
  
    if (is_public_session) {
      return proximity_auth::mojom::AuthType::OFFLINE_PASSWORD;
-@@ -231,7 +242,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+@@ -228,7 +239,7 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
  
    // At this point the reason for invalid token should be already set. If not,
    // this might be a leftover from an old version.
@@ -317,7 +317,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
        token_status == user_manager::User::OAUTH2_TOKEN_STATUS_INVALID) {
      RecordReauthReason(local_state, user->GetAccountId(), ReauthReason::kOther);
    }
-@@ -239,16 +250,30 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
+@@ -236,16 +247,30 @@ proximity_auth::mojom::AuthType GetInitialUserAuthType(
    // We need to force an online signin if the user is marked as requiring it or
    // if there's an invalid OAUTH token that needs to be refreshed.
    if (user->force_online_signin()) {
@@ -353,7 +353,7 @@ index f0937195a1136b3c4a94719303ff65a5cfab86de..4daf40d273fa6168ee639bbfd746a201
  
    user_manager::KnownUser known_user(&local_state);
 diff --git a/chrome/browser/ash/login/signin/auth_error_observer.cc b/chrome/browser/ash/login/signin/auth_error_observer.cc
-index 5e3e445d62acf3a7a74db1887f77ac2271e6fd15..f776640978b17b9b3956fe5e793176d4a3d64ae5 100644
+index 5e3e445d62ac..f776640978b1 100644
 --- a/chrome/browser/ash/login/signin/auth_error_observer.cc
 +++ b/chrome/browser/ash/login/signin/auth_error_observer.cc
 @@ -8,6 +8,7 @@
@@ -400,7 +400,7 @@ index 5e3e445d62acf3a7a74db1887f77ac2271e6fd15..f776640978b17b9b3956fe5e793176d4
  
    if (auth_error.IsPersistentError() && !auth_error.IsScopePersistentError()) {
 diff --git a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
-index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e21748556 100644
+index 7990e513bb8f..12e9f198afeb 100644
 --- a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
 +++ b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
 @@ -4,6 +4,7 @@
@@ -437,24 +437,25 @@ index 7990e513bb8f9ade8e272a30a04083d2d097def5..c581f028a19fe4e3150c5d2e2e141e0e
    signin_scoped_device_id_ = signin_scoped_device_id;
    auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
 diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460f6fbd4f1 100644
+index f0126c9f5420..a1358a83108c 100644
 --- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
 +++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-@@ -14,8 +14,10 @@
+@@ -14,9 +14,11 @@
  #include "ash/public/cpp/notification_utils.h"
  #include "ash/webui/settings/public/constants/routes.mojom.h"
  #include "base/check_deref.h"
 +#include "base/command_line.h"
  #include "base/functional/bind.h"
  #include "base/logging.h"
+ #include "base/strings/strcat.h"
 +#include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
  #include "build/build_config.h"
  #include "chrome/browser/ash/account_manager/account_manager_util.h"
 @@ -60,6 +62,9 @@ namespace {
  
- constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
- constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
+ constexpr char kSettingsSigninUrl[] = "chrome://settings/signin/";
+ constexpr char kSecondaryAccountNotificationIdInfix[] = "secondary-account";
 +// AuraDE compatibility: local Linux users are represented as synthetic
 +// ChromeOS account ids so the shell can run without GAIA as the OS account.
 +constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
@@ -474,7 +475,7 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
  // Returns true if the child user has migrated at least one of their
  // secondary edu accounts to ARC++.
  bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
-@@ -211,7 +222,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -213,7 +224,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
    error_controller_->AddObserver(this);
    const AccountId account_id =
        multi_user_util::GetAccountIdFromProfile(profile_);
@@ -484,7 +485,7 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
        !token_handle_store_->IsRecentlyChecked(account_id)) {
      token_handle_store_->IsReauthRequired(
          account_id, profile->GetURLLoaderFactory(),
-@@ -224,6 +236,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -226,6 +238,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
  void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
                                               const std::string& token,
                                               bool reauth_required) {
@@ -495,13 +496,13 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
    if (ash::features::IsUseTokenHandleStoreEnabled()) {
      account_manager::AccountManager* account_manager =
          AccountManagerFactory::Get()->GetAccountManager(
-@@ -278,8 +294,28 @@ void SigninErrorNotifier::Shutdown() {
+@@ -280,8 +296,28 @@ void SigninErrorNotifier::Shutdown() {
  }
  
  void SigninErrorNotifier::OnErrorChanged() {
 -  if (g_ignore_sync_errors_for_test_)
 +  if (g_ignore_sync_errors_for_test_) {
-+    return;
+     return;
 +  }
 +
 +  // AuraDE compatibility: local Linux accounts intentionally do not have
@@ -513,7 +514,7 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
 +    NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
 +        NotificationHandler::Type::TRANSIENT,
 +        secondary_account_notification_id_);
-     return;
++    return;
 +  }
 +
 +  // HACK(AuraDE): legacy developer stub sessions bypass ChromeOS login and
@@ -524,8 +525,8 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
 +  }
  
    if (!error_controller_->HasError()) {
-     NotificationDisplayServiceFactory::GetForProfile(profile_)->Close(
-@@ -325,8 +361,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
+     message_center::MessageCenter::Get()->RemoveNotification(
+@@ -326,8 +362,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
    // to a Family Link Supervised account, then suppress the notification.
    supervised_user::SupervisedUserService* service =
        supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);
@@ -537,7 +538,7 @@ index 9ba9043c1c69c107cb4faf133787c7c733999552..eeca2a080802a8aff84a26fe9aa20460
    // We need to save the flag in the local state because
    // TokenHandleUtil::IsReauthRequired might fail on the login screen due to
 diff --git a/chrome/browser/ash/login/signin/token_handle_service.cc b/chrome/browser/ash/login/signin/token_handle_service.cc
-index 4bd8e9d1e7986baf2903195d32c9ff4917dcc30f..3d8b893b3fe5ab9ce5b119d4f4027525c0e62e10 100644
+index 4bd8e9d1e798..3d8b893b3fe5 100644
 --- a/chrome/browser/ash/login/signin/token_handle_service.cc
 +++ b/chrome/browser/ash/login/signin/token_handle_service.cc
 @@ -6,6 +6,7 @@

@@ -1,7 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
+index 3fb59497fdd3..ca916ad57c1e 100644
 --- a/ui/file_manager/file_manager/foreground/js/naming_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/naming_controller.ts
-@@ -165,7 +165,14 @@
+@@ -165,7 +165,14 @@ export class NamingController {
      input.focus();
  
      const selectionEnd = input.value.lastIndexOf('.');
@@ -18,9 +19,10 @@ diff --git a/ui/file_manager/file_manager/foreground/js/naming_controller.ts b/u
        input.selectionEnd = selectionEnd;
      } else {
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
+index 19b0c5c01313..b4c66422238c 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
-@@ -47,8 +47,12 @@
+@@ -47,8 +47,12 @@ found in the LICENSE file.
        <command id="get-info" label="$i18n{GET_INFO_BUTTON_LABEL}"
                 shortcut="Space">
        <command id="dlp-restriction-details" label="$i18n{DLP_RESTRICTION_DETAILS}">

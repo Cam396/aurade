@@ -1,5 +1,5 @@
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index da7a1d238d765da5a60614b6a54584cef165c67a..b810fb9f732e8367ac5b0ed29fbaad945d2ccbb4 100644
+index da7a1d238d76..b810fb9f732e 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -1099,6 +1099,9 @@ Style notes:
@@ -13,7 +13,7 @@ index da7a1d238d765da5a60614b6a54584cef165c67a..b810fb9f732e8367ac5b0ed29fbaad94
          Restart
        </message>
 diff --git a/ash/system/update/update_notification_controller.cc b/ash/system/update/update_notification_controller.cc
-index c96270e59b68aed9940374f9d26d2223d8f8fb84..a4c8eafb57408f5227e667ccf09dc0acd231db81 100644
+index c96270e59b68..a4c8eafb5740 100644
 --- a/ash/system/update/update_notification_controller.cc
 +++ b/ash/system/update/update_notification_controller.cc
 @@ -23,6 +23,7 @@
@@ -39,7 +39,7 @@ index c96270e59b68aed9940374f9d26d2223d8f8fb84..a4c8eafb57408f5227e667ccf09dc0ac
      return l10n_util::GetStringFUTF16(IDS_UPDATE_NOTIFICATION_MESSAGE_SLOW_BOOT,
                                        update_text);
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index 4f79057f321099e1264df45457ac1748bb7c7729..710304177bc6790b357c59f965d3a445c0ff1bf4 100644
+index 4f79057f3210..710304177bc6 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -13,6 +13,7 @@
@@ -148,7 +148,7 @@ index 4f79057f321099e1264df45457ac1748bb7c7729..710304177bc6790b357c59f965d3a445
    TypecdClient::Shutdown();
    chromeos::TpmManagerClient::Shutdown();
 diff --git a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
-index c18bae1d144b904fb43f7ebbc7a9d57c6ca116be..4d9c487b8046667f96add8ccab8ab3098b273dd0 100644
+index c18bae1d144b..4d9c487b8046 100644
 --- a/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
 +++ b/chrome/browser/upgrade_detector/upgrade_detector_chromeos.cc
 @@ -12,6 +12,7 @@
@@ -187,7 +187,7 @@ index c18bae1d144b904fb43f7ebbc7a9d57c6ca116be..4d9c487b8046667f96add8ccab8ab309
  }
  
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
-index 3552ef1d29258448b6fcf4e9b9fc53e8f7f7943f..e221755af1fb4b1e1c2a209ce2e6c4503b157faf 100644
+index 3552ef1d2925..e221755af1fb 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.cc
 @@ -7,18 +7,28 @@
@@ -745,7 +745,7 @@ index 3552ef1d29258448b6fcf4e9b9fc53e8f7f7943f..e221755af1fb4b1e1c2a209ce2e6c450
  FakeUpdateEngineClient* UpdateEngineClient::InitializeFakeForTest() {
    auto* client = new FakeUpdateEngineClient();
 diff --git a/chromeos/ash/components/dbus/update_engine/update_engine_client.h b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
-index d84d7036be2e2d432d66e76f71846676982fb346..39ec4ab79d333458398c7a93c739488c3cf04e01 100644
+index d84d7036be2e..39ec4ab79d33 100644
 --- a/chromeos/ash/components/dbus/update_engine/update_engine_client.h
 +++ b/chromeos/ash/components/dbus/update_engine/update_engine_client.h
 @@ -77,6 +77,11 @@ class COMPONENT_EXPORT(ASH_DBUS_UPDATE_ENGINE) UpdateEngineClient

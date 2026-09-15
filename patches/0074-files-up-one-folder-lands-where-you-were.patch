@@ -1,14 +1,8 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/main_window_component.ts b/ui/file_manager/file_manager/foreground/js/main_window_component.ts
+index 5900014df9f0..487ae6e847bd 100644
 --- a/ui/file_manager/file_manager/foreground/js/main_window_component.ts
 +++ b/ui/file_manager/file_manager/foreground/js/main_window_component.ts
-@@ -345,20 +345,76 @@ export class MainWindowComponent {
-           // If there is nothing else for ESC to do, then cancel the dialog.
-           event.preventDefault();
-           this.ui_.dialogFooter.cancelButton.click();
-         }
-         break;
-       default:
-         break;
+@@ -352,6 +352,62 @@ export class MainWindowComponent {
      }
    }
  
@@ -71,21 +65,7 @@ diff --git a/ui/file_manager/file_manager/foreground/js/main_window_component.ts
    /**
     * KeyUp event handler for the document.
     * @param event Key event.
-    */
-   private onKeyUp_(event: KeyboardEvent) {
-     if (event.keyCode === 9) {  // Tab
-       this.pressingTab_ = false;
-     }
-   }
- 
-@@ -384,30 +440,31 @@ export class MainWindowComponent {
-       }
-     }
-   }
- 
-   /**
-    * KeyDown event handler for the div#list-container element.
-    * @param event Key event.
+@@ -391,16 +447,17 @@ export class MainWindowComponent {
     */
    private onListKeyDown_(event: KeyboardEvent) {
      switch (getKeyModifiers(event) + event.key) {
@@ -112,10 +92,3 @@ diff --git a/ui/file_manager/file_manager/foreground/js/main_window_component.ts
          break;
  
        case 'Enter':  // Enter => Change directory or perform default action.
-                      // If the selection is blocked by DLP restrictions, we
-                      // don't allow to
-         // change directory or the default action.
-         if (this.selectionHandler_.isDlpBlocked()) {
-           break;
-         }
-         const selection = this.selectionHandler_.selection;
