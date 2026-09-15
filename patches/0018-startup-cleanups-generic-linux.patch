@@ -285,7 +285,7 @@ index 19045777b3d8..6c7f5fe0e71a 100644
  #else
    return nullptr;
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index 80927be5adaa..93f20700221f 100644
+index 80927be5adaa..ade2dabd33d1 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
 @@ -555,6 +555,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
@@ -414,22 +414,6 @@ index 80927be5adaa..93f20700221f 100644
 +                  extension_misc::kGoogleSpeechSynthesisExtensionPath);
 +    AddComponentFromDir(
 +        google_tts_path, extension_misc::kGoogleSpeechSynthesisExtensionId,
-         base::BindRepeating(
-             &ComponentLoader::FinishLoadSpeechSynthesisExtension,
-             weak_factory_.GetWeakPtr(),
-@@ -920,10 +978,12 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
-   }
- 
-   if (!ExistsOrPendingAdd(extension_misc::kEspeakSpeechSynthesisExtensionId)) {
-+    const base::FilePath espeak_tts_path = base::FilePath(
-+        ::features::IsAccessibilityManifestV3EnabledForEspeakNGTts()
-+            ? extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath
-+            : extension_misc::kEspeakSpeechSynthesisExtensionPath);
-     AddComponentFromDir(
--        base::FilePath(
--            extension_misc::kEspeakManifestV3SpeechSynthesisExtensionPath),
--        extension_misc::kEspeakSpeechSynthesisExtensionId,
-+        espeak_tts_path, extension_misc::kEspeakSpeechSynthesisExtensionId,
          base::BindRepeating(
              &ComponentLoader::FinishLoadSpeechSynthesisExtension,
              weak_factory_.GetWeakPtr(),

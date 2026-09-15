@@ -437,10 +437,10 @@ index 7990e513bb8f..12e9f198afeb 100644
    signin_scoped_device_id_ = signin_scoped_device_id;
    auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
 diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-index f0126c9f5420..a1358a83108c 100644
+index f0126c9f5420..80ac9f6a4de8 100644
 --- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
 +++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-@@ -14,9 +14,11 @@
+@@ -14,15 +14,20 @@
  #include "ash/public/cpp/notification_utils.h"
  #include "ash/webui/settings/public/constants/routes.mojom.h"
  #include "base/check_deref.h"
@@ -452,7 +452,16 @@ index f0126c9f5420..a1358a83108c 100644
  #include "base/strings/utf_string_conversions.h"
  #include "build/build_config.h"
  #include "chrome/browser/ash/account_manager/account_manager_util.h"
-@@ -60,6 +62,9 @@ namespace {
+ #include "chrome/browser/ash/login/reauth_stats.h"
+ #include "chrome/browser/ash/login/signin/legacy_token_handle_fetcher.h"
+ #include "chrome/browser/ash/login/signin/token_handle_store_factory.h"
++#include "chrome/browser/notifications/notification_display_service.h"
++#include "chrome/browser/notifications/notification_display_service_factory.h"
++#include "chrome/browser/notifications/notification_handler.h"
+ #include "chrome/browser/ash/login/signin/token_handle_util.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/signin/identity_manager_factory.h"
+@@ -60,6 +65,9 @@ namespace {
  
  constexpr char kSettingsSigninUrl[] = "chrome://settings/signin/";
  constexpr char kSecondaryAccountNotificationIdInfix[] = "secondary-account";
@@ -462,7 +471,7 @@ index f0126c9f5420..a1358a83108c 100644
  
  bool g_ignore_sync_errors_for_test_ = false;
  
-@@ -80,6 +85,12 @@ bool AreAllAccountsMigrated(
+@@ -80,6 +88,12 @@ bool AreAllAccountsMigrated(
    return true;
  }
  
@@ -475,7 +484,7 @@ index f0126c9f5420..a1358a83108c 100644
  // Returns true if the child user has migrated at least one of their
  // secondary edu accounts to ARC++.
  bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
-@@ -213,7 +224,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -213,7 +227,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
    error_controller_->AddObserver(this);
    const AccountId account_id =
        multi_user_util::GetAccountIdFromProfile(profile_);
@@ -485,7 +494,7 @@ index f0126c9f5420..a1358a83108c 100644
        !token_handle_store_->IsRecentlyChecked(account_id)) {
      token_handle_store_->IsReauthRequired(
          account_id, profile->GetURLLoaderFactory(),
-@@ -226,6 +238,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -226,6 +241,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
  void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
                                               const std::string& token,
                                               bool reauth_required) {
@@ -496,7 +505,7 @@ index f0126c9f5420..a1358a83108c 100644
    if (ash::features::IsUseTokenHandleStoreEnabled()) {
      account_manager::AccountManager* account_manager =
          AccountManagerFactory::Get()->GetAccountManager(
-@@ -280,8 +296,28 @@ void SigninErrorNotifier::Shutdown() {
+@@ -280,8 +299,28 @@ void SigninErrorNotifier::Shutdown() {
  }
  
  void SigninErrorNotifier::OnErrorChanged() {
@@ -526,7 +535,7 @@ index f0126c9f5420..a1358a83108c 100644
  
    if (!error_controller_->HasError()) {
      message_center::MessageCenter::Get()->RemoveNotification(
-@@ -326,8 +362,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
+@@ -326,8 +365,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
    // to a Family Link Supervised account, then suppress the notification.
    supervised_user::SupervisedUserService* service =
        supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);
