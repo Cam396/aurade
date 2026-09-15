@@ -155,6 +155,26 @@ check() {
         bash "${srcdir}/test-google-api-config.sh"
 }
 
+# The Files window is a resource rather than something compiled into Chromium,
+# so it is placed into resources.pak after the build rather than by the build.
+# It runs here, in the package, because the two paks that shipped a page which
+# drew perfectly and ran nothing were both assembled by hand.
+#
+# ci/build-current-chromiumos-ash-package.sh copies this PKGBUILD out of the
+# repo and away from ci/, so it exports AURADE_FILES_PAK_TOOL; a build run from
+# the repo finds the tool beside it instead.
+_place_files_page() {
+    local out_dir="$1"
+    local pak_tool="${AURADE_FILES_PAK_TOOL:-${startdir}/../ci/build-files-pak.sh}"
+
+    if [ ! -x "${pak_tool}" ]; then
+        echo "ERROR: cannot place the Files page: no build-files-pak.sh at ${pak_tool}" >&2
+        echo "       Set AURADE_FILES_PAK_TOOL, or build from a full repo checkout." >&2
+        return 1
+    fi
+    "${pak_tool}" "${out_dir}"
+}
+
 build() {
     # CHROME_SRC must point to a synced+patched ChromiumOS src dir
     local chrome_src="${CHROME_SRC:-${srcdir}/chromiumos-src}"
@@ -178,6 +198,7 @@ build() {
             exit 1
         fi
         echo "Using existing ChromiumOS Ash build artifacts from ${out_dir}."
+        _place_files_page "${out_dir}"
         return
     fi
 
@@ -231,6 +252,8 @@ build() {
 
     # Build the chrome target and its setuid sandbox helper.
     ninja -C "${out_dir}" -j"$(nproc)" chrome chrome_sandbox
+
+    _place_files_page "${out_dir}"
 }
 
 package() {
