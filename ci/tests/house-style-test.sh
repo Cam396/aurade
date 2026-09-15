@@ -21,6 +21,7 @@ cd "$ROOT"
 
 python3 - <<'PY'
 import io
+import re
 import subprocess
 import sys
 
@@ -30,6 +31,12 @@ EXEMPT_EXACT = ("installer/tests/voice_test.py", "ci/tests/house-style-test.sh")
 # em dash, en dash, horizontal bar. The horizontal bar is here because it is
 # what a text editor produces when somebody tries to avoid the other two.
 BANNED = {"—": "em dash", "–": "en dash", "―": "horizontal bar"}
+
+# Code that looks for these characters has to contain them, which is the same
+# reason this file exempts itself above. Only a regex character class made of
+# nothing but the banned characters is taken out of the line before it is
+# read, so prose beside such a class is still caught.
+DETECTOR = re.compile(r"\[[—–―]+\]")
 
 listing = subprocess.run(
     ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -64,8 +71,9 @@ for path in paths:
             # upstream and must stay byte identical.
             if not line.startswith("+") or line.startswith("+++"):
                 continue
+        probe = DETECTOR.sub("", line)
         for char, name in BANNED.items():
-            if char in line:
+            if char in probe:
                 problems.append("%s:%d: %s in %s" % (path, number, name, line.strip()[:70]))
                 break
 
