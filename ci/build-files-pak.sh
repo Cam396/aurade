@@ -56,16 +56,21 @@ sys.exit(1)
 PY
 }
 
-# Injecting twice must be the same as injecting once, so the stock pak is kept
-# beside the build and every run starts from it. Taking that copy from a pak
-# that already holds the page would make the page its own baseline and there
-# would be no way back to the SWA's own.
-if [ -f "${STOCK}" ]; then
+# Injecting twice must be the same as injecting once, so a stock copy is kept
+# beside the build and every run starts from it. Which copy counts as stock is
+# decided by looking inside the pak, not by whether the file exists: ninja
+# rewrites resources.pak whenever the build moves, and a copy kept from before
+# that is a pak from a different Chromium. Restoring it would quietly ship the
+# previous release's resources under the new binary. So a pak without the page
+# in it is the current stock and replaces the copy, and only a pak that already
+# holds the page is restored from one.
+if carries_page "${PAK}"; then
+  [ -f "${STOCK}" ] || {
+    echo "ERROR: ${PAK} already carries the Files page and ${STOCK} is missing," >&2
+    echo "       so the stock pak cannot be recovered. Rebuild it with ninja." >&2
+    exit 1
+  }
   cp -a "${STOCK}" "${PAK}"
-elif carries_page "${PAK}"; then
-  echo "ERROR: ${PAK} already carries the Files page and ${STOCK} is missing," >&2
-  echo "       so the stock pak cannot be recovered. Rebuild it with ninja." >&2
-  exit 1
 else
   cp -a "${PAK}" "${STOCK}"
 fi

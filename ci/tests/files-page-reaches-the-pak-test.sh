@@ -96,4 +96,51 @@ fi
 grep -q 'stock pak cannot be recovered' "$TMP/run4.log" \
   || fail "the refusal did not say why: $(cat "$TMP/run4.log")"
 
+# 5. A rebuilt pak is the new stock. ninja rewrites resources.pak whenever the
+#    build moves, so a kept copy from before that belongs to a different
+#    Chromium; restoring it would put the previous release's resources under
+#    the new binary and nothing would say so.
+cp -a "$TMP/original.pak" "$TMP/out/resources.pak"
+rm -f "$TMP/out/resources.pak.pre-aurade"
+"$STEP" "$TMP/out" >/dev/null 2>&1 || fail 'the step failed on a fresh pak'
+python3 - "$TMP/out/resources.pak.pre-aurade" <<'PYEOF'
+import gzip, struct, sys
+d = open(sys.argv[1], "rb").read()
+count, = struct.unpack_from("<H", d, 8)
+e = [struct.unpack_from("<HI", d, 12 + i * 6) for i in range(count + 1)]
+out = []
+for i in range(count):
+    p = d[e[i][1]:e[i + 1][1]]
+    if p[:2] == b"\x1f\x8b":
+        try: p = gzip.decompress(p)
+        except Exception: pass
+    out.append(p)
+open("/dev/stdout", "wb").write(b"".join(out)[:0])
+PYEOF
+# Now pretend ninja rebuilt: a different stock pak, marked so we can spot it.
+python3 - "$TMP/out/resources.pak" <<'PYEOF'
+import gzip, struct, sys
+def write(path, entries, aliases, encoding=1):
+    count = len(entries)
+    head = struct.pack("<IBBBBHH", 5, encoding, 0, 0, 0, count, len(aliases))
+    offset = 12 + (count + 1) * 6 + len(aliases) * 4
+    table = b""
+    for rid, blob in entries:
+        table += struct.pack("<HI", rid, offset); offset += len(blob)
+    table += struct.pack("<HI", 0, offset)
+    alias = b"".join(struct.pack("<HH", a, b) for a, b in aliases)
+    open(path, "wb").write(head + table + alias + b"".join(b for _, b in entries))
+write(sys.argv[1], [
+    (100, b"another webui, REBUILT MARKER, left alone"),
+    (200, gzip.compress(b"the old bundle, auraDeExactTime lives here")),
+    (300, gzip.compress(b'<!DOCTYPE HTML><script src="chrome://file-manager/init_globals.js">'
+                        b'</script><script type="module" '
+                        b'src="chrome://file-manager/foreground/js/main.js"></script>')),
+    (400, b"and another, REBUILT MARKER, left alone"),
+], [(9001, 0)])
+PYEOF
+"$STEP" "$TMP/out" >/dev/null 2>&1 || fail 'the step failed on a rebuilt pak'
+grep -qa 'REBUILT MARKER' "$TMP/out/resources.pak"   || fail 'the step injected into a stale stock pak and lost the rebuild'
+carries "$TMP/out/resources.pak" || fail 'the page did not reach the rebuilt pak'
+
 echo 'files pak test: PASS'
