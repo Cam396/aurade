@@ -2,7 +2,12 @@ diff --git a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts b/u
 index 4accb2f8f2fe..49570ee5ba71 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/list_container.ts
-@@ -26,6 +26,15 @@ class TextSearchState {
+@@ -21,16 +21,25 @@ import {ListSelectionModel} from './list_selection_model.js';
+ class TextSearchState {
+   text: string = '';
+   date: Date = new Date();
+ }
+ 
  /**
   * List container for the file table and the grid view.
   */
@@ -18,7 +23,17 @@ index 4accb2f8f2fe..49570ee5ba71 100644
  export class ListContainer {
    currentListType: ListType = ListType.UNINITIALIZED;
  
-@@ -123,6 +132,10 @@ export class ListContainer {
+   /**
+    * The input element to rename entry.
+    */
+   readonly renameInput: HTMLInputElement;
+ 
+@@ -118,16 +127,20 @@ export class ListContainer {
+     this.element.addEventListener('touchend', (e: TouchEvent) => {
+       if (e.touches.length === 0) {
+         // contextmenu event will be sent right after touchend.
+         setTimeout(() => this.allowContextMenuByTouch_ = false);
+       }
      });
    }
  
@@ -29,7 +44,17 @@ index 4accb2f8f2fe..49570ee5ba71 100644
    get currentView(): FileTable|FileGrid {
      switch (this.currentListType) {
        case ListType.DETAIL:
-@@ -289,6 +302,87 @@ export class ListContainer {
+         return this.table;
+       case ListType.THUMBNAIL:
+         return this.grid;
+       case ListType.UNINITIALIZED:
+         assertNotReached();
+@@ -284,16 +297,97 @@ export class ListContainer {
+    */
+   private onKeyDown_(event: Event) {
+     // Ignore keydown handler in the rename input box.
+     const srcElement = event.srcElement as HTMLElement | null;
+     if (srcElement?.tagName === 'INPUT') {
        event.stopImmediatePropagation();
        return;
      }
@@ -117,3 +142,8 @@ index 4accb2f8f2fe..49570ee5ba71 100644
    }
  
    /**
+    * KeyPress event handler for the div#list-container element.
+    * @param event Key event.
+    */
+   private onKeyPress_(event: KeyboardEvent) {
+     const srcElement = event.srcElement as HTMLElement | null;

@@ -2,7 +2,12 @@ diff --git a/ui/chromeos/file_manager_strings.grdp b/ui/chromeos/file_manager_st
 index 2635fc25f5ee..c18d54c796dc 100644
 --- a/ui/chromeos/file_manager_strings.grdp
 +++ b/ui/chromeos/file_manager_strings.grdp
-@@ -1886,4 +1886,10 @@
+@@ -1881,9 +1881,15 @@
+ 
+   <!-- Renaming removable device notifications -->
+   <message name="IDS_REMOVABLE_DEVICE_RENAMING_OF_DEVICE_FAILED_TITLE" desc="Title of notification message which is shown when renaming process fails">
+     Renaming failed
+   </message>
    <message name="IDS_REMOVABLE_DEVICE_RENAMING_OF_DEVICE_FINISHED_FAILURE_MESSAGE" desc="Text of notification message which is shown when there are some errors while renaming.">
      Aw, Snap! There was an error during renaming.
    </message>
@@ -17,7 +22,12 @@ diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui
 index 67b650656c08..0205966f9af0 100644
 --- a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
 +++ b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
-@@ -21,6 +21,7 @@ import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
+@@ -16,53 +16,70 @@ import type {FilesAppEntry} from '../../common/js/files_app_entry_types.js';
+  * Every other file manager dims a cut file until it is pasted. This is the set
+  * that makes that possible.
+  *
+  * Keyed by URL rather than by entry, because the list rebuilds its entry
+  * objects as rows are recycled, so the object that was cut is not the object
   * the row is later rendered from. The URL survives that.
   */
  const cutUrls = new Set<string>();
@@ -25,7 +35,9 @@ index 67b650656c08..0205966f9af0 100644
  
  /**
   * Marks entries as cut, replacing anything marked before.
-@@ -30,8 +31,12 @@ const cutUrls = new Set<string>();
+  *
+  * There is only ever one clipboard, so a second cut replaces the first rather
+  * than adding to it.
   */
  export function auraDeMarkCut(entries: Array<Entry|FilesAppEntry>) {
    cutUrls.clear();
@@ -38,7 +50,12 @@ index 67b650656c08..0205966f9af0 100644
    }
  }
  
-@@ -44,6 +49,7 @@ export function auraDeClearCut(): boolean {
+ /**
+  * Forgets what was cut. Returns whether anything was actually forgotten, so a
+  * caller can skip a redraw it does not need.
+  */
+ export function auraDeClearCut(): boolean {
+   if (cutUrls.size === 0) {
      return false;
    }
    cutUrls.clear();
@@ -46,7 +63,14 @@ index 67b650656c08..0205966f9af0 100644
    return true;
  }
  
-@@ -58,6 +64,17 @@ export function auraDeCutCount(): number {
+ /**
+  * How many files are waiting to be moved.
+  *
+  * The dimming only says which ones while you are looking at the folder they
+  * are in. Walk into another folder and the clipboard becomes invisible again,
+  * which is where the status bar picks it up.
+  */
+ export function auraDeCutCount(): number {
    return cutUrls.size;
  }
  
@@ -64,11 +88,21 @@ index 67b650656c08..0205966f9af0 100644
  /**
   * Whether this entry is waiting to be moved.
   */
+ export function auraDeIsCut(entry: Entry|FilesAppEntry): boolean {
+   if (cutUrls.size === 0) {
+     return false;
+   }
+   return cutUrls.has(entry.toURL());
 diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 index af54ac24e47f..63397cedd8ab 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -1233,7 +1233,11 @@ export class FileTransferController {
+@@ -1228,17 +1228,21 @@ export class FileTransferController {
+ 
+     return !(
+         (tagName === 'input' &&
+          (element && 'type' in element && element?.type === 'text')) ||
+         tagName === 'cr-input');
    }
  
    private onCutOrCopy_(isMove: boolean, event: DragEvent|ClipboardEvent) {
@@ -81,7 +115,17 @@ index af54ac24e47f..63397cedd8ab 100644
        return;
      }
  
-@@ -1272,6 +1276,38 @@ export class FileTransferController {
+     event.preventDefault();
+ 
+     const clipboardData = getClipboardData(event);
+     const effectAllowed = isMove ? 'move' : 'copy';
+ 
+@@ -1267,16 +1271,48 @@ export class FileTransferController {
+     if (isMove) {
+       auraDeMarkCut(this.selectionHandler_.selection.entries);
+       this.auraDeRedrawForCutMarks_();
+     } else if (auraDeClearCut()) {
+       this.auraDeRedrawForCutMarks_();
      }
    }
  
@@ -120,11 +164,21 @@ index af54ac24e47f..63397cedd8ab 100644
    /**
     * AuraDE: bring the rows already on screen into line with what is cut.
     *
+    * Deliberately not list.redraw(). Redraw reuses the rows it already has:
+    * mergeItems takes cachedItems_[index] when one exists and only calls
+    * createItem when it does not, so the render path that applies the class
+    * never runs again for a row that is already on screen. Calling redraw here
+    * dimmed nothing at all, and would have dimmed only the rows scrolled into
 diff --git a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 index b2ccf5a33b60..cd2c25ba1373 100644
 --- a/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/toolbar_controller.ts
-@@ -18,7 +18,7 @@ import {type State} from '../../state/state.js';
+@@ -13,17 +13,17 @@ import {queryRequiredElement} from '../../common/js/dom_utils.js';
+ import {isCrosComponentsEnabled} from '../../common/js/flags.js';
+ import {bytesToString, str, strf} from '../../common/js/translations.js';
+ import {canBulkPinningCloudPanelShow} from '../../common/js/util.js';
+ import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
+ import {type State} from '../../state/state.js';
  import {getStore, type Store} from '../../state/store.js';
  import {XfCloudPanel} from '../../widgets/xf_cloud_panel.js';
  
@@ -133,7 +187,17 @@ index b2ccf5a33b60..cd2c25ba1373 100644
  import {ICON_TYPES} from './constants.js';
  import type {DirectoryChangeEvent, DirectoryModel} from './directory_model.js';
  import type {FileSelectionHandler} from './file_selection.js';
-@@ -511,10 +511,17 @@ export class ToolbarController {
+ import type {MetadataModel} from './metadata/metadata_model.js';
+ import {EventType} from './file_selection.js';
+ import type {A11yAnnounce} from './ui/a11y_announce.js';
+ import {Command} from './ui/command.js';
+ import type {FileListSelectionModel} from './ui/file_list_selection_model.js';
+@@ -506,20 +506,27 @@ export class ToolbarController {
+   private auraDeUpdateClipboard_() {
+     const el = this.auraDeStatusClipboard_ ??
+         document.querySelector<HTMLElement>('#aurade-status-clipboard');
+     if (!el) {
+       return;
      }
      this.auraDeStatusClipboard_ = el;
      const count = auraDeCutCount();
@@ -155,3 +219,8 @@ index b2ccf5a33b60..cd2c25ba1373 100644
      el.title = count === 0 ?
          '' :
          'Cut with Ctrl+X. Paste to finish the move, or press Escape to keep them where they are.';
+   }
+ 
+   private auraDeUpdateStatusBar_(selectionText: string) {
+     const count = this.auraDeStatusCount_ ??
+         document.querySelector<HTMLElement>('#aurade-status-count');

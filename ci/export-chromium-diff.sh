@@ -141,11 +141,27 @@ install -d -m 755 "${WORKDIR}" "${PATCH_DIR}"
 tmp_patch="$(mktemp "${WORKDIR}/aurade-export-patch.XXXXXX")"
 trap 'rm -f "${tmp_patch}"' EXIT
 
-git -C "${CHROME_SRC}" diff --binary -- "${normalized_paths[@]}" >"${tmp_patch}"
+# Wider than git's default three lines, because these patches are read as well
+# as applied. Four fixtures in ci/tests check the order of statements inside a
+# patched function by looking at the patch itself, and at three lines of context
+# the surrounding code they check against falls outside the hunk: the guard that
+# has to run first, or the body of the function whose reset they require, sits
+# just above the window. They failed with "the patch no longer carries them
+# together as context" while the code was perfectly correct, which is the worst
+# shape a gate can fail in, because the obvious reading is that the feature
+# broke. Applying is unaffected; this only changes how much a reader is shown.
+AURADE_PATCH_CONTEXT="${AURADE_PATCH_CONTEXT:-8}"
+[[ "${AURADE_PATCH_CONTEXT}" =~ ^[0-9]+$ ]] || {
+  echo "AURADE_PATCH_CONTEXT must be a number of lines" >&2
+  exit 2
+}
+
+git -C "${CHROME_SRC}" diff --binary "-U${AURADE_PATCH_CONTEXT}" \
+  -- "${normalized_paths[@]}" >"${tmp_patch}"
 
 for untracked_path in "${untracked_paths[@]}"; do
-  git -C "${CHROME_SRC}" diff --no-index --binary -- /dev/null \
-    "${untracked_path}" >>"${tmp_patch}" || true
+  git -C "${CHROME_SRC}" diff --no-index --binary "-U${AURADE_PATCH_CONTEXT}" \
+    -- /dev/null "${untracked_path}" >>"${tmp_patch}" || true
 done
 
 if [[ ! -s "${tmp_patch}" ]]; then

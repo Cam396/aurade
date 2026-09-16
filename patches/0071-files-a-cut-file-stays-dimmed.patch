@@ -2,7 +2,12 @@ diff --git a/ui/file_manager/file_manager/foreground/css/file_manager.css b/ui/f
 index aae03f62df81..fbf90177f48b 100644
 --- a/ui/file_manager/file_manager/foreground/css/file_manager.css
 +++ b/ui/file_manager/file_manager/foreground/css/file_manager.css
-@@ -52,6 +52,15 @@ body {
+@@ -47,16 +47,25 @@ body {
+ }
+ 
+ /* Drop opacity of selected rows to give a visual feedback on copy/cut
+  * operation. */
+ .blink {
    opacity: 0.8;
  }
  
@@ -18,6 +23,11 @@ index aae03f62df81..fbf90177f48b 100644
  /* Main part of the dialog between header and footer. */
  .dialog-container {
    align-items: stretch;
+   background-color: var(--cros-sys-app_base_shaded);
+   display: flex;
+   flex: auto;
+   flex-direction: row;
+   overflow: hidden;
 diff --git a/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts b/ui/file_manager/file_manager/foreground/js/aurade_cut_marks.ts
 new file mode 100644
 index 000000000000..ab57790a9fd7
@@ -86,7 +96,12 @@ diff --git a/ui/file_manager/file_manager/foreground/js/file_transfer_controller
 index 8193b06157e9..662ea386bf78 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_transfer_controller.ts
-@@ -28,6 +28,7 @@ import type {XfTreeItem} from '../../widgets/xf_tree_item.js';
+@@ -23,16 +23,17 @@ import {FileErrorToDomError, visitURL} from '../../common/js/util.js';
+ import {RootType, VolumeType} from '../../common/js/volume_manager_types.js';
+ import type {FileKey} from '../../state/state.js';
+ import {getFileData, getStore} from '../../state/store.js';
+ import type {XfTree} from '../../widgets/xf_tree.js';
+ import type {XfTreeItem} from '../../widgets/xf_tree_item.js';
  import {isTreeItem, isXfTree} from '../../widgets/xf_tree_util.js';
  import type {FilesToast} from '../elements/files_toast.js';
  
@@ -94,7 +109,17 @@ index 8193b06157e9..662ea386bf78 100644
  import type {DirectoryModel} from './directory_model.js';
  import type {FileSelectionHandler} from './file_selection.js';
  import {EventType} from './file_selection.js';
-@@ -1179,6 +1180,49 @@ export class FileTransferController {
+ import type {MetadataModel} from './metadata/metadata_model.js';
+ import type {Command} from './ui/command.js';
+ import {DragSelector} from './ui/drag_selector.js';
+ import type {FileGrid} from './ui/file_grid.js';
+ import type {FileTableList} from './ui/file_table_list.js';
+@@ -1174,16 +1175,59 @@ export class FileTransferController {
+           document.activeElement, clipboardData, effectAllowed);
+       return;
+     }
+ 
+     // If current focus is not on DirectoryTree, write the current selection in
      // the list to system clipboard.
      this.cutOrCopy_(clipboardData, effectAllowed);
      this.blinkSelection_();
@@ -144,7 +169,17 @@ index 8193b06157e9..662ea386bf78 100644
    }
  
    /**
-@@ -1308,6 +1352,10 @@ export class FileTransferController {
+    * Performs cut or copy operation dispatched from directory tree.
+    */
+   cutOrCopyFromDirectoryTree(
+       focusedItem: XfTreeItem|null, clipboardData: DataTransfer|null,
+       effectAllowed: DataTransfer['effectAllowed']) {
+@@ -1303,16 +1347,20 @@ export class FileTransferController {
+         !this.canPasteOrDrop_(getClipboardData(event), destination)) {
+       return;
+     }
+     event.preventDefault();
+     this.paste(getClipboardData(event), destination).then(effect => {
        // On cut, we clear the clipboard after the file is pasted/moved so we
        // don't try to move/delete the original file again.
        if (effect === 'move') {
@@ -155,11 +190,21 @@ index 8193b06157e9..662ea386bf78 100644
          this.simulateCommand_('cut', (event: Event) => {
            event.preventDefault();
            const clipboardData = getClipboardData(event);
+           if (clipboardData) {
+             clipboardData.setData('fs/clear', '');
+           }
+         });
+       }
 diff --git a/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts b/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
 index dc1235fdcd2e..6ef2d53db896 100644
 --- a/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
 +++ b/ui/file_manager/file_manager/foreground/js/ui/file_table_list.ts
-@@ -13,6 +13,7 @@ import type {FilesAppEntry} from '../../../common/js/files_app_entry_types.js';
+@@ -8,16 +8,17 @@ import type {EntryLocation} from '../../../background/js/entry_location_impl.js'
+ import type {VolumeManager} from '../../../background/js/volume_manager.js';
+ import type {ArrayDataModel} from '../../../common/js/array_data_model.js';
+ import {isTeamDriveRoot} from '../../../common/js/entry_utils.js';
+ import {getIcon, isEncrypted} from '../../../common/js/file_type.js';
+ import type {FilesAppEntry} from '../../../common/js/files_app_entry_types.js';
  import {isDlpEnabled, isDriveFsBulkPinningEnabled} from '../../../common/js/flags.js';
  import {getEntryLabel, str, strf} from '../../../common/js/translations.js';
  import type {FileListModel} from '../file_list_model.js';
@@ -167,7 +212,17 @@ index dc1235fdcd2e..6ef2d53db896 100644
  import type {MetadataItem} from '../metadata/metadata_item.js';
  import type {MetadataModel} from '../metadata/metadata_model.js';
  
-@@ -476,6 +477,14 @@ export function updateListItemExternalProps(
+ import type {A11yAnnounce} from './a11y_announce.js';
+ import {DragSelector} from './drag_selector.js';
+ import type {FileGridSelectionController} from './file_grid.js';
+ import type {FileListSelectionModel} from './file_list_selection_model.js';
+ import type {FileTable} from './file_table.js';
+@@ -471,16 +472,24 @@ export function updateListItemExternalProps(
+     }
+     const dlpIcon = li.querySelector('.dlp-managed-icon');
+     if (dlpIcon) {
+       dlpIcon.classList.toggle(
+           'is-dlp-restricted', externalProps.isDlpRestricted);
      }
    }
  
@@ -182,11 +237,21 @@ index dc1235fdcd2e..6ef2d53db896 100644
    li.classList.toggle('shortcut', !!externalProps.shortcut);
  
    const iconDiv = li.querySelector<HTMLElement>('.detail-icon');
+   if (!iconDiv) {
+     return;
+   }
+   iconDiv.style.backgroundImage = '';
+ 
 diff --git a/ui/file_manager/file_names.gni b/ui/file_manager/file_names.gni
 index 032a8cb6e90d..33103db76c02 100644
 --- a/ui/file_manager/file_names.gni
 +++ b/ui/file_manager/file_names.gni
-@@ -219,6 +219,7 @@ ts_files = [
+@@ -214,16 +214,17 @@ ts_files = [
+   "file_manager/background/js/volume_manager_factory.ts",
+ 
+   # Foreground:
+   "file_manager/foreground/js/actions_controller.ts",
+   "file_manager/foreground/js/actions_model.ts",
    "file_manager/foreground/js/android_app_list_model.ts",
    "file_manager/foreground/js/app_state_controller.ts",
    "file_manager/foreground/js/aurade_devices_controller.ts",
@@ -194,3 +259,8 @@ index 032a8cb6e90d..33103db76c02 100644
    "file_manager/foreground/js/aurade_folder_size.ts",
    "file_manager/foreground/js/banner_controller.ts",
    "file_manager/foreground/js/command_handler.ts",
+   "file_manager/foreground/js/constants.ts",
+   "file_manager/foreground/js/crossover_search_utils.ts",
+   "file_manager/foreground/js/crostini_controller.ts",
+   "file_manager/foreground/js/one_drive_controller.ts",
+   "file_manager/foreground/js/deferred_elements.ts",
