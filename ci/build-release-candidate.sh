@@ -74,10 +74,17 @@ arch_build_gid="$(stat -c '%g' "${ARCHROOT}/home/aurabuild")"
 install -d -m 755 "${arch_source}" "${arch_input}"
 install -d -o "${arch_build_uid}" -g "${arch_build_gid}" -m 755 \
   "${arch_output}"
+# The photographs are ignored inside the package directory, so they are not
+# in the checkout the way the other sources are. Put them there before the
+# tree is copied into the build root, or aurade-wallpapers builds without the
+# thing it exists to ship.
+"${SCRIPT_DIR}/stage-wallpapers.sh"
+
 rsync -a --delete --exclude pkg --exclude src --exclude __pycache__ \
   "${REPO_ROOT}/aurade-account-helper" \
   "${REPO_ROOT}/aurade-system-helper" \
   "${REPO_ROOT}/aurade-power" \
+  "${REPO_ROOT}/aurade-wallpapers" \
   "${REPO_ROOT}/aurade-host-bridge" \
   "${REPO_ROOT}/aurade-login" \
   "${REPO_ROOT}/shill-nm-adapter" \
@@ -88,6 +95,7 @@ rsync -a --delete --exclude pkg --exclude src --exclude __pycache__ \
   "${REPO_ROOT}/aurade-full" \
   "${REPO_ROOT}/chromiumos-ash" \
   "${REPO_ROOT}/ci" \
+  "${REPO_ROOT}/installer" \
   "${arch_source}/"
 install -m 644 "${chrome_package}" "${arch_input}/"
 chown -R "${arch_build_uid}:${arch_build_gid}" \
@@ -96,7 +104,7 @@ rm -rf "${arch_output}/aurade" "${arch_output}/aurade.previous"
 
 "${SCRIPT_DIR}/run-in-arch-root.sh" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/bash -lc \
-  "cd /build/aurade && AURADE_RELEASE_CHANNEL=candidate REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") ci/build-release-repo.sh"
+  "cd /build/aurade && AURADE_WALLPAPER_DIR=/build/aurade/aurade-wallpapers AURADE_RELEASE_CHANNEL=candidate REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") ci/build-release-repo.sh"
 
 host_staging="${OUTPUT_REPO}.staging.$$"
 host_previous="${OUTPUT_REPO}.previous"
