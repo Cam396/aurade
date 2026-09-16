@@ -231,6 +231,18 @@ while read -r _digest filename _pkgname _pkgver _arch; do
   [[ -n ${filename:-} ]] || continue
   install -m 0644 -- "${AURADE_REPO_DIR%/}/$filename" \
     "$STAGE/airootfs/opt/aurade/repo/$filename"
+  # The repository's SHA256SUMS covers detached package signatures as well as
+  # the packages, and it is checked against the staged tree below. A signed
+  # repository therefore has to bring its signatures across here, beside the
+  # packages. Staging them later, in the branch that verifies them, is too
+  # late: the manifest has already been checked against a directory that was
+  # missing every .sig it lists. An unsigned development repository has no
+  # signature lines in its manifest, which is why that order held until the
+  # first signed image was built.
+  if [[ -r ${AURADE_REPO_DIR%/}/${filename}.sig ]]; then
+    install -m 0644 -- "${AURADE_REPO_DIR%/}/${filename}.sig" \
+      "$STAGE/airootfs/opt/aurade/repo/${filename}.sig"
+  fi
 done < <(awk '!/^#/ {print $1, $2, $3, $4, $5}' \
   "$STAGE/airootfs/opt/aurade/repo/packages.lock")
 for metadata in \
