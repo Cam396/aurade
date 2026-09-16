@@ -1,0 +1,24 @@
+pkgbase = auradefs
+	pkgdesc = The file service behind the AuraDE Files app
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/Cam396/aurade
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = rust
+	depends = gcc-libs
+	depends = glibc
+	depends = xz
+	depends = bzip2
+	depends = zlib
+	optdepends = ffmpeg: video thumbnails, media details and the covers of sound files
+	optdepends = poppler: PDF thumbnails and previews
+	optdepends = gnupg: signature verification in Properties
+	optdepends = polkit: Run as administrator, through pkexec
+	source = README.md
+	source = LICENSE
+	sha256sums = b10ea51389ffcac705a1616a9f93dca8a00d4396ec5a45713fb4f73c7b5a0d7a
+	sha256sums = d9980fe1b68b40a5b2b87ee437e874888186d0ac4f51c6e8ffe32d7ff9ecfa4e
+
+pkgname = auradefs
