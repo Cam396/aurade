@@ -84,6 +84,8 @@ source=(
   'outlook_test.py'
   'packaging_test.py'
   'test-runtime.sh'
+  'extract-copy.py'
+  'aurade-greeter.pot'
 )
 sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '03cdb1bdcfae1d0ca34949716842b9a30161a1e0fb8ca2f6b9bfa75669e23633'
@@ -131,7 +133,7 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '24d1fd41c8ec8eb7c775b05b0c54e94c3c8de43c665e558d295ac3bc2d3efeb4'
             '8e0d3b8eb011b21c26636f17724b2b63308b5083071f6ede6192d6af57416a3f'
             '1c955b1ac075da99bcf61591e48d9d3ad0c244320ea91a0d481c37b1b48c4478'
-            'da6da1f1168811de815cf78d1dbf558774cf9a39aaddccfdae01071067ada8b8'
+            'c5e51599d3abd38dc3ff03aecc8cbb26409bc27c4ae22a68a3301fc0ec42fbcf'
             '449b461c2e077d94ada2808bc50cecf69f4cf2e957759e12e718e318ed9af6a0'
             '028738c4541e3513d9d4eecfc1c735259be6c25b4c87c30fba24f4febafd2438'
             'aa72c6202330a3febb78dbc0c447021fb8f1c2947da02fae252a296e2667d9f8'
@@ -139,7 +141,10 @@ sha256sums=('e2a3a5749be737541e9adc64cd948aab9161a0e81864ff26589eced182891b3b'
             '533464ccef97a459c4f9f085e64afc2ef992b5965c6a8ece148e6dbe22bcdff5'
             'b0e9464c628bb3005a440d52f8b727adba99c2e6c7a2d57a13f09e27c4300545'
             '67ecb77d9922bd0c1ac63c1ab1536bd7dd19656ee10de2081cacbc5a2bdad62d'
-            '26f23fa9052590aef44b68bfb81bf7078fcc59199cd64ba702cc9b5530ed8e54')
+            '26f23fa9052590aef44b68bfb81bf7078fcc59199cd64ba702cc9b5530ed8e54'
+  '5bf53b7c32300ad4ad450012140fb61d73e8cf11e3ea8c351f7e84de48a0fbb4'
+  '7b9903052001268699b2d20eba8c79a1c17d43201208e99932b6cfb8cdd684e4'
+)
 
 _module=(__init__.py accounts.py alerts.py alertui.py app.py backlight.py copy.py glass.py locate.py glyphs.py greeter.css network.py nmlive.py outlook.py preferences.py protocol.py sessions.py settings.py shade.py weather.py weatherdraw.py weatherui.py a11y.py brand.py status.py tokens.py theme.css theme-dark.css theme-hc.css theme-dark-hc.css theme-oled.css)
 _test=(accounts_test.py alerts_test.py copy_test.py glass_test.py locate_test.py network_test.py preferences_test.py protocol_test.py runtime_test.py sessions_test.py settings_test.py shade_test.py outlook_test.py shared_test.py weather_test.py packaging_test.py test-runtime.sh)
@@ -149,7 +154,8 @@ _stage() {
   # tests run against the layout that ships rather than against the one the
   # repository happens to have.
   local name
-  install -d "${srcdir}/staged/aurade_greeter" "${srcdir}/staged/tests"
+  install -d "${srcdir}/staged/aurade_greeter" "${srcdir}/staged/tests" \
+    "${srcdir}/staged/tools" "${srcdir}/staged/po"
   for name in "${_module[@]}"; do
     install -m644 "${srcdir}/${name}" "${srcdir}/staged/aurade_greeter/${name}"
   done
@@ -157,6 +163,11 @@ _stage() {
     install -m644 "${srcdir}/${name}" "${srcdir}/staged/tests/${name}"
   done
   install -m755 "${srcdir}/run-tests.sh" "${srcdir}/staged/run-tests.sh"
+  # copy_test.py runs the extractor against the catalogue, so both have to
+  # be in the staged tree or the test fails on their absence rather than
+  # on anything about the copy.
+  install -m755 "${srcdir}/extract-copy.py" "${srcdir}/staged/tools/extract-copy.py"
+  install -m644 "${srcdir}/aurade-greeter.pot" "${srcdir}/staged/po/aurade-greeter.pot"
   chmod +x "${srcdir}/staged/tests/test-runtime.sh"
 }
 

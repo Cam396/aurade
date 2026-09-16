@@ -277,6 +277,15 @@ def build(app, replies: list[dict],
         WINDOW.entry.set_text("")
         WINDOW._clear_error()  # noqa: SLF001
         WINDOW._working(False)  # noqa: SLF001
+        # The refusal count belongs to one conversation with one person, and
+        # every test here is a new one. Without this, a test that refuses a
+        # password leaves the count standing for the next test that refuses
+        # one for the same name, which then reads as the second wrong answer
+        # and says so. That only shows up where a lockout policy is actually
+        # configured, so it stayed hidden on a build host whose PAM stack had
+        # no pam_faillock in it at all.
+        WINDOW._refusals = 0  # noqa: SLF001
+        WINDOW._refused_for = ""  # noqa: SLF001
         pump()
     lower_shade(WINDOW)
     if lifted:
