@@ -21,7 +21,13 @@ import dbus.mainloop.glib
 import dbus.service
 from gi.repository import GLib
 
-sys.path.insert(0, "/usr/lib/aurade-host-bridge")
+#: Appended, not inserted at the front. The installed directory is where
+#: the core lives once this is a package, but putting it first also beats
+#: PYTHONPATH, so the package's own check() imported the *installed* core
+#: while compiling new sources against it. On a machine carrying an older
+#: copy the build then fails on a name the new core has and the old one
+#: does not, which is every rebuild after the first.
+sys.path.append("/usr/lib/aurade-host-bridge")
 
 from aurade_host_bridge_core import (
     BLUEZ_SERVICE,
