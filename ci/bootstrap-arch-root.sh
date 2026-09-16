@@ -47,6 +47,13 @@ PACKAGES=(
   xdg-utils
   python-dbus
   python-gobject
+  #: aurade-greeter's checkdepends are python and weston, but its tests
+  #: import the drawing and widget layers too, and without these its
+  #: check() reports the chart and the rows as unchecked rather than
+  #: failing, which is a gate that passes by not looking.
+  python-cairo
+  gtk4
+  libadwaita
   glib2
   pkgconf
   ninja
