@@ -73,9 +73,12 @@ package() {
   install -Dm644 "${srcdir}/LICENSE" \
     "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
   # A user unit, not a system one: the service answers for the person whose
-  # session it belongs to. Nothing shipped it before, so the daemon existed on
-  # an installed machine and never ran, and the Files app's live layer had
-  # nothing to reach on any system but a developer's.
+  # session it belongs to. The session child starts it by name and stops it
+  # when the session ends; this file is what gives that start a restart on
+  # failure, a place in the journal and the hardening below. It has no
+  # dependency that would start it on its own: nothing on an AuraDE machine
+  # reaches graphical-session.target, so WantedBy there is a courtesy to a
+  # future session that does, and enabling it by hand changes nothing.
   install -Dm644 "${srcdir}/auradefs.service" \
     "${pkgdir}/usr/lib/systemd/user/auradefs.service"
 }

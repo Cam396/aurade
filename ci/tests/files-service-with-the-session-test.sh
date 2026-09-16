@@ -7,6 +7,13 @@
 # is ended when the session child ends, or a stale one would answer the next
 # session's app with the last session's state. And a machine without the
 # binary loses nothing but the app's backend: the desktop must still come up.
+#
+# Two more, since the service became a packaged user unit. On the port the
+# shipped page asks for, and with a user manager to hand it to, the session
+# starts the unit and starts nothing else: two launchers on one port was the
+# shape of the bug, and the unit is where the restart, the journal and the
+# hardening live. And when the manager will not take it, the direct launch
+# still happens, so a session with no manager is exactly as served as before.
 set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
@@ -93,5 +100,52 @@ env "${env_args[@]}" PATH="$WORK/bin:$PATH" bash "$SCRIPT" >/dev/null 2>"$WORK/e
 grep -q '^service-down$' "$WORK/launches" || \
   fail "B: Ash did not start without the service: $(cat "$WORK/err2")"
 [[ ! -s $WORK/service ]] || fail 'B: something started a service that is not installed'
+
+# --- C: the port the page asks for, and a manager that takes the unit. -----
+# The stub manager and the stub Ash share one sequence log, so the order the
+# session did things in is a fact and not an inference.
+cat >"$WORK/bin/auradefs" <<'STUB'
+#!/usr/bin/env bash
+echo "$$" >"${STUB_SERVICE_PID_FILE}"
+echo "args=$* user=$(id -un)" >>"${STUB_SERVICE_LOG}"
+trap 'exit 0' TERM
+while :; do sleep 1; done
+STUB
+chmod +x "$WORK/bin/auradefs"
+cat >"$WORK/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "--user start auradefs.service") echo unit-start >>"${STUB_SEQUENCE}"; exit "${STUB_UNIT_START_STATUS:-0}" ;;
+  "--user stop auradefs.service")  echo unit-stop  >>"${STUB_SEQUENCE}"; exit 0 ;;
+esac
+exit 0
+STUB
+chmod +x "$WORK/bin/systemctl"
+cat >"$WORK/bin/stub-ash" <<'STUB'
+#!/usr/bin/env bash
+echo ash >>"${STUB_SEQUENCE}"
+exit 0
+STUB
+chmod +x "$WORK/bin/stub-ash"
+
+: >"$WORK/service"; : >"$WORK/sequence"; rm -f "$WORK/service.pid"
+env "${env_args[@]}" AURADE_FILES_PORT= STUB_SEQUENCE="$WORK/sequence" \
+  PATH="$WORK/bin:$PATH" bash "$SCRIPT" >/dev/null 2>"$WORK/err3" || true
+[[ "$(tr '\n' ' ' <"$WORK/sequence")" == "unit-start ash unit-stop " ]] || \
+  fail "C: expected the unit started before Ash and stopped after it, got: $(tr '\n' ' ' <"$WORK/sequence")"
+[[ ! -s $WORK/service ]] || \
+  fail "C: the unit was started and a second daemon was launched beside it: $(cat "$WORK/service")"
+
+# --- D: the same, but the manager refuses. The direct launch still happens. -
+: >"$WORK/service"; : >"$WORK/sequence"; rm -f "$WORK/service.pid"
+env "${env_args[@]}" AURADE_FILES_PORT= STUB_SEQUENCE="$WORK/sequence" STUB_UNIT_START_STATUS=1 \
+  PATH="$WORK/bin:$PATH" bash "$SCRIPT" >/dev/null 2>"$WORK/err4" || true
+grep -q '^unit-start$' "$WORK/sequence" || fail 'D: the unit was never even tried'
+grep -q '^unit-stop$' "$WORK/sequence" && fail 'D: a unit that never started was stopped'
+grep -q "args=--port 8902 " "$WORK/service" || \
+  fail "D: with the manager refusing, no daemon was launched on the page's port: $(cat "$WORK/service")"
+SVC=$(cat "$WORK/service.pid")
+wait_gone "$SVC" 5 || { kill -KILL "$SVC" 2>/dev/null || true; \
+  fail 'D: the fallback daemon outlived the session child'; }
 
 echo 'files service test: PASS'
