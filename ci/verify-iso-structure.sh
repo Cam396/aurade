@@ -132,8 +132,19 @@ if (( FULL )); then
     exit 1
   fi
 
+  # A detached signature sits beside the archive it signs and its name ends in
+  # .pkg.tar.<compression>.sig, which the archive pattern matches as well. On an
+  # unsigned image there are none, so the pattern was right until the first
+  # signed one, where every signature read as a package the lock had not listed.
   mapfile -t embedded_packages < <(
-    awk '$1 ~ /^squashfs-root\/opt\/aurade\/repo\/[^/]+[.]pkg[.]tar[.][^/]+$/ {
+    awk '$1 ~ /^squashfs-root\/opt\/aurade\/repo\/[^/]+[.]pkg[.]tar[.][^/]+$/ &&
+         $1 !~ /[.]sig$/ {
+      sub(/^squashfs-root\/opt\/aurade\/repo\//, "", $1)
+      print $1
+    }' "$contents"
+  )
+  mapfile -t embedded_signatures < <(
+    awk '$1 ~ /^squashfs-root\/opt\/aurade\/repo\/[^/]+[.]pkg[.]tar[.][^/]+[.]sig$/ {
       sub(/^squashfs-root\/opt\/aurade\/repo\//, "", $1)
       print $1
     }' "$contents"
@@ -160,6 +171,16 @@ if (( FULL )); then
       exit 1
     }
   done <"$lock_entries"
+  # Partial signing is the dangerous state: it looks signed and is not. Either
+  # the image carries a signature for every locked archive or it carries none.
+  if (( ${#embedded_signatures[@]} )); then
+    while IFS=$'\t' read -r _expected filename; do
+      grep -Fqx -- "${filename}.sig" <(printf '%s\n' "${embedded_signatures[@]}") || {
+        echo "verify-iso-structure: signed image is missing a signature: ${filename}.sig" >&2
+        exit 1
+      }
+    done <"$lock_entries"
+  fi
   for embedded in "${embedded_packages[@]}"; do
     grep -Fqx -- "$embedded" <(cut -f2 "$lock_entries") || {
       echo "verify-iso-structure: unlisted package archive in ISO: $embedded" >&2

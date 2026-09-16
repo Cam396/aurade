@@ -408,6 +408,13 @@ sbom_sha256=$(sha256sum "$sbom" | awk '{print $1}')
   printf 'gui_release=%s\n' "$GUI_RELEASE"
   if (( GUI_RELEASE )); then
     printf 'gui_manifest_sha256=%s\n' "$(sha256sum "$STAGE/airootfs/etc/aurade-installer/gui-release-manifest.json" | awk '{print $1}')"
+  else
+    # Said rather than left out. ci/verify-iso-artifacts.sh requires a text
+    # release to state that it embeds no GUI manifest, in the same way the
+    # signature fields say not-created: an absent key and a key that says
+    # nothing is embedded are the same string to a reader, and only one of
+    # them was written on purpose.
+    printf 'gui_manifest_sha256=%s\n' not-embedded
   fi
   packages_lock_sha256=$(cd "$(dirname "$STAGE/airootfs/opt/aurade/repo/packages.lock")" && sha256sum packages.lock | awk '{print $1}')
   printf 'packages_lock_sha256=%s\n' "$packages_lock_sha256"
