@@ -9,8 +9,8 @@
 #
 # That test resolves the originals relative to itself, so inside a makepkg
 # build it looks under $srcdir, where the installer tree has never been staged.
-# It is honest about it — it prints NOTHING TO COMPARE and returns 0 rather
-# than claiming a pass — but nothing in ci/tests or the workflow ran it, so the
+# It is honest about it, it prints NOTHING TO COMPARE and returns 0 rather
+# than claiming a pass, but nothing in ci/tests or the workflow ran it, so the
 # only place it ever executed was the one place it could not do its job. Nine
 # vendored files had no drift check at all.
 #
