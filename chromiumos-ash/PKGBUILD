@@ -172,7 +172,13 @@ _place_files_page() {
         echo "       Set AURADE_FILES_PAK_TOOL, or build from a full repo checkout." >&2
         return 1
     fi
-    "${pak_tool}" "${out_dir}"
+    # Into the package's own staging area, never over the Chromium output.
+    # That output is an input here, it belongs to whoever built it, and a
+    # package build that writes into its inputs is not reproducible and not
+    # permitted: as aurabuild against a root-owned out directory it simply
+    # fails with "Permission denied" in the middle of build().
+    install -dm755 "${srcdir}/aurade-pak"
+    "${pak_tool}" "${out_dir}" "${srcdir}/aurade-pak/resources.pak"
 }
 
 build() {
@@ -297,6 +303,12 @@ package() {
 
         src="${out_dir}/${rel}"
         dest="${pkgdir}/usr/lib/chromiumos-ash/${rel}"
+
+        # build() places the Files page into a pak of its own rather than
+        # over the Chromium output, so anything staged there wins.
+        if [ -e "${srcdir}/aurade-pak/${rel}" ]; then
+            src="${srcdir}/aurade-pak/${rel}"
+        fi
 
         if [ ! -e "${src}" ]; then
             printf 'warning: runtime dependency not found: %s\n' "${rel}" >&2

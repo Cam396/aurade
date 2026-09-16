@@ -15,15 +15,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 usage() {
-  echo "usage: $(basename "$0") <chromium output directory>" >&2
+  echo "usage: $(basename "$0") <chromium output directory> [destination pak]" >&2
+  echo >&2
+  echo "  With a destination, the output directory is only read: the stock pak" >&2
+  echo "  is taken from it and the result written where you say. A package" >&2
+  echo "  build needs that, because the Chromium output is somebody else's" >&2
+  echo "  read-only input and a build that writes into its own inputs is not" >&2
+  echo "  a build. Without one, the pak beside the build is replaced in place," >&2
+  echo "  which is what a development tree wants." >&2
   echo >&2
   echo "  AURADE_FILES_PAGE_SCRIPT  the path the Files app serves the page's" >&2
   echo "                            script at (default foreground/js/main.js)" >&2
   exit 2
 }
-[ $# -eq 1 ] || usage
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
 
 OUT_DIR="$(cd "$1" && pwd)"
+DEST="${2:-}"
 PAK="${OUT_DIR}/resources.pak"
 STOCK="${PAK}.pre-aurade"
 
@@ -64,15 +72,27 @@ PY
 # previous release's resources under the new binary. So a pak without the page
 # in it is the current stock and replaces the copy, and only a pak that already
 # holds the page is restored from one.
-if carries_page "${PAK}"; then
+if [ -n "${DEST}" ]; then
+  #: Reading only. The pak in the output directory is the stock one straight
+  #: from ninja; if it already holds the page then somebody has been writing
+  #: into this tree and the answer is a fresh build, not a guess.
+  carries_page "${PAK}" && {
+    echo "ERROR: ${PAK} already carries the Files page, so it is not stock." >&2
+    echo "       Rebuild it with ninja before packaging." >&2
+    exit 1
+  }
+  SOURCE_PAK="${PAK}"
+elif carries_page "${PAK}"; then
   [ -f "${STOCK}" ] || {
     echo "ERROR: ${PAK} already carries the Files page and ${STOCK} is missing," >&2
     echo "       so the stock pak cannot be recovered. Rebuild it with ninja." >&2
     exit 1
   }
   cp -a "${STOCK}" "${PAK}"
+  SOURCE_PAK="${STOCK}"
 else
   cp -a "${PAK}" "${STOCK}"
+  SOURCE_PAK="${STOCK}"
 fi
 
 WORK="$(mktemp -d)"
@@ -81,17 +101,18 @@ trap 'rm -rf "${WORK}"' EXIT
 AURADE_FILES_PAGE_SCRIPT="${SCRIPT_PATH}" \
   "${REPO_ROOT}/ci/build-files-page.sh" "${WORK}/page" >/dev/null
 
-python3 "${REPO_ROOT}/ci/pak-set-resources.py" "${STOCK}" "${WORK}/resources.pak" \
+python3 "${REPO_ROOT}/ci/pak-set-resources.py" "${SOURCE_PAK}" "${WORK}/resources.pak" \
   --set "chrome://file-manager/init_globals.js=${WORK}/page/files.html" \
   --set "auraDeExactTime=${WORK}/page/files.js" \
   --expect "files.html:data-path=\"~\"" \
   --expect "files.html:${SCRIPT_PATH}"
 
-# Only now over the build's own pak, so a refusal above leaves it untouched.
-install -m 644 "${WORK}/resources.pak" "${PAK}"
-carries_page "${PAK}" || {
+# Only now over the target, so a refusal above leaves it untouched.
+TARGET="${DEST:-${PAK}}"
+install -D -m 644 "${WORK}/resources.pak" "${TARGET}"
+carries_page "${TARGET}" || {
   echo "ERROR: the written pak does not carry the page" >&2
-  cp -a "${STOCK}" "${PAK}"
+  [ -n "${DEST}" ] || cp -a "${STOCK}" "${PAK}"
   exit 1
 }
-echo "Files page placed into ${PAK} (script at ${SCRIPT_PATH})"
+echo "Files page placed into ${TARGET} (script at ${SCRIPT_PATH})"

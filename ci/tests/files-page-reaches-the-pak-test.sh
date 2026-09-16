@@ -143,4 +143,17 @@ PYEOF
 grep -qa 'REBUILT MARKER' "$TMP/out/resources.pak"   || fail 'the step injected into a stale stock pak and lost the rebuild'
 carries "$TMP/out/resources.pak" || fail 'the page did not reach the rebuilt pak'
 
+# 6. Out of place: a package build reads the Chromium output and writes its
+#    own pak, because that output belongs to whoever built it. Running as a
+#    different user against a read-only output is where this shows up, and it
+#    showed up as "Permission denied" in the middle of build().
+cp -a "$TMP/original.pak" "$TMP/out/resources.pak"
+rm -f "$TMP/out/resources.pak.pre-aurade"
+before=$(sha256sum "$TMP/out/resources.pak" | cut -d' ' -f1)
+"$STEP" "$TMP/out" "$TMP/elsewhere/resources.pak" >/dev/null 2>&1   || fail 'the step failed writing out of place'
+carries "$TMP/elsewhere/resources.pak" || fail 'the page did not reach the destination pak'
+after=$(sha256sum "$TMP/out/resources.pak" | cut -d' ' -f1)
+[[ $before == "$after" ]] || fail 'writing out of place still modified the output directory'
+[[ ! -e $TMP/out/resources.pak.pre-aurade ]]   || fail 'writing out of place left a backup in the output directory'
+
 echo 'files pak test: PASS'
