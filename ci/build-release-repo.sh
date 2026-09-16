@@ -58,6 +58,33 @@ if [[ -z "${CHROMIUMOS_ASH_PACKAGE:-}" ]]; then
   fi
   CHROMIUMOS_ASH_PACKAGE="${package_candidates[0]}"
 fi
+# auradefs is Rust and its PKGBUILD reads a Cargo workspace staged by
+# ci/build-auradefs-package.sh rather than a tarball, so the generic makepkg
+# loop cannot drive it. It arrives the same way the Chromium package does:
+# built beforehand, named here, copied into the staging repository. Without
+# this it was absent from every image, and chromiumos-ash lists it as the
+# optional dependency the Files app reads the machine through.
+if [[ -z "${AURADEFS_PACKAGE:-}" ]]; then
+  auradefs_pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' \
+    "${REPO_ROOT}/auradefs/PKGBUILD")"
+  auradefs_pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' \
+    "${REPO_ROOT}/auradefs/PKGBUILD")"
+  auradefs_dir="${AURADE_AURADEFS_PKGDEST:-${AURADE_WORKDIR:-/mnt/build/aurade-work}/auradefs-package/pkgdest}"
+  auradefs_name="auradefs-${auradefs_pkgver}-${auradefs_pkgrel}-x86_64.pkg.tar.*"
+  mapfile -t auradefs_candidates < <(find "${auradefs_dir}" -maxdepth 1 -type f \
+    -name "${auradefs_name}" ! -name '*.sig' -printf '%p\n' | LC_ALL=C sort)
+  if [[ "${#auradefs_candidates[@]}" -ne 1 ]]; then
+    echo "Expected exactly one auradefs package matching ${auradefs_name}, found ${#auradefs_candidates[@]}" >&2
+    printf '  %s\n' "${auradefs_candidates[@]}" >&2
+    exit 2
+  fi
+  AURADEFS_PACKAGE="${auradefs_candidates[0]}"
+fi
+[[ -f "${AURADEFS_PACKAGE}" ]] || {
+  echo "Missing prebuilt auradefs package: ${AURADEFS_PACKAGE}" >&2
+  exit 2
+}
+
 staging="${target_repo}.staging.$$"
 previous="${target_repo}.previous"
 
@@ -76,6 +103,7 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "${staging}"
 cp -a "${CHROMIUMOS_ASH_PACKAGE}" "${staging}/"
+cp -a "${AURADEFS_PACKAGE}" "${staging}/"
 
 makepkg_config="${staging}/makepkg.conf"
 sed -E 's/(^OPTIONS=.*[( ])debug([ )])+/\1!debug\2/' \

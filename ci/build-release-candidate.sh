@@ -61,6 +61,22 @@ if [[ "${REUSE_CHROMIUM}" == 0 ]]; then
     "${SCRIPT_DIR}/build-current-chromiumos-ash-package.sh"
 fi
 chrome_package="$(find_chromium_package "${package_workdir}/pkgdest")"
+auradefs_pkgdest="${AURADE_AURADEFS_PKGDEST:-${WORKDIR}/auradefs-package/pkgdest}"
+# Named by the version the PKGBUILD is on, not by a wildcard. Earlier builds
+# stay in the same PKGDEST, so a wildcard finds every auradefs ever built here
+# and refuses rather than picking the current one.
+auradefs_pkgver="$(awk -F= '$1 == "pkgver" { print $2; exit }' "${REPO_ROOT}/auradefs/PKGBUILD")"
+auradefs_pkgrel="$(awk -F= '$1 == "pkgrel" { print $2; exit }' "${REPO_ROOT}/auradefs/PKGBUILD")"
+mapfile -t auradefs_found < <(find "${auradefs_pkgdest}" -maxdepth 1 -type f \
+  -name "auradefs-${auradefs_pkgver}-${auradefs_pkgrel}-x86_64.pkg.tar.*" ! -name '*.sig' \
+  -printf '%p\n' | LC_ALL=C sort)
+if [[ "${#auradefs_found[@]}" -ne 1 ]]; then
+  echo "Expected exactly one auradefs-${auradefs_pkgver}-${auradefs_pkgrel} package in ${auradefs_pkgdest}, found ${#auradefs_found[@]}" >&2
+  echo "Build it with ci/build-auradefs-package.sh, which is the only way its PKGBUILD can be driven." >&2
+  printf '  %s\n' "${auradefs_found[@]}" >&2
+  exit 1
+fi
+auradefs_package="${auradefs_found[0]}"
 [[ -f "${chrome_package}" ]] || {
   echo "Missing current Chromium package: ${chrome_package}" >&2
   exit 1
@@ -93,18 +109,20 @@ rsync -a --delete --exclude pkg --exclude src --exclude __pycache__ \
   "${REPO_ROOT}/aurade-webapp-shortcuts" \
   "${REPO_ROOT}/aurade" \
   "${REPO_ROOT}/aurade-full" \
+  "${REPO_ROOT}/auradefs" \
   "${REPO_ROOT}/chromiumos-ash" \
   "${REPO_ROOT}/ci" \
   "${REPO_ROOT}/installer" \
   "${arch_source}/"
 install -m 644 "${chrome_package}" "${arch_input}/"
+install -m 644 "${auradefs_package}" "${arch_input}/"
 chown -R "${arch_build_uid}:${arch_build_gid}" \
   "${arch_source}" "${arch_input}" "${arch_output}"
 rm -rf "${arch_output}/aurade" "${arch_output}/aurade.previous"
 
 "${SCRIPT_DIR}/run-in-arch-root.sh" /usr/bin/runuser -u aurabuild -- \
   /usr/bin/bash -lc \
-  "cd /build/aurade && AURADE_WALLPAPER_DIR=/build/aurade/aurade-wallpapers AURADE_RELEASE_CHANNEL=candidate REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") ci/build-release-repo.sh"
+  "cd /build/aurade && AURADE_WALLPAPER_DIR=/build/aurade/aurade-wallpapers AURADE_RELEASE_CHANNEL=candidate REPO_DIR=/build/aurade-output/aurade CHROMIUMOS_ASH_PACKAGE=/build/aurade-input/$(basename "${chrome_package}") AURADEFS_PACKAGE=/build/aurade-input/$(basename "${auradefs_package}") ci/build-release-repo.sh"
 
 host_staging="${OUTPUT_REPO}.staging.$$"
 host_previous="${OUTPUT_REPO}.previous"

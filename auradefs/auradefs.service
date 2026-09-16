@@ -1,0 +1,27 @@
+[Unit]
+Description=AuraDE file service
+Documentation=https://github.com/Cam396/aurade
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# The page shipped in resources.pak asks for 127.0.0.1:8902. The daemon's own
+# default is 8901, which is the port the parity suite serves the page itself
+# on, so the two numbers are different on purpose and the one that has to agree
+# with the shipped page is written here rather than inherited from a default
+# that means something else.
+ExecStart=/usr/bin/auradefs --port 8902
+Restart=on-failure
+RestartSec=2
+# A user unit, because this serves one person's own files and nothing else.
+# Running it as that person is the confinement; the rest is ordinary hygiene.
+# Nothing here restricts address families or filesystem reach: the service
+# enumerates volumes and reads the home directory, which is the job.
+NoNewPrivileges=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

@@ -2,12 +2,19 @@
 
 pkgname=auradefs
 pkgver=0.1.0
-pkgrel=1
+pkgrel=3
 pkgdesc="The file service behind the AuraDE Files app"
 arch=('x86_64')
 url="https://github.com/Cam396/aurade"
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'xz' 'bzip2' 'zlib')
+# libgit2 is linked, not vendored, and was missing here: the binary shipped
+# with a DT_NEEDED on libgit2.so.1.9 that nothing declared, so it installed
+# cleanly onto a machine without the library and died on every start with
+# "error while loading shared libraries". Pinned by soname rather than by
+# package name so the same mismatch fails at install time instead of at
+# runtime; a libgit2 that bumps its soname is a rebuild, and this is what
+# makes that a decision rather than a surprise.
+depends=('gcc-libs' 'glibc' 'xz' 'bzip2' 'zlib' 'libgit2.so=1.9-64')
 makedepends=('cargo' 'rust')
 optdepends=(
   'ffmpeg: video thumbnails, media details and the covers of sound files'
@@ -24,9 +31,12 @@ optdepends=(
 source=(
   'README.md'
   'LICENSE'
+  'auradefs.service'
 )
 sha256sums=('b10ea51389ffcac705a1616a9f93dca8a00d4396ec5a45713fb4f73c7b5a0d7a'
-            'd9980fe1b68b40a5b2b87ee437e874888186d0ac4f51c6e8ffe32d7ff9ecfa4e')
+            'd9980fe1b68b40a5b2b87ee437e874888186d0ac4f51c6e8ffe32d7ff9ecfa4e'
+  '24d43ae82a15cf5c4147258ddf43b5be5c5728006823cc66aa9586ddfc8c249e'
+)
 
 prepare() {
   local tree="${AURADEFS_SRC:-${srcdir}/auradefs-src}"
@@ -62,4 +72,10 @@ package() {
     "${pkgdir}/usr/share/doc/${pkgname}/README.md"
   install -Dm644 "${srcdir}/LICENSE" \
     "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  # A user unit, not a system one: the service answers for the person whose
+  # session it belongs to. Nothing shipped it before, so the daemon existed on
+  # an installed machine and never ran, and the Files app's live layer had
+  # nothing to reach on any system but a developer's.
+  install -Dm644 "${srcdir}/auradefs.service" \
+    "${pkgdir}/usr/lib/systemd/user/auradefs.service"
 }
