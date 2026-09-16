@@ -61,7 +61,9 @@ MUTATIONS = [
      "session/navigation_session.ts",
      """        this.selection = new Set(
             this.entries.slice(lo, hi + 1).map(entry => entry.key));""",
-     "        this.selection = new Set([key]);",
+     """        void lo;
+        void hi;
+        this.selection = new Set([key]);""",
      "a range selection is resolved over indices"),
 
     (UNIT, "the backend stops honouring the abort signal while listing",
@@ -270,13 +272,17 @@ SHELL_MUTATIONS = [
      "  if (basketKey !== undefined) {",
      "the basket appears only when there is one"),
 
+    # The mapping was rewritten from an object literal into a block that
+    # builds the place and then attaches the capacity only for the volumes
+    # that show a meter, so the old anchor stopped existing and this file
+    # refused to run at all rather than testing nothing. Throwing the capacity
+    # away is now returning the place without it.
     (UNIT, "the mapping throws the capacity away",
      "ui/places.ts",
-     """    kind: placeKindFor(volume),
-    volume,
-  }));""",
-     """    kind: placeKindFor(volume),
-  }));""",
+     """        {...place, capacity: volume.capacity} :
+        place;""",
+     """        place :
+        place;""",
      "the capacity survives the mapping"),
 
     (DOM, "metadata is fetched for the directory rather than the screen",
@@ -344,7 +350,8 @@ TOOLBAR_MUTATIONS = [
      "ui/history.ts",
      """    if (here && here.length === trail.length &&
         here[here.length - 1]!.key === trail[trail.length - 1]!.key) {""",
-     "    if (false) {",
+     """    void here;
+    if (false) {""",
      "arriving where you already are is not a step"),
 
     (UNIT, "up walks off the top of a root",
@@ -521,14 +528,16 @@ ADAPTER_MUTATIONS = [
      "adapter/chromeos_backend.ts",
      """    const gone = [...before].filter(candidate => !after.has(candidate));
     const fresh = now.filter(entry => !before.has(entry.key));""",
-     """    const gone: FileKey[] = [];
+     """    void before;
+    const gone: FileKey[] = [];
     const fresh: EntryDto[] = [];""",
      "watch reports an addition made after the listing"),
 
     (UNIT, "our field names are sent to the provider untranslated",
      "adapter/chromeos_backend.ts",
      "    const names = fields.map(field => METADATA_NAMES[field]);",
-     "    const names = fields.slice() as string[];",
+     """    void METADATA_NAMES;
+    const names = fields.slice() as string[];""",
      "our field names are translated to the ones the provider knows"),
 
     (UNIT, "every metadata field is handed back regardless of the request",
@@ -569,7 +578,8 @@ ADAPTER_MUTATIONS = [
     (UNIT, "the listing is buffered and paged afterwards",
      "adapter/chromeos_backend.ts",
      "        if (batch.length >= size) {",
-     "        if (false) {",
+     """        void size;
+        if (false) {""",
      "pages arrive before the whole directory has been read"),
 
     (UNIT, "the platform watch is never released",
@@ -667,8 +677,13 @@ ADAPTER2_MUTATIONS = [
 
     (UNIT, "a dialog is confirmed without saying a real path is needed",
      "adapter/chromeos_backend.ts",
-     "        keys.map(key => String(key)), launch?.allowedPaths === 'nativePath');",
-     "        keys.map(key => String(key)), false);",
+     """    const launch = await this.platform.getLaunchDialog();
+    await this.platform.selectFiles(
+        keys.map(key => String(key)), launch?.allowedPaths === 'nativePath');""",
+     """    const launch = await this.platform.getLaunchDialog();
+    void launch;
+    await this.platform.selectFiles(
+        keys.map(key => String(key)), false);""",
      "confirming a dialog says whether a real path is required"),
 
     (UNIT, "the watch matches every directory except its own",
