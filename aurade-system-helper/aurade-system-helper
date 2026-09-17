@@ -1,0 +1,109 @@
+#!/bin/bash
+# Privileged helper for AuraDE desktop integration.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  aurade-system-helper install-package /absolute/path/pkg.pkg.tar.{zst,xz}
+  aurade-system-helper poweroff
+  aurade-system-helper reboot
+  aurade-system-helper suspend
+EOF
+}
+
+die() {
+  echo "aurade-system-helper: $*" >&2
+  exit 1
+}
+
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    die "this command must be run through pkexec"
+  fi
+}
+
+install_package() {
+  local package_path="${1:-}"
+
+  require_root
+  [[ "$#" -eq 1 ]] || { usage; exit 2; }
+  [[ -n "${package_path}" ]] || { usage; exit 2; }
+  [[ "${package_path}" = /* ]] || die "package path must be absolute"
+  [[ -f "${package_path}" ]] || die "package does not exist: ${package_path}"
+
+  case "${package_path,,}" in
+    *.pkg.tar.zst|*.pkg.tar.xz) ;;
+    *) die "unsupported package extension" ;;
+  esac
+
+  pacman -Qip "${package_path}" >/dev/null
+  exec pacman -U --needed --noconfirm "${package_path}"
+}
+
+host_power_action() {
+  local action="${1:-}"
+
+  [[ "$#" -eq 1 ]] || { usage; exit 2; }
+  case "${action}" in
+    poweroff|reboot|suspend) ;;
+    *) usage; exit 2 ;;
+  esac
+
+  # systemctl, and only systemctl.
+  #
+  # There was a loginctl attempt before this one, on the reasoning that logind
+  # is the session aware path and should be preferred. loginctl has no
+  # poweroff, reboot or suspend verb and never has. Those are systemctl's, and
+  # `systemctl reboot` already goes through logind, so nothing was gained.
+  # Every power action logged
+  #
+  #     Unknown command verb 'reboot', did you mean 'help'?
+  #
+  # into Ash's log before going on to do the right thing, which is noise in the
+  # one place this depends on for diagnosis. `loginctl --help` lists no power
+  # verb, so use systemctl for these actions.
+  #
+  # `--no-ask-password` matters more than it looks. Without it a call that
+  # polkit will not authorize can sit waiting for an authentication agent that
+  # no session ever provides, and the desktop above it just stays on its
+  # shutdown animation forever with nothing written anywhere. Failing takes
+  # priority over waiting: a reported failure can be diagnosed, a hang cannot.
+  command -v systemctl >/dev/null 2>&1 || \
+    die "could not ${action}: systemctl is not installed"
+
+  # Captured in the else, not after the fi. After an `if` whose condition fails
+  # and which has no else, `$?` is the status of the `if` itself, which is 0,
+  # so the old form reported every single failure as "failed (0)". That is
+  # misinformation in the one line written to be informative. Inside the else
+  # it is still the condition's status, which is the number wanted.
+  #
+  # An `if` rather than `[[ ... ]] && exit 0`, and an `if` rather than a bare
+  # assignment, because this script runs under `set -e`. A standalone AND list
+  # whose left side fails is a failed statement and the shell would exit right
+  # there, taking the diagnostic below with it; so would an assignment whose
+  # command substitution failed. The condition of an `if` is exempt from both.
+  local reason status
+  if reason=$(systemctl --no-ask-password "${action}" 2>&1); then
+    exit 0
+  else
+    status=$?
+  fi
+
+  echo "aurade-system-helper: systemctl ${action} failed (${status}): ${reason}" >&2
+  die "could not ${action}: systemctl refused it"
+}
+
+case "${1:-}" in
+  install-package)
+    shift
+    install_package "$@"
+    ;;
+  poweroff|reboot|suspend)
+    host_power_action "$@"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
