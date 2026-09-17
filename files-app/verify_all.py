@@ -251,7 +251,7 @@ def main():
         if _r.returncode != 0:
             _bad_js.append(os.path.basename(_f))
     check("js-files-parse-alone", _bad_js, [])
-    for f in ("build_v3.py", "sidebar.py", "v3.html", "GOAL.md"):
+    for f in ("build_v3.py", "sidebar.py", "v3.html"):
         p = os.path.join(ROOT, f)
         if os.path.exists(p):
             check(f"no-dashes-{f}", len(re.findall(r"\u2014|\u2013",
@@ -1904,7 +1904,7 @@ def main():
             # rows gate above cannot see it: it asks whether a control with
             # that name exists. This one flips each setting and looks at the
             # page. The list grows as each one is wired; a setting that is
-            # only stored is named in GOAL.md rather than counted here.
+            # only stored is documented in the source mapping rather than counted here.
             ("settings-that-change-the-page-do",
              "() => { const set = window.__setPref;"
              " const was = k => window.__getPref(k);"

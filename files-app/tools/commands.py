@@ -18,7 +18,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROTO = os.path.dirname(HERE)
-REF = os.environ.get("FILES_REF", "/mnt/build/aurade-work/ref-files")
+REF = os.environ.get("FILES_REF", os.path.join(PROTO, "ref-files"))
 TABLE = os.path.join(PROTO, "assets", "files-commands.json")
 #: The builder and its css/ and js/ files, read together.
 sys.path.insert(0, PROTO)

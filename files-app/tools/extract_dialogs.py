@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROTO = os.path.dirname(HERE)
-REF = os.environ.get("FILES_REF", "/mnt/build/aurade-work/ref-files")
+REF = os.environ.get("FILES_REF", os.path.join(PROTO, "ref-files"))
 DIALOGS = os.path.join(REF, "src/Files.App/Dialogs")
 RESW = os.path.join(REF, "src/Files.App/Strings/en-US/Resources.resw")
 OUT = os.path.join(PROTO, "assets", "files-dialogs.json")

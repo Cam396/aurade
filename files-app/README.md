@@ -26,6 +26,10 @@ be the path the script resource is served at inside the pak, which is not the
 name of the file on disk and is not recorded anywhere in the pak. Getting it
 wrong gives a page that draws perfectly and runs nothing.
 
+The parity extraction tools read the upstream Files checkout from `FILES_REF`.
+When it is unset, they look for that checkout in `files-app/ref-files`; the
+reference checkout is a local build input and is not part of this repository.
+
 ## Layout
 
 `build_v3.py` is the builder: the markup is a Python f string, generated from
