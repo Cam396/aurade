@@ -10,9 +10,12 @@ failures=0
 
 [[ -r $GATE ]] || { printf 'test-leak-gate: no gate at %s\n' "$GATE" >&2; exit 1; }
 
-# Scratch repositories go beside the project, never in /tmp: that is where the
-# project keeps its working data, and /tmp here is mounted without exec.
-WORK=$(mktemp -d "${AURADE_TEST_WORKDIR:-/mnt/build/aurade-work}/.leak-gate-test.XXXXXX")
+# Scratch repositories go beside the project, in the checkout's own parent,
+# never in /tmp: on the build host /tmp is mounted without exec, and the parent
+# is where the project keeps its working data. Taking the parent from the
+# checkout rather than one machine's absolute path keeps this working on a
+# developer clone and a CI runner too. AURADE_TEST_WORKDIR overrides it.
+WORK=$(mktemp -d "${AURADE_TEST_WORKDIR:-${ROOT%/*}}/.leak-gate-test.XXXXXX")
 trap 'rm -rf -- "$WORK"' EXIT
 
 fail() { printf 'test-leak-gate: %s\n' "$*" >&2; failures=$(( failures + 1 )); }

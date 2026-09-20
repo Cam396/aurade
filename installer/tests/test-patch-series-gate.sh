@@ -28,9 +28,12 @@ failures=0
 
 [[ -r $GATE ]] || { printf 'test-patch-series-gate: no gate at %s\n' "$GATE" >&2; exit 1; }
 
-# Beside the project, never /tmp: /tmp here is mounted without exec and the
-# guardrails put project data here anyway.
-WORK=$(mktemp -d "${AURADE_TEST_WORKDIR:-/mnt/build/aurade-work}/.series-gate-test.XXXXXX")
+# Beside the project, in the checkout's own parent, never /tmp: /tmp here is
+# mounted without exec and the guardrails put project data beside the checkout
+# anyway. Deriving the parent from the checkout rather than one machine's
+# absolute path keeps a developer clone and a CI runner working too, not only
+# the build host; AURADE_TEST_WORKDIR overrides it.
+WORK=$(mktemp -d "${AURADE_TEST_WORKDIR:-${ROOT%/*}}/.series-gate-test.XXXXXX")
 trap 'rm -rf -- "$WORK"' EXIT
 
 fail() { printf 'test-patch-series-gate: %s\n' "$*" >&2; failures=$(( failures + 1 )); }
