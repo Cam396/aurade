@@ -43,7 +43,16 @@ series_digest() {
     cat "${dir}/SERIES" 2>/dev/null
     while IFS= read -r name; do
       [[ -n ${name} ]] || continue
-      sha256sum "${dir}/${name}" 2>/dev/null || printf 'missing %s\n' "${name}"
+      # Hash each patch by its content and its name in the series, never by the
+      # absolute path it sits at. sha256sum echoes back the path it is handed,
+      # so hashing "${dir}/${name}" folded the checkout location into the digest,
+      # and a record earned in one tree never matched the same tree checked out
+      # anywhere else, which is what every CI run is.
+      if [[ -f "${dir}/${name}" ]]; then
+        printf '%s  %s\n' "$(sha256sum <"${dir}/${name}" | cut -d" " -f1)" "${name}"
+      else
+        printf 'missing %s\n' "${name}"
+      fi
     done < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "${dir}/SERIES" 2>/dev/null)
   } | sha256sum | cut -d" " -f1
 }

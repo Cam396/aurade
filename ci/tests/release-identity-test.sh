@@ -27,7 +27,7 @@ build_fixture() {
   printf -- '--- a/x\n+++ b/x\n' >"$TMP/tree/patches/0001-first.patch"
   local digest
   digest=$( { cat "$TMP/tree/patches/SERIES"
-              sha256sum "$TMP/tree/patches/0001-first.patch"
+              printf '%s  %s\n' "$(sha256sum <"$TMP/tree/patches/0001-first.patch" | cut -d" " -f1)" 0001-first.patch
             } | sha256sum | cut -d" " -f1 )
   printf 'revision=%s\nversion=%s\nseries=%s\nverified=2026-08-26T00:00:00Z\n' \
     "$GOOD_REVISION" "$GOOD_VERSION" "$digest" \
