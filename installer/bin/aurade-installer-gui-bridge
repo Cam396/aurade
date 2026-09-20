@@ -81,7 +81,13 @@ EOF
   esac
 done
 
-SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer-gui.XXXXXX")
+# Secrets belong on a runtime tmpfs, so /run is preferred, but a non-root
+# context (a CI runner, an unprivileged test) cannot write there. Fall
+# back to the user runtime dir and then a temp dir so it can still start;
+# a real install runs as root and takes the first path.
+SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer-gui.XXXXXX" 2>/dev/null) ||
+  SECRET_DIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/aurade-installer-gui.XXXXXX" 2>/dev/null) ||
+  SECRET_DIR=$(mktemp -d "/tmp/aurade-installer-gui.XXXXXX")
 chmod 700 "$SECRET_DIR"
 install -d -m 0700 "$(dirname "$JOURNAL_FILE")" 2>/dev/null || true
 install -d -m 0700 "$(dirname "$RAW_LOG")" 2>/dev/null || true
