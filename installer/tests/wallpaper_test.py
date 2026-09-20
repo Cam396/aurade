@@ -228,6 +228,17 @@ def test_the_manifest_is_what_the_tool_writes() -> None:
     import subprocess  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
 
+    # The manifest tool measures each photograph with Pillow and numpy. A stock
+    # CI runner carries neither, so the tool cannot run and there is nothing to
+    # compare against; skip the re-run rather than read a missing dependency as a
+    # manifest that disagrees with itself.
+    try:
+        import numpy  # noqa: F401,PLC0415
+        from PIL import Image  # noqa: F401,PLC0415
+    except ImportError as exc:
+        print(f"installer wallpaper test: SKIP the manifest re-run ({exc})")
+        return
+
     tool = os.path.join(ROOT, "installer", "tools", "wallpaper-manifest.py")
     titles = os.path.join(WALLPAPERS, "titles.tsv")
     if not (os.path.exists(tool) and os.path.exists(titles)):
