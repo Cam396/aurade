@@ -71,7 +71,7 @@ flatten() {
 
 render() {
   local screen=$1 color=$2 frame=$3
-  env AURADE_TUI_COLOR="$color" AURADE_TUI_FRAME="$frame" \
+  env AURADE_TUI_PLAIN=0 AURADE_TUI_COLOR="$color" AURADE_TUI_FRAME="$frame" \
     "$TUI" --render "$screen" --journal "$TMP/journal.jsonl"
 }
 

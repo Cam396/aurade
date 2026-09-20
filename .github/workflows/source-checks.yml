@@ -10,6 +10,15 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-latest
+    # A real terminal type: without it the installer's text UI takes its
+    # no-TERM accessibility path and renders unframed, which the render
+    # alignment fixture then measures as misaligned. A serial console
+    # reports a real TERM; a bare runner does not.
+    env:
+      TERM: xterm-256color
+      # Pin a UTF-8 locale too: without it bash counts the progress
+      # bar's braille glyphs by byte and the frame padding lands wrong.
+      LANG: C.UTF-8
     steps:
       - uses: actions/checkout@v4
 
