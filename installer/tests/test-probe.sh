@@ -43,6 +43,22 @@ printf '#!/bin/sh\nprintf disabled\n' >"$TMP/boot-disabled/bootctl"
 printf '#!/bin/sh\nprintf enabled\n' >"$TMP/boot-enabled/bootctl"
 chmod +x "$TMP/boot-disabled/bootctl" "$TMP/boot-enabled/bootctl"
 
+# Firmware variable fixtures so the efivars fallback is exercised without the
+# host's real /sys/firmware/efi/efivars leaking in. On a UEFI runner that real
+# tree exists, and reading it with the empty fixture PATH below would reach for
+# dd/od/awk that are deliberately absent. A SecureBoot variable is four
+# attribute bytes followed by the one state byte the probe reads.
+install -d "$TMP/efivars-empty" "$TMP/efivars-enabled" "$TMP/efivars-disabled"
+sb=SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+printf '\x06\x00\x00\x00\x01' >"$TMP/efivars-enabled/$sb"
+printf '\x06\x00\x00\x00\x00' >"$TMP/efivars-disabled/$sb"
+
+# A PATH that carries the byte-reading tools but no bootctl, so the probe must
+# fall through to reading the variable itself. This is the branch the empty
+# fixture PATH could never take, and the one that broke on UEFI CI.
+install -d "$TMP/efi-tools"
+for _tool in dd od awk; do ln -s "$(command -v "$_tool")" "$TMP/efi-tools/$_tool"; done
+
 install -d "$TMP/dri-empty" "$TMP/dri-ok"
 : >"$TMP/dri-ok/renderD128"
 : >"$TMP/dri-ok/card0"
@@ -80,7 +96,8 @@ probe() {
 }
 
 secure_state() {
-  env AURADE_PROBE_EFI_DIR="$1" PATH="$2" /bin/bash -c '
+  env AURADE_PROBE_EFI_DIR="$1" AURADE_PROBE_EFIVARS_DIR="${3:-$TMP/efivars-empty}" \
+    PATH="$2" /bin/bash -c '
     set -Eeuo pipefail
     . '"$ROOT"'/installer/lib/aurade-probe.sh
     aurade_probe_secure_boot
@@ -91,6 +108,10 @@ check 'secure boot disabled fixture' "$(secure_state "$TMP/efi" "$TMP/boot-disab
 check 'secure boot enabled fixture' "$(secure_state "$TMP/efi" "$TMP/boot-enabled")" enabled
 check 'secure boot unknown fixture' "$(secure_state "$TMP/efi" "$TMP/empty-path")" unknown
 check 'secure boot not applicable fixture' "$(secure_state "$TMP/absent-efi" "$TMP/empty-path")" not-applicable
+# The efivars fallback, exercised deterministically: no bootctl on PATH, so the
+# probe reads the SecureBoot variable's state byte with the tools in efi-tools.
+check 'secure boot enabled via efivars' "$(secure_state "$TMP/efi" "$TMP/efi-tools" "$TMP/efivars-enabled")" enabled
+check 'secure boot disabled via efivars' "$(secure_state "$TMP/efi" "$TMP/efi-tools" "$TMP/efivars-disabled")" disabled
 
 # --- no DRM directory at all: no GPU driver loaded --------------------------
 IFS='|' read -r renderer reason black graphics < <(probe "$TMP/absent" "$TMP/meminfo.big")
