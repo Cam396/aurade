@@ -29,6 +29,19 @@ from aurade_gui.bridge import Bridge  # noqa: E402
 TMP = sys.argv[1]
 BRIDGE = os.path.join(ROOT, "installer", "bin", "aurade-installer-gui-bridge")
 
+# The keymap answer is applied the instant it is chosen, which runs loadkeys
+# (see apply_answer). This suite has no console to load a layout onto and may
+# run unprivileged, where a real loadkeys fails and turns the keyboard question
+# into a dead end that never advances. So a session that does not name its own
+# search path gets a stub loadkeys that succeeds, standing in for the console a
+# real install has; the cases that test the refusal and the missing-tool paths
+# set PATH themselves and override this.
+KEYMAP_STUB_PATH = os.path.join(TMP, "keymap-stub")
+os.makedirs(KEYMAP_STUB_PATH, exist_ok=True)
+_loadkeys = os.path.join(KEYMAP_STUB_PATH, "loadkeys")
+if not os.path.exists(_loadkeys):
+    os.symlink(os.path.join(TMP, "stub", "loadkeys"), _loadkeys)
+
 PASSWORD = "correct horse battery staple"
 PASSPHRASE = "a passphrase with  spaces"
 
@@ -66,6 +79,7 @@ BARE_BRIDGE = os.path.join(TMP, "image", "sbin", "aurade-installer-gui-bridge")
 @contextmanager
 def session(plan_only: bool = False, program: str = BRIDGE, **overrides):
     env = dict(os.environ)
+    env["PATH"] = f"{KEYMAP_STUB_PATH}{os.pathsep}{env.get('PATH', '')}"
     for key, value in overrides.items():
         if value is None:
             env.pop(key, None)

@@ -67,6 +67,22 @@ typed() {
   done
 }
 
+# The keymap answer is applied the instant it is chosen, which on a console
+# runs loadkeys (see apply_answer). This suite has no console and may run
+# unprivileged, where a real loadkeys cannot load a layout and would turn the
+# keyboard question into a dead end that never advances. A stub stands in for
+# it, the same one the keymap cases below drive with AURADE_TEST_LOADKEYS_REJECT,
+# put on the path once here so every route through the flow is answered the same
+# on any host, with or without kbd and root.
+install -d "$TMP/stub"
+cat >"$TMP/stub/loadkeys" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >>"${AURADE_TEST_LOADKEYS_LOG:-/dev/null}"
+[[ $1 != "${AURADE_TEST_LOADKEYS_REJECT:-}" ]]
+STUB
+chmod +x "$TMP/stub/loadkeys"
+PATH="$TMP/stub:$PATH"
+
 # --- the whole default path, answered ---------------------------------------
 # shellcheck disable=SC2034  # SHOW_ADVANCED is read by the sourced front end
 reset_state() { ANSWERS=(); SHOW_ADVANCED=0; }
@@ -342,15 +358,9 @@ grep -Fq '/dev/sda' "$TMP/review.out" || fail 'the review screen omits the targe
 # The keyboard question is answered before any password, so the layout has to
 # take effect at the moment it is chosen rather than at the end of the flow.
 # A layout that is installed but will not load on this console must be caught
-# here, not discovered at a masked prompt.
-install -d "$TMP/stub"
-cat >"$TMP/stub/loadkeys" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$1" >>"${AURADE_TEST_LOADKEYS_LOG:-/dev/null}"
-[[ $1 != "${AURADE_TEST_LOADKEYS_REJECT:-}" ]]
-STUB
-chmod +x "$TMP/stub/loadkeys"
-
+# here, not discovered at a masked prompt. The stub loadkeys is already on the
+# path from the harness setup above; here it also records what it was asked to
+# load so the call can be checked, and refuses the layout named by REJECT.
 : >"$TMP/loadkeys.log"
 export AURADE_TEST_LOADKEYS_LOG="$TMP/loadkeys.log"
 
