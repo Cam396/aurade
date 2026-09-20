@@ -4658,7 +4658,13 @@ main_flow() {
   # on the machine scrolls. Both put back in `cleanup`.
   tui_paste_on
   tui_mouse_on
-  SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX")
+  # Secrets belong on a runtime tmpfs, so /run is preferred, but a non-root
+  # context (a CI runner, an unprivileged test) cannot write there. Fall
+  # back to the user runtime dir and then a temp dir so it can still start;
+  # a real install runs as root and takes the first path.
+  SECRET_DIR=$(mktemp -d "${TMPDIR:-/run}/aurade-installer.XXXXXX" 2>/dev/null) ||
+    SECRET_DIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/aurade-installer.XXXXXX" 2>/dev/null) ||
+    SECRET_DIR=$(mktemp -d "/tmp/aurade-installer.XXXXXX")
   chmod 700 "$SECRET_DIR"
   # Before anything is asked, so the questions open on these rather than on
   # their defaults, and so the review lists them.
