@@ -53,6 +53,10 @@ Options:
 
 Environment:
   AURADE_FORCE_TUI=1 Same as --text
+  AURADE_FORCE_GUI=1 Run the graphical installer past the soft checks: low
+                     memory, software rendering, and the unproven VMware display
+                     path. It cannot force past a missing GPU, which would only
+                     install a system that boots to a black screen.
   AURADE_SAFE_GRAPHICS=1
                      Same as --safe-graphics
 EOF

@@ -41,8 +41,23 @@ AURADE_PROBE_GL_TIMEOUT=${AURADE_PROBE_GL_TIMEOUT:-5}
 # packages into the live overlay and then running Chromium against them costs
 # well over a gigabyte on top of the running system, so a machine that would
 # technically start a compositor can still be one that should be given the text
-# installer instead.
-AURADE_PROBE_MIN_GUI_MIB=${AURADE_PROBE_MIN_GUI_MIB:-6144}
+# installer instead. The floor is a conservative default, not a hard minimum: it
+# is the point below which the live graphical installer is at real risk of an out
+# of memory kill, and it says nothing about the installed system, which has the
+# whole disk and no RAM-backed overlay to contend with. It was 6 GiB, which sent
+# 8 GiB machines to the text installer once the live image had taken its share;
+# 4 GiB leaves those machines the graphical path, and AURADE_FORCE_GUI is there
+# for anyone who wants to try below it anyway.
+AURADE_PROBE_MIN_GUI_MIB=${AURADE_PROBE_MIN_GUI_MIB:-4096}
+
+# An explicit request to run the graphical installer past the soft checks: the
+# ones where the compositor can still start and the probe only declined out of
+# caution. It overrides low memory, software rendering, and the unproven VMware
+# display path. It deliberately cannot override a missing or virtual-only GPU:
+# forcing a compositor onto a machine with no render node only trades the text
+# installer for a black one, which is the single failure this file exists to
+# prevent.
+AURADE_FORCE_GUI=${AURADE_FORCE_GUI:-0}
 
 AURADE_PROBE_RENDERER=
 AURADE_PROBE_REASON=
@@ -225,14 +240,16 @@ _aurade_probe_renderer() {
   AURADE_PROBE_GL=$(_probe_gl_renderer || true)
   if [[ -n $AURADE_PROBE_GL ]]; then
     AURADE_PROBE_GRAPHICS="$AURADE_PROBE_GRAPHICS, renderer $AURADE_PROBE_GL"
-    if _probe_is_software_renderer "$AURADE_PROBE_GL"; then
+    if _probe_is_software_renderer "$AURADE_PROBE_GL" &&
+       [[ $AURADE_FORCE_GUI != 1 ]]; then
       AURADE_PROBE_RENDERER=tui
       AURADE_PROBE_REASON=software-rendering
       return 0
     fi
   fi
 
-  if (( AURADE_PROBE_MEM_MIB < AURADE_PROBE_MIN_GUI_MIB )); then
+  if (( AURADE_PROBE_MEM_MIB < AURADE_PROBE_MIN_GUI_MIB )) &&
+     [[ $AURADE_FORCE_GUI != 1 ]]; then
     AURADE_PROBE_RENDERER=tui
     AURADE_PROBE_REASON=low-memory
     return 0
@@ -246,7 +263,7 @@ _aurade_probe_renderer() {
   # testable on a VMware setup with a known-good visible 3D output.
   if [[ $AURADE_PROBE_VIRT == vmware && $AURADE_PROBE_DRIVER == vmwgfx &&
         -z ${WAYLAND_DISPLAY:-} && -z ${DISPLAY:-} &&
-        ${AURADE_ALLOW_VMWARE_GUI:-0} != 1 ]]; then
+        ${AURADE_ALLOW_VMWARE_GUI:-0} != 1 && $AURADE_FORCE_GUI != 1 ]]; then
     AURADE_PROBE_RENDERER=tui
     AURADE_PROBE_REASON=vmware-kms-uncertain
     return 0
