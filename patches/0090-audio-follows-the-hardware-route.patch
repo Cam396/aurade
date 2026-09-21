@@ -1,0 +1,957 @@
+diff --git a/chromeos/ash/components/dbus/audio/BUILD.gn b/chromeos/ash/components/dbus/audio/BUILD.gn
+index 5f4e2ddf901abe3c2051b407c3aea68074246d4f..b0d1b33551299ac00c9760f809b0f4d10c626335 100644
+--- a/chromeos/ash/components/dbus/audio/BUILD.gn
++++ b/chromeos/ash/components/dbus/audio/BUILD.gn
+@@ -36,6 +36,7 @@ component("audio") {
+     "fake_floss_media_client.h",
+     "floss_media_client.cc",
+     "floss_media_client.h",
++    "pipewire_audio_route.h",
+     "pipewire_cras_audio_client.cc",
+     "pipewire_cras_audio_client.h",
+     "voice_isolation_ui_appearance.cc",
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_audio_route.h b/chromeos/ash/components/dbus/audio/pipewire_audio_route.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d118ac9f9a54d5b15622d2935e1fda78e29d890c
+--- /dev/null
++++ b/chromeos/ash/components/dbus/audio/pipewire_audio_route.h
+@@ -0,0 +1,297 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_AUDIO_ROUTE_H_
++#define CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_AUDIO_ROUTE_H_
++
++#include <spa/param/props.h>
++#include <spa/param/route.h>
++#include <spa/pod/builder.h>
++#include <spa/pod/iter.h>
++#include <spa/pod/parser.h>
++
++#include <algorithm>
++#include <array>
++#include <charconv>
++#include <cmath>
++#include <cstdint>
++#include <cstring>
++#include <optional>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++namespace ash::pipewire_audio {
++
++constexpr uint32_t kMaxChannels = 64;
++constexpr size_t kMaxRoutes = 256;
++constexpr uint32_t kMaxPodBytes = 16384;
++
++inline uint32_t ParseId(std::string_view text) {
++  if (text.empty()) {
++    return SPA_ID_INVALID;
++  }
++  uint32_t result = SPA_ID_INVALID;
++  const auto parsed =
++      std::from_chars(text.data(), text.data() + text.size(), result);
++  if (parsed.ec != std::errc() || parsed.ptr != text.data() + text.size()) {
++    return SPA_ID_INVALID;
++  }
++  return result;
++}
++
++inline int32_t PercentFromVolume(float volume) {
++  // AuraDE compatibility: wpctl uses the cubic perceived-volume scale. Clamp
++  // before rounding so even a valid amplified route cannot overflow lround.
++  if (!std::isfinite(volume) || volume < 0.0f) {
++    return 0;
++  }
++  return static_cast<int32_t>(
++      std::lround(std::cbrt(std::min(volume, 1.0f)) * 100.0f));
++}
++
++inline float VolumeFromPercent(int32_t percent) {
++  const float value = std::clamp(percent, 0, 100) / 100.0f;
++  return value * value * value;
++}
++
++struct Props {
++  std::optional<bool> muted;
++  std::vector<float> volumes;
++};
++
++inline bool ReadProps(const spa_pod* pod, Props* output) {
++  if (!pod || !spa_pod_is_object(pod) || pod->size > kMaxPodBytes ||
++      SPA_POD_OBJECT_TYPE(pod) != SPA_TYPE_OBJECT_Props) {
++    return false;
++  }
++  Props next;
++  if (const auto* prop = spa_pod_find_prop(pod, nullptr, SPA_PROP_mute)) {
++    bool muted = false;
++    if (spa_pod_get_bool(&prop->value, &muted) < 0) {
++      return false;
++    }
++    next.muted = muted;
++  }
++  if (const auto* prop =
++          spa_pod_find_prop(pod, nullptr, SPA_PROP_channelVolumes)) {
++    if (!spa_pod_is_array(&prop->value) ||
++        prop->value.size < sizeof(spa_pod_array_body) ||
++        SPA_POD_ARRAY_VALUE_TYPE(&prop->value) != SPA_TYPE_Float ||
++        SPA_POD_ARRAY_VALUE_SIZE(&prop->value) != sizeof(float)) {
++      return false;
++    }
++    const uint32_t bytes = prop->value.size - sizeof(spa_pod_array_body);
++    const uint32_t count = bytes / sizeof(float);
++    if (bytes % sizeof(float) != 0 || count == 0 || count > kMaxChannels) {
++      return false;
++    }
++    next.volumes.resize(count);
++    std::memcpy(next.volumes.data(), SPA_POD_ARRAY_VALUES(&prop->value), bytes);
++    for (const float volume : next.volumes) {
++      if (!std::isfinite(volume) || volume < 0.0f) {
++        return false;
++      }
++    }
++  }
++  *output = std::move(next);
++  return true;
++}
++
++inline void MergeProps(const Props& update, Props* target) {
++  // Missing fields are not a request to unmute or reset another controller's
++  // volume. PipeWire is allowed to send a mute-only Props update.
++  if (update.muted.has_value()) {
++    target->muted = update.muted;
++  }
++  if (!update.volumes.empty()) {
++    target->volumes = update.volumes;
++  }
++}
++
++struct Route {
++  int32_t index = -1;
++  int32_t profile_device = -1;
++  uint32_t direction = SPA_ID_INVALID;
++  Props props;
++};
++
++struct Level {
++  int32_t volume = 100;
++  bool muted = false;
++};
++
++inline Level ReadLevel(const Route* route, const Props& node, Level previous) {
++  const auto& props = route ? route->props : node;
++  if (props.muted.has_value()) {
++    previous.muted = *props.muted;
++  }
++  if (!props.volumes.empty()) {
++    previous.volume = PercentFromVolume(props.volumes.front());
++  }
++  return previous;
++}
++
++inline bool ReadRoute(const spa_pod* pod, Route* output) {
++  if (!pod || !spa_pod_is_object(pod) || pod->size > kMaxPodBytes ||
++      SPA_POD_OBJECT_TYPE(pod) != SPA_TYPE_OBJECT_ParamRoute) {
++    return false;
++  }
++  Route next;
++  if (const auto* direction =
++          spa_pod_find_prop(pod, nullptr, SPA_PARAM_ROUTE_direction)) {
++    // An absent direction can match either side. A present value with the
++    // wrong type must not become that wildcard through optional parsing.
++    if (spa_pod_get_id(&direction->value, &next.direction) < 0) {
++      return false;
++    }
++  }
++  const spa_pod* props = nullptr;
++  uint32_t id = SPA_PARAM_Route;
++  if (spa_pod_parse_object(pod, SPA_TYPE_OBJECT_ParamRoute, &id,
++                           SPA_PARAM_ROUTE_index, SPA_POD_Int(&next.index),
++                           SPA_PARAM_ROUTE_device,
++                           SPA_POD_Int(&next.profile_device),
++                           SPA_PARAM_ROUTE_props, SPA_POD_Pod(&props)) < 0 ||
++      next.index < 0 || next.profile_device < 0 ||
++      (next.direction != SPA_ID_INVALID &&
++       next.direction != SPA_DIRECTION_INPUT &&
++       next.direction != SPA_DIRECTION_OUTPUT) ||
++      !ReadProps(props, &next.props) || !next.props.muted.has_value() ||
++      next.props.volumes.empty()) {
++    return false;
++  }
++  *output = std::move(next);
++  return true;
++}
++
++// AuraDE compatibility: Route callbacks are an enumeration, not individual
++// replacement events. Publish at the matching core sync, including an empty
++// result, so a removed headphone route cannot remain the write destination.
++class RouteSnapshot {
++ public:
++  explicit RouteSnapshot(uint32_t global_device = SPA_ID_INVALID)
++      : global_device_(global_device) {}
++
++  void Begin(int sequence) {
++    sequence_ = sequence;
++    pending_.clear();
++    loading_ = true;
++    overflow_ = false;
++  }
++
++  bool Add(int sequence, const spa_pod* pod) {
++    if (!loading_ || sequence != sequence_) {
++      return false;
++    }
++    Route route;
++    if (!ReadRoute(pod, &route)) {
++      return false;
++    }
++    if (pending_.size() >= kMaxRoutes) {
++      overflow_ = true;
++      return false;
++    }
++    pending_.push_back(std::move(route));
++    return true;
++  }
++
++  bool Complete(int sequence) {
++    if (!loading_ || sequence != sequence_) {
++      return false;
++    }
++    current_ = overflow_ ? std::vector<Route>() : std::move(pending_);
++    loading_ = false;
++    return true;
++  }
++
++  void Clear() {
++    pending_.clear();
++    current_.clear();
++    loading_ = false;
++  }
++
++  bool loading() const { return loading_; }
++
++  const Route* Find(uint32_t global_device,
++                    uint32_t profile_device,
++                    uint32_t direction) const {
++    if (global_device == SPA_ID_INVALID || global_device != global_device_ ||
++        profile_device == SPA_ID_INVALID) {
++      return nullptr;
++    }
++    for (const auto& route : current_) {
++      if (static_cast<uint32_t>(route.profile_device) == profile_device &&
++          (route.direction == SPA_ID_INVALID || route.direction == direction)) {
++        return &route;
++      }
++    }
++    return nullptr;
++  }
++
++ private:
++  uint32_t global_device_;
++  int sequence_ = 0;
++  bool loading_ = false;
++  bool overflow_ = false;
++  std::vector<Route> current_;
++  std::vector<Route> pending_;
++};
++
++template <typename RouteWriter, typename NodeWriter>
++bool WriteProps(const Route* route,
++                uint32_t channels,
++                std::optional<int32_t> volume,
++                std::optional<bool> mute,
++                RouteWriter write_route,
++                NodeWriter write_node) {
++  if ((!volume.has_value() && !mute.has_value()) || channels == 0 ||
++      channels > kMaxChannels ||
++      (route && (route->index < 0 || route->profile_device < 0))) {
++    return false;
++  }
++  alignas(8) std::array<uint8_t, 1024> buffer{};
++  spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer.data(), buffer.size());
++  spa_pod_frame outer;
++  if (route) {
++    spa_pod_builder_push_object(&builder, &outer, SPA_TYPE_OBJECT_ParamRoute,
++                                SPA_PARAM_Route);
++    spa_pod_builder_add(&builder, SPA_PARAM_ROUTE_index,
++                        SPA_POD_Int(route->index), SPA_PARAM_ROUTE_device,
++                        SPA_POD_Int(route->profile_device),
++                        SPA_PARAM_ROUTE_save, SPA_POD_Bool(true), 0);
++    spa_pod_builder_prop(&builder, SPA_PARAM_ROUTE_props, 0);
++  }
++  spa_pod_frame props_frame;
++  spa_pod_builder_push_object(&builder, &props_frame, SPA_TYPE_OBJECT_Props,
++                              SPA_PARAM_Props);
++  if (mute.has_value()) {
++    spa_pod_builder_prop(&builder, SPA_PROP_mute, 0);
++    spa_pod_builder_bool(&builder, *mute);
++  }
++  if (volume.has_value()) {
++    // Match wpctl's scalar setter: set each channel equally. Sending only the
++    // changed fields preserves channel maps, monitor gains and other Props.
++    std::array<float, kMaxChannels> values;
++    values.fill(VolumeFromPercent(*volume));
++    spa_pod_builder_prop(&builder, SPA_PROP_channelVolumes, 0);
++    spa_pod_builder_array(&builder, sizeof(float), SPA_TYPE_Float, channels,
++                          values.data());
++  }
++  const spa_pod* pod =
++      static_cast<const spa_pod*>(spa_pod_builder_pop(&builder, &props_frame));
++  if (route) {
++    pod = static_cast<const spa_pod*>(spa_pod_builder_pop(&builder, &outer));
++  }
++  if (!pod || builder.state.offset > buffer.size()) {
++    return false;
++  }
++  // Acceptance is not confirmation. The caller must wait for a parameter
++  // event before updating the state shown to Ash, even when this returns true.
++  return (route ? write_route(pod) : write_node(pod)) >= 0;
++}
++
++}  // namespace ash::pipewire_audio
++
++#endif  // CHROMEOS_ASH_COMPONENTS_DBUS_AUDIO_PIPEWIRE_AUDIO_ROUTE_H_
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+index 047fb816b5d81d0d8083936d3bca928394085585..586080efd616a84ea2ca2359007b5642395e3ad5 100644
+--- a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
++++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.h"
+ 
++#include <pipewire/device.h>
+ #include <pipewire/extensions/metadata.h>
+ #include <pipewire/node.h>
+ #include <pipewire/pipewire.h>
+@@ -17,7 +18,6 @@
+ #include <cmath>
+ #include <limits>
+ #include <map>
+-#include <numeric>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -39,6 +39,7 @@
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/time/time.h"
+ #include "base/values.h"
++#include "chromeos/ash/components/dbus/audio/pipewire_audio_route.h"
+ 
+ namespace ash {
+ namespace {
+@@ -49,7 +50,6 @@ constexpr char kDefaultSinkKey[] = "default.audio.sink";
+ constexpr char kDefaultSourceKey[] = "default.audio.source";
+ constexpr char kDefaultMetadataName[] = "default";
+ constexpr char kMetadataJsonType[] = "Spa:String:JSON";
+-constexpr uint32_t kMaxAudioChannels = 64;
+ 
+ bool g_pipewire_initialized = false;
+ 
+@@ -116,6 +116,22 @@ int PipeWireNodeSetParam(pw_node* node,
+   return pw_node_set_param(node, id, flags, param);
+ }
+ 
++int PipeWireDeviceAddListener(pw_device* device,
++                              spa_hook* listener,
++                              const pw_device_events* events,
++                              void* data) {
++  return pw_device_add_listener(device, listener, events, data);
++}
++
++int PipeWireDeviceEnumRoutes(pw_device* device, int sequence) {
++  return pw_device_enum_params(device, sequence, SPA_PARAM_Route, 0, UINT32_MAX,
++                               nullptr);
++}
++
++int PipeWireDeviceSetRoute(pw_device* device, const spa_pod* param) {
++  return pw_device_set_param(device, SPA_PARAM_Route, 0, param);
++}
++
+ #pragma clang diagnostic pop
+ 
+ uint64_t StableNodeId(bool is_input, const std::string& node_name) {
+@@ -263,22 +279,23 @@ std::string NodeType(bool is_input,
+   return "INTERNAL_SPEAKER";
+ }
+ 
+-int32_t PercentFromVolume(float volume) {
+-  if (!std::isfinite(volume)) {
+-    return 100;
+-  }
+-  return std::clamp(static_cast<int32_t>(std::lround(volume * 100.0f)), 0, 100);
+-}
+-
+-float VolumeFromPercent(int32_t percent) {
+-  return std::clamp(percent, 0, 100) / 100.0f;
+-}
+-
+ }  // namespace
+ 
+ struct PipeWireCrasAudioClient::State {
++  struct PipeWireDevice {
++    raw_ptr<State> state = nullptr;
++    raw_ptr<pw_device> device = nullptr;
++    pipewire_audio::RouteSnapshot routes;
++    int request_seq = 0;
++    int sync_seq = -1;
++    bool query_failed = true;
++    spa_hook listener = {};
++  };
++
+   struct PipeWireNode {
+     uint32_t pipewire_id = 0;
++    uint32_t device_id = SPA_ID_INVALID;
++    uint32_t profile_device = SPA_ID_INVALID;
+     uint64_t cras_node_id = 0;
+     uint64_t stable_device_id = 0;
+     raw_ptr<State> state = nullptr;
+@@ -297,6 +314,7 @@ struct PipeWireCrasAudioClient::State {
+     std::string node_latency;
+     int32_t volume = 100;
+     bool muted = false;
++    pipewire_audio::Props node_props;
+     uint64_t plugged_time = 0;
+     raw_ptr<pw_node> node = nullptr;
+     spa_hook listener = {};
+@@ -384,6 +402,12 @@ struct PipeWireCrasAudioClient::State {
+     }
+     nodes.clear();
+ 
++    for (auto& [id, device] : devices) {
++      spa_hook_remove(&device.listener);
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(device.device.get()));
++    }
++    devices.clear();
++
+     if (metadata) {
+       spa_hook_remove(&metadata_listener);
+       pw_proxy_destroy(reinterpret_cast<pw_proxy*>(metadata.get()));
+@@ -490,6 +514,11 @@ struct PipeWireCrasAudioClient::State {
+       return;
+     }
+ 
++    node.device_id =
++        pipewire_audio::ParseId(DictString(props, PW_KEY_DEVICE_ID));
++    node.profile_device =
++        pipewire_audio::ParseId(DictString(props, "card.profile.device"));
++
+     std::string node_name = DictString(props, PW_KEY_NODE_NAME);
+     if (!node_name.empty()) {
+       node.node_name = node_name;
+@@ -545,50 +574,37 @@ struct PipeWireCrasAudioClient::State {
+             DictString(props, PW_KEY_NODE_NAME));
+   }
+ 
+-  void RefreshNodeInfoLocked(PipeWireNode& node, const pw_node_info* info)
++  NodeParamChange RefreshNodeInfoLocked(PipeWireNode& node,
++                                        const pw_node_info* info)
+       EXCLUSIVE_LOCKS_REQUIRED(lock) {
+     RefreshNodeIdentityLocked(node, info->props);
++    auto change = ApplyEffectivePropsLocked(node);
+     RebuildAudioStateLocked();
++    return change;
++  }
++
++  const pipewire_audio::Route* FindRouteLocked(const PipeWireNode& node) const
++      EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    auto device = devices.find(node.device_id);
++    return device == devices.end() ? nullptr
++                                   : device->second.routes.Find(
++                                         node.device_id, node.profile_device,
++                                         node.is_input ? SPA_DIRECTION_INPUT
++                                                       : SPA_DIRECTION_OUTPUT);
+   }
+ 
+-  NodeParamChange ApplyPropsParamLocked(PipeWireNode& node,
+-                                        const spa_pod* param)
++  NodeParamChange ApplyEffectivePropsLocked(PipeWireNode& node)
+       EXCLUSIVE_LOCKS_REQUIRED(lock) {
+     NodeParamChange change;
+     change.is_input = node.is_input;
+     change.node_id = node.cras_node_id;
+-    change.volume = node.volume;
+-    change.muted = node.muted;
+-
+-    if (!param) {
+-      return change;
+-    }
+-
+-    bool muted = node.muted;
+     const int32_t previous_volume = node.volume;
+     const bool previous_muted = node.muted;
+-    uint32_t child_size = 0;
+-    uint32_t child_type = 0;
+-    uint32_t n_values = 0;
+-    const void* values = nullptr;
+-
+-    uint32_t object_id = SPA_PARAM_Props;
+-    spa_pod_parse_object(
+-        param, SPA_TYPE_OBJECT_Props, &object_id, SPA_PROP_mute,
+-        SPA_POD_OPT_Bool(&muted), SPA_PROP_channelVolumes,
+-        SPA_POD_OPT_Array(&child_size, &child_type, &n_values, &values));
+-
+-    node.muted = muted;
+-    if (values && child_type == SPA_TYPE_Float && child_size == sizeof(float) &&
+-        n_values > 0 && n_values <= kMaxAudioChannels) {
+-      // PipeWire's SPA parser returns array payloads as an untyped C pointer.
+-      // Bound the channel count before reintroducing the float span.
+-      auto volumes = UNSAFE_BUFFERS(
+-          base::span(static_cast<const float*>(values), n_values));
+-      const float sum = std::accumulate(volumes.begin(), volumes.end(), 0.0f);
+-      node.volume = PercentFromVolume(sum / n_values);
+-    }
+-    RebuildAudioStateLocked();
++    const auto* route = FindRouteLocked(node);
++    const auto level = pipewire_audio::ReadLevel(route, node.node_props,
++                                                 {node.volume, node.muted});
++    node.volume = level.volume;
++    node.muted = level.muted;
+ 
+     change.is_active =
+         node.cras_node_id ==
+@@ -600,6 +616,35 @@ struct PipeWireCrasAudioClient::State {
+     return change;
+   }
+ 
++  std::vector<NodeParamChange> RefreshEffectivePropsLocked()
++      EXCLUSIVE_LOCKS_REQUIRED(lock) {
++    std::vector<NodeParamChange> changes;
++    for (auto& [id, node] : nodes) {
++      changes.push_back(ApplyEffectivePropsLocked(node));
++    }
++    RebuildAudioStateLocked();
++    return changes;
++  }
++
++  void PostParamChanges(const std::vector<NodeParamChange>& changes) {
++    for (const auto& change : changes) {
++      if (change.volume_changed) {
++        if (change.is_input) {
++          PostInputNodeGainChanged(change.node_id, change.volume);
++        } else {
++          PostOutputNodeVolumeChanged(change.node_id, change.volume);
++        }
++      }
++      if (change.mute_changed && change.is_active) {
++        if (change.is_input) {
++          PostInputMuteChanged(change.muted);
++        } else {
++          PostOutputMuteChanged(change.muted);
++        }
++      }
++    }
++  }
++
+   void PostNodesChangedIfNeeded() {
+     bool should_post = false;
+     {
+@@ -652,10 +697,27 @@ struct PipeWireCrasAudioClient::State {
+ 
+   static void OnCoreDone(void* data, uint32_t id, int seq) {
+     auto* state = static_cast<State*>(data);
++    if (id != PW_ID_CORE) {
++      return;
++    }
+     if (id == PW_ID_CORE && seq == state->sync_seq) {
+       state->initial_sync_done = true;
+       pw_thread_loop_signal(state->thread_loop.get(), false);
+     }
++    std::vector<NodeParamChange> changes;
++    {
++      base::AutoLock locked(state->lock);
++      for (auto& [device_id, device] : state->devices) {
++        if (device.sync_seq == seq &&
++            device.routes.Complete(device.request_seq)) {
++          device.sync_seq = -1;
++          device.query_failed = false;
++          changes = state->RefreshEffectivePropsLocked();
++          break;
++        }
++      }
++    }
++    state->PostParamChanges(changes);
+   }
+ 
+   static void OnCoreError(void* data,
+@@ -679,6 +741,32 @@ struct PipeWireCrasAudioClient::State {
+       return;
+     }
+ 
++    if (std::string(type) == PW_TYPE_INTERFACE_Device &&
++        DictString(props, PW_KEY_MEDIA_CLASS) == "Audio/Device") {
++      auto* proxy = static_cast<pw_device*>(
++          pw_registry_bind(state->registry.get(), id, type,
++                           std::min<uint32_t>(version, PW_VERSION_DEVICE), 0));
++      if (!proxy) {
++        return;
++      }
++      PipeWireDevice* stored = nullptr;
++      {
++        base::AutoLock locked(state->lock);
++        auto [entry, inserted] = state->devices.try_emplace(id);
++        if (!inserted) {
++          pw_proxy_destroy(reinterpret_cast<pw_proxy*>(proxy));
++          return;
++        }
++        stored = &entry->second;
++        stored->state = state;
++        stored->device = proxy;
++        stored->routes = pipewire_audio::RouteSnapshot(id);
++      }
++      PipeWireDeviceAddListener(proxy, &stored->listener, &kDeviceEvents,
++                                stored);
++      return;
++    }
++
+     if (std::string(type) == PW_TYPE_INTERFACE_Metadata) {
+       // AuraDE compatibility: PipeWire can expose more than one metadata
+       // object. A single CRAS client only needs the default metadata, and a
+@@ -763,6 +851,7 @@ struct PipeWireCrasAudioClient::State {
+       base::AutoLock locked(state->lock);
+       auto node_iter = state->nodes.emplace(id, std::move(node)).first;
+       stored_node = &node_iter->second;
++      state->ApplyEffectivePropsLocked(*stored_node);
+       state->RebuildAudioStateLocked();
+     }
+     PipeWireNodeAddListener(stored_node->node.get(), &stored_node->listener,
+@@ -779,9 +868,20 @@ struct PipeWireCrasAudioClient::State {
+     bool changed = false;
+     pw_metadata* metadata_to_destroy = nullptr;
+     pw_node* node_to_destroy = nullptr;
++    pw_device* device_to_destroy = nullptr;
++    std::vector<NodeParamChange> changes;
+     {
+       base::AutoLock locked(state->lock);
+-      if (id == state->metadata_id) {
++      auto device = state->devices.find(id);
++      if (device != state->devices.end()) {
++        spa_hook_remove(&device->second.listener);
++        device_to_destroy = device->second.device;
++        // The thread-loop lock excludes setters and callbacks until the proxy
++        // is destroyed. Its listener must go before its callback data does.
++        state->devices.erase(device);
++        changes = state->RefreshEffectivePropsLocked();
++        changed = true;
++      } else if (id == state->metadata_id) {
+         if (state->metadata) {
+           spa_hook_remove(&state->metadata_listener);
+           metadata_to_destroy = state->metadata;
+@@ -807,6 +907,10 @@ struct PipeWireCrasAudioClient::State {
+     if (node_to_destroy) {
+       pw_proxy_destroy(reinterpret_cast<pw_proxy*>(node_to_destroy));
+     }
++    if (device_to_destroy) {
++      pw_proxy_destroy(reinterpret_cast<pw_proxy*>(device_to_destroy));
++    }
++    state->PostParamChanges(changes);
+     if (changed) {
+       state->PostNodesChangedIfNeeded();
+     }
+@@ -846,13 +950,90 @@ struct PipeWireCrasAudioClient::State {
+       return;
+     }
+     State* state = node_data->state;
++    NodeParamChange change;
+     {
+       base::AutoLock locked(state->lock);
+-      state->RefreshNodeInfoLocked(*node_data, info);
++      change = state->RefreshNodeInfoLocked(*node_data, info);
+     }
++    state->PostParamChanges({change});
+     state->PostNodesChangedIfNeeded();
+   }
+ 
++  static void OnDeviceInfo(void* data, const pw_device_info* info) {
++    auto* device = static_cast<PipeWireDevice*>(data);
++    if (!device || !device->state || !info ||
++        !(info->change_mask & PW_DEVICE_CHANGE_MASK_PARAMS)) {
++      return;
++    }
++    auto* state = device->state.get();
++    bool readable = false;
++    if (info->params && info->n_params <= 128) {
++      // PipeWire sends initial info and changed parameter serials to every
++      // bound device, including clients without a parameter subscription.
++      // Device info invalidates Route when its serial changes. An explicit
++      // enumeration plus core sync also reports the disappearance of every
++      // route, which individual subscribed parameter events cannot express.
++      for (const auto& param :
++           UNSAFE_BUFFERS(base::span(info->params, info->n_params))) {
++        if (param.id == SPA_PARAM_Route &&
++            (param.flags & SPA_PARAM_INFO_READ)) {
++          readable = true;
++        }
++      }
++    }
++    std::vector<NodeParamChange> changes;
++    if (!readable) {
++      {
++        base::AutoLock locked(state->lock);
++        device->routes.Clear();
++        device->sync_seq = -1;
++        device->query_failed = false;
++        changes = state->RefreshEffectivePropsLocked();
++      }
++      state->PostParamChanges(changes);
++      return;
++    }
++    int request = 0;
++    {
++      base::AutoLock locked(state->lock);
++      if (state->route_request_seq == std::numeric_limits<int>::max()) {
++        state->route_request_seq = 0;
++      }
++      request = ++state->route_request_seq;
++      device->request_seq = request;
++      device->routes.Begin(request);
++    }
++    const int enumerated =
++        PipeWireDeviceEnumRoutes(device->device.get(), request);
++    const int sync = enumerated < 0
++                         ? -1
++                         : PipeWireCoreSync(state->core.get(), PW_ID_CORE, 0);
++    {
++      base::AutoLock locked(state->lock);
++      device->sync_seq = sync;
++      device->query_failed = sync < 0;
++      if (sync < 0) {
++        device->routes.Clear();
++        changes = state->RefreshEffectivePropsLocked();
++      }
++    }
++    state->PostParamChanges(changes);
++  }
++
++  static void OnDeviceParam(void* data,
++                            int seq,
++                            uint32_t id,
++                            uint32_t index,
++                            uint32_t next,
++                            const spa_pod* param) {
++    auto* device = static_cast<PipeWireDevice*>(data);
++    if (!device || !device->state || id != SPA_PARAM_Route) {
++      return;
++    }
++    base::AutoLock locked(device->state->lock);
++    device->routes.Add(seq, param);
++  }
++
+   static void OnNodeParam(void* data,
+                           int seq,
+                           uint32_t id,
+@@ -870,34 +1051,29 @@ struct PipeWireCrasAudioClient::State {
+     NodeParamChange change;
+     {
+       base::AutoLock locked(state->lock);
+-      change = state->ApplyPropsParamLocked(*node_data, param);
+-    }
+-    if (change.volume_changed) {
+-      if (change.is_input) {
+-        state->PostInputNodeGainChanged(change.node_id, change.volume);
+-      } else {
+-        state->PostOutputNodeVolumeChanged(change.node_id, change.volume);
+-      }
+-    }
+-    if (change.mute_changed && change.is_active) {
+-      if (change.is_input) {
+-        state->PostInputMuteChanged(change.muted);
+-      } else {
+-        state->PostOutputMuteChanged(change.muted);
++      pipewire_audio::Props props;
++      if (!pipewire_audio::ReadProps(param, &props)) {
++        return;
+       }
++      pipewire_audio::MergeProps(props, &node_data->node_props);
++      change = state->ApplyEffectivePropsLocked(*node_data);
++      state->RebuildAudioStateLocked();
+     }
++    state->PostParamChanges({change});
+   }
+ 
+   static const pw_core_events kCoreEvents;
+   static const pw_registry_events kRegistryEvents;
+   static const pw_metadata_events kMetadataEvents;
+   static const pw_node_events kNodeEvents;
++  static const pw_device_events kDeviceEvents;
+ 
+   mutable base::Lock lock;
+   bool started = false;
+   bool initial_sync_done = false;
+   bool core_failed = false;
+   int sync_seq = 0;
++  int route_request_seq = 0;
+ 
+   raw_ptr<pw_thread_loop> thread_loop = nullptr;
+   raw_ptr<pw_context> context = nullptr;
+@@ -910,6 +1086,7 @@ struct PipeWireCrasAudioClient::State {
+   spa_hook metadata_listener = {};
+ 
+   std::map<uint32_t, PipeWireNode> nodes;
++  std::map<uint32_t, PipeWireDevice> devices;
+   std::map<uint64_t, uint32_t> pipewire_id_by_cras_id;
+   std::map<uint64_t, std::string> name_by_cras_id;
+   AudioNodeList node_list;
+@@ -953,6 +1130,12 @@ const pw_node_events PipeWireCrasAudioClient::State::kNodeEvents = {
+     PipeWireCrasAudioClient::State::OnNodeParam,
+ };
+ 
++const pw_device_events PipeWireCrasAudioClient::State::kDeviceEvents = {
++    PW_VERSION_DEVICE_EVENTS,
++    PipeWireCrasAudioClient::State::OnDeviceInfo,
++    PipeWireCrasAudioClient::State::OnDeviceParam,
++};
++
+ bool PipeWireCrasAudioClient::Initialize() {
+   auto* client = new PipeWireCrasAudioClient();
+   if (!client->Start()) {
+@@ -1185,6 +1368,15 @@ bool PipeWireCrasAudioClient::SetNodeProps(uint64_t node_id,
+ 
+   pw_thread_loop_lock(loop);
+   pw_node* node = nullptr;
++  pw_device* device = nullptr;
++  // A rejected asynchronous request also arrives through OnCoreError. A later
++  // empty sync must not turn that failure into permission to set another gain.
++  if (state_->core_failed) {
++    pw_thread_loop_unlock(loop);
++    return false;
++  }
++  std::optional<pipewire_audio::Route> route;
++  bool routes_loading = false;
+   uint32_t channels = 2;
+   {
+     base::AutoLock locked(state_->lock);
+@@ -1192,53 +1384,46 @@ bool PipeWireCrasAudioClient::SetNodeProps(uint64_t node_id,
+     if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
+       auto pipewire_node = state_->nodes.find(pipewire_id->second);
+       if (pipewire_node != state_->nodes.end()) {
+-        node = pipewire_node->second.node;
+-        channels = std::max(pipewire_node->second.channels, 1u);
++        const auto& info = pipewire_node->second;
++        node = info.node;
++        channels = info.channels;
++        const auto device_iter = state_->devices.find(info.device_id);
++        if (device_iter != state_->devices.end()) {
++          routes_loading = device_iter->second.routes.loading() ||
++                           device_iter->second.query_failed;
++          if (const auto* selected = state_->FindRouteLocked(info)) {
++            route = *selected;
++            device = device_iter->second.device;
++            channels = route->props.volumes.size();
++          }
++        }
+       }
+     }
+   }
+-  if (!node) {
++  // Do not write the software node during a hardware profile transition. A
++  // second gain would multiply the restored route volume once it arrives.
++  if (!node || routes_loading) {
+     pw_thread_loop_unlock(loop);
+     return false;
+   }
+ 
+-  uint8_t buffer[512];
+-  spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+-  spa_pod_frame frame;
+-  spa_pod_builder_push_object(&builder, &frame, SPA_TYPE_OBJECT_Props,
+-                              SPA_PARAM_Props);
+-  if (mute.has_value()) {
+-    spa_pod_builder_prop(&builder, SPA_PROP_mute, 0);
+-    spa_pod_builder_bool(&builder, *mute);
+-  }
+-  if (volume.has_value()) {
+-    std::vector<float> channel_volumes(channels, VolumeFromPercent(*volume));
+-    spa_pod_builder_prop(&builder, SPA_PROP_channelVolumes, 0);
+-    spa_pod_builder_array(&builder, sizeof(float), SPA_TYPE_Float, channels,
+-                          channel_volumes.data());
+-  }
+-  const spa_pod* pod =
+-      static_cast<const spa_pod*>(spa_pod_builder_pop(&builder, &frame));
+-
+-  const int result = PipeWireNodeSetParam(node, SPA_PARAM_Props, 0, pod);
++  const bool accepted = pipewire_audio::WriteProps(
++      route ? &*route : nullptr, channels, volume, mute,
++      [device](const spa_pod* pod) {
++        return PipeWireDeviceSetRoute(device, pod);
++      },
++      [node](const spa_pod* pod) {
++        return PipeWireNodeSetParam(node, SPA_PARAM_Props, 0, pod);
++      });
+   pw_thread_loop_unlock(loop);
+-  return result >= 0;
++  return accepted;
+ }
+ 
+ void PipeWireCrasAudioClient::SetOutputNodeVolume(uint64_t node_id,
+                                                   int32_t volume) {
+-  if (!SetNodeProps(node_id, std::clamp(volume, 0, 100), std::nullopt)) {
+-    return;
+-  }
+-  {
+-    base::AutoLock locked(state_->lock);
+-    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
+-    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
+-      state_->nodes[pipewire_id->second].volume = std::clamp(volume, 0, 100);
+-      state_->RebuildAudioStateLocked();
+-    }
+-  }
+-  state_->PostOutputNodeVolumeChanged(node_id, std::clamp(volume, 0, 100));
++  // The parameter callback reports the accepted hardware value. A queued or
++  // rejected request is not a volume change, and must not be announced as one.
++  SetNodeProps(node_id, std::clamp(volume, 0, 100), std::nullopt);
+ }
+ 
+ void PipeWireCrasAudioClient::SetOutputUserMute(bool mute_on) {
+@@ -1250,32 +1435,10 @@ void PipeWireCrasAudioClient::SetOutputUserMute(bool mute_on) {
+   if (node_id) {
+     SetNodeProps(node_id, std::nullopt, mute_on);
+   }
+-  {
+-    base::AutoLock locked(state_->lock);
+-    state_->volume_state.output_user_mute = mute_on;
+-    state_->volume_state.output_system_mute = mute_on;
+-    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
+-    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
+-      state_->nodes[pipewire_id->second].muted = mute_on;
+-      state_->RebuildAudioStateLocked();
+-    }
+-  }
+-  state_->PostOutputMuteChanged(mute_on);
+ }
+ 
+ void PipeWireCrasAudioClient::SetInputNodeGain(uint64_t node_id, int32_t gain) {
+-  if (!SetNodeProps(node_id, std::clamp(gain, 0, 100), std::nullopt)) {
+-    return;
+-  }
+-  {
+-    base::AutoLock locked(state_->lock);
+-    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
+-    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
+-      state_->nodes[pipewire_id->second].volume = std::clamp(gain, 0, 100);
+-      state_->RebuildAudioStateLocked();
+-    }
+-  }
+-  state_->PostInputNodeGainChanged(node_id, std::clamp(gain, 0, 100));
++  SetNodeProps(node_id, std::clamp(gain, 0, 100), std::nullopt);
+ }
+ 
+ void PipeWireCrasAudioClient::SetInputMute(bool mute_on) {
+@@ -1287,16 +1450,6 @@ void PipeWireCrasAudioClient::SetInputMute(bool mute_on) {
+   if (node_id) {
+     SetNodeProps(node_id, std::nullopt, mute_on);
+   }
+-  {
+-    base::AutoLock locked(state_->lock);
+-    state_->volume_state.input_mute = mute_on;
+-    auto pipewire_id = state_->pipewire_id_by_cras_id.find(node_id);
+-    if (pipewire_id != state_->pipewire_id_by_cras_id.end()) {
+-      state_->nodes[pipewire_id->second].muted = mute_on;
+-      state_->RebuildAudioStateLocked();
+-    }
+-  }
+-  state_->PostInputMuteChanged(mute_on);
+ }
+ 
+ void PipeWireCrasAudioClient::GetAudioEffectDlcs(
