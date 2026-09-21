@@ -83,8 +83,9 @@ probe() {
   # them could pass on a value left behind by the previous case.
   env -u DISPLAY -u WAYLAND_DISPLAY AURADE_PROBE_GL_TIMEOUT=0.2 \
     AURADE_PROBE_DRI_DIR="$1" AURADE_PROBE_MEMINFO="$2" \
-    AURADE_PROBE_MIN_GUI_MIB="${3:-6144}" AURADE_FORCE_TUI="${4:-0}" \
+    AURADE_PROBE_MIN_GUI_MIB="${3:-4096}" AURADE_FORCE_TUI="${4:-0}" \
     AURADE_PROBE_DRM_DIR="${5:-$TMP/drm-empty}" PATH="${6:-$PATH}" \
+    AURADE_FORCE_GUI="${7:-0}" \
     bash -c '
       set -Eeuo pipefail
       . '"$ROOT"'/installer/lib/aurade-probe.sh
@@ -139,6 +140,23 @@ IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/mem
 check 'low memory renderer' "$renderer" tui
 check 'low memory reason' "$reason" low-memory
 check 'low memory does not predict a black screen' "$black" no
+
+# --- low memory, but the operator forced the graphical path -----------------
+# AURADE_FORCE_GUI overrides the checks where the compositor can still start.
+# Low memory is one of them: it only ever described the live image, never the
+# installed disk, so forcing past it risks a tight live session and nothing more.
+IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/meminfo.small" 4096 0 "$TMP/drm-empty" "$PATH" 1)
+check 'forced gui past low memory renderer' "$renderer" gui
+check 'forced gui past low memory reason' "$reason" ok
+
+# --- force cannot conjure a GPU: a missing render node stays text ------------
+# The black-screen guarantee outranks the override. Forcing a compositor onto a
+# machine with no render node would only install one that boots to black, which
+# is the failure the probe exists to prevent, so force must not reach it.
+IFS='|' read -r renderer reason black graphics < <(probe "$TMP/absent" "$TMP/meminfo.big" 4096 0 "$TMP/drm-empty" "$PATH" 1)
+check 'forced gui cannot override a missing GPU renderer' "$renderer" tui
+check 'forced gui cannot override a missing GPU reason' "$reason" no-dri-dir
+check 'forced gui still predicts a black screen' "$black" yes
 
 # --- render node and memory both fine ---------------------------------------
 IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/meminfo.big")
