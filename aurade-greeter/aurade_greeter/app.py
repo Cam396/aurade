@@ -2751,7 +2751,11 @@ class GreeterWindow(Adw.ApplicationWindow):
         return C.WRONG
 
     def _restart_attempt(self) -> None:
-        """greetd ends the attempt on a refusal, so the next try needs a new one."""
+        """The refused attempt is over, so the next try needs a new one.
+
+        greetd does not end a refused attempt by itself; the protocol cancels
+        it as it reads the refusal, and only then will greetd begin another.
+        """
         name = self.chosen.name if self.chosen else self.typed_name
         if name and self.transport is not None:
             session = P.Session(self.transport)

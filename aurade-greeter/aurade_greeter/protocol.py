@@ -325,11 +325,30 @@ class Session:
                 self.state = self.CLOSED
                 self.prompt = None
                 if reply.get("error_type") == "auth_error":
+                    self._clear_refused()
                     raise AuthFailed(_description(
                         reply, "that did not sign you in"))
                 raise GreeterError(_description(
                     reply, "the login service could not sign you in"))
             raise GreeterError("the login service answered something unexpected")
+
+    def _clear_refused(self) -> None:
+        """Tell greetd the refused attempt is over.
+
+        greetd keeps an attempt it has refused configured until it is
+        cancelled, and answers the next ``create_session`` with "a session is
+        already being configured". The greeter read that as a service that had
+        died, told the person to restart the computer, and a single mistyped
+        password kept everybody out until somebody did. greetd's own answer
+        to this cancel is an error as well, because the PAM conversation
+        behind the attempt has already gone, and it clears the attempt all
+        the same, so it is read and dropped.
+        """
+        try:
+            self.transport.send({"type": "cancel_session"})
+            self.transport.receive()
+        except GreeterError:
+            pass
 
     def _auth_message(self, reply: dict[str, Any]) -> Prompt | None:
         kind = reply.get("auth_message_type")
