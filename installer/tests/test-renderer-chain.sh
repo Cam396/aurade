@@ -166,11 +166,26 @@ cat >"$TMP/stub/cage" <<'STUB'
 printf 'cage renderer=%s devices=%s gsk=%s disable=%s\n' \
   "${WLR_RENDERER:-unset}" "${WLR_DRM_DEVICES:-none}" \
   "${GSK_RENDERER:-default}" "${GDK_DISABLE:-none}" >>"$AURADE_TEST_LOG"
+# A compositor that comes up on the device and then draws nothing: no ready
+# file is ever written and the process never exits. `exec sleep` so the process
+# the launcher watches is the one a signal reaches, the way stopping the real
+# cage stops the real compositor rather than orphaning it.
+if [[ -n ${AURADE_TEST_HANG_RENDERER:-} \
+      && ${WLR_RENDERER:-} == "$AURADE_TEST_HANG_RENDERER" ]]; then
+  exec sleep 120
+fi
 if [[ ${WLR_RENDERER:-} != "${AURADE_TEST_WORKING_RENDERER:-never}" ]]; then
   exit 1     # the compositor never started: nothing is drawn
 fi
+# A window that takes a moment to put its first frame up, so a test can land
+# that frame while the launcher is mid-wait rather than before it starts.
+[[ -z ${AURADE_TEST_DRAW_AFTER:-} ]] || sleep "$AURADE_TEST_DRAW_AFTER"
 # The compositor drew. This is what the real front end writes on first map.
 printf 'mapped\n' >"$AURADE_GUI_READY_FILE"
+# A drawn window that the person then sits in front of for longer than the
+# first-frame budget. Once it is mapped the launcher must wait it out, not
+# reclaim it, however small that budget was.
+[[ -z ${AURADE_TEST_DRAW_THEN_SLEEP:-} ]] || sleep "$AURADE_TEST_DRAW_THEN_SLEEP"
 if [[ -n ${AURADE_TEST_WORKING_GSK:-} \
       && ${GSK_RENDERER:-default} != "$AURADE_TEST_WORKING_GSK" ]]; then
   exit 1     # a window, then GTK dies on it: the client side, not the renderer
@@ -183,20 +198,30 @@ chmod +x "$TMP/bin/aurade-installer-gui" "$TMP/bin/aurade-installer-tui" "$TMP/s
 
 run_launcher() {
   : >"$TMP/log"
+  # An optional outer bound, set only by the cases that drive a renderer which
+  # hangs. It turns a launcher that regressed back into hanging into a fast
+  # failure of this test instead of a stalled suite; the other cases leave it
+  # unset and run unbounded, exactly as before.
+  local guard=()
+  [[ -z ${AURADE_TEST_LAUNCH_TIMEOUT:-} ]] || guard=(timeout "$AURADE_TEST_LAUNCH_TIMEOUT")
   # No DISPLAY and no WAYLAND_DISPLAY, because the launcher has a deliberate
   # shortcut for "already inside a session with a display" that runs the front
   # end directly and never starts a compositor. The build host has an X display
   # and the installation image does not, so without this the whole chain is
   # skipped and every assertion below passes on an empty log.
-  env -u DISPLAY -u WAYLAND_DISPLAY -u WLR_RENDERER -u GSK_RENDERER \
+  "${guard[@]}" env -u DISPLAY -u WAYLAND_DISPLAY -u WLR_RENDERER -u GSK_RENDERER \
     -u XDG_SESSION_ID \
     AURADE_SEAT_SOCKET="${AURADE_TEST_CASE_SEAT-$AURADE_TEST_SEAT_SOCKET}" \
     AURADE_TEST_LOG="$TMP/log" PATH="$TMP/stub:$PATH" \
     AURADE_RENDERER_DRI_DIR="$AURADE_RENDERER_DRI_DIR" \
     AURADE_RENDERER_DRM_DIR="$AURADE_RENDERER_DRM_DIR" \
     AURADE_RENDERER_VULKAN_DIR="$AURADE_RENDERER_VULKAN_DIR" \
+    ${AURADE_RENDERER_DRAW_TIMEOUT:+AURADE_RENDERER_DRAW_TIMEOUT="$AURADE_RENDERER_DRAW_TIMEOUT"} \
     ${AURADE_TEST_WORKING_RENDERER:+AURADE_TEST_WORKING_RENDERER="$AURADE_TEST_WORKING_RENDERER"} \
     ${AURADE_TEST_WORKING_GSK:+AURADE_TEST_WORKING_GSK="$AURADE_TEST_WORKING_GSK"} \
+    ${AURADE_TEST_HANG_RENDERER:+AURADE_TEST_HANG_RENDERER="$AURADE_TEST_HANG_RENDERER"} \
+    ${AURADE_TEST_DRAW_AFTER:+AURADE_TEST_DRAW_AFTER="$AURADE_TEST_DRAW_AFTER"} \
+    ${AURADE_TEST_DRAW_THEN_SLEEP:+AURADE_TEST_DRAW_THEN_SLEEP="$AURADE_TEST_DRAW_THEN_SLEEP"} \
     ${AURADE_TEST_STAGE:+AURADE_TEST_STAGE="$AURADE_TEST_STAGE"} \
     ${AURADE_TEST_GUI_STATUS:+AURADE_TEST_GUI_STATUS="$AURADE_TEST_GUI_STATUS"} \
     AURADE_NOTES_FILE="$AURADE_NOTES_FILE" \
@@ -209,6 +234,11 @@ reset_case() {
   AURADE_TEST_WORKING_GSK=
   AURADE_TEST_STAGE=
   AURADE_TEST_GUI_STATUS=
+  AURADE_TEST_HANG_RENDERER=
+  AURADE_TEST_DRAW_AFTER=
+  AURADE_TEST_DRAW_THEN_SLEEP=
+  AURADE_RENDERER_DRAW_TIMEOUT=
+  AURADE_TEST_LAUNCH_TIMEOUT=
 }
 
 # Nothing but pixman works: every earlier renderer is attempted, in order, and
@@ -361,6 +391,55 @@ run_launcher
   fail 'a front end that declined to draw was retried under other renderers'
 grep -q 'text installer ran' "$TMP/log" || \
   fail 'a front end that declined to draw did not reach the text installer'
+
+# A compositor that comes up on the graphics device and then draws nothing is
+# the one stall the stage machine above cannot see: no window is ever mapped, so
+# `mapped` is never written, and without a bound on the wait for that first
+# frame the chain would sit on a black screen forever instead of walking on.
+# Here the first renderer hangs like that and a later one draws; the launcher
+# has to give up on the hung one and arrive at the working screen. The launch
+# timeout turns a regression back into hanging into a fast failure of this test
+# rather than a stalled suite.
+reset_case
+AURADE_TEST_HANG_RENDERER=vulkan
+AURADE_TEST_WORKING_RENDERER=pixman
+AURADE_RENDERER_DRAW_TIMEOUT=2
+AURADE_TEST_LAUNCH_TIMEOUT=45
+run_launcher
+grep -q 'renderer=vulkan' "$TMP/log" || \
+  fail 'the launcher never reached the renderer that hangs'
+grep -q 'drew nothing in' "$TMP/log" || \
+  fail 'a renderer that came up and drew nothing was not bounded'
+grep -q 'renderer=pixman' "$TMP/log" || \
+  fail 'a renderer that came up and drew nothing stalled the whole chain'
+grep -q 'text installer ran' "$TMP/log" && \
+  fail 'a recoverable hang was sent to text instead of the renderer that works'
+
+# The mirror image, and the one that matters for the rule that nothing on a
+# screen expires: once a window is drawn the wait for it is unbounded, however
+# small the first-frame budget was. This case draws late on purpose - the frame
+# lands in the last second of the budget, after the launcher's last look for it
+# but before it gives up - and then the window stays up well past the budget, as
+# it would while somebody reads it. So it pins two things at once: a frame that
+# arrives during that final second is still counted, and a window that has drawn
+# is waited out and its clean exit honoured, never reclaimed to try another
+# renderer underneath a person already using this one. With a budget of three
+# the frame at two and a half seconds is missed by the poll at two and caught
+# only by the check made just before giving up; drop that check and this case
+# fails, which is what keeps it.
+reset_case
+AURADE_TEST_WORKING_RENDERER=vulkan
+AURADE_TEST_DRAW_AFTER=2.5
+AURADE_TEST_DRAW_THEN_SLEEP=3
+AURADE_RENDERER_DRAW_TIMEOUT=3
+AURADE_TEST_LAUNCH_TIMEOUT=45
+run_launcher
+(( $(grep -c '^cage ' "$TMP/log") == 1 )) || \
+  fail 'a drawn window that outlived the first-frame budget was reclaimed and another renderer tried'
+grep -q 'drew nothing in' "$TMP/log" && \
+  fail 'a window that drew in the final second of the budget was called a compositor that drew nothing'
+grep -q 'text installer ran' "$TMP/log" && \
+  fail 'a drawn window that outlived the budget was dropped to the text installer'
 
 # An explicit choice is honoured rather than overridden. This is the command
 # the user had to type before any of this existed, and it must still mean what
