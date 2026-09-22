@@ -27,6 +27,8 @@ import socket
 import struct
 import sys
 import time
+import urllib.error
+import urllib.request
 
 TESTS = os.path.dirname(os.path.realpath(__file__))
 PACKAGE = os.path.normpath(os.path.join(TESTS, ".."))
@@ -122,6 +124,26 @@ def seed_weather() -> None:
 
 
 seed_weather()
+
+
+def no_network(*_args, **_kwargs):
+    """What every request this file could make gets, which is no answer.
+
+    The fresh cache keeps the forecast from asking. It does not keep the
+    warnings from asking, and it is not meant to: they refresh on a clock of
+    their own, a minute apart, because a tornado warning cannot wait for the
+    forecast to go stale. The suite builds one window and keeps it for every
+    test, so that clock runs for the whole run. On a machine with a route out,
+    a real answer from the weather service landed partway through the alerts
+    test and repainted the panel it was counting rows on, and the test failed
+    or passed depending on which half of it the answer arrived in. A refused
+    request is the case the greeter already handles by keeping what is on
+    screen, so refusing all of them costs no test anything.
+    """
+    raise urllib.error.URLError("the runtime test has no network")
+
+
+urllib.request.urlopen = no_network
 
 
 def check(condition: bool, message: str) -> None:

@@ -31,6 +31,14 @@ export GTK_USE_PORTAL=0 GIO_USE_VFS=local GTK_A11Y=none NO_AT_BRIDGE=1
 export GTK_IM_MODULE=gtk-im-context-simple
 unset DBUS_SESSION_BUS_ADDRESS DISPLAY
 
+# Nor the desktop of whoever runs it. GTK reads its settings from the caller's
+# own config directory, so a desktop that turns animations off there turned
+# them off here too. The greeter takes that as a request for stillness, and
+# the tests that watch things move failed for a reason that was about the
+# person running them rather than about the product. The same file carries a
+# display scale, which moves every size the layout tests measure.
+export XDG_CONFIG_HOME="$TMP/config"
+
 # A broken or partially installed GI stack can block while probing a display
 # backend instead of returning an import error. Never turn that into an
 # unbounded run. The timeout is generous because a cold font cache on a slow
@@ -71,9 +79,11 @@ export AURADE_GREETER_POWER_COMMAND="/bin/false"
 # The weather, switched on, so the pill and the panel behind it are actually
 # built and can be interrogated. The reading itself is written to the cache by
 # the python side before any window exists, and a cache written a moment ago
-# is fresh, so nothing here reaches the network. A runtime test that asked a
-# weather service would fail on a build host with no route out, which is a
-# test reporting on the machine rather than on the product.
+# is fresh, so the forecast is never asked for. The warnings refresh on their
+# own clock whatever the cache says, so the python side also refuses every
+# request outright. A runtime test that asked a weather service would pass or
+# fail on whether the build host has a route out, which is a test reporting on
+# the machine rather than on the product.
 cat >"$TMP/greeter.conf" <<'EOF'
 weather = on
 weather_place = Ardsley, NY
