@@ -1,0 +1,45 @@
+diff --git a/content/browser/gpu/gpu_data_manager_impl_private.cc b/content/browser/gpu/gpu_data_manager_impl_private.cc
+index 3c714a79b13a..5061e7cc558c 100644
+--- a/content/browser/gpu/gpu_data_manager_impl_private.cc
++++ b/content/browser/gpu/gpu_data_manager_impl_private.cc
+@@ -19,12 +19,15 @@
+ #include <array>
+ #include <iterator>
+ #include <memory>
++#include <optional>
++#include <string>
+ #include <utility>
+ 
+ #include "base/command_line.h"
+ #include "base/containers/adapters.h"
+ #include "base/containers/circular_deque.h"
+ #include "base/debug/dump_without_crashing.h"
++#include "base/environment.h"
+ #include "base/feature_list.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+@@ -478,6 +481,24 @@ void GpuDataManagerImplPrivate::InitializeGpuModes() {
+     fallback_modes_.push_back(gpu::GpuMode::SOFTWARE_GL);
+   }
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: the last resort a desktop Linux build keeps and a
++  // Chromebook is built without. A Chromebook's GPU is known, so a GPU process
++  // that keeps failing there is a fault that a restart should surface. The
++  // AuraDE host session runs on whatever it was installed on, and a GPU that
++  // is present and then fails every time, such as a virtual GPU with no 3D
++  // behind it or a driver that has none, took the whole desktop down once the
++  // last hardware mode had failed. When the session allows it, the GPU process
++  // runs the display compositor alone instead and the desktop composites in
++  // software, which the transport factory already accepts under the same
++  // variable.
++  std::optional<std::string> aura_de_fallback =
++      base::Environment::Create()->GetVar(
++          "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
++  if (aura_de_fallback.has_value() && aura_de_fallback.value() != "0") {
++    fallback_modes_.push_back(gpu::GpuMode::DISPLAY_COMPOSITOR);
++  }
++#endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+   if (command_line->HasSwitch(switches::kDisableGpu)) {
