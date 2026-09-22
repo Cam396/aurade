@@ -486,7 +486,9 @@ grep -Fq 'multi-user.target.wants/seatd.service' "$ROOT/installer/build-iso.sh" 
 # screen somebody sits through.
 install -d "$TMP/dumb-dri" "$TMP/dumb-drm/card0/device" "$TMP/dumb-drm/card0-Virtual-1"
 : >"$TMP/dumb-dri/card0"
-printf 'DRIVER=bochs\n' >"$TMP/dumb-drm/card0/device/uevent"
+# Real kernels publish this driver as `bochs-drm`, not `bochs`; the shortcut
+# has to fire on the name the kernel actually reports, suffix and all.
+printf 'DRIVER=bochs-drm\n' >"$TMP/dumb-drm/card0/device/uevent"
 printf 'connected\n' >"$TMP/dumb-drm/card0-Virtual-1/status"
 
 AURADE_RENDERER_DRI_DIR="$TMP/dumb-dri" AURADE_RENDERER_DRM_DIR="$TMP/dumb-drm" \
