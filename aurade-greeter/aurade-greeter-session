@@ -27,10 +27,30 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # package.
 cd /var/lib/aurade-greeter 2>/dev/null || cd /tmp || exit 1
 
+# A machine with no GPU still gets a login screen. Without a render node this
+# user can open, weston composites with pixman and GTK draws with cairo, the
+# same rule the desktop session follows. Otherwise weston fails to start,
+# greetd starts it again, and the one screen that is the way in never appears.
+# Unlike the desktop, a render node this user cannot open is not refused here:
+# the screen only has to be good enough to sign in to, and the desktop session
+# reports that fault properly once somebody has.
+renderer="${AURADE_WESTON_RENDERER:-auto}"
+have_render=0
+for node in "${AURADE_DRI_DIR:-/dev/dri}"/renderD*; do
+  if [[ -r $node && -w $node ]]; then
+    have_render=1
+    break
+  fi
+done
+if [[ ${AURADE_FORCE_SOFTWARE_RENDERING:-0} == 1 || $have_render == 0 ]]; then
+  renderer="${AURADE_WESTON_RENDERER:-pixman}"
+  export GSK_RENDERER="${GSK_RENDERER:-cairo}"
+fi
+
 exec weston \
   --backend=drm \
   --shell=kiosk-shell.so \
-  --renderer=auto \
+  --renderer="$renderer" \
   --idle-time=0 \
   --continue-without-input \
   -- /usr/bin/aurade-greeter
