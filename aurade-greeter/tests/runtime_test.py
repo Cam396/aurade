@@ -220,6 +220,11 @@ SECRET = {"type": "auth_message", "auth_message_type": "secret",
 OK = {"type": "success"}
 REFUSED = {"type": "error", "error_type": "auth_error",
            "description": "Login incorrect"}
+# greetd 0.10's answer when the refused attempt is cancelled, which it has to
+# be before the next one can begin. An error, and the attempt is cleared anyway.
+CANCELLED = {"type": "error", "error_type": "error",
+             "description": "unable to send message: Connection refused "
+                            "(os error 111)"}
 
 
 def rows(window) -> list:
@@ -694,7 +699,7 @@ def test_a_refused_password_names_the_keyboard(app) -> None:
     Hidden until a password has actually been refused: stated up front it is a
     fact nobody needs, and stated after a refusal it is the answer.
     """
-    window, service = build(app, [SECRET, REFUSED, SECRET])
+    window, service = build(app, [SECRET, REFUSED, CANCELLED, SECRET])
     try:
         line = window.widgets.get("password.layout")
         check(line is not None, "the password page has no layout line")
@@ -788,7 +793,7 @@ def test_the_password_field_never_shows_the_password(app) -> None:
 
 
 def test_a_refused_password_says_so_and_gives_the_field_back(app) -> None:
-    window, service = build(app, [SECRET, REFUSED, SECRET])
+    window, service = build(app, [SECRET, REFUSED, CANCELLED, SECRET])
     try:
         window.choose(window.accounts[0])
         check(pump_until(lambda: not window.busy), "the first prompt never arrived")
@@ -806,6 +811,19 @@ def test_a_refused_password_says_so_and_gives_the_field_back(app) -> None:
               "the refused password is still sitting in the field")
         equal(window.stack.get_visible_child_name(), "password",
               "a refused password threw the person back to the account list")
+        # And the next try has to be able to start. greetd refuses a new
+        # attempt until the refused one is cancelled; without the cancel the
+        # retry failed, the message turned into restart the computer, and it
+        # meant it.
+        check(pump_until(lambda: not window.busy and window.session is not None
+                         and window.session.state == P.Session.ASKING),
+              "after a refused password the next try never got its prompt")
+        equal(window.widgets["password.error"].get_label(), C.WRONG,
+              "the refusal turned into a different message after the retry")
+        kinds = [request["type"] for request in service.requests()]
+        equal(kinds, ["create_session", "post_auth_message_response",
+                      "cancel_session", "create_session"],
+              "the refused attempt was not cancelled before the next began")
     finally:
         pump()
 
