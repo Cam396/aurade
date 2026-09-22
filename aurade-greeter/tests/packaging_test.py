@@ -240,7 +240,28 @@ printf 'arg=%s\\n' "$@" >>"${AURADE_TEST_WESTON_LOG:?}"
 """
 
 
-def _drive_wrapper(scratch: str, render_node: bool) -> str:
+def _virtio_sysfs(scratch: str, virgl: bool) -> str:
+    """A sysfs whose renderD128 is a virtio-gpu, with or without the host's 3D.
+
+    Bit 0 of a virtio device's feature string is VIRTIO_GPU_F_VIRGL.
+    """
+    kind = "virgl" if virgl else "no-virgl"
+    virtio = os.path.join(scratch, "devices", kind, "virtio0")
+    os.makedirs(virtio, exist_ok=True)
+    driver = os.path.join(scratch, "drivers", "virtio_gpu")
+    os.makedirs(driver, exist_ok=True)
+    if not os.path.islink(os.path.join(virtio, "driver")):
+        os.symlink(driver, os.path.join(virtio, "driver"))
+    with open(os.path.join(virtio, "features"), "w", encoding="utf-8") as handle:
+        handle.write(("1" if virgl else "0") + "100000000000000000000000000110010\n")
+    node = os.path.join(scratch, "sysfs-" + kind, "renderD128")
+    os.makedirs(node, exist_ok=True)
+    if not os.path.islink(os.path.join(node, "device")):
+        os.symlink(os.path.dirname(virtio), os.path.join(node, "device"))
+    return os.path.dirname(node)
+
+
+def _drive_wrapper(scratch: str, render_node: bool, sysfs: str = "") -> str:
     stubs = os.path.join(scratch, "bin")
     os.makedirs(stubs, exist_ok=True)
     weston = os.path.join(stubs, "weston")
@@ -258,9 +279,14 @@ def _drive_wrapper(scratch: str, render_node: bool) -> str:
     env = {key: value for key, value in os.environ.items()
            if key not in ("GSK_RENDERER", "AURADE_WESTON_RENDERER",
                           "AURADE_FORCE_SOFTWARE_RENDERING")}
+    # An empty sysfs unless a case brings its own, so nothing here reads the
+    # real one on whatever machine runs it.
+    if not sysfs:
+        sysfs = os.path.join(scratch, "sysfs-none")
+        os.makedirs(sysfs, exist_ok=True)
     env.update(PATH=stubs + os.pathsep + env.get("PATH", "/usr/bin:/bin"),
                AURADE_DRI_DIR=dri, AURADE_TEST_WESTON_LOG=log,
-               XDG_RUNTIME_DIR=scratch)
+               AURADE_SYSFS_DRM=sysfs, XDG_RUNTIME_DIR=scratch)
     subprocess.run(["bash", _wrapper], env=env, check=False,
                    capture_output=True, timeout=30)
     if not os.path.isfile(log):
@@ -283,6 +309,19 @@ if os.path.isfile(_wrapper):
               "a machine with a usable GPU was given a software renderer")
         check("gsk=unset" in _gpu.splitlines(),
               "a machine with a usable GPU had the greeter forced to cairo")
+        # A render node with no 3D behind it is no GPU. On virtio-gpu without
+        # the host's 3D, GTK's software GL starved the screen's own main loop.
+        _bare = _drive_wrapper(_scratch, render_node=True,
+                               sysfs=_virtio_sysfs(_scratch, virgl=False))
+        check("arg=--renderer=pixman" in _bare.splitlines()
+              and "gsk=cairo" in _bare.splitlines(),
+              "virtio-gpu without the host's 3D was treated as a GPU, so the "
+              "login screen renders with software GL and stops answering")
+        _virgl = _drive_wrapper(_scratch, render_node=True,
+                                sysfs=_virtio_sysfs(_scratch, virgl=True))
+        check("arg=--renderer=auto" in _virgl.splitlines()
+              and "gsk=unset" in _virgl.splitlines(),
+              "virtio-gpu with the host's 3D was given a software renderer")
 
 # -- somewhere to write ----------------------------------------------------
 #

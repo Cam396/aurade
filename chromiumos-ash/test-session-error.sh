@@ -105,6 +105,18 @@ mkdir -p "${workdir}/dri-none" "${workdir}/dri-gpu"
 : >"${workdir}/dri-gpu/card0"
 : >"${workdir}/dri-gpu/renderD128"
 
+# A sysfs with nothing in it, so no case reads the real one on whatever machine
+# runs this, and two with a virtio-gpu behind renderD128: one whose host gives
+# it 3D (feature bit 0, VIRGL, set) and one whose host does not.
+mkdir -p "${workdir}/sysfs-none" "${workdir}/drivers/virtio_gpu"
+for kind in virgl no-virgl; do
+  mkdir -p "${workdir}/devices/${kind}/virtio0" "${workdir}/sysfs-${kind}/renderD128"
+  ln -s "${workdir}/drivers/virtio_gpu" "${workdir}/devices/${kind}/virtio0/driver"
+  ln -s "${workdir}/devices/${kind}" "${workdir}/sysfs-${kind}/renderD128/device"
+done
+printf '%s\n' 1100000000000000000000000000110010000000 >"${workdir}/devices/virgl/virtio0/features"
+printf '%s\n' 0100000000000000000000000000110010000000 >"${workdir}/devices/no-virgl/virtio0/features"
+
 run_session() {
   local dri="$1"
   shift
@@ -112,7 +124,7 @@ run_session() {
   chmod 700 "${workdir}/runtime"
   rm -f "${workdir}/weston.log" "${workdir}/logger.log" "${workdir}/child-error"
   set +e
-  env "$@" \
+  env AURADE_SYSFS_DRM="${workdir}/sysfs-none" "$@" \
     AURADE_DRI_DIR="${dri}" \
     AURADE_SESSION_ERROR="${workdir}/session-error" \
     AURADE_TEST_SESSION_ERROR="${workdir}/child-error" \
@@ -150,6 +162,21 @@ run_session "${workdir}/dri-gpu" AURADE_FORCE_SOFTWARE_RENDERING=1
 [[ "${session_status}" == 0 ]]
 grep -Fxq 'arg=--renderer=pixman' "${workdir}/weston.log"
 grep -Fxq 'software=1' "${workdir}/weston.log"
+
+# A render node this user can open, with no 3D behind it: virtio-gpu on a host
+# that gives it none. That is no GPU, not a permissions fault, and the desktop
+# draws in software and says why.
+run_session "${workdir}/dri-gpu" AURADE_SYSFS_DRM="${workdir}/sysfs-no-virgl"
+[[ "${session_status}" == 0 ]]
+grep -Fxq 'arg=--renderer=pixman' "${workdir}/weston.log"
+grep -Fxq 'software=1' "${workdir}/weston.log"
+grep -Fq 'virtio-gpu without virgl' "${workdir}/logger.log"
+
+# The same device with the host's 3D switched on is a GPU like any other.
+run_session "${workdir}/dri-gpu" AURADE_SYSFS_DRM="${workdir}/sysfs-virgl"
+[[ "${session_status}" == 0 ]]
+grep -Fxq 'arg=--renderer=auto' "${workdir}/weston.log"
+grep -Fxq 'software=0' "${workdir}/weston.log"
 
 # An explicit renderer still wins over the software default.
 run_session "${workdir}/dri-none" AURADE_WESTON_RENDERER=gl

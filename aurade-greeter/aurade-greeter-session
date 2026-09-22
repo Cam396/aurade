@@ -34,10 +34,26 @@ cd /var/lib/aurade-greeter 2>/dev/null || cd /tmp || exit 1
 # Unlike the desktop, a render node this user cannot open is not refused here:
 # the screen only has to be good enough to sign in to, and the desktop session
 # reports that fault properly once somebody has.
+#
+# A render node with no 3D behind it counts as none: virtio-gpu on a host that
+# gives it no 3D publishes one anyway, GTK then renders with software GL, and
+# the animated screen starves its own main loop until a keypress takes a
+# minute to land. Bit 0 of the virtio device's features is VIRTIO_GPU_F_VIRGL.
+has_3d() {
+  local device virtio driver
+  device=$(readlink -f "${AURADE_SYSFS_DRM:-/sys/class/drm}/${1##*/}/device" 2>/dev/null) || return 0
+  for virtio in "$device"/virtio*; do
+    [[ -r $virtio/features ]] || continue
+    driver=$(readlink -f "$virtio/driver" 2>/dev/null) || continue
+    [[ ${driver##*/} == virtio_gpu ]] || continue
+    [[ $(head -c 1 "$virtio/features") == 1 ]] || return 1
+  done
+  return 0
+}
 renderer="${AURADE_WESTON_RENDERER:-auto}"
 have_render=0
 for node in "${AURADE_DRI_DIR:-/dev/dri}"/renderD*; do
-  if [[ -r $node && -w $node ]]; then
+  if [[ -r $node && -w $node ]] && has_3d "$node"; then
     have_render=1
     break
   fi
