@@ -230,6 +230,15 @@ build_packages() {
 build_iso() {
   local repo_dir="$WORKDIR/private-repo"
   [[ -d "$repo_dir" ]] || die "verified package repository missing: $repo_dir"
+  # A candidate or public ISO ships the graphical installer; a development or
+  # unset channel stays text-only. An explicit AURADE_GUI_RELEASE still wins, so
+  # a deliberate text-only candidate remains possible.
+  if [[ -z ${AURADE_GUI_RELEASE:-} ]]; then
+    case ${AURADE_RELEASE_CHANNEL:-development} in
+      candidate|public) export AURADE_GUI_RELEASE=1 ;;
+      *) export AURADE_GUI_RELEASE=0 ;;
+    esac
+  fi
   local allow_unsigned=${AURADE_ALLOW_UNSIGNED:-}
   if [[ -z "$allow_unsigned" ]]; then
     if [[ -n "${AURADE_REPO_KEY:-}" && -n "${AURADE_REPO_FINGERPRINT:-}" ]]; then
@@ -249,12 +258,15 @@ build_iso() {
     "AURADE_INSTALLER_WORK_ROOT=$WORKDIR/installer"
   )
   # sudo/env does not reliably preserve release-specific variables. Pass the
-  # public verification key, ISO signing policy, and size budget explicitly so
-  # `--all` cannot silently downgrade a requested candidate build to unsigned.
+  # public verification key, ISO signing policy, size budget, and the release
+  # channel and graphical selection explicitly so `--all` cannot silently
+  # downgrade a requested candidate build to unsigned or drop its graphical
+  # payload back to a text-only image.
   local variable
   for variable in \
     AURADE_REPO_KEY AURADE_REPO_FINGERPRINT AURADE_ISO_SIGNING_KEY \
-    AURADE_REQUIRE_ISO_SIGNATURE AURADE_MAX_ISO_BYTES; do
+    AURADE_REQUIRE_ISO_SIGNATURE AURADE_MAX_ISO_BYTES \
+    AURADE_RELEASE_CHANNEL AURADE_GUI_RELEASE; do
     if [[ -n ${!variable+x} ]]; then
       build_env+=("$variable=${!variable}")
     fi
