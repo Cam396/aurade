@@ -84,6 +84,14 @@ class Fake:
 SECRET_PROMPT = {"type": "auth_message", "auth_message_type": "secret",
                  "auth_message": "Password:"}
 SUCCESS = {"type": "success"}
+REFUSED = {"type": "error", "error_type": "auth_error",
+           "description": "Login incorrect"}
+# What greetd 0.10 answers when a refused attempt is cancelled: an error,
+# because the PAM conversation behind it has already gone. The attempt is
+# cleared all the same.
+REFUSED_CANCELLED = {"type": "error", "error_type": "error",
+                     "description": "unable to send message: Connection "
+                                    "refused (os error 111)"}
 
 
 # --- the framing ----------------------------------------------------------
@@ -213,9 +221,7 @@ def test_account_with_no_question() -> None:
 # --- the two failures that must not be one --------------------------------
 
 def test_wrong_password_is_its_own_failure() -> None:
-    fake = Fake([SECRET_PROMPT,
-                 {"type": "error", "error_type": "auth_error",
-                  "description": "Login incorrect"}])
+    fake = Fake([SECRET_PROMPT, REFUSED, REFUSED_CANCELLED])
     session = P.Session(fake.transport)
     session.begin("ada")
     try:
@@ -227,6 +233,35 @@ def test_wrong_password_is_its_own_failure() -> None:
     except P.GreeterError:
         FAILURES.append(
             "a wrong password raised the same exception as a dead service")
+    fake.close()
+
+
+def test_a_refusal_is_cancelled_so_the_next_try_can_start() -> None:
+    """greetd keeps a refused attempt until it is cancelled, and answers the
+    next create_session with "a session is already being configured" until
+    then. The greeter read that as a service that had died: one mistyped
+    password, and the screen told the person to restart the computer and
+    meant it, because nothing else would let anybody in. The replies are the
+    ones greetd 0.10 gave on a real machine."""
+    fake = Fake([SECRET_PROMPT, REFUSED, REFUSED_CANCELLED, SECRET_PROMPT])
+    first = P.Session(fake.transport)
+    first.begin("ada")
+    try:
+        first.answer("wrong")
+    except P.AuthFailed:
+        pass
+    retry = P.Session(fake.transport)
+    prompt = None
+    try:
+        prompt = retry.begin("ada")
+    except P.GreeterError as exc:
+        FAILURES.append(f"the try after a refused password failed: {exc}")
+    check(prompt is not None and prompt.secret,
+          "the try after a refused password was not asked for one")
+    check([r["type"] for r in fake.sent()] ==
+          ["create_session", "post_auth_message_response",
+           "cancel_session", "create_session"],
+          "a refused attempt was not cancelled before the next one began")
     fake.close()
 
 
