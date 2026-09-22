@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 PACKAGE = os.path.normpath(os.path.join(HERE, ".."))
@@ -55,7 +56,7 @@ def arrays() -> dict[str, list[str]]:
     """
     script = (
         "source ./PKGBUILD\n"
-        'for name in source sha256sums _module _test; do\n'
+        'for name in source sha256sums _module _test depends; do\n'
         '  declare -n array="$name"\n'
         '  printf "%s\\n" "@@${name}"\n'
         '  printf "%s\\n" "${array[@]}"\n'
@@ -79,6 +80,7 @@ source = recipe["source"]
 sums = recipe["sha256sums"]
 module = recipe["_module"]
 tests = recipe["_test"]
+depends = recipe["depends"]
 
 # The two arrays are read in step, so a file added to one and not the other
 # silently shifts every checksum after it onto the wrong file.
@@ -139,8 +141,42 @@ if os.path.isfile(SRCINFO):
           "the sources in .SRCINFO are not the sources in the PKGBUILD")
     check(recorded == sums,
           "the checksums in .SRCINFO are not the checksums in the PKGBUILD")
+    needed = [line.split(" = ", 1)[1] for line in lines
+              if line.startswith("depends = ")]
+    check(needed == depends,
+          "the dependencies in .SRCINFO are not the dependencies in the "
+          "PKGBUILD")
 else:
     FAILURES.append(".SRCINFO is missing, so the AUR has no recipe to read")
+
+# -- what the modules import, the package has to pull in --------------------
+#
+# The failure at the top of this file, one level further out. `cairo` is
+# pycairo, a package of its own, and the greeter paints the photograph and
+# everything else it draws by hand with it. The live image lists it, so the
+# installer drew its wallpapers and every screenshot looked right. An installed
+# system never had it: the import failed inside a handler written to swallow
+# exactly that, and the login screen came up on a flat colour with no
+# photograph, on every machine, with nothing said anywhere. Read from the
+# imports rather than kept as a list, so a new one fails here until the recipe
+# names what provides it.
+PROVIDERS = {"cairo": "python-cairo", "gi": "python-gobject"}
+_imported: dict[str, str] = {}
+for _file in sorted(os.listdir(MODULES)):
+    if not _file.endswith(".py"):
+        continue
+    with open(os.path.join(MODULES, _file), encoding="utf-8") as handle:
+        for _line in handle:
+            _match = re.match(r"\s*(?:import|from)\s+([A-Za-z_]\w*)", _line)
+            if _match and _match.group(1) in PROVIDERS:
+                _imported.setdefault(_match.group(1), _file)
+for _top, _file in sorted(_imported.items()):
+    check(PROVIDERS[_top] in depends,
+          f"{_file} imports {_top} and the recipe does not depend on "
+          f"{PROVIDERS[_top]}, so on an installed system that import fails")
+check("cairo" in _imported,
+      "no module imports cairo, and brand.py paints the photograph with it. "
+      "The scan has stopped seeing something.")
 
 # -- the greeter cannot draw on a bare terminal -----------------------------
 #
@@ -189,6 +225,64 @@ if os.path.isfile(_wrapper):
 else:
     FAILURES.append("aurade-greeter-session is missing, so the example config "
                     "names a file that is not there")
+
+# -- a machine with no GPU still gets a login screen ------------------------
+#
+# The wrapper decides how weston draws before starting it. A render node this
+# user can open means the usual renderer; none means pixman underneath and
+# cairo in GTK, so a virtual machine with no 3D reaches a login screen instead
+# of a compositor that fails and is restarted forever. Driven for real, with a
+# stand-in weston that records what it was asked for, because a check on the
+# text of the script passed for as long as the words were in its comments.
+_WESTON_STUB = """#!/usr/bin/env bash
+printf 'gsk=%s\\n' "${GSK_RENDERER:-unset}" >"${AURADE_TEST_WESTON_LOG:?}"
+printf 'arg=%s\\n' "$@" >>"${AURADE_TEST_WESTON_LOG:?}"
+"""
+
+
+def _drive_wrapper(scratch: str, render_node: bool) -> str:
+    stubs = os.path.join(scratch, "bin")
+    os.makedirs(stubs, exist_ok=True)
+    weston = os.path.join(stubs, "weston")
+    with open(weston, "w", encoding="utf-8") as handle:
+        handle.write(_WESTON_STUB)
+    os.chmod(weston, 0o755)
+    dri = os.path.join(scratch, "dri-gpu" if render_node else "dri-none")
+    os.makedirs(dri, exist_ok=True)
+    open(os.path.join(dri, "card0"), "w", encoding="utf-8").close()
+    if render_node:
+        open(os.path.join(dri, "renderD128"), "w", encoding="utf-8").close()
+    log = os.path.join(scratch, "weston.log")
+    if os.path.exists(log):
+        os.unlink(log)
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("GSK_RENDERER", "AURADE_WESTON_RENDERER",
+                          "AURADE_FORCE_SOFTWARE_RENDERING")}
+    env.update(PATH=stubs + os.pathsep + env.get("PATH", "/usr/bin:/bin"),
+               AURADE_DRI_DIR=dri, AURADE_TEST_WESTON_LOG=log,
+               XDG_RUNTIME_DIR=scratch)
+    subprocess.run(["bash", _wrapper], env=env, check=False,
+                   capture_output=True, timeout=30)
+    if not os.path.isfile(log):
+        return ""
+    with open(log, encoding="utf-8") as handle:
+        return handle.read()
+
+
+if os.path.isfile(_wrapper):
+    with tempfile.TemporaryDirectory() as _scratch:
+        _plain = _drive_wrapper(_scratch, render_node=False)
+        check("arg=--renderer=pixman" in _plain.splitlines(),
+              "with no GPU render node the wrapper did not ask weston for "
+              "pixman, so a machine with no 3D gets no login screen")
+        check("gsk=cairo" in _plain.splitlines(),
+              "with no GPU render node the greeter is not told to draw with "
+              "cairo, so GTK goes looking for a GL it cannot have")
+        _gpu = _drive_wrapper(_scratch, render_node=True)
+        check("arg=--renderer=auto" in _gpu.splitlines(),
+              "a machine with a usable GPU was given a software renderer")
+        check("gsk=unset" in _gpu.splitlines(),
+              "a machine with a usable GPU had the greeter forced to cairo")
 
 # -- somewhere to write ----------------------------------------------------
 #
