@@ -1,0 +1,169 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 1b7e44688f26..37b8d67bd2b3 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -611,6 +611,9 @@ if (is_chromeos) {
+       "//chrome/browser/ash/exo",
+       "//chromeos/ash/experiences/arc",
+       "//components/exo/server",
++      "//components/viz/common",
++      "//ui/aura",
++      "//ui/compositor",
+     ]
+   }
+ 
+diff --git a/chrome/browser/exo_parts.cc b/chrome/browser/exo_parts.cc
+index 730c043bd604..458f6a9c1fb9 100644
+--- a/chrome/browser/exo_parts.cc
++++ b/chrome/browser/exo_parts.cc
+@@ -10,6 +10,7 @@
+ #include "ash/public/cpp/keyboard/arc/arc_input_method_bounds_tracker.h"
+ #include "ash/shell.h"
+ #include "base/command_line.h"
++#include "base/logging.h"
+ #include "base/memory/ptr_util.h"
+ #include "chrome/browser/ash/exo/chrome_data_exchange_delegate.h"
+ #include "chrome/browser/ash/exo/chrome_security_delegate.h"
+@@ -18,6 +19,9 @@
+ #include "chromeos/ash/experiences/arc/overlay/arc_overlay_manager.h"
+ #include "chromeos/ash/experiences/arc/toast/arc_toast_surface_manager.h"
+ #include "components/exo/server/wayland_server_controller.h"
++#include "components/viz/common/gpu/raster_context_provider.h"
++#include "ui/aura/env.h"
++#include "ui/compositor/compositor.h"
+ 
+ // static
+ std::unique_ptr<ExoParts> ExoParts::CreateIfNecessary() {
+@@ -26,6 +30,20 @@ std::unique_ptr<ExoParts> ExoParts::CreateIfNecessary() {
+     return nullptr;
+   }
+ 
++  // AuraDE compatibility: exo hands every client buffer to the GPU through
++  // the shared context the compositor draws with, and has no software path.
++  // A desktop composited in software has no such context, and exo then
++  // crashes the browser as it starts, or the first time a client attaches a
++  // buffer. So the Wayland server stays off, exactly as it does without the
++  // switch, and says why once.
++  if (!aura::Env::GetInstance()
++           ->context_factory()
++           ->SharedMainThreadRasterContextProvider()) {
++    LOG(WARNING) << "Not starting the Wayland server: the desktop is "
++                    "composited in software and exo needs GPU compositing.";
++    return nullptr;
++  }
++
+   return base::WrapUnique(new ExoParts());
+ }
+ 
+diff --git a/content/browser/compositor/viz_process_transport_factory.cc b/content/browser/compositor/viz_process_transport_factory.cc
+index 7ca2539e761b..956ff9108ac7 100644
+--- a/content/browser/compositor/viz_process_transport_factory.cc
++++ b/content/browser/compositor/viz_process_transport_factory.cc
+@@ -4,11 +4,14 @@
+ 
+ #include "content/browser/compositor/viz_process_transport_factory.h"
+ 
++#include <optional>
++#include <string>
+ #include <utility>
+ #include <vector>
+ 
+ #include "base/command_line.h"
+ #include "base/debug/dump_without_crashing.h"
++#include "base/environment.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
+@@ -266,10 +269,25 @@ ui::ContextFactory* VizProcessTransportFactory::GetContextFactory() {
+ void VizProcessTransportFactory::DisableGpuCompositing(
+     ui::Compositor* guilty_compositor) {
+ #if BUILDFLAG(IS_CHROMEOS)
+-  // A fatal error has occurred and we can't fall back to software compositing
+-  // on CrOS. These can be unrecoverable hardware errors, or bugs that should
+-  // not happen. Crash the browser process to reset everything.
+-  LOG(FATAL) << "Software compositing fallback is unavailable. Goodbye.";
++  // AuraDE compatibility: a Chromebook treats this as fatal because its GPU is
++  // known and GPU compositing always works on it. The AuraDE host session runs
++  // on whatever it was installed on, including virtual machines and laptops
++  // whose graphics driver has no 3D, and there the GPU process comes up but
++  // has no way to present a frame. Desktop Linux builds fall back to software
++  // compositing at exactly this point, and this build does the same when the
++  // session allows it. Without it the desktop is a black screen that never
++  // changes, or an abort, depending on which side noticed first.
++  std::optional<std::string> aura_de_fallback =
++      base::Environment::Create()->GetVar(
++          "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
++  if (!aura_de_fallback.has_value() || aura_de_fallback.value() == "0") {
++    // A fatal error has occurred and we can't fall back to software
++    // compositing on CrOS. These can be unrecoverable hardware errors, or bugs
++    // that should not happen. Crash the browser process to reset everything.
++    LOG(FATAL) << "Software compositing fallback is unavailable. Goodbye.";
++  }
++  LOG(WARNING) << "Switching to software compositing for the AuraDE host "
++                  "session.";
+ #else
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kDisableSoftwareCompositingFallback)) {
+@@ -279,6 +297,7 @@ void VizProcessTransportFactory::DisableGpuCompositing(
+   }
+ 
+   DVLOG(1) << "Switching to software compositing.";
++#endif
+ 
+   is_gpu_compositing_disabled_ = true;
+ 
+@@ -319,7 +338,6 @@ void VizProcessTransportFactory::DisableGpuCompositing(
+     if (visible)
+       compositor->SetVisible(true);
+   }
+-#endif
+ }
+ 
+ void VizProcessTransportFactory::OnGpuProcessLost() {
+diff --git a/content/browser/gpu/gpu_process_host.cc b/content/browser/gpu/gpu_process_host.cc
+index 456ef0928171..8772426f59d2 100644
+--- a/content/browser/gpu/gpu_process_host.cc
++++ b/content/browser/gpu/gpu_process_host.cc
+@@ -10,6 +10,8 @@
+ #include <array>
+ #include <list>
+ #include <memory>
++#include <optional>
++#include <string>
+ #include <utility>
+ 
+ #include "ash/constants/ash_switches.h"
+@@ -18,6 +20,7 @@
+ #include "base/command_line.h"
+ #include "base/compiler_specific.h"
+ #include "base/containers/span.h"
++#include "base/environment.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -1250,9 +1253,24 @@ bool GpuProcessHost::GpuAccessAllowed() const {
+ }
+ 
+ void GpuProcessHost::DisableGpuCompositing() {
+-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_ANDROID)
+   DLOG(ERROR) << "Can't disable GPU compositing";
+ #else
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE compatibility: the GPU process asks for this when it could not
++  // make a GPU output surface and the session allowed the software fallback
++  // (see output_surface_provider_impl.cc). A Chromebook drops the request,
++  // and on a machine whose GPU cannot present that leaves a black desktop
++  // with nothing saying why. With the same variable set the request goes on
++  // to the transport factory, which switches to software compositing.
++  std::optional<std::string> aura_de_fallback =
++      base::Environment::Create()->GetVar(
++          "AURADE_ALLOW_GPU_COMPOSITING_FALLBACK");
++  if (!aura_de_fallback.has_value() || aura_de_fallback.value() == "0") {
++    DLOG(ERROR) << "Can't disable GPU compositing";
++    return;
++  }
++#endif
+   // TODO(crbug.com/40565996): The switch from GPU to software compositing
+   // should be handled here instead of by ImageTransportFactory.
+   GetUIThreadTaskRunner({})->PostTask(
