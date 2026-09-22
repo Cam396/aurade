@@ -323,6 +323,27 @@ attempt_stage() {
   printf '%s' "${stage:-none}"
 }
 
+# Is this attempt still a live process, as opposed to one that has already
+# exited and is only waiting to be reaped? A finished-but-unwaited child shows
+# state `Z` in /proc, and treating that as gone is what lets a fast refusal be
+# noticed the instant it happens instead of being mistaken for a slow start and
+# waited out. The comm field can hold spaces and parentheses, so the state is
+# read as the first word after the last `)` rather than by counting fields.
+_attempt_alive() {
+  local stat state
+  { read -r stat < "/proc/$1/stat"; } 2>/dev/null || return 1
+  state=${stat##*) }
+  [[ ${state%% *} != Z ]]
+}
+
+# How long to wait for a compositor to put its first frame on the screen before
+# deciding it never will. Only the wait for that first frame is bounded; see the
+# attempt loop for why that is not a screen timeout. A real compositor draws in
+# a second or two even in software, so this is a wide margin, not a deadline.
+# Set it to 0 to wait forever, which is what this did before.
+AURADE_RENDERER_DRAW_TIMEOUT=${AURADE_RENDERER_DRAW_TIMEOUT:-45}
+[[ $AURADE_RENDERER_DRAW_TIMEOUT =~ ^[0-9]+$ ]] || AURADE_RENDERER_DRAW_TIMEOUT=45
+
 #: What every attempt gets, whichever renderer and whichever client.
 #:
 #: All three of these are here because of something that was measured, and all
@@ -387,11 +408,51 @@ while IFS=$'\t' read -r label settings; do
     # `env` rather than exporting: each attempt gets exactly the settings for
     # that combination and nothing carried over from the attempt before it.
     set +e
+    # Started in the background so the wait for it can be the wait for a drawn
+    # frame rather than the wait for the process to end. `$!` is cage itself,
+    # not the log writer, because its output goes to `tee` through a process
+    # substitution instead of a pipe; that is what makes it the thing to watch
+    # and, if it hangs, the thing to stop.
     # shellcheck disable=SC2086  # both are deliberate lists of KEY=VALUE
     env $BASE_ENV $settings $client_settings cage -- "$GUI" \
       ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"} \
-      ${GUI_EXTRA[@]+"${GUI_EXTRA[@]}"} 2>&1 | tee -a "$ATTEMPT_LOG"
-    status=${PIPESTATUS[0]}
+      ${GUI_EXTRA[@]+"${GUI_EXTRA[@]}"} \
+      > >(tee -a "$ATTEMPT_LOG") 2>&1 &
+    cage_pid=$!
+
+    # Wait for the first frame, and only for the first frame. A compositor that
+    # opens the graphics device and then draws nothing is the one failure the
+    # stage machine above cannot see: it never exits, so `mapped` is never
+    # written and the chain never advances - the black screen with no way back
+    # that every other path here falls out of. This bounds that single wait and
+    # nothing else. The instant the front end writes its ready file the window
+    # exists, watching stops, and the `wait` below runs unbounded: nothing a
+    # person can read or answer is ever put on a clock, which is the rule
+    # test-no-timeouts.sh keeps. A refusal is noticed the moment the process
+    # leaves the run queue, so only a true hang ever spends the whole budget.
+    if (( AURADE_RENDERER_DRAW_TIMEOUT > 0 )); then
+      drew=0
+      for (( waited = 0; waited < AURADE_RENDERER_DRAW_TIMEOUT; waited++ )); do
+        [[ -e $AURADE_GUI_READY_FILE ]] && { drew=1; break; }
+        _attempt_alive "$cage_pid" || { drew=1; break; }
+        sleep 1
+      done
+      # A frame that arrived during the final second still counts: the ready
+      # file is checked once more here, so a window that drew late is waited
+      # for like any other, never reclaimed for having been slow.
+      if (( ! drew )) && [[ ! -e $AURADE_GUI_READY_FILE ]] && _attempt_alive "$cage_pid"; then
+        printf '\n--- %s drew nothing in %ss; giving up on it\n' \
+          "$label" "$AURADE_RENDERER_DRAW_TIMEOUT" >>"$ATTEMPT_LOG"
+        note "the '$label' path opened the screen but drew nothing in ${AURADE_RENDERER_DRAW_TIMEOUT}s; trying the next"
+        # TERM first so cage can hand back the DRM master and the virtual
+        # console it took; KILL only if it will not.
+        kill -TERM "$cage_pid" 2>/dev/null
+        for _ in 1 2 3; do _attempt_alive "$cage_pid" || break; sleep 1; done
+        kill -KILL "$cage_pid" 2>/dev/null
+      fi
+    fi
+    wait "$cage_pid"
+    status=$?
     set -e
 
     stage=$(attempt_stage)
