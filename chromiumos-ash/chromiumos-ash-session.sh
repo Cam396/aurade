@@ -7,40 +7,75 @@ export AURADE_OZONE_PLATFORM="${AURADE_OZONE_PLATFORM:-wayland}"
 export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
 export AURADE_ENABLE_WESTON_INPUT_SETTINGS="${AURADE_ENABLE_WESTON_INPUT_SETTINGS:-1}"
 
-# AuraDE compatibility: fail before Weston paints a blank screen when the
-# kernel exposed no DRM render node. This is common with VMware 3D disabled
-# and otherwise looks exactly like a rejected password. Software rendering is
-# available as an explicit diagnostic override, not as the silent default.
-if [[ "${AURADE_ALLOW_SOFTWARE_RENDERER:-0}" != 1 ]]; then
-    render_node_found=0
-    render_node_usable=0
-    if [[ ! -d /dev/dri ]]; then
-        if [[ -x /usr/bin/aurade-session-error ]]; then
-            /usr/bin/aurade-session-error missing-dri 'the /dev/dri directory is absent' || true
-        else
-            printf '%s\n' 'AuraDE cannot start: /dev/dri is absent.' >&2
-        fi
-        exit 78
+WESTON_BACKEND="${AURADE_WESTON_BACKEND:-drm}"
+SESSION_ERROR="${AURADE_SESSION_ERROR:-/usr/bin/aurade-session-error}"
+DRI_DIR="${AURADE_DRI_DIR:-/dev/dri}"
+
+session_refuses() {
+    local kind="$1" detail="$2" fallback="$3"
+    if [[ -x "${SESSION_ERROR}" ]]; then
+        "${SESSION_ERROR}" "${kind}" "${detail}" || true
+    else
+        printf '%s\n' "${fallback}" >&2
     fi
-    for render_node in /dev/dri/renderD*; do
-        [[ -e "${render_node}" ]] || continue
-        render_node_found=1
-        if [[ -r "${render_node}" && -w "${render_node}" ]]; then
-            render_node_usable=1
-            break
-        fi
-    done
-    if [[ "${render_node_usable}" == 0 ]]; then
-        error_kind=missing-render
-        [[ "${render_node_found}" == 1 ]] && error_kind=render-permission
-        if [[ -x /usr/bin/aurade-session-error ]]; then
-            /usr/bin/aurade-session-error "${error_kind}" \
-                'render-node preflight failed' || true
-        else
-            printf '%s\n' \
-                'AuraDE cannot start: no usable DRM render device was found.' >&2
-        fi
-        exit 78
+    exit 78
+}
+
+# AuraDE compatibility: decide how this desktop draws before Weston starts.
+#
+# A render node is the GPU. Without one the desktop still runs: Weston
+# composites with pixman and Ash composites in software, which is how a
+# virtual machine with no 3D, or a laptop whose graphics driver has none,
+# gets a desktop instead of an error screen asking for hardware it does not
+# have. It is slower, and it is not silent about it: the choice goes to the
+# journal and into the session environment, where the launcher reads it.
+#
+# What is still refused is what software cannot fix. With no /dev/dri there
+# is no display device for the DRM backend to put a picture on at all. And a
+# render node that exists but cannot be opened is a permissions fault on a
+# machine that does have a GPU; drawing in software there would hide the fault
+# behind a slower desktop, so it is reported instead.
+#
+# AURADE_ALLOW_SOFTWARE_RENDERER=0 restores the old rule of refusing whenever
+# there is no GPU. AURADE_FORCE_SOFTWARE_RENDERING=1 draws in software even
+# when there is one, for a GPU that is present and broken.
+if [[ "${WESTON_BACKEND}" == drm && ! -d "${DRI_DIR}" ]]; then
+    session_refuses missing-dri "the ${DRI_DIR} directory is absent" \
+        "AuraDE cannot start: ${DRI_DIR} is absent."
+fi
+render_node_found=0
+render_node_usable=0
+for render_node in "${DRI_DIR}"/renderD*; do
+    [[ -e "${render_node}" ]] || continue
+    render_node_found=1
+    if [[ -r "${render_node}" && -w "${render_node}" ]]; then
+        render_node_usable=1
+        break
+    fi
+done
+AURADE_SOFTWARE_RENDERING=0
+if [[ "${AURADE_FORCE_SOFTWARE_RENDERING:-0}" == 1 ]]; then
+    AURADE_SOFTWARE_RENDERING=1
+elif [[ "${render_node_usable}" == 0 ]]; then
+    if [[ "${render_node_found}" == 1 ]]; then
+        session_refuses render-permission 'render-node preflight failed' \
+            'AuraDE cannot start: the DRM render device cannot be opened.'
+    elif [[ "${AURADE_ALLOW_SOFTWARE_RENDERER:-1}" == 1 ]]; then
+        AURADE_SOFTWARE_RENDERING=1
+    else
+        session_refuses missing-render 'render-node preflight failed' \
+            'AuraDE cannot start: no usable DRM render device was found.'
+    fi
+fi
+export AURADE_SOFTWARE_RENDERING
+if [[ "${AURADE_SOFTWARE_RENDERING}" == 1 ]]; then
+    # An explicit renderer still wins, so a machine where software GL
+    # composites better than pixman can say so in one variable.
+    : "${AURADE_WESTON_RENDERER:=pixman}"
+    if command -v logger >/dev/null 2>&1; then
+        logger -t aurade-session -- \
+            "no usable GPU render device; drawing the desktop in software (renderer=${AURADE_WESTON_RENDERER})" \
+            2>/dev/null || true
     fi
 fi
 
@@ -70,7 +105,6 @@ if ! command -v weston >/dev/null 2>&1; then
     exit 78
 fi
 
-WESTON_BACKEND="${AURADE_WESTON_BACKEND:-drm}"
 WESTON_ARGS=(
     --backend="${WESTON_BACKEND}"
     --shell="${AURADE_WESTON_SHELL:-kiosk-shell.so}"
