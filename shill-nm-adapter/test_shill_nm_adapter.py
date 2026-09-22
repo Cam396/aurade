@@ -329,6 +329,77 @@ def test_identity_and_device_filtering():
     assert adapter._ssid_text(b"") == "Hidden network"
 
 
+class FakeProps:
+    def __init__(self, values):
+        self._values = values
+
+    def Get(self, iface, name):
+        return self._values[(iface, name)]
+
+
+class RecordingService:
+    def __init__(self, connection_path=""):
+        self.nm_connection_path = connection_path
+        self.nm_ap_paths = set()
+        self.states = []
+
+    def set_state(self, state):
+        self.states.append(state)
+
+    def clear_error(self):
+        pass
+
+    def set_failure(self, error):
+        self.states.append("failure:" + error)
+
+
+def test_a_connected_cable_is_online_to_ash():
+    """NetworkManager names a device's active connection by its active
+    connection object and the service keeps the saved profile, which is a
+    different path for the same connection.  Compared directly they never
+    matched: a cable NetworkManager called connected, full connectivity, was
+    idle to Ash, and first run stayed on its network screen with Next greyed
+    out on every machine without Wi-Fi.  The paths are the ones a virtual
+    machine with one wired interface actually reported."""
+    import types
+
+    def states_for(active_connection, saved):
+        monitor = object.__new__(adapter.NetworkManagerMonitor)
+        monitor._nm_devices = {
+            "/org/freedesktop/NetworkManager/Devices/2": {
+                "type": adapter.SHILL_TYPE_ETHERNET, "iface": "enp0s2"},
+        }
+        service = RecordingService(saved)
+        monitor._device_to_services = {
+            "/org/freedesktop/NetworkManager/Devices/2": {"/service/ethernet_test"},
+        }
+        monitor._shill = types.SimpleNamespace(
+            services={"/service/ethernet_test": service}, devices={})
+        props = {
+            "/org/freedesktop/NetworkManager/Devices/2": FakeProps({
+                (adapter.NM_DEVICE_IFACE, "State"): adapter.NM_DEVICE_STATE_ACTIVATED,
+                (adapter.NM_DEVICE_IFACE, "ActiveConnection"): active_connection,
+                (adapter.NM_DEVICE_IFACE, "StateReason"): (adapter.NM_DEVICE_STATE_ACTIVATED, 0),
+            }),
+            "/org/freedesktop/NetworkManager/ActiveConnection/2": FakeProps({
+                (adapter.NM_ACTIVE_CONNECTION_IFACE, "Connection"):
+                    "/org/freedesktop/NetworkManager/Settings/2",
+            }),
+        }
+        monitor._props_for = lambda path: props[path]
+        monitor._refresh_service_states("/org/freedesktop/NetworkManager/Devices/2")
+        return service.states
+
+    active = "/org/freedesktop/NetworkManager/ActiveConnection/2"
+    saved = "/org/freedesktop/NetworkManager/Settings/2"
+    assert states_for(active, saved) == [adapter.SHILL_STATE_ONLINE]
+    # Connected with a profile other than the one the adapter took for the
+    # saved one is still the one Ethernet service that device has.
+    assert states_for(active, "") == [adapter.SHILL_STATE_ONLINE]
+    # No active connection is not online, whatever the device state says.
+    assert states_for("/", saved) == [adapter.SHILL_STATE_IDLE]
+
+
 if __name__ == "__main__":
     tests = [value for name, value in globals().items() if name.startswith("test_")]
     for test in tests:

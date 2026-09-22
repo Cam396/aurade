@@ -43,6 +43,7 @@ NM_SETTINGS_CONNECTION_IFACE = "org.freedesktop.NetworkManager.Settings.Connecti
 NM_DEVICE_IFACE = "org.freedesktop.NetworkManager.Device"
 NM_WIFI_DEVICE_IFACE = "org.freedesktop.NetworkManager.Device.Wireless"
 NM_AP_IFACE = "org.freedesktop.NetworkManager.AccessPoint"
+NM_ACTIVE_CONNECTION_IFACE = "org.freedesktop.NetworkManager.Connection.Active"
 
 NM_DEVICE_TYPE_ETHERNET = 1
 NM_DEVICE_TYPE_WIFI = 2
@@ -1220,11 +1221,26 @@ class NetworkManagerMonitor:
             active_ap = "/"
         info["state"] = state
         failure = NM_REASON_TO_SHILL_ERROR.get(reason, SHILL_ERROR_CONNECT_FAILED)
+        # The device names its active connection object, under /ActiveConnection/,
+        # and a service remembers its saved profile, under /Settings/.  The two
+        # are never the same string, so comparing them matched nothing, and a
+        # cable NetworkManager reported connected with full connectivity was
+        # idle to Ash.  First run then sat on its network screen with Next
+        # greyed out on every machine without Wi-Fi, every virtual machine
+        # included.  Wi-Fi only ever worked through the access point.  So the
+        # saved profile behind the active connection is what gets compared, and
+        # an Ethernet device, which carries exactly one service, is that
+        # service's whenever it is connected with anything at all.
+        active_settings = self._active_settings(active_connection)
+        wired_up = info["type"] == SHILL_TYPE_ETHERNET and active_connection not in ("", "/")
         for service_path in self._device_to_services.get(device_path, set()):
             service = self._shill.services.get(service_path)
             if service is None:
                 continue
-            active = service.nm_connection_path == active_connection or active_ap in service.nm_ap_paths
+            saved = service.nm_connection_path
+            active = (wired_up
+                      or (bool(saved) and saved in (active_connection, active_settings))
+                      or active_ap in service.nm_ap_paths)
             if state == NM_DEVICE_STATE_FAILED and active:
                 # Say which way it failed.  A wrong word is not the same as a
                 # network that walked out of range, and the person retyping it
@@ -1240,6 +1256,16 @@ class NetworkManagerMonitor:
                 PROP_STATE,
                 dbus.String(_device_state_to_shill(state, bool(active_connection != "/"))),
             )
+
+    def _active_settings(self, active_connection: str) -> str:
+        """The saved profile behind an active connection, or empty for none."""
+        if not active_connection or active_connection == "/":
+            return ""
+        try:
+            return str(self._props_for(active_connection).Get(
+                NM_ACTIVE_CONNECTION_IFACE, "Connection"))
+        except Exception:
+            return ""
 
     def _set_scanning(self, device_path: str, scanning: bool) -> None:
         info = self._nm_devices.get(device_path)
