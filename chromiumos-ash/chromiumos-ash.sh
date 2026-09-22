@@ -110,6 +110,7 @@ if [ "$(id -u)" -eq 0 ]; then
         AURADE_DISABLE_ARC_FEATURES="${AURADE_DISABLE_ARC_FEATURES}" \
         AURADE_USE_FLOSS_STUBS="${AURADE_USE_FLOSS_STUBS}" \
         AURADE_ALLOW_GPU_COMPOSITING_FALLBACK="${AURADE_ALLOW_GPU_COMPOSITING_FALLBACK}" \
+        AURADE_SOFTWARE_RENDERING="${AURADE_SOFTWARE_RENDERING:-0}" \
         AURADE_ENABLE_WEB_SESSION_BRIDGE="${AURADE_ENABLE_WEB_SESSION_BRIDGE}" \
         AURADE_WEB_SESSION_REMOTE_DEBUGGING_PORT="${AURADE_WEB_SESSION_REMOTE_DEBUGGING_PORT}" \
         AURADE_ENABLE_SPEECH_DISPATCHER="${AURADE_ENABLE_SPEECH_DISPATCHER}" \
@@ -520,6 +521,29 @@ fi
 
 if [ "${AURADE_ENABLE_SPEECH_DISPATCHER}" = "1" ]; then
     FLAGS+=(--enable-speech-dispatcher)
+fi
+
+# AuraDE compatibility: the session found no GPU it can use and said so, and
+# Weston is already compositing in software underneath. Ash composites in
+# software too, instead of asking a GPU process that has no way to present a
+# frame and ending on a black screen. A ChromeOS build refuses software
+# compositing outright unless the fallback is allowed, so it is allowed here
+# whatever features.conf says: the alternative is a desktop that cannot start.
+#
+# exo, the Wayland server Ash runs for Linux applications, is left off. It
+# hands every client buffer to the GPU and has no software path, so on this
+# machine it crashed the desktop as it started, five times, and the session
+# gave up. Chrome now declines to start it without GPU compositing anyway;
+# not asking keeps that refusal out of the log on every login.
+if [ "${AURADE_SOFTWARE_RENDERING:-0}" = "1" ]; then
+    AURADE_ALLOW_GPU_COMPOSITING_FALLBACK=1
+    export AURADE_ALLOW_GPU_COMPOSITING_FALLBACK
+    FLAGS+=(--disable-gpu-compositing)
+    SOFTWARE_FLAGS=()
+    for flag in "${FLAGS[@]}"; do
+        [ "${flag}" = "--enable-wayland-server" ] || SOFTWARE_FLAGS+=("${flag}")
+    done
+    FLAGS=("${SOFTWARE_FLAGS[@]}")
 fi
 
 if [ -n "${AURADE_CHROME_EXTRA_FLAGS}" ]; then
