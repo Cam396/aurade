@@ -55,8 +55,14 @@ _renderer_accelerated() {
   # failing is one attempt and the cost of assuming wrongly is a machine that
   # never draws with its graphics card.
   [[ -n $driver ]] || return 0
+  # Kernels differ on whether these drivers carry a `-drm` or `_drm` suffix in
+  # DRIVER=. The bochs framebuffer reports `bochs-drm`, not `bochs`, so a plain
+  # equality check silently offered it OpenGL and spent the machine's first
+  # minute proving it has none. Compare with any such suffix removed from both
+  # sides so the shortcut fires on the name the kernel actually publishes.
+  local driver_base=${driver%[-_]drm}
   for dumb in $AURADE_RENDERER_NO_GL; do
-    [[ $driver != "$dumb" ]] || return 1
+    [[ $driver_base != "${dumb%[-_]drm}" ]] || return 1
   done
   return 0
 }
