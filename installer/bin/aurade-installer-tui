@@ -2968,9 +2968,11 @@ ask() {
 
 write_secret() {
   local name=$1 value=$2
-  umask 077
-  printf '%s' "$value" >"$SECRET_DIR/$name"
-  chmod 600 "$SECRET_DIR/$name"
+  (
+    umask 077
+    printf '%s' "$value" >"$SECRET_DIR/$name"
+    chmod 600 "$SECRET_DIR/$name"
+  )
 }
 
 # Build the engine argument list from the manifest. Answers are matched to
