@@ -2368,11 +2368,8 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.widgets["wifi.password"] = entry
         box.append(prompt)
 
-        # Not the page subtitle again. It says "everything is downloaded and
-        # checked before any disk is touched" four inches above this, and
-        # repeating the first eleven words of it here read as a screen with
-        # one thought. This says the part that follows from it, and then what
-        # to do about it.
+        # A failed connection is still a safe place to stop, before the disk
+        # question. Keep a practical next step beside the network controls.
         box.append(label(
             "A connection that fails here costs you nothing. Try another "
             "network, or plug in a cable.",
@@ -3463,7 +3460,7 @@ class InstallerWindow(Adw.ApplicationWindow):
         samples = [value for value in report.get("rate", [])
                    if isinstance(value, int) and value >= 0]
         meter_row = self.widgets["progress.meter.row"]
-        if report.get("active") == "acquire" and len(samples) >= 2:
+        if report.get("active") in ("acquire", "acquire-target") and len(samples) >= 2:
             self.widgets["progress.meter"].set_samples(samples)
             self.widgets["progress.rate"].set_label(
                 F.PROGRESS_DOWNLOAD % F.rate_label(samples[-1]))

@@ -45,10 +45,11 @@ printf '%s\n' \
 
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"6f2a1c9e","seq":1,"attempt":1,"stage":"preflight","status":"ok","elapsed_ms":3200,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"partition","status":"ok","elapsed_ms":2100,"reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"storage_error","message":"bootctl could not write to the EFI system partition","resumable":true,"reversible":false,"idempotent":true,"remediation":["retry","export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"package-check","status":"ok","message":"workspace","reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"partition","status":"ok","elapsed_ms":2100,"reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":5,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":6,"attempt":1,"stage":"bootloader","status":"failed","exit":1,"cause":"storage_error","message":"bootctl could not write to the EFI system partition","resumable":true,"reversible":false,"idempotent":true,"remediation":["retry","export","log","shell","reboot"],"target":{"path":"/dev/nvme0n1"}}
 EOF
 
 export AURADE_ZONEINFO_DIR="$TMP/zoneinfo" AURADE_LOCALE_DIR="$TMP/locales"
@@ -250,7 +251,7 @@ flatten "$TMP/failure" | grep -Fq 'Check the disk for faults, then start again.'
   fail 'failure does not name one next step'
 grep -Fq 'Save a report' "$TMP/failure" || fail 'failure does not offer a report'
 grep -Fq 'Open a terminal' "$TMP/failure" || fail 'failure does not offer a terminal'
-grep -Fq 'stage 9 of 11' "$TMP/failure" || fail 'failure does not say where in the sequence it stopped'
+grep -Fq 'stage 10 of 12' "$TMP/failure" || fail 'failure does not say where in the sequence it stopped'
 # The engine cannot be told to start at a stage, so a retry would re-run
 # wipefs. The screen must not offer one, and must say what starting over costs.
 ! grep -Fq 'Try ' "$TMP/failure" ||
@@ -262,6 +263,7 @@ flatten "$TMP/failure" | grep -Fq 'Starting again erases the disk' ||
 
 # A failure before the erase gate has a different, non-destructive message.
 cat >"$TMP/reversible.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"acquire","status":"failed","exit":1,"cause":"network_error","message":"the pinned snapshot could not be reached","resumable":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
@@ -317,9 +319,10 @@ grep -Eq '^\|  > _ +\|' "$TMP/username.out" ||
 # The first time this happened, an export error rendered as a listing of the
 # repository root.
 cat >"$TMP/glob.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"configure","status":"failed","exit":1,"cause":"unexpected_exit","message":"no match for /dev/sd* or ?? in the table","resumable":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
-env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
+env AURADE_TUI_PLAIN=0 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
   --journal "$TMP/glob.jsonl" >"$TMP/glob.out"
 grep -Fq '/dev/sd*' "$TMP/glob.out" ||
   fail 'a message containing a glob was not rendered literally'
@@ -392,6 +395,7 @@ PY
 
 # --- a failure at a non-resumable stage offers no retry ---------------------
 cat >"$TMP/nonresumable.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"snapshot","status":"failed","exit":1,"cause":"unexpected_exit","message":"a step ended without reporting why","resumable":false,"target":{"path":"/dev/nvme0n1"}}
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \
@@ -405,6 +409,7 @@ flatten "$TMP/nonresumable.out" | grep -Fq 'no way to carry on' ||
 
 # --- a journal message cannot forge a record field --------------------------
 cat >"$TMP/hostile.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"configure","status":"failed","exit":1,"cause":"unexpected_exit","message":"quoted \"stage\":\"bootloader\" text","resumable":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
 env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii "$TUI" --render failure \

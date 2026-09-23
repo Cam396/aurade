@@ -82,8 +82,10 @@ handle_cancel() {
 }
 trap handle_cancel TERM INT
 aurade_journal_init execute "$target"
-for stage in preflight acquire confirm partition format mount pacstrap \
-  configure bootloader snapshot verify-install; do
+staging=${AURADE_STUB_STAGING:-workspace}
+run_stage() {
+  local stage=$1 message=${2:-}
+  [[ -n $message ]] || message="finished $stage"
   aurade_journal_begin "$stage" "starting $stage"
   if [[ ${AURADE_STUB_LINGER_AT:-} == "$stage" ]]; then
     : >"$AURADE_STUB_DIR/lingering"
@@ -94,7 +96,21 @@ for stage in preflight acquire confirm partition format mount pacstrap \
       'a step ended without reporting why' export log reboot
     exit 1
   fi
-  aurade_journal_ok "$stage" "finished $stage"
+  aurade_journal_ok "$stage" "$message"
+}
+run_stage preflight
+run_stage package-check "$staging"
+if [[ $staging == workspace ]]; then
+  run_stage acquire
+fi
+for stage in confirm partition format mount; do
+  run_stage "$stage"
+done
+if [[ $staging == target ]]; then
+  run_stage acquire-target
+fi
+for stage in pacstrap configure bootloader snapshot verify-install; do
+  run_stage "$stage"
 done
 exit 0
 STUB

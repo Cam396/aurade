@@ -49,8 +49,9 @@ mapfile -t SCREENS < <("$TUI" --list-screens)
 # below is that all four survive having the frame taken off.
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"6f2a1c9e","seq":1,"attempt":1,"stage":"preflight","status":"ok","elapsed_ms":3200,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"package-check","status":"ok","message":"workspace","reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"acquire","status":"ok","elapsed_ms":252000,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":4,"attempt":1,"stage":"pacstrap","status":"running","pct":59,"message":"612/1041 packages","reversible":false,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
 
 plain() {

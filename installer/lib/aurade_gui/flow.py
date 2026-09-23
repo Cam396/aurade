@@ -51,7 +51,7 @@ PAGES: tuple[Page, ...] = (
     Page(
         name="network",
         title="Get online",
-        subtitle="Everything is downloaded and checked before any disk is touched.",
+        subtitle="The package list is checked before the disk changes.",
     ),
     Page(
         name="language",
@@ -465,8 +465,9 @@ REVIEW_ASSURANCE = "Nothing has been written to any disk yet."
 GATE_TITLE = "Confirm erase"
 GATE_BODY = (
     "Everything up to here can be undone. Nothing after it can.\n\n"
-    "Packages are downloaded and checked first. If the network fails, this "
-    "stops with the disk untouched."
+    "The package list and archive are checked first. On low memory computers, "
+    "packages download after the new system is formatted. If a download fails, "
+    "the install stops with an incomplete system on the new disk."
 )
 
 PROGRESS_TITLE = "Making this computer yours"
@@ -557,9 +558,9 @@ STATUS_NET_NONE = "Not connected to any network."
 #: what the tooltip and the screen reader get.
 STATUS_NET_SHORT = "off"
 
-#: The download meter, during the one stage that takes minutes and reports
-#: almost nothing. Word for word what the text installer says in plain mode,
-#: because the two front ends are watching the same file.
+#: The download meter, during either package download stage. Word for word
+#: what the text installer says in plain mode, because both front ends watch
+#: the same file.
 PROGRESS_DOWNLOAD = "Downloading at %s"
 
 

@@ -16,7 +16,9 @@ for marker in \
   'no host boot disk' \
   'must not fabricate' \
   'plain and LUKS2 paths' \
-  'Package acquisition and signature/hash verification finish before' \
+  'Package selection' \
+  'archive reachability' \
+  'journal records which route ran' \
   'First boot reaches the greeter' \
   'factory rollback' \
   'machine-readable journal' \

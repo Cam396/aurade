@@ -68,6 +68,10 @@ grep -Fq -- 'sof-firmware' "$TMP/plain.out"
 grep -Fq -- 'file:///var/cache/aurade/repo' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pacstrap -M -G -C' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'GPGDir = ${ARCH_GPG_DIR}' "$ROOT/installer/bin/aurade-install"
+# pacstrap prefixes CacheDir with the target root, so the local config keeps its default.
+local_pacman_conf=$(sed -n '/^write_arch_local_pacman_conf()/,/^}/p' \
+  "$ROOT/installer/bin/aurade-install")
+refute grep -Eq '^[[:space:]]*CacheDir[[:space:]]*=' <<<"$local_pacman_conf"
 grep -Fq -- 'LocalFileSigLevel = Required' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pacman-key --gpgdir "$ARCH_GPG_DIR" --populate archlinux' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '/usr/share/pacman/keyrings/archlinux.gpg' "$ROOT/installer/bin/aurade-install"
@@ -80,7 +84,8 @@ grep -Fq -- 'aurade_journal_fail "$_J_ACTIVE_STAGE" "$status" cancelled' \
   "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'trap '\''handle_cancel 130'\'' INT' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'journal_message=${message:0:256}' "$ROOT/installer/bin/aurade-install"
-grep -Fq -- 'without touching the target disk' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'Everything above this line is reversible: the disk has not been touched' \
+  "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'private keys excluded' "$TMP/plain.out"
 
 # --- the first boot check, which is the other half of a promise -------------
@@ -128,8 +133,8 @@ awk '/^die_keyring_failure\(\) \{/,/^\}/' "$ROOT/installer/bin/aurade-install" |
   { echo 'die_keyring_failure no longer dies' >&2; exit 1; }
 # ...and the message it dies with still classifies as a keyring failure, which
 # is what tests/test-die-cause.sh pins by name.
-grep -Fq -- 'installer staging filesystem has ' "$TMP/plain.out"
-grep -Fq -- 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'installer staging capacity is ' "$TMP/plain.out"
+grep -Fq -- 'Set AURADE_INSTALL_WORK_DIR to a disk with more free space' "$ROOT/installer/bin/aurade-install"
 # The three Secure Boot states each get told to the user before the erase gate:
 # on and trusted, on and untrusted, and unreadable. Matched on the state rather
 # than on the sentence, because the sentences have been rewritten once already.
@@ -211,6 +216,17 @@ plan() {
     exit 1
   fi
 }
+
+grep -Fq 'compare package size with available memory and swap' "$TMP/plain.out"
+grep -Fq 'download to the target disk after mount when memory headroom is low' "$TMP/plain.out"
+plan stage_workspace --staging workspace
+workspace_download=$(grep -n -- '--disable-sandbox -Sw' "$TMP/stage_workspace.out" | head -1 | cut -d: -f1)
+workspace_erase=$(grep -n -- 'wipefs --all --force' "$TMP/stage_workspace.out" | head -1 | cut -d: -f1)
+(( workspace_download < workspace_erase ))
+plan stage_target --staging target
+target_mount=$(grep -n -- 'mount ' "$TMP/stage_target.out" | head -1 | cut -d: -f1)
+target_download=$(grep -n -- '--disable-sandbox -Sw' "$TMP/stage_target.out" | head -1 | cut -d: -f1)
+(( target_mount < target_download ))
 
 # --- accessibility survives the reboot, or it is not accessibility ---------
 #

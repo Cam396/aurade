@@ -37,7 +37,8 @@ fail() { printf 'test-greyscale: %s\n' "$*" >&2; failures=$(( failures + 1 )); }
 # draw is on the screen at once.
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"6f2a1c9e","seq":1,"attempt":1,"stage":"preflight","status":"ok","elapsed_ms":3200,"reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
-{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"acquire","status":"running","pct":41,"message":"312/1041 packages","reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":2,"attempt":1,"stage":"package-check","status":"ok","message":"workspace","reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
+{"v":1,"install_id":"6f2a1c9e","seq":3,"attempt":1,"stage":"acquire","status":"running","pct":41,"message":"312/1041 packages","reversible":true,"idempotent":true,"target":{"path":"/dev/nvme0n1"}}
 EOF
 
 grey() {
