@@ -30,11 +30,12 @@ install -d \
   "$TMP/squash/usr/local/sbin" \
   "$TMP/squash/usr/local/lib/aurade" \
   "$TMP/squash/etc/aurade-installer"
-for helper in aurade-installer aurade-install aurade-recovery aurade-installer-start \
+for helper in aurade-installer-tui aurade-install aurade-recovery aurade-installer-start \
   aurade-installer-gui aurade-installer-gui-bridge; do
-  printf '%s\n' helper >"$TMP/squash/usr/local/sbin/$helper"
+printf '%s\n' helper >"$TMP/squash/usr/local/sbin/$helper"
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
+printf '%s\n' staging >"$TMP/squash/usr/local/lib/aurade/aurade-staging.sh"
 install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
 for module in __init__ a11y arcade app bible brand bridge flow locales stage status tokens wait; do
   printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
@@ -121,6 +122,21 @@ printf 'release_channel=candidate\ngui_release=1\ngui_manifest_sha256=%s\n' \
   "$(sha256sum "$TMP/valid-gui-release-manifest.json" | awk '{print $1}')" \
   >"$TMP/full.iso.build-info"
 "$ROOT/ci/verify-iso-structure.sh" "$TMP/full.iso" --full --require-gui
+
+# The image must not carry the retired prompt by prompt installer, even if the
+# current launcher never selects it.
+printf '%s\n' old >"$TMP/squash/usr/local/sbin/aurade-installer"
+mksquashfs "$TMP/squash" "$TMP/legacy.sfs" -noappend -quiet
+cp -a "$TMP/iso-tree" "$TMP/legacy-tree"
+cp "$TMP/legacy.sfs" "$TMP/legacy-tree/arch/x86_64/airootfs.sfs"
+(cd "$TMP/legacy-tree" && bsdtar -cf "$TMP/legacy.iso" .)
+if "$ROOT/ci/verify-iso-structure.sh" "$TMP/legacy.iso" --full \
+  >"$TMP/legacy.out" 2>&1; then
+  echo 'ISO with the legacy installer unexpectedly passed' >&2
+  exit 1
+fi
+grep -Fq 'legacy installer is present in the live image' "$TMP/legacy.out"
+rm -f -- "$TMP/squash/usr/local/sbin/aurade-installer"
 
 # A GUI payload built on the unsigned development channel is not a releasable
 # 0.2.0 candidate, even when its embedded manifest is otherwise valid.

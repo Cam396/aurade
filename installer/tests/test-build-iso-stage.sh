@@ -123,6 +123,9 @@ for package in gtk4 libadwaita python-gobject cage python-cairo ttf-jetbrains-mo
 done
 [[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-release-manifest.json ]]
 [[ -r $TMP/work/profile/airootfs/etc/aurade-installer/gui-enabled ]]
+[[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
+[[ ! -e $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-staging.sh ]]
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
@@ -158,6 +161,9 @@ env \
   AURADE_INSTALLER_WORK_ROOT="$TMP/work_text_only" \
   "$ROOT/installer/build-iso.sh" --stage-only >"$TMP/text-only.out"
 text_profile=$TMP/work_text_only/profile
+[[ -x $text_profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
+[[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer ]]
+[[ -r $text_profile/airootfs/usr/local/lib/aurade/aurade-staging.sh ]]
 [[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
 [[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
 [[ ! -e $text_profile/airootfs/etc/aurade-installer/gui-enabled ]]
@@ -515,6 +521,11 @@ done < <(find "$ROOT/installer/units" -maxdepth 1 -type f -name '*.service' -pri
 grep -Fq -- 'root with no password' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq -- 'not copied to the installed system' "$ROOT/installer/archiso/airootfs/etc/motd"
 grep -Fq '/usr/local/sbin/aurade-installer-tui' "$ROOT/installer/archiso/profiledef.sh"
+grep -Fq 'text)   "$START" --text' \
+  "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart"
+grep -Fq 'TUI=$(_find aurade-installer-tui)' "$ROOT/installer/bin/aurade-installer-start"
+! grep -Fq 'aurade-installer ' \
+  "$ROOT/installer/archiso/airootfs/usr/local/sbin/aurade-installer-autostart"
 for staged in /usr/local/sbin/aurade-installer-gui \
   /usr/local/sbin/aurade-installer-gui-bridge \
   /usr/local/sbin/aurade-installer-start \

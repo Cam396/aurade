@@ -76,7 +76,20 @@ for arg in "$@"; do
 done
 aurade_journal_init execute "$target"
 printf 'stub engine running stages\n'
-for stage in preflight acquire confirm partition format mount pacstrap \
+for stage in preflight package-check; do
+  aurade_journal_begin "$stage" "starting $stage"
+  if [[ ${AURADE_STUB_FAIL_AT:-} == "$stage" ]]; then
+    aurade_journal_fail "$stage" 1 unexpected_exit "a step ended without reporting why" \
+      retry export log shell reboot
+    exit 1
+  fi
+  if [[ $stage == package-check ]]; then
+    aurade_journal_ok "$stage" workspace
+  else
+    aurade_journal_ok "$stage" "finished $stage"
+  fi
+done
+for stage in acquire confirm partition format mount pacstrap \
   configure bootloader snapshot verify-install; do
   aurade_journal_begin "$stage" "starting $stage"
   if [[ ${AURADE_STUB_FAIL_AT:-} == "$stage" ]]; then

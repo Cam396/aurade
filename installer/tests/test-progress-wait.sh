@@ -29,6 +29,7 @@ fail() { printf 'test-progress-wait: %s\n' "$*" >&2; failures=$(( failures + 1 )
 
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"stage":"preflight","status":"ok","elapsed_ms":3200}
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"acquire","status":"ok","elapsed_ms":161000}
 {"v":1,"stage":"confirm","status":"ok","elapsed_ms":900}
 {"v":1,"stage":"partition","status":"ok","elapsed_ms":2100}
@@ -230,7 +231,7 @@ done
 # into a count rather than dropping them silently.
 grep -Fq 'Checking this computer' "$TMP/p.34" ||
   fail 'a tall console did not list the finished stages'
-grep -Fq '6 steps done' "$TMP/p.24" ||
+grep -Fq '7 steps done' "$TMP/p.24" ||
   fail 'a 24 row console did not fold the finished stages into a count'
 grep -Fq 'Checking this computer' "$TMP/p.24" &&
   fail 'a 24 row console listed the finished stages and folded them'

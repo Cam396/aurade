@@ -38,6 +38,7 @@ file_permissions=(
   ["/usr/local/share/aurade/aurade-first-boot-accessibility.service"]=0:0:644
   ["/usr/local/lib/aurade/aurade-validate.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-journal.sh"]=0:0:644
+  ["/usr/local/lib/aurade/aurade-staging.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-questions.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-tui.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-copy.sh"]=0:0:644

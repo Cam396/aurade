@@ -32,12 +32,15 @@ The plain and LUKS2 paths must prove, separately:
    recovery action.
 9. Cleanup removes temporary mappings, mounts, loops, and test credentials.
 
-The record is the full disposable execute-path evidence. Full disposable
-execute-path evidence also records that package acquisition
-and signature/hash verification finish before any destructive disk operation.
-`Package acquisition and signature/hash verification finish before` the erase
-boundary, `First boot reaches the greeter`, and factory rollback returns to the
-recorded snapshot. The machine-readable journal is part of the evidence,
+The record is the full disposable execute-path evidence. Package selection
+and archive reachability are checked before any destructive disk operation.
+When automatic staging has enough workspace headroom, package downloads and
+signature verification also finish before the disk changes. When the installer
+chooses the target disk to keep the live system within its memory budget,
+packages are downloaded after formatting and verified before pacstrap. The
+journal records which route ran and where a failure left the disk. The evidence
+must also show `First boot reaches the greeter` and factory rollback returns to
+the recorded snapshot. The machine-readable journal is part of the evidence,
 including the reversibility boundary and cleanup result.
 
 `installer/tests/test-execute-path-gate.sh` is a safe pre-acquisition fixture.

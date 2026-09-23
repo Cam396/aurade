@@ -37,7 +37,7 @@ tip	A snapshot does not copy anything. It records what changes after it, so it c
 tip	A recovery snapshot is saved before the first restart. It is a way back to exactly how the system leaves here.
 tip	The boot menu will have a rollback entry. It starts the system from that snapshot and changes nothing on the way.
 tip	Rolling back is a boot menu choice, not a repair. Nothing is rewritten, so a rollback that does not help can be undone.
-tip	Every package was downloaded and checked before the disk was touched. This install no longer needs the network.
+tip	The packages were downloaded and checked. This install no longer needs the network.
 tip	Packages come from one pinned day of the Arch archive, not from whatever is newest, so two machines get the same system.
 tip	AuraDE starts with systemd-boot rather than GRUB. Its boot entries are plain text files you can fix with an editor.
 tip	If you turned on encryption, the disk is protected with LUKS2 and unreadable to anything without the passphrase.

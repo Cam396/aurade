@@ -69,10 +69,11 @@ if (( FULL )); then
   unsquashfs -l "$image" >"$contents"
   required_payload=(
     usr/local/sbin/aurade-installer-start \
-    usr/local/sbin/aurade-installer \
+    usr/local/sbin/aurade-installer-tui \
     usr/local/sbin/aurade-install \
     usr/local/sbin/aurade-recovery \
     usr/local/lib/aurade/aurade-journal.sh \
+    usr/local/lib/aurade/aurade-staging.sh \
     opt/aurade/repo/packages.lock \
     etc/aurade-installer/snapshot
   )
@@ -100,6 +101,10 @@ if (( FULL )); then
       exit 1
     }
   done
+  if grep -Fqx 'squashfs-root/usr/local/sbin/aurade-installer' "$contents"; then
+    echo 'verify-iso-structure: legacy installer is present in the live image' >&2
+    exit 1
+  fi
 
   # The lock file is part of the release provenance, so verify it against the
   # package archives inside the final squashfs rather than trusting the

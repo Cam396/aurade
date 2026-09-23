@@ -85,7 +85,7 @@ else
 fi
 
 if (( issues )); then
-  (( QUIET )) || printf 'Network check: %d thing(s) to look at. Every package is still downloaded and verified before any disk changes.\n' "$issues" >&2
+  (( QUIET )) || printf 'Network check: %d thing(s) to look at. The package list is checked before the disk changes. When memory is tight, downloads happen after formatting.\n' "$issues" >&2
   exit 1
 fi
 report 'Network check: ready to download packages.'

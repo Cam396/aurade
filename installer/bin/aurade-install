@@ -14,6 +14,15 @@ JOURNAL_LIB=${AURADE_JOURNAL_LIB:-/usr/local/lib/aurade/aurade-journal.sh}
 # shellcheck source=../lib/aurade-journal.sh
 . "$JOURNAL_LIB"
 
+STAGING_LIB=${AURADE_STAGING_LIB:-/usr/local/lib/aurade/aurade-staging.sh}
+[[ -r $STAGING_LIB ]] || STAGING_LIB="$SELF_DIR/../lib/aurade-staging.sh"
+[[ -r $STAGING_LIB ]] || {
+  printf '%s: package staging library not found\n' "${0##*/}" >&2
+  exit 1
+}
+# shellcheck source=../lib/aurade-staging.sh
+. "$STAGING_LIB"
+
 # The install fingerprint. Optional: a machine that cannot find the library
 # gets an install without a mark on it, which is a missing file in /etc and
 # nothing else.
@@ -52,6 +61,7 @@ KEYMAP=us
 # none of these new flags runs exactly the sequence it ran before.
 FILESYSTEM=btrfs
 SWAP=none
+STAGING_MODE=${AURADE_INSTALL_STAGING:-auto}
 
 # Accessibility, which is not a setting the installer applies to itself.
 #
@@ -101,6 +111,10 @@ ARCH_GPG_DIR=
 ARCH_DB_PATH=
 ARCH_LOG_FILE=
 MICROCODE_IMAGE=
+ARCH_STAGING_SELECTED=
+ARCH_PACKAGE_BYTES=0
+ARCH_FIRST_PACKAGE_URL=
+ARCH_PACKAGE_FILES=()
 ARCH_KEYRING_FILES=(pubring.gpg trustdb.gpg gpg.conf dirmngr.conf dirmngr_ldapserver.conf)
 
 usage() {
@@ -132,6 +146,7 @@ Storage and identity:
   --filesystem FS              btrfs (default), ext4 or xfs
   --swap POLICY                none (default), file or zram
   --swap-size SIZE             auto (default), hibernate, or a size like 8G
+  --staging MODE               auto (default), workspace or target
   --layout MODE                wipe (default) or alongside
   --secure-boot-key FILE       PEM private key for an already-enrolled Secure Boot db key
   --secure-boot-cert FILE      PEM certificate matching --secure-boot-key
@@ -188,6 +203,7 @@ die() {
     case $message in
       *Secure\ Boot*) cause=secure_boot_error ;;
       *keyring*|*signature*) cause=keyring_error ;;
+      *--staging*) cause=installer_error ;;
       *staging\ filesystem*|*capacity*|*free\ space*) cause=capacity_error ;;
       *archive*|*acquire*|*network*|*DNS*|*route*|*clock*) cause=network_error ;;
       *target*|*disk*|*partition*) cause=target_error ;;
@@ -223,16 +239,14 @@ log() {
 }
 
 check_workspace_capacity() {
-  local path=$1 minimum=${AURADE_MIN_WORKSPACE_BYTES:-2147483648}
-  local available_kib available_bytes
+  local path=$1 minimum=${AURADE_MIN_WORKSPACE_BYTES:-268435456}
+  local available_bytes
   [[ $minimum =~ ^[0-9]+$ ]] || die 'AURADE_MIN_WORKSPACE_BYTES must be an integer byte count'
-  available_kib=$(df -Pk -- "$path" 2>/dev/null | awk 'NR == 2 {print $4; exit}')
-  [[ $available_kib =~ ^[0-9]+$ ]] || die "cannot determine free space on installer staging filesystem: $path"
-  available_bytes=$((available_kib * 1024))
+  available_bytes=$(aurade_workspace_capacity_bytes "$path") || die "cannot determine free space on installer staging filesystem: $path"
   if (( available_bytes < minimum )); then
-    die "the installer staging filesystem has ${available_bytes} bytes free and needs at least ${minimum} for the package cache. Set AURADE_INSTALL_WORK_DIR to a directory on a disk."
+    die "installer staging capacity is ${available_bytes} bytes and needs at least ${minimum} to check package availability before changing the disk. Set AURADE_INSTALL_WORK_DIR to a disk with more free space."
   fi
-  log "installer staging filesystem has ${available_bytes} bytes free (minimum ${minimum})"
+  log "installer staging capacity is ${available_bytes} bytes before package planning"
 }
 
 # EFI variables have four bytes of attributes before their payload. Keep this
@@ -477,7 +491,7 @@ run_pacstrap_logged() {
 
 run_pacstrap() {
   if [[ $MODE == dry-run ]]; then
-    run pacstrap -M -G -C "$ARCH_PACMAN_CONF" "$@"
+    run pacstrap -M -G -C "$ARCH_LOCAL_PACMAN_CONF" "$@"
     return
   fi
 
@@ -529,41 +543,112 @@ stop_rate_sampler() {
   return 0
 }
 
-acquire_arch_packages() {
-  if [[ $MODE == dry-run ]]; then
-    run install -d -m 0755 "$ARCH_CACHE"
-    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
-      --disable-sandbox -Syy --noconfirm
-    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
-      --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"
-    run repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" \
-      "$ARCH_CACHE"/'*.pkg.tar.*'
-    printf ' + write %q with a local file:// repository for the prefetched Arch packages\n' \
-      "$ARCH_LOCAL_PACMAN_CONF"
-    ARCH_LOCAL_PACMAN_CONF=$ARCH_PACMAN_CONF
-    return
-  fi
+write_arch_pacman_conf() {
+  cat >"$ARCH_PACMAN_CONF" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+ParallelDownloads = 1
+DisableDownloadTimeout
+DBPath = ${ARCH_DB_PATH}
+CacheDir = ${ARCH_CACHE}
+GPGDir = ${ARCH_GPG_DIR}
+LogFile = ${ARCH_LOG_FILE}
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Required
 
-  # "install" rather than "acquire": the classifier matches the word acquire
-  # and sent a missing pacman to the network explanation, which told somebody
-  # with a broken image to check their network connection.
+[core]
+Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
+
+[extra]
+Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
+EOF
+}
+
+write_arch_local_pacman_conf() {
+  # pacstrap prefixes CacheDir with the target root, so keep its default path.
+  cat >"$ARCH_LOCAL_PACMAN_CONF" <<EOF
+[options]
+Architecture = auto
+CheckSpace
+ParallelDownloads = 1
+GPGDir = ${ARCH_GPG_DIR}
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Required
+
+[aurade-arch]
+SigLevel = Required DatabaseOptional
+Server = file://${ARCH_CACHE}
+EOF
+}
+
+plan_arch_package_set() {
   command -v pacman >/dev/null || die 'pacman is required to install Arch packages'
+  command -v timeout >/dev/null || die 'timeout is required to check the pinned package list'
+  local attempt attempt_log plan_output bytes url extra total=0
+  local plan_timeout=${AURADE_ARCH_PLAN_TIMEOUT:-2m}
+  ARCH_FIRST_PACKAGE_URL=
+  ARCH_PACKAGE_BYTES=0
+
+  for attempt in 1 2 3; do
+    attempt_log="$WORK_DIR/arch-plan-${attempt}.log"
+    : >"$attempt_log"
+    if ! run_logged "$attempt_log" timeout --foreground "$plan_timeout" \
+        pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+        --disable-sandbox -Syy --noconfirm; then
+      (( attempt < 3 )) && log 'the pinned package list could not be refreshed. Trying once more.'
+      continue
+    fi
+    if ! plan_output=$(timeout --foreground "$plan_timeout" \
+        pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+        --disable-sandbox -Sp --print-format '%s %l' --needed --noconfirm \
+        "${BASE_PACKAGES[@]}" 2>>"$attempt_log"); then
+      (( attempt < 3 )) && log 'the pinned package set could not be resolved. Trying once more.'
+      continue
+    fi
+
+    total=0
+    ARCH_FIRST_PACKAGE_URL=
+    while read -r bytes url extra; do
+      [[ -n ${bytes:-} ]] || continue
+      [[ $bytes =~ ^[0-9]+$ && -n ${url:-} && -z ${extra:-} ]] || \
+        die 'the pinned package archive returned an unreadable package list'
+      (( total <= 9223372036854775807 - bytes )) || \
+        die 'the pinned package list is too large to stage safely'
+      total=$((total + bytes))
+      [[ -n $ARCH_FIRST_PACKAGE_URL ]] || ARCH_FIRST_PACKAGE_URL=$url
+    done <<<"$plan_output"
+    (( total > 0 )) || die 'the pinned package list is empty'
+    ARCH_PACKAGE_BYTES=$total
+    break
+  done
+  (( ARCH_PACKAGE_BYTES > 0 )) || die 'the pinned package archive could not be reached before changing the disk'
+
+  command -v curl >/dev/null || die 'required command not found: curl'
+  local probe_timeout=${AURADE_ARCH_PROBE_TIMEOUT:-20}
+  timeout --foreground "$((probe_timeout + 5))s" curl --fail --silent --show-error \
+    --location --head --max-time "$probe_timeout" -- "$ARCH_FIRST_PACKAGE_URL" \
+    >/dev/null || die 'the pinned package archive did not answer before the disk was changed'
+}
+
+download_arch_packages() {
+  local changed_disk=$1 attempt acquired=0 signature_failure_seen=0
+  local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
   command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
   command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
   install -d -m 0755 "$ARCH_CACHE"
   start_rate_sampler "$ARCH_CACHE"
 
-  local attempt acquired=0 signature_failure_seen=0
-  local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
   for attempt in 1 2 3; do
     rm -f -- "$ARCH_CACHE"/*
     local attempt_log="$WORK_DIR/arch-acquire-${attempt}.log"
     : >"$attempt_log"
-    log "acquiring the pinned Arch package set before touching $TARGET (attempt ${attempt}/3)"
+    if (( changed_disk )); then
+      log "downloading the pinned package set to the new disk (attempt ${attempt}/3)"
+    else
+      log "downloading the pinned package set before changing $TARGET (attempt ${attempt}/3)"
+    fi
     if run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
-        pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
-          --disable-sandbox -Syy --noconfirm && \
-       run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
         --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
       mapfile -t ARCH_PACKAGE_FILES < <(
@@ -578,39 +663,68 @@ acquire_arch_packages() {
         die_keyring_failure
       fi
       signature_failure_seen=1
-      log 'one or more prefetched Arch package signatures were invalid. Clearing the cache and retrying, without touching the target disk.'
+      log 'one or more package signatures were invalid. Clearing the cache and retrying.'
     fi
     if pacman_keyring_failure "$attempt_log"; then
       die_keyring_failure
     fi
-    (( attempt < 3 )) && log 'Arch package acquisition failed. Retrying, without altering the target disk.'
+    (( attempt < 3 )) && log 'package acquisition failed. Trying once more.'
   done
-  # Before the `die`s below, so a failure screen is not drawn over a meter
-  # still ticking along behind it.
   stop_rate_sampler
   if (( ! acquired )); then
     if (( signature_failure_seen )); then
-      die 'the downloaded packages did not match their signatures, after three attempts'
+      if (( changed_disk )); then
+        die 'the downloaded packages did not match their signatures after the disk was changed'
+      fi
+      die 'the downloaded packages did not match their signatures before the disk was changed'
     fi
-    die 'the packages could not all be downloaded from the archive'
+    if (( changed_disk )); then
+      die 'the packages could not all be downloaded from the archive after the disk was changed'
+    fi
+    die 'the packages could not all be downloaded from the archive before changing the disk'
   fi
 
   repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" "${ARCH_PACKAGE_FILES[@]}" >/dev/null || \
     die 'could not build the local Arch package repository'
-  cat >"$ARCH_LOCAL_PACMAN_CONF" <<EOF
-[options]
-Architecture = auto
-CheckSpace
-ParallelDownloads = 1
-GPGDir = ${ARCH_GPG_DIR}
-SigLevel = Required DatabaseOptional
-LocalFileSigLevel = Required
+  write_arch_local_pacman_conf
+  log "verified ${#ARCH_PACKAGE_FILES[@]} Arch packages. The base system install can run without a network connection."
+}
 
-[aurade-arch]
-SigLevel = Required DatabaseOptional
-Server = file://${ARCH_CACHE}
-EOF
-  log "verified ${#ARCH_PACKAGE_FILES[@]} prefetched Arch packages. The installation continues offline."
+acquire_arch_packages() {
+  if [[ $MODE == dry-run ]]; then
+    run install -d -m 0755 "$ARCH_CACHE" "$ARCH_DB_PATH"
+    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+      --disable-sandbox -Syy --noconfirm
+    run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+      --disable-sandbox -Sp --print-format '%s %l' --needed --noconfirm \
+      "${BASE_PACKAGES[@]}"
+    case $STAGING_MODE in
+      workspace)
+        printf ' + download and verify the package set before changing the target\n'
+        ;;
+      target)
+        printf ' + download the package set to %q after the new system is mounted\n' \
+          "$MOUNTPOINT/var/cache/pacman/pkg"
+        ;;
+      auto)
+        printf ' + compare package size with available memory and swap\n'
+        printf ' + download to the target disk after mount when memory headroom is low\n'
+        ;;
+    esac
+    ARCH_STAGING_SELECTED=$STAGING_MODE
+    write_arch_local_pacman_conf
+    return
+  fi
+
+  command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
+  command -v timeout >/dev/null || die 'timeout is required to bound Arch package planning'
+  install -d -m 0755 "$ARCH_CACHE" "$ARCH_DB_PATH"
+  plan_arch_package_set
+  ARCH_STAGING_SELECTED=$(aurade_select_package_staging "$STAGING_MODE" \
+    "$ARCH_PACKAGE_BYTES" "$WORKSPACE_FS_PATH") || {
+      die 'installer staging capacity is too small for the pinned package set. Set AURADE_INSTALL_WORK_DIR to a disk with more free space.'
+    }
+  log "package set size is ${ARCH_PACKAGE_BYTES} bytes. Staging mode is ${ARCH_STAGING_SELECTED}."
 }
 
 write_target_file() {
@@ -680,7 +794,7 @@ swap_mib() {
     *M) printf '%s' "${SWAP_SIZE%M}"; return 0 ;;
     *G) printf '%s' "$(( ${SWAP_SIZE%G} * 1024 ))"; return 0 ;;
   esac
-  total_kib=$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo 2>/dev/null || true)
+  total_kib=$(awk '/^MemTotal:/ { print $2; exit }' "${AURADE_MEMINFO:-/proc/meminfo}" 2>/dev/null || true)
   [[ $total_kib =~ ^[0-9]+$ ]] || total_kib=$(( 4 * 1024 * 1024 ))
   total_mib=$(( total_kib / 1024 ))
   if [[ $SWAP_SIZE == hibernate ]]; then
@@ -761,6 +875,7 @@ while (($#)); do
     --filesystem) FILESYSTEM=${2:?}; shift 2 ;;
     --swap) SWAP=${2:?}; shift 2 ;;
     --swap-size) SWAP_SIZE=${2:?}; shift 2 ;;
+    --staging) STAGING_MODE=${2:?}; shift 2 ;;
     --layout) LAYOUT=${2:?}; shift 2 ;;
     --screen-reader) SCREEN_READER=${2:?}; shift 2 ;;
     --braille) BRAILLE=${2:?}; shift 2 ;;
@@ -801,6 +916,10 @@ TARGET=$(canonical_device "$TARGET")
 case $FILESYSTEM in
   btrfs|ext4|xfs) ;;
   *) die '--filesystem must be btrfs, ext4 or xfs' ;;
+esac
+case $STAGING_MODE in
+  auto|workspace|target) ;;
+  *) die '--staging must be auto, workspace or target' ;;
 esac
 case $SCREEN_READER in yes|no) ;; *) die '--screen-reader must be yes or no' ;; esac
 case $BRAILLE in yes|no) ;; *) die '--braille must be yes or no' ;; esac
@@ -1075,7 +1194,7 @@ if [[ $MODE == execute ]]; then
     break
   done
   log "target identity: model=${target_model:-unknown} serial=${target_serial:-unknown} transport=${target_transport:-unknown} by-id=${target_by_id:-unavailable}"
-  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee gpg gpgv; do
+  for command in blockdev sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid timeout tee curl gpg gpgv; do
     command -v "$command" >/dev/null || die "required command not found: $command"
   done
   # Same rule as cryptsetup below: anything the chosen shape will need is
@@ -1197,35 +1316,30 @@ ARCH_GPG_DIR=$WORK_DIR/gnupg
 ARCH_DB_PATH=$WORK_DIR/pacman-db
 ARCH_LOG_FILE=$WORK_DIR/pacman.log
 install -d -m 0755 "$ARCH_CACHE" "$ARCH_DB_PATH"
-cat >"$ARCH_PACMAN_CONF" <<EOF
-[options]
-Architecture = auto
-CheckSpace
-ParallelDownloads = 1
-DisableDownloadTimeout
-DBPath = ${ARCH_DB_PATH}
-CacheDir = ${ARCH_CACHE}
-GPGDir = ${ARCH_GPG_DIR}
-LogFile = ${ARCH_LOG_FILE}
-SigLevel = Required DatabaseOptional
-LocalFileSigLevel = Required
-
-[core]
-Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
-
-[extra]
-Server = https://archive.archlinux.org/repos/${ARCH_SNAPSHOT}/\$repo/os/\$arch
-EOF
+write_arch_pacman_conf
 
 if [[ $MODE == execute ]]; then
   prepare_arch_keyring
 fi
 
-# This is deliberately before wipefs/sgdisk. A stalled archive or broken
-# network must fail while the existing installation is still intact.
-aurade_journal_begin acquire 'downloading and verifying packages'
+# Package metadata and a package URL are checked before the target changes.
+# The selected staging route is recorded before either download path begins.
+aurade_journal_begin package-check 'checking the pinned package set and staging capacity'
 acquire_arch_packages
-aurade_journal_ok acquire
+aurade_journal_ok package-check "$ARCH_STAGING_SELECTED"
+if [[ $MODE == execute && $ARCH_STAGING_SELECTED == workspace ]]; then
+  aurade_journal_begin acquire 'downloading packages before changing the target'
+  download_arch_packages 0
+  aurade_journal_ok acquire
+elif [[ $MODE == dry-run && $STAGING_MODE == workspace ]]; then
+  aurade_journal_begin acquire 'downloading packages before changing the target'
+  run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+    --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"
+  run repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" \
+    "$ARCH_CACHE"/'*.pkg.tar.*'
+  write_arch_local_pacman_conf
+  aurade_journal_ok acquire
+fi
 
 # Everything above this line is reversible: the disk has not been touched and
 # an abandoned run costs only the downloads. Everything below it is not.
@@ -1317,6 +1431,27 @@ else
 fi
 aurade_journal_ok mount
 
+if [[ $MODE == execute && $ARCH_STAGING_SELECTED == target ]]; then
+  ARCH_CACHE="$MOUNTPOINT/var/cache/pacman/pkg"
+  run install -d -m 0755 "$ARCH_CACHE"
+  write_arch_pacman_conf
+  aurade_journal_begin acquire-target 'downloading packages to the new disk'
+  download_arch_packages 1
+  aurade_journal_ok acquire-target
+elif [[ $MODE == dry-run && $STAGING_MODE == target ]]; then
+  ARCH_CACHE="$MOUNTPOINT/var/cache/pacman/pkg"
+  run install -d -m 0755 "$ARCH_CACHE"
+  write_arch_pacman_conf
+  run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
+    --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"
+  run repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" \
+    "$ARCH_CACHE"/'*.pkg.tar.*'
+  write_arch_local_pacman_conf
+elif [[ $MODE == dry-run && $STAGING_MODE == auto ]]; then
+  printf ' + when memory headroom is low, download and verify packages in %q here\n' \
+    "$MOUNTPOINT/var/cache/pacman/pkg"
+fi
+
 # Swap, before pacstrap so the file is part of the filesystem the rest of the
 # install measures itself against, and before genfstab so the entry is written
 # by the same pass that writes every other mount.
@@ -1352,6 +1487,13 @@ fi
 aurade_journal_begin pacstrap 'installing the base system'
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
 aurade_journal_ok pacstrap
+if [[ $MODE == execute && $ARCH_STAGING_SELECTED == target ]]; then
+  for package in "${ARCH_PACKAGE_FILES[@]}"; do
+    rm -f -- "$package" "${package}.sig"
+  done
+  rm -f -- "$ARCH_CACHE/aurade-arch.db" "$ARCH_CACHE/aurade-arch.db.tar.gz" \
+    "$ARCH_CACHE/aurade-arch.files" "$ARCH_CACHE/aurade-arch.files.tar.gz"
+fi
 run cp -a "${BUNDLE_DIR%/}/." "$MOUNTPOINT/var/cache/aurade/repo/"
 if [[ $MODE == execute ]]; then
   copy_public_keyring "$ARCH_GPG_DIR" "$MOUNTPOINT/etc/pacman.d/gnupg"

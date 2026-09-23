@@ -25,11 +25,25 @@
 
 # Journal stage names are engineering terms. These are what the user sees; the
 # journal keeps the real name so a support case and a screenshot still line up.
+package_staging_choice() {
+  local journal=${AURADE_JOURNAL_PATH:-}
+  [[ -r $journal ]] || return 1
+  awk '
+    /"stage":"package-check"/ { record = $0 }
+    END {
+      if (record ~ /"message":"workspace"/) print "workspace"
+      else if (record ~ /"message":"target"/) print "target"
+    }
+  ' "$journal"
+}
+
 stage_label() {
   case $1 in
     preflight)      printf 'Checking this computer' ;;
     network)        printf 'Connecting' ;;
+    package-check)  printf 'Checking the package list' ;;
     acquire)        printf 'Downloading packages' ;;
+    acquire-target) printf 'Downloading packages to disk' ;;
     verify)         printf 'Checking the downloads' ;;
     confirm)        printf 'Confirming the disk' ;;
     partition)      printf 'Partitioning the disk' ;;
@@ -61,7 +75,9 @@ stage_pacing() {
   case $1 in
     preflight)      printf 'a few seconds' ;;
     network)        printf 'a few seconds' ;;
+    package-check)  printf 'a few seconds' ;;
     acquire)        printf 'a few minutes' ;;
+    acquire-target) printf 'a few minutes' ;;
     verify)         printf 'under a minute' ;;
     confirm)        printf 'a moment' ;;
     partition)      printf 'a few seconds' ;;
@@ -94,7 +110,9 @@ stage_weight() {
   case $1 in
     preflight)      printf '5' ;;
     network)        printf '5' ;;
+    package-check)  printf '5' ;;
     acquire)        printf '150' ;;
+    acquire-target) printf '150' ;;
     verify)         printf '30' ;;
     confirm)        printf '1' ;;
     partition)      printf '5' ;;
@@ -119,13 +137,15 @@ stage_explanation() {
   case $1 in
     preflight)  printf 'Nothing has been changed. This computer did not meet one of the requirements.' ;;
     network)    printf 'Nothing has been changed. The package archive could not be reached.' ;;
+    package-check) printf 'Nothing has been changed. The package list could not be checked.' ;;
     acquire)    printf 'Nothing has been changed. A package could not be downloaded.' ;;
+    acquire-target) printf 'The disk is partitioned and formatted. A package could not be downloaded.' ;;
     verify)     printf 'Nothing has been changed. A package did not match its signature, so it was not installed.' ;;
     confirm)    printf 'Nothing has been changed. The confirmation did not match the disk.' ;;
     partition)  printf 'What was on this disk is already gone. It could not be partitioned.' ;;
     format)     printf 'The disk is partitioned and has no filesystem on it yet. Formatting did not finish.' ;;
     mount)      printf 'The disk is partitioned and formatted. The new filesystems could not be mounted.' ;;
-    pacstrap)   printf 'The disk is partitioned and formatted. The base system did not finish installing. Every package is already downloaded and verified, so starting again will not need the network.' ;;
+    pacstrap)   printf 'The disk is partitioned and formatted. The base system did not finish installing. Every package was downloaded and verified before installation began. The log records where it stopped.' ;;
     configure)  printf 'Every file is in place. Setting the system up did not finish.' ;;
     bootloader) printf 'The system is installed but cannot start yet. The bootloader was not written.' ;;
     snapshot)   printf 'The system is installed and will start. There is no snapshot to roll back to.' ;;
