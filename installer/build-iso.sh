@@ -216,6 +216,7 @@ while IFS=$'\t' read -r _code _section _short _name _chapters _verses _book; do
 done < "$ROOT/bible/manifest.tsv"
 install -Dm0644 "$ROOT/lib/aurade-validate.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-validate.sh"
 install -Dm0644 "$ROOT/lib/aurade-journal.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-journal.sh"
+install -Dm0644 "$ROOT/lib/aurade-staging.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-staging.sh"
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
 install -Dm0644 "$ROOT/lib/aurade-tui.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tui.sh"
 install -Dm0644 "$ROOT/lib/aurade-copy.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-copy.sh"

@@ -160,7 +160,8 @@ done
 # --- the row on the progress screen ----------------------------------------
 cat >"$TMP/journal.jsonl" <<'EOF'
 {"v":1,"install_id":"x","seq":1,"stage":"preflight","status":"ok","elapsed_ms":4000}
-{"v":1,"install_id":"x","seq":2,"stage":"acquire","status":"running","pct":41,"message":"downloading"}
+{"v":1,"install_id":"x","seq":2,"stage":"package-check","status":"ok","message":"workspace"}
+{"v":1,"install_id":"x","seq":3,"stage":"acquire","status":"running","pct":41,"message":"downloading"}
 EOF
 printf '%s\n' 120000 4800000 6100000 5900000 2400000 900000 6291456 >"$TMP/acquire-rate"
 
@@ -186,13 +187,28 @@ refute grep -q '▁' "$TMP/plain.out"
 # it while the disk is being partitioned would be showing a number that stopped
 # changing several minutes ago.
 cat >"$TMP/later.jsonl" <<'EOF'
-{"v":1,"install_id":"x","seq":1,"stage":"acquire","status":"ok","elapsed_ms":40000}
-{"v":1,"install_id":"x","seq":2,"stage":"pacstrap","status":"running","pct":12,"message":"60 of 500 packages"}
+{"v":1,"install_id":"x","seq":1,"stage":"package-check","status":"ok","message":"workspace"}
+{"v":1,"install_id":"x","seq":2,"stage":"acquire","status":"ok","elapsed_ms":40000}
+{"v":1,"install_id":"x","seq":3,"stage":"pacstrap","status":"running","pct":12,"message":"60 of 500 packages"}
 EOF
 cp "$TMP/acquire-rate" "$TMP/acquire-rate.keep"
 AURADE_TUI_HEIGHT=40 bash "$TUI" --render progress --journal "$TMP/later.jsonl" \
   >"$TMP/later.out" 2>&1
 refute grep -Fq 'MB/s' "$TMP/later.out"
+
+# The target-disk route uses the same meter after formatting, with its own
+# stage selected from the package-check record.
+cat >"$TMP/target.jsonl" <<'EOF'
+{"v":1,"install_id":"x","seq":1,"stage":"package-check","status":"ok","message":"target"}
+{"v":1,"install_id":"x","seq":2,"stage":"acquire-target","status":"running","pct":41,"message":"downloading"}
+EOF
+render_target() {
+  AURADE_TUI_HEIGHT=40 AURADE_TUI_FRAME=${2:-rounded} \
+    bash "$TUI" --render progress --journal "$TMP/target.jsonl" ${1:+$1} 2>&1
+}
+render_target >"$TMP/target.out"
+grep -Fq 'Downloading packages to disk' "$TMP/target.out"
+grep -Fq '6.0 MB/s' "$TMP/target.out"
 
 # No samples, no row, no gap where a row would be. A resumed install and a
 # machine that got its packages off the medium both look like this.

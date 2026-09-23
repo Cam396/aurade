@@ -145,8 +145,10 @@ refute grep -Fq 'wipefs --all --force' "$TMP/target.out"
 # A staged installer missing its recovery helper must fail before it can read
 # or modify a target. Use a copied engine so the real source tree is untouched.
 install -d -m 0755 "$TMP/engine/lib"
+install -d -m 0755 "$TMP/lib"
 cp "$ROOT/installer/bin/aurade-install" "$TMP/engine/aurade-install"
 cp "$ROOT/installer/lib/aurade-journal.sh" "$TMP/engine/lib/aurade-journal.sh"
+cp "$ROOT/installer/lib/aurade-staging.sh" "$TMP/lib/aurade-staging.sh"
 chmod 0755 "$TMP/engine/aurade-install"
 if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper.out" 2>&1; then
@@ -189,7 +191,7 @@ if ! AURADE_INSTALL_WORK_DIR="$TMP/not-a-directory" \
   exit 1
 fi
 grep -Fq 'could not use ' "$TMP/fallback.out"
-grep -Fq 'installer staging filesystem has ' "$TMP/fallback.out"
+grep -Fq 'installer staging capacity is ' "$TMP/fallback.out"
 
 # A disk-backed staging requirement that cannot fit must fail before package
 # acquisition, making low-memory/tmpfs failures actionable and bounded.
@@ -198,7 +200,7 @@ if AURADE_MIN_WORKSPACE_BYTES=999999999999999999 \
   echo 'impossible staging capacity unexpectedly passed' >&2
   exit 1
 fi
-grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$TMP/capacity.out"
+grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a disk with more free space' "$TMP/capacity.out"
 refute grep -Fq -- '--disable-sandbox -Syy' "$TMP/capacity.out"
 refute grep -Fq 'wipefs --all --force' "$TMP/capacity.out"
 
