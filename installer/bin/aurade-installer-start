@@ -443,7 +443,7 @@ while IFS=$'\t' read -r label settings; do
       if (( ! drew )) && [[ ! -e $AURADE_GUI_READY_FILE ]] && _attempt_alive "$cage_pid"; then
         printf '\n--- %s drew nothing in %ss; giving up on it\n' \
           "$label" "$AURADE_RENDERER_DRAW_TIMEOUT" >>"$ATTEMPT_LOG"
-        note "the '$label' path opened the screen but drew nothing in ${AURADE_RENDERER_DRAW_TIMEOUT}s; trying the next"
+        note "the '$label' path opened the screen but drew nothing in ${AURADE_RENDERER_DRAW_TIMEOUT}s, moving on to the next"
         # TERM first so cage can hand back the DRM master and the virtual
         # console it took; KILL only if it will not.
         kill -TERM "$cage_pid" 2>/dev/null
