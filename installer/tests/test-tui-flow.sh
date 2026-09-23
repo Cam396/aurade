@@ -280,7 +280,10 @@ ANSWERS=(
   [encrypt]=yes [luks_passphrase]=set [keymap]=fr [timezone]=UTC
   [locale]=en_US.UTF-8
 )
+normal_umask=$(umask)
 build_engine_args
+[[ $(umask) == "$normal_umask" ]] ||
+  fail 'writing installer secrets changed the process umask'
 argv=" ${ENGINE_ARGS[*]} "
 for expected in '--target /dev/sda' '--hostname aurade' '--username alex' \
   '--keymap fr' '--timezone UTC' '--locale en_US.UTF-8' '--encrypt' \

@@ -81,7 +81,7 @@ child.expect([b"sh-[0-9.]+# ", b"# $"], timeout=300)
 run("stty -echo cols 200; export TERM=dumb")
 status, out = run("cat /etc/aurade-installer/snapshot /etc/aurade-installer/repo-fingerprint")
 print(out.strip())
-run("umask 077; printf '%s\\n' '" + os.environ["AURADE_SMOKE_HASH"] + "' > /root/pw")
+run("(umask 077; printf '%s\\n' '" + os.environ["AURADE_SMOKE_HASH"] + "' > /root/pw)")
 user = os.environ["AURADE_SMOKE_USER"]
 cmd = ("/usr/local/sbin/aurade-install --target /dev/vda --username " + user +
        " --password-hash-file /root/pw --hostname aurade-smoke"
