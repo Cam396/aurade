@@ -58,6 +58,7 @@ trap '_rc=$?; _cmd=${BASH_COMMAND//\"/};
 "$ROOT/test-progress-wait.sh"
 "$ROOT/test-progress-motion.sh"
 "$ROOT/test-download-rate.sh"
+"$ROOT/test-package-staging.sh"
 "$ROOT/test-die-cause.sh"
 "$ROOT/test-gui-runtime.sh"
 "$ROOT/test-network-diagnostics.sh"

@@ -80,7 +80,7 @@ fi
 # The installer performs this complete command check before it initializes its
 # journal. Missing tooling is therefore a skip, not a partial execute claim.
 required_commands=(
-  losetup lsblk blockdev timeout truncate bsdtar
+  losetup lsblk blockdev timeout truncate bsdtar curl
   sgdisk wipefs partprobe udevadm mkfs.fat mkfs.btrfs mount umount btrfs
   pacman pacstrap pacman-key repo-add arch-chroot genfstab bootctl blkid tee
   gpg gpgv findmnt
@@ -191,8 +191,8 @@ set -e
   exit 1
 }
 
-grep -Fq 'installer staging filesystem has ' "$RUN_DIR/installer.out"
-grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a directory on a disk' "$RUN_DIR/installer.out"
+grep -Fq 'installer staging capacity is ' "$RUN_DIR/installer.out"
+grep -Fq 'Set AURADE_INSTALL_WORK_DIR to a disk with more free space' "$RUN_DIR/installer.out"
 for forbidden in \
   'wipefs --all' 'sgdisk ' 'mkfs.' ' mount ' 'pacman ' 'pacstrap ' \
   'bootctl ' 'cryptsetup '; do

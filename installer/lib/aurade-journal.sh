@@ -41,8 +41,8 @@ AURADE_RATE_PATH=${AURADE_RATE_PATH:-${AURADE_JOURNAL_PATH%/*}/acquire-rate}
 # Stage order. Everything up to and including `confirm` leaves the disk
 # untouched; `partition` is the first stage that cannot be undone.
 AURADE_STAGES=(
-  preflight network acquire verify confirm
-  partition format mount pacstrap configure
+  preflight network package-check acquire verify confirm
+  partition format mount acquire-target pacstrap configure
   bootloader snapshot verify-install 'done'
 )
 
@@ -60,7 +60,7 @@ _J_TARGET_SIZE=
 # by definition: nothing has happened yet.
 aurade_stage_reversible() {
   case $1 in
-    start|preflight|network|acquire|verify|confirm) return 0 ;;
+    start|preflight|network|package-check|acquire|verify|confirm) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -72,7 +72,7 @@ aurade_stage_reversible() {
 # deliberately non-idempotent because it is the one-shot erase boundary.
 aurade_stage_idempotent() {
   case $1 in
-    preflight|network|acquire|verify) return 0 ;;
+    preflight|network|package-check|acquire|verify) return 0 ;;
     *) return 1 ;;
   esac
 }

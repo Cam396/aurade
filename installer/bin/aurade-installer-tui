@@ -1570,7 +1570,7 @@ screen_gate() {
   if [[ $layout == alongside ]]; then
     tui_wrap 'The partitions already on this disk are kept, including the one the other system boots from. AuraDE is written into unallocated space only, and nothing already there is moved, resized or erased.' ink
   else
-    tui_wrap 'Everything up to here can be undone. Nothing after it can. Packages are downloaded and checked first. If the network fails, this stops with the disk untouched.' ink
+    tui_wrap 'Everything up to here can be undone. Nothing after it can. The package list and archive are checked first. On low memory computers, packages download after the new system is formatted. If a download fails, the install stops with an incomplete system on the new disk.' ink
   fi
   tui_blank
   tui_wrap "Type $token to continue" dim
@@ -1603,17 +1603,21 @@ disk_serial() {
 # Which stages get a row on the progress screen.
 #
 # AURADE_STAGES is the journal's vocabulary, not the engine's itinerary. The
-# engine folds its reachability checks into `preflight` and its signature and
-# checksum verification into `acquire`, so it never emits a `network` or
-# `verify` record, and `done` is a terminal marker rather than a step. Listing
-# those anyway produces a screen with rows that stay grey forever while the
-# ones below them complete, which reads as three steps that hung.
+# engine folds reachability checks into `preflight` and signature verification
+# into the selected download stage, so it does not emit `network` or `verify`.
+# The two download stages are alternatives, and the journal's package check
+# record says which one applies. `done` is a terminal marker rather than a step.
 #
 # This is a display rule, deliberately kept out of the journal contract: if the
 # engine later emits those stages, they belong here, and nothing else changes.
 stage_displayed() {
+  local choice
   case $1 in
     network|verify|done) return 1 ;;
+    acquire|acquire-target)
+      choice=$(package_staging_choice)
+      [[ $1 == acquire && $choice == workspace ||
+         $1 == acquire-target && $choice == target ]] ;;
     *) return 0 ;;
   esac
 }
@@ -1798,7 +1802,7 @@ progress_ease() {
   fi
 }
 
-#: The download meter under the bar, during `acquire` and nowhere else.
+#: The download meter under the bar, during a package download and nowhere else.
 #:
 #: The engine samples the size of the package cache once a second and leaves a
 #: short list of integers beside the journal; nothing here parses anything and
@@ -1813,7 +1817,7 @@ progress_ease() {
 #: Loading is separate from drawing because the row has to be counted before
 #: the screen is laid out. A row that appears only sometimes and is not in the
 #: height budget is a footer pushed off the bottom of a 24 line console for
-#: the one stage it appears during.
+#: either stage it appears during.
 PROGRESS_RATE_SAMPLES=()
 PROGRESS_RATE=0
 
@@ -1939,7 +1943,7 @@ screen_progress() {
   done
 
   PROGRESS_RATE=0
-  if [[ $active == acquire ]] && progress_rate_load; then
+  if [[ $active == acquire || $active == acquire-target ]] && progress_rate_load; then
     PROGRESS_RATE=1
   fi
   progress_layout "$shown" "$done_count" "$pending_count" "$PROGRESS_RATE"

@@ -23,6 +23,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 cat >"$TMP/journal.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"workspace"}
 {"v":1,"stage":"acquire","status":"failed","message":"archive unavailable","cause":"network_error","remediation":["retry","export","log"]}
 EOF
 printf '%s\n' 'PRIVATE_RAW_SECRET=must-not-be-printed' >"$TMP/install.log"
@@ -48,7 +49,30 @@ refute grep -Fq 'PRIVATE_RAW_SECRET' "$TMP/report.out"
 # No engine cause code reaches the screen.
 refute grep -Fq 'network_error' "$TMP/report.out"
 
+# A low-memory download happens after formatting, so its failure must describe
+# the disk as already changed and use the target-disk download stage.
+cat >"$TMP/target-journal.jsonl" <<'EOF'
+{"v":1,"stage":"package-check","status":"ok","message":"target"}
+{"v":1,"stage":"confirm","status":"ok"}
+{"v":1,"stage":"partition","status":"ok"}
+{"v":1,"stage":"format","status":"ok"}
+{"v":1,"stage":"mount","status":"ok"}
+{"v":1,"stage":"acquire-target","status":"failed","exit":1,"cause":"network_error","message":"archive unavailable","reversible":false,"remediation":["retry","export","log"]}
+EOF
+set +e
+"$ROOT/installer/bin/aurade-install-failure" \
+  --status 7 --journal "$TMP/target-journal.jsonl" --raw-log "$TMP/install.log" \
+  --noninteractive >"$TMP/target-report.out" 2>&1
+status=$?
+set -e
+[[ $status -eq 7 ]]
+grep -Fq 'The install stopped while downloading packages to disk.' "$TMP/target-report.out"
+grep -Fq 'The disk is partitioned and formatted. A package could not be downloaded.' \
+  "$TMP/target-report.out"
+! grep -Fq 'Nothing has been changed' "$TMP/target-report.out"
+
 cat >"$TMP/escaped-journal.jsonl" <<'EOF'
+{"stage":"package-check","status":"ok","message":"workspace"}
 {"stage":"configure","status":"failed","message":"quoted \"stage\":\"fake\" text","cause":"config\\path"}
 EOF
 set +e

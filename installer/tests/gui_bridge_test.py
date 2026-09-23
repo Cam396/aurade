@@ -513,7 +513,7 @@ with session(AURADE_STUB_FAIL_AT="pacstrap") as model:
         "erases the disk and begins from the beginning" in report["restart_advice"],
         f"restarting after an irreversible failure was undersold: {report}",
     )
-    equal(report["position"], "stage 7 of 11", "the failure screen miscounted stages")
+    equal(report["position"], "stage 8 of 12", "the failure screen miscounted stages")
 
     progress = model.progress()
     failed = [row for row in progress["stages"] if row["status"] == "failed"]
@@ -807,6 +807,23 @@ with session(AURADE_STUB_LINGER_AT="acquire") as model:
     check(failure["reversible"], "a cancellation before the erase gate was called final")
     check("Nothing was written" in failure["restart_advice"],
           f"the advice after stopping was wrong: {failure['restart_advice']}")
+
+# The automatic low-memory route downloads after formatting. It is shown as a
+# separate, irreversible stage and the stop command stays unavailable there.
+reset_calls()
+if os.path.exists(lingering):
+    os.unlink(lingering)
+with session(AURADE_STUB_STAGING="target", AURADE_STUB_LINGER_AT="acquire-target") as model:
+    answer_everything(model)
+    check(model.plan().get("ok"), "a valid plan was refused")
+    check(model.execute("ERASE:/dev/sda").get("ok"), "the install did not start")
+    check(wait_for(lingering), "the stub engine never reached target downloads")
+    report = model.progress()
+    equal(report["active"], "acquire-target", "target downloads used the wrong stage")
+    check(not report["reversible"], "target downloads were called reversible")
+    check(not report["can_stop"], "stopping was offered during target downloads")
+    result = model.call("stop")
+    check(not result["ok"], "target downloads could be stopped as if the disk were untouched")
 
 # Past the boundary the offer is gone, and the command refuses even if a stale
 # button somehow reaches it.
