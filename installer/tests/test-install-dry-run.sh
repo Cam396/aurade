@@ -329,18 +329,17 @@ grep -Fq -- 'mkfs.xfs' "$TMP/xfs.out"
 
 # The same shape on an image without the tool. This is the failure a real
 # image produced: every question answered, the disk confirmed by name, and
-# then a stopped install. Whatever the host has, take it out of reach first,
-# so this asserts on every build machine rather than only on the ones that
-# happen to lack xfsprogs.
+# then a stopped install. Hide only mkfs.xfs so ordinary test tools remain
+# available when the host keeps it in /usr/bin.
 PATH=$saved_path
-while xfs_tool=$(command -v mkfs.xfs 2>/dev/null); do
-  xfs_dir=${xfs_tool%/*}
-  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fxv "$xfs_dir" | paste -sd:)
-  [[ -n $PATH ]] || break
-done
+command() {
+  [[ $1 != -v || ${2:-} != mkfs.xfs ]] || return 1
+  builtin command "$@"
+}
+export -f command
 command -v mkfs.xfs >/dev/null 2>&1 && { echo 'could not stage a host without mkfs.xfs' >&2; exit 1; }
 refuses 'required command not found: mkfs.xfs' --filesystem xfs
-PATH=$saved_path
+unset -f command
 
 # A Btrfs swap file needs the native mkswapfile helper. An older btrfs-progs
 # can still provide the btrfs command while lacking that subcommand, which is

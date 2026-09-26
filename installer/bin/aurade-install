@@ -23,6 +23,15 @@ STAGING_LIB=${AURADE_STAGING_LIB:-/usr/local/lib/aurade/aurade-staging.sh}
 # shellcheck source=../lib/aurade-staging.sh
 . "$STAGING_LIB"
 
+WIFI_LIB=${AURADE_WIFI_LIB:-/usr/local/lib/aurade/aurade-wifi.sh}
+[[ -r $WIFI_LIB ]] || WIFI_LIB="$SELF_DIR/../lib/aurade-wifi.sh"
+[[ -r $WIFI_LIB ]] || {
+  printf '%s: Wi-Fi library not found\n' "${0##*/}" >&2
+  exit 1
+}
+# shellcheck source=../lib/aurade-wifi.sh
+. "$WIFI_LIB"
+
 # The install fingerprint. Optional: a machine that cannot find the library
 # gets an install without a mark on it, which is a missing file in /etc and
 # nothing else.
@@ -1521,6 +1530,9 @@ else
 fi
 write_target_file /etc/pacman.d/aurade-mirrorlist 0644 "Server = ${REPO_URL%/}\n"
 write_target_file /etc/pacman.d/aurade.conf 0644 "[${REPO_NAME}]\n${repo_siglevel}\nInclude = /etc/pacman.d/aurade-mirrorlist\n"
+if [[ $MODE == execute ]]; then
+  aurade_wifi_copy_profiles "$MOUNTPOINT"
+fi
 # The install runs against a pinned archive snapshot, which is no place to
 # update from, and the stock mirrorlist has every server commented out.
 # Without real mirrors an installed system could not sync core or extra.

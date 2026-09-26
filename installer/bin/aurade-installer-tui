@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Keyboard-first front end for aurade-install.
 #
-# This renders the installer; it does not implement one. The destructive engine
-# stays exactly as it is - a noninteractive script that takes arguments, checks
-# everything before it touches the disk, and writes an append-only journal. All
-# this program does is ask the questions in installer/lib/aurade-questions.sh,
-# hand the answers to that engine, and render the journal back.
+# This renders the installer and sets up the live network. The destructive
+# engine remains a noninteractive script that checks its plan before changing
+# the disk and writes an append-only journal. The questions come from
+# installer/lib/aurade-questions.sh; network setup is a separate live action.
 #
 # Three things follow from that, and they are the whole design:
 #
@@ -53,7 +52,7 @@ _STAR_RARITY_SET=${AURADE_STAR_RARITY+set}
 # caller set it, which is only knowable before the source.
 _RATE_PATH_SET=${AURADE_RATE_PATH+set}
 
-for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-probe.sh \
+for _lib in aurade-validate.sh aurade-questions.sh aurade-tui.sh aurade-wifi.sh aurade-probe.sh \
             aurade-journal.sh aurade-copy.sh aurade-wait.sh \
             aurade-bible.sh; do
   if ! _path=$(_find_lib "$_lib"); then
@@ -75,6 +74,8 @@ if [[ -z $ENGINE ]]; then
 fi
 FAILURE_HELPER=${AURADE_FAILURE_HELPER:-/usr/local/sbin/aurade-install-failure}
 [[ -x $FAILURE_HELPER ]] || FAILURE_HELPER="$SELF_DIR/aurade-install-failure"
+NETWORK_HELPER=${AURADE_NETWORK_HELPER:-/usr/local/sbin/aurade-network-diagnostics}
+[[ -x $NETWORK_HELPER ]] || NETWORK_HELPER="$SELF_DIR/../archiso/airootfs/usr/local/sbin/aurade-network-diagnostics"
 
 #: Redraws one tip stays on screen for. At roughly eight frames a second this
 #: is about nine seconds: long enough to read two lines without hurrying, short
@@ -1000,6 +1001,318 @@ screen_fallback() {
   tui_footer 'enter  continue in text mode    esc  quit' "$AURADE_PROBE_REASON"
 }
 
+# Wi-Fi is a live-session action. It is not an answer to save or an engine
+# option, and it stays available from Review if a connection drops later.
+WIFI_CURSOR=0
+WIFI_NOTICE=
+WIFI_NOTICE_KIND=dim
+WIFI_VIEW_ORDER=()
+WIFI_REPORT=()
+
+wifi_name() {
+  printf '%s' "$1" | tr -d '\000-\037\177'
+}
+
+wifi_signal_words() {
+  local signal=$1
+  if (( signal >= 75 )); then printf 'Excellent'
+  elif (( signal >= 55 )); then printf 'Good'
+  elif (( signal >= 35 )); then printf 'Fair'
+  elif (( signal >= 1 )); then printf 'Weak'
+  else printf 'None'
+  fi
+}
+
+wifi_sort() {
+  local index position other
+  WIFI_VIEW_ORDER=()
+  for index in "${!AURADE_WIFI_SSIDS[@]}"; do
+    position=${#WIFI_VIEW_ORDER[@]}
+    for (( other = 0; other < ${#WIFI_VIEW_ORDER[@]}; other++ )); do
+      if (( AURADE_WIFI_SIGNALS[index] > AURADE_WIFI_SIGNALS[WIFI_VIEW_ORDER[other]] )); then
+        position=$other
+        break
+      fi
+    done
+    WIFI_VIEW_ORDER=("${WIFI_VIEW_ORDER[@]:0:position}" "$index" "${WIFI_VIEW_ORDER[@]:position}")
+  done
+  (( WIFI_CURSOR < ${#WIFI_VIEW_ORDER[@]} )) || WIFI_CURSOR=0
+}
+
+wifi_refresh() {
+  aurade_wifi_status
+  AURADE_WIFI_SSIDS=()
+  if [[ $AURADE_WIFI_AVAILABLE == true && $AURADE_WIFI_WIFI == true &&
+        $AURADE_WIFI_RADIO == enabled ]]; then
+    if ! aurade_wifi_scan; then
+      WIFI_NOTICE=$AURADE_WIFI_ERROR
+      WIFI_NOTICE_KIND=warn
+    fi
+  fi
+  wifi_sort
+}
+
+screen_network() {
+  local cursor=${1:-0} count=${#WIFI_VIEW_ORDER[@]} rows start end position index
+  local name strength note status subtitle selected
+  local CURRENT_SCREEN=network
+  rows=$(( AURADE_TUI_HEIGHT - 19 ))
+  (( rows >= 3 )) || rows=3
+  (( rows <= 10 )) || rows=10
+  start=$(( cursor / rows * rows ))
+  end=$(( start + rows ))
+  (( end <= count )) || end=$count
+  tui_clear
+  tui_header 'Get online'
+  tui_blank
+  tui_wrap 'Get online' accent
+  tui_wrap 'The package list is checked before the disk changes.' dim
+  tui_blank
+  if [[ $AURADE_WIFI_AVAILABLE != true ]]; then
+    status='Wi-Fi cannot be set up here'
+    subtitle='This image has no way to set up Wi-Fi. Connect a cable to get online.'
+  elif [[ $AURADE_WIFI_WIRED == true ]]; then
+    status='Connected by cable'
+    subtitle='A wired connection is up. Wi-Fi is optional.'
+  elif [[ -n $AURADE_WIFI_SSID ]]; then
+    status="Connected to $(wifi_name "$AURADE_WIFI_SSID")"
+    subtitle=''
+  elif [[ $AURADE_WIFI_RADIO == disabled ]]; then
+    status='Wi-Fi is turned off'
+    subtitle='Turn Wi-Fi on to see what is nearby.'
+  else
+    status='Not connected'
+    subtitle='Choose a network below.'
+  fi
+  tui_wrap "$status" ink
+  [[ -z $subtitle ]] || tui_wrap "$subtitle" dim
+  if [[ $AURADE_WIFI_CONNECTIVITY == portal || $AURADE_WIFI_CONNECTIVITY == limited ]]; then
+    tui_wrap 'A sign-in page may be waiting. Press d to check the connection.' warn
+  fi
+  tui_blank
+  if (( count )); then
+    tui_wrap 'Wi-Fi networks' accent
+    for (( position = start; position < end; position++ )); do
+      index=${WIFI_VIEW_ORDER[position]}
+      name=$(wifi_name "${AURADE_WIFI_SSIDS[index]}")
+      local max_name=$(( AURADE_TUI_INNER - 30 ))
+      (( max_name >= 12 )) || max_name=12
+      (( ${#name} <= max_name )) || name="${name:0:max_name-3}..."
+      strength=$(wifi_signal_words "${AURADE_WIFI_SIGNALS[index]}")
+      note='Password'
+      [[ ${AURADE_WIFI_OPEN[index]} != true ]] || note='Open'
+      [[ ${AURADE_WIFI_SAVED[index]} != true ]] || note='Saved'
+      [[ ${AURADE_WIFI_ACTIVE[index]} != true ]] || note='Connected'
+      selected=no
+      (( position != cursor )) || selected=yes
+      tui_item "$selected" "$(printf '%-*s  %-9s %s' "$max_name" "$name" "$strength" "$note")"
+    done
+    if (( count > rows )); then
+      tui_wrap "Showing $(( start + 1 )) to $end of $count networks." dim
+    fi
+  elif [[ $AURADE_WIFI_AVAILABLE == true && $AURADE_WIFI_WIFI == false ]]; then
+    tui_wrap 'No Wi-Fi device was found. Plug in a cable or a supported adapter.' dim
+  elif [[ $AURADE_WIFI_RADIO == enabled ]]; then
+    tui_wrap 'Nothing in range. Move closer to the router, or use a cable.' dim
+  fi
+  if [[ -n $WIFI_NOTICE ]]; then
+    tui_blank
+    tui_wrap "$WIFI_NOTICE" "$WIFI_NOTICE_KIND"
+  fi
+  tui_blank
+  tui_footer 'enter join  r scan  w radio' 'f forget d check c next esc back'
+}
+
+screen_wifi_password() {
+  local ssid=$1 value=$2 error=${3:-}
+  local CURRENT_SCREEN=wifi_password HELP_KEY=0 SECRET_SHORT_WARN=0
+  tui_clear
+  tui_header 'Join Wi-Fi'
+  tui_blank
+  tui_wrap "Password for $(wifi_name "$ssid")" accent
+  tui_blank
+  widget_secret "$value"
+  [[ -z $error ]] || { tui_blank; tui_wrap "$error" warn; }
+  tui_blank
+  tui_footer 'enter  join    f3  show it' 'esc  networks'
+}
+
+prompt_wifi_password() {
+  local ssid=$1 error=${2:-} value='' key
+  local HELP_KEY=0 CURRENT_SCREEN=wifi_password SECRET_REVEAL=0
+  while true; do
+    screen_wifi_password "$ssid" "$value" "$error"
+    error=''
+    key=$(read_key) || return 1
+    case $key in
+      enter)
+        if (( ${#value} < 8 )); then
+          error='A Wi-Fi password is at least 8 characters.'
+        else
+          WIFI_PASSWORD=$value
+          return 0
+        fi ;;
+      esc) return 1 ;;
+      f3) SECRET_REVEAL=$(( ! SECRET_REVEAL )) ;;
+      backspace) value=${value%?} ;;
+      space) value+=' ' ;;
+      paste:*) value+=$(printf '%s' "${key#paste:}" | tr -d '\000-\037\177') ;;
+      up|down|left|right|tab|redraw) ;;
+      *) [[ ${#key} -ne 1 ]] || value+=$key ;;
+    esac
+  done
+}
+
+screen_wifi_forget() {
+  local ssid=$1 CURRENT_SCREEN=wifi_forget
+  tui_clear
+  tui_header 'Forget network'
+  tui_blank
+  tui_wrap "Forget $(wifi_name "$ssid")?" accent
+  tui_blank
+  tui_wrap 'The saved connection is removed from this live session. You can join it again.' ink
+  tui_blank
+  tui_footer 'f  forget' 'esc  keep it'
+}
+
+screen_network_check() {
+  local line CURRENT_SCREEN=network_check
+  tui_clear
+  tui_header 'Connection check'
+  tui_blank
+  tui_wrap 'Connection check' accent
+  tui_blank
+  for line in "${WIFI_REPORT[@]}"; do
+    tui_wrap "$line" ink
+  done
+  tui_blank
+  tui_footer 'r  check again' 'enter  networks'
+}
+
+run_network_check() {
+  local output line key status CURRENT_SCREEN=network_check
+  while true; do
+    WIFI_REPORT=('Checking the connection...')
+    screen_network_check
+    status=0
+    if [[ -x $NETWORK_HELPER ]]; then
+      output=$("$NETWORK_HELPER" 2>&1) || status=$?
+    else
+      output='The network check is missing from this image.'
+      status=1
+    fi
+    WIFI_REPORT=()
+    while IFS= read -r line; do
+      line=${line#'  '}
+      case ${line%%:*} in ERROR) line=${line#*: } ;; esac
+      line=$(printf '%s' "$line" | tr -d '\000-\037\177')
+      [[ -z $line ]] || WIFI_REPORT+=("$line")
+    done <<<"$output"
+    (( ${#WIFI_REPORT[@]} )) || WIFI_REPORT=('The network check had no result.')
+    screen_network_check
+    key=$(read_key) || return 0
+    case $key in
+      r|R) ;;
+      *)
+        if (( status == 0 )); then
+          WIFI_NOTICE='Ready to download packages.'
+          WIFI_NOTICE_KIND=ok
+        else
+          WIFI_NOTICE='The connection needs attention before packages can be downloaded.'
+          WIFI_NOTICE_KIND=warn
+        fi
+        return 0 ;;
+    esac
+  done
+}
+
+run_wifi_forget() {
+  local ssid=$1 key CURRENT_SCREEN=wifi_forget
+  screen_wifi_forget "$ssid"
+  key=$(read_key) || return 1
+  [[ $key == f || $key == F ]]
+}
+
+run_network() {
+  local key count index ssid error answer
+  local CURRENT_SCREEN=network
+  WIFI_NOTICE=
+  WIFI_NOTICE_KIND=dim
+  wifi_refresh
+  while true; do
+    screen_network "$WIFI_CURSOR"
+    key=$(read_key) || return 1
+    count=${#WIFI_VIEW_ORDER[@]}
+    case $key in
+      up) (( count == 0 )) || WIFI_CURSOR=$(( (WIFI_CURSOR - 1 + count) % count )) ;;
+      down) (( count == 0 )) || WIFI_CURSOR=$(( (WIFI_CURSOR + 1) % count )) ;;
+      r|R) WIFI_NOTICE=''; wifi_refresh ;;
+      w|W)
+        if [[ $AURADE_WIFI_RADIO == disabled ]]; then answer=on; else answer=off; fi
+        if aurade_wifi_radio "$answer"; then
+          WIFI_NOTICE='Wi-Fi is turned on.'
+          [[ $answer != off ]] || WIFI_NOTICE='Wi-Fi is turned off.'
+          WIFI_NOTICE_KIND=ok
+          wifi_refresh
+        else
+          WIFI_NOTICE=$AURADE_WIFI_ERROR
+          WIFI_NOTICE_KIND=warn
+        fi ;;
+      d|D) run_network_check; wifi_refresh ;;
+      f|F)
+        (( count )) || continue
+        index=${WIFI_VIEW_ORDER[WIFI_CURSOR]}
+        [[ ${AURADE_WIFI_SAVED[index]} == true ]] || continue
+        ssid=${AURADE_WIFI_SSIDS[index]}
+        if run_wifi_forget "$ssid"; then
+          if aurade_wifi_forget "$ssid"; then
+            WIFI_NOTICE="Forgot $(wifi_name "$ssid")."
+            WIFI_NOTICE_KIND=ok
+          else
+            WIFI_NOTICE=$AURADE_WIFI_ERROR
+            WIFI_NOTICE_KIND=warn
+          fi
+          wifi_refresh
+        fi ;;
+      enter)
+        (( count )) || return 0
+        index=${WIFI_VIEW_ORDER[WIFI_CURSOR]}
+        ssid=${AURADE_WIFI_SSIDS[index]}
+        if [[ ${AURADE_WIFI_ACTIVE[index]} == true ]]; then
+          WIFI_NOTICE="Already connected to $(wifi_name "$ssid")."
+          WIFI_NOTICE_KIND=ok
+          continue
+        fi
+        if [[ ${AURADE_WIFI_OPEN[index]} == true || ${AURADE_WIFI_SAVED[index]} == true ]]; then
+          if aurade_wifi_connect "$ssid" ''; then
+            WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
+            WIFI_NOTICE_KIND=ok
+            wifi_refresh
+          else
+            WIFI_NOTICE=$AURADE_WIFI_ERROR
+            WIFI_NOTICE_KIND=warn
+          fi
+          continue
+        fi
+        error=''
+        while prompt_wifi_password "$ssid" "$error"; do
+          if aurade_wifi_connect "$ssid" "$WIFI_PASSWORD"; then
+            WIFI_PASSWORD=
+            WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
+            WIFI_NOTICE_KIND=ok
+            wifi_refresh
+            break
+          fi
+          WIFI_PASSWORD=
+          error=$AURADE_WIFI_ERROR
+        done
+        WIFI_PASSWORD= ;;
+      c|C) return 0 ;;
+      esc) return 1 ;;
+    esac
+  done
+}
+
 # One question screen, driven entirely by the manifest.
 screen_question() {
   local id=$1 step=$2 total=$3 error=${4:-} buffer=${5:-} cursor=${6:-0}
@@ -1036,8 +1349,6 @@ screen_question() {
     tui_wrap "$error" danger
   fi
   local back='esc  back'
-  # Only the first question exits the installer, so only its footer says so.
-  (( step > 1 )) || back='esc  quit'
   case $type in
     disk|bool|enum)
       tui_footer 'up/down  select    enter  continue' "$back" ;;
@@ -1129,7 +1440,7 @@ widget_secret() {
   # score: the honest thing a program can say about a passphrase is how long
   # it is, and the honest thing it can do about a short one is nothing. A
   # refusal here is a person locked out of their own installer.
-  if (( ${#1} > 0 && ${#1} < 8 )); then
+  if (( ${SECRET_SHORT_WARN:-1} && ${#1} > 0 && ${#1} < 8 )); then
     tui_wrap 'That is short. It will still be accepted.' dim
   fi
 }
@@ -1303,7 +1614,7 @@ screen_review() {
   # the one hint somebody stuck on this screen actually needs. The arrows are
   # discoverable from the marker moving; the way out is not discoverable from
   # anything.
-  tui_footer 'enter  change    c  continue    a  advanced' 'esc  back' split
+  tui_footer 'enter change  c next  a advanced  n network' 'esc back' split
 }
 
 # The list of answers, one selectable row each.
@@ -2634,6 +2945,14 @@ screen_explain() {
   case $CURRENT_SCREEN in
     welcome)
       body='This installs AuraDE onto a disk in this computer. Nothing is written to any disk until you type the words on the confirmation screen, and you can stop before then without leaving a trace.' ;;
+    network)
+      body='Join Wi-Fi or use a cable before installing. Scan again with r, check the package connection with d, or press c to continue. Nothing has been written to any disk.' ;;
+    wifi_password)
+      body='Type the network password and press enter to join. It is kept in a private NetworkManager profile and carried into the installed system.' ;;
+    network_check)
+      body='This checks the route, package archive, and clock. Press r to check again or enter to return to the networks.' ;;
+    wifi_forget)
+      body='This removes the saved connection from the live installer. Press f to forget it or escape to keep it.' ;;
     question)
       body='Answer the question and press enter. Going back keeps what you typed. Nothing is written to any disk while you are answering.' ;;
     keycheck)
@@ -4300,20 +4619,6 @@ run_engine_with_progress() {
 # Flow
 # --------------------------------------------------------------------------
 
-confirm_quit() {
-  local key
-  tui_clear
-  tui_header 'Quit?'
-  tui_blank
-  tui_wrap 'Quit the installer?' accent
-  tui_blank
-  tui_wrap 'Nothing has been written to any disk. This computer will be left exactly as it is now.' ink
-  tui_blank
-  tui_footer 'q  quit' 'any other key  keep going'
-  key=$(read_key) || return 1
-  [[ $key == q || $key == Q ]]
-}
-
 # `start` is the question to open on: 0 for the first, -1 for the last. The
 # last is what "go back" from the review screen means, and without an entry
 # point that footer would be a promise the flow cannot keep.
@@ -4346,8 +4651,7 @@ run_questions() {
         ;;
       1)
         if (( index == 0 )); then
-          # shellcheck disable=SC2034  # inspected by main_flow's callers
-          if confirm_quit; then return 1; fi
+          return 1
         else
           index=$(( index - 1 ))
         fi
@@ -4417,6 +4721,7 @@ run_review() {
         ;;
       c|C)   return 0 ;;
       a|A)   run_advanced ;;
+      n|N)   run_network || true ;;
       esc)   return 1 ;;
     esac
   done
@@ -4688,9 +4993,8 @@ main_flow() {
 
   # A state machine rather than a straight line, because "go back" has to be
   # able to go back. Every screen whose footer offers `esc back` returns here
-  # and moves to the previous state; the two that offer `esc quit` are the
-  # welcome screen and the first question, and those are the only ways out
-  # before the erase gate.
+  # and moves to the previous state. The welcome screen is the only place
+  # where Escape quits before the erase gate.
   while true; do
     case $state in
       welcome)
@@ -4709,15 +5013,21 @@ main_flow() {
           :
         else
           entry=0
-          state=questions
+          state=network
         fi
+        ;;
+
+      network)
+        rc=0
+        run_network || rc=$?
+        if (( rc == 0 )); then state=questions; else state=welcome; fi
         ;;
 
       questions)
         rc=0
         run_questions "$entry" || rc=$?
         entry=0
-        if (( rc == 0 )); then state=review; else state=cancelled; fi
+        if (( rc == 0 )); then state=review; else state=network; fi
         ;;
 
       review)
@@ -4827,7 +5137,8 @@ fi
 # appear.
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
-RENDERABLE=(welcome fallback review gate progress game 2048 failure 'done' cancelled
+RENDERABLE=(welcome fallback network wifi-password network-check wifi-forget
+  review gate progress game 2048 failure 'done' cancelled
   access keycheck explain help watch ttt life picker lights fifteen mines nono
   type credits
   question-target question-hostname question-username question-password
@@ -4889,6 +5200,23 @@ if [[ -n $RENDER_ONLY ]]; then
   aurade_probe_renderer
   case $RENDER_ONLY in
     welcome)   screen_welcome ;;
+    network)
+      AURADE_WIFI_AVAILABLE=true AURADE_WIFI_WIFI=true
+      AURADE_WIFI_WIRED=false AURADE_WIFI_RADIO=enabled
+      AURADE_WIFI_SSID='' AURADE_WIFI_CONNECTIVITY=full
+      AURADE_WIFI_SSIDS=('Ferry: Cross' 'Guest Lounge' 'kestrel-5g')
+      AURADE_WIFI_SIGNALS=(82 38 67)
+      AURADE_WIFI_SECURITY=(WPA2 -- WPA2)
+      AURADE_WIFI_OPEN=(false true false)
+      AURADE_WIFI_ACTIVE=(false false false)
+      AURADE_WIFI_SAVED=(false false true)
+      wifi_sort
+      screen_network "${AURADE_RENDER_WIFI_ROW:-0}" ;;
+    wifi-password) SECRET_REVEAL=0; screen_wifi_password 'Ferry: Cross' 'example passphrase' ;;
+    network-check)
+      WIFI_REPORT=('A network connection is up.' 'The package archive can be looked up.' 'This computer clock is set.')
+      screen_network_check ;;
+    wifi-forget) screen_wifi_forget 'kestrel-5g' ;;
     access)    screen_access "${AURADE_RENDER_ACCESS_ROW:-0}" ;;
     keycheck)  screen_keycheck 2 9 "${AURADE_RENDER_TYPED:-}" ;;
     explain)   CURRENT_SCREEN=${AURADE_RENDER_EXPLAIN:-review}

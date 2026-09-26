@@ -159,7 +159,7 @@ case "$*" in
       ':22:WPA2:no' \
       'Ferry\: Cross:82:WPA2:no' \
       'Ferry\: Cross:44:WPA2:no' \
-      'kestrel-5g:67:WPA2:yes' \
+      'kestrel-5g:67:WPA2:*' \
       'Guest Lounge:38:--:no'
     ;;
   *"connection show"*) printf '%s\n' 'kestrel-5g:802-11-wireless' 'eno1:802-3-ethernet' ;;

@@ -126,6 +126,7 @@ done
 [[ -x $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
 [[ ! -e $TMP/work/profile/airootfs/usr/local/sbin/aurade-installer ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-staging.sh ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-wifi.sh ]]
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"
@@ -164,6 +165,7 @@ text_profile=$TMP/work_text_only/profile
 [[ -x $text_profile/airootfs/usr/local/sbin/aurade-installer-tui ]]
 [[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer ]]
 [[ -r $text_profile/airootfs/usr/local/lib/aurade/aurade-staging.sh ]]
+[[ -r $text_profile/airootfs/usr/local/lib/aurade/aurade-wifi.sh ]]
 [[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui ]]
 [[ ! -e $text_profile/airootfs/usr/local/sbin/aurade-installer-gui-bridge ]]
 [[ ! -e $text_profile/airootfs/etc/aurade-installer/gui-enabled ]]
@@ -240,6 +242,10 @@ grep -Fxq 'ConditionKernelCommandLine=!aurade.installer=serial' "$console_unit" 
   echo 'test-build-iso-stage: the console unit would also start on a serial boot' >&2
   exit 1
 }
+if grep -Eq '^(After|Wants)=.*dev-tty1\.device' "$console_unit"; then
+  echo 'test-build-iso-stage: waiting for tty1 can prevent the installer from starting' >&2
+  exit 1
+fi
 # The line that decides whether the graphical installer can start at all.
 #
 # plymouth holds DRM master until it is told to go, and `cage` cannot become

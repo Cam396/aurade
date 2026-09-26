@@ -125,6 +125,7 @@ export AURADE_REPO_FINGERPRINT_FILE="$TMP/installer-meta/repo-fingerprint"
 answers() {
   local i
   echo enter                       # welcome
+  echo c                           # network: continue on the wired test image
   echo enter                       # locale (default)
   echo enter                       # keymap (default)
   echo enter                       # keyboard check

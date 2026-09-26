@@ -531,199 +531,46 @@ gb_network() {
 # keyfile in its own profile directory, which is where the secret was going to
 # end up regardless.
 
-NMCLI=${AURADE_NMCLI:-nmcli}
-NM_PROFILE_DIR=${AURADE_NM_PROFILE_DIR:-/etc/NetworkManager/system-connections}
-
-_nm_available() { command -v "$NMCLI" >/dev/null 2>&1; }
-
-# nmcli's terse output escapes `:` and `\` inside values. An SSID may contain
-# both, and a half-unescaped SSID is one that cannot be joined.
-_nm_unescape() {
-  local s=$1 out='' i c
-  for (( i = 0; i < ${#s}; i++ )); do
-    c=${s:i:1}
-    if [[ $c == '\' ]]; then
-      i=$(( i + 1 ))
-      out+=${s:i:1}
-    else
-      out+=$c
-    fi
-  done
-  printf '%s' "$out"
-}
-
-# Split a terse nmcli record on unescaped colons.
-_nm_fields() {
-  local line=$1 field='' i c
-  NM_FIELDS=()
-  for (( i = 0; i < ${#line}; i++ )); do
-    c=${line:i:1}
-    if [[ $c == '\' ]]; then
-      field+=$c${line:i+1:1}
-      i=$(( i + 1 ))
-    elif [[ $c == ':' ]]; then
-      NM_FIELDS+=("$(_nm_unescape "$field")")
-      field=''
-    else
-      field+=$c
-    fi
-  done
-  NM_FIELDS+=("$(_nm_unescape "$field")")
-}
-NM_FIELDS=()
-
 gb_net_status() {
-  local out wired=false wifi=false radio=unavailable ssid='' state=''
-  if ! _nm_available; then
+  aurade_wifi_status
+  if [[ $AURADE_WIFI_AVAILABLE != true ]]; then
     _gb_emit '{"ok":false,"available":false,"wired":false,"wifi":false,"radio":"unavailable","ssid":"","reason":"Nothing on this image can set up a wireless connection."}'
     return 0
   fi
-  while IFS= read -r line; do
-    [[ -n $line ]] || continue
-    _nm_fields "$line"
-    case ${NM_FIELDS[1]:-} in
-      ethernet) [[ ${NM_FIELDS[2]:-} != connected ]] || wired=true ;;
-      wifi)
-        wifi=true
-        if [[ ${NM_FIELDS[2]:-} == connected ]]; then
-          ssid=${NM_FIELDS[3]:-}
-        fi
-        ;;
-    esac
-  done < <("$NMCLI" -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null || true)
-  radio=$("$NMCLI" -t radio wifi 2>/dev/null || printf 'unavailable')
-  [[ -n $radio ]] || radio=unavailable
-  state=$("$NMCLI" -t -f CONNECTIVITY general status 2>/dev/null | head -1 || true)
-  out='{"ok":true,"available":true,'
-  out+="\"wired\":$wired,\"wifi\":$wifi,"
-  out+="\"radio\":$(_gb_str "$radio"),"
-  out+="\"ssid\":$(_gb_str "$ssid"),"
-  out+="\"connectivity\":$(_gb_str "$state")}"
-  _gb_emit "$out"
+  _gb_emit "{\"ok\":true,\"available\":true,\"wired\":$AURADE_WIFI_WIRED,\"wifi\":$AURADE_WIFI_WIFI,\"radio\":$(_gb_str "$AURADE_WIFI_RADIO"),\"ssid\":$(_gb_str "$AURADE_WIFI_SSID"),\"connectivity\":$(_gb_str "$AURADE_WIFI_CONNECTIVITY")}"
 }
 
 gb_wifi_scan() {
-  local out='[' sep='' line ssid signal security active seen=''
-  if ! _nm_available; then
-    _gb_emit '{"ok":false,"error":"NetworkManager is not on this image","networks":[]}'
+  local out='[' sep='' index
+  if ! aurade_wifi_scan; then
+    _gb_emit "{\"ok\":false,\"error\":$(_gb_str "$AURADE_WIFI_ERROR"),\"networks\":[]}"
     return 0
   fi
-  "$NMCLI" device wifi rescan >/dev/null 2>&1 || true
-  while IFS= read -r line; do
-    [[ -n $line ]] || continue
-    _nm_fields "$line"
-    ssid=${NM_FIELDS[0]:-}
-    signal=${NM_FIELDS[1]:-0}
-    security=${NM_FIELDS[2]:-}
-    active=${NM_FIELDS[3]:-no}
-    # A hidden network broadcasts an empty SSID and cannot be joined by
-    # picking it from a list, so it is not offered as though it could be.
-    [[ -n $ssid ]] || continue
-    # Access points repeat once per band and per radio. The list is of
-    # networks, not of radios, so the strongest sighting wins.
-    [[ $seen != *"|$ssid|"* ]] || continue
-    seen+="|$ssid|"
-    [[ $signal =~ ^[0-9]+$ ]] || signal=0
-    out+="${sep}{\"ssid\":$(_gb_str "$ssid"),\"signal\":${signal},"
-    out+="\"security\":$(_gb_str "$security"),"
-    out+="\"open\":$(if [[ -z $security || $security == '--' ]]; then printf 'true'; else printf 'false'; fi),"
-    out+="\"active\":$(if [[ $active == yes ]]; then printf 'true'; else printf 'false'; fi),"
-    out+="\"saved\":$(if _wifi_saved "$ssid"; then printf 'true'; else printf 'false'; fi)}"
+  for index in "${!AURADE_WIFI_SSIDS[@]}"; do
+    out+="${sep}{\"ssid\":$(_gb_str "${AURADE_WIFI_SSIDS[index]}"),\"signal\":${AURADE_WIFI_SIGNALS[index]},"
+    out+="\"security\":$(_gb_str "${AURADE_WIFI_SECURITY[index]}"),"
+    out+="\"open\":${AURADE_WIFI_OPEN[index]},\"active\":${AURADE_WIFI_ACTIVE[index]},\"saved\":${AURADE_WIFI_SAVED[index]}}"
     sep=','
-  done < <("$NMCLI" -t -f SSID,SIGNAL,SECURITY,IN-USE device wifi list 2>/dev/null || true)
+  done
   out+=']'
   _gb_emit "{\"ok\":true,\"networks\":$out}"
 }
 
-_wifi_saved() {
-  local want=$1 line
-  while IFS= read -r line; do
-    [[ -n $line ]] || continue
-    _nm_fields "$line"
-    [[ ${NM_FIELDS[1]:-} == 802-11-wireless ]] || continue
-    [[ ${NM_FIELDS[0]:-} != "$want" ]] || return 0
-  done < <("$NMCLI" -t -f NAME,TYPE connection show 2>/dev/null || true)
-  return 1
-}
-
-# Join a network. The passphrase arrives on the protocol's value line and goes
-# straight into a mode-0600 keyfile; it is never an argument, never logged and
-# never echoed back.
 gb_wifi_connect() {
-  local ssid=$1 psk=$2 uuid profile status=0 output
-  if ! _nm_available; then
-    _gb_err 'NetworkManager is not on this image'
-    return 0
+  local ssid=$1 psk=$2
+  if aurade_wifi_connect "$ssid" "$psk"; then
+    _gb_ok "\"ssid\":$(_gb_str "$ssid")"
+  else
+    _gb_err "$AURADE_WIFI_ERROR"
   fi
-  [[ -n $ssid ]] || { _gb_err 'choose a network first'; return 0; }
-  if [[ -n $psk && ${#psk} -lt 8 ]]; then
-    # WPA rejects anything shorter, and it rejects it after a slow association
-    # attempt. Saying so now is faster and clearer than letting it fail.
-    _gb_err 'A Wi-Fi password is at least 8 characters.'
-    return 0
-  fi
-  if ! install -d -m 0700 -- "$NM_PROFILE_DIR" 2>/dev/null; then
-    _gb_err 'cannot write a network profile on this system'
-    return 0
-  fi
-  uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || printf 'aurade-%s' "$$")
-  profile="$NM_PROFILE_DIR/aurade-${uuid}.nmconnection"
-  (
-    umask 077
-    {
-      printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\n\n' "$ssid" "$uuid"
-      printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$ssid"
-      if [[ -n $psk ]]; then
-        printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$psk"
-      fi
-      printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n'
-    } >"$profile"
-  )
-  chmod 600 "$profile" 2>/dev/null || true
-  "$NMCLI" connection load "$profile" >/dev/null 2>&1 || true
-  output=$("$NMCLI" connection up uuid "$uuid" 2>&1) || status=$?
-  if (( status != 0 )); then
-    # A profile that did not connect is a profile that will be retried on the
-    # installed system for no reason, so it does not outlive the attempt.
-    "$NMCLI" connection delete uuid "$uuid" >/dev/null 2>&1 || true
-    rm -f -- "$profile"
-    _gb_err "$(_wifi_reason "$output" "$psk")"
-    return 0
-  fi
-  _gb_ok "\"ssid\":$(_gb_str "$ssid")"
-}
-
-# Turn nmcli's diagnostic into something a person can act on. The raw text is
-# not shown: it names D-Bus paths and profile UUIDs, and none of that tells
-# anyone what to do next.
-_wifi_reason() {
-  local text=${1,,} had_psk=$2
-  case $text in
-    *"secrets were required"*|*"no secrets"*|*"802.1x supplicant"*)
-      if [[ -n $had_psk ]]; then
-        printf '%s' 'That password was not accepted. Check it and try again.'
-      else
-        printf '%s' 'This network needs a password.'
-      fi
-      ;;
-    *timeout*|*timed\ out*)
-      printf '%s' 'The network did not answer in time. Move closer to the router, or try again.'
-      ;;
-    *"not authorized"*|*"not permitted"*)
-      printf '%s' 'This session is not allowed to change network settings.'
-      ;;
-    *"no network with ssid"*|*"not found"*)
-      printf '%s' 'That network is no longer in range.'
-      ;;
-    *) printf '%s' 'Could not join that network. Check the password, or pick another network.' ;;
-  esac
 }
 
 gb_wifi_forget() {
-  local ssid=$1
-  _nm_available || { _gb_err 'NetworkManager is not on this image'; return 0; }
-  "$NMCLI" connection delete id "$ssid" >/dev/null 2>&1 || true
-  _gb_ok
+  if aurade_wifi_forget "$1"; then
+    _gb_ok
+  else
+    _gb_err "$AURADE_WIFI_ERROR"
+  fi
 }
 
 # The accessibility choices, read and written through the same shared state the
@@ -767,16 +614,10 @@ gb_access_set() {
 }
 
 gb_wifi_radio() {
-  local want=$1
-  _nm_available || { _gb_err 'NetworkManager is not on this image'; return 0; }
-  case $want in
-    on|off) ;;
-    *) _gb_err 'the radio is either on or off'; return 0 ;;
-  esac
-  if "$NMCLI" radio wifi "$want" >/dev/null 2>&1; then
+  if aurade_wifi_radio "$1"; then
     _gb_ok
   else
-    _gb_err "Could not turn the Wi-Fi radio $want."
+    _gb_err "$AURADE_WIFI_ERROR"
   fi
 }
 
