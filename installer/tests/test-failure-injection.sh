@@ -149,6 +149,7 @@ install -d -m 0755 "$TMP/lib"
 cp "$ROOT/installer/bin/aurade-install" "$TMP/engine/aurade-install"
 cp "$ROOT/installer/lib/aurade-journal.sh" "$TMP/engine/lib/aurade-journal.sh"
 cp "$ROOT/installer/lib/aurade-staging.sh" "$TMP/lib/aurade-staging.sh"
+cp "$ROOT/installer/lib/aurade-wifi.sh" "$TMP/lib/aurade-wifi.sh"
 chmod 0755 "$TMP/engine/aurade-install"
 if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper.out" 2>&1; then

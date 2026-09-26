@@ -36,6 +36,7 @@ printf '%s\n' helper >"$TMP/squash/usr/local/sbin/$helper"
 done
 printf '%s\n' journal >"$TMP/squash/usr/local/lib/aurade/aurade-journal.sh"
 printf '%s\n' staging >"$TMP/squash/usr/local/lib/aurade/aurade-staging.sh"
+printf '%s\n' wifi >"$TMP/squash/usr/local/lib/aurade/aurade-wifi.sh"
 install -d "$TMP/squash/usr/local/lib/aurade/aurade_gui"
 for module in __init__ a11y arcade app bible brand bridge flow locales stage status tokens wait; do
   printf '%s\n' "$module" >"$TMP/squash/usr/local/lib/aurade/aurade_gui/$module.py"
@@ -53,6 +54,7 @@ paths = [
     "installer/bin/aurade-installer-gui",
     "installer/bin/aurade-installer-gui-bridge",
     "installer/bin/aurade-installer-start",
+    "installer/lib/aurade-wifi.sh",
     "installer/lib/aurade_gui/__init__.py",
     "installer/lib/aurade_gui/a11y.py",
     "installer/lib/aurade_gui/arcade.py",

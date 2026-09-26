@@ -1,6 +1,6 @@
 [Unit]
 Description=Start the AuraDE installer selected by the boot menu
-After=systemd-vconsole-setup.service systemd-user-sessions.service dev-tty1.device
+After=systemd-vconsole-setup.service systemd-user-sessions.service
 # The one that decides whether the graphical installer can start at all.
 #
 # `splash` puts plymouth on tty1, and plymouth holds DRM master until it is
@@ -24,7 +24,8 @@ After=plymouth-quit.service
 # they start in whatever order systemd picks.
 After=seatd.service
 Before=getty@tty1.service
-Wants=dev-tty1.device
+# The TTY path exists in /dev, but tty1 has no udev device unit on some
+# machines. Waiting for dev-tty1.device can hold the installer forever.
 # Not when the boot menu asked for the serial console. That entry has its own
 # unit on ttyS0, and an image where both fire draws two installers over one
 # machine, each reading half the keystrokes.

@@ -233,16 +233,15 @@ run_questions >/dev/null || fail 'a mismatched password broke the flow'
 release
 check 'password after mismatch' "${ANSWERS[password]}" 'agreed'
 
-# --- quitting from the first question cancels, and only when confirmed ------
+# --- going back from the first question returns to the network page --------
 reset_state
-{ echo esc; echo q; } >"$TMP/keys"
+{ echo esc; } >"$TMP/keys"
 exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
-run_questions >/dev/null && fail 'quitting was reported as a completed flow'
+run_questions >/dev/null && fail 'going back was reported as a completed flow'
 release
 
 reset_state
 {
-  echo esc; echo x                 # decline the quit, stay in the flow
   # locale, keymap, the keyboard check, timezone, disk, hostname
   echo enter; echo enter; echo enter; echo enter; echo enter; echo enter
   typed 'alex'; echo enter
@@ -250,7 +249,7 @@ reset_state
   echo n
 } >"$TMP/keys"
 exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
-run_questions >/dev/null || fail 'declining the quit prompt did not resume the flow'
+run_questions >/dev/null || fail 'the question flow did not resume'
 release
 
 # --- the erase gate accepts only the exact token ----------------------------
@@ -436,16 +435,14 @@ prompt_enum keymap 2 9 >/dev/null || fail 'the keymap question did not accept'
 release
 check 'enum remembered' "$PROMPT_RESULT" 'fr'
 
-# --- the first question offers quit; later ones offer back ------------------
+# --- every question goes back, with network before the first one -----------
 reset_state
 screen_question locale 1 9 >"$TMP/first.out"
-grep -Fq 'esc  quit' "$TMP/first.out" ||
-  fail 'the first question does not offer quit, which is what esc actually does there'
+grep -Fq 'esc  back' "$TMP/first.out" ||
+  fail 'the first question does not offer back to the network page'
 screen_question hostname 5 9 >"$TMP/later.out"
 grep -Fq 'esc  back' "$TMP/later.out" ||
   fail 'a later question does not offer back'
-! grep -Fq 'esc  quit' "$TMP/later.out" ||
-  fail 'a later question claims esc quits'
 
 # --- key decoding ------------------------------------------------------------
 check 'up arrow'    "$(tui_decode_key $'\033[A')" 'up'
@@ -489,14 +486,14 @@ chmod +x "$TMP/fsbin/mkfs.xfs"
 offered=$(enum_candidates filesystem | tr '\n' ' ')
 offered=${offered% }
 [[ $offered == 'btrfs ext4 xfs' ]] || fail "the filesystem list offered '$offered' on an image that has every mkfs"
-rm -f "$TMP/fsbin/mkfs.xfs"
-# And with the tool out of reach, wherever the host keeps it.
-while xfs_tool=$(command -v mkfs.xfs 2>/dev/null); do
-  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -Fxv "${xfs_tool%/*}" | tr '\n' ':')
-  PATH=${PATH%:}
-  [[ -n $PATH ]] || break
-done
+# Hide only the one command being tested. Removing its directory from PATH
+# also hides tr and rm on hosts that keep mkfs.xfs in /usr/bin.
+command() {
+  [[ $1 != -v || ${2:-} != mkfs.xfs ]] || return 1
+  builtin command "$@"
+}
 offered=$(enum_candidates filesystem | tr '\n' ' ')
+unset -f command
 offered=${offered% }
 [[ $offered == 'btrfs ext4' ]] || fail "the filesystem list offered '$offered' on an image with no mkfs.xfs"
 PATH=$saved_path
@@ -521,10 +518,12 @@ TUI=$ROOT/installer/bin/aurade-installer-tui
 review=$(env -u AURADE_INSTALLER_TUI_LIB AURADE_TUI_COLUMNS=68 \
   AURADE_TUI_HEIGHT=34 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii \
   "$TUI" --render review 2>/dev/null)
-grep -Fq 'enter  change' <<<"$review" ||
+grep -Fq 'enter change' <<<"$review" ||
   fail 'the review screen does not offer to change a line'
-grep -Fq 'c  continue' <<<"$review" ||
+grep -Fq 'c next' <<<"$review" ||
   fail 'the review screen does not say how to continue'
+grep -Fq 'n network' <<<"$review" ||
+  fail 'the review screen cannot reopen the network page'
 # The selection marker is the same one the disk list and the failure options
 # use, so "the line you are on" looks the same everywhere in the product.
 grep -q '^| *> ' <<<"$review" ||
