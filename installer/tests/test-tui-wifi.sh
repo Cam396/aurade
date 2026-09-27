@@ -157,6 +157,7 @@ dest="$TMP/target/etc/NetworkManager/system-connections"
 [[ -f $dest/${profiles[0]##*/} ]] || fail 'the installed system lost the Wi-Fi connection'
 [[ $(stat -c %a "$dest/${profiles[0]##*/}") == 600 ]] || fail 'the installed profile is not private'
 [[ ! -e $dest/aurade-bad.nmconnection ]] || fail 'a symlink was copied into the target'
+rm -f -- "$TMP/live/aurade-bad.nmconnection"
 
 # A failed association cleans its profile and never prints the secret.
 printf 'disconnected\n' >"$TMP/state"
