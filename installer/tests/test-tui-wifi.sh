@@ -10,6 +10,12 @@ install -d "$TMP/live" "$TMP/target" "$TMP/stub"
 printf 'enabled\n' >"$TMP/radio"
 printf 'disconnected\n' >"$TMP/state"
 printf 'full\n' >"$TMP/connectivity"
+printf '%s\n' \
+  'kestrel-5g:00000000-0000-0000-0000-000000000001:802-11-wireless' \
+  'kestrel-5g:00000000-0000-0000-0000-000000000002:wifi' \
+  'Wired office:00000000-0000-0000-0000-000000000003:ethernet' \
+  'Ghost:invalid:wifi' \
+  >"$TMP/saved"
 
 cat >"$TMP/stub/nmcli" <<'STUB'
 #!/usr/bin/env bash
@@ -34,7 +40,25 @@ case $* in
       "Ferry\\: Cross:82:WPA2:$active" 'kestrel-5g:67:WPA2:no' \
       'Pure WPA3:31:WPA3:no' 'Cafe OWE:26:OWE:no' \
       'Company:25:WPA2 802.1X:no' 'Old Lock:18:WEP:no' ;;
-  *'connection show') printf '%s\n' 'kestrel-5g:802-11-wireless' ;;
+  '-t -f NAME,UUID,TYPE connection show')
+    cat "$AURADE_TEST_WIFI_SAVED"
+    for profile in "$AURADE_TEST_WIFI_PROFILE_DIR"/aurade-*.nmconnection; do
+      [[ -f $profile && ! -L $profile ]] || continue
+      name=$(sed -n 's/^id=//p' "$profile" | head -1)
+      uuid=$(sed -n 's/^uuid=//p' "$profile" | head -1)
+      name=${name//\\/\\\\}
+      name=${name//:/\\:}
+      printf '%s:%s:wifi\n' "$name" "$uuid"
+    done ;;
+  '-t -f NAME,TYPE connection show')
+    printf '%s\n' 'kestrel-5g:802-11-wireless'
+    for profile in "$AURADE_TEST_WIFI_PROFILE_DIR"/aurade-*.nmconnection; do
+      [[ -f $profile && ! -L $profile ]] || continue
+      name=$(sed -n 's/^id=//p' "$profile" | head -1)
+      name=${name//\\/\\\\}
+      name=${name//:/\\:}
+      printf '%s:wifi\n' "$name"
+    done ;;
   'connection load '*) : ;;
   'connection up uuid '*)
     [[ ${AURADE_TEST_WIFI_FAIL:-0} != 1 ]] || {
@@ -43,6 +67,9 @@ case $* in
     }
     printf 'connected\n' >"$AURADE_TEST_WIFI_STATE" ;;
   'connection up id '*) printf 'connected\n' >"$AURADE_TEST_WIFI_STATE" ;;
+  'connection delete uuid '*)
+    uuid=${*: -1}
+    sed -i "/:$uuid:/d" "$AURADE_TEST_WIFI_SAVED" ;;
   'connection delete '*) : ;;
 esac
 STUB
@@ -62,6 +89,8 @@ export AURADE_TEST_WIFI_CALLS="$TMP/calls"
 export AURADE_TEST_WIFI_RADIO="$TMP/radio"
 export AURADE_TEST_WIFI_STATE="$TMP/state"
 export AURADE_TEST_WIFI_CONNECTIVITY="$TMP/connectivity"
+export AURADE_TEST_WIFI_SAVED="$TMP/saved"
+export AURADE_TEST_WIFI_PROFILE_DIR="$TMP/live"
 export AURADE_TUI_PLAIN=1 AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii
 export AURADE_TUI_HEIGHT=24 AURADE_TUI_COLUMNS=68
 export AURADE_INSTALLER_TUI_LIB=1
@@ -132,6 +161,7 @@ dest="$TMP/target/etc/NetworkManager/system-connections"
 # A failed association cleans its profile and never prints the secret.
 printf 'disconnected\n' >"$TMP/state"
 export AURADE_TEST_WIFI_FAIL=1
+WIFI_CURSOR=3
 {
   echo enter
   typed "$password"
@@ -142,6 +172,7 @@ export AURADE_TEST_WIFI_FAIL=1
 exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
 run_network >"$TMP/fail.out" || fail 'the failed join trapped the user'
 release
+WIFI_CURSOR=0
 grep -Fq 'That password was not accepted.' "$TMP/fail.out" || fail 'the error was not actionable'
 ! grep -Fq "$password" "$TMP/fail.out" || fail 'the failed password appeared on screen'
 (( $(find "$TMP/live" -name 'aurade-*.nmconnection' -type f | wc -l) == 1 )) ||
@@ -199,12 +230,16 @@ aurade_wifi_connect $'bad\nname' '' open true >/dev/null 2>&1 &&
   fail 'a control character reached a network keyfile'
 
 # Radio and saved connection controls remain reachable without a disk.
-keys w w r down f f c
+guest_uuid=${open_profile##*/aurade-}
+guest_uuid=${guest_uuid%.nmconnection}
+keys w w r down down f f c
 run_network >"$TMP/controls.out" || fail 'the network controls did not complete'
 release
 grep -Fq 'radio wifi off' "$TMP/calls" || fail 'Wi-Fi could not be turned off'
 grep -Fq 'radio wifi on' "$TMP/calls" || fail 'Wi-Fi could not be turned on'
-grep -Fq 'connection delete id kestrel-5g' "$TMP/calls" || fail 'a saved network could not be forgotten'
+grep -Fq "connection delete uuid $guest_uuid" "$TMP/calls" ||
+  fail 'the scanned saved network was not forgotten by UUID'
+WIFI_CURSOR=0
 
 # Hidden setup runs inside the same network page and keeps its private profile.
 {
@@ -242,7 +277,98 @@ release
 sae_ui_profile=$(grep -lF 'ssid=Night WPA3' "$TMP/live"/aurade-*.nmconnection)
 grep -Fxq 'key-mgmt=sae' "$sae_ui_profile" || fail 'the TUI did not use WPA3 Personal'
 
+# Saved profiles include hidden networks that scans cannot show. UUID actions
+# target one profile even when another saved connection has the same name.
+aurade_wifi_saved_profiles || fail 'saved networks could not be listed'
+[[ ${AURADE_WIFI_SAVED_NAMES[0]} == kestrel-5g &&
+   ${AURADE_WIFI_SAVED_NAMES[1]} == kestrel-5g ]] ||
+  fail 'duplicate saved names were collapsed'
+for name in "${AURADE_WIFI_SAVED_NAMES[@]}"; do
+  [[ $name != 'Wired office' && $name != Ghost ]] || fail 'a non-Wi-Fi or invalid profile was shown'
+done
+saved_hidden=-1
+saved_colon=-1
+for index in "${!AURADE_WIFI_SAVED_NAMES[@]}"; do
+  case ${AURADE_WIFI_SAVED_NAMES[index]} in
+    'Night Guest') saved_hidden=$index ;;
+    'Ferry: Cross') saved_colon=$index ;;
+  esac
+done
+(( saved_hidden >= 0 && saved_colon >= 0 )) || fail 'a hidden or escaped network was lost'
+[[ ${AURADE_WIFI_SAVED_CARRIED[saved_hidden]} == true ]] || fail 'the hidden profile was marked live only'
+[[ ${AURADE_WIFI_SAVED_CARRIED[0]} == false ]] || fail 'a preexisting profile was marked for install'
+saved_hidden_uuid=${AURADE_WIFI_SAVED_UUIDS[saved_hidden]}
+WIFI_SAVED_CURSOR=$saved_hidden
+screen_wifi_saved "$WIFI_SAVED_CURSOR" >"$TMP/saved-page.out"
+(( $(wc -l <"$TMP/saved-page.out") <= 24 )) || fail 'saved networks scroll off a 24-line console'
+grep -Fq 'New system' "$TMP/saved-page.out" || fail 'the profile carryover is not shown'
+screen_wifi_saved 0 >"$TMP/saved-first.out"
+grep -Fq 'Live only' "$TMP/saved-first.out" || fail 'live-only profiles are not marked'
+grep -Fq 'kestrel-5g #0001' "$TMP/saved-first.out" || fail 'duplicate profiles look identical'
+grep -Fq 'kestrel-5g #0002' "$TMP/saved-first.out" || fail 'duplicate profiles look identical'
+WIFI_SAVED_NOTICE='More than one saved connection uses this name. Choose one.'
+screen_wifi_saved 0 >"$TMP/saved-notice.out"
+(( $(wc -l <"$TMP/saved-notice.out") <= 24 )) ||
+  fail 'the saved page with a notice scrolls off a 24-line console'
+WIFI_SAVED_NOTICE=
+
+WIFI_SAVED_CURSOR=$saved_hidden
+keys s enter c
+run_network >"$TMP/saved-reconnect.out" || fail 'saved network reconnect did not complete'
+release
+grep -Fq "connection up uuid $saved_hidden_uuid" "$TMP/calls" ||
+  fail 'the hidden network was not reconnected by UUID'
+grep -Fq 'Connected to Night Guest.' "$TMP/saved-reconnect.out" ||
+  fail 'the saved-network page gave no connection result'
+
+# A scanned name with two saved profiles asks which one to use.
+WIFI_CURSOR=1
+keys enter down enter c
+run_network >"$TMP/duplicate-scan.out" || fail 'duplicate-name scan entry did not complete'
+release
+grep -Fq 'More than one saved connection uses this name.' "$TMP/duplicate-scan.out" ||
+  fail 'the scan page silently chose a duplicate saved name'
+grep -Fq 'connection up uuid 00000000-0000-0000-0000-000000000002' "$TMP/calls" ||
+  fail 'the scan page did not use the selected duplicate profile'
+
+WIFI_SAVED_CURSOR=1
+keys s enter c
+run_network >"$TMP/duplicate-reconnect.out" || fail 'duplicate-name reconnect did not complete'
+release
+grep -Fq 'connection up uuid 00000000-0000-0000-0000-000000000002' "$TMP/calls" ||
+  fail 'a duplicate saved name reconnected by ambiguous ID'
+WIFI_SAVED_CURSOR=1
+keys s f f esc c
+run_network >"$TMP/duplicate-forget.out" || fail 'duplicate-name forget did not complete'
+release
+grep -Fq 'connection delete uuid 00000000-0000-0000-0000-000000000002' "$TMP/calls" ||
+  fail 'a duplicate saved name was deleted by ambiguous ID'
+grep -Fq ':00000000-0000-0000-0000-000000000001:' "$TMP/saved" ||
+  fail 'forgetting one duplicate removed the other'
+
+aurade_wifi_saved_profiles || fail 'saved networks disappeared after forgetting one'
+saved_hidden=-1
+for index in "${!AURADE_WIFI_SAVED_NAMES[@]}"; do
+  [[ ${AURADE_WIFI_SAVED_UUIDS[index]} != "$saved_hidden_uuid" ]] || saved_hidden=$index
+done
+(( saved_hidden >= 0 )) || fail 'the hidden saved network disappeared unexpectedly'
+WIFI_SAVED_CURSOR=$saved_hidden
+keys s f f esc c
+run_network >"$TMP/saved-forget.out" || fail 'hidden saved network forget did not complete'
+release
+grep -Fq "connection delete uuid $saved_hidden_uuid" "$TMP/calls" ||
+  fail 'the hidden network was not forgotten by UUID'
+[[ ! -e $hidden_ui_profile ]] || fail 'a forgotten profile would still reach the installed system'
+grep -Fq 'will not follow you to the new system' "$TMP/saved-forget.out" ||
+  fail 'the forget screen hid the installed-system effect'
+
 # Scanned WPA3 and Enhanced Open networks follow the right prompt path.
+wpa3_uuid=${wpa3_profile##*/aurade-}
+wpa3_uuid=${wpa3_uuid%.nmconnection}
+owe_uuid=${owe_profile##*/aurade-}
+owe_uuid=${owe_uuid%.nmconnection}
+aurade_wifi_forget_profile "$wpa3_uuid" || fail 'the old WPA3 test profile could not be cleared'
+aurade_wifi_forget_profile "$owe_uuid" || fail 'the old OWE test profile could not be cleared'
 WIFI_CURSOR=0
 {
   echo down; echo down; echo down; echo enter

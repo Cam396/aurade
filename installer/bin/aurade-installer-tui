@@ -1008,6 +1008,9 @@ WIFI_NOTICE=
 WIFI_NOTICE_KIND=dim
 WIFI_VIEW_ORDER=()
 WIFI_REPORT=()
+WIFI_SAVED_CURSOR=0
+WIFI_SAVED_NOTICE=
+WIFI_SAVED_NOTICE_KIND=dim
 
 wifi_name() {
   printf '%s' "$1" | tr -d '\000-\037\177'
@@ -1056,7 +1059,7 @@ screen_network() {
   local cursor=${1:-0} count=${#WIFI_VIEW_ORDER[@]} rows start end position index
   local name strength note status subtitle selected
   local CURRENT_SCREEN=network
-  rows=$(( AURADE_TUI_HEIGHT - 19 ))
+  rows=$(( AURADE_TUI_HEIGHT - 20 ))
   (( rows >= 3 )) || rows=3
   (( rows <= 10 )) || rows=10
   start=$(( cursor / rows * rows ))
@@ -1126,7 +1129,134 @@ screen_network() {
     tui_wrap "$WIFI_NOTICE" "$WIFI_NOTICE_KIND"
   fi
   tui_blank
-  tui_footer 'enter join  r scan  h hidden' 'w radio  f forget  d check  c next  esc back'
+  tui_wrap 'w radio  f forget  d check' dim
+  tui_footer 'enter join  h hidden  s saved' 'r scan  c next  esc back'
+}
+
+wifi_saved_refresh() {
+  if ! aurade_wifi_saved_profiles; then
+    WIFI_SAVED_NOTICE=$AURADE_WIFI_ERROR
+    WIFI_SAVED_NOTICE_KIND=warn
+  fi
+  (( WIFI_SAVED_CURSOR < ${#AURADE_WIFI_SAVED_NAMES[@]} )) || WIFI_SAVED_CURSOR=0
+}
+
+wifi_saved_for_name() {
+  local name=$1 position
+  WIFI_SAVED_MATCH=-1
+  WIFI_SAVED_MATCHES=0
+  aurade_wifi_saved_profiles || return 1
+  for position in "${!AURADE_WIFI_SAVED_NAMES[@]}"; do
+    [[ ${AURADE_WIFI_SAVED_NAMES[position]} == "$name" ]] || continue
+    (( WIFI_SAVED_MATCHES )) || WIFI_SAVED_MATCH=$position
+    WIFI_SAVED_MATCHES=$(( WIFI_SAVED_MATCHES + 1 ))
+  done
+  return 0
+}
+
+screen_wifi_saved() {
+  local count=${#AURADE_WIFI_SAVED_NAMES[@]} cursor=${1:-0} rows start end position
+  local name note max_name suffix other
+  local CURRENT_SCREEN=wifi_saved
+  rows=$(( AURADE_TUI_HEIGHT - 17 ))
+  (( rows >= 3 )) || rows=3
+  (( rows <= 10 )) || rows=10
+  start=$(( cursor / rows * rows ))
+  end=$(( start + rows ))
+  (( end <= count )) || end=$count
+  tui_clear
+  tui_header 'Saved networks'
+  tui_blank
+  tui_wrap 'Saved Wi-Fi' accent
+  tui_wrap 'Connections added here follow you to the new system. Others stay in this live session.' dim
+  tui_blank
+  if (( count )); then
+    max_name=$(( AURADE_TUI_INNER - 23 ))
+    (( max_name >= 12 )) || max_name=12
+    for (( position = start; position < end; position++ )); do
+      name=$(wifi_name "${AURADE_WIFI_SAVED_NAMES[position]}")
+      suffix=
+      for other in "${!AURADE_WIFI_SAVED_NAMES[@]}"; do
+        if (( other != position )) &&
+           [[ ${AURADE_WIFI_SAVED_NAMES[other]} == "${AURADE_WIFI_SAVED_NAMES[position]}" ]]; then
+          suffix=" #${AURADE_WIFI_SAVED_UUIDS[position]: -4}"
+          break
+        fi
+      done
+      if (( ${#name} + ${#suffix} > max_name )); then
+        name="${name:0:max_name-${#suffix}-3}..."
+      fi
+      name+=$suffix
+      note='Live only'
+      [[ ${AURADE_WIFI_SAVED_CARRIED[position]} != true ]] || note='New system'
+      if (( position == cursor )); then
+        tui_item yes "$(printf '%-*s  %s' "$max_name" "$name" "$note")"
+      else
+        tui_item no "$(printf '%-*s  %s' "$max_name" "$name" "$note")"
+      fi
+    done
+    (( count <= rows )) || tui_wrap "Showing $(( start + 1 )) to $end of $count saved networks." dim
+  else
+    tui_wrap 'No saved Wi-Fi networks yet.' dim
+  fi
+  if [[ -n $WIFI_SAVED_NOTICE ]]; then
+    tui_blank
+    tui_wrap "$WIFI_SAVED_NOTICE" "$WIFI_SAVED_NOTICE_KIND"
+  fi
+  tui_blank
+  tui_footer 'enter reconnect  f forget  r refresh' 'esc networks'
+}
+
+run_wifi_saved() {
+  local key count uuid name carried
+  local CURRENT_SCREEN=wifi_saved
+  WIFI_NOTICE=
+  WIFI_SAVED_NOTICE=${1:-}
+  WIFI_SAVED_NOTICE_KIND=dim
+  wifi_saved_refresh
+  while true; do
+    screen_wifi_saved "$WIFI_SAVED_CURSOR"
+    key=$(read_key) || return 0
+    count=${#AURADE_WIFI_SAVED_NAMES[@]}
+    case $key in
+      up) (( count == 0 )) || WIFI_SAVED_CURSOR=$(( (WIFI_SAVED_CURSOR - 1 + count) % count )) ;;
+      down) (( count == 0 )) || WIFI_SAVED_CURSOR=$(( (WIFI_SAVED_CURSOR + 1) % count )) ;;
+      r|R) WIFI_SAVED_NOTICE=''; wifi_saved_refresh ;;
+      enter)
+        (( count )) || continue
+        uuid=${AURADE_WIFI_SAVED_UUIDS[WIFI_SAVED_CURSOR]}
+        name=${AURADE_WIFI_SAVED_NAMES[WIFI_SAVED_CURSOR]}
+        if [[ $AURADE_WIFI_RADIO != enabled ]]; then
+          WIFI_SAVED_NOTICE='Turn Wi-Fi on from the network page first.'
+          WIFI_SAVED_NOTICE_KIND=warn
+        elif aurade_wifi_activate_profile "$uuid"; then
+          WIFI_NOTICE="Connected to $(wifi_name "$name")."
+          WIFI_NOTICE_KIND=ok
+          return 0
+        else
+          WIFI_SAVED_NOTICE=$AURADE_WIFI_ERROR
+          WIFI_SAVED_NOTICE_KIND=warn
+        fi ;;
+      f|F)
+        (( count )) || continue
+        uuid=${AURADE_WIFI_SAVED_UUIDS[WIFI_SAVED_CURSOR]}
+        name=${AURADE_WIFI_SAVED_NAMES[WIFI_SAVED_CURSOR]}
+        carried=${AURADE_WIFI_SAVED_CARRIED[WIFI_SAVED_CURSOR]}
+        if run_wifi_forget "$name" "$carried"; then
+          if aurade_wifi_forget_profile "$uuid"; then
+            WIFI_SAVED_NOTICE="Forgot $(wifi_name "$name")."
+            WIFI_SAVED_NOTICE_KIND=ok
+            WIFI_NOTICE=$WIFI_SAVED_NOTICE
+            WIFI_NOTICE_KIND=ok
+          else
+            WIFI_SAVED_NOTICE=$AURADE_WIFI_ERROR
+            WIFI_SAVED_NOTICE_KIND=warn
+          fi
+          wifi_saved_refresh
+        fi ;;
+      esc) return 0 ;;
+    esac
+  done
 }
 
 screen_wifi_password() {
@@ -1298,13 +1428,17 @@ run_wifi_hidden() {
 }
 
 screen_wifi_forget() {
-  local ssid=$1 CURRENT_SCREEN=wifi_forget
+  local ssid=$1 carried=${2:-false} CURRENT_SCREEN=wifi_forget
   tui_clear
   tui_header 'Forget network'
   tui_blank
   tui_wrap "Forget $(wifi_name "$ssid")?" accent
   tui_blank
-  tui_wrap 'The saved connection is removed from this live session. You can join it again.' ink
+  if [[ $carried == true ]]; then
+    tui_wrap 'This connection will not follow you to the new system. You can join it again.' ink
+  else
+    tui_wrap 'The saved connection is removed from this live session. You can join it again.' ink
+  fi
   tui_blank
   tui_footer 'f  forget' 'esc  keep it'
 }
@@ -1361,14 +1495,14 @@ run_network_check() {
 }
 
 run_wifi_forget() {
-  local ssid=$1 key CURRENT_SCREEN=wifi_forget
-  screen_wifi_forget "$ssid"
+  local ssid=$1 carried=${2:-false} key CURRENT_SCREEN=wifi_forget
+  screen_wifi_forget "$ssid" "$carried"
   key=$(read_key) || return 1
   [[ $key == f || $key == F ]]
 }
 
 run_network() {
-  local key count index ssid auth error answer
+  local key count index ssid auth error answer uuid carried
   local CURRENT_SCREEN=network
   WIFI_NOTICE=
   WIFI_NOTICE_KIND=dim
@@ -1382,6 +1516,7 @@ run_network() {
       down) (( count == 0 )) || WIFI_CURSOR=$(( (WIFI_CURSOR + 1) % count )) ;;
       r|R) WIFI_NOTICE=''; wifi_refresh ;;
       h|H) run_wifi_hidden ;;
+      s|S) run_wifi_saved; wifi_refresh ;;
       w|W)
         if [[ $AURADE_WIFI_RADIO == disabled ]]; then answer=on; else answer=off; fi
         if aurade_wifi_radio "$answer"; then
@@ -1399,8 +1534,26 @@ run_network() {
         index=${WIFI_VIEW_ORDER[WIFI_CURSOR]}
         [[ ${AURADE_WIFI_SAVED[index]} == true ]] || continue
         ssid=${AURADE_WIFI_SSIDS[index]}
-        if run_wifi_forget "$ssid"; then
-          if aurade_wifi_forget "$ssid"; then
+        if ! wifi_saved_for_name "$ssid"; then
+          WIFI_NOTICE=$AURADE_WIFI_ERROR
+          WIFI_NOTICE_KIND=warn
+          continue
+        fi
+        if (( WIFI_SAVED_MATCHES > 1 )); then
+          WIFI_SAVED_CURSOR=$WIFI_SAVED_MATCH
+          run_wifi_saved 'More than one saved connection uses this name. Choose one.'
+          wifi_refresh
+          continue
+        fi
+        if (( WIFI_SAVED_MATCHES == 0 )); then
+          WIFI_NOTICE='That saved connection is no longer available. Scan again.'
+          WIFI_NOTICE_KIND=warn
+          continue
+        fi
+        uuid=${AURADE_WIFI_SAVED_UUIDS[WIFI_SAVED_MATCH]}
+        carried=${AURADE_WIFI_SAVED_CARRIED[WIFI_SAVED_MATCH]}
+        if run_wifi_forget "$ssid" "$carried"; then
+          if aurade_wifi_forget_profile "$uuid"; then
             WIFI_NOTICE="Forgot $(wifi_name "$ssid")."
             WIFI_NOTICE_KIND=ok
           else
@@ -1419,7 +1572,35 @@ run_network() {
           WIFI_NOTICE_KIND=ok
           continue
         fi
-        if [[ $auth == open || $auth == owe || ${AURADE_WIFI_SAVED[index]} == true ||
+        if [[ ${AURADE_WIFI_SAVED[index]} == true ]]; then
+          if ! wifi_saved_for_name "$ssid"; then
+            WIFI_NOTICE=$AURADE_WIFI_ERROR
+            WIFI_NOTICE_KIND=warn
+            continue
+          fi
+          if (( WIFI_SAVED_MATCHES > 1 )); then
+            WIFI_SAVED_CURSOR=$WIFI_SAVED_MATCH
+            run_wifi_saved 'More than one saved connection uses this name. Choose one.'
+            wifi_refresh
+            continue
+          fi
+          if (( WIFI_SAVED_MATCHES == 0 )); then
+            WIFI_NOTICE='That saved connection is no longer available. Scan again.'
+            WIFI_NOTICE_KIND=warn
+            continue
+          fi
+          uuid=${AURADE_WIFI_SAVED_UUIDS[WIFI_SAVED_MATCH]}
+          if aurade_wifi_activate_profile "$uuid"; then
+            WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
+            WIFI_NOTICE_KIND=ok
+            wifi_refresh
+          else
+            WIFI_NOTICE=$AURADE_WIFI_ERROR
+            WIFI_NOTICE_KIND=warn
+          fi
+          continue
+        fi
+        if [[ $auth == open || $auth == owe ||
               $auth == enterprise || $auth == legacy || $auth == unknown ]]; then
           if aurade_wifi_connect "$ssid" '' "$auth"; then
             WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
@@ -3083,7 +3264,9 @@ screen_explain() {
     welcome)
       body='This installs AuraDE onto a disk in this computer. Nothing is written to any disk until you type the words on the confirmation screen, and you can stop before then without leaving a trace.' ;;
     network)
-      body='Join Wi-Fi or use a cable before installing. Press h to name a hidden network, d to check the package connection, or c to continue. Nothing has been written to any disk.' ;;
+      body='Join Wi-Fi or use a cable before installing. Press h to name a hidden network, s to manage saved networks, d to check the package connection, or c to continue. Nothing has been written to any disk.' ;;
+    wifi_saved)
+      body='Reconnect or forget a saved Wi-Fi connection. A connection added in this installer follows you to the new system. Other live-session connections do not. When names repeat, the short code distinguishes the profiles.' ;;
     wifi_password)
       body='Type the network password and press enter to join. It is kept in a private NetworkManager profile and carried into the installed system.' ;;
     wifi_hidden_name)
@@ -5278,7 +5461,7 @@ fi
 # appear.
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
-RENDERABLE=(welcome fallback network wifi-password wifi-hidden-name
+RENDERABLE=(welcome fallback network wifi-saved wifi-password wifi-hidden-name
   wifi-hidden-security network-check wifi-forget
   review gate progress game 2048 failure 'done' cancelled
   access keycheck explain help watch ttt life picker lights fifteen mines nono
@@ -5355,6 +5538,11 @@ if [[ -n $RENDER_ONLY ]]; then
       AURADE_WIFI_SAVED=(false false true)
       wifi_sort
       screen_network "${AURADE_RENDER_WIFI_ROW:-0}" ;;
+    wifi-saved)
+      AURADE_WIFI_SAVED_NAMES=('Night Lobby' 'kestrel-5g')
+      AURADE_WIFI_SAVED_UUIDS=('11111111-1111-1111-1111-111111111111' '22222222-2222-2222-2222-222222222222')
+      AURADE_WIFI_SAVED_CARRIED=(true false)
+      screen_wifi_saved "${AURADE_RENDER_SAVED_ROW:-0}" ;;
     wifi-password) SECRET_REVEAL=0; screen_wifi_password 'Ferry: Cross' 'example passphrase' ;;
     wifi-hidden-name) screen_wifi_hidden_name 'Night Lobby' ;;
     wifi-hidden-security) screen_wifi_hidden_security 1 ;;

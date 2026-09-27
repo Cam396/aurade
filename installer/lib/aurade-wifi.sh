@@ -12,6 +12,9 @@ AURADE_WIFI_AUTH=()
 AURADE_WIFI_OPEN=()
 AURADE_WIFI_ACTIVE=()
 AURADE_WIFI_SAVED=()
+AURADE_WIFI_SAVED_NAMES=()
+AURADE_WIFI_SAVED_UUIDS=()
+AURADE_WIFI_SAVED_CARRIED=()
 
 aurade_wifi_available() { command -v "$AURADE_WIFI_NMCLI" >/dev/null 2>&1; }
 
@@ -70,6 +73,71 @@ aurade_wifi_saved() {
     [[ ${AURADE_WIFI_FIELDS[0]:-} != "$want" ]] || return 0
   done < <("$AURADE_WIFI_NMCLI" -t -f NAME,TYPE connection show 2>/dev/null || true)
   return 1
+}
+
+aurade_wifi_saved_profiles() {
+  local listing line name uuid type profile index
+  AURADE_WIFI_SAVED_NAMES=()
+  AURADE_WIFI_SAVED_UUIDS=()
+  AURADE_WIFI_SAVED_CARRIED=()
+  AURADE_WIFI_ERROR=
+  if ! aurade_wifi_available; then
+    AURADE_WIFI_ERROR='NetworkManager is not on this image'
+    return 1
+  fi
+  if ! listing=$("$AURADE_WIFI_NMCLI" -t -f NAME,UUID,TYPE connection show 2>/dev/null); then
+    AURADE_WIFI_ERROR='Saved networks could not be listed.'
+    return 1
+  fi
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    aurade_wifi_fields "$line"
+    name=${AURADE_WIFI_FIELDS[0]:-}
+    uuid=${AURADE_WIFI_FIELDS[1]:-}
+    type=${AURADE_WIFI_FIELDS[2]:-}
+    [[ $type == wifi || $type == 802-11-wireless ]] || continue
+    [[ $uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || continue
+    index=${#AURADE_WIFI_SAVED_NAMES[@]}
+    AURADE_WIFI_SAVED_NAMES[index]=$name
+    AURADE_WIFI_SAVED_UUIDS[index]=$uuid
+    AURADE_WIFI_SAVED_CARRIED[index]=false
+    profile="$AURADE_WIFI_PROFILE_DIR/aurade-${uuid,,}.nmconnection"
+    [[ ! -f $profile || -L $profile ]] || AURADE_WIFI_SAVED_CARRIED[index]=true
+  done <<<"$listing"
+  return 0
+}
+
+aurade_wifi_activate_profile() {
+  local uuid=$1 output
+  AURADE_WIFI_ERROR=
+  if [[ ! $uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+    AURADE_WIFI_ERROR='That saved network is no longer available.'
+    return 1
+  fi
+  if output=$("$AURADE_WIFI_NMCLI" connection up uuid "$uuid" 2>&1); then
+    return 0
+  fi
+  AURADE_WIFI_ERROR=$(aurade_wifi_reason "$output" '')
+  return 1
+}
+
+aurade_wifi_forget_profile() {
+  local uuid=$1 profile
+  AURADE_WIFI_ERROR=
+  if [[ ! $uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+    AURADE_WIFI_ERROR='That saved network is no longer available.'
+    return 1
+  fi
+  if ! "$AURADE_WIFI_NMCLI" connection delete uuid "$uuid" >/dev/null 2>&1; then
+    AURADE_WIFI_ERROR='Could not forget that network.'
+    return 1
+  fi
+  profile="$AURADE_WIFI_PROFILE_DIR/aurade-${uuid,,}.nmconnection"
+  if [[ -f $profile && ! -L $profile ]] && ! rm -f -- "$profile"; then
+    AURADE_WIFI_ERROR='The network was removed, but its local profile could not be cleared.'
+    return 1
+  fi
+  return 0
 }
 
 aurade_wifi_classify() {
@@ -198,7 +266,7 @@ aurade_wifi_connect() {
     AURADE_WIFI_ERROR='Hidden-network setting is invalid.'
     return 1
   fi
-  if [[ -z $psk ]] && aurade_wifi_saved "$ssid"; then
+  if [[ -z $psk && -z $auth && $hidden == false ]] && aurade_wifi_saved "$ssid"; then
     if output=$("$AURADE_WIFI_NMCLI" connection up id "$ssid" 2>&1); then
       return 0
     fi
