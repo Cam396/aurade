@@ -31,6 +31,12 @@ install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
 : >"$TMP/locales/en_US"; : >"$TMP/locales/fr_FR"
 for _keymap in us fr de; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+# The default layout and zone sort past the first 200 entries on a real ISO.
+# Keep them that far down here so pressing enter still chooses the default.
+for _n in $(seq -w 0 239); do
+  : >"$TMP/keymaps/i386/qwerty/a$_n.map.gz"
+  : >"$TMP/zoneinfo/America/A$_n"
+done
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
@@ -49,6 +55,13 @@ export AURADE_INSTALLER_TUI_LIB=1
 
 # shellcheck source=../bin/aurade-installer-tui
 . "$ROOT/installer/bin/aurade-installer-tui"
+
+enum_filter keymap ''
+(( ${#ENUM_MATCHES[@]} > 200 )) || fail 'the keyboard list stopped at 200 entries'
+check 'keyboard default in the full list' "${ENUM_MATCHES[$(enum_index_of us)]}" us
+enum_filter timezone ''
+(( ${#ENUM_MATCHES[@]} > 200 )) || fail 'the time-zone list stopped at 200 entries'
+check 'time-zone default in the full list' "${ENUM_MATCHES[$(enum_index_of UTC)]}" UTC
 
 # Drive the state machine from a file of key names, one per line, with all
 # drawing discarded. `keys` rewinds the stream for each scenario.
