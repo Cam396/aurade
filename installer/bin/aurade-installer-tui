@@ -1099,8 +1099,14 @@ screen_network() {
       (( max_name >= 12 )) || max_name=12
       (( ${#name} <= max_name )) || name="${name:0:max_name-3}..."
       strength=$(wifi_signal_words "${AURADE_WIFI_SIGNALS[index]}")
-      note='Password'
-      [[ ${AURADE_WIFI_OPEN[index]} != true ]] || note='Open'
+      case ${AURADE_WIFI_AUTH[index]:-unknown} in
+        open) note='Open' ;;
+        owe) note='Enhanced' ;;
+        sae) note='WPA3' ;;
+        enterprise) note='Account' ;;
+        legacy|unknown) note='Other' ;;
+        *) note='Password' ;;
+      esac
       [[ ${AURADE_WIFI_SAVED[index]} != true ]] || note='Saved'
       [[ ${AURADE_WIFI_ACTIVE[index]} != true ]] || note='Connected'
       selected=no
@@ -1120,16 +1126,17 @@ screen_network() {
     tui_wrap "$WIFI_NOTICE" "$WIFI_NOTICE_KIND"
   fi
   tui_blank
-  tui_footer 'enter join  r scan  w radio' 'f forget d check c next esc back'
+  tui_footer 'enter join  r scan  h hidden' 'w radio  f forget  d check  c next  esc back'
 }
 
 screen_wifi_password() {
-  local ssid=$1 value=$2 error=${3:-}
+  local ssid=$1 value=$2 error=${3:-} auth=${4:-wpa-psk}
   local CURRENT_SCREEN=wifi_password HELP_KEY=0 SECRET_SHORT_WARN=0
   tui_clear
   tui_header 'Join Wi-Fi'
   tui_blank
   tui_wrap "Password for $(wifi_name "$ssid")" accent
+  [[ $auth != sae ]] || tui_wrap 'WPA3 Personal' dim
   tui_blank
   widget_secret "$value"
   [[ -z $error ]] || { tui_blank; tui_wrap "$error" warn; }
@@ -1138,15 +1145,17 @@ screen_wifi_password() {
 }
 
 prompt_wifi_password() {
-  local ssid=$1 error=${2:-} value='' key
+  local ssid=$1 error=${2:-} auth=${3:-wpa-psk} value='' key
   local HELP_KEY=0 CURRENT_SCREEN=wifi_password SECRET_REVEAL=0
   while true; do
-    screen_wifi_password "$ssid" "$value" "$error"
+    screen_wifi_password "$ssid" "$value" "$error" "$auth"
     error=''
     key=$(read_key) || return 1
     case $key in
       enter)
-        if (( ${#value} < 8 )); then
+        if [[ $auth == sae && -z $value ]]; then
+          error='Enter the WPA3 password.'
+        elif [[ $auth != sae && ${#value} -lt 8 ]]; then
           error='A Wi-Fi password is at least 8 characters.'
         else
           WIFI_PASSWORD=$value
@@ -1161,6 +1170,131 @@ prompt_wifi_password() {
       *) [[ ${#key} -ne 1 ]] || value+=$key ;;
     esac
   done
+}
+
+screen_wifi_hidden_name() {
+  local value=$1 error=${2:-}
+  local CURRENT_SCREEN=wifi_hidden_name HELP_KEY=0
+  tui_clear
+  tui_header 'Join hidden Wi-Fi'
+  tui_blank
+  tui_wrap 'Network name' accent
+  tui_wrap 'Type the exact name. Hidden networks do not appear in the list.' dim
+  tui_blank
+  widget_text "$value"
+  [[ -z $error ]] || { tui_blank; tui_wrap "$error" warn; }
+  tui_blank
+  tui_footer 'enter  next' 'esc  networks'
+}
+
+prompt_wifi_hidden_name() {
+  local value=${1:-} error='' key bytes
+  local CURRENT_SCREEN=wifi_hidden_name HELP_KEY=0
+  while true; do
+    screen_wifi_hidden_name "$value" "$error"
+    error=''
+    key=$(read_key) || return 1
+    case $key in
+      enter)
+        bytes=$(printf '%s' "$value" | wc -c)
+        if [[ -z $value ]]; then
+          error='Enter the network name.'
+        elif (( bytes > 32 )); then
+          error='That network name is too long.'
+        else
+          WIFI_HIDDEN_SSID=$value
+          return 0
+        fi ;;
+      esc) return 1 ;;
+      backspace) value=${value%?} ;;
+      space) value+=' ' ;;
+      paste:*) value+=$(printf '%s' "${key#paste:}" | tr -d '\000-\037\177') ;;
+      up|down|left|right|tab|redraw) ;;
+      *) [[ ${#key} -ne 1 ]] || value+=$key ;;
+    esac
+  done
+}
+
+screen_wifi_hidden_security() {
+  local cursor=$1 index
+  local CURRENT_SCREEN=wifi_hidden_security
+  local -a labels=('Open network' 'WPA2 or mixed WPA3' 'WPA3 Personal' 'Enhanced Open')
+  tui_clear
+  tui_header 'Join hidden Wi-Fi'
+  tui_blank
+  tui_wrap 'How is this network secured?' accent
+  tui_wrap 'Choose the setting used by the router. Enhanced Open needs no password.' dim
+  tui_blank
+  for index in "${!labels[@]}"; do
+    if (( index == cursor )); then
+      tui_item yes "${labels[index]}"
+    else
+      tui_item no "${labels[index]}"
+    fi
+  done
+  tui_blank
+  tui_footer 'up/down  choose    enter  next' 'esc  network name'
+}
+
+prompt_wifi_hidden_security() {
+  local cursor=1 key
+  local CURRENT_SCREEN=wifi_hidden_security
+  local -a auth=(open wpa-psk sae owe)
+  while true; do
+    screen_wifi_hidden_security "$cursor"
+    key=$(read_key) || return 1
+    case $key in
+      up) cursor=$(( (cursor + 3) % 4 )) ;;
+      down) cursor=$(( (cursor + 1) % 4 )) ;;
+      enter) WIFI_HIDDEN_AUTH=${auth[cursor]}; return 0 ;;
+      esc) return 1 ;;
+    esac
+  done
+}
+
+run_wifi_hidden() {
+  local ssid='' auth='' error=''
+  if [[ $AURADE_WIFI_AVAILABLE != true || $AURADE_WIFI_WIFI != true ]]; then
+    WIFI_NOTICE='No Wi-Fi device was found. Plug in a cable or a supported adapter.'
+    WIFI_NOTICE_KIND=warn
+    return 0
+  fi
+  if [[ $AURADE_WIFI_RADIO != enabled ]]; then
+    WIFI_NOTICE='Turn Wi-Fi on before joining a hidden network.'
+    WIFI_NOTICE_KIND=warn
+    return 0
+  fi
+  while true; do
+    prompt_wifi_hidden_name "$ssid" || return 0
+    ssid=$WIFI_HIDDEN_SSID
+    if prompt_wifi_hidden_security; then
+      auth=$WIFI_HIDDEN_AUTH
+      break
+    fi
+  done
+  if [[ $auth == wpa-psk || $auth == sae ]]; then
+    while prompt_wifi_password "$ssid" "$error" "$auth"; do
+      if aurade_wifi_connect "$ssid" "$WIFI_PASSWORD" "$auth" true; then
+        WIFI_PASSWORD=
+        WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
+        WIFI_NOTICE_KIND=ok
+        wifi_refresh
+        return 0
+      fi
+      WIFI_PASSWORD=
+      error=$AURADE_WIFI_ERROR
+    done
+    WIFI_PASSWORD=
+    return 0
+  fi
+  if aurade_wifi_connect "$ssid" '' "$auth" true; then
+    WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
+    WIFI_NOTICE_KIND=ok
+    wifi_refresh
+  else
+    WIFI_NOTICE=$AURADE_WIFI_ERROR
+    WIFI_NOTICE_KIND=warn
+  fi
 }
 
 screen_wifi_forget() {
@@ -1234,7 +1368,7 @@ run_wifi_forget() {
 }
 
 run_network() {
-  local key count index ssid error answer
+  local key count index ssid auth error answer
   local CURRENT_SCREEN=network
   WIFI_NOTICE=
   WIFI_NOTICE_KIND=dim
@@ -1247,6 +1381,7 @@ run_network() {
       up) (( count == 0 )) || WIFI_CURSOR=$(( (WIFI_CURSOR - 1 + count) % count )) ;;
       down) (( count == 0 )) || WIFI_CURSOR=$(( (WIFI_CURSOR + 1) % count )) ;;
       r|R) WIFI_NOTICE=''; wifi_refresh ;;
+      h|H) run_wifi_hidden ;;
       w|W)
         if [[ $AURADE_WIFI_RADIO == disabled ]]; then answer=on; else answer=off; fi
         if aurade_wifi_radio "$answer"; then
@@ -1275,16 +1410,18 @@ run_network() {
           wifi_refresh
         fi ;;
       enter)
-        (( count )) || return 0
+        (( count )) || continue
         index=${WIFI_VIEW_ORDER[WIFI_CURSOR]}
         ssid=${AURADE_WIFI_SSIDS[index]}
+        auth=${AURADE_WIFI_AUTH[index]:-unknown}
         if [[ ${AURADE_WIFI_ACTIVE[index]} == true ]]; then
           WIFI_NOTICE="Already connected to $(wifi_name "$ssid")."
           WIFI_NOTICE_KIND=ok
           continue
         fi
-        if [[ ${AURADE_WIFI_OPEN[index]} == true || ${AURADE_WIFI_SAVED[index]} == true ]]; then
-          if aurade_wifi_connect "$ssid" ''; then
+        if [[ $auth == open || $auth == owe || ${AURADE_WIFI_SAVED[index]} == true ||
+              $auth == enterprise || $auth == legacy || $auth == unknown ]]; then
+          if aurade_wifi_connect "$ssid" '' "$auth"; then
             WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
             WIFI_NOTICE_KIND=ok
             wifi_refresh
@@ -1295,8 +1432,8 @@ run_network() {
           continue
         fi
         error=''
-        while prompt_wifi_password "$ssid" "$error"; do
-          if aurade_wifi_connect "$ssid" "$WIFI_PASSWORD"; then
+        while prompt_wifi_password "$ssid" "$error" "$auth"; do
+          if aurade_wifi_connect "$ssid" "$WIFI_PASSWORD" "$auth"; then
             WIFI_PASSWORD=
             WIFI_NOTICE="Connected to $(wifi_name "$ssid")."
             WIFI_NOTICE_KIND=ok
@@ -2946,9 +3083,13 @@ screen_explain() {
     welcome)
       body='This installs AuraDE onto a disk in this computer. Nothing is written to any disk until you type the words on the confirmation screen, and you can stop before then without leaving a trace.' ;;
     network)
-      body='Join Wi-Fi or use a cable before installing. Scan again with r, check the package connection with d, or press c to continue. Nothing has been written to any disk.' ;;
+      body='Join Wi-Fi or use a cable before installing. Press h to name a hidden network, d to check the package connection, or c to continue. Nothing has been written to any disk.' ;;
     wifi_password)
       body='Type the network password and press enter to join. It is kept in a private NetworkManager profile and carried into the installed system.' ;;
+    wifi_hidden_name)
+      body='Type the exact name of a network that does not appear in scans. A hidden network makes this computer send that name while looking for it.' ;;
+    wifi_hidden_security)
+      body='Choose the router security type. Open and Enhanced Open need no password. WPA2 and WPA3 Personal use a password. Work or school networks need account setup outside this installer.' ;;
     network_check)
       body='This checks the route, package archive, and clock. Press r to check again or enter to return to the networks.' ;;
     wifi_forget)
@@ -5137,7 +5278,8 @@ fi
 # appear.
 [[ -n ${_STAR_RARITY_SET:-} ]] || AURADE_STAR_RARITY=0
 
-RENDERABLE=(welcome fallback network wifi-password network-check wifi-forget
+RENDERABLE=(welcome fallback network wifi-password wifi-hidden-name
+  wifi-hidden-security network-check wifi-forget
   review gate progress game 2048 failure 'done' cancelled
   access keycheck explain help watch ttt life picker lights fifteen mines nono
   type credits
@@ -5207,12 +5349,15 @@ if [[ -n $RENDER_ONLY ]]; then
       AURADE_WIFI_SSIDS=('Ferry: Cross' 'Guest Lounge' 'kestrel-5g')
       AURADE_WIFI_SIGNALS=(82 38 67)
       AURADE_WIFI_SECURITY=(WPA2 -- WPA2)
+      AURADE_WIFI_AUTH=(wpa-psk open wpa-psk)
       AURADE_WIFI_OPEN=(false true false)
       AURADE_WIFI_ACTIVE=(false false false)
       AURADE_WIFI_SAVED=(false false true)
       wifi_sort
       screen_network "${AURADE_RENDER_WIFI_ROW:-0}" ;;
     wifi-password) SECRET_REVEAL=0; screen_wifi_password 'Ferry: Cross' 'example passphrase' ;;
+    wifi-hidden-name) screen_wifi_hidden_name 'Night Lobby' ;;
+    wifi-hidden-security) screen_wifi_hidden_security 1 ;;
     network-check)
       WIFI_REPORT=('A network connection is up.' 'The package archive can be looked up.' 'This computer clock is set.')
       screen_network_check ;;

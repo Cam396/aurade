@@ -666,6 +666,14 @@ with session() as model:
     check(not ferry["open"], "a WPA2 network was called open")
     guest = next(n for n in networks if n["ssid"] == "Guest Lounge")
     check(guest["open"], "a network with no security was not called open")
+    check(guest["no_password"], "open Wi-Fi still asks for a password")
+    wpa3 = next(n for n in networks if n["ssid"] == "Pure WPA3")
+    equal(wpa3["auth"], "sae", "WPA3-only was classified as WPA2")
+    owe = next(n for n in networks if n["ssid"] == "Cafe OWE")
+    check(owe["no_password"] and not owe["open"],
+          "Enhanced Open was treated as ordinary open Wi-Fi")
+    company = next(n for n in networks if n["ssid"] == "Company")
+    equal(company["auth"], "enterprise", "account setup was treated as a password")
     kestrel = next(n for n in networks if n["ssid"] == "kestrel-5g")
     check(kestrel["active"], "the joined network was not marked as such")
     check(kestrel["saved"], "a saved profile was not recognised")
@@ -699,6 +707,34 @@ with session() as model:
 profiles = os.listdir(profiles_dir)
 text = open(os.path.join(profiles_dir, profiles[0])).read()
 check("wifi-security" not in text, "an open network was given a security section")
+
+reset_nmcli()
+with session() as model:
+    model.call("wifi-scan")
+    result = model.call("wifi-connect", "Pure WPA3", "tiny")
+    check(result["ok"], f"joining WPA3-only Wi-Fi failed: {result}")
+profiles = os.listdir(profiles_dir)
+text = open(os.path.join(profiles_dir, profiles[0])).read()
+check("key-mgmt=sae" in text, "WPA3-only got the wrong keyfile type")
+
+reset_nmcli()
+with session() as model:
+    model.call("wifi-scan")
+    result = model.call("wifi-connect", "Cafe OWE", "")
+    check(result["ok"], f"joining Enhanced Open failed: {result}")
+profiles = os.listdir(profiles_dir)
+text = open(os.path.join(profiles_dir, profiles[0])).read()
+check("key-mgmt=owe" in text and "psk=" not in text,
+      "Enhanced Open got a password profile")
+
+reset_nmcli()
+with session() as model:
+    model.call("wifi-scan")
+    result = model.call("wifi-connect", "Company", "password")
+    check(not result["ok"], "enterprise Wi-Fi was given a personal profile")
+    check("work or school account" in result["error"],
+          "enterprise Wi-Fi lacks an account-setup explanation")
+equal(os.listdir(profiles_dir), [], "enterprise Wi-Fi left a profile behind")
 
 # A refused association leaves nothing behind. A profile that did not connect
 # is one the installed system would keep retrying for no reason.
