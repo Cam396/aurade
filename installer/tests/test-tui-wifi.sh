@@ -31,7 +31,9 @@ case $* in
     active=no
     [[ $(cat "$AURADE_TEST_WIFI_STATE") != connected ]] || active='*'
     printf '%s\n' 'Ferry\: Cross:41:WPA2:no' 'Guest Lounge:38:--:no' \
-      "Ferry\\: Cross:82:WPA2:$active" 'kestrel-5g:67:WPA2:no' ;;
+      "Ferry\\: Cross:82:WPA2:$active" 'kestrel-5g:67:WPA2:no' \
+      'Pure WPA3:31:WPA3:no' 'Cafe OWE:26:OWE:no' \
+      'Company:25:WPA2 802.1X:no' 'Old Lock:18:WEP:no' ;;
   *'connection show') printf '%s\n' 'kestrel-5g:802-11-wireless' ;;
   'connection load '*) : ;;
   'connection up uuid '*)
@@ -84,6 +86,10 @@ typed() {
 aurade_wifi_scan || fail 'the shared backend could not scan'
 [[ ${AURADE_WIFI_SSIDS[0]} == 'Ferry: Cross' ]] || fail 'the escaped SSID was lost'
 [[ ${AURADE_WIFI_SIGNALS[0]} == 82 ]] || fail 'a weaker duplicate won'
+[[ ${AURADE_WIFI_AUTH[3]} == sae ]] || fail 'WPA3-only was classified as WPA2'
+[[ ${AURADE_WIFI_AUTH[4]} == owe ]] || fail 'Enhanced Open was classified as password Wi-Fi'
+[[ ${AURADE_WIFI_AUTH[5]} == enterprise ]] || fail 'account setup was classified as a password'
+[[ ${AURADE_WIFI_AUTH[6]} == legacy ]] || fail 'WEP was classified as a WPA password'
 wifi_sort
 [[ ${WIFI_VIEW_ORDER[0]} == 0 ]] || fail 'the strongest network was not first'
 SECRET_REVEAL=0
@@ -154,6 +160,44 @@ aurade_wifi_connect 'kestrel-5g' '' || fail 'the saved network did not connect'
   fail 'joining a saved network made another profile'
 grep -Fq 'connection up id kestrel-5g' "$TMP/calls" || fail 'the saved profile was not reused'
 
+# WPA3-only and Enhanced Open get their own keyfile types. Unsupported networks
+# fail before a profile is written or a password is sent to nmcli.
+aurade_wifi_connect 'Pure WPA3' tiny || fail 'WPA3-only rejected a valid SAE passphrase'
+wpa3_profile=$(grep -lF 'ssid=Pure WPA3' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'key-mgmt=sae' "$wpa3_profile" || fail 'WPA3-only got a WPA2 profile'
+grep -Fxq 'psk=tiny' "$wpa3_profile" || fail 'the SAE password was lost'
+aurade_wifi_connect 'Cafe OWE' '' || fail 'Enhanced Open could not connect'
+owe_profile=$(grep -lF 'ssid=Cafe OWE' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'key-mgmt=owe' "$owe_profile" || fail 'Enhanced Open got the wrong keyfile type'
+! grep -Fq 'psk=' "$owe_profile" || fail 'Enhanced Open got a password'
+before_profiles=$(find "$TMP/live" -name 'aurade-*.nmconnection' -type f | wc -l)
+aurade_wifi_connect Company anything >/dev/null 2>&1 && fail 'enterprise Wi-Fi was given a personal profile'
+[[ $AURADE_WIFI_ERROR == *'work or school account'* ]] || fail 'enterprise Wi-Fi has no useful explanation'
+aurade_wifi_connect 'Old Lock' anything >/dev/null 2>&1 && fail 'WEP was given a WPA profile'
+[[ $AURADE_WIFI_ERROR == *'older Wi-Fi security'* ]] || fail 'WEP has no useful explanation'
+(( $(find "$TMP/live" -name 'aurade-*.nmconnection' -type f | wc -l) == before_profiles )) ||
+  fail 'an unsupported network left a profile'
+
+# A hidden network needs an exact SSID, security choice, and a profile that
+# continues probing for that SSID after the installed system boots.
+aurade_wifi_connect 'Night Lobby' secretpass wpa-psk true || fail 'hidden WPA could not connect'
+hidden_profile=$(grep -lF 'ssid=Night Lobby' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'hidden=true' "$hidden_profile" || fail 'the hidden profile will not find its SSID'
+grep -Fxq 'autoconnect=true' "$hidden_profile" || fail 'the hidden profile will not reconnect'
+[[ $(stat -c %a "$hidden_profile") == 600 ]] || fail 'hidden profile permissions are not private'
+aurade_wifi_connect Visible '' open true || fail 'hidden open network could not connect'
+open_hidden_profile=$(grep -lF 'ssid=Visible' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'hidden=true' "$open_hidden_profile" || fail 'hidden open network was not marked hidden'
+aurade_wifi_connect 'Night Lobby' short wpa-psk true >/dev/null 2>&1 &&
+  fail 'short WPA password was accepted for a hidden network'
+aurade_wifi_connect 'Night Lobby' '' sae true >/dev/null 2>&1 &&
+  fail 'empty WPA3 password was accepted for a hidden network'
+long_ssid=$(printf '%033d' 0)
+aurade_wifi_connect "$long_ssid" '' open true >/dev/null 2>&1 &&
+  fail 'a network name over 32 bytes was accepted'
+aurade_wifi_connect $'bad\nname' '' open true >/dev/null 2>&1 &&
+  fail 'a control character reached a network keyfile'
+
 # Radio and saved connection controls remain reachable without a disk.
 keys w w r down f f c
 run_network >"$TMP/controls.out" || fail 'the network controls did not complete'
@@ -162,10 +206,78 @@ grep -Fq 'radio wifi off' "$TMP/calls" || fail 'Wi-Fi could not be turned off'
 grep -Fq 'radio wifi on' "$TMP/calls" || fail 'Wi-Fi could not be turned on'
 grep -Fq 'connection delete id kestrel-5g' "$TMP/calls" || fail 'a saved network could not be forgotten'
 
+# Hidden setup runs inside the same network page and keeps its private profile.
+{
+  echo h
+  typed 'Night Guest'
+  echo enter
+  echo enter
+  typed 'hiddenpass'
+  echo enter
+  echo c
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_network >"$TMP/hidden.out" || fail 'the hidden-network flow did not complete'
+release
+hidden_ui_profile=$(grep -lF 'ssid=Night Guest' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'hidden=true' "$hidden_ui_profile" || fail 'the TUI did not mark the network hidden'
+grep -Fq 'Connected to Night Guest.' "$TMP/hidden.out" || fail 'the hidden join had no confirmation'
+! grep -Fq 'hiddenpass' "$TMP/hidden.out" || fail 'the hidden password appeared on screen'
+! grep -Fq 'hiddenpass' "$TMP/calls" || fail 'the hidden password reached nmcli argv'
+
+# WPA3 Personal allows a short SAE passphrase and offers it as a distinct choice.
+{
+  echo h
+  typed 'Night WPA3'
+  echo enter
+  echo down
+  echo enter
+  typed tiny
+  echo enter
+  echo c
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_network >"$TMP/sae.out" || fail 'the hidden WPA3 flow did not complete'
+release
+sae_ui_profile=$(grep -lF 'ssid=Night WPA3' "$TMP/live"/aurade-*.nmconnection)
+grep -Fxq 'key-mgmt=sae' "$sae_ui_profile" || fail 'the TUI did not use WPA3 Personal'
+
+# Scanned WPA3 and Enhanced Open networks follow the right prompt path.
+WIFI_CURSOR=0
+{
+  echo down; echo down; echo down; echo enter
+  typed tiny
+  echo enter; echo c
+} >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_network >"$TMP/visible-sae.out" || fail 'visible WPA3 did not complete'
+release
+grep -Fq 'Password for Pure WPA3' "$TMP/visible-sae.out" ||
+  fail 'visible WPA3 did not ask for its password'
+grep -Fq 'Connected to Pure WPA3.' "$TMP/visible-sae.out" ||
+  fail 'visible WPA3 did not join'
+WIFI_CURSOR=0
+{ echo down; echo down; echo down; echo down; echo enter; echo c; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_network >"$TMP/visible-owe.out" || fail 'visible Enhanced Open did not complete'
+release
+grep -Fq 'Connected to Cafe OWE.' "$TMP/visible-owe.out" ||
+  fail 'visible Enhanced Open did not join'
+! grep -Fq 'Password for Cafe OWE' "$TMP/visible-owe.out" ||
+  fail 'Enhanced Open asked for a password'
+WIFI_CURSOR=0
+{ echo down; echo down; echo down; echo down; echo down; echo enter; echo c; } >"$TMP/keys"
+exec {_TUI_KEYFD}<"$TMP/keys"; export _TUI_KEYFD
+run_network >"$TMP/enterprise.out" || fail 'enterprise Wi-Fi trapped the user'
+release
+grep -Fq 'work or school account setup' "$TMP/enterprise.out" ||
+  fail 'enterprise Wi-Fi still shows a password prompt'
+
 # Many networks stay paged on a short console. Untrusted names cannot repaint it.
 AURADE_WIFI_SSIDS=()
 AURADE_WIFI_SIGNALS=()
 AURADE_WIFI_SECURITY=()
+AURADE_WIFI_AUTH=()
 AURADE_WIFI_OPEN=()
 AURADE_WIFI_ACTIVE=()
 AURADE_WIFI_SAVED=()
@@ -173,6 +285,7 @@ for (( i = 0; i < 14; i++ )); do
   AURADE_WIFI_SSIDS[i]="Network $i"
   AURADE_WIFI_SIGNALS[i]=$(( 90 - i ))
   AURADE_WIFI_SECURITY[i]=WPA2
+  AURADE_WIFI_AUTH[i]=wpa-psk
   AURADE_WIFI_OPEN[i]=false
   AURADE_WIFI_ACTIVE[i]=false
   AURADE_WIFI_SAVED[i]=false

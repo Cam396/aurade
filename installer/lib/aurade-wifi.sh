@@ -8,6 +8,7 @@ AURADE_WIFI_FIELDS=()
 AURADE_WIFI_SSIDS=()
 AURADE_WIFI_SIGNALS=()
 AURADE_WIFI_SECURITY=()
+AURADE_WIFI_AUTH=()
 AURADE_WIFI_OPEN=()
 AURADE_WIFI_ACTIVE=()
 AURADE_WIFI_SAVED=()
@@ -71,11 +72,30 @@ aurade_wifi_saved() {
   return 1
 }
 
+aurade_wifi_classify() {
+  local security=${1^^}
+  case $security in
+    ''|--) AURADE_WIFI_KIND=open ;;
+    *802.1X*|*EAP*|*ENTERPRISE*) AURADE_WIFI_KIND=enterprise ;;
+    *WEP*) AURADE_WIFI_KIND=legacy ;;
+    *OWE*) AURADE_WIFI_KIND=owe ;;
+    *WPA3*)
+      if [[ $security == *WPA1* || $security == *WPA2* ]]; then
+        AURADE_WIFI_KIND=wpa-psk
+      else
+        AURADE_WIFI_KIND=sae
+      fi ;;
+    *WPA*) AURADE_WIFI_KIND=wpa-psk ;;
+    *) AURADE_WIFI_KIND=unknown ;;
+  esac
+}
+
 aurade_wifi_scan() {
   local listing line ssid signal security active index found
   AURADE_WIFI_SSIDS=()
   AURADE_WIFI_SIGNALS=()
   AURADE_WIFI_SECURITY=()
+  AURADE_WIFI_AUTH=()
   AURADE_WIFI_OPEN=()
   AURADE_WIFI_ACTIVE=()
   AURADE_WIFI_SAVED=()
@@ -120,6 +140,8 @@ aurade_wifi_scan() {
     AURADE_WIFI_SSIDS[found]=$ssid
     AURADE_WIFI_SIGNALS[found]=$signal
     AURADE_WIFI_SECURITY[found]=$security
+    aurade_wifi_classify "$security"
+    AURADE_WIFI_AUTH[found]=$AURADE_WIFI_KIND
     AURADE_WIFI_OPEN[found]=false
     [[ -n $security && $security != -- ]] || AURADE_WIFI_OPEN[found]=true
     AURADE_WIFI_ACTIVE[found]=${AURADE_WIFI_ACTIVE[found]:-false}
@@ -153,7 +175,8 @@ aurade_wifi_reason() {
 
 # A password goes into a mode-0600 NetworkManager keyfile, never into argv.
 aurade_wifi_connect() {
-  local ssid=$1 psk=$2 uuid profile output
+  local ssid=$1 psk=$2 auth=${3:-} hidden=${4:-false} uuid profile output index
+  local LC_ALL=C
   AURADE_WIFI_ERROR=
   if ! aurade_wifi_available; then
     AURADE_WIFI_ERROR='NetworkManager is not on this image'
@@ -163,17 +186,16 @@ aurade_wifi_connect() {
     AURADE_WIFI_ERROR='Choose a network first.'
     return 1
   fi
+  if (( ${#ssid} > 32 )); then
+    AURADE_WIFI_ERROR='That network name is too long.'
+    return 1
+  fi
   if [[ $psk == *[[:cntrl:]]* ]]; then
     AURADE_WIFI_ERROR='That password contains a character Wi-Fi cannot use.'
     return 1
   fi
-  if [[ -n $psk && ${#psk} -lt 8 ]]; then
-    AURADE_WIFI_ERROR='A Wi-Fi password is at least 8 characters.'
-    return 1
-  fi
-  if (( ${#psk} > 63 )) &&
-     ! { (( ${#psk} == 64 )) && [[ $psk =~ ^[0-9a-fA-F]+$ ]]; }; then
-    AURADE_WIFI_ERROR='A Wi-Fi password is at most 63 characters.'
+  if [[ $hidden != true && $hidden != false ]]; then
+    AURADE_WIFI_ERROR='Hidden-network setting is invalid.'
     return 1
   fi
   if [[ -z $psk ]] && aurade_wifi_saved "$ssid"; then
@@ -182,6 +204,50 @@ aurade_wifi_connect() {
     fi
     AURADE_WIFI_ERROR=$(aurade_wifi_reason "$output" '')
     return 1
+  fi
+  if [[ -z $auth ]]; then
+    for index in "${!AURADE_WIFI_SSIDS[@]}"; do
+      if [[ ${AURADE_WIFI_SSIDS[index]} == "$ssid" ]]; then
+        auth=${AURADE_WIFI_AUTH[index]:-}
+        break
+      fi
+    done
+  fi
+  [[ -n $auth ]] || { if [[ -n $psk ]]; then auth=wpa-psk; else auth=open; fi; }
+  case $auth in
+    enterprise)
+      AURADE_WIFI_ERROR='This network needs work or school account setup. Use another network or a cable.'
+      return 1 ;;
+    legacy)
+      AURADE_WIFI_ERROR='This older Wi-Fi security type is not supported here. Use another network or a cable.'
+      return 1 ;;
+    unknown)
+      AURADE_WIFI_ERROR='This network uses a security type the installer does not recognize.'
+      return 1 ;;
+    open|owe)
+      if [[ -n $psk ]]; then
+        AURADE_WIFI_ERROR='This network does not use a password.'
+        return 1
+      fi ;;
+    wpa-psk|sae)
+      if [[ -z $psk ]]; then
+        AURADE_WIFI_ERROR='This network needs a password.'
+        return 1
+      fi ;;
+    *)
+      AURADE_WIFI_ERROR='This network uses a security type the installer does not recognize.'
+      return 1 ;;
+  esac
+  if [[ $auth == wpa-psk ]]; then
+    if (( ${#psk} < 8 )); then
+      AURADE_WIFI_ERROR='A Wi-Fi password is at least 8 characters.'
+      return 1
+    fi
+    if (( ${#psk} > 63 )) &&
+       ! { (( ${#psk} == 64 )) && [[ $psk =~ ^[0-9a-fA-F]+$ ]]; }; then
+      AURADE_WIFI_ERROR='A Wi-Fi password is at most 63 characters.'
+      return 1
+    fi
   fi
   if ! install -d -m 0700 -- "$AURADE_WIFI_PROFILE_DIR" 2>/dev/null; then
     AURADE_WIFI_ERROR='Cannot write a network profile on this system.'
@@ -192,10 +258,15 @@ aurade_wifi_connect() {
   if ! (
     umask 077
     {
-      printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\n\n' "$ssid" "$uuid"
-      printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$ssid"
-      if [[ -n $psk ]]; then
-        printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$psk"
+      printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\nautoconnect=true\n\n' "$ssid" "$uuid"
+      printf '[wifi]\nmode=infrastructure\nssid=%s\n' "$ssid"
+      [[ $hidden != true ]] || printf 'hidden=true\n'
+      [[ $auth == open ]] || printf 'security=802-11-wireless-security\n'
+      printf '\n'
+      if [[ $auth != open ]]; then
+        printf '[wifi-security]\nkey-mgmt=%s\n' "$auth"
+        [[ $auth != wpa-psk && $auth != sae ]] || printf 'psk=%s\n' "$psk"
+        printf '\n'
       fi
       printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n'
     } >"$profile"
@@ -205,7 +276,11 @@ aurade_wifi_connect() {
     return 1
   fi
   chmod 600 -- "$profile"
-  "$AURADE_WIFI_NMCLI" connection load "$profile" >/dev/null 2>&1 || true
+  if ! "$AURADE_WIFI_NMCLI" connection load "$profile" >/dev/null 2>&1; then
+    rm -f -- "$profile"
+    AURADE_WIFI_ERROR='Could not save that network profile.'
+    return 1
+  fi
   if ! output=$("$AURADE_WIFI_NMCLI" connection up uuid "$uuid" 2>&1); then
     "$AURADE_WIFI_NMCLI" connection delete uuid "$uuid" >/dev/null 2>&1 || true
     rm -f -- "$profile"

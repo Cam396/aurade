@@ -2451,12 +2451,23 @@ class InstallerWindow(Adw.ApplicationWindow):
             notes.append("Connected")
         elif network.get("saved"):
             notes.append("Saved")
-        notes.append("Open network" if network.get("open")
-                     else network.get("security", ""))
+        auth = network.get("auth", "")
+        if auth == "open":
+            notes.append("Open network")
+        elif auth == "owe":
+            notes.append("Enhanced Open")
+        elif auth == "enterprise":
+            notes.append("Work or school account")
+        elif auth in ("legacy", "unknown"):
+            notes.append("Needs another setup method")
+        else:
+            notes.append(network.get("security", ""))
         item.set_subtitle("   ".join(n for n in notes if n))
-        if not network.get("open"):
+        if auth == "owe" or not network.get("no_password"):
             lock = Gtk.Image.new_from_icon_name("channel-secure-symbolic")
-            lock.set_tooltip_text("Password required")
+            lock.set_tooltip_text(
+                "Encrypted without a password" if auth == "owe"
+                else "Password or account setup required")
             item.add_suffix(lock)
         if network.get("active"):
             item.add_css_class("aurade-stage-done")
@@ -2470,10 +2481,19 @@ class InstallerWindow(Adw.ApplicationWindow):
         if network.get("active"):
             self._toast(f"Already connected to {network['ssid']}.")
             return
+        if not network.get("saved") and network.get("auth") in (
+                "enterprise", "legacy", "unknown"):
+            message = {
+                "enterprise": "This network needs work or school account setup.",
+                "legacy": "This older Wi-Fi security type is not supported here.",
+                "unknown": "This network uses a security type the installer does not recognize.",
+            }[network["auth"]]
+            self._toast(message)
+            return
         self._wifi_target = network["ssid"]
         prompt = self.widgets["wifi.prompt"]
         entry = self.widgets["wifi.password"]
-        if network.get("open") or network.get("saved"):
+        if network.get("no_password") or network.get("saved"):
             prompt.set_visible(False)
             self.join_wifi()
             return

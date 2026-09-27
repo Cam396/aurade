@@ -549,7 +549,9 @@ gb_wifi_scan() {
   for index in "${!AURADE_WIFI_SSIDS[@]}"; do
     out+="${sep}{\"ssid\":$(_gb_str "${AURADE_WIFI_SSIDS[index]}"),\"signal\":${AURADE_WIFI_SIGNALS[index]},"
     out+="\"security\":$(_gb_str "${AURADE_WIFI_SECURITY[index]}"),"
-    out+="\"open\":${AURADE_WIFI_OPEN[index]},\"active\":${AURADE_WIFI_ACTIVE[index]},\"saved\":${AURADE_WIFI_SAVED[index]}}"
+    out+="\"auth\":$(_gb_str "${AURADE_WIFI_AUTH[index]}"),\"open\":${AURADE_WIFI_OPEN[index]},"
+    out+="\"no_password\":$(if [[ ${AURADE_WIFI_AUTH[index]} == open || ${AURADE_WIFI_AUTH[index]} == owe ]]; then printf true; else printf false; fi),"
+    out+="\"active\":${AURADE_WIFI_ACTIVE[index]},\"saved\":${AURADE_WIFI_SAVED[index]}}"
     sep=','
   done
   out+=']'
