@@ -1,0 +1,189 @@
+diff --git a/ash/shelf/login_shelf_view.cc b/ash/shelf/login_shelf_view.cc
+index 470e516..8c7ab8a 100644
+--- a/ash/shelf/login_shelf_view.cc
++++ b/ash/shelf/login_shelf_view.cc
+@@ -37,6 +37,7 @@
+ #include "ash/system/tray/system_tray_notifier.h"
+ #include "ash/system/tray/tray_background_view.h"
+ #include "ash/wm/lock_state_controller.h"
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/sequence_checker.h"
+@@ -787,6 +788,10 @@ bool LoginShelfView::ShouldShowGuestButton() const {
+ }
+ 
+ bool LoginShelfView::ShouldShowEnterpriseEnrollmentButton() const {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    return false;
++  }
+   const SessionState session_state =
+       Shell::Get()->session_controller()->GetSessionState();
+   return session_state == SessionState::OOBE &&
+@@ -794,6 +799,10 @@ bool LoginShelfView::ShouldShowEnterpriseEnrollmentButton() const {
+ }
+ 
+ bool LoginShelfView::ShouldShowSchoolEnrollmentButton() const {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    return false;
++  }
+   const SessionState session_state =
+       Shell::Get()->session_controller()->GetSessionState();
+ 
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
+index e7135c2..1fd952b 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.cc
++++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
+@@ -159,6 +159,11 @@ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
+     return;
+   }
+   const std::string& action_id = args[0].GetString();
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts") &&
++      action_id != kUserActionLocalAccount && action_id != kUserActionCancel) {
++    return;
++  }
+   if (action_id == kUserActionLocalAccount) {
+     context()->sign_in_as_child = false;
+     RunExitCallback(Result::LOCAL_ACCOUNT);
+@@ -190,6 +195,12 @@ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
+ }
+ 
+ bool UserCreationScreen::HandleAccelerator(LoginAcceleratorAction action) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts") &&
++      (action == LoginAcceleratorAction::kStartEnrollment ||
++       action == LoginAcceleratorAction::kStartKioskEnrollment)) {
++    return true;
++  }
+   if (action == LoginAcceleratorAction::kStartEnrollment) {
+     LoginDisplayHost::default_host()->GetWebUILoginView()->RequestFocus();
+     RunExitCallback(Result::ENTERPRISE_ENROLL_SHORTCUT);
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+index 815b8de..b406612 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+@@ -26,13 +26,18 @@ found in the LICENSE file.
+   }
+ 
+   #userType.local-accounts-enabled {
+-    display: grid;
+-    gap: 12px;
+-    grid-template-columns: repeat(2, minmax(0, 1fr));
+-    max-width: 760px;
++    max-width: 520px;
+     width: 100%;
+   }
+ 
++  #userType.local-accounts-enabled #selfButton,
++  #userType.local-accounts-enabled #childButton,
++  #userType.local-accounts-enabled #enrollButton,
++  #googleIcon[hidden],
++  #localIcon[hidden] {
++    display: none;
++  }
++
+   #userType.local-accounts-enabled cr-card-radio-button {
+     margin-bottom: 0;
+   }
+@@ -69,7 +74,10 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="userCreationDialog"
+     for-step="create"
+     role="dialog">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon id="googleIcon" slot="icon" icon="oobe-32:googleg"
++      hidden="[[isAuraDeLocalAccountEnabled_]]"></iron-icon>
++  <iron-icon id="localIcon" slot="icon" icon="oobe-32:lock"
++      hidden="[[!isAuraDeLocalAccountEnabled_]]"></iron-icon>
+   <h1 slot="title" aria-live="polite">
+     [[i18nDynamic(locale, titleKey_)]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+index 6bda2a9..4356c3e 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+@@ -185,9 +185,9 @@ export class UserCreation extends UserCreationScreenElementBase {
+   constructor() {
+     super();
+     if (this.isAuraDeLocalAccountEnabled_) {
+-      this.selectedUserType = UserCreationUserType.SELF;
+-      this.titleKey_ = 'userCreationUpdatedTitle';
+-      this.subtitleKey_ = 'userCreationUpdatedSubtitle';
++      this.selectedUserType = UserCreationUserType.LOCAL;
++      this.titleKey_ = 'userCreationAuraLocalTitle';
++      this.subtitleKey_ = 'userCreationAuraLocalSubtitle';
+     } else if (this.isOobeSoftwareUpdateEnabled_) {
+       this.selectedUserType = '';
+       this.titleKey_ = 'userCreationUpdatedTitle';
+@@ -222,14 +222,9 @@ export class UserCreation extends UserCreationScreenElementBase {
+   override onBeforeShow(): void {
+     super.onBeforeShow();
+     if (this.isAuraDeLocalAccountEnabled_) {
+-      this.selectedUserType = UserCreationUserType.SELF;
+-      if (!loadTimeData.getBoolean('isOobeFlow')) {
+-        this.titleKey_ = 'userCreationAddPersonUpdatedTitle';
+-        this.subtitleKey_ = 'userCreationAddPersonUpdatedSubtitle';
+-      } else {
+-        this.titleKey_ = 'userCreationUpdatedTitle';
+-        this.subtitleKey_ = 'userCreationUpdatedSubtitle';
+-      }
++      this.selectedUserType = UserCreationUserType.LOCAL;
++      this.titleKey_ = 'userCreationAuraLocalTitle';
++      this.subtitleKey_ = 'userCreationAuraLocalSubtitle';
+ 
+       return;
+     }
+diff --git a/chrome/browser/ui/startup/infobar_utils.cc b/chrome/browser/ui/startup/infobar_utils.cc
+index 598e361..b7fd283 100644
+--- a/chrome/browser/ui/startup/infobar_utils.cc
++++ b/chrome/browser/ui/startup/infobar_utils.cc
+@@ -253,7 +253,9 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
+   infobars::ContentInfoBarManager* infobar_manager =
+       infobars::ContentInfoBarManager::FromWebContents(web_contents);
+ 
+-  if (!google_apis::HasAPIKeyConfigured()) {
++  if (!google_apis::HasAPIKeyConfigured() &&
++      !base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
+     if (infobars::IsInfoBarMigrated(
+             infobars::InfoBarDelegate::GOOGLE_API_KEYS_INFOBAR_DELEGATE)) {
+       if (auto* manager =
+diff --git a/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc b/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
+index f52e68e..c8022e6 100644
+--- a/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
+@@ -10,6 +10,7 @@
+ #include "ash/login/resources/grit/ash_login_strings.h"
+ #include "ash/shell.h"
+ #include "base/check_deref.h"
++#include "base/command_line.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/values.h"
+ #include "chrome/browser/ash/login/configuration_keys.h"
+@@ -50,7 +51,9 @@ void CoreOobeHandler::DeclareLocalizedValues(
+ 
+   const bool has_api_keys_configured = google_apis::HasAPIKeyConfigured() &&
+                                        google_apis::HasOAuthClientConfigured();
+-  if (!has_api_keys_configured) {
++  if (!has_api_keys_configured &&
++      !base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
+     builder->AddF("missingAPIKeysNotice", IDS_LOGIN_API_KEYS_NOTICE,
+                   base::ASCIIToUTF16(google_apis::kAPIKeysDevelopersHowToURL));
+   }
+diff --git a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+index d7c3df8..97fabf1 100644
+--- a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+@@ -46,6 +46,9 @@ void UserCreationScreenHandler::DeclareLocalizedValues(
+   builder->Add("userCreationLocalButtonTitle", "Local account");
+   builder->Add("userCreationLocalButtonDescription",
+                "Use this Linux account with local files and settings.");
++  builder->Add("userCreationAuraLocalTitle", "Set up your account");
++  builder->Add("userCreationAuraLocalSubtitle",
++               "Keep your files and settings on this device.");
+ 
+   builder->Add("userCreationPersonalButtonTitle",
+                IDS_OOBE_USER_CREATION_PERSONEL_USE_BUTTON_LABEL);
