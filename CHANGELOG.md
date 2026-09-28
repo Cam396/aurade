@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## Unreleased
+## 1.1.0, 2026-09-28
 
 ### Added
 - Wi-Fi setup in the text installer: scan, join, hidden networks, WPA3 Personal and Enhanced Open, and a Saved Wi-Fi page to reconnect or forget networks. Networks joined in the installer carry into the installed system.
@@ -10,7 +10,6 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 ### Changed
 - First-run setup offers only the local account. The Google sign-in and device enrollment options are gone, because they cannot work without Google's services.
 - A local account's first login goes from the account form straight to display size and theme. There is no separate device password, no Gemini or AI introduction, and no Explore window afterwards.
-
 - New installs sign in through the graphical login screen instead of the text one. If the graphical screen fails to start three times in a row, the text login takes over for that boot, so there is always a way in.
 
 ### Fixed
