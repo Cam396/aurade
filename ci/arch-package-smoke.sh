@@ -66,6 +66,7 @@ if [[ "${AURADE_VERIFY_CHROMIUMOS_ASH:-1}" = "1" ]]; then
   (
     cd "${REPO_ROOT}/chromiumos-ash"
     bash ./test-google-api-config.sh
+    bash ./test-local-account-flags.sh
     makepkg --verifysource --noconfirm
     namcap PKGBUILD
   )

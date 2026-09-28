@@ -1,0 +1,76 @@
+diff --git a/chrome/browser/ash/login/screens/ai_intro_screen.cc b/chrome/browser/ash/login/screens/ai_intro_screen.cc
+--- a/chrome/browser/ash/login/screens/ai_intro_screen.cc
++++ b/chrome/browser/ash/login/screens/ai_intro_screen.cc
+@@ -7,6 +7,7 @@
+ #include "ai_intro_screen.h"
+ #include "ash/constants/ash_features.h"
+ #include "ash/constants/ash_pref_names.h"
++#include "base/command_line.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/values.h"
+ #include "chrome/browser/ash/accessibility/accessibility_manager.h"
+@@ -65,6 +66,13 @@
+ AiIntroScreen::~AiIntroScreen() = default;
+ 
+ bool AiIntroScreen::MaybeSkip(WizardContext& context) {
++  // AuraDE: a local account has no Google services behind it. This screen
++  // promotes or sets up something that needs them, so it never shows.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::kNotApplicable);
++    return true;
++  }
+   if (context.skip_post_login_screens_for_tests) {
+     exit_callback_.Run(Result::kNotApplicable);
+     return true;
+diff --git a/chrome/browser/ash/login/screens/gemini_intro_screen.cc b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
+--- a/chrome/browser/ash/login/screens/gemini_intro_screen.cc
++++ b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
+@@ -8,6 +8,7 @@
+ #include "ash/constants/ash_features.h"
+ #include "ash/constants/ash_login_pref_names.h"
+ #include "ash/constants/ash_pref_names.h"
++#include "base/command_line.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/values.h"
+ #include "chrome/browser/ash/login/oobe_screen.h"
+@@ -72,6 +73,13 @@
+ GeminiIntroScreen::~GeminiIntroScreen() = default;
+ 
+ bool GeminiIntroScreen::MaybeSkip(WizardContext& context) {
++  // AuraDE: a local account has no Google services behind it. This screen
++  // promotes or sets up something that needs them, so it never shows.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::kNotApplicable);
++    return true;
++  }
+   if (context.skip_post_login_screens_for_tests) {
+     exit_callback_.Run(Result::kNotApplicable);
+     return true;
+diff --git a/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc b/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
+--- a/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
++++ b/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
+@@ -10,6 +10,7 @@
+ #include "ash/constants/ash_features.h"
+ #include "base/check.h"
+ #include "base/check_is_test.h"
++#include "base/command_line.h"
+ #include "base/debug/crash_logging.h"
+ #include "base/debug/dump_without_crashing.h"
+ #include "base/functional/bind.h"
+@@ -143,6 +144,14 @@
+ }
+ 
+ bool PasswordSelectionScreen::MaybeSkip(WizardContext& wizard_context) {
++  // AuraDE: a local account has no Google services behind it. Its password is
++  // the Linux account password the greeter already checked, so there is no
++  // separate device password to choose here.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::NOT_APPLICABLE);
++    return true;
++  }
+   if (wizard_context.skip_post_login_screens_for_tests && is_shown_) {
+     CHECK_IS_TEST();
+     // WizardController::SkipPostLoginScreensForTesting() can be triggered
