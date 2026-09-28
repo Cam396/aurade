@@ -9,6 +9,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
 ### Changed
 - First-run setup offers only the local account. The Google sign-in and device enrollment options are gone, because they cannot work without Google's services.
+- A local account's first login goes from the account form straight to display size and theme. There is no separate device password, no Gemini or AI introduction, and no Explore window afterwards.
+- AI Mode is off in the browser for local accounts, unless the opt-in AI profile is chosen.
 
 ### Fixed
 - The "Google API keys are missing" warnings no longer appear, on the setup screen or in the browser.
