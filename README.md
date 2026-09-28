@@ -8,7 +8,7 @@ AuraDE is a ChromeOS-inspired desktop for ordinary Arch Linux hardware. It
 uses the Ash user interface while keeping the Linux kernel, hardware support,
 NetworkManager, PipeWire, and systemd that already work on the machine.
 
-AuraDE 1.0.0 "Alpenglow" is the current release. The ISO, the signed package
+AuraDE 1.1.0 is the current release. The ISO, the signed package
 repository, and the release key are on the
 [releases page](https://github.com/Cam396/aurade/releases/latest). AuraDE is
 not an official Google or ChromeOS distribution. Back up anything you cannot
@@ -27,8 +27,9 @@ restore before you install it.
 - Arch package recipes, an ordered Chromium patch series, tests, and an ISO
   profile.
 
-The 1.0.0 ISO starts the graphical installer by default, and the text
-installer is on the same boot menu.
+The ISO starts the graphical installer by default, and the text installer
+is on the same boot menu. Installed systems sign in on the graphical login
+screen.
 
 ## Start here
 
