@@ -473,8 +473,15 @@ if [ -n "${AURADE_ASH_HOST_WINDOW_BOUNDS}" ]; then
     FLAGS+=(--ash-host-window-bounds="${AURADE_ASH_HOST_WINDOW_BOUNDS}")
 fi
 
+# Chrome keeps only the last --disable-features it is given, so every block
+# adds to this list and it is passed once, just before Chrome starts.
+AURADE_DISABLED_FEATURES=()
+
 if [ "${AURADE_ENABLE_LOCAL_ACCOUNTS}" = "1" ]; then
     FLAGS+=(--aurade-enable-local-accounts)
+    # A local account has no Google services behind it, and the Explore app it
+    # would open on first login draws a blank window without them.
+    FLAGS+=(--disable-first-run-ui)
 fi
 
 if [ "${AURADE_DISABLE_CHROMEVOX_HINT_TIMER}" = "1" ]; then
@@ -508,8 +515,8 @@ fi
 if [ "${AURADE_DISABLE_CHROMEOS_CONNECTED_DEVICE_FEATURES}" = "1" ]; then
     FLAGS+=(
         --aurade-disable-chromeos-connected-device-features
-        "--disable-features=PhoneHub,EcheSWA,EcheSWASendStartSignaling,EcheSWACheckAndroidNetworkInfo"
     )
+    AURADE_DISABLED_FEATURES+=(PhoneHub EcheSWA EcheSWASendStartSignaling EcheSWACheckAndroidNetworkInfo)
 fi
 
 if [ "${AURADE_ENABLE_WEB_SESSION_BRIDGE}" = "1" ]; then
@@ -544,6 +551,10 @@ if [ "${AURADE_SOFTWARE_RENDERING:-0}" = "1" ]; then
         [ "${flag}" = "--enable-wayland-server" ] || SOFTWARE_FLAGS+=("${flag}")
     done
     FLAGS=("${SOFTWARE_FLAGS[@]}")
+fi
+
+if [ "${#AURADE_DISABLED_FEATURES[@]}" -gt 0 ]; then
+    FLAGS+=(--disable-features="$(aurade_join_csv "${AURADE_DISABLED_FEATURES[@]}")")
 fi
 
 if [ -n "${AURADE_CHROME_EXTRA_FLAGS}" ]; then

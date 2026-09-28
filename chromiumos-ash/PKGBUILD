@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=156.0.8060.0
-pkgrel=5
+pkgrel=6
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -120,6 +120,7 @@ source=(
     'aurade.features.conf'
     'google-api.conf.example'
     'test-google-api-config.sh'
+    'test-local-account-flags.sh'
     'aurade-session-manager-shim.py'
     'aurade-session-manager.service'
     'org.chromium.SessionManager.conf'
@@ -129,7 +130,7 @@ source=(
     'LICENSE'
 )
 noextract=()
-sha256sums=('31c6f5db3f0294971d84390e9c3fa3ca387bc23932720755c6e1c61cd3bbec5e'
+sha256sums=('b0ac96686616b4936ba8c991ee43d78db530ab6015587f6f36cfbac99d81eaac'
             'c3903b2880039de8b92b06bb7a51f903b1557eea1e17b3fafe888d9a7ad6ddff'
             '8987d561744c2284df7cfedfdd46fa3b83953ea6bc38423ae7489b792dad3bb0'
             'c067de2ae32f0e0b453eca3f71610ed4b9af2877a7baf93b5050eaff574711f6'
@@ -139,6 +140,7 @@ sha256sums=('31c6f5db3f0294971d84390e9c3fa3ca387bc23932720755c6e1c61cd3bbec5e'
             '84ea9c1d5108606f8db4ff4664847628bb9510a3e1b0d54adf49aad0143bd017'
             '8d51c23cfeb5f946a12a51d7d7f406f4a4e15a454db904e024df2b7367a36829'
             '9d6d84fd979c027f9170a917d497cb4ef3f9b70acca0a48c4703062f8ba8b69c'
+            '744057eafe7a18389e039ee9ba4503226d0eef10b0476109ef3358950b35e42e'
             '8506d6044acd85b1ba6e72a6aff3452ea2955b1c14feb000718e02a2ecc641fc'
             'fa70439a19399b9fd27ae402f62a8259c10132b5a259750d6849bd7b30f01480'
             'c0f2402c7ee102fb1b127a17dd16755b2b0c90bb5a7b7c95f66812f8d6bdc53b'
@@ -153,6 +155,7 @@ check() {
     AURADE_PKGBUILD_PATH="${startdir}/PKGBUILD" \
         AURADE_CI_DIR="${startdir}/../ci" \
         bash "${srcdir}/test-google-api-config.sh"
+    bash "${srcdir}/test-local-account-flags.sh"
 }
 
 # The Files window is a resource rather than something compiled into Chromium,
