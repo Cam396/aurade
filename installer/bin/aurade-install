@@ -1739,6 +1739,16 @@ run arch-chroot "$MOUNTPOINT" systemctl enable \
   seatd.service aurade-powerd.service aurade-host-bridge.service aurade-greetd.service
 run arch-chroot "$MOUNTPOINT" systemctl set-default graphical.target
 
+# The graphical login screen, on a new install. aurade-greeter ships its
+# config as an example rather than over aurade-login's, so an upgrade never
+# switches the greeter on a machine somebody already set up. A new install has
+# nobody to surprise. tuigreet stays installed, and the greeter's session hands
+# the screen to it when the graphical greeter keeps failing to start.
+if [[ -n ${LOCKED_NAMES[aurade-greeter]:-} ]]; then
+  run install -m 0644 "$MOUNTPOINT/usr/share/aurade-greeter/aurade.toml.example" \
+    "$MOUNTPOINT/etc/greetd/aurade.toml"
+fi
+
 if (( LUKS )); then
   if [[ $MODE == execute ]]; then
     sed -i -E 's|^HOOKS=.*|HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)|' "$MOUNTPOINT/etc/mkinitcpio.conf"

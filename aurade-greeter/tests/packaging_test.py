@@ -219,9 +219,13 @@ if os.path.isfile(_wrapper):
           "has nothing to draw on")
     check("/usr/bin/aurade-greeter" in _script,
           "the session wrapper starts a compositor and never runs the greeter")
-    check("exec " in _script,
-          "the wrapper does not exec, so greetd waits on a shell rather than "
-          "on the compositor and cannot tell when the screen has gone")
+    # The wrapper waits on weston instead of exec'ing it, so it can count a
+    # compositor that dies at once. That is only safe while a stop request
+    # from greetd reaches weston, rather than killing the shell and leaving
+    # the compositor behind.
+    check('kill -TERM "$weston_pid"' in _script and "trap " in _script,
+          "the wrapper waits on weston but does not pass greetd's stop on to "
+          "it, so stopping the greeter leaves a compositor behind")
 else:
     FAILURES.append("aurade-greeter-session is missing, so the example config "
                     "names a file that is not there")
@@ -322,6 +326,57 @@ if os.path.isfile(_wrapper):
         check("arg=--renderer=auto" in _virgl.splitlines()
               and "gsk=unset" in _virgl.splitlines(),
               "virtio-gpu with the host's 3D was given a software renderer")
+
+# -- the way in when the graphical greeter cannot start --------------------
+#
+# greetd restarts its greeter every time it exits. A graphical greeter that
+# dies on some machine would loop over the only way to log in, so three
+# failures within seconds, in the same boot, hand the screen to tuigreet.
+# Driven for real: a weston that fails at once, and a tuigreet that records
+# that it was reached.
+if os.path.isfile(_wrapper):
+    with tempfile.TemporaryDirectory() as _scratch:
+        _bin = os.path.join(_scratch, "bin")
+        os.makedirs(_bin)
+        with open(os.path.join(_bin, "weston"), "w", encoding="utf-8") as handle:
+            handle.write("#!/usr/bin/env bash\nexit 1\n")
+        with open(os.path.join(_bin, "tuigreet"), "w", encoding="utf-8") as handle:
+            handle.write("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >\"$AURADE_TEST_TUIGREET_LOG\"\n")
+        for _name in ("weston", "tuigreet"):
+            os.chmod(os.path.join(_bin, _name), 0o755)
+        _state = os.path.join(_scratch, "quick-exits")
+        _tui_log = os.path.join(_scratch, "tuigreet.log")
+        _dri = os.path.join(_scratch, "dri")
+        os.makedirs(_dri)
+        _env = dict(os.environ, PATH=_bin + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
+                    AURADE_GREETER_FALLBACK_STATE=_state, AURADE_TEST_TUIGREET_LOG=_tui_log,
+                    AURADE_DRI_DIR=_dri, AURADE_SYSFS_DRM=_scratch, XDG_RUNTIME_DIR=_scratch)
+        for _attempt in range(3):
+            subprocess.run(["bash", _wrapper], env=_env, check=False,
+                           capture_output=True, timeout=30)
+            check(not os.path.exists(_tui_log),
+                  f"the text greeter took over after {_attempt + 1} failure(s), "
+                  "before the graphical greeter had its three tries")
+        subprocess.run(["bash", _wrapper], env=_env, check=False,
+                       capture_output=True, timeout=30)
+        check(os.path.isfile(_tui_log),
+              "three quick failures did not hand the screen to tuigreet, so a "
+              "broken graphical greeter loops over the only way in")
+        if os.path.isfile(_tui_log):
+            with open(_tui_log, encoding="utf-8") as handle:
+                _args = handle.read().splitlines()
+            check("/usr/bin/chromiumos-ash-session" in _args
+                  and "/usr/bin/aurade-session-supervisor" in _args,
+                  "the fallback tuigreet does not start the AuraDE session the "
+                  "way aurade-login's greeter does")
+        # A new boot tries the graphical greeter again.
+        os.unlink(_tui_log)
+        with open(_state, "w", encoding="utf-8") as handle:
+            handle.write("an-earlier-boot 3\n")
+        subprocess.run(["bash", _wrapper], env=_env, check=False,
+                       capture_output=True, timeout=30)
+        check(not os.path.exists(_tui_log),
+              "a count from an earlier boot kept the text greeter in charge")
 
 # -- somewhere to write ----------------------------------------------------
 #

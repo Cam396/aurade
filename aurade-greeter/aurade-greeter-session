@@ -63,10 +63,53 @@ if [[ ${AURADE_FORCE_SOFTWARE_RENDERING:-0} == 1 || $have_render == 0 ]]; then
   export GSK_RENDERER="${GSK_RENDERER:-cairo}"
 fi
 
-exec weston \
+# The way in when this screen will not start. greetd starts the greeter again
+# every time it exits, so a greeter that dies on this machine would otherwise
+# loop forever over the only way to log in. Three failures in a row, each
+# within seconds and with an error, in the same boot, hand the screen to the
+# text greeter aurade-login ships. A login exits cleanly and resets the count,
+# and a new boot tries the graphical greeter again.
+FALLBACK_STATE="${AURADE_GREETER_FALLBACK_STATE:-/var/lib/aurade-greeter/quick-exits}"
+QUICK_EXIT_SECONDS="${AURADE_GREETER_QUICK_EXIT_SECONDS:-20}"
+QUICK_EXIT_LIMIT="${AURADE_GREETER_QUICK_EXIT_LIMIT:-3}"
+boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)
+quick_exits=0
+if read -r saved_boot saved_count <"$FALLBACK_STATE" 2>/dev/null &&
+    [[ $saved_boot == "$boot_id" && $saved_count =~ ^[0-9]+$ ]]; then
+  quick_exits=$saved_count
+fi
+if (( quick_exits >= QUICK_EXIT_LIMIT )); then
+  exec tuigreet --time --remember --remember-user-session \
+    --asterisks --sessions /usr/share/wayland-sessions \
+    --session-wrapper /usr/bin/aurade-session-supervisor \
+    --cmd /usr/bin/chromiumos-ash-session
+fi
+
+# weston runs as a child rather than in place of this script, because the
+# script has to see how it ended. greetd still sees the screen go when weston
+# goes, and anything greetd sends to stop the greeter is passed on to weston
+# rather than leaving it behind with nothing waiting on it.
+started=$(date +%s)
+weston \
   --backend=drm \
   --shell=kiosk-shell.so \
   --renderer="$renderer" \
   --idle-time=0 \
   --continue-without-input \
-  -- /usr/bin/aurade-greeter
+  -- /usr/bin/aurade-greeter &
+weston_pid=$!
+trap 'kill -TERM "$weston_pid" 2>/dev/null' TERM INT HUP
+status=0
+wait "$weston_pid" || status=$?
+# A signal interrupts the first wait. The second one collects weston itself.
+while kill -0 "$weston_pid" 2>/dev/null; do
+  status=0
+  wait "$weston_pid" || status=$?
+done
+if (( status != 0 && $(date +%s) - started < QUICK_EXIT_SECONDS )); then
+  quick_exits=$((quick_exits + 1))
+else
+  quick_exits=0
+fi
+printf '%s %s\n' "$boot_id" "$quick_exits" >"$FALLBACK_STATE" 2>/dev/null || true
+exit "$status"
