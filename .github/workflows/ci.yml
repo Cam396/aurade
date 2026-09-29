@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request makes the older run pointless. Runs on
+# main are kept, so every commit there gets a result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+# A real terminal type: without it the installer's text UI takes its no-TERM
+# accessibility path and renders unframed, which the render alignment fixture
+# then measures as misaligned. A UTF-8 locale, or bash counts the progress
+# bar's braille glyphs by byte and the frame padding lands wrong.
+env:
+  TERM: xterm-256color
+  LANG: C.UTF-8
+
+# Every job runs ci/run.sh, which is what a local run uses too. Nothing below
+# should grow a check of its own.
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - run: ci/run.sh lint
+
+  gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh gates
+
+  installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: installer (${{ matrix.shard }}/4)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh setup-ubuntu
+      - run: ci/run.sh installer ${{ matrix.shard }}/4
+
+  fixtures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh setup-ubuntu
+      - run: ci/run.sh fixtures
+
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-cache/pacman
+          key: pacman-${{ hashFiles('pins/arch.snapshot') }}-${{ hashFiles('**/.SRCINFO') }}
+          restore-keys: pacman-${{ hashFiles('pins/arch.snapshot') }}-
+      - run: ci/run.sh packages
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packages
+          path: .ci-out/*.pkg.tar.*
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The one check to require. It passes only when every job above passed, so a
+  # new job never has to be added to the branch rules by hand.
+  ci-ok:
+    if: always()
+    needs: [lint, gates, installer, fixtures, packages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: ${RESULTS}"
+          read -ra results <<<"${RESULTS}"
+          for result in "${results[@]}"; do
+            [[ ${result} == success ]] || exit 1
+          done

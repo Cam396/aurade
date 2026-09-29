@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The cheap half of CI before anything leaves this machine: syntax, workflow
+# lint, the patch series, whitespace, and the release and leak gates. The
+# slow half runs in CI. git push --no-verify skips this.
+exec "$(git rev-parse --show-toplevel)/ci/run.sh" fast
