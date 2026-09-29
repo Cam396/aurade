@@ -114,12 +114,9 @@ check(S.coordinates(got) == (53.8, -1.55),
 # line, not three, and looking up your own latitude is a computer's job.
 #
 # The guarantee that assertion existed for survives below, in the case where
-# nothing can be derived either.
-_alone = record("weather = on\n")
-check(_alone["weather"] == "on",
-      "the weather did not turn on with a location it could derive")
-check(S.coordinates(_alone) is not None,
-      "the weather turned on with nowhere to ask about after all")
+# nothing can be derived either. The derived case itself is checked further
+# down, against a pinned zone: what this machine happens to be set to decides
+# nothing, and a container set to UTC has no place to derive at all.
 check(record("weather = on\nweather_latitude = 53.8\n")["weather"] == "off",
       "the weather turned on with only half a coordinate")
 check(record("weather = on\nweather_latitude = 91\nweather_longitude = 0\n"
@@ -158,12 +155,11 @@ check(S.coordinates(record("weather = on\nweather_place = Ardsley\n"
       "a coordinate off the globe was handed out because a place name saved it")
 # Whitespace is not a place name. It is now treated as nothing typed at all,
 # so the timezone answers instead, and what must not happen is the spaces
-# being carried through as though somebody had named somewhere.
+# being carried through as though somebody had named somewhere. That the zone
+# then answers is checked with the pinned zone further down.
 _spaces = record("weather = on\nweather_place =    \n")
 check(S.place(_spaces).strip() == S.place(_spaces),
       f"a place name of nothing but spaces survived: {S.place(_spaces)!r}")
-check(S.coordinates(_spaces) is not None,
-      "spaces for a place name left the weather with nowhere to ask about")
 
 # Who to ask. Named services exist so somebody debugging a wrong forecast can
 # pin the source rather than guess at it.
@@ -395,6 +391,10 @@ try:
           "no coordinate was derived from the timezone")
     check(_record["weather_place"] == "Chicago",
           f"the derived place is {_record['weather_place']!r}")
+    _spaced = S.read(_wrote("weather-spaces.conf",
+                            "weather = on\nweather_place =    \n"))
+    check(S.coordinates(_spaced) is not None,
+          "spaces for a place name left the weather with nowhere to ask about")
 finally:
     S.ZONE_TABLE, S.ZONE_NAME, S.ZONE_LINK = _saved
 
