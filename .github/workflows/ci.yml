@@ -84,7 +84,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-cache/pacman
-          key: pacman-${{ hashFiles('pins/arch.snapshot') }}-${{ hashFiles('**/.SRCINFO') }}
+          key: pacman-${{ hashFiles('pins/arch.snapshot') }}-${{ hashFiles('*/.SRCINFO') }}
           restore-keys: pacman-${{ hashFiles('pins/arch.snapshot') }}-
       - run: ci/run.sh packages
       - if: always()
@@ -94,6 +94,7 @@ jobs:
           path: .ci-out/*.pkg.tar.*
           retention-days: 7
           if-no-files-found: ignore
+          include-hidden-files: true
 
   # The one check to require. It passes only when every job above passed, so a
   # new job never has to be added to the branch rules by hand.
