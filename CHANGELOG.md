@@ -10,6 +10,9 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The first setup screen says "Welcome to AuraDE".
 - The Memory Saver tip says "Make AuraDE faster".
 
+### Fixed
+- Installing some AuraDE packages from the online repository failed with "invalid or corrupted package". The repository was repaired on 2026-09-29, and every release now checks that what is served matches its database.
+
 ### Removed
 - Browse as Guest. On AuraDE a guest session would run as the owner's Linux account, with the owner's files.
 
