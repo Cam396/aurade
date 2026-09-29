@@ -240,7 +240,7 @@ _q snapshot \
 _q repo_url \
   label 'Package source' \
   short 'Package source' \
-  help 'Where the installed system looks for AuraDE updates. The default points at the copy written to the disk.' \
+  help 'Where the installed system looks for AuraDE updates. The default follows the published AuraDE repository, and falls back to the copy written to the disk when there is no network.' \
   type text \
   default 'file:///var/cache/aurade/repo' \
   validator '' \

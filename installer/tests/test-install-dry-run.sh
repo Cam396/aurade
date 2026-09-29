@@ -72,6 +72,22 @@ grep -Fq -- 'GPGDir = ${ARCH_GPG_DIR}' "$ROOT/installer/bin/aurade-install"
 local_pacman_conf=$(sed -n '/^write_arch_local_pacman_conf()/,/^}/p' \
   "$ROOT/installer/bin/aurade-install")
 refute grep -Eq '^[[:space:]]*CacheDir[[:space:]]*=' <<<"$local_pacman_conf"
+# The installed mirrorlist follows the published repository only for a
+# release-key install on the default URL, with the disk copy behind it.
+eval "$(sed -n '/^aurade_mirror_servers() {/,/^}/p' "$ROOT/installer/bin/aurade-install")"
+DEFAULT_REPO_URL=file:///var/cache/aurade/repo
+RELEASE_FINGERPRINT=BC390DCF360B2184DBBF008B8B2AB2EFE667CB69
+HOSTED_REPO_URL=https://github.com/Cam396/aurade/releases/download/repo-x86_64
+REPO_URL=$DEFAULT_REPO_URL ALLOW_UNSIGNED=0 expected_fingerprint=$RELEASE_FINGERPRINT
+[[ $(printf '%b' "$(aurade_mirror_servers)") == "Server = $HOSTED_REPO_URL"$'\n'"Server = $DEFAULT_REPO_URL" ]]
+expected_fingerprint=410C994F8F82F45247DEAC74570659A8F9EB45A7
+[[ $(printf '%b' "$(aurade_mirror_servers)") == "Server = $DEFAULT_REPO_URL" ]]
+expected_fingerprint=$RELEASE_FINGERPRINT REPO_URL=https://mirror.example.invalid/aurade/
+[[ $(printf '%b' "$(aurade_mirror_servers)") == "Server = https://mirror.example.invalid/aurade" ]]
+REPO_URL=$DEFAULT_REPO_URL ALLOW_UNSIGNED=1
+[[ $(printf '%b' "$(aurade_mirror_servers)") == "Server = $DEFAULT_REPO_URL" ]]
+grep -Fq -- "RELEASE_FINGERPRINT=$RELEASE_FINGERPRINT" "$ROOT/installer/bin/aurade-install"
+grep -Fq -- 'aurade-mirrorlist 0644 "$(aurade_mirror_servers)"' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'LocalFileSigLevel = Required' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pacman-key --gpgdir "$ARCH_GPG_DIR" --populate archlinux' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- '/usr/share/pacman/keyrings/archlinux.gpg' "$ROOT/installer/bin/aurade-install"
