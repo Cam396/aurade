@@ -14,6 +14,7 @@
 #                             Arch container (docker or podman)
 #   ci/run.sh fast            lint and gates, which is what the pre-push hook runs
 #   ci/run.sh changes BASE    whether anything since BASE affects the packages
+#   ci/run.sh hosted          check the published pacman repository as pacman sees it
 #   ci/run.sh setup-ubuntu    the distribution packages the Ubuntu jobs need
 #   ci/run.sh install-hooks   use ci/hooks for this clone
 set -Eeuo pipefail
@@ -193,6 +194,13 @@ job_fast() {
   job_gates
 }
 
+# The published repository is outside this tree, so a push cannot break it
+# and a pull request cannot fix it. It runs on its own schedule instead of
+# gating changes, and fails loudly when what is served stops matching.
+job_hosted() {
+  group 'hosted pacman repository'; ci/release.sh check-repo; endgroup
+}
+
 job_install_hooks() {
   git config core.hooksPath ci/hooks
   echo 'ci/run.sh: this clone now runs ci/hooks (git push --no-verify skips them)'
@@ -333,6 +341,7 @@ case $job in
   packages) job_packages ;;
   fast) job_fast ;;
   changes) job_changes "$@" ;;
+  hosted) job_hosted ;;
   setup-ubuntu) job_setup_ubuntu ;;
   install-hooks) job_install_hooks ;;
   *) die "unknown job: $job" ;;

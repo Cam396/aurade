@@ -30,6 +30,21 @@ from the CHANGELOG, `draft` tags the commit and uploads a draft release, and,
 once a person has published it, `publish-repo` brings the hosted package
 repository in line and reads it back. It never publishes a release itself.
 
+A version that is already published keeps its published bytes. Rebuilding an
+unchanged package still gives a different file (the build date is inside it),
+and a database that describes the new file while the old one is still served
+makes pacman refuse the download as corrupted. So the release repository is
+built with `AURADE_PUBLISHED_REPO` pointing at a copy from
+`ci/release.sh fetch-published`: `ci/reuse-published-packages.sh` swaps each
+already published file back in, after checking its signature, and refuses if
+the contents really changed without a new pkgrel.
+
+`ci/release.sh check-repo` checks what is served the way pacman uses it: the
+database is signed by the key in `pins/aurade-release.gpg`, and every package
+it names is uploaded with the checksum it records. CI runs it on every push to
+main, weekly and on demand (the `hosted` job), outside `ci-ok`, since a change
+can neither break nor fix what is already published.
+
 ## Source and package checks
 
 ~~~bash
