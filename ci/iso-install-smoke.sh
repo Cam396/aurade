@@ -144,7 +144,7 @@ qemu-system-x86_64 "${common[@]}" -boot c -vga std \
 trap 'kill "$(cat "$WORK/phase2.pid" 2>/dev/null)" 2>/dev/null || true' EXIT
 
 ssh_opts=(-i "$WORK/id_ed25519" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-          -o ConnectTimeout=5 -o BatchMode=yes -p "$SSH_PORT")
+          -o ConnectTimeout=5 -o BatchMode=yes -o LogLevel=ERROR -p "$SSH_PORT")
 for _ in $(seq 1 90); do
   ssh "${ssh_opts[@]}" root@127.0.0.1 true 2>/dev/null && break
   sleep 5
