@@ -7,9 +7,10 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd -P)
 # Stopping at the first failure used to hide every failure after it, and a
 # script that fails says so on its own output above its FAIL line.
 #
-# AURADE_TEST_SHARD=I/N runs every Nth script starting at the Ith, so CI can
-# split the suite across parallel jobs. Shards are dealt round robin in the
-# order below, which is also the order a full run uses.
+# AURADE_TEST_SHARD=I/N runs shard I of N, so CI can split the suite across
+# parallel jobs. Scripts are dealt longest first, each to the shard with the
+# least time so far, using the times in durations.tsv; a script missing from
+# that file counts as one second. Within a shard they run in the order below.
 TESTS=(
   test-prompt-validation.sh
   test-questions.sh
@@ -80,12 +81,43 @@ if [[ -n ${AURADE_TEST_SHARD:-} ]]; then
   shard_count=${BASH_REMATCH[2]}
 fi
 
+declare -A duration=()
+if [[ -r $ROOT/durations.tsv ]]; then
+  while IFS=$'\t' read -r name seconds; do
+    [[ $name == \#* || -z $name ]] || duration[$name]=$seconds
+  done <"$ROOT/durations.tsv"
+fi
+declare -A mine=()
+if (( shard_count > 1 )); then
+  load=()
+  for (( s = 0; s < shard_count; s++ )); do load[s]=0; done
+  # Longest first; ties keep the order of the list above.
+  while read -r _ i; do
+    lightest=0
+    for (( s = 1; s < shard_count; s++ )); do
+      (( load[s] < load[lightest] )) && lightest=$s
+    done
+    weight=${duration[${TESTS[i]##*/}]:-1}
+    load[lightest]=$(( load[lightest] + weight ))
+    (( lightest == shard_index - 1 )) && mine[$i]=1
+  done < <(for (( i = 0; i < ${#TESTS[@]}; i++ )); do
+             printf '%s %s\n' "${duration[${TESTS[i]##*/}]:-1}" "$i"
+           done | sort -s -k1,1nr)
+  printf 'run.sh: shard %s of %s holds about %ss of work\n' \
+    "$shard_index" "$shard_count" "${load[shard_index - 1]}"
+fi
+
 failed=()
 timings=()
 started=$SECONDS
 for (( i = 0; i < ${#TESTS[@]}; i++ )); do
-  (( i % shard_count == shard_index - 1 )) || continue
+  (( shard_count == 1 )) || [[ -n ${mine[$i]:-} ]] || continue
   test=${TESTS[i]}
+  # AURADE_TEST_LIST=1 names what this shard would run, and runs nothing.
+  if [[ -n ${AURADE_TEST_LIST:-} ]]; then
+    printf '%s\n' "$test"
+    continue
+  fi
   begin=$SECONDS
   if "$ROOT/$test"; then
     result=ok
@@ -96,6 +128,8 @@ for (( i = 0; i < ${#TESTS[@]}; i++ )); do
   printf 'run.sh: %-4s %-40s %4ss\n' "$result" "${test##*/}" "$(( SECONDS - begin ))"
   timings+=("| ${test##*/} | ${result} | $(( SECONDS - begin ))s |")
 done
+
+[[ -z ${AURADE_TEST_LIST:-} ]] || exit 0
 
 # The rollback test mounts and snapshots, so only root can run it. It goes in
 # the last shard so a sharded run still covers it exactly once.
