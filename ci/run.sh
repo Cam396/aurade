@@ -6,7 +6,8 @@
 # its own copy of each check, and a check could pass here and fail there with
 # nobody able to say which copy was wrong.
 #
-#   ci/run.sh lint            syntax, workflow lint, patch series, metadata, whitespace
+#   ci/run.sh lint            syntax, workflow lint, action runtimes, patch series,
+#                             metadata, whitespace
 #   ci/run.sh gates           release identity, source integrity, leak and docs gates
 #   ci/run.sh installer [I/N] the installer suite, or shard I of N
 #   ci/run.sh fixtures        ci/tests and the component tests
@@ -120,6 +121,29 @@ print(f"{len(paths)} python files compile")
 
   group 'workflow lint'
   "$(fetch_actionlint)" -color .github/workflows/*.yml
+  endgroup
+
+  # GitHub retires JavaScript action runtimes on a schedule (Node 20 went in
+  # 2026) and only warns on the runs that still use one. Every action is
+  # pinned by commit, so its action.yml at that commit says exactly which
+  # runtime it needs; anything older than node24 fails here instead.
+  group 'action runtimes'
+  local ref using count=0
+  while IFS= read -r ref; do
+    using=$(curl -fsSL "https://raw.githubusercontent.com/${ref%@*}/${ref#*@}/action.yml" |
+      python3 -c 'import sys, yaml; print(yaml.safe_load(sys.stdin)["runs"]["using"])') ||
+      die "could not read the runtime from action.yml for ${ref}"
+    case $using in
+      node2[4-9]|node[3-9][0-9]|composite|docker) ;;
+      *) die "${ref} runs on '${using:-unknown}'; pin a release that runs on node24 or later" ;;
+    esac
+    printf '%s: %s\n' "$ref" "$using"
+    count=$((count + 1))
+  done < <(sed -n 's/^[[:space:]]*-\{0,1\}[[:space:]]*uses:[[:space:]]*\([^ #]*@[0-9a-f]\{40\}\).*/\1/p' .github/workflows/*.yml | sort -u)
+  (( count > 0 )) || die 'found no pinned actions to check'
+  # A tag or branch reference would let the runtime change under the pin.
+  ! grep -nE '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^ #]+@' .github/workflows/*.yml |
+    grep -vE '@[0-9a-f]{40}([[:space:]]|$)' || die 'the action above is not pinned by a full commit hash'
   endgroup
 
   group 'patch series manifest'
