@@ -55,8 +55,9 @@ for package in "$REPO_DIR"/*.pkg.tar.*; do
       same_payload "$PUBLISHED/$name" "$package" ||
         fail "${name} is already published with different contents; bump its pkgrel"
       cp -f "$PUBLISHED/$name" "$package"
-      cp -f "$PUBLISHED/$name.sig" "$package.sig"
     fi
+    # Even identical bytes carry a new signature, with a new timestamp.
+    cp -f "$PUBLISHED/$name.sig" "$package.sig"
     kept=$((kept + 1))
   else
     fresh=$((fresh + 1))
