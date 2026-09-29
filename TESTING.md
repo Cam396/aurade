@@ -9,11 +9,12 @@ is not a substitute for booting the exact ISO on a disposable machine.
 Run these before asking someone else to test an image:
 
 ~~~bash
-git diff --check
-ci/source-integrity-gate.sh
-ci/public-release-leak-gate.sh
-bash installer/tests/run.sh
+ci/run.sh fast
+ci/run.sh installer
+ci/run.sh fixtures
 ~~~
+
+These are the jobs CI runs, and `ci/README.md` lists the rest.
 
 The installer suite covers the GUI and text flows, journal rules, refusal
 paths, graphics fallback, package staging, recovery fixtures, and public
@@ -21,6 +22,11 @@ contracts. A test that skips a runtime dependency must say SKIP; do not report
 it as a pass.
 
 ## Disposable VM pass
+
+`ci/iso-install-smoke.sh ISO` automates the core of this pass: it installs
+the ISO onto a virtual disk, signs in through the graphical login screen,
+walks the local account setup, and requires the desktop. The list below is
+what it does not cover.
 
 Use a VM that can be erased and recreated. Start it through the host
 hypervisor, attach only the candidate ISO and a disposable virtual disk, and
