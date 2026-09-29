@@ -122,6 +122,21 @@ jobs:
   # The one check to require. It passes only when every job above passed, so a
   # new job never has to be added to the branch rules by hand.
   # The package job may be skipped on purpose; nothing else may be.
+  # The published repository, checked the way pacman uses it. Not part of
+  # ci-ok: nothing in a change can break or fix what is already served.
+  hosted:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ci/run.sh setup-ubuntu
+      - run: ci/run.sh hosted
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   ci-ok:
     if: always()
     needs: [lint, gates, installer, fixtures, changes, packages]

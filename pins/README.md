@@ -21,3 +21,9 @@ Changing either file means changing both, and running the gate.
 
 `arch.snapshot` is the Arch Linux Archive date that the ISO installs from and
 that the CI package job builds against, in the archive's `YYYY/MM/DD` form.
+
+`aurade-release.gpg` is the public half of the release signing key
+(fingerprint `BC390DCF360B2184DBBF008B8B2AB2EFE667CB69`), the same file each
+release publishes as `aurade-repository.gpg`. It lets CI and anybody else check
+the hosted repository without a keyring. The private half never enters this
+tree.

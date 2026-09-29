@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Turn a built ISO and signed repository into a GitHub release.
 #
+#   ci/release.sh check-repo
+#       Check the hosted pacman repository (the repo-x86_64 release) the way
+#       pacman will use it: the database is signed by the release key, and
+#       every package and signature it names is up with the checksum it
+#       records. Needs only curl, gpgv, bsdtar and python3; CI runs it weekly.
+#   ci/release.sh fetch-published DIR
+#       Download the hosted repository into DIR, checked against the digests
+#       GitHub reports for each file, for the release build to reuse
+#       (AURADE_PUBLISHED_REPO), so a version that is already published keeps
+#       its published bytes.
 #   ci/release.sh stage VERSION COMMIT ISO_DIR REPO_DIR OUT_DIR
 #       Check the build, rename the ISO for VERSION, write the repository
 #       archive, SHA256SUMS and its signature, and the release notes from the
@@ -12,16 +22,21 @@
 #   ci/release.sh publish-repo OUT_DIR
 #       After the release is public: bring the hosted pacman repository (the
 #       repo-x86_64 release) in line with the staged one, then download its
-#       database back and check it.
+#       database back and check it. AURADE_RELEASE_DRY_RUN=1 prints the plan
+#       and changes nothing.
 #
 # Signing uses the key whose fingerprint is in AURADE_RELEASE_FINGERPRINT,
-# from whatever GNUPGHOME points at. The key never enters the repository.
+# from whatever GNUPGHOME points at. The key never enters the repository;
+# only its public half does, in pins/aurade-release.gpg.
 set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 GH_REPO=${AURADE_GH_REPO:-Cam396/aurade}
 REPO_TAG=repo-x86_64
+REPO_BASE="https://github.com/${GH_REPO}/releases/download/${REPO_TAG}"
 ISO_NAME=aurade-1-x86_64.iso
+PUBLIC_KEY=$ROOT/pins/aurade-release.gpg
+PUBLIC_FINGERPRINT=BC390DCF360B2184DBBF008B8B2AB2EFE667CB69
 
 die() { printf 'release: %s\n' "$*" >&2; exit 1; }
 say() { printf 'release: %s\n' "$*"; }
@@ -40,6 +55,32 @@ verify_signature() {
   gpg --status-fd 1 --verify "$sig" "$file" 2>/dev/null |
     grep -Eq "^\[GNUPG:\] VALIDSIG ${fpr} " ||
     die "${file##*/} is not signed by ${fpr}"
+}
+
+# The same check against the pinned public key, for a machine with no
+# release keyring (CI, or anyone checking the hosted repository).
+verify_public() {
+  local sig=$1 file=$2
+  gpgv --status-fd 1 --keyring "$PUBLIC_KEY" "$sig" "$file" 2>/dev/null |
+    grep -Eq "^\[GNUPG:\] VALIDSIG ${PUBLIC_FINGERPRINT} " ||
+    die "${file##*/} is not signed by ${PUBLIC_FINGERPRINT}"
+}
+
+# name<TAB>sha256 for every file on the repository release, as GitHub
+# reports it. This, not the SHA256SUMS file among them, is what is served.
+hosted_digests() {
+  local -a auth=()
+  [[ -n ${GH_TOKEN:-${GITHUB_TOKEN:-}} ]] && auth=(-H "Authorization: Bearer ${GH_TOKEN:-${GITHUB_TOKEN:-}}")
+  curl -fsSL "${auth[@]}" -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${GH_REPO}/releases/tags/${REPO_TAG}?per_page=100" |
+    python3 -c '
+import json, sys
+for a in json.load(sys.stdin)["assets"]:
+    d = a.get("digest") or ""
+    if not d.startswith("sha256:"):
+        sys.exit("release: GitHub reported no sha256 for " + a["name"])
+    print(a["name"] + "\t" + d[7:])
+' | sort
 }
 
 changelog_section() {
@@ -176,7 +217,9 @@ cmd_publish_repo() {
 
   local local_repo="$out/repository" hosted
   hosted=$(mktemp -d)
-  curl -fsSL -o "$hosted/SHA256SUMS" "https://github.com/${GH_REPO}/releases/download/${REPO_TAG}/SHA256SUMS"
+  # What GitHub serves, not the SHA256SUMS file among it: that file can say
+  # one thing while an older upload of a package is what is really there.
+  hosted_digests | awk -F '\t' '{ print $2 "  " $1 }' >"$hosted/SHA256SUMS"
 
   # Packages and their signatures first, the database after them, so a client
   # that syncs mid-update never sees a database naming a file that is not up.
@@ -199,6 +242,13 @@ cmd_publish_repo() {
                                  <(awk '{print $2}' "$hosted/SHA256SUMS" | sort))
 
   say "packages to upload: ${#upload_first[@]}, database files: ${#upload_last[@]}, assets to remove: ${#remove[@]}"
+  if [[ -n ${AURADE_RELEASE_DRY_RUN:-} ]]; then
+    printf '  upload %s\n' "${upload_first[@]##*/}" "${upload_last[@]##*/}"
+    (( ${#remove[@]} == 0 )) || printf '  remove %s\n' "${remove[@]}"
+    rm -rf -- "$hosted"
+    say 'dry run: nothing was changed'
+    return
+  fi
   (( ${#upload_first[@]} == 0 )) || gh release upload "$REPO_TAG" -R "$GH_REPO" --clobber "${upload_first[@]}"
   gh release upload "$REPO_TAG" -R "$GH_REPO" --clobber "${upload_last[@]}"
   for name in "${remove[@]}"; do
@@ -213,11 +263,91 @@ cmd_publish_repo() {
   verify_signature "$check/aurade.db.sig" "$check/aurade.db" "$fingerprint"
   rm -rf -- "$hosted" "$check"
   say "the hosted repository serves the ${version} database, signed by the release key"
+  cmd_check_repo
+}
+
+cmd_check_repo() {
+  need curl; need gpgv; need bsdtar; need python3
+  local tmp problems=0 name sum
+  tmp=$(mktemp -d)
+  trap 'rm -rf -- "$tmp"' RETURN
+  hosted_digests >"$tmp/digests"
+  digest() { awk -F '\t' -v n="$1" '$1 == n { print $2 }' "$tmp/digests"; }
+  problem() { printf 'release: check-repo: %s\n' "$*" >&2; problems=$((problems + 1)); }
+
+  local db
+  for db in aurade.db aurade.files; do
+    curl -fsSL -o "$tmp/$db" "$REPO_BASE/$db"
+    curl -fsSL -o "$tmp/$db.sig" "$REPO_BASE/$db.sig"
+    verify_public "$tmp/$db.sig" "$tmp/$db"
+    [[ $(digest "$db") == "$(digest "$db.tar.gz")" && $(digest "$db.sig") == "$(digest "$db.tar.gz.sig")" ]] ||
+      problem "${db} and ${db}.tar.gz are not the same file"
+  done
+
+  # Every package the database names is up, with the checksum it records and
+  # the signature it embeds. pacman refuses a download that differs.
+  mkdir "$tmp/db"
+  bsdtar -xf "$tmp/aurade.db" -C "$tmp/db"
+  local -A named=()
+  local desc file want sig
+  for desc in "$tmp"/db/*/desc; do
+    file=$(sed -n '/^%FILENAME%$/{n;p;q}' "$desc")
+    want=$(sed -n '/^%SHA256SUM%$/{n;p;q}' "$desc")
+    # repo-add embeds the signature only with --include-sigs; pacman then
+    # uses the embedded one, so it has to be the one that is uploaded.
+    sig=$(sed -n '/^%PGPSIG%$/{n;p;q}' "$desc")
+    named[$file]=1 named[$file.sig]=1
+    case $(digest "$file") in
+      "") problem "${file} is in the database but not uploaded" ;;
+      "$want") ;;
+      *) problem "${file} is not the file the database describes; pacman will refuse it" ;;
+    esac
+    [[ -n $(digest "$file.sig") ]] || problem "${file}.sig is not uploaded"
+    if [[ -n $sig && $(digest "$file.sig") != "$(base64 -d <<<"$sig" | sha256sum | cut -d' ' -f1)" ]]; then
+      problem "${file}.sig is not the signature the database carries"
+    fi
+  done
+
+  # Nothing stale is left beside them, and SHA256SUMS describes what is up.
+  while IFS=$'\t' read -r name sum; do
+    case $name in
+      aurade.db|aurade.db.*|aurade.files|aurade.files.*|SHA256SUMS) ;;
+      *) [[ -n ${named[$name]:-} ]] || problem "${name} is uploaded but the database does not name it" ;;
+    esac
+  done <"$tmp/digests"
+  curl -fsSL -o "$tmp/SHA256SUMS" "$REPO_BASE/SHA256SUMS"
+  while read -r sum name; do
+    [[ $(digest "$name") == "$sum" ]] || problem "SHA256SUMS is wrong about ${name}"
+  done <"$tmp/SHA256SUMS"
+
+  (( problems == 0 )) || die "the hosted repository has ${problems} problem(s)"
+  say "the hosted repository is consistent: ${#named[@]} package files, database signed by ${PUBLIC_FINGERPRINT}"
+}
+
+cmd_fetch_published() {
+  local dir=${1:?dir} name sum
+  need curl; need sha256sum; need gpgv
+  mkdir -p "$dir"
+  hosted_digests >"$dir/.digests"
+  while IFS=$'\t' read -r name sum; do
+    [[ $name == *.pkg.tar.* ]] || continue
+    [[ -f $dir/$name ]] && [[ $(sha256sum "$dir/$name" | cut -d' ' -f1) == "$sum" ]] && continue
+    curl -fsSL -o "$dir/$name" "$REPO_BASE/$name"
+    [[ $(sha256sum "$dir/$name" | cut -d' ' -f1) == "$sum" ]] || die "${name} downloaded with the wrong checksum"
+  done <"$dir/.digests"
+  for name in "$dir"/*.pkg.tar.*; do
+    [[ $name == *.sig ]] && continue
+    verify_public "$name.sig" "$name"
+  done
+  rm -f "$dir/.digests"
+  say "fetched the published packages into ${dir}, each signed by the release key"
 }
 
 case ${1:-} in
+  check-repo) shift; cmd_check_repo "$@" ;;
+  fetch-published) shift; cmd_fetch_published "$@" ;;
   stage) shift; cmd_stage "$@" ;;
   draft) shift; cmd_draft "$@" ;;
   publish-repo) shift; cmd_publish_repo "$@" ;;
-  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
