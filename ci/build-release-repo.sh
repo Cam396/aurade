@@ -124,6 +124,12 @@ if [[ -n "${GPGKEY:-}" ]]; then
 fi
 "${SCRIPT_DIR}/build-private-repo.sh"
 rm -f "${makepkg_config}"
+# A version that is already published keeps its published bytes. The
+# directory is a copy of the hosted repository (ci/release.sh fetch-published).
+if [[ -n "${AURADE_PUBLISHED_REPO:-}" ]]; then
+  [[ -n "${GPGKEY:-}" ]] || { echo "AURADE_PUBLISHED_REPO needs a signed build" >&2; exit 1; }
+  "${SCRIPT_DIR}/reuse-published-packages.sh" "${staging}" "${AURADE_PUBLISHED_REPO}"
+fi
 REPO_DIR="${staging}" "${SCRIPT_DIR}/write-release-checksums.sh"
 if [[ -n "${GPGKEY:-}" ]]; then
   export AURADE_REQUIRE_SIGNATURES=1
