@@ -13,6 +13,7 @@
 #   ci/run.sh packages        build, check and install the Arch packages in a clean
 #                             Arch container (docker or podman)
 #   ci/run.sh fast            lint and gates, which is what the pre-push hook runs
+#   ci/run.sh changes BASE    whether anything since BASE affects the packages
 #   ci/run.sh setup-ubuntu    the distribution packages the Ubuntu jobs need
 #   ci/run.sh install-hooks   use ci/hooks for this clone
 set -Eeuo pipefail
@@ -160,6 +161,21 @@ job_fixtures() {
   endgroup
 }
 
+# Whether a change could affect the Arch packages, for the workflow to decide
+# whether the slow package job runs. Anything it cannot compare against, a new
+# branch or a missing commit, counts as yes.
+PACKAGE_PATHS='^(aurade[^/]*|shill-nm-adapter|chromiumos-ash)/|^installer/wallpapers/|^ci/(run|arch-package-smoke|build-private-repo)\.sh$|^pins/arch\.snapshot$|^\.github/workflows/'
+job_changes() {
+  local base=${1:-} packages=true
+  if [[ -n $base && ! $base =~ ^0+$ ]] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+    if ! git diff --name-only "$base" HEAD | grep -qE "$PACKAGE_PATHS"; then
+      packages=false
+    fi
+  fi
+  echo "packages=$packages"
+  [[ -z ${GITHUB_OUTPUT:-} ]] || echo "packages=$packages" >>"$GITHUB_OUTPUT"
+}
+
 job_fast() {
   job_lint
   job_gates
@@ -295,7 +311,7 @@ packages_in_container() {
 # --- dispatch ---------------------------------------------------------------
 
 job=${1:-}
-[[ -n $job ]] || { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[[ -n $job ]] || { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 case $job in
   lint) job_lint ;;
@@ -304,6 +320,7 @@ case $job in
   fixtures) job_fixtures ;;
   packages) job_packages ;;
   fast) job_fast ;;
+  changes) job_changes "$@" ;;
   setup-ubuntu) job_setup_ubuntu ;;
   install-hooks) job_install_hooks ;;
   *) die "unknown job: $job" ;;
