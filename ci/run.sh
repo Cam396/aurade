@@ -251,8 +251,12 @@ packages_in_container() {
   echo "every .SRCINFO matches its PKGBUILD"
   endgroup
 
+  # The greeter's check() draws the login screen over a photograph and fails
+  # without one. On a build machine they come from an installed
+  # aurade-wallpapers; here they come from the checkout.
   group 'build, check() and namcap'
   runuser -u builder -- env \
+    AURADE_WALLPAPER_DIR="$work/installer/wallpapers" \
     AURADE_PACKAGES="${CI_PACKAGES[*]}" \
     AURADE_SKIP_INSTALLER_TESTS=1 \
     AURADE_SKIP_UNIT_VERIFY=1 \
