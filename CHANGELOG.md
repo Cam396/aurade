@@ -2,6 +2,17 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## Unreleased
+
+### Changed
+- New installs follow the published AuraDE repository, so `sudo pacman -Syu` brings AuraDE updates as well as Arch ones. The copy on the disk stays as a fallback for machines without a network.
+- First login no longer waits on Google services a local account cannot reach. The language, interest and perks steps are skipped, which removes several seconds of loading screen.
+- The first setup screen says "Welcome to AuraDE".
+- The Memory Saver tip says "Make AuraDE faster".
+
+### Removed
+- Browse as Guest. On AuraDE a guest session would run as the owner's Linux account, with the owner's files.
+
 ## 1.1.0, 2026-09-28
 
 ### Added
