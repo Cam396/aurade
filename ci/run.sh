@@ -180,6 +180,14 @@ job_packages() {
   local engine
   engine=$(command -v docker || command -v podman) ||
     die 'the package job needs docker or podman'
+  # Ubuntu 24.04 refuses unprivileged user namespaces through AppArmor, and a
+  # privileged container does not lift that for the unprivileged builder
+  # inside it: bwrap fails to write its uid map. Only on a CI runner, which is
+  # thrown away afterwards; a local run leaves the host's settings alone.
+  local restrict=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+  if [[ -n ${GITHUB_ACTIONS:-} && -r $restrict && $(<"$restrict") == 1 ]]; then
+    as_root sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+  fi
   local out="$ROOT/.ci-out" cache="${AURADE_PACMAN_CACHE:-$ROOT/.ci-cache/pacman}"
   mkdir -p "$out" "$cache"
   chmod 0777 "$out"
