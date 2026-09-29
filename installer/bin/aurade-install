@@ -55,7 +55,10 @@ ARCH_SNAPSHOT=
 BUNDLE_DIR=/opt/aurade/repo
 PACKAGE_LOCK=
 REPO_NAME=aurade
-REPO_URL=${AURADE_DEFAULT_REPO_URL:-file:///var/cache/aurade/repo}
+DEFAULT_REPO_URL=${AURADE_DEFAULT_REPO_URL:-file:///var/cache/aurade/repo}
+REPO_URL=$DEFAULT_REPO_URL
+RELEASE_FINGERPRINT=BC390DCF360B2184DBBF008B8B2AB2EFE667CB69
+HOSTED_REPO_URL=${AURADE_HOSTED_REPO_URL:-https://github.com/Cam396/aurade/releases/download/repo-x86_64}
 REPO_KEY=
 REPO_FINGERPRINT=
 ALLOW_UNSIGNED=0
@@ -746,6 +749,20 @@ write_target_file() {
   install -d -m 0755 "$(dirname "$destination")"
   printf '%b' "$content" >"$destination"
   chmod "$mode" "$destination"
+}
+
+# An install signed with the release key follows the published repository,
+# so pacman -Syu picks up AuraDE fixes. The copy on disk stays as a second
+# server for machines with no network. Any other key, or a URL the user chose,
+# gets exactly that URL: the published repository is signed with the release
+# key, and a development key would reject it.
+aurade_mirror_servers() {
+  if [[ $REPO_URL == "$DEFAULT_REPO_URL" && $ALLOW_UNSIGNED == 0 &&
+        ${expected_fingerprint:-} == "$RELEASE_FINGERPRINT" ]]; then
+    printf 'Server = %s\\nServer = %s\\n' "$HOSTED_REPO_URL" "${REPO_URL%/}"
+  else
+    printf 'Server = %s\\n' "${REPO_URL%/}"
+  fi
 }
 
 canonical_device() {
@@ -1528,7 +1545,7 @@ if (( ALLOW_UNSIGNED )); then
 else
   repo_siglevel='SigLevel = Required DatabaseOptional'
 fi
-write_target_file /etc/pacman.d/aurade-mirrorlist 0644 "Server = ${REPO_URL%/}\n"
+write_target_file /etc/pacman.d/aurade-mirrorlist 0644 "$(aurade_mirror_servers)"
 write_target_file /etc/pacman.d/aurade.conf 0644 "[${REPO_NAME}]\n${repo_siglevel}\nInclude = /etc/pacman.d/aurade-mirrorlist\n"
 if [[ $MODE == execute ]]; then
   aurade_wifi_copy_profiles "$MOUNTPOINT"
