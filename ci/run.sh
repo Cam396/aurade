@@ -199,6 +199,11 @@ job_packages() {
     -v "$out:/out" \
     -v "$cache:/var/cache/pacman/pkg" \
     "$ARCH_IMAGE" bash /src/ci/run.sh packages
+  # The container writes as root. Hand the output and the pacman cache back,
+  # or the cache step cannot read what it is meant to save.
+  if [[ -n ${GITHUB_ACTIONS:-} ]]; then
+    as_root chown -R "$(id -u):$(id -g)" "$out" "$cache"
+  fi
   if [[ -n ${GITHUB_STEP_SUMMARY:-} && -f $out/summary.md ]]; then
     cat "$out/summary.md" >>"$GITHUB_STEP_SUMMARY"
   fi
