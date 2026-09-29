@@ -18,3 +18,6 @@ third thing, so anybody following the build instructions would have fetched
 is the plainest possible definition of not being releasable.
 
 Changing either file means changing both, and running the gate.
+
+`arch.snapshot` is the Arch Linux Archive date that the ISO installs from and
+that the CI package job builds against, in the archive's `YYYY/MM/DD` form.

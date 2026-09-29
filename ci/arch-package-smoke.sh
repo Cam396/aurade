@@ -22,7 +22,10 @@ need pacman
 need python
 need bsdtar
 
-"${REPO_ROOT}/installer/tests/run.sh"
+# CI runs the installer suite in jobs of its own.
+if [[ "${AURADE_SKIP_INSTALLER_TESTS:-0}" != 1 ]]; then
+  "${REPO_ROOT}/installer/tests/run.sh"
+fi
 
 export AURADE_PACKAGES
 export MAKEPKG_FLAGS
@@ -54,7 +57,8 @@ python -B -m py_compile \
   "${REPO_ROOT}/aurade-host-bridge/aurade_host_bridge.py" \
   "${REPO_ROOT}/aurade-host-bridge/aurade_desktop_bridge.py"
 
-if command -v systemd-analyze >/dev/null 2>&1; then
+# CI verifies the units after installing them, where their commands exist.
+if [[ "${AURADE_SKIP_UNIT_VERIFY:-0}" != 1 ]] && command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze verify \
     "${REPO_ROOT}/shill-nm-adapter/shill-nm-adapter.service" \
     "${REPO_ROOT}/aurade-power/aurade-powerd.service" \

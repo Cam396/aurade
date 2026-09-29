@@ -10,18 +10,20 @@ set -Eeuo pipefail
 HERE=$(cd -- "$(dirname -- "$0")" && pwd -P)
 ROOT=$(cd -- "$HERE/.." && pwd -P)
 REPO=$(cd -- "$ROOT/.." && pwd -P)
-WORKFLOW="$REPO/.github/workflows/source-checks.yml"
+WORKFLOW="$REPO/.github/workflows/ci.yml"
+RUNNER="$ROOT/run.sh"
 
-# Preflight: the workflow has to call this runner rather than list the fixtures,
-# or the drift this file exists to prevent starts over.
+# Preflight: the workflow calls ci/run.sh, and ci/run.sh has to call this
+# runner rather than list the fixtures, or the drift this file exists to
+# prevent starts over.
 if [[ -r $WORKFLOW ]]; then
-  if ! grep -Fq 'ci/tests/run.sh' "$WORKFLOW"; then
-    echo "run: the source-checks workflow does not call ci/tests/run.sh" >&2
+  if ! grep -Fq 'ci/run.sh fixtures' "$WORKFLOW" || ! grep -Fq 'ci/tests/run.sh' "$RUNNER"; then
+    echo "run: the CI workflow does not reach ci/tests/run.sh through ci/run.sh fixtures" >&2
     exit 1
   fi
-  stray=$(grep -oE 'ci/tests/[a-z0-9-]+-test\.sh' "$WORKFLOW" | sort -u || true)
+  stray=$(grep -ohE 'ci/tests/[a-z0-9-]+-test\.sh' "$WORKFLOW" "$RUNNER" | sort -u || true)
   if [[ -n $stray ]]; then
-    echo 'run: the workflow still names individual fixtures, so new ones can be forgotten:' >&2
+    echo 'run: the workflow or ci/run.sh still names individual fixtures, so new ones can be forgotten:' >&2
     printf '  %s\n' $stray >&2
     exit 1
   fi

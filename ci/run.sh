@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+# One entry point for every CI job.
+#
+# The workflow names these jobs and nothing else, so a run on this machine and
+# a run on the GitHub runner do the same work. Before this, the workflow held
+# its own copy of each check, and a check could pass here and fail there with
+# nobody able to say which copy was wrong.
+#
+#   ci/run.sh lint            syntax, workflow lint, patch series, metadata, whitespace
+#   ci/run.sh gates           release identity, source integrity, leak and docs gates
+#   ci/run.sh installer [I/N] the installer suite, or shard I of N
+#   ci/run.sh fixtures        ci/tests and the component tests
+#   ci/run.sh packages        build, check and install the Arch packages in a clean
+#                             Arch container (docker or podman)
+#   ci/run.sh fast            lint and gates, which is what the pre-push hook runs
+#   ci/run.sh setup-ubuntu    the distribution packages the Ubuntu jobs need
+#   ci/run.sh install-hooks   use ci/hooks for this clone
+set -Eeuo pipefail
+
+ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+cd "$ROOT"
+
+# The package job's base image, by digest so a new upload under the same tag
+# cannot change what CI tests. Packages then come from the Arch archive at the
+# same snapshot the ISO installs from.
+ARCH_IMAGE=docker.io/library/archlinux:base-devel@sha256:51dd3d24f7fba779e7c471caeee7804c50e8c134ad948e19685a1c83a42facc3
+ARCH_SNAPSHOT=$(<"$ROOT/pins/arch.snapshot")
+ACTIONLINT_VERSION=1.7.12
+ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+# The packages CI builds. chromiumos-ash needs a Chromium build, auradefs a
+# Rust toolchain and the Files page, and aurade-wallpapers the staged images,
+# so those three are left to the release build on the build machine.
+CI_PACKAGES=(
+  aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power
+  aurade-host-bridge aurade-login aurade-greeter aurade-ai
+  aurade-webapp-shortcuts aurade aurade-full
+)
+# The subset that installs without chromiumos-ash in a repository. The
+# login and greeter packages depend on it, so their check() is what covers them.
+CI_INSTALLABLE=(
+  aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power
+  aurade-host-bridge
+)
+
+group() {
+  if [[ -n ${GITHUB_ACTIONS:-} ]]; then
+    printf '::group::%s\n' "$*"
+  else
+    printf '\n== %s\n' "$*"
+  fi
+}
+endgroup() {
+  [[ -z ${GITHUB_ACTIONS:-} ]] || printf '::endgroup::\n'
+}
+die() {
+  printf 'ci/run.sh: %s\n' "$*" >&2
+  exit 1
+}
+as_root() {
+  if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
+}
+
+job_setup_ubuntu() {
+  group 'distribution packages'
+  as_root apt-get update -q
+  as_root apt-get install -y -q --no-install-recommends \
+    libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0
+  endgroup
+}
+
+fetch_actionlint() {
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/aurade-ci/actionlint-$ACTIONLINT_VERSION
+  local tarball="$cache/actionlint.tar.gz"
+  if [[ ! -x $cache/actionlint ]]; then
+    mkdir -p "$cache"
+    curl -fsSL -o "$tarball" \
+      "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+    printf '%s  %s\n' "$ACTIONLINT_SHA256" "$tarball" | sha256sum -c --quiet - ||
+      die 'the actionlint download does not match its pinned checksum'
+    tar -xzf "$tarball" -C "$cache" actionlint
+    rm -f "$tarball"
+  fi
+  printf '%s\n' "$cache/actionlint"
+}
+
+job_lint() {
+  local file
+
+  group 'shell syntax'
+  while IFS= read -r -d '' file; do
+    bash -n "$file"
+  done < <(git ls-files -z -- '*.sh')
+  endgroup
+
+  group 'python syntax'
+  git ls-files -z -- '*.py' | python3 -B -c '
+import sys
+paths = [p for p in sys.stdin.read().split("\0") if p]
+for path in paths:
+    with open(path, encoding="utf-8") as handle:
+        compile(handle.read(), path, "exec")
+print(f"{len(paths)} python files compile")
+'
+  endgroup
+
+  group 'workflow lint'
+  "$(fetch_actionlint)" -color .github/workflows/*.yml
+  endgroup
+
+  group 'patch series manifest'
+  local -a patches
+  mapfile -t patches < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' patches/SERIES)
+  (( ${#patches[@]} > 0 )) || die 'patches/SERIES lists no patches'
+  for file in "${patches[@]}"; do
+    [[ -f patches/$file ]] || die "patches/SERIES names a missing patch: $file"
+  done
+  [[ $(printf '%s\n' "${patches[@]}" | sort -u | wc -l) -eq ${#patches[@]} ]] ||
+    die 'patches/SERIES names a patch twice'
+  printf '%s patches, all present, none repeated\n' "${#patches[@]}"
+  endgroup
+
+  group 'package metadata'
+  while IFS= read -r file; do
+    [[ -f $file/PKGBUILD && -f $file/.SRCINFO ]] || die "$file is missing PKGBUILD or .SRCINFO"
+  done <installer/expected-packages.txt
+  endgroup
+
+  # Patch files carry diff context, where a blank line is a single space, so
+  # they are left out. The rest is checked against the commit before this one
+  # and against anything not yet committed.
+  group 'whitespace'
+  if git rev-parse -q --verify HEAD^ >/dev/null; then
+    git diff --check HEAD^ HEAD -- . ':!patches/*.patch'
+  fi
+  git diff --check HEAD -- . ':!patches/*.patch'
+  endgroup
+}
+
+job_gates() {
+  group 'release identity'; ci/verify-release-identity.sh; endgroup
+  group 'source integrity'; ci/source-integrity-gate.sh; endgroup
+  group 'public release leak gate'; ci/public-release-leak-gate.sh; endgroup
+  group 'public documentation gate'; ci/public-docs-gate.sh; endgroup
+}
+
+job_installer() {
+  local shard=${1:-}
+  AURADE_TEST_SHARD=$shard installer/tests/run.sh
+}
+
+job_fixtures() {
+  group 'ci/tests'; ci/tests/run.sh; endgroup
+  group 'host bridge'; aurade-host-bridge/run-tests.sh; endgroup
+  group 'NetworkManager adapter'; python3 -B shill-nm-adapter/test_shill_nm_adapter.py; endgroup
+  group 'launcher'
+  bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
+  bash chromiumos-ash/test-local-account-flags.sh
+  bash chromiumos-ash/test-google-api-config.sh
+  endgroup
+}
+
+job_fast() {
+  job_lint
+  job_gates
+}
+
+job_install_hooks() {
+  git config core.hooksPath ci/hooks
+  echo 'ci/run.sh: this clone now runs ci/hooks (git push --no-verify skips them)'
+}
+
+# --- packages ---------------------------------------------------------------
+
+job_packages() {
+  if [[ -n ${AURADE_IN_CI_CONTAINER:-} ]]; then
+    packages_in_container
+    return
+  fi
+  local engine
+  engine=$(command -v docker || command -v podman) ||
+    die 'the package job needs docker or podman'
+  local out="$ROOT/.ci-out" cache="${AURADE_PACMAN_CACHE:-$ROOT/.ci-cache/pacman}"
+  mkdir -p "$out" "$cache"
+  chmod 0777 "$out"
+  # Privileged, because aurade-login's check() runs its supervisor inside
+  # bubblewrap, and a default container profile refuses the user namespace.
+  "$engine" run --rm --privileged \
+    -e AURADE_IN_CI_CONTAINER=1 \
+    -v "$ROOT:/src:ro" \
+    -v "$out:/out" \
+    -v "$cache:/var/cache/pacman/pkg" \
+    "$ARCH_IMAGE" bash /src/ci/run.sh packages
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} && -f $out/summary.md ]]; then
+    cat "$out/summary.md" >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+# Every depends, makedepends and checkdepends of the packages CI builds, less
+# the packages themselves, from their .SRCINFO. makepkg runs with --nodeps, so
+# what check() needs has to be installed before it starts.
+package_dependencies() {
+  local own dir
+  own=$(for dir in $(<installer/expected-packages.txt); do
+          sed -n 's/^pkgname = //p' "$dir/.SRCINFO"
+        done | sort -u)
+  for dir in "${CI_PACKAGES[@]}"; do
+    sed -nE 's/^[[:space:]]*(depends|makedepends|checkdepends) = ([^<>=:]+).*/\2/p' "$dir/.SRCINFO"
+  done | sort -u | grep -vxF -f <(printf '%s\n' "$own")
+}
+
+packages_in_container() {
+  local work=/work repo=/work/.ci-repo
+
+  group "pacman at the ${ARCH_SNAPSHOT} snapshot"
+  printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$ARCH_SNAPSHOT" \
+    >/etc/pacman.d/mirrorlist
+  pacman -Syuu --noconfirm --noprogressbar
+  endgroup
+
+  group 'copy the tree for an unprivileged build'
+  mkdir -p "$work"
+  tar -C /src --exclude=./.build --exclude=./.ci-out --exclude=./.ci-cache -cf - . |
+    tar -C "$work" -xf -
+  cd "$work"
+  useradd --create-home builder
+  chown -R builder: "$work"
+  endgroup
+
+  group 'build and check dependencies'
+  local -a deps
+  mapfile -t deps < <(package_dependencies)
+  printf '%s\n' "${deps[@]}"
+  pacman -S --needed --noconfirm --noprogressbar namcap git python "${deps[@]}"
+  endgroup
+
+  group '.SRCINFO matches PKGBUILD'
+  local dir
+  for dir in $(<installer/expected-packages.txt); do
+    runuser -u builder -- bash -c 'cd "$1" && makepkg --printsrcinfo' _ "$work/$dir" |
+      diff -u "$work/$dir/.SRCINFO" - || die "$dir/.SRCINFO is stale; regenerate it with makepkg --printsrcinfo"
+  done
+  echo "every .SRCINFO matches its PKGBUILD"
+  endgroup
+
+  group 'build, check() and namcap'
+  runuser -u builder -- env \
+    AURADE_PACKAGES="${CI_PACKAGES[*]}" \
+    AURADE_SKIP_INSTALLER_TESTS=1 \
+    AURADE_SKIP_UNIT_VERIFY=1 \
+    REPO_DIR="$repo" \
+    bash ci/arch-package-smoke.sh
+  endgroup
+
+  group 'install, verify files and units'
+  local -a files=() units=()
+  local name
+  for name in "${CI_INSTALLABLE[@]}"; do
+    files+=("$(find "$repo" -maxdepth 1 -name "${name}-[0-9]*.pkg.tar.*" ! -name '*.sig' | sort | tail -1)")
+  done
+  pacman -U --noconfirm --noprogressbar "${files[@]}"
+  pacman -Qk "${CI_INSTALLABLE[@]}"
+  mapfile -t units < <(pacman -Qlq "${CI_INSTALLABLE[@]}" | grep -E '^/usr/lib/systemd/system/[^/]+\.service$')
+  systemd-analyze verify "${units[@]}"
+  printf '%s units verify\n' "${#units[@]}"
+  endgroup
+
+  cp "$repo"/*.pkg.tar.* /out/
+  {
+    printf '### Packages\n\n| Package | Size |\n|---|---|\n'
+    for name in "$repo"/*.pkg.tar.*; do
+      [[ $name == *.sig ]] && continue
+      printf '| %s | %s KiB |\n' "${name##*/}" "$(( $(stat -c %s "$name") / 1024 ))"
+    done
+  } >/out/summary.md
+}
+
+# --- dispatch ---------------------------------------------------------------
+
+job=${1:-}
+[[ -n $job ]] || { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+shift
+case $job in
+  lint) job_lint ;;
+  gates) job_gates ;;
+  installer) job_installer "$@" ;;
+  fixtures) job_fixtures ;;
+  packages) job_packages ;;
+  fast) job_fast ;;
+  setup-ubuntu) job_setup_ubuntu ;;
+  install-hooks) job_install_hooks ;;
+  *) die "unknown job: $job" ;;
+esac
