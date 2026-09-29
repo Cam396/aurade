@@ -1,0 +1,121 @@
+diff --git a/ash/shelf/login_shelf_view.cc b/ash/shelf/login_shelf_view.cc
+--- a/ash/shelf/login_shelf_view.cc
++++ b/ash/shelf/login_shelf_view.cc
+@@ -761,6 +761,11 @@
+ // 6. There are no scoped guest buttons blockers active.
+ // 7. The device is not in kiosk license mode.
+ bool LoginShelfView::ShouldShowGuestButton() const {
++  // A guest here would run as the owner's Linux user, with the owner's files.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    return false;
++  }
+   if (!allow_guest_) {
+     return false;
+   }
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -3075,7 +3075,7 @@
+       <!-- Memory Saver IPH strings -->
+       <if expr="not is_android">
+         <message name="IDS_MEMORY_SAVER_MODE_PROMO_TITLE" desc="The title for the Memory Saver mode in-product promo bubble">
+-          Make Chromium faster
++          Make AuraDE faster
+         </message>
+       </if>
+ 
+diff --git a/chrome/browser/ash/login/screens/categories_selection_screen.cc b/chrome/browser/ash/login/screens/categories_selection_screen.cc
+--- a/chrome/browser/ash/login/screens/categories_selection_screen.cc
++++ b/chrome/browser/ash/login/screens/categories_selection_screen.cc
+@@ -9,6 +9,7 @@
+ #include "ash/constants/ash_features.h"
+ #include "ash/constants/ash_login_pref_names.h"
+ #include "ash/constants/ash_pref_names.h"
++#include "base/command_line.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+@@ -111,6 +112,13 @@
+     exit_callback_.Run(Result::kNotApplicable);
+     return true;
+   }
++
++  // The categories come from a Google service a local account cannot reach.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::kNotApplicable);
++    return true;
++  }
+ 
+   if (!features::IsOobePersonalizedOnboardingEnabled()) {
+     exit_callback_.Run(Result::kNotApplicable);
+diff --git a/chrome/browser/ash/login/screens/locale_switch_screen.cc b/chrome/browser/ash/login/screens/locale_switch_screen.cc
+--- a/chrome/browser/ash/login/screens/locale_switch_screen.cc
++++ b/chrome/browser/ash/login/screens/locale_switch_screen.cc
+@@ -10,6 +10,7 @@
+ 
+ #include "ash/constants/ash_login_pref_names.h"
+ #include "base/check_deref.h"
++#include "base/command_line.h"
+ #include "base/functional/callback.h"
+ #include "base/json/json_reader.h"
+ #include "base/time/time.h"
+@@ -194,6 +195,14 @@
+     exit_callback_.Run(Result::kNotApplicable);
+     return true;
+   }
++
++  // A local account has no Google profile to take a language from, and
++  // waiting for one only shows a loading card until the fetch times out.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::kNotApplicable);
++    return true;
++  }
+ 
+   // Skip GAIA language sync if user specifically set language through the UI
+   // on the welcome screen.
+diff --git a/chrome/browser/ash/login/screens/perks_discovery_screen.cc b/chrome/browser/ash/login/screens/perks_discovery_screen.cc
+--- a/chrome/browser/ash/login/screens/perks_discovery_screen.cc
++++ b/chrome/browser/ash/login/screens/perks_discovery_screen.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "ash/constants/ash_features.h"
+ #include "ash/constants/ash_login_pref_names.h"
++#include "base/command_line.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "chrome/browser/ash/login/wizard_controller.h"
+ #include "chrome/browser/policy/profile_policy_connector.h"
+@@ -199,6 +200,13 @@
+     exit_callback_.Run(Result::kNotApplicable);
+     return true;
+   }
++
++  // The perks come from a Google service a local account cannot reach.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    exit_callback_.Run(Result::kNotApplicable);
++    return true;
++  }
+ 
+   Profile* profile = ProfileManager::GetActiveUserProfile();
+   const user_manager::UserManager* user_manager =
+diff --git a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
+--- a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
+@@ -110,7 +110,13 @@
+ 
+ void WelcomeScreenHandler::DeclareLocalizedValues(
+     ::login::LocalizedValuesBuilder* builder) {
+-  if (fjord_util::ShouldShowFjordOobe()) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          "aurade-enable-local-accounts")) {
++    builder->AddF("welcomeScreenGreeting",
++                  IDS_WELCOME_SCREEN_GREETING_CLOUD_READY, u"AuraDE");
++    builder->Add("welcomeScreenGreetingSubtitle",
++                 IDS_WELCOME_SCREEN_GREETING_SUBTITLE);
++  } else if (fjord_util::ShouldShowFjordOobe()) {
+     builder->Add("welcomeScreenGreeting", IDS_FJORD_WELCOME_MESSAGE);
+     builder->Add("welcomeScreenGreetingSubtitle", IDS_EMPTY_STRING);
+   } else if (policy::EnrollmentRequisitionManager::IsMeetDevice(
