@@ -62,11 +62,23 @@ as_root() {
   if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
 }
 
+UBUNTU_PACKAGES=(libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0)
 job_setup_ubuntu() {
   group 'distribution packages'
-  as_root apt-get update -q
-  as_root apt-get install -y -q --no-install-recommends \
-    libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0
+  local -a missing=()
+  local pkg
+  for pkg in "${UBUNTU_PACKAGES[@]}"; do
+    dpkg-query -W -f '${Status}' "$pkg" 2>/dev/null | grep -q 'ok installed' || missing+=("$pkg")
+  done
+  if (( ${#missing[@]} )); then
+    # man-db rebuilds its index after every install, which is most of the
+    # time an install takes on a runner. The package lists the runner image
+    # ships are usually fresh enough; update them only if the install fails.
+    as_root rm -f /var/lib/man-db/auto-update
+    as_root apt-get install -y -q --no-install-recommends "${missing[@]}" ||
+      { as_root apt-get update -q && as_root apt-get install -y -q --no-install-recommends "${missing[@]}"; }
+  fi
+  echo "installed: ${UBUNTU_PACKAGES[*]}"
   endgroup
 }
 
