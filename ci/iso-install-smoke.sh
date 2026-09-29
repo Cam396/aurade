@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
-# Install AuraDE from an ISO onto a virtual disk, boot the result, and run the
-# live smoke against it.
+# Install AuraDE from an ISO onto a virtual disk, boot it, sign in, and walk
+# the first-run setup to the desktop.
 #
 # The ISO gates prove the image is well formed and boots to the installer.
-# This proves the installer produces a system that boots to a desktop with the
-# Files app talking to its service, which is the claim a release actually
-# makes. It needs KVM, a network for the pinned Arch base set, and about half
-# an hour, so it is a script to run before a release and not a fixture.
+# This proves what a release claims: the installer produces a system that
+# boots to the graphical login screen, signs in, runs the local account setup
+# without waiting on Google, and reaches a desktop with the Files service
+# answering. It needs KVM, socat, python3 pexpect, a network for the pinned
+# Arch base set, and about half an hour, so it runs before a release and not
+# as a fixture.
 #
 # Phase one boots the live image by direct kernel boot, which lets the kernel
 # command line be set without touching the image: the installer autostart is
 # told to stay out of the way and systemd puts a root shell on the serial line,
 # so there is no login to script. The engine is then run the way the text
 # installer runs it, with the flags it derives from the live image. Before
-# powering off, the target gets sshd and a key so phase two can reach it.
+# powering off, the target gets sshd and a key so phase two can look inside.
 #
-# Phase two boots the disk, waits for sshd, and hands over to ci/vm-smoke.sh.
+# Phase two boots the disk on plain VGA, which is the software rendering path,
+# and drives it through the QEMU monitor: keys to sign in and to answer the
+# setup screens, screenshots as evidence. What passes or fails is read from
+# the machine over ssh (processes, units, the journal's record of each setup
+# screen), not from pixels.
 set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 ISO=${1:?usage: $0 ISO [WORKDIR]}
-WORK=${2:-/mnt/build/aurade-work/iso-install-smoke}
+WORK=${2:-${TMPDIR:-/var/tmp}/aurade-iso-install-smoke}
 DISK_GB=${AURADE_SMOKE_DISK_GB:-40}
 MEM=${AURADE_SMOKE_MEM:-4096}
 CPUS=${AURADE_SMOKE_CPUS:-4}
@@ -32,7 +38,7 @@ OVMF_CODE=${OVMF_CODE:-/usr/share/edk2/x64/OVMF_CODE.4m.fd}
 OVMF_VARS=${OVMF_VARS:-/usr/share/edk2/x64/OVMF_VARS.4m.fd}
 
 fail() { echo "iso install smoke: $*" >&2; exit 1; }
-for c in qemu-system-x86_64 qemu-img bsdtar ssh ssh-keygen openssl python3; do
+for c in qemu-system-x86_64 qemu-img bsdtar ssh ssh-keygen openssl python3 socat; do
   command -v "$c" >/dev/null || fail "$c is missing"
 done
 python3 -c 'import pexpect' 2>/dev/null || fail 'python3 pexpect is missing'
@@ -96,10 +102,9 @@ print("==> install engine exit %d after %ds" % (status, time.time() - t0))
 if status != 0:
     print(out[-6000:])
     sys.exit(1)
-# Phase two needs a way in and a session to look at. Both are the test's own
-# additions to the test's own disk: a root key for ssh, and greetd's
-# first-boot autologin for the desktop user, through the same supervisor and
-# session command the greeter would have used. The product installs neither.
+# Phase two needs a way in: a root key for ssh, which is the test's own
+# addition to the test's own disk. It signs in through the graphical login
+# screen the way a person does, so nothing else is added.
 mount = ("mkdir -p /mnt/t && mount -o subvol=@ /dev/vda2 /mnt/t 2>/dev/null || "
          "mount /dev/vda2 /mnt/t")
 status, out = run(mount)
@@ -118,8 +123,7 @@ status, out = run("mkdir -p -m 700 /mnt/t/root/.ssh && printf '%s\\n' '" + os.en
                   " && systemctl --root=/mnt/t enable sshd")
 if status != 0:
     print(out); sys.exit(1)
-autologin = ("\\n[initial_session]\\ncommand = \\\"/usr/bin/aurade-session-supervisor /usr/bin/chromiumos-ash-session\\\"\\nuser = \\\"" + user + "\\\"\\n")
-status, out = run("printf '" + autologin + "' >> /mnt/t/etc/greetd/aurade.toml && tail -4 /mnt/t/etc/greetd/aurade.toml && umount -R /mnt/t")
+status, out = run("tail -3 /mnt/t/etc/greetd/aurade.toml && umount -R /mnt/t")
 print(out)
 if status != 0:
     sys.exit(1)
@@ -128,9 +132,15 @@ child.expect(pexpect.EOF, timeout=180)
 PY
 
 echo "==> phase two: boot the installed disk"
-qemu-system-x86_64 "${common[@]}" -boot c \
+# Plain VGA with no render node, which is the software rendering path a VM
+# without virgl takes. The monitor socket is how this script types and takes
+# screenshots.
+rm -f "$WORK/hmp.sock"
+qemu-system-x86_64 "${common[@]}" -boot c -vga std \
   -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22" \
-  -serial "file:$WORK/phase2-serial.log" -monitor none -daemonize -pidfile "$WORK/phase2.pid"
+  -serial "file:$WORK/phase2-serial.log" \
+  -monitor "unix:$WORK/hmp.sock,server,nowait" \
+  -daemonize -pidfile "$WORK/phase2.pid"
 trap 'kill "$(cat "$WORK/phase2.pid" 2>/dev/null)" 2>/dev/null || true' EXIT
 
 ssh_opts=(-i "$WORK/id_ed25519" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
@@ -142,13 +152,35 @@ done
 ssh "${ssh_opts[@]}" root@127.0.0.1 true 2>/dev/null || fail 'the installed system never answered on ssh'
 sremote() { ssh "${ssh_opts[@]}" root@127.0.0.1 "$@"; }
 
-# The claims a headless VM can actually settle. The desktop itself renders
-# through a GPU, and this VM has none: under llvmpipe Ash\'s GPU process gives
-# up and the compositor aborts, which is the same condition AuraDE\'s own
-# installer meets by falling back to the text installer. So the render is
-# checked and reported, never asserted, and everything up to it is asserted.
+hmp() { printf '%s\n' "$1" | socat -T 2 - "UNIX-CONNECT:$WORK/hmp.sock" >/dev/null; }
+keys() { local k; for k in "$@"; do hmp "sendkey $k"; sleep 0.3; done; }
+type_text() {
+  local text=$1 i c
+  for (( i = 0; i < ${#text}; i++ )); do
+    c=${text:i:1}
+    case $c in
+      [a-z0-9]) hmp "sendkey $c" ;;
+      [A-Z]) hmp "sendkey shift-${c,,}" ;;
+      ' ') hmp 'sendkey spc' ;;
+      *) fail "type_text has no key for '$c'" ;;
+    esac
+    sleep 0.08
+  done
+}
+shot() {
+  rm -f "$WORK/$1.ppm"
+  hmp "screendump $WORK/$1.ppm"
+  for _ in $(seq 1 50); do [[ -s $WORK/$1.ppm ]] && break; sleep 0.1; done
+  echo "   screenshot: $WORK/$1.ppm"
+}
+# Wait for a line in this boot's journal, and print it.
+wait_journal() {
+  local pattern=$1 seconds=$2
+  sremote "for i in \$(seq 1 $seconds); do journalctl -b --no-pager -o cat | grep -m1 -E '$pattern' && exit 0; sleep 1; done; exit 1"
+}
+
 echo "==> the installed system is healthy"
-state=$(sremote 'systemctl is-system-running' || true)
+state=$(sremote 'timeout 300 systemctl is-system-running --wait' || true)
 case $state in
   running|degraded) echo "   is-system-running: $state" ;;
   *) fail "the installed system is $state, not running" ;;
@@ -163,63 +195,84 @@ for u in $failed; do
   esac
 done
 
-echo "==> the AuraDE package set is installed, at the versions the repo shipped"
-for want in "chromiumos-ash 156.0.8060.0-2" "auradefs 0.1.0-4" "aurade-greeter 0.1.0-1"; do
-  set -- $want
-  got=$(sremote "pacman -Q $1" 2>/dev/null || true)
-  [[ $got == "$1 $2" ]] || fail "expected '$want', got '${got:-nothing}'"
+echo "==> the AuraDE packages are the versions this tree builds"
+for pkg in chromiumos-ash auradefs aurade-greeter aurade-login; do
+  want="$pkg $(sed -n 's/^\tpkgver = //p' "$ROOT/$pkg/.SRCINFO" | head -1)-$(sed -n 's/^\tpkgrel = //p' "$ROOT/$pkg/.SRCINFO" | head -1)"
+  got=$(sremote "pacman -Q $pkg" 2>/dev/null || true)
+  [[ $got == "$want" ]] || fail "expected '$want', got '${got:-nothing}'"
   echo "   $got"
 done
 
 echo "==> the file service is a unit whose config names the port the page asks for"
 sremote 'test -f /usr/lib/systemd/user/auradefs.service' || fail 'the auradefs user unit is not installed'
 sremote 'grep -q -- "--port 8902" /usr/lib/systemd/user/auradefs.service' || fail 'the unit does not name port 8902'
-# Start it for the installed user the way the session would, out of band of the
-# desktop, and require it to answer. This is the fix under test: the unit runs
-# and binds the loopback port the shipped page reaches.
-# Lingering gives the user a persistent systemd manager, so this does not
-# depend on a graphical session that this VM cannot keep up.
+
+echo "==> the graphical login screen is what greetd runs"
+sremote 'grep -q "^command = \"/usr/lib/aurade-greeter/aurade-greeter-session\"" /etc/greetd/aurade.toml' ||
+  fail 'greetd is not configured for the graphical login screen'
+sremote 'for i in $(seq 1 60); do pgrep -f "^/usr/bin/python3? /usr/bin/aurade-greeter|/usr/bin/aurade-greeter" >/dev/null && exit 0; sleep 1; done; exit 1' ||
+  fail 'the graphical login screen never started'
+sremote 'test ! -s /var/lib/aurade-greeter/quick-exits' || fail 'the login screen already fell back to text'
+sleep 5
+shot 1-greeter
+
+echo "==> sign in through the login screen"
+keys ret; sleep 2
+keys ret; sleep 2
+type_text "$USERNAME"
+keys ret
+sremote "for i in \$(seq 1 90); do pgrep -u $USERNAME -f -- '--aurade-enable-local-accounts' >/dev/null && exit 0; sleep 1; done; exit 1" ||
+  fail 'signing in did not start the desktop session'
+wait_journal 'OOBE finished loading' 120 >/dev/null || fail 'first-run setup never loaded'
+sleep 5
+shot 2-welcome
+
+echo "==> first-run setup, as a local account"
+# The focus order these keys rely on: Get started has focus on the welcome
+# screen; on the account screen two tabs reach Next; on the local account form
+# the first tab is Back, then the name, the hint, and Continue.
+keys ret; sleep 8
+keys tab tab ret; sleep 5
+shot 3-local-account
+keys tab tab; type_text 'Aura Test'; keys tab tab ret
+wait_journal 'aura-local-account exited with reason: StartSession' 30 >/dev/null ||
+  fail 'the local account form did not start the session'
+wait_journal 'drive-pinning exited' 60 >/dev/null || fail 'first-run setup stalled after the account form'
+journal=$(sremote 'journalctl -b --no-pager -o short-unix | grep "Wizard screen"')
+printf '%s\n' "$journal" | sed -n '/aura-local-account exited/,$p' | sed 's/^[^ ]* [^ ]* [^ ]* \[[^]]*\] (LOGIN) /   /' | head -40
+# Local accounts skip every screen that needs Google. A screen that waits on
+# Google instead shows a loading card until its request times out.
+for screen in locale-switch categories-selection perks-discovery gemini-intro password-selection; do
+  printf '%s\n' "$journal" | grep -q "Wizard screen ${screen} exited with reason: NotApplicable" ||
+    fail "${screen} was shown or waited on instead of being skipped"
+done
+! printf '%s\n' "$journal" | grep -q 'Wizard screen guest-tos' || fail 'guest mode was offered'
+start=$(printf '%s\n' "$journal" | awk '/aura-local-account exited with reason: StartSession/ {print int($1); exit}')
+end=$(printf '%s\n' "$journal" | awk '/drive-pinning exited/ {print int($1); exit}')
+(( end - start <= 5 )) || fail "the account form took $(( end - start ))s to reach display size; something waited"
+echo "   the account form reached display size in $(( end - start ))s"
+sleep 5
+shot 4-display-size
+# Display size: focus starts outside the dialog, and the sixth tab reaches Next.
+keys tab tab tab tab tab tab ret; sleep 6
+keys ret
+wait_journal 'theme-selection exited' 30 >/dev/null || fail 'the theme step did not finish'
+
+echo "==> the desktop"
+sremote "for i in \$(seq 1 60); do curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | grep -q '\"type\": \"page\"' && exit 0; sleep 2; done; exit 1" ||
+  fail 'the desktop never opened a browser page'
+sleep 5
+shot 5-desktop
+cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
+[[ $cores == 0 ]] || fail "the first login left ${cores} core dump(s)"
+
+echo "==> the file service answers for the signed in user"
 uid=$(sremote "id -u $USERNAME")
-sremote "loginctl enable-linger $USERNAME"
-sremote "for i in \$(seq 1 20); do test -S /run/user/$uid/systemd/private && exit 0; sleep 1; done; exit 1" \
-  || fail 'the user manager never came up under lingering'
-sremote "systemctl --user -M ${USERNAME}@.host start auradefs.service" \
-  || fail 'the auradefs unit would not start for the installed user'
 sremote "runuser -u $USERNAME -- env XDG_RUNTIME_DIR=/run/user/$uid sh -c '
+  systemctl --user start auradefs.service
   for i in \$(seq 1 20); do
     curl -fsS http://127.0.0.1:8902/api/volumes >/dev/null 2>&1 && exit 0; sleep 1
-  done; exit 1'" || fail 'auradefs started but never answered on 8902'
+  done; exit 1'" || fail 'auradefs never answered on 8902'
 echo "   auradefs answered on 127.0.0.1:8902"
 
-echo "==> greetd is up and the first-boot session was attempted"
-sremote 'systemctl is-active aurade-greetd' >/dev/null || fail 'aurade-greetd is not active'
-sremote "test -d /home/$USERNAME" || fail "the installed user has no home"
-
-# Now look at the desktop, and report rather than assert.
-echo "==> the desktop (reported, not asserted: this VM has no GPU)"
-if sremote 'for i in $(seq 1 24); do curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1 && exit 0; sleep 5; done; exit 1'; then
-  echo "   REACHED: Ash is up and answering CDP; running the live smoke"
-  cat >"$WORK/ssh_config" <<CFG
-Host aurade-smoke
-  HostName 127.0.0.1
-  Port $SSH_PORT
-  User root
-  IdentityFile $WORK/id_ed25519
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-  BatchMode yes
-CFG
-  mkdir -p "$WORK/shim"
-  printf '#!/bin/sh\nexec /usr/bin/ssh -F "%s" "$@"\n' "$WORK/ssh_config" >"$WORK/shim/ssh"
-  chmod +x "$WORK/shim/ssh"
-  PATH="$WORK/shim:$PATH" bash "$ROOT/ci/vm-smoke.sh" --host aurade-smoke \
-    --test-user "$USERNAME" --files-volume-smoke --release-package-smoke "${@:3}" \
-    || fail 'the desktop rendered but the live smoke did not pass'
-else
-  reason=$(sremote "grep -h reason= /home/$USERNAME/.local/state/aurade/session-error.txt 2>/dev/null | head -1" || true)
-  echo "   NO GPU: the compositor did not come up under software rendering."
-  echo "   ${reason:-reason=unknown}"
-  echo "   This is the expected outcome on a machine without 3D acceleration."
-  echo "   Everything the install produces up to the GPU was verified above."
-fi
-echo "iso install smoke: PASS (install, boot, health, packages, file service)"
+echo "iso install smoke: PASS (install, graphical sign in, local first run, desktop, file service)"
