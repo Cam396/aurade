@@ -449,7 +449,7 @@ test_watchdog_drops_lock_fd() {
   session_group_pids+=("${child_pid}")
 
   kill -USR1 "${supervisor_pid}"
-  for _ in {1..100}; do
+  for _ in {1..300}; do
     while read -r candidate; do
       if [[ "${candidate}" =~ ^[0-9]+$ && "${candidate}" != "${child_pid}" ]]; then
         watchdog_pid="${candidate}"
@@ -460,8 +460,16 @@ test_watchdog_drops_lock_fd() {
     sleep 0.01
   done
   [[ "${watchdog_pid}" =~ ^[0-9]+$ ]] || fail "watchdog process was not observed"
+  # The watchdog is a forked subshell, so it holds fd 9 until its first
+  # command closes it. On a loaded machine ps can find it before that, which
+  # is why this waits for the drop instead of asserting it never happened.
+  # The watchdog then sleeps for the whole grace period with fd 9 closed.
+  for _ in {1..100}; do
+    [[ -e "/proc/${watchdog_pid}/fd/9" ]] || break
+    sleep 0.01
+  done
   [[ ! -e "/proc/${watchdog_pid}/fd/9" ]] || \
-    fail "watchdog inherited the session lock fd"
+    fail "watchdog kept the session lock fd"
 
   wait_for_count '^start ' 2 "${session_log}"
   second_child="$(sed -n 's/^start pid=\([0-9][0-9]*\).*/\1/p' "${session_log}" | tail -1)"
