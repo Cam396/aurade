@@ -238,7 +238,11 @@ cmd_publish_repo() {
   upload_last+=("$local_repo/aurade.db" "$local_repo/aurade.db.sig"
                 "$local_repo/aurade.files" "$local_repo/aurade.files.sig"
                 "$local_repo/SHA256SUMS")
-  mapfile -t remove < <(comm -13 <(awk '{print $2}' "$local_repo/SHA256SUMS" | sort) \
+  # The hosted list is every asset, which includes the names SHA256SUMS does
+  # not list (the four pacman fetches and SHA256SUMS itself), so what goes up
+  # is never a candidate for removal.
+  mapfile -t remove < <(comm -13 <({ awk '{print $2}' "$local_repo/SHA256SUMS"
+                                     printf '%s\n' "${upload_last[@]##*/}"; } | sort -u) \
                                  <(awk '{print $2}' "$hosted/SHA256SUMS" | sort))
 
   say "packages to upload: ${#upload_first[@]}, database files: ${#upload_last[@]}, assets to remove: ${#remove[@]}"
@@ -270,7 +274,6 @@ cmd_check_repo() {
   need curl; need gpgv; need bsdtar; need python3
   local tmp problems=0 name sum
   tmp=$(mktemp -d)
-  trap 'rm -rf -- "$tmp"' RETURN
   hosted_digests >"$tmp/digests"
   digest() { awk -F '\t' -v n="$1" '$1 == n { print $2 }' "$tmp/digests"; }
   problem() { printf 'release: check-repo: %s\n' "$*" >&2; problems=$((problems + 1)); }
@@ -320,6 +323,7 @@ cmd_check_repo() {
     [[ $(digest "$name") == "$sum" ]] || problem "SHA256SUMS is wrong about ${name}"
   done <"$tmp/SHA256SUMS"
 
+  rm -rf -- "$tmp"
   (( problems == 0 )) || die "the hosted repository has ${problems} problem(s)"
   say "the hosted repository is consistent: ${#named[@]} package files, database signed by ${PUBLIC_FINGERPRINT}"
 }
