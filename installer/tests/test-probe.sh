@@ -59,7 +59,8 @@ printf '\x06\x00\x00\x00\x00' >"$TMP/efivars-disabled/$sb"
 install -d "$TMP/efi-tools"
 for _tool in dd od awk; do ln -s "$(command -v "$_tool")" "$TMP/efi-tools/$_tool"; done
 
-install -d "$TMP/dri-empty" "$TMP/dri-ok"
+install -d "$TMP/dri-empty" "$TMP/dri-ok" "$TMP/dri-display"
+: >"$TMP/dri-display/card0"
 : >"$TMP/dri-ok/renderD128"
 : >"$TMP/dri-ok/card0"
 
@@ -134,6 +135,15 @@ for _jargon in renderD /sys/ GPU driver kernel; do
   [[ $graphics != *"$_jargon"* ]] ||
     fail "the graphics field says '$_jargon', which belongs in the advice"
 done
+# --- a display device and no render node: plain VGA in a virtual machine ----
+# The desktop draws in software there, so this warns and does not block. It
+# used to be counted with the empty directory above, and the graphical
+# installer refused every VM with plain VGA as a black screen that never came.
+IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-display" "$TMP/meminfo.big")
+check 'display only renderer' "$renderer" tui
+check 'display only reason' "$reason" display-only
+check 'display only does not predict a black screen' "$black" no
+
 
 # --- render node present, but not enough memory for the live graphical path -
 IFS='|' read -r renderer reason black graphics < <(probe "$TMP/dri-ok" "$TMP/meminfo.small")
