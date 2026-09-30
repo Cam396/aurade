@@ -590,6 +590,47 @@ test_legacy_config_migration() {
     fail "greetd migration changed a genuinely custom command"
 }
 
+# Sign out must let the browser finish quitting before logind ends the
+# session, because ending it also stops the session bus under the browser.
+test_sign_out_ends_browser_first() {
+  local dir="${test_tmp}/sign-out" scope started elapsed browser renderer
+  mkdir -p "${dir}/bin"
+  cat >"${dir}/bin/loginctl" <<EOF_LOGINCTL
+#!/usr/bin/bash
+case "\$1" in
+  show-session) id -u ;;
+  terminate-session)
+    if kill -0 "\$(cat '${dir}/browser.pid')" 2>/dev/null; then state=alive; else state=gone; fi
+    printf '%s %s\\n' "\$2" "\$state" >'${dir}/terminated'
+    ;;
+  *) exit 1 ;;
+esac
+EOF_LOGINCTL
+  chmod 755 "${dir}/bin/loginctl"
+  # A browser that takes half a second to quit, and a renderer beside it that
+  # sign out must not wait for. Chrome rewrites its command line into one
+  # space separated string, which is what these look like too.
+  (exec -a "${dir}/chrome --login-manager" /usr/bin/bash -c 'trap "sleep 0.5; exit 0" TERM; while :; do sleep 0.05; done') &
+  browser=$!
+  echo "${browser}" >"${dir}/browser.pid"
+  (exec -a "${dir}/chrome --type=renderer" /usr/bin/bash -c 'sleep 30') &
+  renderer=$!
+  sleep 0.2
+  scope="$(sed -n 's/^0:://p' /proc/self/cgroup)"
+  started=$(date +%s%N)
+  PATH="${dir}/bin:${PATH}" XDG_SESSION_ID=7 AURADE_BROWSER_ARGV0="${dir}/chrome" \
+    AURADE_SIGN_OUT_SCOPE="${scope:-/}" \
+    /usr/bin/bash "${session_control}" sign-out || fail "sign out failed"
+  elapsed=$(( ($(date +%s%N) - started) / 1000000 ))
+  (( elapsed < 400 )) || fail "sign out made its caller wait ${elapsed}ms for the browser"
+  for _ in {1..50}; do [[ -s "${dir}/terminated" ]] && break; sleep 0.1; done
+  [[ "$(cat "${dir}/terminated" 2>/dev/null)" == "7 gone" ]] || \
+    fail "sign out ended the session before the browser quit: $(cat "${dir}/terminated" 2>/dev/null || echo never)"
+  kill -0 "${renderer}" 2>/dev/null || fail "sign out signalled a process with --type="
+  kill "${renderer}" 2>/dev/null || true
+  wait "${browser}" "${renderer}" 2>/dev/null || true
+}
+
 bash -n "${supervisor}" "${session_control}" "${greetd_vt}"
 test_default_command
 test_cached_legacy_command_migrated
@@ -603,6 +644,7 @@ test_unscoped_fallback_fails_closed
 test_supervisor_crash_fails_closed
 test_watchdog_drops_lock_fd
 test_session_control_restarts_own_scope
+test_sign_out_ends_browser_first
 test_greetd_config_consistency
 test_legacy_config_migration
 
