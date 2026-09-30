@@ -286,7 +286,7 @@ drift_in_container() {
     [[ -f $file && ! -L $file ]] || continue
     [[ $(head -c4 "$file" 2>/dev/null | od -An -c | tr -d ' ') == 177ELF ]] || continue
     elves+=("$file")
-    missing=$(ldd "$file" 2>/dev/null | awk '/not found/ { print $1 }' | tr '\n' ' ')
+    missing=$(ldd "$file" 2>/dev/null | awk '/not found/ { print $1 }' | sort -u | tr '\n' ' ')
     [[ -z $missing ]] || problem "${file} cannot find: ${missing}"
   done
   echo "${#elves[@]} ELF files checked"
