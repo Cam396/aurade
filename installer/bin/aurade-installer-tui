@@ -3169,18 +3169,30 @@ access_obey() {
 # who asked for larger text and got the same size is inconvenienced; somebody
 # who asked and got no installer is not.
 access_obey_font() {
-  local font
+  local fonts=(ter-116n ter-124n ter-132n) step=0 width=0 size
   [[ ${TERM:-} == linux ]] || return 0
   command -v setfont >/dev/null 2>&1 || return 0
+  # "100" is the size that reads well on this screen, not 16 pixels on every
+  # screen: on a 2560 pixel wide display the 16 pixel font draws the installer
+  # as a small box in one corner. The framebuffer says how wide the screen is.
+  size=$(cat "${AURADE_FB_SIZE_FILE:-/sys/class/graphics/fb0/virtual_size}" 2>/dev/null || true)
+  width=${size%%,*}
+  [[ $width =~ ^[0-9]+$ ]] || width=0
+  if (( width >= 2400 )); then step=2
+  elif (( width >= 1600 )); then step=1
+  fi
   case ${ACCESS[text_scale]} in
-    125) font=ter-124n ;;
-    150) font=ter-132n ;;
-    *)   font=ter-116n ;;
+    125) step=$(( step + 1 )) ;;
+    150) step=$(( step + 2 )) ;;
   esac
-  setfont "$font" >/dev/null 2>&1 || true
-  # The frame is measured in rows, and a taller font means fewer of them, so
-  # the height has to be asked for again rather than remembered from boot.
-  AURADE_TUI_HEIGHT=$(tput lines 2>/dev/null || printf '')
+  (( step <= 2 )) || step=2
+  setfont "${fonts[step]}" >/dev/null 2>&1 || true
+  # A different font is a different number of rows and columns, so both are
+  # asked for again rather than remembered from boot: the width recentres the
+  # frame, and the height is what the progress screen spends.
+  tui_measure
+  AURADE_TUI_HEIGHT=$(tui_console_size rows)
+  [[ $AURADE_TUI_HEIGHT =~ ^[0-9]+$ ]] || AURADE_TUI_HEIGHT=$(tput lines 2>/dev/null || printf '')
   [[ $AURADE_TUI_HEIGHT =~ ^[0-9]+$ ]] || AURADE_TUI_HEIGHT=24
   (( AURADE_TUI_HEIGHT >= 10 )) || AURADE_TUI_HEIGHT=24
 }

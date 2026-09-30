@@ -407,6 +407,40 @@ grep -Fq 'command -v setfont' "$TUI" ||
 grep -Fq 'AURADE_TUI_HEIGHT=$(tput lines' "$TUI" ||
   fail 'the frame does not re-measure after the console font changes'
 
+# "100" is the size that reads on this screen. On a wide screen the 16 pixel
+# font drew the installer as a small box in one corner, so the base size
+# follows the framebuffer's width and the text size steps up from there.
+FB_SIZE=$(mktemp)
+FONT_SET=$(mktemp)
+font_for() {
+  local width=$1 scale=$2 chosen
+  chosen=$(
+    TERM=linux
+    declare -A ACCESS=([text_scale]=$scale)
+    setfont() { printf '%s' "$1" >"$FONT_SET"; }
+    tui_measure() { :; }
+    tui_console_size() { :; }
+    printf '%s' "$width,1080" >"$FB_SIZE"
+    AURADE_FB_SIZE_FILE=$FB_SIZE
+    eval "$(sed -n '/^access_obey_font() {/,/^}/p' "$TUI")"
+    : >"$FONT_SET"
+    access_obey_font >/dev/null 2>&1
+    cat "$FONT_SET"
+  )
+  printf '%s' "$chosen"
+}
+check_font() {
+  local got
+  got=$(font_for "$1" "$2")
+  [[ $got == "$3" ]] || fail "a ${1} pixel wide screen at text size $2 loads '$got', not $3"
+}
+check_font 1366 100 ter-116n
+check_font 1920 100 ter-124n
+check_font 2560 100 ter-132n
+check_font 1366 150 ter-132n
+check_font 2560 150 ter-132n
+rm -f "$FB_SIZE" "$FONT_SET"
+
 (( failures == 0 )) || exit 1
 printf 'installer accessibility test: PASS (%s choices, defaults unchanged, both ends agree)\n' \
   "$(wc -l <<<"$keys")"

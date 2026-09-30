@@ -17,11 +17,26 @@ _TUI_WIDTH_PINNED=0
 [[ -z $AURADE_TUI_COLUMNS ]] || _TUI_COLUMNS_PINNED=1
 [[ -z $AURADE_TUI_WIDTH ]]   || _TUI_WIDTH_PINNED=1
 
+# Rows or columns of the terminal this is drawn on, read from the terminal
+# rather than from whatever stdout and stderr happen to be. Nothing when there
+# is no terminal to ask.
+tui_console_size() {
+  local size
+  size=$({ stty size </dev/tty; } 2>/dev/null) || return 0
+  [[ $size =~ ^([0-9]+)\ ([0-9]+)$ ]] || return 0
+  (( BASH_REMATCH[1] > 0 && BASH_REMATCH[2] > 0 )) || return 0
+  if [[ $1 == rows ]]; then printf '%s' "${BASH_REMATCH[1]}"; else printf '%s' "${BASH_REMATCH[2]}"; fi
+}
+
 # Work out the frame from the terminal. Called once at startup, and again
 # every time the terminal changes size under us.
 tui_measure() {
   if (( ! _TUI_COLUMNS_PINNED )); then
-    AURADE_TUI_COLUMNS=$(tput cols 2>/dev/null || printf '')
+    # The console itself first. `tput cols` inside $(...) asks whatever its
+    # stderr is, and at boot that is a log, so it answered 80 on a console 320
+    # columns wide and the frame sat in the corner.
+    AURADE_TUI_COLUMNS=$(tui_console_size cols)
+    [[ $AURADE_TUI_COLUMNS =~ ^[0-9]+$ ]] || AURADE_TUI_COLUMNS=$(tput cols 2>/dev/null || printf '')
     [[ $AURADE_TUI_COLUMNS =~ ^[0-9]+$ ]] || AURADE_TUI_COLUMNS=${COLUMNS:-80}
     (( AURADE_TUI_COLUMNS >= 40 )) || AURADE_TUI_COLUMNS=80
   fi
@@ -140,7 +155,8 @@ tui_measure_panes
 
 AURADE_TUI_HEIGHT=${AURADE_TUI_HEIGHT:-}
 if [[ -z $AURADE_TUI_HEIGHT ]]; then
-  AURADE_TUI_HEIGHT=$(tput lines 2>/dev/null || printf '')
+  AURADE_TUI_HEIGHT=$(tui_console_size rows)
+  [[ $AURADE_TUI_HEIGHT =~ ^[0-9]+$ ]] || AURADE_TUI_HEIGHT=$(tput lines 2>/dev/null || printf '')
   [[ $AURADE_TUI_HEIGHT =~ ^[0-9]+$ ]] || AURADE_TUI_HEIGHT=${LINES:-24}
   (( AURADE_TUI_HEIGHT >= 10 )) || AURADE_TUI_HEIGHT=24
 fi
