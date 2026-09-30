@@ -16,6 +16,8 @@
 #   ci/run.sh fast            lint and gates, which is what the pre-push hook runs
 #   ci/run.sh changes BASE    whether anything since BASE affects the packages
 #   ci/run.sh hosted          check the published pacman repository as pacman sees it
+#   ci/run.sh drift           install the published packages on today's Arch and
+#                             check every library and module they need still resolves
 #   ci/run.sh setup-ubuntu    the distribution packages the Ubuntu jobs need
 #   ci/run.sh install-hooks   use ci/hooks for this clone
 set -Eeuo pipefail
@@ -225,6 +227,118 @@ job_hosted() {
   group 'hosted pacman repository'; ci/release.sh check-repo; endgroup
 }
 
+# Installed machines update Arch from the live mirrors, but the packages were
+# built against the snapshot in pins/arch.snapshot. When Arch moves a library
+# on (an ICU or Python bump is the usual one), a machine that runs
+# `pacman -Syu` can be left with a desktop that will not start, and nothing in
+# this tree changed. This installs what is published onto today's Arch, in a
+# container that is deliberately not pinned, and fails on anything that no
+# longer resolves, so the rebuild happens before somebody's update.
+DRIFT_IMAGE=docker.io/library/archlinux:base-devel
+HOSTED_REPO=https://github.com/Cam396/aurade/releases/download/repo-x86_64
+job_drift() {
+  if [[ -n ${AURADE_IN_CI_CONTAINER:-} ]]; then
+    drift_in_container
+    return
+  fi
+  local engine out="$ROOT/.ci-out"
+  engine=$(command -v docker || command -v podman) ||
+    die 'the drift job needs docker or podman'
+  mkdir -p "$out"
+  chmod 0777 "$out"
+  "$engine" pull -q "$DRIFT_IMAGE" >/dev/null
+  "$engine" run --rm -e AURADE_IN_CI_CONTAINER=1 \
+    -v "$ROOT:/src:ro" -v "$out:/out" "$DRIFT_IMAGE" bash /src/ci/run.sh drift
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} && -f $out/drift.md ]]; then
+    cat "$out/drift.md" >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+drift_in_container() {
+  local problems=0 pkg file missing
+  local -a pkgs files elves
+  problem() { printf 'drift: %s\n' "$*" >&2; problems=$((problems + 1)); }
+
+  group 'pacman keys and the published repository'
+  sed -i 's/^#\?ParallelDownloads.*/ParallelDownloads = 8/' /etc/pacman.conf
+  pacman-key --init >/dev/null 2>&1
+  pacman-key --populate archlinux >/dev/null 2>&1
+  pacman-key --add /src/pins/aurade-release.gpg >/dev/null 2>&1
+  pacman-key --lsign-key BC390DCF360B2184DBBF008B8B2AB2EFE667CB69 >/dev/null 2>&1
+  printf '\n[aurade]\nSigLevel = Required\nServer = %s\n' "$HOSTED_REPO" >>/etc/pacman.conf
+  pacman -Syu --noconfirm >/dev/null
+  mapfile -t pkgs < <(pacman -Slq aurade)
+  (( ${#pkgs[@]} > 0 )) || die 'the published repository lists no packages'
+  echo "published: ${pkgs[*]}"
+  endgroup
+
+  group 'install every published package on current Arch'
+  # Install scriptlets that talk to a running systemd complain in a container
+  # and carry on; a package that cannot be installed at all fails here.
+  pacman -S --noconfirm --needed "${pkgs[@]}" >/tmp/drift-install.log 2>&1 ||
+    { tail -40 /tmp/drift-install.log; die 'the published packages no longer install on current Arch'; }
+  pacman -Dk >/dev/null || problem 'pacman reports broken dependencies'
+  endgroup
+
+  group 'every AuraDE binary and library still finds what it links'
+  mapfile -t files < <(pacman -Qlq "${pkgs[@]}" | grep -v '/$' | sort -u)
+  for file in "${files[@]}"; do
+    [[ -f $file && ! -L $file ]] || continue
+    [[ $(head -c4 "$file" 2>/dev/null | od -An -c | tr -d ' ') == 177ELF ]] || continue
+    elves+=("$file")
+    missing=$(ldd "$file" 2>/dev/null | awk '/not found/ { print $1 }' | tr '\n' ' ')
+    [[ -z $missing ]] || problem "${file} cannot find: ${missing}"
+  done
+  echo "${#elves[@]} ELF files checked"
+  # ldd shows the libraries; loading the browser shows the symbols as well.
+  /usr/lib/chromiumos-ash/chrome --version ||
+    problem 'the browser no longer starts against current Arch libraries'
+  endgroup
+
+  group 'every AuraDE Python file compiles, and the login screen imports'
+  local -a py=()
+  for file in "${files[@]}"; do
+    [[ -f $file ]] || continue
+    if [[ $file == *.py ]] || head -1 "$file" 2>/dev/null | grep -Eq '^#!.*python'; then
+      py+=("$file")
+    fi
+  done
+  python3 - "${py[@]}" <<'PY' || problem 'an AuraDE Python file no longer compiles'
+import sys
+bad = 0
+for path in sys.argv[1:]:
+    try:
+        compile(open(path, encoding="utf-8").read(), path, "exec")
+    except SyntaxError as exc:
+        print(f"drift: {path}: {exc}", file=sys.stderr)
+        bad += 1
+print(f"{len(sys.argv) - 1} Python files compile under {sys.version.split()[0]}")
+sys.exit(1 if bad else 0)
+PY
+  python3 -c 'import sys; sys.path.insert(0, "/usr/lib/aurade-greeter"); import aurade_greeter.app' ||
+    problem 'the login screen no longer imports against current Arch Python and GTK'
+  endgroup
+
+  {
+    echo '### Arch drift'
+    echo
+    echo '| | |'
+    echo '|---|---|'
+    local name
+    for name in glibc icu python gtk4 weston chromiumos-ash aurade-greeter; do
+      echo "| ${name} | $(pacman -Q "$name" 2>/dev/null | cut -d' ' -f2) |"
+    done
+    echo
+    if (( problems )); then
+      echo "**${problems} problem(s)**: a machine running \`pacman -Syu\` today would hit them."
+    else
+      echo 'Everything published still resolves on current Arch.'
+    fi
+  } >/out/drift.md
+  (( problems == 0 )) || die "${problems} problem(s) against current Arch"
+  echo 'drift: everything published still resolves on current Arch'
+}
+
 job_install_hooks() {
   git config core.hooksPath ci/hooks
   echo 'ci/run.sh: this clone now runs ci/hooks (git push --no-verify skips them)'
@@ -366,6 +480,7 @@ case $job in
   fast) job_fast ;;
   changes) job_changes "$@" ;;
   hosted) job_hosted ;;
+  drift) job_drift ;;
   setup-ubuntu) job_setup_ubuntu ;;
   install-hooks) job_install_hooks ;;
   *) die "unknown job: $job" ;;
