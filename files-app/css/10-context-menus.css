@@ -249,3 +249,26 @@ body.light-theme .msep,
 }
 
 
+
+/* A submenu hangs outside its menu, and a menu that scrolls clips whatever
+   hangs outside it, so "Set as" could never open. The blur moves to a layer
+   of its own: with no backdrop filter on the menu itself, the menu is no
+   longer the box a fixed submenu is placed in, and 19-navigation.js puts the
+   submenu beside its row in the window's own coordinates. */
+.ctx, .ctx-sub {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.ctx::before, .ctx-sub::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: -1;
+  pointer-events: none;
+}
+.ctx .ctx-sub {
+  position: fixed;
+}

@@ -341,6 +341,10 @@
     }
   }
 
+  // The live layer rebuilds the rows in its own scope, after this has already
+  // judged the folder by a listing that had not arrived yet.
+  window.__updateEmptyFolderIndicator = updateEmptyFolderIndicator;
+
   // =========================================================================
   // 4. Marquee / Rubberband Selection
   // =========================================================================

@@ -2142,6 +2142,30 @@ def api_mksymlink(q, body):
     return {"link": link_abs, "target": target}
 
 
+#: The extensions the Rust daemon treats as pictures, so both backends hand
+#: out the same files.
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff",
+               ".tif", ".ico", ".avif"}
+_IMAGE_MAX_BYTES = 40 * 1024 * 1024
+
+
+def api_image(q, _body):
+    """The picture itself, for Set as desktop background. Images only."""
+    path = _abs((q or {}).get("path", ""))
+    if not path:
+        raise _Err(400, "path required")
+    if _os.path.splitext(path)[1].lower() not in _IMAGE_EXTS:
+        raise _Err(400, "not an image")
+    if not _os.path.isfile(path):
+        raise _Err(404, "not found")
+    if _os.path.getsize(path) > _IMAGE_MAX_BYTES:
+        raise _Err(400, "too large")
+    import mimetypes as _mimetypes
+    mime = _mimetypes.guess_type(path)[0] or "application/octet-stream"
+    with open(path, "rb") as fh:
+        return _Raw(fh.read(), mime)
+
+
 def api_thumbnail(q, _body):
     path = _abs((q or {}).get("path", ""))
     if not path:
@@ -2280,6 +2304,7 @@ _ROUTES = {
     ("POST", "/api/restore-all"): api_restore_all,
     ("POST", "/api/mksymlink"): api_mksymlink,
     ("GET", "/api/thumbnail"): api_thumbnail,
+    ("GET", "/api/image"): api_image,
     ("GET", "/api/xattr"): api_xattr,
     ("GET", "/api/recent"): api_recent,
 }
