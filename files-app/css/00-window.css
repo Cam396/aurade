@@ -832,3 +832,18 @@ body.light-theme #ctx-tab .mi {
 /* Wave B: Menus and Actions (WinUI 3 Fluent Design System) */
 /* Typography constraint: zero em dashes and zero en dashes. */
 
+/* Buttons that step aside when the toolbar runs out of room; the script in
+   00-layout-modes.js picks the level. */
+.toolbar.tb-tight-1 [data-tb="share"], .toolbar.tb-tight-1 [data-tb="rename"],
+.toolbar.tb-tight-1 [data-tb="properties"],
+.toolbar.tb-tight-2 [data-tb="new"] .tbtn > span,
+.toolbar.tb-tight-3 [data-tb="cut"], .toolbar.tb-tight-3 [data-tb="copy"],
+.toolbar.tb-tight-3 [data-tb="paste"] { display:none; }
+/* With no width to spare, the details pane floats over the file area below
+   the toolbar instead of taking a column of its own. */
+.body:has(.toolbar.tb-fold-pane) { position:relative; }
+.body:has(.toolbar.tb-fold-pane) > .infopane {
+  position:absolute; top:52px; bottom:36px; right:8px; z-index:5; margin:0;
+  background:var(--solid-3);
+  box-shadow:0 8px 16px rgba(0,0,0,.28);
+}
