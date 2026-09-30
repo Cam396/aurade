@@ -138,6 +138,57 @@ switch_user() {
   exec loginctl activate "${greeter_session}"
 }
 
+# Ending the logind session signals everything in it at once, the session's
+# own dbus-daemon included. When the bus goes first, Chrome finds its D-Bus
+# connection gone mid shutdown and aborts, which left a core dump on roughly
+# one sign out in four. So the browser is asked to quit first, while its bus
+# is still there, and the session is ended once it has. Chrome runs this, so
+# the waiting happens in a detached copy and Chrome gets its answer at once.
+browser_pids() {
+  local argv0="${AURADE_BROWSER_ARGV0:-/usr/lib/chromiumos-ash/chrome}"
+  local scope="${AURADE_SIGN_OUT_SCOPE:-/session-${session_id}.scope}"
+  local proc pid
+  local -a words
+  for proc in /proc/[0-9]*; do
+    pid="${proc#/proc/}"
+    [[ -O "${proc}" ]] || continue
+    # Chrome rewrites its command line into one space separated string, so
+    # it is read as words rather than as NUL separated arguments.
+    # read returns 1 at the missing final newline even though it read words.
+    words=()
+    read -r -a words < <(tr '\0' ' ' <"${proc}/cmdline" 2>/dev/null) || true
+    [[ "${words[0]:-}" == "${argv0}" ]] || continue
+    # Renderers, the GPU process and the rest carry --type=; the browser
+    # process does not, and quitting it takes them all down in order.
+    [[ " ${words[*]} " == *" --type="* ]] && continue
+    grep -Fq -- "${scope}" "${proc}/cgroup" 2>/dev/null || continue
+    echo "${pid}"
+  done
+}
+
+sign_out() {
+  require_own_session
+  if [[ -z "${AURADE_SIGN_OUT_DETACHED:-}" ]]; then
+    AURADE_SIGN_OUT_DETACHED=1 setsid -f "${BASH:-/usr/bin/bash}" "$0" sign-out </dev/null >/dev/null 2>&1
+    exit 0
+  fi
+  local grace="${AURADE_SIGN_OUT_GRACE_SECONDS:-10}" pid tick
+  local -a pids=()
+  mapfile -t pids < <(browser_pids)
+  if (( ${#pids[@]} )); then
+    kill -TERM "${pids[@]}" 2>/dev/null || true
+    for (( tick = 0; tick < grace * 10; tick++ )); do
+      for pid in "${pids[@]}"; do
+        kill -0 "${pid}" 2>/dev/null && break
+        pid=""
+      done
+      [[ -z "${pid}" ]] && break
+      sleep 0.1
+    done
+  fi
+  exec loginctl terminate-session "${session_id}"
+}
+
 case "${1:-}" in
   status)
     [[ "$#" -eq 1 ]] || { usage; exit 2; }
@@ -149,8 +200,7 @@ case "${1:-}" in
     ;;
   sign-out)
     [[ "$#" -eq 1 ]] || { usage; exit 2; }
-    require_own_session
-    exec loginctl terminate-session "${session_id}"
+    sign_out
     ;;
   switch-user)
     [[ "$#" -eq 1 ]] || { usage; exit 2; }
