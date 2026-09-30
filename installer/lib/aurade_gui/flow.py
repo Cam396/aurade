@@ -82,7 +82,7 @@ PAGES: tuple[Page, ...] = (
     Page(
         name="encryption",
         title="Disk encryption",
-        subtitle="Your files stay unreadable to anyone without the passphrase.",
+        subtitle="Protects your files if this computer is lost or stolen.",
         questions=("encrypt", "luks_passphrase"),
     ),
     Page(
