@@ -1200,6 +1200,18 @@ def run_wallpaper(window: InstallerWindow) -> None:
         equal(caption.get_label(), window.wallpaper["title"],
               "the caption did not follow the picture")
 
+    # The card over the caption is a card. A photograph asks for its own size,
+    # and the card once opened as wide as the screen because of it.
+    window._show_wallpaper_card()
+    pump()
+    card = window.widgets.get("card")
+    check(card is not None, "there is no wallpaper card")
+    if card is not None:
+        width = card.get_child().measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+        check(width <= 360, f"the wallpaper card asks to be {width} pixels wide")
+        card.popdown()
+        pump()
+
     # -- the two places it must not appear ---------------------------------
     #
     # Driven through the real switch rather than by setting the flag, because

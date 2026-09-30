@@ -1131,13 +1131,24 @@ class InstallerWindow(Adw.ApplicationWindow):
         box.set_size_request(300, -1)
 
         picture = Gtk.Picture()
-        picture.set_size_request(276, 154)
+        picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.COVER)
         picture.add_css_class("aurade-wallpaper-thumb")
-        picture.set_margin_bottom(14)
         A.decorative(picture)
-        box.append(picture)
+        # A picture asks for its photograph's own size, and a popover grows to
+        # whatever its child asks for, so a size request on the picture alone
+        # opened the card as wide as the screen. The frame asks for the thumb
+        # size and does not pass the photograph's size on.
+        frame = Gtk.ScrolledWindow()
+        frame.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        frame.set_propagate_natural_width(False)
+        frame.set_propagate_natural_height(False)
+        frame.set_size_request(276, 154)
+        frame.set_margin_bottom(14)
+        frame.set_child(picture)
+        box.append(frame)
         self.widgets["card.picture"] = picture
+        self.widgets["card.frame"] = frame
 
         for name, style, css, gap in (
             ("title", "m3-title-medium", "", 6),
@@ -1147,6 +1158,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         ):
             item = label("", style, css=css)
             item.set_wrap(True)
+            # A wrapping label asks for its whole text on one line unless it
+            # is told a measure, and that alone made the card wide.
+            item.set_max_width_chars(34)
             item.set_xalign(0)
             item.set_margin_bottom(gap)
             box.append(item)
