@@ -45,12 +45,20 @@ python3 -c 'import pexpect' 2>/dev/null || fail 'python3 pexpect is missing'
 [[ -r $ISO ]] || fail "no ISO at $ISO"
 [[ -r /dev/kvm ]] || fail '/dev/kvm is not available'
 
+# AURADE_SMOKE_REUSE_DISK=1 skips the install and boots the disk already in
+# WORK, which is how ci/iso-upgrade-smoke.sh checks an upgraded older release.
+REUSE=${AURADE_SMOKE_REUSE_DISK:-}
 mkdir -p "$WORK"
-cp -f "$OVMF_VARS" "$WORK/OVMF_VARS.fd"
-bsdtar -xf "$ISO" -C "$WORK" arch/boot/x86_64/vmlinuz-linux arch/boot/x86_64/initramfs-linux.img
+if [[ -n $REUSE ]]; then
+  [[ -f $WORK/disk.qcow2 && -f $WORK/OVMF_VARS.fd && -f $WORK/id_ed25519 ]] ||
+    fail "AURADE_SMOKE_REUSE_DISK needs an installed disk, its firmware variables and its key in $WORK"
+else
+  cp -f "$OVMF_VARS" "$WORK/OVMF_VARS.fd"
+  bsdtar -xf "$ISO" -C "$WORK" arch/boot/x86_64/vmlinuz-linux arch/boot/x86_64/initramfs-linux.img
+  qemu-img create -q -f qcow2 "$WORK/disk.qcow2" "${DISK_GB}G"
+fi
 KERNEL="$WORK/arch/boot/x86_64/vmlinuz-linux"
 INITRD="$WORK/arch/boot/x86_64/initramfs-linux.img"
-qemu-img create -q -f qcow2 "$WORK/disk.qcow2" "${DISK_GB}G"
 [[ -f $WORK/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -f "$WORK/id_ed25519"
 PUBKEY=$(cat "$WORK/id_ed25519.pub")
 PASSWORD_HASH=$(openssl passwd -6 "$USERNAME")
@@ -61,6 +69,7 @@ common=(-machine q35,accel=kvm -cpu host -smp "$CPUS" -m "$MEM"
         -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2"
         -display none -no-reboot)
 
+if [[ -z $REUSE ]]; then
 echo "==> phase one: install from the live image"
 AURADE_SMOKE_QEMU="qemu-system-x86_64 ${common[*]} -cdrom $ISO -kernel $KERNEL -initrd $INITRD -nic user,model=virtio-net-pci -serial stdio -monitor none" \
 AURADE_SMOKE_APPEND="archisobasedir=arch archisolabel=AURADE_INSTALL cow_spacesize=4G aurade.installer=none systemd.debug_shell=ttyS0" \
@@ -130,6 +139,13 @@ if status != 0:
 child.sendline("sync; systemctl poweroff")
 child.expect(pexpect.EOF, timeout=180)
 PY
+
+# An installed disk and its key are all an upgrade test needs from here.
+if [[ -n ${AURADE_SMOKE_INSTALL_ONLY:-} ]]; then
+  echo "iso install smoke: installed onto $WORK/disk.qcow2; stopping as AURADE_SMOKE_INSTALL_ONLY asks"
+  exit 0
+fi
+fi
 
 echo "==> phase two: boot the installed disk"
 # Plain VGA with no render node, which is the software rendering path a VM
@@ -212,7 +228,12 @@ sremote 'grep -q "^command = \"/usr/lib/aurade-greeter/aurade-greeter-session\""
   fail 'greetd is not configured for the graphical login screen'
 sremote 'for i in $(seq 1 60); do pgrep -f "^/usr/bin/python3? /usr/bin/aurade-greeter|/usr/bin/aurade-greeter" >/dev/null && exit 0; sleep 1; done; exit 1' ||
   fail 'the graphical login screen never started'
-sremote 'test ! -s /var/lib/aurade-greeter/quick-exits' || fail 'the login screen already fell back to text'
+# The file holds a boot id and how many times the graphical screen died fast
+# in that boot. An entry from an earlier boot (an update, a shutdown) is not a
+# failure; a quick exit in this boot is.
+sremote 'read -r boot count </var/lib/aurade-greeter/quick-exits 2>/dev/null || exit 0
+         [[ $boot != "$(cat /proc/sys/kernel/random/boot_id)" || $count == 0 ]]' ||
+  fail 'the graphical login screen already exited early in this boot'
 sleep 5
 shot 1-greeter
 
@@ -275,4 +296,34 @@ sremote "runuser -u $USERNAME -- env XDG_RUNTIME_DIR=/run/user/$uid sh -c '
   done; exit 1'" || fail 'auradefs never answered on 8902'
 echo "   auradefs answered on 127.0.0.1:8902"
 
-echo "iso install smoke: PASS (install, graphical sign in, local first run, desktop, file service)"
+# 1.0 left a core dump on sign out. Ctrl+Shift+Q twice is how a person signs
+# out of Ash; the login screen has to come back, nothing may crash, and the
+# second sign in has to go straight to the desktop with no first-run setup.
+echo "==> sign out, and sign in again"
+oobe_loads=$(sremote "journalctl -b --no-pager -o cat | grep -c 'OOBE finished loading'" || true)
+keys ctrl-shift-q; sleep 1; keys ctrl-shift-q
+sremote "for i in \$(seq 1 60); do pgrep -u $USERNAME -f -- '--aurade-enable-local-accounts' >/dev/null || exit 0; sleep 1; done; exit 1" ||
+  fail 'signing out did not end the session'
+sremote 'for i in $(seq 1 60); do pgrep -f /usr/bin/aurade-greeter >/dev/null && exit 0; sleep 1; done; exit 1' ||
+  fail 'the login screen did not come back after signing out'
+sleep 10
+shot 6-signed-out
+cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
+[[ $cores == 0 ]] || fail "signing out left ${cores} core dump(s)"
+keys ret; sleep 2
+keys ret; sleep 2
+type_text "$USERNAME"
+keys ret
+sremote "for i in \$(seq 1 90); do pgrep -u $USERNAME -f -- '--aurade-enable-local-accounts' >/dev/null && exit 0; sleep 1; done; exit 1" ||
+  fail 'the second sign in did not start the desktop session'
+sremote "for i in \$(seq 1 60); do curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | grep -q '\"type\": \"page\"' && exit 0; sleep 2; done; exit 1" ||
+  fail 'the second sign in never opened a browser page'
+[[ $(sremote "journalctl -b --no-pager -o cat | grep -c 'OOBE finished loading'" || true) == "$oobe_loads" ]] ||
+  fail 'the second sign in ran first-run setup again'
+sleep 5
+shot 7-desktop-again
+cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
+[[ $cores == 0 ]] || fail "the second sign in left ${cores} core dump(s)"
+echo "   signed out to the login screen and back in, with no crash and no second setup"
+
+echo "iso install smoke: PASS (install, graphical sign in, local first run, desktop, file service, sign out and in)"
