@@ -377,6 +377,16 @@ grep -Fq 'a graphics adapter with a very long name' "$TMP/longwords.out" ||
 measure "$TMP/longwords.out" || fail 'a long spaced field value broke the frame'
 grep -q 'name-$' "$TMP/longwords.out" && fail 'a spaced value was cut mid word'
 
+# A display with no render node, plain VGA in a virtual machine, runs the
+# graphical installer in software, so the text one must not say it cannot.
+mkdir -p "$TMP/dri-display" && : >"$TMP/dri-display/card0"
+env AURADE_TUI_COLOR=none AURADE_TUI_FRAME=ascii AURADE_PROBE_DRI_DIR="$TMP/dri-display" \
+  "$TUI" --render fallback >"$TMP/display-only.out"
+flatten "$TMP/display-only.out" | grep -Fq 'graphical installer also works here' ||
+  fail 'the display only fallback does not say the graphical installer works'
+flatten "$TMP/display-only.out" | grep -Fq 'cannot start' &&
+  fail 'the display only fallback says the graphical installer cannot start'
+
 python3 - "$TMP/longfield.out" <<'PY' || fail 'a long field value did not wrap into its own column'
 import sys
 lines = open(sys.argv[1], encoding='utf-8').read().split('\n')

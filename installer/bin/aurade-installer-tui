@@ -985,6 +985,10 @@ screen_fallback() {
   tui_blank
   if aurade_probe_predicts_black_screen; then
     tui_wrap 'This computer has no working 3D acceleration, so the graphical installer cannot start. The text installer does exactly the same thing.' ink
+  elif [[ $AURADE_PROBE_REASON == display-only ]]; then
+    # The graphical installer does start here, drawn by the processor, so
+    # this screen must not say that it cannot.
+    tui_wrap 'This computer has no 3D acceleration. The graphical installer also works here, drawn by the processor. The text installer does exactly the same thing.' ink
   else
     tui_wrap 'The graphical installer cannot start on this computer. The text installer does exactly the same thing.' ink
   fi
