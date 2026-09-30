@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## Unreleased
+## 1.1.1, 2026-09-29
 
 ### Updating from 1.0.0 or 1.1.0
 Machines installed from 1.0.0 or 1.1.0 only read the copy of the AuraDE repository on their own disk, so they never see an update. Paste this once in a terminal; it adds the online repository ahead of that copy and updates. Pasting it again changes nothing.
@@ -18,7 +18,7 @@ grep -q Cam396/aurade /etc/pacman.d/aurade-mirrorlist || sudo sed -i '1i Server 
 - The Memory Saver tip says "Make AuraDE faster".
 
 ### Fixed
-- Signing out no longer crashes the desktop in the background. The browser used to be stopped at the same moment as the session's message bus, and about one sign out in three left a crash report behind. It now finishes quitting first.
+- Signing out no longer crashes the desktop in the background. The browser used to be stopped at the same moment as the session's message bus, and up to half of all sign outs left a crash report behind. It now finishes quitting first.
 - Installing some AuraDE packages from the online repository failed with "invalid or corrupted package". The repository was repaired on 2026-09-29, and every release now checks that what is served matches its database.
 
 ### Removed
