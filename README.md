@@ -86,6 +86,22 @@ Use a matching checksum and release notice for every image. The installer
 shows the selected disk, repeats its identity immediately before the erase
 gate, and keeps the text path available when graphics are unavailable.
 
+### Updates
+
+`sudo pacman -Syu` updates AuraDE along with Arch. Installs from 1.1.1 on
+already do this. A machine installed from 1.0.0 or 1.1.0 only reads the copy
+of the repository on its own disk, so it never sees an update until this is
+run once. It adds the online repository ahead of that copy, which stays as a
+fallback, and then updates:
+
+<!-- enable-updates -->
+```sh
+grep -q Cam396/aurade /etc/pacman.d/aurade-mirrorlist || sudo sed -i '1i Server = https://github.com/Cam396/aurade/releases/download/repo-x86_64' /etc/pacman.d/aurade-mirrorlist; sudo pacman -Syu
+```
+
+Running it again changes nothing, so it is safe to paste on any AuraDE
+machine.
+
 AuraDE is developed in public through GitHub issues and discussions. When
 asking for help, include the release or commit, hardware family, and the exact
 user-visible error. Remove passwords, API keys, serial numbers, private logs,
