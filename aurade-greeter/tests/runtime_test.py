@@ -29,6 +29,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from zoneinfo import ZoneInfo
 
 TESTS = os.path.dirname(os.path.realpath(__file__))
 PACKAGE = os.path.normpath(os.path.join(TESTS, ".."))
@@ -102,7 +103,11 @@ def seed_weather() -> None:
     where = os.environ.get("AURADE_WEATHER_CACHE")
     if not where:
         return
-    start = datetime.datetime.now().astimezone().replace(
+    # The panel names days in the forecast's own zone, so the forecast is
+    # dated there too. Dated by this machine's clock instead, the first day
+    # was tomorrow in New York for the four hours a UTC runner is already
+    # past midnight, and the week lost its "Today".
+    start = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         minute=0, second=0, microsecond=0)
     report = WX.Report(
         place="Ardsley, NY", provider="nws", latitude=41.0126,
