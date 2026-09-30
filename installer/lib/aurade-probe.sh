@@ -222,8 +222,18 @@ _aurade_probe_renderer() {
   case $selection in
     1)
       AURADE_PROBE_RENDERER=tui
-      AURADE_PROBE_REASON=no-render-node
-      AURADE_PROBE_GRAPHICS='none found'
+      # A display device with no render node is what plain VGA in a virtual
+      # machine, or a GPU whose driver has no 3D, looks like. The installed
+      # desktop draws in software there (chromiumos-ash-session.sh), so it
+      # is slow, not black. Only a /dev/dri with no display device at all
+      # has nothing to put a picture on.
+      if compgen -G "$AURADE_PROBE_DRI_DIR/card*" >/dev/null; then
+        AURADE_PROBE_REASON=display-only
+        AURADE_PROBE_GRAPHICS='a display with no 3D acceleration'
+      else
+        AURADE_PROBE_REASON=no-render-node
+        AURADE_PROBE_GRAPHICS='none found'
+      fi
       return 0
       ;;
     2)
@@ -305,7 +315,7 @@ aurade_probe_advice() {
     virtual-gpu-only)
       printf '%s' "The only graphics device here is $AURADE_PROBE_DRIVER, and it has no display output. Without 3D acceleration from a real graphics adapter, the desktop will not start."
       ;;
-    software-rendering)
+    software-rendering|display-only)
       printf '%s' "Graphics are being drawn by the processor rather than by a graphics card. The desktop will start, and it will be slow. On a virtual machine, turning on 3D acceleration usually fixes it."
       ;;
     forced)
