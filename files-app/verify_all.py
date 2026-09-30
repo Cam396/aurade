@@ -697,6 +697,32 @@ def main():
             check("history-records",
                   ev("() => JSON.parse(sessionStorage.getItem('aurade-trail') || '[]').length >= 1"),
                   True)
+            # A narrow window with the details pane open pushed the toolbar's
+            # right-hand buttons under the pane, where no click could reach
+            # the one that closes it.
+            def metrics(params):
+                seq[0] += 1
+                ws.send(json.dumps({"id": seq[0], "params": params, "method":
+                                    "Emulation.setDeviceMetricsOverride" if params
+                                    else "Emulation.clearDeviceMetricsOverride"}))
+                while json.loads(ws.recv()).get("id") != seq[0]:
+                    pass
+            metrics({"width": 700, "height": 700, "deviceScaleFactor": 1,
+                     "mobile": False})
+            check("narrow-toolbar-keeps-the-pane-button",
+                  ev("async () => { const b = document.getElementById('btn-pane');"
+                     " const was = b.getAttribute('aria-pressed') === 'true';"
+                     " if (!was) b.click();"
+                     " await new Promise(r => setTimeout(r, 300));"
+                     " const q = b.getBoundingClientRect();"
+                     " const hit = document.elementFromPoint(q.left + q.width / 2,"
+                     " q.top + q.height / 2);"
+                     " const pane = document.getElementById('infopane');"
+                     " const out = [!!(hit && hit.closest('#btn-pane')),"
+                     " pane.getBoundingClientRect().width > 0];"
+                     " if (!was) b.click(); return out; }"),
+                  [True, True])
+            metrics(None)
             # Column resize. The header cell and the body cell of a column
             # read one custom property, so the test that matters is that both
             # move together: two numbers kept equal by hand drift the moment

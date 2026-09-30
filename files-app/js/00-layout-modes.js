@@ -89,3 +89,37 @@ window.__DIR_CATALOG = __BUILD("CATALOG_JSON");
   window.__mode = () => mode;
   window.__modes = MODES;
 })();
+//: A narrow window, or the details pane taking its share, leaves the toolbar
+//: less room than its buttons need. The bar cannot clip, since its menus hang
+//: out of it, so the buttons on the right used to paint under the pane where
+//: nothing could reach them. The ones the context menu also offers go first,
+//: then the New label, then the clipboard trio. If that is still not enough,
+//: the details pane stops taking a column and floats over the file area.
+(() => {
+  const LEVELS = ['tb-tight-1', 'tb-tight-2', 'tb-tight-3', 'tb-fold-pane'];
+  const fits = bar => bar.scrollWidth <= bar.clientWidth + 1;
+  const fit = bar => {
+    bar.classList.remove(...LEVELS);
+    for (const level of LEVELS) {
+      if (fits(bar)) break;
+      bar.classList.add(level);
+    }
+    if (!bar.classList.contains('tb-fold-pane')) return;
+    //: The floating pane hands its width to the bar, so the buttons that
+    //: went before it may fit again.
+    for (const level of LEVELS.slice(0, -1).reverse()) {
+      bar.classList.remove(level);
+      if (!fits(bar)) { bar.classList.add(level); break; }
+    }
+  };
+  if (!window.ResizeObserver) return;
+  const watch = new ResizeObserver(entries => entries.forEach(e => fit(e.target)));
+  //: The set of buttons changes too, with the page and with the customised
+  //: toolbar, and neither changes the bar's own size.
+  const again = new MutationObserver(records => fit(records[0].target.closest('.toolbar')));
+  document.querySelectorAll('.toolbar').forEach(bar => {
+    watch.observe(bar);
+    again.observe(bar, { subtree: true, childList: true, attributes: true,
+      attributeFilter: ['hidden'] });
+  });
+})();
