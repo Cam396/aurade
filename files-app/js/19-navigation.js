@@ -257,11 +257,20 @@
   function dressMenu(m) {
     m.querySelectorAll('[data-command]').forEach(row => {
       const c = COMMANDS.get(row.getAttribute('data-command'));
-      if (!c) return;
+      //: A command this page never registered cannot run, and a row that does
+      //: nothing when clicked is worse than no row. Slideshow is one.
+      if (!c) {
+        if (!row.hasAttribute('data-keep')) row.hidden = true;
+        return;
+      }
       let can = true;
       try { can = !c.enabled || !!c.enabled(ctxTarget); } catch (err) { can = false; }
+      //: A row whose own condition is false is not in the menu at all, grey
+      //: or not. Only a row that belongs here goes grey when it cannot run.
+      let shown = true;
+      try { shown = !c.shown || !!c.shown(ctxTarget); } catch (err) { shown = false; }
       const keep = row.hasAttribute('data-keep');
-      row.hidden = !can && !keep;
+      row.hidden = !shown || (!can && !keep);
       row.classList.toggle('dis', !can);
       if (c.unavailable) {
         row.classList.add('dis');
@@ -319,6 +328,26 @@
     });
     if (run) run.hidden = true;
   }
+
+  // A submenu is fixed to the window (10-context-menus.css), so it is put
+  // beside its row here, and on the left of it when there is no room on the
+  // right. Measured after the hover has shown it.
+  document.addEventListener('mouseover', e => {
+    const row = e.target && e.target.closest && e.target.closest('.mi-sub');
+    if (!row) return;
+    const list = row.querySelector(':scope > .ctx-sub');
+    if (!list) return;
+    requestAnimationFrame(() => {
+      const r = row.getBoundingClientRect();
+      const w = list.offsetWidth, h = list.offsetHeight;
+      let x = r.right;
+      if (x + w > window.innerWidth - 8) x = Math.max(8, r.left - w);
+      let y = r.top - 4;
+      if (y + h > window.innerHeight - 8) y = Math.max(8, window.innerHeight - 8 - h);
+      list.style.left = x + 'px';
+      list.style.top = y + 'px';
+    });
+  });
 
   function openCtx(id, x, y) {
     hideOverlays();

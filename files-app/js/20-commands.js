@@ -100,6 +100,18 @@
     const p = (window.__livePath || (activeTab() ? activeTab().path : '')) || '';
     return p.indexOf('/.local/share/Trash') !== -1;
   };
+  //: What a row is for, which `shown` asks before whether it can run. Files
+  //: states these as conditions on the row, and a row whose condition is
+  //: false is not in the menu at all: Restore belongs to the trash, Run as to
+  //: a program, and Set as to one picture.
+  const IMAGE_NAME = /\.(png|jpe?g|gif|bmp|webp|tiff?|avif)$/i;
+  const RUNNABLE_NAME = /\.(sh|bash|run|bin|appimage|desktop|py|pl)$/i;
+  const oneSelectedMatching = (re) => {
+    const paths = selectedPaths();
+    return paths.length === 1 && re.test(paths[0]);
+  };
+  const oneImage = () => oneSelectedMatching(IMAGE_NAME);
+  const oneRunnable = () => oneSelectedMatching(RUNNABLE_NAME);
 
 __BUILD("COMMAND_REGISTRATIONS")
 
@@ -441,17 +453,17 @@ __BUILD("COMMAND_REGISTRATIONS")
     if (!confirm('Empty the trash? This cannot be undone.')) return;
     await ask('/api/empty-trash', {});
     refreshHere();
-  })});
+  }), shown: inTrash});
   cmd('RestoreRecycleBin', {run: quietly(async () => {
     const paths = selectedPaths();
     if (!paths.length) return;
     await ask('/api/restore', {paths: paths});
     refreshHere();
-  }), enabled: () => selectedPaths().length > 0});
+  }), enabled: () => selectedPaths().length > 0, shown: inTrash});
   cmd('RestoreAllRecycleBin', {run: quietly(async () => {
     await ask('/api/restore-all', {});
     refreshHere();
-  })});
+  }), shown: inTrash});
   // A named stream on a file, which on Linux is an extended attribute in the
   // user namespace. Files calls it an alternate data stream because that is
   // what NTFS calls it; the thing itself is the same idea.
@@ -493,14 +505,14 @@ __BUILD("COMMAND_REGISTRATIONS")
   cmd('RunAsAdmin', {run: quietly(async () => {
     const path = onePath(null);
     if (path) await ask('/api/run-admin', {path: path});
-  }), enabled: () => selectedPaths().length === 1});
+  }), enabled: () => selectedPaths().length === 1, shown: oneRunnable});
   cmd('RunAsAnotherUser', {run: quietly(async () => {
     const path = onePath(null);
     if (!path) return;
     const who = window.prompt('Run as which user?');
     if (!who) return;
     await ask('/api/run-admin', {path: path, user: who});
-  }), enabled: () => selectedPaths().length === 1});
+  }), enabled: () => selectedPaths().length === 1, shown: oneRunnable});
   cmd('InstallFont', {run: quietly(async () => {
     const paths = selectedPaths();
     if (!paths.length) return;
@@ -722,7 +734,33 @@ __BUILD("COMMAND_REGISTRATIONS")
     if (!path) return;
     if (window.__setPref) window.__setPref('bgImagePath', path);
     if (window.__toast) window.__toast('Background set');
-  }, enabled: () => selectedPaths().length === 1});
+  }, enabled: () => selectedPaths().length === 1, shown: oneImage});
+
+  // The desktop's wallpaper, set the way the ChromeOS Files app sets it: the
+  // picture's own bytes handed to the wallpaper API, cropped to fill.
+  cmd('SetAsWallpaperBackground', {run: quietly(async () => {
+    const path = onePath(null);
+    if (!path || !window.__api) return;
+    const wallpaper = window.chrome && window.chrome.wallpaper;
+    if (!wallpaper || !wallpaper.setWallpaper) {
+      if (window.__toast) window.__toast('This window cannot set the desktop background.');
+      return;
+    }
+    const r = await fetch(window.__api + '/api/image?path=' + encodeURIComponent(path));
+    if (!r.ok) throw new Error('http ' + r.status);
+    const data = await r.arrayBuffer();
+    await wallpaper.setWallpaper({
+      data: data,
+      layout: 'CENTER_CROPPED',
+      filename: path.split('/').pop() || 'wallpaper',
+    });
+    if (window.__toast) window.__toast('Desktop background set');
+  }), enabled: () => selectedPaths().length === 1, shown: oneImage});
+  // The lock screen is drawn from the desktop's wallpaper, which the palette
+  // explains (COMMAND_NOT_HERE). In the menu that explanation would be a grey
+  // row under a picture, so there the row is simply not offered.
+  const lockscreen = COMMANDS.get('SetAsLockscreenBackground');
+  if (lockscreen) lockscreen.shown = () => false;
 
   // PowerShell is a real program on this system when it is installed, so this
   // is the command Files has and not a stand in. `-File`, so the script's

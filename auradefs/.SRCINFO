@@ -1,7 +1,7 @@
 pkgbase = auradefs
 	pkgdesc = The file service behind the AuraDE Files app
 	pkgver = 0.1.0
-	pkgrel = 4
+	pkgrel = 5
 	url = https://github.com/Cam396/aurade
 	arch = x86_64
 	license = MIT
@@ -17,6 +17,7 @@ pkgbase = auradefs
 	optdepends = poppler: PDF thumbnails and previews
 	optdepends = gnupg: signature verification in Properties
 	optdepends = polkit: Run as administrator, through pkexec
+	options = !lto
 	source = README.md
 	source = LICENSE
 	source = auradefs.service

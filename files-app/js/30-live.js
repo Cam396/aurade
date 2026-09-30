@@ -557,6 +557,11 @@
     }
     // The folder changed, so the rule gets to look again.
     if (window.__relayoutAdaptive) window.__relayoutAdaptive();
+    //: The empty folder message was decided before this listing arrived, so a
+    //: folder that has things in it has to take it down again.
+    if (window.__updateEmptyFolderIndicator) {
+      window.__updateEmptyFolderIndicator(items.length, false);
+    }
     //: A rebuild replaces every row, so the tag cells are empty again. The
     //: index is already in memory, so catching them up costs no request.
     if (window.__tags) window.__tags.paint();

@@ -46,7 +46,7 @@ cd "${PACKAGE_SRC}"
 makepkg --force --noconfirm --nodeps
 
 package_file="$(find "${PKGDEST}" -maxdepth 1 -type f \
-  -name 'auradefs-*.pkg.tar.*' ! -name '*.sig' -printf '%T@ %p\n' |
+  -name 'auradefs-*.pkg.tar.*' ! -name 'auradefs-debug-*' ! -name '*.sig' -printf '%T@ %p\n' |
   sort -nr | head -1 | cut -d' ' -f2-)"
 if [[ -z "${package_file}" ]]; then
   echo "makepkg finished but no auradefs package is in ${PKGDEST}" >&2

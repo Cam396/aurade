@@ -792,6 +792,28 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
             })
         }
 
+        //: The picture itself, for Set as desktop background: the wallpaper is
+        //: made from the file's own bytes, not from a thumbnail of them. Only
+        //: an image, and no bigger than a thumbnail would read.
+        ("GET", "/api/image") => {
+            let file = path_param(req, "path")?;
+            if thumbs::Kind::of_path(&file) != Some(thumbs::Kind::Image) {
+                return Err(Error::BadRequest("not an image".into()));
+            }
+            let meta = std::fs::metadata(&file)
+                .map_err(|e| Error::io(file.display().to_string(), e))?;
+            if meta.is_dir() {
+                return Err(Error::BadRequest("is a directory".into()));
+            }
+            if meta.len() > thumbs::MAX_SOURCE_BYTES {
+                return Err(Error::BadRequest("too large".into()));
+            }
+            let mime_type = service.mime.of_path(&file)?;
+            let bytes =
+                std::fs::read(&file).map_err(|e| Error::io(file.display().to_string(), e))?;
+            return Ok(Answer::Bytes(mime_type, bytes));
+        }
+
         // ---------------------------------------------------------- thumbnails
         ("GET", "/api/thumb") | ("GET", "/api/thumbnail") => {
             let file = path_param(req, "path")?;
@@ -2619,6 +2641,26 @@ mod tests {
             .status()
             .ok()?;
         status.success().then_some(out)
+    }
+
+    #[test]
+    fn an_image_is_read_whole_and_nothing_else_is() {
+        let dir = std::env::temp_dir().join("auradefs-api-image");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let art = dir.join("wall.png");
+        image::RgbImage::from_pixel(8, 8, image::Rgb([20, 120, 220])).save(&art).unwrap();
+        let text = dir.join("notes.txt");
+        std::fs::write(&text, "not a picture").unwrap();
+        let service = Arc::new(Service::new());
+
+        let got = call(&service, "GET", &format!("/api/image?path={}", art.display()), Value::Null)
+            .unwrap();
+        assert_eq!(got["mime"], "image/png");
+        assert_eq!(got["len"].as_u64().unwrap(), std::fs::metadata(&art).unwrap().len());
+        let refused = call(&service, "GET", &format!("/api/image?path={}", text.display()), Value::Null);
+        assert!(refused.is_err(), "a file that is not an image is not handed out");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

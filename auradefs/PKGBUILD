@@ -2,7 +2,7 @@
 
 pkgname=auradefs
 pkgver=0.1.0
-pkgrel=4
+pkgrel=5
 pkgdesc="The file service behind the AuraDE Files app"
 arch=('x86_64')
 url="https://github.com/Cam396/aurade"
@@ -16,6 +16,9 @@ license=('MIT')
 # makes that a decision rather than a surprise.
 depends=('gcc-libs' 'glibc' 'xz' 'bzip2' 'zlib' 'libgit2.so=1.9-64')
 makedepends=('cargo' 'rust')
+# The vendored zstd is C, and makepkg's lto option compiles it to GCC bitcode
+# that the Rust link cannot read: every ZSTD_ symbol comes out undefined.
+options=('!lto')
 optdepends=(
   'ffmpeg: video thumbnails, media details and the covers of sound files'
   'poppler: PDF thumbnails and previews'

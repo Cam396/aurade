@@ -2029,7 +2029,7 @@
 
     pane.appendChild(linkCard('Documentation',
       'How AuraDE is put together, how to build it, and what each package does.',
-      'Open', 'https://github.com/aurade-project/aurade/tree/main/docs'));
+      'Open', 'https://github.com/Cam396/aurade/tree/main/docs'));
     pane.appendChild(createCard('Keyboard shortcuts',
       'Every binding in this window, on one page. Also on question mark.',
       el('button', {
@@ -2056,13 +2056,13 @@
           'Something behaved differently to how it reads. Include what you did and what happened.',
           el('button', {
             className: 'btn-dlg', type: 'button', id: 'btn-link-issues', text: 'Open tracker',
-            onclick: function () { window.open('https://github.com/aurade-project/aurade/issues', '_blank', 'noopener'); }
+            onclick: function () { window.open('https://github.com/Cam396/aurade/issues', '_blank', 'noopener'); }
           })),
         createNestedCard('Request a feature',
           'Something is missing. Say what you were trying to do, not only what to add.',
           el('button', {
             className: 'btn-dlg', type: 'button', text: 'Open tracker',
-            onclick: function () { window.open('https://github.com/aurade-project/aurade/issues/new', '_blank', 'noopener'); }
+            onclick: function () { window.open('https://github.com/Cam396/aurade/issues/new', '_blank', 'noopener'); }
           }))
       ], false));
 
@@ -2070,7 +2070,7 @@
 
     pane.appendChild(linkCard('Source code',
       'AuraDE is BSD 3-Clause. Read it, build it, fork it.',
-      'Open', 'https://github.com/aurade-project/aurade'));
+      'Open', 'https://github.com/Cam396/aurade'));
     pane.appendChild(createCard('Privacy',
       'This file manager collects nothing. No telemetry, no crash reports, no '
       + 'identifier. Thumbnails and previews are made on this computer and stay on it.',
