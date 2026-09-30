@@ -1,0 +1,65 @@
+name: Hardware report
+description: Tell us how AuraDE ran on a machine or in a virtual machine, good or bad.
+title: "Hardware: "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every report helps, including "everything worked". Please leave out
+        serial numbers, IP addresses, passwords and anything else private.
+  - type: input
+    id: release
+    attributes:
+      label: AuraDE release
+      description: From the ISO's name, or `pacman -Q chromiumos-ash` on the installed system.
+      placeholder: v1.1.1
+    validations:
+      required: true
+  - type: input
+    id: machine
+    attributes:
+      label: Machine
+      description: Maker and model, or the hypervisor and its version for a virtual machine.
+      placeholder: Lenovo ThinkPad T480, or VirtualBox 7.1 on Windows 11
+    validations:
+      required: true
+  - type: input
+    id: cpu-gpu
+    attributes:
+      label: Processor and graphics
+      placeholder: Intel Core i5-8250U, Intel UHD 620
+  - type: dropdown
+    id: installer
+    attributes:
+      label: Installer used
+      options:
+        - Graphical
+        - Text
+        - Did not get that far
+    validations:
+      required: true
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What worked
+      options:
+        - label: The ISO booted
+        - label: The install finished
+        - label: The installed system reached the login screen
+        - label: The desktop appeared after signing in
+        - label: Wi-Fi
+        - label: Sound
+        - label: Suspend and resume
+        - label: Brightness keys and the touchpad
+  - type: textarea
+    id: notes
+    attributes:
+      label: What happened
+      description: Anything that broke, looked wrong or was slow, and what you did just before.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt (optional)
+      description: A short, redacted excerpt, such as `journalctl -b -p warning` lines near the problem.
+      render: text
