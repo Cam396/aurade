@@ -41,7 +41,13 @@ for dir in "${EXPORT}"/*/; do
   find "${repo}" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
   cp -a "${dir}/." "${repo}/"
   rm -f "${repo}"/*.log
-  (cd "${repo}" && makepkg --printsrcinfo > .SRCINFO)
+  if (( EUID == 0 )); then
+    # makepkg will not run as root, even only to print metadata.
+    chmod -R a+rX "${WORK}"
+    runuser -u nobody -- bash -c 'b=$(mktemp -d) && cd "$1" && BUILDDIR=$b PKGDEST=$b SRCDEST=$b SRCPKGDEST=$b LOGDEST=$b makepkg --printsrcinfo; s=$?; rm -rf "$b"; exit $s' _ "${repo}" > "${repo}/.SRCINFO"
+  else
+    (cd "${repo}" && makepkg --printsrcinfo > .SRCINFO)
+  fi
   ver=$(sed -n 's/^\tpkgver = //p' "${repo}/.SRCINFO" | head -1)
   rel=$(sed -n 's/^\tpkgrel = //p' "${repo}/.SRCINFO" | head -1)
   git -C "${repo}" add -A
