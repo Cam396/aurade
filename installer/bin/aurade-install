@@ -1306,7 +1306,7 @@ log "safety token: $ERASE_TOKEN"
 aurade_journal_init "$MODE" "$TARGET" || {
   die 'the install journal could not be started, and nothing runs without one'
 }
-aurade_journal_begin preflight 'validating target and environment'
+aurade_journal_begin preflight 'Checking the disk and this computer'
 aurade_journal_ok preflight
 
 WORK_PARENT=${AURADE_INSTALL_WORK_DIR:-/var/tmp}
@@ -1350,15 +1350,15 @@ fi
 
 # Package metadata and a package URL are checked before the target changes.
 # The selected staging route is recorded before either download path begins.
-aurade_journal_begin package-check 'checking the pinned package set and staging capacity'
+aurade_journal_begin package-check 'Checking the package list and where it will be stored'
 acquire_arch_packages
 aurade_journal_ok package-check "$ARCH_STAGING_SELECTED"
 if [[ $MODE == execute && $ARCH_STAGING_SELECTED == workspace ]]; then
-  aurade_journal_begin acquire 'downloading packages before changing the target'
+  aurade_journal_begin acquire 'Downloading and checking packages'
   download_arch_packages 0
   aurade_journal_ok acquire
 elif [[ $MODE == dry-run && $STAGING_MODE == workspace ]]; then
-  aurade_journal_begin acquire 'downloading packages before changing the target'
+  aurade_journal_begin acquire 'Downloading and checking packages'
   run pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
     --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"
   run repo-add "$ARCH_CACHE/aurade-arch.db.tar.gz" \
@@ -1369,10 +1369,10 @@ fi
 
 # Everything above this line is reversible: the disk has not been touched and
 # an abandoned run costs only the downloads. Everything below it is not.
-aurade_journal_begin confirm 'erase token accepted'
+aurade_journal_begin confirm 'Erase confirmed'
 aurade_journal_ok confirm
 
-aurade_journal_begin partition 'partitioning the disk'
+aurade_journal_begin partition 'Partitioning the disk'
 ROOT_PARTITION_TYPE=8300
 (( LUKS )) && ROOT_PARTITION_TYPE=8309
 if [[ $LAYOUT == alongside ]]; then
@@ -1402,7 +1402,7 @@ else
 fi
 aurade_journal_ok partition
 
-aurade_journal_begin format 'creating filesystems'
+aurade_journal_begin format 'Creating the filesystems'
 if [[ $LAYOUT == alongside ]]; then
   # Formatting the ESP here would destroy the boot entries of whatever is
   # already installed, which is the single most damaging thing this mode could
@@ -1428,7 +1428,7 @@ case $FILESYSTEM in
 esac
 aurade_journal_ok format
 
-aurade_journal_begin mount 'laying out and mounting the filesystems'
+aurade_journal_begin mount 'Mounting the new filesystems'
 run install -d -m 0755 "$MOUNTPOINT"
 if [[ $FILESYSTEM == btrfs ]]; then
   run mount "$ROOT_DEVICE" "$MOUNTPOINT"
@@ -1461,7 +1461,7 @@ if [[ $MODE == execute && $ARCH_STAGING_SELECTED == target ]]; then
   ARCH_CACHE="$MOUNTPOINT/var/cache/pacman/pkg"
   run install -d -m 0755 "$ARCH_CACHE"
   write_arch_pacman_conf
-  aurade_journal_begin acquire-target 'downloading packages to the new disk'
+  aurade_journal_begin acquire-target 'Downloading packages to the new disk'
   download_arch_packages 1
   aurade_journal_ok acquire-target
 elif [[ $MODE == dry-run && $STAGING_MODE == target ]]; then
@@ -1510,7 +1510,7 @@ if [[ $SWAP == file ]] && (( SWAP_SIZE_MIB > 0 )); then
   log "swap: ${SWAP_SIZE_MIB} MiB swap file at $SWAP_FILE"
 fi
 
-aurade_journal_begin pacstrap 'installing the base system'
+aurade_journal_begin pacstrap 'Installing the base system'
 run_pacstrap "$MOUNTPOINT" "${BASE_PACKAGES[@]}"
 aurade_journal_ok pacstrap
 if [[ $MODE == execute && $ARCH_STAGING_SELECTED == target ]]; then
@@ -1562,7 +1562,7 @@ fi
 
 run arch-chroot "$MOUNTPOINT" pacman -U --needed --noconfirm "${PACKAGE_FILES[@]}"
 
-aurade_journal_begin configure 'configuring the installed system'
+aurade_journal_begin configure 'Setting up the installed system'
 if [[ $MODE == execute ]]; then
   genfstab -U "$MOUNTPOINT" >"$MOUNTPOINT/etc/fstab"
 else
@@ -1800,7 +1800,7 @@ if (( SECURE_BOOT_SIGN )); then
 fi
 aurade_journal_ok configure
 
-aurade_journal_begin bootloader 'installing the bootloader'
+aurade_journal_begin bootloader 'Installing the bootloader'
 secure_boot_sign_loader
 BOOTCTL_INSTALL=(bootctl --root="$MOUNTPOINT" --esp-path=/boot --no-variables)
 if (( SECURE_BOOT_SETUP_MODE )); then
@@ -1923,7 +1923,7 @@ run install -Dm0755 "$SELF_DIR/aurade-recovery" "$MOUNTPOINT/usr/local/sbin/aura
 run install -Dm0755 "$SELF_DIR/aurade-hardware-qualify" "$MOUNTPOINT/usr/local/sbin/aurade-hardware-qualify"
 aurade_journal_ok bootloader
 
-aurade_journal_begin snapshot 'creating the factory snapshot'
+aurade_journal_begin snapshot 'Taking the first snapshot'
 SWAP_POLICY=$SWAP
 [[ $SWAP != file ]] || SWAP_POLICY="file:${SWAP_SIZE_MIB}M"
 if [[ $FILESYSTEM == btrfs ]]; then
@@ -1940,7 +1940,7 @@ fi
 run sync
 aurade_journal_ok snapshot
 
-aurade_journal_begin verify-install 'verifying the installation'
+aurade_journal_begin verify-install 'Checking the installation'
 if [[ $MODE == dry-run ]]; then
   printf ' + verify installed package set, fstab/UUIDs, boot artifacts, enabled units, locked root, and repository URL\n'
 else
