@@ -1204,6 +1204,26 @@
     paintStatus(buildRows(data));
   }
 
+  function noService() {
+    const area = document.getElementById('filearea');
+    if (!area) return;
+    const box = document.createElement('div');
+    box.className = 'no-service';
+    box.setAttribute('role', 'alert');
+    const head = document.createElement('strong');
+    head.textContent = 'Files cannot reach its file service';
+    const why = document.createElement('p');
+    why.textContent = 'Your files are fine. The service that lists them, ' +
+      'auradefs, is not running. Signing out and back in starts it. If ' +
+      'it is not installed, install it first:';
+    const cmd = document.createElement('code');
+    cmd.textContent = 'sudo pacman -S auradefs';
+    box.append(head, why, cmd);
+    area.prepend(box);
+    const count = document.getElementById('st-count');
+    if (count) count.textContent = 'File service not running';
+  }
+
   async function enterLive() {
     const win = document.querySelector('.win');
     const start = win ? win.getAttribute('data-path') : null;
@@ -1219,7 +1239,12 @@
         ok = false;
       }
     }
-    if (!ok) return;
+    if (!ok) {
+      //: The shipped page carries no folder of its own, so without the
+      //: service it opened on an empty Home whose status bar said Ready.
+      if (start === '~') noService();
+      return;
+    }
     window.__livePath = start;
     document.body.setAttribute('data-live', '1');
     $$('[data-live]').forEach(el => {
