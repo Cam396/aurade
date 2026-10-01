@@ -2088,6 +2088,9 @@ class InstallerWindow(Adw.ApplicationWindow):
             index = widget.get_selected()
             if 0 <= index < len(values):
                 chosen[question] = values[index]
+        size = self.widgets.get("q.swap_size")
+        if size is not None:
+            size.set_visible(chosen.get("swap") != "none")
 
         notes = []
         if chosen.get("filesystem", "btrfs") != "btrfs":
@@ -2726,8 +2729,10 @@ class InstallerWindow(Adw.ApplicationWindow):
             connection = disk.get("connection") or ""
             # Never "unknown". A drive that does not report its model has not
             # been misread by the installer, and the other wording says which
-            # of the two actually happened.
-            facts = [disk.get("model") or "not reported by this drive",
+            # of the two actually happened. Named here, because on this row,
+            # unlike the labelled rows of the erase gate, nothing else says
+            # which fact the drive did not report.
+            facts = [disk.get("model") or "Model not reported by this drive",
                      disk.get("size") or ""]
             if connection:
                 facts.append(connection)
@@ -2829,17 +2834,41 @@ class InstallerWindow(Adw.ApplicationWindow):
         self._clear_group("review", group)
         # Secrets arrive as the word `set`. There is no command that returns
         # one, so this screen cannot show a password even by mistake.
-        for question, entry in self.model.answers().items():
-            item = Adw.ActionRow(title=entry["short"], subtitle=entry["value"])
+        answers = self.model.answers()
+        for question, entry in answers.items():
+            # A size for swap that is not there is a question nobody asked.
+            if (question == "swap_size"
+                    and answers.get("swap", {}).get("value") == "none"):
+                continue
+            item = Adw.ActionRow(title=entry["short"],
+                                 subtitle=self._review_value(question,
+                                                             entry["value"]))
             item.set_subtitle_lines(0)
             if question in ("target", "snapshot", "repo_url"):
-                item.add_css_class("aurade-mono")
+                item.add_css_class("aurade-mono-value")
             page = F.page_for_question(question)
             if page is not None:
                 item.set_activatable(True)
                 item.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
                 item.connect("activated", self._on_review_row, page.name)
             self._add_row("review", group, item)
+
+    def _review_value(self, question: str, value: str) -> str:
+        """An answer in the words its own picker showed, not the engine's.
+
+        The review read `wipe`, `btrfs`, `none` and `auto` under choices that
+        had been made from `Erase the whole disk`, `Btrfs`, `None` and
+        `Automatic` one page earlier.
+        """
+        if question == "locale":
+            return self.names.describe_locale(value)[0] or value
+        if question == "keymap":
+            return locales.describe_keymap(value)[0] or value
+        if question in locales.STORAGE_NAMES:
+            return locales.describe_storage(question, value)[0] or value
+        if value in ("yes", "no", "set"):
+            return value[:1].upper() + value[1:]
+        return value
 
     def _on_review_row(self, _row, page_name: str) -> None:
         self.flow.jump_to_page(page_name)
@@ -3544,7 +3573,10 @@ class InstallerWindow(Adw.ApplicationWindow):
         if report.get("can_stop"):
             self.secondary_button.set_label("Stop")
             self.secondary_button.set_visible(True)
-            state.set_label("Nothing has been written to any disk yet.")
+            # The line under the page title already says nothing has been
+            # written, and the same sentence twice, a card apart, read as two
+            # different reassurances about two different things.
+            state.set_label("")
             state.remove_css_class("warning")
             state.add_css_class("aurade-stage-done")
         else:

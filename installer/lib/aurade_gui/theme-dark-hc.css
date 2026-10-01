@@ -126,6 +126,14 @@ window.aurade {
   letter-spacing: 0.2px;
 }
 
+/* A row whose value is machine text and whose label is prose: the disk path
+   under "Disk" on the review page. Only the value takes the machine face. */
+.aurade-mono-value .subtitle {
+  font-family: "JetBrains Mono", "Adwaita Mono", monospace;
+  font-feature-settings: "zero" 1, "ss01" 1;
+  letter-spacing: 0.2px;
+}
+
 /* ---- surfaces --------------------------------------------------------- */
 
 .aurade-pane {
@@ -348,6 +356,15 @@ banner:focus-visible {
    rows being wrong rather than as one row being chosen. */
 row:focus-visible {
   outline-offset: -2px;
+}
+
+/* A text field row already draws its own focus edge in the primary colour.
+   The two rings above landed on it as well, one on the row and one on the
+   text inside it, so the erase gate's confirmation field wore three nested
+   rectangles while somebody typed the one thing on that page that matters. */
+row.entry:focus-visible,
+row.entry text:focus-visible {
+  outline: none;
 }
 
 /* ---- motion ----------------------------------------------------------- */
