@@ -2,13 +2,14 @@
 
 pkgname=aurade
 pkgver=156.0.8060.0
-pkgrel=1
+pkgrel=2
 pkgdesc="ChromiumOS-style desktop environment for Arch Linux"
 arch=('any')
 url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause')
 depends=(
     "chromiumos-ash>=${pkgver}"
+    'auradefs'
     'aurade-webapp-shortcuts'
     'aurade-login'
     'aurade-power'
@@ -58,7 +59,7 @@ sha256sums=('9a391d9366506b9e22c31cf9a0783ca433e373d7ec366277afcc7a0eb5e0d165'
             '8de2eb0d9d8c5ad88bdc73972ee94d3cd261c1d393958150c8fbb7046aaff0bf'
             '16c1326f956011211fac43b5127325919df6089538e044864d9552b865dfaf5e'
             'df1bf73bdd0e5cf435cf162951968e3ab7d9ae9f76763787530b14beb7c89b3d'
-            '5d6f2fded5b15ac208d5b4b1d9ea10145e6e0c511188885e67157555efe95eac'
+            '0f69c529cb97eb631d71246a73efa6d95f17b1f6f2e6b412cb3c7d59a904e923'
             '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f')
 
 package() {
