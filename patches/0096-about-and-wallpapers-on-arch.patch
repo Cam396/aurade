@@ -130,6 +130,42 @@ diff --git a/chrome/browser/ash/wallpaper/wallpaper_enumerator.cc b/chrome/brows
 diff --git a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.html b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.html
 --- a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.html
 +++ b/chrome/browser/resources/ash/settings/os_about_page/os_about_page.html
+@@ -207,7 +207,7 @@
+           </div>
+         </cr-link-row>
+         <template is="dom-if" if="[[hasInternetConnection_]]">
+-          <cr-link-row class="hr" id="releaseNotesOnline"
++          <cr-link-row class="hr" id="releaseNotesOnline" hidden$="[[isAuraDe_]]"
+               start-icon="os-settings:about-release-notes"
+               on-click="onReleaseNotesClick_"
+               label="$i18n{aboutShowReleaseNotes}"
+@@ -217,7 +217,7 @@
+           </cr-link-row>
+         </template>
+         <template is="dom-if" if="[[!hasInternetConnection_]]">
+-          <cr-link-row class="hr" id="releaseNotesOffline"
++          <cr-link-row class="hr" id="releaseNotesOffline" hidden$="[[isAuraDe_]]"
+               start-icon="os-settings:about-release-notes"
+               on-click="onReleaseNotesClick_"
+               label="$i18n{aboutShowReleaseNotes}"
+@@ -254,7 +254,7 @@
+             deep-link-focus-id$="[[Setting.kDiagnostics]]">
+         </cr-link-row>
+         <template is="dom-if" if="[[canChangeFirmware_]]">
+-        <cr-link-row class="hr" id="firmwareUpdates"
++        <cr-link-row class="hr" id="firmwareUpdates" hidden$="[[isAuraDe_]]"
+             start-icon="os-settings:about-firmware-updates"
+             on-click="onFirmwareUpdatesClick_"
+             label="$i18n{aboutFirmwareUpdates}"
+@@ -275,7 +275,7 @@
+         </cr-link-row>
+         </template>
+         <template is="dom-if" if="[[!canChangeFirmware_]]">
+-        <cr-link-row class="hr" id="firmwareUpdates"
++        <cr-link-row class="hr" id="firmwareUpdates" hidden$="[[isAuraDe_]]"
+             start-icon="os-settings:about-firmware-updates"
+             label="$i18n{aboutFirmwareUpdates}"
+             sub-label="[[getFirmwareSublabel_(firmwareUpdateCount_)]]"
 @@ -312,7 +312,20 @@
          </cr-link-row>
        </settings-card>
@@ -250,6 +286,18 @@ diff --git a/chrome/browser/resources/ash/settings/os_about_page/os_about_page.t
      // Disable update button if the device needs to opt-in
      // to extended updates.
      if (this.showExtendedUpdatesOption_) {
+diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+--- a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+@@ -25,7 +25,7 @@
+   builder->Add("auraLocalAccountPasswordHintPlaceholder",
+                "Optional hint shown only on this device");
+   builder->Add("auraLocalAccountPasswordNote",
+-               "Linux password changes require AuraDE account helper support.");
++               "You sign in with this Linux account's password.");
+   builder->Add("auraLocalAccountBack", "Back");
+   builder->Add("auraLocalAccountStart", "Continue");
+ }
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/about/about_section.cc b/chrome/browser/ui/webui/ash/settings/pages/about/about_section.cc
 --- a/chrome/browser/ui/webui/ash/settings/pages/about/about_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/about/about_section.cc
