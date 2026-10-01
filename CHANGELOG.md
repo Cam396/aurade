@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## 1.1.2, unreleased
+## 1.1.2, 2026-10-01
 
 ### Added
 - AuraDE installs onto an Arch system you already use, as one more session at your login screen next to Plasma, GNOME or whatever else is there. The steps are in [docs/existing-arch.md](docs/existing-arch.md), and `sudo pacman -Rns aurade` takes it back out.

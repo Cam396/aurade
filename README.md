@@ -10,7 +10,7 @@ NetworkManager, PipeWire, and systemd that already work on the machine.
 Underneath it is plain Arch: pacman, the Arch kernel, and your own local
 account, with no Google account needed.
 
-AuraDE 1.1.1 is the current release. The ISO, the signed package
+AuraDE 1.1.2 is the current release. The ISO, the signed package
 repository, and the release key are on the
 [releases page](https://github.com/Cam396/aurade/releases/latest). AuraDE is
 not an official Google or ChromeOS distribution. Back up anything you cannot
