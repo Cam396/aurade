@@ -3021,8 +3021,6 @@ run_help_where() {
 }
 
 screen_done() {
-  # One bell: finished. See `tui_bell` for why it is a count rather than a tone.
-  tui_bell 1
   local CURRENT_SCREEN=done
   tui_clear
   tui_header 'You are all set'
@@ -3064,7 +3062,44 @@ screen_done() {
     tui_wrap 'You also reached 2048 while that was going. Well played.' dim
   fi
   tui_blank
-  tui_footer 'take out the installation media, then restart' ''
+  local HELP_KEY=0
+  tui_footer 'enter  restart' 'esc  console'
+}
+
+# Restarts the computer, and only ever the live medium's computer.
+#
+# The flow tests drive this file as root on a developer's own machine, and a
+# scripted key stream that reaches a restart option used to restart that
+# machine. So the restart needs both the live medium, which is the only place
+# /run/archiso exists, and no test override. A test sets AURADE_REBOOT_CMD to
+# a stand in and checks that it ran.
+installer_reboot() {
+  if [[ -n ${AURADE_REBOOT_CMD:-} ]]; then
+    "$AURADE_REBOOT_CMD" || true
+    return 0
+  fi
+  [[ -d ${AURADE_LIVE_MARKER:-/run/archiso} ]] || return 0
+  systemctl reboot || true
+}
+
+# The done screen waits for a key. Returning at once handed the console
+# straight back to the live system, whose prompt drew over this screen, so
+# nobody ever saw that the install had finished or who to sign in as.
+run_done() {
+  local key
+  # One bell: finished. See `tui_bell` for why it is a count rather than a tone.
+  tui_bell 1
+  while true; do
+    screen_done
+    key=$(read_key) || return 0
+    case $key in
+      enter)
+        tui_clear
+        installer_reboot
+        return 0 ;;
+      esc) return 0 ;;
+    esac
+  done
 }
 
 screen_cancelled() {
@@ -5301,7 +5336,7 @@ run_failure() {
             printf 'Type exit to come back to the installer.\n'
             bash || true ;;
           4)
-            systemctl reboot || true
+            installer_reboot
             return "$status" ;;
         esac
         ;;
@@ -5445,7 +5480,7 @@ main_flow() {
           run_failure "$status" || status=$?
           return "$status"
         fi
-        screen_done
+        run_done
         return 0
         ;;
 
