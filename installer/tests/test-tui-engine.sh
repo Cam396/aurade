@@ -46,7 +46,26 @@ cat >"$TMP/stub/loadkeys" <<'STUB'
 exit 0
 STUB
 chmod +x "$TMP/stub/loadkeys"
+# Nothing in this test may restart the machine running it. The done screen and
+# the failure menu both offer a restart, and an earlier version of this test
+# pressed enter on one as root and rebooted the developer's computer. So the
+# restart is a stand in that writes a line, systemctl is a stub that refuses,
+# and the live medium marker points somewhere that does not exist.
+cat >"$TMP/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+echo "systemctl $*" >>"${AURADE_TEST_SYSTEMCTL_LOG:-/dev/null}"
+exit 1
+STUB
+cat >"$TMP/stub/reboot-stand-in" <<'STUB'
+#!/usr/bin/env bash
+echo reboot >>"${AURADE_TEST_REBOOT_LOG:?}"
+STUB
+chmod +x "$TMP/stub/systemctl" "$TMP/stub/reboot-stand-in"
 export PATH="$TMP/stub:$PATH"
+export AURADE_REBOOT_CMD="$TMP/stub/reboot-stand-in"
+export AURADE_TEST_REBOOT_LOG="$TMP/reboots"
+export AURADE_TEST_SYSTEMCTL_LOG="$TMP/systemctl"
+export AURADE_LIVE_MARKER="$TMP/not-a-live-medium"
 printf '%s\n' '2026/07/12' >"$TMP/snapshot"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
 printf '%s\n' \
@@ -206,6 +225,10 @@ tail -1 "$calls" | grep -Fq -- '--allow-unsigned' ||
 
 # The finished screen must actually be reached.
 grep -Fq 'AuraDE is installed' "$TMP/out.happy" || fail 'the finished screen was never shown'
+# Enter on the finished screen restarts, through the stand in and never systemctl.
+[[ $(cat "$TMP/reboots" 2>/dev/null) == reboot ]] ||
+  fail 'enter on the finished screen did not ask for exactly one restart'
+[[ ! -s $TMP/systemctl ]] || fail "the installer called systemctl: $(cat "$TMP/systemctl")"
 # And the journal the engine wrote must have driven a progress render.
 grep -Fq 'Installing the base system' "$TMP/out.happy" || fail 'no progress screen was rendered'
 
