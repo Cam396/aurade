@@ -1,7 +1,7 @@
 # AuraDE
 
 <p align="center">
-  <img src="assets/aurade-banner-1.1.1.png" alt="AuraDE 1.1.1" width="820">
+  <img src="assets/aurade-banner-1.1.2.png" alt="AuraDE 1.1.2" width="820">
 </p>
 
 AuraDE is a ChromeOS-inspired desktop for ordinary Arch Linux hardware. It
