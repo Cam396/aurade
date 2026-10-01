@@ -135,6 +135,10 @@ Use a matching checksum and release notice for every image. The installer
 shows the selected disk, repeats its identity immediately before the erase
 gate, and keeps the text path available when graphics are unavailable.
 
+Already running Arch? AuraDE installs next to your current desktop as one more
+session at your login screen, and comes back out with one command. See
+[AuraDE on an Arch system you already use](docs/existing-arch.md).
+
 ### Updates
 
 `sudo pacman -Syu` updates AuraDE along with Arch. Installs from 1.1.1 on
