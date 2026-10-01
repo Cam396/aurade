@@ -1004,6 +1004,29 @@ tui_clear() {
   [[ $AURADE_TUI_COLOR == none ]] && return 0
   [[ -t 1 ]] || return 0
   printf '\033[H\033[2J'
+  tui_follow_console
+}
+
+# Keep the frame measured for the console that is really there.
+#
+# fbcon defers taking over the console, and the installer is the first thing
+# to write to tty1, so the takeover lands at the framebuffer's own size after
+# the first screen was measured for the 80 by 25 placeholder. On a 2560 pixel
+# display that left the whole install as a 68 column frame in the top left
+# corner. Nothing is told about that resize, and the redraw a resize signal
+# asks for measured inside the subshell that reads keys, where the result never
+# reached the screens. So every screen asks here, in the shell that draws it.
+# The first screen can still be drawn for the placeholder; from the first key
+# on, every screen fits the console.
+tui_follow_console() {
+  (( ! _TUI_COLUMNS_PINNED )) || return 0
+  local cols
+  cols=$(tui_console_size cols)
+  [[ -n $cols && $cols != "$AURADE_TUI_COLUMNS" ]] || return 0
+  # The installer can choose a font for the new size before measuring; on its
+  # own the library only measures.
+  "${TUI_RESIZE_HOOK:-tui_measure}"
+  printf '\033[H\033[2J'
 }
 
 # Step counter as a coarse bar for the header. Stays ASCII for the same reason

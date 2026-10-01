@@ -3235,6 +3235,15 @@ run_access() {
   done
 }
 
+# What the drawing library calls when the console turns out to be a different
+# size from the one the frame was measured for: the font is chosen for the
+# screen, so it is chosen again, and then the frame is measured.
+tui_resized() {
+  access_obey_font
+  tui_measure
+}
+TUI_RESIZE_HOOK=tui_resized
+
 _access_seed
 access_obey
 (( AURADE_TUI_PLAIN )) || tui_palette_apply
