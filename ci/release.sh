@@ -24,6 +24,10 @@
 #       repo-x86_64 release) in line with the staged one, then download its
 #       database back and check it. AURADE_RELEASE_DRY_RUN=1 prints the plan
 #       and changes nothing.
+#   ci/release.sh aur OUT_DIR
+#       After publish-repo: export the AUR packages from the vVERSION tag, with
+#       chromiumos-ash-bin pinned to the chromiumos-ash package just published,
+#       and push them (ci/publish-aur.sh). Without AUR_SSH_KEY it is a dry run.
 #
 # Signing uses the key whose fingerprint is in AURADE_RELEASE_FINGERPRINT,
 # from whatever GNUPGHOME points at. The key never enters the repository;
@@ -347,11 +351,38 @@ cmd_fetch_published() {
   say "fetched the published packages into ${dir}, each signed by the release key"
 }
 
+cmd_aur() {
+  local out=${1:?out dir}
+  need gpg; need curl
+  load_stage "$out"
+  # The export copies the PKGBUILDs from this checkout and the sources from
+  # the tag, so the two have to be the same tree.
+  [[ $(git -C "$ROOT" rev-parse HEAD) == "$commit" ]] ||
+    die "check out ${commit:0:12} (v${version}) before exporting its AUR packages"
+  [[ -z $(git -C "$ROOT" status --porcelain --untracked-files=no) ]] ||
+    die 'the checkout has uncommitted changes'
+  local -a ash=("$out"/repository/chromiumos-ash-[0-9]*.pkg.tar.zst)
+  [[ -f ${ash[0]} ]] || die "the staged repository has no chromiumos-ash package"
+  (( ${#ash[@]} == 1 )) || die "the staged repository has ${#ash[@]} chromiumos-ash packages"
+  # chromiumos-ash-bin downloads the package from the hosted repository, so it
+  # has to be the published file, byte for byte, before the AUR names it.
+  local name=${ash[0]##*/}
+  hosted_digests | grep -qxF "${name}"$'\t'"$(sha256sum "${ash[0]}" | cut -d' ' -f1)" ||
+    die "${name} is not on ${REPO_TAG} yet; run publish-repo first"
+  local export
+  export=$(mktemp -d)
+  AURADE_AUR_OUTPUT="$export/aur" AURADE_AUR_REF="v${version}" \
+    AURADE_AUR_CHROMIUM_PACKAGE="${ash[0]}" "$ROOT/ci/export-aur-bundles.sh"
+  "$ROOT/ci/publish-aur.sh" "$export/aur"
+  rm -rf -- "${export:?}"
+}
+
 case ${1:-} in
   check-repo) shift; cmd_check_repo "$@" ;;
   fetch-published) shift; cmd_fetch_published "$@" ;;
   stage) shift; cmd_stage "$@" ;;
   draft) shift; cmd_draft "$@" ;;
   publish-repo) shift; cmd_publish_repo "$@" ;;
-  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  aur) shift; cmd_aur "$@" ;;
+  *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
