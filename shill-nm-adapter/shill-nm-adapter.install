@@ -1,6 +1,11 @@
 post_install() {
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl enable shill-nm-adapter.service >/dev/null 2>&1 || true
+    # Started as well as enabled: Ash reads the network through this bridge,
+    # and a session started before the next boot found none, so first-run
+    # setup asked for Wi-Fi on a machine already online. In a chroot the
+    # start fails and the enable still stands.
+    systemctl enable --now shill-nm-adapter.service >/dev/null 2>&1 ||
+        systemctl enable shill-nm-adapter.service >/dev/null 2>&1 || true
 }
 
 post_upgrade() {
