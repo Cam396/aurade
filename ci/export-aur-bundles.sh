@@ -1,28 +1,35 @@
 #!/usr/bin/env bash
-# Export self-contained directories suitable for separate AUR package repos.
+# Export one directory per AUR package, ready to commit to its AUR git repo.
 #
-# The source tree is intentionally a monorepo, while the AUR expects one Git
-# repository per package. This exporter copies only package inputs and emits
-# a small x86_64 -bin wrapper for the currently published Chromium payload.
+# The AUR keeps one git repository per package; this tree is a monorepo. Each
+# package directory is copied as it is, with three changes so it builds from
+# public sources and nothing else:
+#
+#   aurade-wallpapers  the photographs come from the tagged tree on GitHub
+#                      (installer/wallpapers), not from AUR git, which is for
+#                      recipes and not 46 MB of pictures
+#   auradefs           the Rust workspace comes from the tag's source archive
+#   chromiumos-ash-bin the signed release build, repackaged; its dependencies
+#                      are read from chromiumos-ash/PKGBUILD so they cannot drift
+#
+# Every package keeps its own version, the same one the pacman repository
+# carries, so the AUR and the repository never disagree about what is newer.
+#
+# Settings:
+#   AURADE_AUR_OUTPUT           where to write (absolute, must not exist)
+#   AURADE_AUR_REF              the git tag (or commit) the sources come from
+#   AURADE_AUR_SOURCE_SHA256    SHA-256 of that ref's source archive; fetched and
+#                               computed when unset
+#   AURADE_AUR_CHROMIUM_SHA256  SHA-256 of the released chromiumos-ash package;
+#   AURADE_AUR_CHROMIUM_PACKAGE or a local copy of that package to hash
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WORKDIR="${AURADE_WORKDIR:-${REPO_ROOT}/.aurade-work}"
-OUTPUT="${AURADE_AUR_OUTPUT:-${WORKDIR}/aur-bundles}"
-RELEASE_TAG="${AURADE_AUR_RELEASE_TAG:-v0.1.0-prealpha}"
-RELEASE_ARCHIVE="${AURADE_AUR_RELEASE_ARCHIVE:-aurade-v0.1.0-prealpha-x86_64-repository.tar.gz}"
-RELEASE_SHA256="${AURADE_AUR_ARCHIVE_SHA256:-}"
-CHROMIUM_VERSION=${AURADE_AUR_CHROMIUM_VERSION:-}
-CHROMIUM_PKGREL=${AURADE_AUR_CHROMIUM_PKGREL:-}
-if [[ -z $CHROMIUM_VERSION ]]; then
-  CHROMIUM_VERSION=$(awk -F= '$1 == "pkgver" {print $2; exit}' \
-    "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
-fi
-if [[ -z $CHROMIUM_PKGREL ]]; then
-  CHROMIUM_PKGREL=$(awk -F= '$1 == "pkgrel" {print $2; exit}' \
-    "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
-fi
+OUTPUT="${AURADE_AUR_OUTPUT:-}"
+REF="${AURADE_AUR_REF:-}"
+GITHUB=https://github.com/Cam396/aurade
+BIN_RELEASE=repo-x86_64
 
 SOURCE_PACKAGES=(
   aurade-account-helper
@@ -34,6 +41,8 @@ SOURCE_PACKAGES=(
   aurade-greeter
   aurade-ai
   aurade-webapp-shortcuts
+  aurade-wallpapers
+  auradefs
   aurade
   aurade-full
 )
@@ -43,231 +52,154 @@ die() {
   exit 1
 }
 
-generate_srcinfo() {
-  local package_dir="$1"
-  local generated
-  command -v makepkg >/dev/null 2>&1 || return 0
-  generated="${package_dir}/.SRCINFO.generated"
-
-  if (( EUID == 0 )); then
-    local build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
-    if ! command -v runuser >/dev/null 2>&1 || ! getent passwd "${build_user}" >/dev/null; then
-      printf 'export-aur-bundles: makepkg available but no unprivileged build user; regenerate .SRCINFO with makepkg before upload\n' >&2
-      return 0
-    fi
-    # makepkg checks that its build directory is writable even for
-    # --printsrcinfo. The exporter itself may run as root, so hand this
-    # package directory to the dedicated unprivileged build user first.
-    chown -R "${build_user}:" "${package_dir}"
-    runuser -u "${build_user}" -- bash -c 'cd -- "$1" && makepkg --printsrcinfo' \
-      bash "${package_dir}" >"${generated}"
-  else
-    (cd "${package_dir}" && makepkg --printsrcinfo >"${generated}")
-  fi
-  install -m 0644 "${generated}" "${package_dir}/.SRCINFO"
-  rm -f -- "${generated}"
+sha256_of_url() {
+  curl -fsSL "$1" | sha256sum | cut -d' ' -f1
 }
 
-[[ "${OUTPUT}" = /* && "${OUTPUT}" != / ]] ||
+[[ ${OUTPUT} = /* && ${OUTPUT} != / ]] ||
   die 'AURADE_AUR_OUTPUT must be an absolute, non-root path'
-[[ "${RELEASE_TAG}" =~ ^[A-Za-z0-9._/-]+$ ]] ||
-  die 'AURADE_AUR_RELEASE_TAG contains unsupported characters'
-[[ "${RELEASE_ARCHIVE}" =~ ^[A-Za-z0-9._-]+$ ]] ||
-  die 'AURADE_AUR_RELEASE_ARCHIVE contains unsupported characters'
-[[ -n "${RELEASE_SHA256}" ]] ||
-  die 'AURADE_AUR_ARCHIVE_SHA256 is required; copy the current release archive digest instead of using stale metadata'
-[[ "${RELEASE_SHA256}" =~ ^[[:xdigit:]]{64}$ ]] ||
-  die 'AURADE_AUR_ARCHIVE_SHA256 must be a 64-character hex digest'
-[[ "${CHROMIUM_VERSION}" =~ ^[0-9]+([.][0-9]+)*$ ]] ||
-  die 'AURADE_AUR_CHROMIUM_VERSION must be a numeric package version'
-[[ "${CHROMIUM_PKGREL}" =~ ^[0-9]+$ ]] ||
-  die 'AURADE_AUR_CHROMIUM_PKGREL must be numeric'
-[[ ! -e "${OUTPUT}" ]] ||
+[[ ! -e ${OUTPUT} ]] ||
   die "output already exists; choose another path or remove it first: ${OUTPUT}"
+[[ ${REF} =~ ^[A-Za-z0-9._-]+$ ]] ||
+  die 'AURADE_AUR_REF must name the git tag (or commit) the sources come from'
+
+archive_url="${GITHUB}/archive/${REF}.tar.gz"
+# GitHub names the top directory after the repository and the ref, without a
+# leading v on a version tag.
+archive_dir="aurade-${REF#v}"
+source_sha="${AURADE_AUR_SOURCE_SHA256:-$(sha256_of_url "${archive_url}")}"
+[[ ${source_sha} =~ ^[[:xdigit:]]{64}$ ]] ||
+  die 'the source archive digest is not a SHA-256'
+
+chromium_ver=$(awk -F= '$1 == "pkgver" {print $2; exit}' "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
+chromium_rel=$(awk -F= '$1 == "pkgrel" {print $2; exit}' "${REPO_ROOT}/chromiumos-ash/PKGBUILD")
+chromium_file="chromiumos-ash-${chromium_ver}-${chromium_rel}-x86_64.pkg.tar.zst"
+chromium_sha="${AURADE_AUR_CHROMIUM_SHA256:-}"
+if [[ -z ${chromium_sha} && -n ${AURADE_AUR_CHROMIUM_PACKAGE:-} ]]; then
+  [[ $(basename "${AURADE_AUR_CHROMIUM_PACKAGE}") == "${chromium_file}" ]] ||
+    die "AURADE_AUR_CHROMIUM_PACKAGE is not ${chromium_file}"
+  chromium_sha=$(sha256sum "${AURADE_AUR_CHROMIUM_PACKAGE}" | cut -d' ' -f1)
+fi
+[[ ${chromium_sha} =~ ^[[:xdigit:]]{64}$ ]] ||
+  die "set AURADE_AUR_CHROMIUM_SHA256 or AURADE_AUR_CHROMIUM_PACKAGE for ${chromium_file}"
 
 mkdir -p "${OUTPUT}"
 
-copy_package() {
-  local package="$1"
-  local package_dir="${OUTPUT}/${package}"
-  [[ -f "${REPO_ROOT}/${package}/PKGBUILD" ]] ||
-    die "missing package directory: ${package}"
-  mkdir -p "${package_dir}"
-  cp -a "${REPO_ROOT}/${package}/." "${package_dir}/"
-  local modified=0
-  if (( EUID == 0 )) && command -v chown >/dev/null 2>&1; then
-    local build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
-    if getent passwd "${build_user}" >/dev/null; then
-      chown -R "${build_user}:" "${package_dir}"
-    fi
-  fi
+# Single-quote a value for a PKGBUILD array.
+quote() {
+  local value=${1//\'/\'\\\'\'}
+  printf "    '%s'\n" "${value}"
+}
 
-  # AUR helpers resolve dependency names before installing packages. Point
-  # the generated meta/session helpers at the explicit -bin provider rather
-  # than relying on a virtual provide that an AUR helper may not discover.
-  case "${package}" in
-    aurade)
-      sed -i 's/chromiumos-ash>=/chromiumos-ash-bin>=/' \
-        "${package_dir}/PKGBUILD"
-      rm -f "${package_dir}/.SRCINFO"
-      modified=1
+copy_package() {
+  local package=$1 dir="${OUTPUT}/$1"
+  [[ -f ${REPO_ROOT}/${package}/PKGBUILD ]] || die "missing package directory: ${package}"
+  mkdir -p "${dir}"
+  # What git tracks, and nothing a local build left behind (pkg/, src/, staged
+  # wallpapers, a Rust target directory).
+  git -C "${REPO_ROOT}" ls-files -z -- "${package}" |
+    while IFS= read -r -d '' file; do
+      install -Dm"$(stat -c '%a' "${REPO_ROOT}/${file}")" \
+        "${REPO_ROOT}/${file}" "${OUTPUT}/${file}"
+    done
+
+  # Rewritten below for some packages; ci/aur-package-smoke.sh writes it fresh.
+  rm -f "${dir}/.SRCINFO"
+  case ${package} in
+    aurade-wallpapers)
+      # Each photograph is downloaded from the tagged tree under its own name.
+      sed -i -E "s#^(\s*)'([A-Za-z0-9._-]+\.png)'#\1'\2::${GITHUB}/raw/${REF}/installer/wallpapers/\2'#" \
+        "${dir}/PKGBUILD"
       ;;
-    aurade-login|aurade-webapp-shortcuts)
-      sed -i "s/'chromiumos-ash'/'chromiumos-ash-bin'/g" \
-        "${package_dir}/PKGBUILD"
-      rm -f "${package_dir}/.SRCINFO"
-      modified=1
+    auradefs)
+      # The workspace is the tag's own, unpacked by makepkg; nothing is vendored
+      # into AUR git. Cargo.lock pins every crate.
+      rm -rf "${dir}/workspace"
+      python3 - "${dir}/PKGBUILD" "${archive_url}" "${archive_dir}" "${source_sha}" <<'EOF'
+import re, sys
+path, url, top, sha = sys.argv[1:]
+s = open(path).read()
+s = s.replace("source=(\n", f"source=(\n  'aurade-src.tar.gz::{url}'\n", 1)
+s = s.replace("sha256sums=(", f"sha256sums=('{sha}'\n            ", 1)
+s = s.replace("${srcdir}/auradefs-src", "${srcdir}/" + top + "/auradefs/workspace")
+open(path, "w").write(s)
+EOF
       ;;
   esac
+  # A dependency on the Chromium package names the -bin package, which is the
+  # one the AUR has. Helpers resolve that name directly.
+  sed -i -E "s/(['\"])chromiumos-ash(>=|['\"])/\1chromiumos-ash-bin\2/" "${dir}/PKGBUILD"
 
-  if (( modified )); then
-    generate_srcinfo "${package_dir}"
+  if find "${dir}" -type f -size +1M -print -quit | grep -q .; then
+    die "${package}: a file over 1 MiB would go into AUR git"
   fi
-
-  find "${package_dir}" -type f -size +50M -print -quit | {
-    read -r oversized || true
-    [[ -z "${oversized}" ]] || die "unexpected oversized AUR input: ${oversized}"
-  }
 }
 
 for package in "${SOURCE_PACKAGES[@]}"; do
   copy_package "${package}"
 done
 
-release_archive_template="${RELEASE_ARCHIVE//x86_64/\$CARCH}"
-release_url_template="https://github.com/Cam396/aurade/releases/download/${RELEASE_TAG}/${release_archive_template}"
-mkdir -p "${OUTPUT}/chromiumos-ash-bin"
-cat >"${OUTPUT}/chromiumos-ash-bin/PKGBUILD" <<EOF
+# --- chromiumos-ash-bin ------------------------------------------------------
+read_array() {
+  (
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/chromiumos-ash/PKGBUILD"
+    local -n arr=$1
+    printf '%s\n' "${arr[@]}"
+  )
+}
+mapfile -t ash_depends < <(read_array depends)
+mapfile -t ash_optdepends < <(read_array optdepends)
+mapfile -t ash_backup < <(read_array backup)
+(( ${#ash_depends[@]} > 10 )) || die 'could not read the chromiumos-ash dependencies'
+
+bin="${OUTPUT}/chromiumos-ash-bin"
+mkdir -p "${bin}"
+install -m644 "${REPO_ROOT}/chromiumos-ash/LICENSE" "${bin}/LICENSE"
+{
+  cat <<EOF
 # Maintainer: AuraDE Contributors
-# Generated by ci/export-aur-bundles.sh. This is the x86_64 binary AUR path.
+# Generated by ci/export-aur-bundles.sh from chromiumos-ash/PKGBUILD.
 pkgname=chromiumos-ash-bin
-pkgver=${CHROMIUM_VERSION}
-pkgrel=${CHROMIUM_PKGREL}
-pkgdesc="Prebuilt ChromeOS Ash desktop environment for Linux (AuraDE development build)"
+pkgver=${chromium_ver}
+pkgrel=${chromium_rel}
+pkgdesc="ChromeOS Ash desktop for Linux, as built for AuraDE (prebuilt)"
 arch=('x86_64')
-url="https://github.com/Cam396/aurade"
+url="${GITHUB}"
 license=('BSD-3-Clause')
-depends=(
-    'shill-nm-adapter'
-    'bash'
-    'dbus'
-    'dbus-glib'
-    'util-linux'
-    'python'
-    'python-dbus'
-    'python-gobject'
-    'libgl'
-    'wayland'
-    'weston'
-    'seatd'
-    'xorg-xwayland'
-    'libxkbcommon'
-    'libx11'
-    'libxcb'
-    'libxcomposite'
-    'libxdamage'
-    'libxext'
-    'libxfixes'
-    'libxi'
-    'libxrandr'
-    'libxrender'
-    'libxss'
-    'libxtst'
-    'pango'
-    'cairo'
-    'nss'
-    'nspr'
-    'alsa-lib'
-    'pipewire'
-    'minizip'
-    'libevent'
-    'libdrm'
-    'mesa'
-    'hwdata'
-    'harfbuzz'
-    'freetype2'
-    'ttf-roboto'
-    'libpng'
-    'libjpeg-turbo'
-    'tar'
-    'gzip'
-    'bzip2'
-    'xz'
-    'zstd'
-    'lzip'
-    '7zip'
-    'unrar'
-    'aurade-system-helper'
-    'aurade-account-helper'
-    'polkit'
-    'pam'
-    'shadow'
-    'accountsservice'
-)
-optdepends=(
-    'lm_sensors: userspace sensor discovery and setup tools for host hwmon devices'
-    'vulkan-driver: hardware Vulkan acceleration when supported by the GPU'
-    'mesa-utils: GPU smoke-test tools such as glxinfo and eglinfo'
-    'aurade-ai: Advanced Plus AI local Gemma model bootstrap'
-    'aurade-login: PAM greeter, lock screen, and logind session controls'
-    'aurade-power: event-driven Linux laptop suspend and power lifecycle bridge'
-    'aurade-host-bridge: BlueZ, udisks2, MIME, and pacman host integration'
-    'udiskie: opt-in recovery automounter when AURADE_REMOVABLE_AUTOMOUNT=1'
-)
 provides=("chromiumos-ash=\${pkgver}-\${pkgrel}")
 conflicts=('chromiumos-ash')
-source=("aurade-repository.tar.gz::${release_url_template}")
-sha256sums=('${RELEASE_SHA256}')
+options=('!strip' '!debug')
+EOF
+  echo 'depends=('; for d in "${ash_depends[@]}"; do quote "$d"; done; echo ')'
+  echo 'optdepends=('; for d in "${ash_optdepends[@]}"; do quote "$d"; done; echo ')'
+  echo 'backup=('; for d in "${ash_backup[@]}"; do quote "$d"; done; echo ')'
+  cat <<EOF
+# The release's own package, unpacked as it is. The build behind it is the one
+# the pacman repository and the ISO install, from the same tag.
+source=("${GITHUB}/releases/download/${BIN_RELEASE}/chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.zst"
+        'LICENSE')
+noextract=("chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.zst")
+sha256sums=('${chromium_sha}'
+            '$(sha256sum "${REPO_ROOT}/chromiumos-ash/LICENSE" | cut -d' ' -f1)')
 
 package() {
-    local -a payloads=()
-    while IFS= read -r payload; do
-        payloads+=("\$payload")
-    done < <(find "\${srcdir}/repository" -maxdepth 1 -type f \\
-        -name "chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.*" \\
-        ! -name '*.sig' -print)
-    if (( \${#payloads[@]} != 1 )); then
-        printf 'expected exactly one Chromium payload in release archive, found %s\\n' \\
-            "\${#payloads[@]}" >&2
-        return 1
-    fi
-    local payload="\${payloads[0]}"
     bsdtar --exclude='.BUILDINFO' --exclude='.MTREE' --exclude='.PKGINFO' \\
-        --no-same-owner -xpf "\${payload}" -C "\${pkgdir}"
+        --exclude='.INSTALL' --no-same-owner \\
+        -xpf "\${srcdir}/chromiumos-ash-\${pkgver}-\${pkgrel}-\${CARCH}.pkg.tar.zst" \\
+        -C "\${pkgdir}"
+    install -Dm644 "\${srcdir}/LICENSE" "\${pkgdir}/usr/share/licenses/\${pkgname}/LICENSE"
 }
 EOF
+} >"${bin}/PKGBUILD"
 
-if (( EUID == 0 )) && command -v chown >/dev/null 2>&1; then
-  build_user="${AURADE_AUR_BUILD_USER:-aurabuild}"
-  if getent passwd "${build_user}" >/dev/null; then
-    chown -R "${build_user}:" "${OUTPUT}/chromiumos-ash-bin"
-  fi
-fi
-generate_srcinfo "${OUTPUT}/chromiumos-ash-bin"
-
-commit="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD 2>/dev/null || printf unknown)"
 cat >"${OUTPUT}/AUR-EXPORT.md" <<EOF
 # AuraDE AUR export
 
-Generated from AuraDE commit ${commit}.
-
-The directories below are intentionally self-contained because the AUR uses
-one Git repository per package. Upload each package directory to its own AUR
-repository only after the current VM/hardware feedback is accepted.
-
-The chromiumos-ash-bin package is the current x86_64 development path. It
-downloads the unsigned Chromium payload from the GitHub release
-${RELEASE_TAG} and verifies SHA-256 ${RELEASE_SHA256}. It provides
-chromiumos-ash for manual installs; generated AUR meta/session packages use
-the explicit chromiumos-ash-bin dependency so AUR helpers resolve it.
-There is no ARM binary claim.
-
-When an unprivileged Arch build user and \`makepkg\` are available, the exporter
-regenerates \`.SRCINFO\` for transformed/generated packages. Otherwise, run
-\`makepkg --printsrcinfo\` as an unprivileged Arch user before upload. In every
-case, run \`namcap PKGBUILD\` and \`makepkg --verifysource\` in every directory.
-Do not upload the parent repository, private engineering documents, VM
-credentials, build logs, ISO files, or package archives to an AUR package repo.
+From ${REF} ($(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)).
+One directory per AUR repository. Before pushing, in each directory as an
+unprivileged user: \`makepkg --printsrcinfo > .SRCINFO\`, \`namcap PKGBUILD\`,
+\`makepkg --verifysource\`. ci/aur-package-smoke.sh does all three.
 EOF
 
 printf 'AUR bundles exported to %s\n' "${OUTPUT}"

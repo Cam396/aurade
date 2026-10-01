@@ -21,9 +21,24 @@ makepkg --printsrcinfo > .SRCINFO
 ~~~
 
 Inspect the package file list and the license before installing it. Repeat the
-same checks for every package in a proposed upload. ci/export-aur-bundles.sh
-can create self-contained upload directories without copying Chromium
-checkouts, ISO files, logs, or private material.
+same checks for every package in a proposed upload.
+
+## The AUR export
+
+`ci/export-aur-bundles.sh` writes one directory per AUR repository from a
+release tag. Every package keeps the version the pacman repository carries.
+Three are adjusted so they build from public sources only: the wallpapers are
+downloaded from the tagged tree, `auradefs` builds from the tag's source
+archive, and `chromiumos-ash-bin` repackages the released Chromium build with
+its dependencies read from `chromiumos-ash/PKGBUILD`.
+
+~~~bash
+AURADE_AUR_OUTPUT=$HOME/aur-export AURADE_AUR_REF=v1.1.2 \
+  AURADE_AUR_CHROMIUM_PACKAGE=/path/to/chromiumos-ash-<ver>-<rel>-x86_64.pkg.tar.zst \
+  ci/export-aur-bundles.sh
+ci/aur-package-smoke.sh            # .SRCINFO, namcap, verifysource, as a normal user
+ci/publish-aur.sh ~/aur-export         # a dry run until AUR_SSH_KEY is set
+~~~
 
 ## Publication checklist
 
