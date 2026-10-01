@@ -847,3 +847,11 @@ body.light-theme #ctx-tab .mi {
   background:var(--solid-3);
   box-shadow:0 8px 16px rgba(0,0,0,.28);
 }
+/* What the shipped page says when its file service does not answer. */
+.no-service { margin:12px; padding:16px 18px; display:grid; gap:6px;
+  background:var(--card); border:1px solid var(--card-stroke);
+  border-radius:var(--r-overlay); color:var(--text-1); font-size:14px; }
+.no-service strong { font-size:16px; font-weight:600; }
+.no-service p { margin:0; color:var(--text-2); }
+.no-service code { justify-self:start; padding:4px 8px; border-radius:var(--r-ctl);
+  background:var(--subtle-2); font-family:ui-monospace, monospace; user-select:all; }
