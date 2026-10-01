@@ -2,6 +2,30 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## 1.1.2, unreleased
+
+### Added
+- AuraDE installs onto an Arch system you already use, as one more session at your login screen next to Plasma, GNOME or whatever else is there. The steps are in [docs/existing-arch.md](docs/existing-arch.md), and `sudo pacman -Rns aurade` takes it back out.
+- One command to try AuraDE in a virtual machine on Linux, macOS and Windows.
+- A hardware report form for telling us what works on your machine.
+
+### Changed
+- Setup and system messages say "computer" instead of "Chromebook".
+- About says updates come from pacman, shows Arch Linux where it showed Crostini, and no longer lists What's new or Firmware updates, which pointed at Google's services.
+- Setup says you sign in with your Linux account's password.
+- My Images lists the AuraDE wallpapers.
+- The text installer fills a large screen and picks a font size to match it.
+- The installer's wallpaper card fits its column, and the encryption page says each thing once.
+- On a display with no render node, the installer draws in software and warns instead of refusing to install.
+
+### Fixed
+- Installing `aurade` on its own now brings the Files service with it. Before, Files opened on an empty Home.
+- Files says when its file service is not running and how to start it, instead of showing an empty folder.
+- Only one AuraDE session shows at the login screen. The developer sessions of the shell are hidden.
+- The network bridge starts as soon as it is installed, so setup on a wired connection no longer asks for Wi-Fi before the first reboot.
+- Files: Set as Desktop sets the wallpaper, submenus open, rows that do not apply stay hidden, and a full folder no longer says it is empty.
+- Files: a narrow window keeps every toolbar button in reach and floats the details pane over the list.
+
 ## 1.1.1, 2026-09-29
 
 ### Updating from 1.0.0 or 1.1.0
