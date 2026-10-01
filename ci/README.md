@@ -28,7 +28,9 @@ archive snapshot in `pins/arch.snapshot`.
 `stage` checks every signature and writes the assets, SHA256SUMS and notes
 from the CHANGELOG, `draft` tags the commit and uploads a draft release, and,
 once a person has published it, `publish-repo` brings the hosted package
-repository in line and reads it back. It never publishes a release itself.
+repository in line and reads it back. It never publishes a release itself. After that,
+`aur` exports the AUR packages from the release tag and pushes them, a dry run
+unless `AUR_SSH_KEY` names the AUR account's key.
 
 A version that is already published keeps its published bytes. Rebuilding an
 unchanged package still gives a different file (the build date is inside it),
