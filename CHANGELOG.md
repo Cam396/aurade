@@ -12,6 +12,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
+- The erase confirmation field in the graphical installer shows one focus
+  ring instead of two.
 - The login screen says "Welcome" to an account signing in for the first
   time, and "Welcome back" only after that.
 - The text installer's done screen stays up until you press a key: enter

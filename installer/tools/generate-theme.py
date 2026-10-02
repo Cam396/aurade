@@ -562,8 +562,11 @@ list.boxed-list {
    coming back from somewhere else. A container that takes focus still takes
    it; it just does not announce the fact by outlining the page.
 
-   `list` is GTK's node name for a list box, `clamp` and `toolbarview` are
-   libadwaita's. Anything not named here keeps the ring. */
+   `list` is GTK's node name for a list box, `clamp`, `preferencesgroup`
+   and `toolbarview` are libadwaita's. GTK marks every ancestor of the focused
+   widget focus-visible, so a group left off this list drew a second ring
+   around the erase gate's confirmation field. Anything not named here keeps
+   the ring. */
 window:focus-visible,
 box:focus-visible,
 grid:focus-visible,
@@ -575,6 +578,7 @@ scrolledwindow:focus-visible,
 list:focus-visible,
 flowbox:focus-visible,
 clamp:focus-visible,
+preferencesgroup:focus-visible,
 toolbarview:focus-visible,
 banner:focus-visible {
   outline: none;
@@ -931,8 +935,11 @@ COMPONENT_CSS = r"""
    coming back from somewhere else. A container that takes focus still takes
    it; it just does not announce the fact by outlining the page.
 
-   `list` is GTK's node name for a list box, `clamp` and `toolbarview` are
-   libadwaita's. Anything not named here keeps the ring. */
+   `list` is GTK's node name for a list box, `clamp`, `preferencesgroup`
+   and `toolbarview` are libadwaita's. GTK marks every ancestor of the focused
+   widget focus-visible, so a group left off this list drew a second ring
+   around the erase gate's confirmation field. Anything not named here keeps
+   the ring. */
 window:focus-visible,
 box:focus-visible,
 grid:focus-visible,
@@ -944,6 +951,7 @@ scrolledwindow:focus-visible,
 list:focus-visible,
 flowbox:focus-visible,
 clamp:focus-visible,
+preferencesgroup:focus-visible,
 toolbarview:focus-visible,
 banner:focus-visible {
   outline: none;
