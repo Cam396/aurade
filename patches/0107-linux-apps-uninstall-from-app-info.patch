@@ -1,0 +1,50 @@
+diff --git a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc b/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
+index 62749b9e6e59..c1e2291748a0 100644
+--- a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
++++ b/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
+@@ -289,8 +289,14 @@ void AppUninstallDialogView::InitializeView(Profile* profile,
+       NOTREACHED();
+ #endif
+     case apps::AppType::kCrostini:
+-      // No longer supported
+-      NOTREACHED();
++      // AuraDE compatibility: Linux apps here are the desktop's own, removed
++      // with pacman, and the confirmation says what that does. Crostini
++      // itself is gone, which is why this used to be unreachable; asking to
++      // uninstall a Linux app took the whole desktop down.
++      AddSubtitle(
++          u"This removes the app's package from this computer. Your files and "
++          u"the app's settings in your home folder stay.");
++      break;
+     case apps::AppType::kBruschetta:
+       // No longer supported
+       NOTREACHED();
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
+index c69b93cd78af..9923369d3823 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
+@@ -63,6 +63,9 @@ export class AppManagementAppItemElement extends
+       case AppType.kArc:
+         return AppManagementEntryPoint.MAIN_VIEW_ARC;
+       case AppType.kChromeApp:
++      // AuraDE compatibility: Linux apps open the same detail view as Chrome
++      // apps; with no case here, opening one from the list threw.
++      case AppType.kCrostini:
+         return AppManagementEntryPoint.MAIN_VIEW_CHROME_APP;
+       case AppType.kWeb:
+         return AppManagementEntryPoint.MAIN_VIEW_WEB_APP;
+diff --git a/ui/webui/resources/cr_components/app_management/util.ts b/ui/webui/resources/cr_components/app_management/util.ts
+index 88294208788c..03fc56bf6ce1 100644
+--- a/ui/webui/resources/cr_components/app_management/util.ts
++++ b/ui/webui/resources/cr_components/app_management/util.ts
+@@ -134,6 +134,10 @@ function getUserActionHistogramNameForAppType(appType: AppType): string {
+       return 'AppManagement.AppDetailViews.PluginVmApp';
+     case AppType.kBorealis:
+       return 'AppManagement.AppDetailViews.BorealisApp';
++    // AuraDE compatibility: Linux apps are the desktop's own here; with no
++    // case, every visit to one and every uninstall threw.
++    case AppType.kCrostini:
++      return 'AppManagement.AppDetailViews.CrostiniApp';
+     default:
+       assertNotReached();
+   }
