@@ -85,6 +85,41 @@ if (( quick_exits >= QUICK_EXIT_LIMIT )); then
     --cmd /usr/bin/chromiumos-ash-session
 fi
 
+# The keyboard layout. weston types US unless a config file says otherwise,
+# and it reads neither the console's KEYMAP nor XKB's environment variables.
+# The installer writes the layout as XKB lines in /etc/vconsole.conf, from the
+# same conversion the graphical installer typed this machine's passwords with,
+# so those lines are what this screen types on. A machine with no XKB lines
+# keeps the US this screen has always had: the graphical installer before the
+# conversion typed its passwords on US, whatever layout was chosen.
+#
+# The greeter is told which layout that came to, so that "This keyboard is set
+# to" names the one under the cursor rather than one in a file weston ignored.
+weston_config=()
+xkb_ini=''
+xkb_layout=''
+vconsole="${AURADE_VCONSOLE_CONF:-/etc/vconsole.conf}"
+if [[ -r $vconsole ]]; then
+  while IFS='=' read -r key value; do
+    value=${value%[\"\']}
+    value=${value#[\"\']}
+    [[ -n $value ]] || continue
+    case $key in
+      XKBLAYOUT) xkb_layout=$value; xkb_ini+="keymap_layout=$value"$'\n' ;;
+      XKBMODEL) xkb_ini+="keymap_model=$value"$'\n' ;;
+      XKBVARIANT) xkb_ini+="keymap_variant=$value"$'\n' ;;
+      XKBOPTIONS) xkb_ini+="keymap_options=$value"$'\n' ;;
+    esac
+  done <"$vconsole"
+fi
+weston_ini="$XDG_RUNTIME_DIR/aurade-greeter-weston.ini"
+if [[ -n $xkb_layout ]] && printf '[keyboard]\n%s' "$xkb_ini" >"$weston_ini" 2>/dev/null; then
+  weston_config=(--config="$weston_ini")
+else
+  xkb_layout=us
+fi
+export AURADE_GREETER_XKB_LAYOUT="$xkb_layout"
+
 # weston runs as a child rather than in place of this script, because the
 # script has to see how it ended. greetd still sees the screen go when weston
 # goes, and anything greetd sends to stop the greeter is passed on to weston
@@ -96,6 +131,7 @@ weston \
   --renderer="$renderer" \
   --idle-time=0 \
   --continue-without-input \
+  ${weston_config[@]+"${weston_config[@]}"} \
   -- /usr/bin/aurade-greeter &
 weston_pid=$!
 trap 'kill -TERM "$weston_pid" 2>/dev/null' TERM INT HUP

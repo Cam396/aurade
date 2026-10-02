@@ -2861,7 +2861,7 @@ class GreeterWindow(Adw.ApplicationWindow):
         found = self.widgets.get("password.layout")
         if found is None:
             return
-        words = SET.layout_words(SET.keyboard_layout())
+        words = SET.layout_words(SET.screen_layout())
         if not words:
             return
         found.set_label(C.KEYBOARD_LAYOUT.format(layout=words))

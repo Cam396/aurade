@@ -240,6 +240,7 @@ else:
 # text of the script passed for as long as the words were in its comments.
 _WESTON_STUB = """#!/usr/bin/env bash
 printf 'gsk=%s\\n' "${GSK_RENDERER:-unset}" >"${AURADE_TEST_WESTON_LOG:?}"
+printf 'layout=%s\\n' "${AURADE_GREETER_XKB_LAYOUT:-unset}" >>"${AURADE_TEST_WESTON_LOG:?}"
 printf 'arg=%s\\n' "$@" >>"${AURADE_TEST_WESTON_LOG:?}"
 """
 
@@ -265,7 +266,8 @@ def _virtio_sysfs(scratch: str, virgl: bool) -> str:
     return os.path.dirname(node)
 
 
-def _drive_wrapper(scratch: str, render_node: bool, sysfs: str = "") -> str:
+def _drive_wrapper(scratch: str, render_node: bool, sysfs: str = "",
+                   vconsole: str = "") -> str:
     stubs = os.path.join(scratch, "bin")
     os.makedirs(stubs, exist_ok=True)
     weston = os.path.join(stubs, "weston")
@@ -288,9 +290,19 @@ def _drive_wrapper(scratch: str, render_node: bool, sysfs: str = "") -> str:
     if not sysfs:
         sysfs = os.path.join(scratch, "sysfs-none")
         os.makedirs(sysfs, exist_ok=True)
+    # The machine's keyboard record, written for the case, or none at all: the
+    # real /etc/vconsole.conf of whatever runs this is not the test's business.
+    record = os.path.join(scratch, "vconsole.conf")
+    if os.path.exists(record):
+        os.unlink(record)
+    if vconsole:
+        with open(record, "w", encoding="utf-8") as handle:
+            handle.write(vconsole)
+    env.pop("AURADE_GREETER_XKB_LAYOUT", None)
     env.update(PATH=stubs + os.pathsep + env.get("PATH", "/usr/bin:/bin"),
                AURADE_DRI_DIR=dri, AURADE_TEST_WESTON_LOG=log,
-               AURADE_SYSFS_DRM=sysfs, XDG_RUNTIME_DIR=scratch)
+               AURADE_SYSFS_DRM=sysfs, XDG_RUNTIME_DIR=scratch,
+               AURADE_VCONSOLE_CONF=record)
     subprocess.run(["bash", _wrapper], env=env, check=False,
                    capture_output=True, timeout=30)
     if not os.path.isfile(log):
@@ -326,6 +338,35 @@ if os.path.isfile(_wrapper):
         check("arg=--renderer=auto" in _virgl.splitlines()
               and "gsk=unset" in _virgl.splitlines(),
               "virtio-gpu with the host's 3D was given a software renderer")
+
+        # The keyboard. XKB lines in the machine's record are the layout the
+        # passwords were typed on, so weston is given them in a config file;
+        # a record with only a console KEYMAP keeps US, the layout the
+        # graphical installer before the conversion typed passwords on.
+        _ini = os.path.join(_scratch, "aurade-greeter-weston.ini")
+        _german = _drive_wrapper(
+            _scratch, render_node=False,
+            vconsole='KEYMAP=de-latin1\nXKBLAYOUT=de\nXKBMODEL=pc105\n'
+                     'XKBOPTIONS="terminate:ctrl_alt_bksp"\n')
+        check(f"arg=--config={_ini}" in _german.splitlines(),
+              "XKB lines in vconsole.conf did not reach weston, which then "
+              "types US under passwords typed on the chosen layout")
+        _given = open(_ini, encoding="utf-8").read() if os.path.isfile(_ini) else ""
+        check(_given.splitlines() == ["[keyboard]", "keymap_layout=de",
+                                      "keymap_model=pc105",
+                                      "keymap_options=terminate:ctrl_alt_bksp"],
+              f"weston's keyboard section is not the record's: {_given!r}")
+        check("layout=de" in _german.splitlines(),
+              "the greeter was not told the layout weston was given")
+        _console = _drive_wrapper(_scratch, render_node=False,
+                                  vconsole="KEYMAP=de-latin1\n")
+        check(not any(line.startswith("arg=--config") for line in _console.splitlines())
+              and "layout=us" in _console.splitlines(),
+              "a record with only a console KEYMAP changed the layout weston "
+              "types on, under passwords the old installer typed on US")
+        _nothing = _drive_wrapper(_scratch, render_node=False)
+        check("layout=us" in _nothing.splitlines(),
+              "with no keyboard record the greeter was not told US")
 
 # -- the way in when the graphical greeter cannot start --------------------
 #

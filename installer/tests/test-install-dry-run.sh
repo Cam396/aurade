@@ -32,6 +32,12 @@ make_package chromiumos-ash
   printf '%s\n' '# sha256 filename pkgname pkgver arch'
   LC_ALL=C sort -k3,3 "$TMP/packages.lock.unsorted"
 } >"$TMP/packages.lock"
+# systemd's keymap table, two lines of it: the dry run should not depend on
+# the version this machine happens to have.
+printf '%s\n' '# Generated' \
+  'us	us	pc105+inet	-	terminate:ctrl_alt_bksp	en-US,en' \
+  'de-latin1	de	pc105	-	terminate:ctrl_alt_bksp	-' >"$TMP/kbd-model-map"
+export AURADE_KBD_MODEL_MAP="$TMP/kbd-model-map"
 printf '%s\n' "\$6\$audit\$not-a-plaintext-password" >"$TMP/password.hash"
 printf '%s\n' 'audit-passphrase' >"$TMP/luks.passphrase"
 chmod 0600 "$TMP/password.hash" "$TMP/luks.passphrase"
@@ -235,6 +241,18 @@ plan() {
     exit 1
   fi
 }
+
+# The keyboard, written for everything that reads keys through XKB. A keymap
+# systemd's table converts gets its XKB lines beside KEYMAP; `cz` comes from
+# AuraDE's own short list, as the QWERTY variant the console keymap is; one
+# neither knows gets KEYMAP alone, and a login screen that stays on US.
+grep -Fq -- 'keyboard: KEYMAP=us with XKBLAYOUT=us XKBMODEL=pc105+inet XKBOPTIONS=terminate:ctrl_alt_bksp' "$TMP/plain.out"
+plan kb-de --keymap de-latin1
+grep -Fq -- 'keyboard: KEYMAP=de-latin1 with XKBLAYOUT=de XKBMODEL=pc105 XKBOPTIONS=terminate:ctrl_alt_bksp' "$TMP/kb-de.out"
+plan kb-cz --keymap cz
+grep -Fq -- 'keyboard: KEYMAP=cz with XKBLAYOUT=cz XKBMODEL=pc105 XKBVARIANT=qwerty' "$TMP/kb-cz.out"
+plan kb-ua --keymap ua
+grep -Fq -- 'keyboard: KEYMAP=ua, which has no XKB layout, so the login screen stays on US' "$TMP/kb-ua.out"
 
 grep -Fq 'compare package size with available memory and swap' "$TMP/plain.out"
 grep -Fq 'download to the target disk after mount when memory headroom is low' "$TMP/plain.out"

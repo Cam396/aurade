@@ -64,7 +64,27 @@ install -d "$TMP/zoneinfo/America" "$TMP/zoneinfo/Europe" "$TMP/locales" \
 : >"$TMP/zoneinfo/UTC"
 for _zone in America/Chicago Europe/London Europe/Paris; do : >"$TMP/zoneinfo/$_zone"; done
 for _locale in en_US en_GB fr_FR de_DE ja_JP; do : >"$TMP/locales/$_locale"; done
-for _keymap in us uk fr de dvorak; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+# `xx` has no XKB layout, so the screen refuses it rather than type it on US.
+for _keymap in us uk fr de dvorak xx; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+printf '%s\n' \
+  'us	us	pc105+inet	-	terminate:ctrl_alt_bksp' 'uk	gb	pc105	-	-' \
+  'fr	fr	pc105	-	-' 'de	de	pc105	-	-' 'dvorak	us	pc105	dvorak	-' \
+  >"$TMP/kbd-model-map"
+# The layout file `cage` would read, and an input sysfs with no keyboards in
+# it: nothing here may ask udev to plug in the keyboards of the machine
+# running the test.
+install -d "$TMP/live-xkb/symbols" "$TMP/input"
+printf 'default partial alphanumeric_keys modifier_keys\nxkb_symbols "basic" {\n  include "pc+us+inet(evdev)"\n};\n' \
+  >"$TMP/live-xkb/symbols/aurade"
+cat >"$TMP/stub/xkbcli" <<'STUB'
+#!/usr/bin/env bash
+[[ $* == *--kccgst* ]] || exit 0
+layout=us
+set -- "${@:2}"
+while (($#)); do [[ $1 != --layout ]] || layout=$2; shift; done
+printf '  xkb_symbols { include "pc+%s+inet(evdev)" };\n' "$layout"
+STUB
+chmod +x "$TMP/stub/xkbcli"
 : >"$TMP/dri/renderD128"
 printf 'DRIVER=i915\n' >"$TMP/drm/renderD128/device/uevent"
 printf 'MemAvailable:   16000000 kB\n' >"$TMP/meminfo"
@@ -94,6 +114,8 @@ export AURADE_JOURNAL_PATH="$TMP/run/journal.jsonl"
 export AURADE_JOURNAL_RAW="$TMP/run/install.log"
 export AURADE_ASSET_DIR="$ROOT/installer/assets"
 export AURADE_NM_PROFILE_DIR="$TMP/nm"
+export AURADE_KBD_MODEL_MAP="$TMP/kbd-model-map" AURADE_LIVE_XKB="$TMP/live-xkb"
+export AURADE_INPUT_SYSFS="$TMP/input"
 export XDG_RUNTIME_DIR="$TMP/xdg"
 chmod 700 "$XDG_RUNTIME_DIR"
 

@@ -32,6 +32,15 @@ WIFI_LIB=${AURADE_WIFI_LIB:-/usr/local/lib/aurade/aurade-wifi.sh}
 # shellcheck source=../lib/aurade-wifi.sh
 . "$WIFI_LIB"
 
+KEYBOARD_LIB=${AURADE_KEYBOARD_LIB:-/usr/local/lib/aurade/aurade-keyboard.sh}
+[[ -r $KEYBOARD_LIB ]] || KEYBOARD_LIB="$SELF_DIR/../lib/aurade-keyboard.sh"
+[[ -r $KEYBOARD_LIB ]] || {
+  printf '%s: keyboard library not found\n' "${0##*/}" >&2
+  exit 1
+}
+# shellcheck source=../lib/aurade-keyboard.sh
+. "$KEYBOARD_LIB"
+
 # The install fingerprint. Optional: a machine that cannot find the library
 # gets an install without a mark on it, which is a missing file in /etc and
 # nothing else.
@@ -816,6 +825,22 @@ write_target_file() {
   install -d -m 0755 "$(dirname "$destination")"
   printf '%b' "$content" >"$destination"
   chmod "$mode" "$destination"
+}
+
+# The XKB lines for a console keymap, the way `localectl set-keymap` writes
+# them beside KEYMAP, escaped for write_target_file. Nothing for a keymap with
+# no XKB layout (lib/aurade-keyboard.sh).
+#
+# Everything graphical reads keys through XKB and ignores KEYMAP. The login
+# screen types with these lines, and the graphical installer typed the
+# passwords with the same conversion, so the two agree.
+keymap_xkb_lines() {
+  local layout model variant options
+  IFS=$'\t' read -r layout model variant options < <(aurade_keymap_xkb "$1") || return 0
+  printf 'XKBLAYOUT=%s\\n' "$layout"
+  [[ $model == - ]] || printf 'XKBMODEL=%s\\n' "$model"
+  [[ $variant == - ]] || printf 'XKBVARIANT=%s\\n' "$variant"
+  [[ $options == - ]] || printf 'XKBOPTIONS=%s\\n' "$options"
 }
 
 # An install signed with the release key follows the published repository,
@@ -1656,7 +1681,13 @@ fi
 run arch-chroot "$MOUNTPOINT" ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 run arch-chroot "$MOUNTPOINT" hwclock --systohc
 write_target_file /etc/hostname 0644 "$HOSTNAME\n"
-write_target_file /etc/vconsole.conf 0644 "KEYMAP=$KEYMAP\n"
+VCONSOLE_XKB=$(keymap_xkb_lines "$KEYMAP")
+write_target_file /etc/vconsole.conf 0644 "KEYMAP=$KEYMAP\n${VCONSOLE_XKB}"
+if [[ -n $VCONSOLE_XKB ]]; then
+  log "keyboard: KEYMAP=$KEYMAP with ${VCONSOLE_XKB//\\n/ }"
+else
+  log "keyboard: KEYMAP=$KEYMAP, which has no XKB layout, so the login screen stays on US"
+fi
 write_target_file /etc/locale.conf 0644 "LANG=$LOCALE\n"
 
 # --- the accessibility choices, written into the installed system --------
