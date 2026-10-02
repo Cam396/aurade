@@ -1,0 +1,189 @@
+diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/resources/chromeos/login/BUILD.gn
+--- a/chrome/browser/resources/chromeos/login/BUILD.gn
++++ b/chrome/browser/resources/chromeos/login/BUILD.gn
+@@ -25,6 +25,7 @@
+     "images/app_icons/a4.svg",
+     "images/app_icons/calculator.svg",
+     "images/app_icons/camera.svg",
++    "images/app_icons/chromium.svg",
+     "images/app_icons/files.svg",
+     "images/app_icons/photos.svg",
+     "images/app_icons/settings.svg",
+diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
+--- a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
++++ b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
+@@ -59,6 +59,10 @@
+     grid-template-rows: repeat(2, 1fr);
+   }
+ 
++  #grid.single-row {
++    grid-template-rows: 1fr;
++  }
++
+   #sliderContainer {
+     align-items: center;
+     display: flex;
+@@ -160,7 +164,7 @@
+   <div id="preview" aria-hidden="true">
+     <p id="previewTitle">[[i18nDynamic(locale, 'displaySizePreview')]]</p>
+     <div id="grid-container" clsas="layout horizontal center flex">
+-      <div id="grid">
++      <div id="grid" class$="[[getGridClass_(apps)]]">
+         <template is="dom-repeat" items="[[apps]]" as="app">
+           <div>
+             <img class="app-icon" srcset="[[app.icon]]">
+diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
+--- a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
++++ b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
+@@ -7,6 +7,7 @@
+ import '//resources/ash/common/cr_elements/icons.html.js';
+ 
+ import {CrSliderElement} from '//resources/ash/common/cr_elements/cr_slider/cr_slider.js';
++import {loadTimeData} from '//resources/js/load_time_data.js';
+ import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
+ import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+ import {assert} from 'chrome://resources/js/assert.js';
+@@ -104,6 +105,24 @@
+     this.tickedSizeIndex = currentSizeIndex;
+     this.markerCounts = this.availableSizesTicks.length;
+ 
++    // AuraDE ships none of Photos, Calculator, Camera or A4, so the preview
++    // shows the apps that are really on the machine.
++    if (loadTimeData.valueExists('isAuraDeLocalAccountEnabled') &&
++        loadTimeData.getBoolean('isAuraDeLocalAccountEnabled')) {
++      this.apps = [
++        {icon: 'images/app_icons/files.svg', name: 'displaySizeFilesApp'},
++        {
++          icon: 'images/app_icons/chromium.svg',
++          name: 'displaySizeChromiumApp',
++        },
++        {
++          icon: 'images/app_icons/settings.svg',
++          name: 'displaySizeSettingsApp',
++        },
++      ];
++      return;
++    }
++
+     this.apps = [
+       {icon: 'images/app_icons/files.svg', name: 'displaySizeFilesApp'},
+       {icon: 'images/app_icons/photos.svg', name: 'displaySizePhotosApp'},
+@@ -124,6 +143,11 @@
+     return this.availableSizesTicks[this.tickedSizeIndex].value;
+   }
+ 
++  // One row when there are no more apps than fit in it.
++  private getGridClass_(apps: App[]): string {
++    return apps && apps.length <= 3 ? 'single-row' : '';
++  }
++
+   // Called upon `tickedSizeIndex` property changes.
+   private updatePreviewSizes(): void {
+     const selectedSize = this.availableSizesTicks[this.tickedSizeIndex].value;
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
+--- a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
+@@ -12,6 +12,7 @@
+ import '../../components/dialogs/oobe_adaptive_dialog.js';
+ import '../../components/oobe_icons.html.js';
+ 
++import {loadTimeData} from '//resources/js/load_time_data.js';
+ import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
+ import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+ 
+@@ -59,6 +60,12 @@
+   override ready(): void {
+     super.ready();
+     this.initializeLoginScreen('AuraLocalAccountScreen');
++    // AuraDE: start from the Linux account's full name, so the usual case is
++    // to press Continue. Left empty when the account has none.
++    if (loadTimeData.valueExists('auraLocalAccountLinuxFullName')) {
++      this.displayName_ =
++          loadTimeData.getString('auraLocalAccountLinuxFullName');
++    }
+   }
+ 
+   override getOobeUIInitialState(): OobeUiState {
+diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+--- a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.h"
+ 
++#include <pwd.h>
++#include <unistd.h>
++
++#include <string>
++
+ #include "components/login/localized_values_builder.h"
+ 
+ namespace ash {
+@@ -13,6 +18,34 @@
+ 
+ AuraLocalAccountScreenHandler::~AuraLocalAccountScreenHandler() = default;
+ 
++namespace {
++
++// AuraDE: the Linux account this session runs as, read from the password
++// database. The full name is the GECOS field up to its first comma, which is
++// where `useradd -c` and the installer put it. Either part can be empty.
++struct LinuxAccountNames {
++  std::string login;
++  std::string full_name;
++};
++
++LinuxAccountNames GetLinuxAccountNames() {
++  LinuxAccountNames names;
++  const struct passwd* entry = getpwuid(getuid());
++  if (!entry) {
++    return names;
++  }
++  if (entry->pw_name) {
++    names.login = entry->pw_name;
++  }
++  if (entry->pw_gecos) {
++    std::string gecos = entry->pw_gecos;
++    names.full_name = gecos.substr(0, gecos.find(','));
++  }
++  return names;
++}
++
++}  // namespace
++
+ void AuraLocalAccountScreenHandler::DeclareLocalizedValues(
+     ::login::LocalizedValuesBuilder* builder) {
+   builder->Add("auraLocalAccountTitle", "Set up your local account");
+@@ -20,7 +53,12 @@
+                "AuraDE will use this Linux user and store files in your home "
+                "folder.");
+   builder->Add("auraLocalAccountDisplayName", "Display name");
+-  builder->Add("auraLocalAccountDisplayNamePlaceholder", "Local user");
++  // The name field starts with the account's full name, and an empty field
++  // shows the login name, so the usual case is to press Continue.
++  const LinuxAccountNames names = GetLinuxAccountNames();
++  builder->Add("auraLocalAccountDisplayNamePlaceholder",
++               names.login.empty() ? std::string("Local user") : names.login);
++  builder->Add("auraLocalAccountLinuxFullName", names.full_name);
+   builder->Add("auraLocalAccountPasswordHint", "Password hint");
+   builder->Add("auraLocalAccountPasswordHintPlaceholder",
+                "Optional hint shown only on this device");
+diff --git a/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc b/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
+--- a/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
+@@ -32,6 +32,8 @@
+   builder->Add("displaySizeCalculatorApp",
+                IDS_OOBE_DISPLAY_SIZE_CALCULATOR_APP_NAME);
+   builder->Add("displaySizeCameraApp", IDS_OOBE_DISPLAY_SIZE_CAMERA_APP_NAME);
++  // AuraDE: the browser in the preview. A product name, not translated.
++  builder->Add("displaySizeChromiumApp", "Chromium");
+   builder->Add("displaySizeFilesApp", IDS_OOBE_DISPLAY_SIZE_FILES_APP_NAME);
+   builder->Add("displaySizePhotosApp", IDS_OOBE_DISPLAY_SIZE_PHOTOS_APP_NAME);
+   builder->Add("displaySizeSettingsApp",
+diff --git a/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
+@@ -0,0 +1 @@
++<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#a)"><path d="M128 191.995c35.346 0 64-28.654 64-64 0-35.347-28.654-64-64-64-35.346 0-64 28.654-64 64 0 35.346 28.654 64 64 64Z" fill="#fff"/><path d="M96.01 183.41a63.681 63.681 0 0 1-23.42-23.43l-.007.004-55.425-96a128.027 128.027 0 0 0 110.841 192.018l55.436-96.018a63.985 63.985 0 0 1-16.465 18.775 64.007 64.007 0 0 1-70.96 4.651Z" fill="#669DF6"/><path d="M191.991 127.984a63.683 63.683 0 0 1-8.581 31.996l.007.004-55.426 96a128.029 128.029 0 0 0 110.872-192H127.991a64 64 0 0 1 64 64Z" fill="#AECBFA"/><path d="M128 180c28.719 0 52-23.281 52-52s-23.281-52-52-52-52 23.281-52 52 23.281 52 52 52Z" fill="#1A73E8"/><path d="M95.99 72.59a63.684 63.684 0 0 1 32.001-8.566v-.008h110.851A128.035 128.035 0 0 0 127.991.026 128.028 128.028 0 0 0 17.13 63.999l55.436 96.018a64.003 64.003 0 0 1 4.65-70.961A64 64 0 0 1 95.991 72.59Z" fill="#1967D2"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h256v256H0z"/></clipPath></defs></svg>
+\ No newline at end of file
