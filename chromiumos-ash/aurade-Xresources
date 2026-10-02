@@ -1,0 +1,38 @@
+! AuraDE defaults for X11 applications. ~/.Xresources is merged after this
+! file, so anything set there wins.
+
+Xft.antialias: true
+Xft.hinting: true
+Xft.hintstyle: hintslight
+Xft.rgba: none
+
+! XTerm and UXTerm (both draw through the VT100 widget): a readable outline
+! font, room around the text, no scrollbar, and the colours of a dark
+! terminal rather than black on white.
+*VT100*faceName: Monospace
+*VT100*faceSize: 11
+*VT100*internalBorder: 12
+*VT100*scrollBar: false
+*VT100*saveLines: 10000
+*VT100*selectToClipboard: true
+*termName: xterm-256color
+*VT100*background: #1f1f23
+*VT100*foreground: #e3e2e6
+*VT100*cursorColor: #c6bfff
+*VT100*pointerColor: #e3e2e6
+*VT100*color0: #1f1f23
+*VT100*color1: #f2b8b5
+*VT100*color2: #a8d5a2
+*VT100*color3: #ecd58a
+*VT100*color4: #a9c7ff
+*VT100*color5: #c6bfff
+*VT100*color6: #9ad4d6
+*VT100*color7: #e3e2e6
+*VT100*color8: #5e5d66
+*VT100*color9: #ffb4ab
+*VT100*color10: #b9e8b2
+*VT100*color11: #ffe08a
+*VT100*color12: #c3d7ff
+*VT100*color13: #ddd6ff
+*VT100*color14: #b3eef0
+*VT100*color15: #ffffff

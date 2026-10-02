@@ -20,7 +20,12 @@ EVENTS="$TMP/events"
 cat >"$TMP/bin/xwayland-satellite" <<'STUB'
 #!/bin/bash
 echo "bridge start $1 wayland=${WAYLAND_DISPLAY:-}" >>"$AURADE_TEST_EVENTS"
-trap 'echo "bridge stopped $1" >>"$AURADE_TEST_EVENTS"; exit 0' TERM
+# Asked to, it puts up the X socket the way Xwayland would.
+xsocket="${AURADE_X11_SOCKET_DIR}/X${1#:}"
+if [ -n "${AURADE_TEST_XSOCKET:-}" ]; then
+  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$xsocket"
+fi
+trap 'rm -f "$xsocket"; echo "bridge stopped $1" >>"$AURADE_TEST_EVENTS"; exit 0' TERM
 while :; do sleep 0.1; done
 STUB
 # The desktop says which display it was given, puts up an exo socket as Ash
@@ -34,7 +39,16 @@ sleep 3
 rm -f "$XDG_RUNTIME_DIR/wayland-0"
 exit 0
 STUB
-chmod 0755 "$TMP/bin/xwayland-satellite" "$TMP/stub-desktop"
+# xrdb says what it merged and how. Told to, it fails unless it is spared
+# the preprocessor, as it does where cpp is not installed.
+cat >"$TMP/bin/xrdb" <<'STUB'
+#!/bin/bash
+nocpp=no
+[ "$1" = -nocpp ] && { nocpp=yes; shift; }
+if [ -n "${AURADE_TEST_NO_CPP:-}" ] && [ "$nocpp" = no ]; then exit 1; fi
+echo "xrdb $1 $2 display=${DISPLAY:-} nocpp=$nocpp" >>"$AURADE_TEST_EVENTS"
+STUB
+chmod 0755 "$TMP/bin/xwayland-satellite" "$TMP/stub-desktop" "$TMP/bin/xrdb"
 
 session() {
   : >"$EVENTS"
@@ -45,7 +59,7 @@ session() {
       AURADE_CHROME_COMMAND="$TMP/stub-desktop" \
       AURADE_SESSION_ERROR="$TMP/nonexistent-error-handler" \
       AURADE_REMOVABLE_AUTOMOUNT=0 AURADE_SESSION_ON_EXIT=exit \
-      AURADE_RESTART_DELAY=0 \
+      AURADE_RESTART_DELAY=0 AURADE_X11_RESOURCES="$TMP/defaults" \
       "$@" bash "$CHILD" >"$TMP/console" 2>&1 || true
 }
 
@@ -85,4 +99,20 @@ done
 SESSION_PATH="$TMP/nobridge" session
 grep -Fxq 'desktop display=none' "$EVENTS" || fail "a display was offered with no bridge installed: $(cat "$EVENTS")"
 
-echo 'session x11 bridge test: PASS (handed to the desktop, served on its exo, skips taken displays, one per desktop, none in software or without the bridge)'
+# 6. Once the X server is up, AuraDE's defaults are merged into it and then
+# the user's own ~/.Xresources, so the user's win; without cpp both still load.
+echo 'XTerm*faceSize: 11' >"$TMP/defaults"
+mkdir -p "$TMP/home"
+echo 'XTerm*faceSize: 14' >"$TMP/home/.Xresources"
+session AURADE_TEST_XSOCKET=1
+grep -q '^xrdb ' "$EVENTS" || fail "nothing was merged into the X server: $(cat "$EVENTS")"
+[[ $(grep '^xrdb ' "$EVENTS" | head -1) == "xrdb -merge $TMP/defaults display=:0 nocpp=no" ]] || \
+  fail "AuraDE's defaults were not merged first: $(cat "$EVENTS")"
+[[ $(grep '^xrdb ' "$EVENTS" | sed -n 2p) == "xrdb -merge $TMP/home/.Xresources display=:0 nocpp=no" ]] || \
+  fail "the user's ~/.Xresources was not merged after the defaults: $(cat "$EVENTS")"
+session AURADE_TEST_XSOCKET=1 AURADE_TEST_NO_CPP=1
+[[ $(grep -c '^xrdb .* nocpp=yes$' "$EVENTS") -eq 2 ]] || \
+  fail "without cpp the resources were not loaded: $(cat "$EVENTS")"
+rm -f "$TMP/home/.Xresources"
+
+echo 'session x11 bridge test: PASS (handed to the desktop, served on its exo, skips taken displays, one per desktop, none in software or without the bridge, X defaults then the user'"'"'s)'
