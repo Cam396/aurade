@@ -1,0 +1,140 @@
+diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
+index 4a838ae5582b..b39fe5d9570f 100644
+--- a/ash/app_list/app_list_controller_impl.cc
++++ b/ash/app_list/app_list_controller_impl.cc
+@@ -90,6 +90,7 @@
+ #include "components/services/app_service/public/cpp/app_registry_cache.h"
+ #include "components/services/app_service/public/cpp/app_registry_cache_wrapper.h"
+ #include "ui/base/models/image_model.h"
++#include "ui/chromeos/devicetype_utils.h"
+ #include "ui/base/mojom/menu_source_type.mojom-forward.h"
+ #include "ui/compositor/compositor.h"
+ #include "ui/compositor/layer.h"
+@@ -1985,11 +1986,14 @@ void AppListControllerImpl::MaybeShowSunfishLauncherNudge(
+   pref_service->SetTime(prefs::kSunfishLauncherNudgeLastShown, now);
+ 
+   // TODO(hewer): Upload string for translation.
++  // AuraDE compatibility: this one sentence is written out rather than a
++  // resource, so it named a Chromebook on every machine. It names the device
++  // the way the resources do.
+   AnchoredNudgeData nudge_data = AnchoredNudgeData(
+       capture_mode::kSunfishLauncherNudgeId,
+       NudgeCatalogName::kSunfishLauncherNudge,
+-      u"Select anything on your screen and let your Chromebook suggest best "
+-      u"actions from there",
++      u"Select anything on your screen and let your " +
++          ui::GetChromeOSDeviceName() + u" suggest best actions from there",
+       launcher_button);
+ 
+   AnchoredNudgeManager::Get()->Show(nudge_data);
+diff --git a/chrome/browser/ash/app_list/search/files/file_search_provider.cc b/chrome/browser/ash/app_list/search/files/file_search_provider.cc
+index 839d47dcad88..3da76f3fa9c3 100644
+--- a/chrome/browser/ash/app_list/search/files/file_search_provider.cc
++++ b/chrome/browser/ash/app_list/search/files/file_search_provider.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ash/app_list/search/files/file_search_provider.h"
+ 
++#include <fnmatch.h>
++
+ #include <algorithm>
+ #include <cmath>
+ #include <utility>
+@@ -100,41 +102,69 @@ std::vector<FileSearchProvider::FileInfo> SearchFilesByPattern(
+     std::vector<base::FilePath> trash_paths,
+     int file_type,
+     base::span<const std::string> allowed_extensions) {
+-  base::FileEnumerator enumerator(
+-      root_path,
+-      /*recursive=*/true, file_type, CreateFnmatchQuery(query),
+-      base::FileEnumerator::FolderSearchPolicy::ALL);
++  // AuraDE compatibility: My files is the home directory here, so a recursive
++  // walk also went through every application's hidden folder (~/.mozilla,
++  // ~/.cache). Searching for an application found folders named after it,
++  // ranked above the application itself, and spent the time limit below in
++  // caches. The walk is the enumerator's, depth first with the same pattern
++  // and types, one directory at a time so a hidden one is never entered.
++  const std::string pattern = CreateFnmatchQuery(query);
++  std::vector<base::FilePath> pending_dirs = {root_path};
+ 
+   const auto time_limit = base::Milliseconds(kSearchTimeoutMs);
+   bool timed_out = false;
+   std::vector<FileSearchProvider::FileInfo> matched_paths;
+-  for (base::FilePath path = enumerator.Next(); !path.empty();
+-       path = enumerator.Next()) {
+-    // Exclude any paths that are parented at an enabled trash location.
+-    if (std::ranges::any_of(trash_paths,
+-                            [&path](const base::FilePath& trash_path) {
+-                              return trash_path.IsParent(path);
+-                            })) {
+-      continue;
+-    }
+-    // Exclude any results that are not in the allowed extensions.
+-    if (!allowed_extensions.empty() &&
+-        !std::ranges::any_of(allowed_extensions,
+-                             [&path](const std::string& extension) {
+-                               return path.MatchesFinalExtension(extension);
+-                             })) {
+-      continue;
++  while (!pending_dirs.empty() && matched_paths.size() < kMaxResults &&
++         !timed_out) {
++    if (base::TimeTicks::Now() - query_start_time > time_limit) {
++      timed_out = true;
++      break;
+     }
++    base::FileEnumerator enumerator(
++        pending_dirs.back(), /*recursive=*/false,
++        base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES);
++    pending_dirs.pop_back();
++    for (base::FilePath path = enumerator.Next(); !path.empty();
++         path = enumerator.Next()) {
++      if (path.BaseName().value().starts_with('.')) {
++        continue;
++      }
++      const bool is_directory = enumerator.GetInfo().IsDirectory();
++      if (is_directory) {
++        pending_dirs.push_back(path);
++      }
++      if ((file_type & (is_directory ? base::FileEnumerator::DIRECTORIES
++                                     : base::FileEnumerator::FILES)) == 0 ||
++          fnmatch(pattern.c_str(), path.BaseName().value().c_str(),
++                  FNM_NOESCAPE) != 0) {
++        continue;
++      }
++      // Exclude any paths that are parented at an enabled trash location.
++      if (std::ranges::any_of(trash_paths,
++                              [&path](const base::FilePath& trash_path) {
++                                return trash_path.IsParent(path);
++                              })) {
++        continue;
++      }
++      // Exclude any results that are not in the allowed extensions.
++      if (!allowed_extensions.empty() &&
++          !std::ranges::any_of(allowed_extensions,
++                               [&path](const std::string& extension) {
++                                 return path.MatchesFinalExtension(extension);
++                               })) {
++        continue;
++      }
+ 
+-    matched_paths.emplace_back(
+-        path, enumerator.GetInfo().IsDirectory(),
+-        base::Time::FromTimeT(enumerator.GetInfo().stat().st_atime));
++      matched_paths.emplace_back(
++          path, enumerator.GetInfo().IsDirectory(),
++          base::Time::FromTimeT(enumerator.GetInfo().stat().st_atime));
+ 
+-    if (matched_paths.size() == kMaxResults) {
+-      break;
+-    } else if (base::TimeTicks::Now() - query_start_time > time_limit) {
+-      timed_out = true;
+-      break;
++      if (matched_paths.size() == kMaxResults) {
++        break;
++      } else if (base::TimeTicks::Now() - query_start_time > time_limit) {
++        timed_out = true;
++        break;
++      }
+     }
+   }
+   UMA_HISTOGRAM_BOOLEAN("Apps.AppList.FileSearchProvider.TimedOut", timed_out);
