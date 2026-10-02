@@ -10,6 +10,7 @@ CHROME_COMMAND="${AURADE_CHROME_COMMAND:-/usr/bin/chromiumos-ash}"
 SESSION_ERROR="${AURADE_SESSION_ERROR:-/usr/bin/aurade-session-error}"
 FAST_RESTARTS=0
 UDISKIE_PID=""
+X11_BRIDGE_PID=""
 AURADEFS_PID=""
 AURADEFS_UNIT=""
 EXO_SOCKET_NAME="${AURADE_EXO_SOCKET:-wayland-0}"
@@ -76,7 +77,75 @@ wait_for_exo_socket() {
     return 1
 }
 
+# AuraDE: X11 applications.
+#
+# exo, the display Linux applications open on, speaks Wayland only, so an
+# application with no Wayland support started, found no display and exited.
+# xwayland-satellite runs Xwayland as an ordinary exo client, each X11 window
+# its own window with the desktop's frame, and the launcher hands applications
+# the display it serves through AURADE_HOST_APP_X11_DISPLAY.
+#
+# The display is chosen once, before the first desktop starts, because Ash
+# reads it from its environment. The bridge itself runs once per desktop: it
+# is a client of that desktop's exo and ends with it, so the loop below
+# starts one with every launch and stops it when the launch returns. In
+# software rendering there is no exo, so there is nothing to bridge to.
+X11_DISPLAY=""
+pick_x11_display() {
+    local number sockets="${AURADE_X11_SOCKET_DIR:-/tmp/.X11-unix}"
+    local locks="${AURADE_X11_LOCK_DIR:-/tmp}"
+    for number in $(seq 0 63); do
+        if [ ! -e "${sockets}/X${number}" ] && [ ! -e "${locks}/.X${number}-lock" ]; then
+            printf ':%s\n' "${number}"
+            return 0
+        fi
+    done
+    return 1
+}
+if [ "${AURADE_SOFTWARE_RENDERING:-0}" != "1" ] && \
+        command -v xwayland-satellite >/dev/null 2>&1 && \
+        X11_DISPLAY="$(pick_x11_display)"; then
+    export AURADE_HOST_APP_X11_DISPLAY="${X11_DISPLAY}"
+fi
+
+# Waits for this desktop's exo socket, then serves X11 on it until stopped. A
+# socket left by the previous desktop can be found first and refuse the
+# connection, so a bridge that ends early is started again, a bounded number
+# of times rather than in a tight loop.
+start_x11_bridge() {
+    [ -n "${X11_DISPLAY}" ] || return 0
+    local socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${EXO_SOCKET_NAME}"
+    (
+        child=""
+        # Waited for, so the bridge is gone, and its display free, before the
+        # next desktop is started on it.
+        trap '[ -n "${child}" ] && kill "${child}" 2>/dev/null && wait "${child}"; exit 0' TERM INT
+        for attempt in $(seq 1 10); do
+            waited=0
+            while [ ! -S "${socket}" ] && [ "${waited}" -lt 120 ]; do
+                sleep 0.5
+                waited="$((waited + 1))"
+            done
+            [ -S "${socket}" ] || exit 0
+            WAYLAND_DISPLAY="${EXO_SOCKET_NAME}" xwayland-satellite "${X11_DISPLAY}" &
+            child="$!"
+            wait "${child}"
+            child=""
+            sleep 2
+        done
+    ) >>"${AURADE_LOG_DIR:-/tmp}/xwayland-satellite.log" 2>&1 &
+    X11_BRIDGE_PID="$!"
+}
+
+stop_x11_bridge() {
+    [ -n "${X11_BRIDGE_PID}" ] || return 0
+    kill "${X11_BRIDGE_PID}" 2>/dev/null || true
+    wait "${X11_BRIDGE_PID}" 2>/dev/null || true
+    X11_BRIDGE_PID=""
+}
+
 cleanup() {
+    stop_x11_bridge
     if [ -n "${UDISKIE_PID}" ]; then
         kill "${UDISKIE_PID}" 2>/dev/null || true
         wait "${UDISKIE_PID}" 2>/dev/null || true
@@ -212,6 +281,7 @@ while :; do
         exit 0
     fi
     START_TIME="$(date +%s)"
+    start_x11_bridge
     if [ -n "${AURADE_LOG}" ]; then
         # A desktop that logs its way through the disk is its own outage, so
         # roll over rather than grow without bound.
@@ -227,6 +297,7 @@ while :; do
         "${CHROME_COMMAND}" "$@"
         STATUS="$?"
     fi
+    stop_x11_bridge
     END_TIME="$(date +%s)"
     RUNTIME="$((END_TIME - START_TIME))"
 
