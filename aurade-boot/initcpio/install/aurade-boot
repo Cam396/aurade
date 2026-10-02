@@ -65,15 +65,18 @@ build() {
 }
 
 # Drop the drawn sizes no screen connected now would use. With no screen to
-# measure (a build in a container, say) everything stays.
+# measure (a build in a container, say) everything stays. 1x and 2x always
+# stay: a 4K monitor plugged in after this ran would otherwise get the card at
+# whatever size the laptop panel needed, a third of the size it should be.
 aurade_boot_keep_sizes() {
-    local theme=$1 status mode keep=' s100 ' dir
+    local theme=$1 status mode base=' s100 s200 ' keep dir
     local -a sizes=()
 
     for dir in "$theme"/s[0-9][0-9][0-9]; do
         [[ -d $dir ]] && sizes+=("${dir##*/}")
     done
     (( ${#sizes[@]} )) || return 0
+    keep=$base
 
     for status in "$AURADE_BOOT_DRM"/card*-*/status; do
         [[ -r $status && $(<"$status") == connected ]] || continue
@@ -90,7 +93,7 @@ aurade_boot_keep_sizes() {
                 print best
             }') "
     done
-    [[ $keep != ' s100 ' ]] || return 0
+    [[ $keep != "$base" ]] || return 0
 
     for dir in "${sizes[@]}"; do
         [[ $keep == *" $dir "* ]] || rm -rf -- "${BUILDROOT:?}$theme/$dir"

@@ -121,12 +121,12 @@ kept() {
 [[ $(kept) == 's075 s100 s125 s150 s175 s200 s250 s300 ' ]] || fail 'no screen to measure keeps everything'
 screen card0-eDP-1 connected 2256x1504
 screen card0-DP-1 disconnected
-[[ $(kept) == 's100 s150 ' ]] || fail "a Surface Laptop panel keeps 1.5x and 1x, not $(kept)"
-screen card1-HDMI-A-1 connected 3840x2160
-[[ $(kept) == 's100 s150 s200 ' ]] || fail "a 4K monitor beside it adds 2x, not $(kept)"
+[[ $(kept) == 's100 s150 s200 ' ]] || fail "a Surface Laptop panel keeps 1.5x beside 1x and 2x, not $(kept)"
+screen card1-HDMI-A-1 connected 5120x2880
+[[ $(kept) == 's100 s150 s200 s250 ' ]] || fail "a 5K monitor beside it adds 2.5x, not $(kept)"
 rm -rf -- "${AURADE_BOOT_DRM:?}"
 screen card0-eDP-1 connected 1366x768
-[[ $(kept) == 's075 s100 ' ]] || fail "a 768 line panel keeps 0.75x, not $(kept)"
+[[ $(kept) == 's075 s100 s200 ' ]] || fail "a 768 line panel keeps 0.75x beside 1x and 2x, not $(kept)"
 
 # --- the photographs and the theme file --------------------------------------
 
