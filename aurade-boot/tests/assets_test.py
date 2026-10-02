@@ -81,10 +81,15 @@ def main() -> int:
                   if line.strip() and not line.startswith("#")]
     check(listed == [name for name, _, _ in gen.PHOTOS],
           "photos.list is not the generator's photograph list")
+    # What the theme's links point at is what the wallpaper package installs,
+    # and its manifest is the list of that.
+    with open(os.path.join(REPO, "aurade-wallpapers", "manifest.tsv"), encoding="utf-8") as handle:
+        installed = {line.split("\t", 1)[0] for line in handle
+                     if line.strip() and not line.startswith("#")}
     titles = gen.titles()
     for name in listed:
-        check(os.path.isfile(os.path.join(REPO, "aurade-wallpapers", f"{name}.png")),
-              f"no wallpaper {name}.png")
+        check(f"{name}.png" in installed,
+              f"{name}.png is not in the wallpaper package, so its slot links to nothing")
         check(name in titles, f"no caption for {name} in titles.tsv")
 
     # Every image the script asks for, at every size, is in the archive.
