@@ -79,6 +79,7 @@ expected_gui_payload = {
     "installer/bin/aurade-installer-gui-bridge",
     "installer/bin/aurade-installer-start",
     "installer/lib/aurade-wifi.sh",
+    "installer/lib/aurade-keyboard.sh",
 }
 expected_gui_payload.update(
     str(path.relative_to(root))

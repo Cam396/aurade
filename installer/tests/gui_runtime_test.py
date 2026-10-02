@@ -122,6 +122,25 @@ def run(window: InstallerWindow) -> None:
                   f"the {combo.get_title()!r} picker enables search with no "
                   "expression to search on")
 
+    # -- the keyboard layout this screen types on ------------------------
+    #
+    # A layout the model refuses, one with no XKB layout that this screen
+    # could not type on, puts the picker back on the layout still in use. A
+    # picker left on the refused one says a layout is in use that is not,
+    # right above the field where somebody tests it.
+    keymap_row = window.widgets["q.keymap"]
+    keymaps = window.enum_values.get("keymap", [])
+    before = window.model.get("keymap") or "us"
+    check("xx" in keymaps and before in keymaps,
+          f"the fixtures have no unmapped keymap to refuse: {keymaps}")
+    if "xx" in keymaps and before in keymaps:
+        keymap_row.set_selected(keymaps.index("xx"))
+        pump()
+        equal(keymaps[keymap_row.get_selected()], before,
+              "a refused layout was left showing in the picker")
+        equal(window.model.get("keymap") or "us", before,
+              "a refused layout replaced the answer")
+
     # -- the readiness page ------------------------------------------------
     window.flow.state = "pages"
     window.flow.jump_to_page("readiness")

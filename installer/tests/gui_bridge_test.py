@@ -286,6 +286,88 @@ with session(PATH=os.path.join(TMP, "nokeys")) as model:
     equal(model.get("keymap"), "us", "a keymap was not recorded without loadkeys")
 
 # ---------------------------------------------------------------------------
+# The layout this screen types on
+# ---------------------------------------------------------------------------
+#
+# `cage` compiles a keymap for each keyboard as it appears, from the layout
+# file the start script named in AURADE_LIVE_XKB. Choosing a keymap rewrites
+# that file in the engine's conversion and has udev plug the keyboards in
+# again. A keymap with no XKB layout is refused before anything changes,
+# because typing a password on US under it is the lockout this prevents.
+
+LIVE = os.path.join(TMP, "live-xkb")
+LAYOUT_FILE = os.path.join(LIVE, "symbols", "aurade")
+os.makedirs(os.path.dirname(LAYOUT_FILE), exist_ok=True)
+US_FILE = ('default partial alphanumeric_keys modifier_keys\n'
+           'xkb_symbols "basic" {\n  include "pc+us+inet(evdev)"\n};\n')
+KEYBOARD = os.path.join(TMP, "input", "event1")
+LIVE_ENV = dict(PATH=f"{TMP}/stub:{os.environ['PATH']}", AURADE_LIVE_XKB=LIVE,
+                AURADE_INPUT_SYSFS=os.path.join(TMP, "input"))
+
+
+def reset_live() -> None:
+    with open(LAYOUT_FILE, "w") as handle:
+        handle.write(US_FILE)
+    for log in ("udevadm.log", "loadkeys.log"):
+        open(os.path.join(TMP, log), "w").close()
+
+
+def layout_file() -> str:
+    with open(LAYOUT_FILE) as handle:
+        return handle.read()
+
+
+def logged(name: str) -> list[str]:
+    with open(os.path.join(TMP, name)) as handle:
+        return handle.read().splitlines()
+
+
+reset_live()
+with session(**LIVE_ENV) as model:
+    ok, error = model.set("keymap", "de")
+    check(ok, f"a keymap with an XKB layout was refused: {error}")
+    check('include "pc+de+inet(evdev)"' in layout_file(),
+          f"the layout file cage reads does not say the chosen layout: {layout_file()!r}")
+    equal(logged("udevadm.log"),
+          [f"trigger --action=remove --settle {KEYBOARD}",
+           f"trigger --action=add --settle {KEYBOARD}"],
+          "the keyboard, and only the keyboard, was not plugged in again by path")
+    equal(model.get("keymap"), "de", "the applied keymap was not recorded")
+
+    for log in ("udevadm.log", "loadkeys.log"):
+        open(os.path.join(TMP, log), "w").close()
+    ok, error = model.set("keymap", "xx")
+    check(not ok, "a keymap with no XKB layout was accepted, so a password set "
+                  "here would be typed on US and asked for on that keymap")
+    check("cannot type on" in error, f"the refusal does not say why: {error}")
+    check('include "pc+de+inet(evdev)"' in layout_file(),
+          "a refused keymap changed the layout file")
+    equal(logged("udevadm.log"), [], "a refused keymap plugged the keyboards in again")
+    check("xx" not in logged("loadkeys.log"), "a refused keymap was loaded onto the console")
+    equal(model.get("keymap"), "de", "a refused keymap replaced the answer")
+
+# A layout file that does not compile never goes where `cage` reads it: cage
+# drops a keyboard it cannot compile a keymap for, and here that is every one.
+reset_live()
+with session(**LIVE_ENV, AURADE_TEST_XKBCLI_REJECT="1") as model:
+    ok, error = model.set("keymap", "fr")
+    check(not ok, "a layout that would not compile was accepted")
+    check("could not be set up" in error, f"the failure does not say what failed: {error}")
+    equal(layout_file(), US_FILE, "a layout that would not compile replaced the one cage reads")
+    equal(logged("udevadm.log"), [], "a layout that would not compile plugged the keyboards in")
+    equal(logged("loadkeys.log")[-1:], ["us"],
+          "the console was not put back on the layout this screen still types")
+    equal(model.get("keymap"), "", "a layout that could not be set up was recorded")
+
+# Outside the start script's cage there is no layout file, and nothing changes.
+reset_live()
+with session(PATH=f"{TMP}/stub:{os.environ['PATH']}", AURADE_LIVE_XKB=None) as model:
+    ok, error = model.set("keymap", "xx")
+    check(ok, f"with no live layout to change, a loadable keymap was refused: {error}")
+    equal(logged("udevadm.log"), [], "with no live layout, the keyboards were plugged in again")
+    equal(layout_file(), US_FILE, "with no live layout, the layout file was written")
+
+# ---------------------------------------------------------------------------
 # Which questions apply
 # ---------------------------------------------------------------------------
 

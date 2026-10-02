@@ -724,10 +724,10 @@ def test_a_refused_password_names_the_keyboard(app) -> None:
         # Only where the machine can say what its layout is. On a host with
         # none of the three files this stays quiet, and a line reading "This
         # keyboard is set to" and then nothing would be worse than no line.
-        if SET.keyboard_layout():
+        if SET.screen_layout():
             check(line.get_visible(),
                   "a refused password did not name the keyboard")
-            check(SET.layout_words(SET.keyboard_layout()) in line.get_label(),
+            check(SET.layout_words(SET.screen_layout()) in line.get_label(),
                   f"the layout line does not name the layout: "
                   f"{line.get_label()!r}")
     finally:

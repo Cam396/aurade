@@ -370,6 +370,23 @@ AURADE_RENDERER_DRAW_TIMEOUT=${AURADE_RENDERER_DRAW_TIMEOUT:-45}
 #: behind it, telling a toolkit that expects one not to go looking.
 BASE_ENV='GTK_USE_PORTAL=0 GIO_USE_VFS=local GTK_IM_MODULE=gtk-im-context-simple'
 
+#: The keyboard layout, which changes while the installer runs.
+#:
+#: `cage` compiles an XKB keymap for each keyboard as it appears, from a layout
+#: it reads out of its environment once, when it starts. Naming a layout that
+#: lives in a file in this run's directory is what lets the bridge change it
+#: later: it rewrites the file and has udev plug the keyboards in again (see
+#: `gb_set`). The file starts as the US layout `cage` would have used anyway.
+#: If it does not compile, `cage` gets nothing extra and types US as it always
+#: did, and the bridge, with no AURADE_LIVE_XKB, leaves the layout alone.
+LIVE_XKB=$READY_DIR/xkb
+if install -d -m 0755 "$LIVE_XKB/symbols" 2>/dev/null &&
+    printf 'default partial alphanumeric_keys modifier_keys\nxkb_symbols "basic" {\n  include "pc+us+inet(evdev)"\n};\n' \
+      >"$LIVE_XKB/symbols/aurade" &&
+    XKB_CONFIG_EXTRA_PATH=$LIVE_XKB xkbcli compile-keymap --layout aurade >/dev/null 2>&1; then
+  BASE_ENV+=" XKB_CONFIG_EXTRA_PATH=$LIVE_XKB XKB_DEFAULT_LAYOUT=aurade AURADE_LIVE_XKB=$LIVE_XKB"
+fi
+
 attempted=0
 mapfile -t CLIENTS < <(aurade_renderer_client_plan)
 

@@ -244,6 +244,25 @@ check(S.keyboard_layout((_xorg, _debian)) == "fr",
 check(S.keyboard_layout(("/nowhere", _debian)) == "de",
       "a missing first file stopped the search instead of continuing it")
 
+# The session script's word on what weston was given beats every file: a
+# machine that names its keyboard only as a console KEYMAP types US on this
+# screen, and the line under a refused password has to say so.
+_saved_layout = os.environ.pop("AURADE_GREETER_XKB_LAYOUT", None)
+try:
+    os.environ["AURADE_GREETER_XKB_LAYOUT"] = "us"
+    check(S.screen_layout() == "us",
+          "the layout the session gave weston did not win over the files")
+    os.environ["AURADE_GREETER_XKB_LAYOUT"] = "ru,us"
+    check(S.screen_layout() == "ru",
+          "the first of the session's layouts is the one a screen starts on")
+    os.environ["AURADE_GREETER_XKB_LAYOUT"] = ""
+    check(S.screen_layout() == S.keyboard_layout(),
+          "with no word from the session, the files did not answer")
+finally:
+    os.environ.pop("AURADE_GREETER_XKB_LAYOUT", None)
+    if _saved_layout is not None:
+        os.environ["AURADE_GREETER_XKB_LAYOUT"] = _saved_layout
+
 check(S.layout_words("fr") == "French", "a known layout was not spelled out")
 check(S.layout_words("cz") == "Czech", "a known layout was not spelled out")
 check(S.layout_words("zz") == "ZZ",

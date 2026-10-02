@@ -30,7 +30,15 @@ install -d "$TMP/zoneinfo/America" "$TMP/locales" "$TMP/keymaps/i386/qwerty" \
   "$TMP/empty-dri" "$TMP/run" "$TMP/stub" "$TMP/export" "$TMP/bundle"
 : >"$TMP/zoneinfo/UTC"; : >"$TMP/zoneinfo/America/Chicago"
 : >"$TMP/locales/en_US"; : >"$TMP/locales/fr_FR"
-for _keymap in us fr de; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+# `xx` is a console keymap with no XKB layout, which this screen cannot type on.
+for _keymap in us fr de xx; do : >"$TMP/keymaps/i386/qwerty/$_keymap.map.gz"; done
+printf '%s\n' '# consolelayout xlayout xmodel xvariant xoptions' \
+  'us	us	pc105+inet	-	terminate:ctrl_alt_bksp' \
+  'fr	fr	pc105	-	terminate:ctrl_alt_bksp' \
+  'de	de	pc105	-	terminate:ctrl_alt_bksp' >"$TMP/kbd-model-map"
+# One keyboard and one mouse, for the keyboards udev is asked to plug in again.
+install -d "$TMP/input/event1" "$TMP/input/event2"
+: >"$TMP/input/event1/keyboard"
 : >"$TMP/dri/renderD128"
 # The kernel driver behind the node, read from sysfs. Two fixtures, because the
 # graphics page prints different advice for "a named driver is loaded" and
@@ -122,6 +130,49 @@ printf '%s\n' "$1" >>"$AURADE_TEST_LOADKEYS_LOG"
 exit 0
 STUB
 
+# xkbcli spells a layout's symbols the way the rules would, and compiles the
+# layout file `cage` reads; udevadm says which input devices are keyboards and
+# records every trigger. Enough of both for the layout this screen types on.
+cat >"$TMP/stub/xkbcli" <<'STUB'
+#!/usr/bin/env bash
+kccgst=0 layout='' variant=''
+shift
+while (($#)); do
+  case $1 in
+    --kccgst) kccgst=1; shift ;;
+    --layout) layout=$2; shift 2 ;;
+    --variant) variant=$2; shift 2 ;;
+    *) shift 2 ;;
+  esac
+done
+if (( kccgst )); then
+  printf '  xkb_symbols { include "pc+%s%s+inet(evdev)" };\n' "$layout" "${variant:+($variant)}"
+  exit 0
+fi
+[[ -z ${AURADE_TEST_XKBCLI_REJECT:-} ]] || exit 1
+[[ -r ${XKB_CONFIG_EXTRA_PATH:?}/symbols/$layout ]]
+STUB
+
+cat >"$TMP/stub/udevadm" <<'STUB'
+#!/usr/bin/env bash
+case $1 in
+  info)
+    path=''
+    for arg in "$@"; do [[ $arg != --path=* ]] || path=${arg#--path=}; done
+    printf 'DEVNAME=/dev/input/%s\nID_INPUT=1\n' "${path##*/}"
+    if [[ -e $path/keyboard ]]; then
+      printf 'ID_INPUT_KEYBOARD=1\n'
+    else
+      printf 'ID_INPUT_MOUSE=1\n'
+    fi
+    ;;
+  trigger)
+    shift
+    printf 'trigger %s\n' "$*" >>"$AURADE_TEST_UDEVADM_LOG"
+    ;;
+esac
+STUB
+
 cat >"$TMP/stub/systemctl" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$AURADE_STUB_DIR/systemctl.calls"
@@ -195,8 +246,9 @@ STUB
 
 chmod +x "$TMP/stub-engine" "$TMP/stub/loadkeys" "$TMP/stub/broken-helper" \
   "$TMP/stub/net-ok" "$TMP/stub/net-bad" "$TMP/stub/nmcli" \
-  "$TMP/stub/systemctl"
+  "$TMP/stub/systemctl" "$TMP/stub/xkbcli" "$TMP/stub/udevadm"
 : >"$TMP/loadkeys.log"
+: >"$TMP/udevadm.log"
 
 # A search path with everything the bridge needs and no loadkeys, so the
 # "a console tool this image does not carry is not a failure" case can be
@@ -253,6 +305,8 @@ export AURADE_STUB_DIR="$TMP"
 export AURADE_NMCLI="$TMP/stub/nmcli"
 export AURADE_NM_PROFILE_DIR="$TMP/nm-profiles"
 export AURADE_TEST_LOADKEYS_LOG="$TMP/loadkeys.log"
+export AURADE_TEST_UDEVADM_LOG="$TMP/udevadm.log"
+export AURADE_KBD_MODEL_MAP="$TMP/kbd-model-map"
 export TMPDIR="$TMP"
 
 exec python3 "$ROOT/installer/tests/gui_bridge_test.py" "$TMP"

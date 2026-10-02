@@ -51,6 +51,17 @@ export AURADE_INSTALLER_TUI_LIB=1
 . "$GB_TUI"
 unset AURADE_INSTALLER_TUI_LIB
 
+# The keyboard conversion the engine writes into the installed system, so the
+# layout a password is typed on here is the one it is asked for on there.
+if _gb_keyboard_lib=$(_find_lib aurade-keyboard.sh); then
+  # shellcheck source=../lib/aurade-keyboard.sh
+  . "$_gb_keyboard_lib"
+fi
+# The XKB settings the start script gave `cage` are for `cage`. Nothing this
+# process starts, the engine and everything it runs in the target included,
+# should compile a keymap from a file in this session's temporary directory.
+unset XKB_CONFIG_EXTRA_PATH XKB_DEFAULT_LAYOUT
+
 # --------------------------------------------------------------------------
 # Options
 # --------------------------------------------------------------------------
@@ -817,16 +828,116 @@ gb_failure() {
 # One entry point, so validation and immediate application happen for every
 # answer regardless of which widget produced it. `aurade_question_validate`
 # and `apply_answer` are the text installer's; nothing is re-decided here.
+#
+# The keyboard layout is the one answer applied a second time, to this screen.
+# The text installer loads a keymap onto its console, and that is where its
+# keys come from. These keys come from `cage`, which compiled one XKB keymap
+# when it started and never reads the console's. So choosing a layout here
+# used to change nothing on this screen: the field under it still typed US,
+# and a passphrase set here was typed on US and asked for on the chosen layout
+# at every boot after.
+#
+# `cage` cannot be told a new layout, but it compiles a keymap for every
+# keyboard that appears, from the layout file the start script pointed it at
+# (AURADE_LIVE_XKB). So the file is rewritten to say the chosen layout, in the
+# conversion the engine writes into the installed system, and the keyboards
+# are unplugged and plugged back in as far as udev is concerned. The window,
+# its answers and its focus stay where they are. A keymap with no XKB layout
+# is refused rather than typed on US, which is the mistake this exists to stop.
+
+GB_LAYOUT_ERROR=
+GB_LAYOUT_SYMBOLS=
+
+# The symbols the chosen keymap's layout is made of, spelled the way the XKB
+# rules spell them. Sets GB_LAYOUT_SYMBOLS, or GB_LAYOUT_ERROR and fails.
+gb_layout_symbols() {
+  local keymap=$1 xkb layout model variant options
+  GB_LAYOUT_ERROR=
+  GB_LAYOUT_SYMBOLS=
+  if ! declare -F aurade_keymap_xkb >/dev/null || ! xkb=$(aurade_keymap_xkb "$keymap"); then
+    GB_LAYOUT_ERROR="This screen cannot type on the $keymap layout, so a password set here would not match the keyboard when the computer starts. Choose another layout, or use the text installer, which can use this one."
+    return 1
+  fi
+  IFS=$'\t' read -r layout model variant options <<<"$xkb"
+  [[ $variant != - ]] || variant=
+  [[ $options != - ]] || options=
+  GB_LAYOUT_SYMBOLS=$(xkbcli compile-keymap --kccgst --rules evdev --model "$model" \
+      --layout "$layout" --variant "$variant" --options "$options" 2>/dev/null |
+    sed -n 's/^[[:space:]]*xkb_symbols[[:space:]]*{[[:space:]]*include "\([^"]*\)".*/\1/p') || true
+  if [[ -z $GB_LAYOUT_SYMBOLS ]]; then
+    GB_LAYOUT_ERROR="The $keymap layout could not be set up on this screen. Choose another layout, or use the text installer."
+    return 1
+  fi
+}
+
+# Every keyboard udev knows of, by its event device.
+gb_keyboards() {
+  local event props
+  for event in "${AURADE_INPUT_SYSFS:-/sys/class/input}"/event*; do
+    [[ -e $event ]] || continue
+    # Read whole, then matched: `grep -q` on the pipe can finish first, and
+    # under pipefail the SIGPIPE that leaves udevadm with would count a match
+    # as a failure.
+    props=$(udevadm info --query=property --path="$event" 2>/dev/null) || continue
+    [[ $'\n'$props$'\n' == *$'\nID_INPUT_KEYBOARD=1\n'* ]] && printf '%s\n' "$event"
+  done
+  return 0
+}
+
+gb_replug_keyboards() {
+  local -a keyboards
+  mapfile -t keyboards < <(gb_keyboards)
+  (( ${#keyboards[@]} )) || return 0
+  # By path both times. A device udev has just been told is gone has no
+  # properties left, so a second trigger that matched on them would find
+  # nothing and leave every keyboard unplugged.
+  udevadm trigger --action=remove --settle "${keyboards[@]}" >/dev/null 2>&1 || true
+  udevadm trigger --action=add --settle "${keyboards[@]}" >/dev/null 2>&1
+}
+
+# The layout file, replaced by one that includes the symbols. Compiled first
+# under another name, because a file `cage` cannot compile is a keyboard it
+# drops the next time one appears, and on this screen that is every keyboard.
+gb_apply_layout() {
+  local symbols=$1 dir=$AURADE_LIVE_XKB/symbols previous=''
+  printf 'default partial alphanumeric_keys modifier_keys\nxkb_symbols "basic" {\n  include "%s"\n};\n' \
+    "$symbols" >"$dir/aurade-next" || return 1
+  if ! XKB_CONFIG_EXTRA_PATH=$AURADE_LIVE_XKB xkbcli compile-keymap --layout aurade-next >/dev/null 2>&1; then
+    rm -f -- "$dir/aurade-next"
+    return 1
+  fi
+  [[ ! -r $dir/aurade ]] || previous=$(<"$dir/aurade")
+  mv -f -- "$dir/aurade-next" "$dir/aurade" || return 1
+  gb_replug_keyboards && return 0
+  # Plugged back in on the layout it had, as far as that goes, rather than
+  # left on one no answer names.
+  [[ -z $previous ]] || printf '%s\n' "$previous" >"$dir/aurade"
+  gb_replug_keyboards || true
+  return 1
+}
 
 gb_set() {
-  local id=$1 value=$2
+  local id=$1 value=$2 live=0
   aurade_question_exists "$id" || { _gb_err "unknown question: $id"; return 0; }
   if ! aurade_question_validate "$id" "$value"; then
     _gb_err "$(aurade_question_field "$id" error)"
     return 0
   fi
+  [[ $id != keymap || -z ${AURADE_LIVE_XKB:-} ]] || live=1
+  # Refused before anything changes, the console included.
+  if (( live )) && ! gb_layout_symbols "$value"; then
+    _gb_err "$GB_LAYOUT_ERROR"
+    return 0
+  fi
   if ! apply_answer "$id" "$value"; then
     _gb_err "${APPLY_ERROR:-That answer could not be applied.}"
+    return 0
+  fi
+  if (( live )) && ! gb_apply_layout "$GB_LAYOUT_SYMBOLS"; then
+    # The console back on the answer this screen still types, so nothing is
+    # left on a layout that no answer names.
+    apply_answer keymap "${ANSWERS[keymap]:-us}" || true
+    _gb_err "The $value layout could not be set up on this screen. Choose another layout, or use the text installer."
     return 0
   fi
   ANSWERS[$id]=$value

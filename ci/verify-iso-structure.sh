@@ -75,6 +75,7 @@ if (( FULL )); then
     usr/local/lib/aurade/aurade-journal.sh \
     usr/local/lib/aurade/aurade-staging.sh \
     usr/local/lib/aurade/aurade-wifi.sh \
+    usr/local/lib/aurade/aurade-keyboard.sh \
     opt/aurade/repo/packages.lock \
     etc/aurade-installer/snapshot
   )
@@ -245,6 +246,7 @@ expected_payload = {
     "installer/bin/aurade-installer-gui-bridge",
     "installer/bin/aurade-installer-start",
     "installer/lib/aurade-wifi.sh",
+    "installer/lib/aurade-keyboard.sh",
     "installer/lib/aurade_gui/__init__.py",
     "installer/lib/aurade_gui/a11y.py",
     "installer/lib/aurade_gui/arcade.py",

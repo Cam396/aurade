@@ -431,6 +431,21 @@ def keyboard_layout(paths: tuple = LAYOUT_FILES) -> str:
     return ""
 
 
+def screen_layout() -> str:
+    """The layout this screen types on, which is not always the machine's.
+
+    The session script gives weston a layout only from XKB lines, and says
+    which one it gave in AURADE_GREETER_XKB_LAYOUT. A machine that names its
+    keyboard only as a console KEYMAP types US here, and saying otherwise to
+    somebody whose password was just refused sends them looking in the wrong
+    place. Outside that session, the files are the best answer there is.
+    """
+    given = os.environ.get("AURADE_GREETER_XKB_LAYOUT", "").strip()
+    if given:
+        return given.split(",")[0].strip()
+    return keyboard_layout()
+
+
 def _setting(text: str, key: str) -> str:
     """The value of `key`, from either a shell record or an xorg snippet."""
     for line in text.splitlines():

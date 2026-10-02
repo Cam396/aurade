@@ -690,6 +690,9 @@ class InstallerWindow(Adw.ApplicationWindow):
         self.stage_rows: dict = {}
         self.secrets_set: set = set()
         self.enum_values: dict = {}
+        # Set while the keymap picker is put back after a refusal, so putting
+        # it back does not ask for the layout it is going back to all over again.
+        self._keymap_reverting = False
         self.probe: dict = {}
         self.install_status = 0
         #: The one accessibility choice that stops at the front end. Off until
@@ -2651,11 +2654,24 @@ class InstallerWindow(Adw.ApplicationWindow):
         # field below: what gets typed there has to be what the chosen layout
         # produces, not what the previous one did.
         values = self.enum_values.get("keymap", [])
-        index = self.widgets["q.keymap"].get_selected()
-        if 0 <= index < len(values):
-            ok, error = self.model.set("keymap", values[index])
-            if not ok:
-                self._toast(error)
+        row = self.widgets["q.keymap"]
+        index = row.get_selected()
+        if self._keymap_reverting or not 0 <= index < len(values):
+            return
+        ok, error = self.model.set("keymap", values[index])
+        if ok:
+            return
+        self._toast(error)
+        # Back on the layout this screen still types. A picker left showing
+        # the refused one says a layout is in use that is not, right above the
+        # field where somebody is about to test it.
+        current = self.model.get("keymap") or "us"
+        if current in values:
+            self._keymap_reverting = True
+            try:
+                row.set_selected(values.index(current))
+            finally:
+                self._keymap_reverting = False
 
     def _build_keymap_test(self):
         """Somewhere to try the layout before it is used for a password.
