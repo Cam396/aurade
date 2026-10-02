@@ -1,0 +1,64 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-boot
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="The AuraDE boot screen, and the disk unlock in it, for plymouth"
+arch=('any')
+url="https://github.com/Cam396/aurade"
+license=('BSD-3-Clause')
+# The photographs are the wallpaper package's; the theme links to them and
+# the initramfs hook copies a few in. Adwaita Sans is the face plymouth's own
+# hook puts in the initramfs for the one sentence drawn at boot, the name of
+# the keyboard layout; every other sentence is drawn ahead of time.
+depends=(
+  'plymouth'
+  'aurade-wallpapers'
+  'adwaita-fonts'
+)
+# Basenames, because makepkg resolves every local source to its basename and
+# refuses a path. The repository keeps the real tree; the top level entries
+# are symlinks into it, as in aurade-greeter.
+source=(
+  'aurade-boot.plymouth'
+  'aurade-boot.script'
+  'photos.list'
+  'aurade-boot-drawn.tar'
+  'aurade-boot.initcpio'
+  'README.md'
+  'LICENSE'
+)
+noextract=('aurade-boot-drawn.tar')
+sha256sums=('323907da924b51d5be63fcb5d733d41d972837baa29048ed40b9e423be9ed555'
+            '85e0f17f8b54d7295c6fb53f6c31cec6934a00f56513c75de6f62f994ffe27c1'
+            '7ccaefd989b6cc1dfb849199f15fc3d03608332c6b725baee27e311647cb5890'
+            '755b0a51384a5daafb63b2d1c368455c97f97e74ca96a4562e158290d0ff74cc'
+            '6bb62c9cb9da32884504ebba33a260ac0a2fed4c8795d471382a401781496d3e'
+            '4e2c0bcef7d7db7da282359332269fe2a6784cc576796e9ae2052d3f09d86555'
+            '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f')
+
+package() {
+  local theme="${pkgdir}/usr/share/plymouth/themes/aurade-boot"
+
+  install -Dm644 "${srcdir}/aurade-boot.plymouth" "${theme}/aurade-boot.plymouth"
+  install -Dm644 "${srcdir}/aurade-boot.script" "${theme}/aurade-boot.script"
+  install -Dm644 "${srcdir}/photos.list" "${theme}/photos.list"
+  # Everything drawn ahead of time: the shade, and each size's type, field,
+  # dots and captions. tar keeps the archive's modes, which are 0644 and 0755.
+  bsdtar -xf "${srcdir}/aurade-boot-drawn.tar" -C "${theme}" --no-same-owner
+
+  # Each photograph is a link into the wallpaper package, by slot. Relative,
+  # so a link copied into an initramfs, or read from a chroot, still points
+  # at the right place.
+  local name slot=0
+  while read -r name; do
+    [[ -n ${name} && ${name} != '#'* ]] || continue
+    ln -s "../../../aurade/wallpapers/${name}.png" "${theme}/photo-${slot}.png"
+    slot=$((slot + 1))
+  done <"${srcdir}/photos.list"
+
+  install -Dm644 "${srcdir}/aurade-boot.initcpio" \
+    "${pkgdir}/usr/lib/initcpio/install/aurade-boot"
+  install -Dm644 "${srcdir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

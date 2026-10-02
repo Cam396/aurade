@@ -131,3 +131,7 @@ ci/.rc-signed.sh
 # Local wallpaper authoring files. The catalog and images above are public;
 # prompts and the generator stay on the build machine.
 installer/wallpapers/.private/
+
+# aurade-boot draws into build/ and packs that into aurade-boot-drawn.tar;
+# only the archive is kept.
+aurade-boot/build/
