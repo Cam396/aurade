@@ -1,0 +1,482 @@
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index cbda58345eef..18bad8879045 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -24,6 +24,8 @@ static_library("dbus") {
+     "component_updater_service_provider.h",
+     "cryptohome_key_delegate_service_provider.cc",
+     "cryptohome_key_delegate_service_provider.h",
++    "desktop_appearance_service.cc",
++    "desktop_appearance_service.h",
+     "desktop_notification_service.cc",
+     "desktop_notification_service.h",
+     "dlp_files_policy_service_provider.cc",
+@@ -201,9 +203,12 @@ static_library("dbus") {
+     "//third_party/boringssl",
+     "//ui/aura",
+     "//ui/base",
++    "//ui/chromeos/styles:cros_tokens_color_mappings",
++    "//ui/color",
+     "//ui/gfx",
+     "//ui/gfx/codec",
+     "//ui/message_center",
++    "//ui/native_theme",
+     "//url",
+   ]
+ 
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.h b/chrome/browser/ash/dbus/desktop_appearance_service.h
+new file mode 100644
+index 000000000000..af0c1bae6aaa
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.h
+@@ -0,0 +1,109 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
++#define CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
++
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "dbus/exported_object.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class MethodCall;
++class MessageWriter;
++}  // namespace dbus
++
++namespace ash {
++
++// What the desktop looks like, in the terms Linux applications ask for it.
++struct DesktopAppearance {
++  // org.freedesktop.appearance color-scheme: 1 prefers dark, 2 prefers light.
++  uint32_t color_scheme = 0;
++  // org.freedesktop.appearance accent-color, when the desktop has one.
++  std::optional<SkColor> accent_color;
++
++  bool operator==(const DesktopAppearance&) const = default;
++};
++
++// Implements the settings half of an xdg-desktop-portal backend for an AuraDE
++// session, so GTK, libadwaita, Qt and Firefox take their light or dark look
++// and their accent colour from Ash rather than from a fixed default.
++// xdg-desktop-portal merges it ahead of the GTK backend, which knows neither.
++class DesktopAppearanceService final : public ui::NativeThemeObserver {
++ public:
++  DesktopAppearanceService();
++  DesktopAppearanceService(const DesktopAppearanceService&) = delete;
++  DesktopAppearanceService& operator=(const DesktopAppearanceService&) = delete;
++  ~DesktopAppearanceService() override;
++
++  void Start(scoped_refptr<dbus::ExportedObject> exported_object);
++
++  // Whether a namespace a client asked for, which may end in a glob, covers
++  // org.freedesktop.appearance.
++  static bool NamespaceRequested(const std::vector<std::string>& requested);
++
++  // ui::NativeThemeObserver:
++  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
++
++ private:
++  void HandleReadAll(dbus::MethodCall* method_call,
++                     dbus::ExportedObject::ResponseSender response_sender);
++  void HandleRead(dbus::MethodCall* method_call,
++                  dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++  void EmitSettingChanged(const std::string& key);
++  void WriteValue(const std::string& key, dbus::MessageWriter* writer) const;
++
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  DesktopAppearance appearance_;
++  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
++      theme_observation_{this};
++  base::WeakPtrFactory<DesktopAppearanceService> weak_ptr_factory_{this};
++};
++
++// Owns the private session bus connection the appearance service answers on.
++class DesktopAppearanceServiceHost final {
++ public:
++  static std::unique_ptr<DesktopAppearanceServiceHost> Create();
++
++  DesktopAppearanceServiceHost(const DesktopAppearanceServiceHost&) = delete;
++  DesktopAppearanceServiceHost& operator=(const DesktopAppearanceServiceHost&) =
++      delete;
++  ~DesktopAppearanceServiceHost();
++
++ private:
++  DesktopAppearanceServiceHost();
++  bool Start();
++  void OnOwnership(const std::string& service_name, bool success);
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  std::unique_ptr<DesktopAppearanceService> service_;
++  base::WeakPtrFactory<DesktopAppearanceServiceHost> weak_ptr_factory_{this};
++};
++
++// Reads the desktop's current appearance from Ash's native theme.
++DesktopAppearance ReadDesktopAppearance();
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.cc b/chrome/browser/ash/dbus/desktop_appearance_service.cc
+new file mode 100644
+index 000000000000..0b02f16cbba8
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.cc
+@@ -0,0 +1,295 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/desktop_appearance_service.h"
++
++#include <algorithm>
++#include <string_view>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/strings/string_util.h"
++#include "base/threading/thread.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "ui/chromeos/styles/cros_tokens_color_mappings.h"
++#include "ui/color/color_provider.h"
++#include "ui/color/color_provider_manager.h"
++#include "ui/gfx/color_palette.h"
++
++namespace ash {
++namespace {
++
++constexpr char kServiceName[] = "org.freedesktop.impl.portal.desktop.aurade";
++constexpr char kObjectPath[] = "/org/freedesktop/portal/desktop";
++constexpr char kInterfaceName[] = "org.freedesktop.impl.portal.Settings";
++constexpr char kReadAllMethod[] = "ReadAll";
++constexpr char kReadMethod[] = "Read";
++constexpr char kSettingChangedSignal[] = "SettingChanged";
++constexpr char kNotFoundError[] = "org.freedesktop.portal.Error.NotFound";
++constexpr char kInvalidArgsError[] = "org.freedesktop.DBus.Error.InvalidArgs";
++
++constexpr char kAppearanceNamespace[] = "org.freedesktop.appearance";
++constexpr char kColorSchemeKey[] = "color-scheme";
++constexpr char kAccentColorKey[] = "accent-color";
++
++constexpr uint32_t kPreferDark = 1;
++constexpr uint32_t kPreferLight = 2;
++
++std::vector<std::string> KeysFor(const DesktopAppearance& appearance) {
++  std::vector<std::string> keys = {kColorSchemeKey};
++  if (appearance.accent_color) {
++    keys.push_back(kAccentColorKey);
++  }
++  return keys;
++}
++
++}  // namespace
++
++DesktopAppearance ReadDesktopAppearance() {
++  DesktopAppearance appearance;
++  ui::NativeTheme* theme = ui::NativeTheme::GetInstanceForNativeUi();
++  const bool dark = theme->preferred_color_scheme() ==
++                    ui::NativeTheme::PreferredColorScheme::kDark;
++  appearance.color_scheme = dark ? kPreferDark : kPreferLight;
++
++  // Applications draw their accent behind white text in both modes, so it
++  // must be a middle tone. Primary is that tone in light mode; in dark mode
++  // primary is pale and the inverse primary is the middle one.
++  if (const ui::ColorProvider* provider =
++          ui::ColorProviderManager::Get().GetColorProviderFor(
++              theme->GetColorProviderKey(/*custom_theme=*/nullptr))) {
++    const SkColor accent =
++        provider->GetColor(dark ? cros_tokens::kCrosSysInversePrimary
++                                : cros_tokens::kCrosSysPrimary);
++    // Until Ash adds its colour mixers the token is unresolved; say nothing
++    // rather than hand applications the placeholder.
++    if (accent != gfx::kPlaceholderColor) {
++      appearance.accent_color = accent;
++    }
++  }
++  return appearance;
++}
++
++DesktopAppearanceService::DesktopAppearanceService() = default;
++DesktopAppearanceService::~DesktopAppearanceService() = default;
++
++void DesktopAppearanceService::Start(
++    scoped_refptr<dbus::ExportedObject> exported_object) {
++  exported_object_ = std::move(exported_object);
++  appearance_ = ReadDesktopAppearance();
++  theme_observation_.Observe(ui::NativeTheme::GetInstanceForNativeUi());
++
++  exported_object_->ExportMethod(
++      kInterfaceName, kReadAllMethod,
++      base::BindRepeating(&DesktopAppearanceService::HandleReadAll,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopAppearanceService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++  exported_object_->ExportMethod(
++      kInterfaceName, kReadMethod,
++      base::BindRepeating(&DesktopAppearanceService::HandleRead,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&DesktopAppearanceService::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++// static
++bool DesktopAppearanceService::NamespaceRequested(
++    const std::vector<std::string>& requested) {
++  if (requested.empty()) {
++    return true;
++  }
++  for (const std::string& pattern : requested) {
++    if (pattern.empty() || pattern == "*" || pattern == kAppearanceNamespace) {
++      return true;
++    }
++    if (pattern.ends_with('*') &&
++        std::string_view(kAppearanceNamespace)
++            .starts_with(
++                std::string_view(pattern).substr(0, pattern.size() - 1))) {
++      return true;
++    }
++  }
++  return false;
++}
++
++void DesktopAppearanceService::OnNativeThemeUpdated(
++    ui::NativeTheme* observed_theme) {
++  const DesktopAppearance updated = ReadDesktopAppearance();
++  if (updated == appearance_) {
++    return;
++  }
++  const DesktopAppearance previous = appearance_;
++  appearance_ = updated;
++  if (previous.color_scheme != updated.color_scheme) {
++    EmitSettingChanged(kColorSchemeKey);
++  }
++  if (updated.accent_color && previous.accent_color != updated.accent_color) {
++    EmitSettingChanged(kAccentColorKey);
++  }
++}
++
++void DesktopAppearanceService::WriteValue(const std::string& key,
++                                          dbus::MessageWriter* writer) const {
++  if (key == kColorSchemeKey) {
++    dbus::MessageWriter variant(nullptr);
++    writer->OpenVariant("u", &variant);
++    variant.AppendUint32(appearance_.color_scheme);
++    writer->CloseContainer(&variant);
++    return;
++  }
++  const SkColor color = appearance_.accent_color.value_or(SK_ColorBLACK);
++  dbus::MessageWriter variant(nullptr);
++  writer->OpenVariant("(ddd)", &variant);
++  dbus::MessageWriter rgb(nullptr);
++  variant.OpenStruct(&rgb);
++  rgb.AppendDouble(SkColorGetR(color) / 255.0);
++  rgb.AppendDouble(SkColorGetG(color) / 255.0);
++  rgb.AppendDouble(SkColorGetB(color) / 255.0);
++  variant.CloseContainer(&rgb);
++  writer->CloseContainer(&variant);
++}
++
++void DesktopAppearanceService::HandleReadAll(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::vector<std::string> namespaces;
++  if (!reader.PopArrayOfStrings(&namespaces)) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, kInvalidArgsError, "Expected an array of strings"));
++    return;
++  }
++
++  auto response = dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  dbus::MessageWriter all(nullptr);
++  writer.OpenArray("{sa{sv}}", &all);
++  if (NamespaceRequested(namespaces)) {
++    dbus::MessageWriter entry(nullptr);
++    all.OpenDictEntry(&entry);
++    entry.AppendString(kAppearanceNamespace);
++    dbus::MessageWriter settings(nullptr);
++    entry.OpenArray("{sv}", &settings);
++    for (const std::string& key : KeysFor(appearance_)) {
++      dbus::MessageWriter setting(nullptr);
++      settings.OpenDictEntry(&setting);
++      setting.AppendString(key);
++      WriteValue(key, &setting);
++      settings.CloseContainer(&setting);
++    }
++    entry.CloseContainer(&settings);
++    all.CloseContainer(&entry);
++  }
++  writer.CloseContainer(&all);
++  std::move(response_sender).Run(std::move(response));
++}
++
++void DesktopAppearanceService::HandleRead(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::string name_space;
++  std::string key;
++  if (!reader.PopString(&name_space) || !reader.PopString(&key)) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, kInvalidArgsError, "Expected a namespace and a key"));
++    return;
++  }
++  const std::vector<std::string> keys = KeysFor(appearance_);
++  if (name_space != kAppearanceNamespace ||
++      std::find(keys.begin(), keys.end(), key) == keys.end()) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, kNotFoundError, "Requested setting not found"));
++    return;
++  }
++  auto response = dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  WriteValue(key, &writer);
++  std::move(response_sender).Run(std::move(response));
++}
++
++void DesktopAppearanceService::EmitSettingChanged(const std::string& key) {
++  if (!exported_object_) {
++    return;
++  }
++  dbus::Signal signal(kInterfaceName, kSettingChangedSignal);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendString(kAppearanceNamespace);
++  writer.AppendString(key);
++  WriteValue(key, &writer);
++  exported_object_->SendSignal(&signal);
++}
++
++void DesktopAppearanceService::OnExported(const std::string& interface_name,
++                                          const std::string& method_name,
++                                          bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not export " << interface_name << "."
++                          << method_name;
++}
++
++DesktopAppearanceServiceHost::DesktopAppearanceServiceHost() = default;
++
++DesktopAppearanceServiceHost::~DesktopAppearanceServiceHost() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  service_.reset();
++  exported_object_.reset();
++  if (bus_) {
++    bus_->ShutdownOnDBusThreadAndBlock();
++    bus_.reset();
++  }
++  if (dbus_thread_) {
++    dbus_thread_->Stop();
++  }
++}
++
++// static
++std::unique_ptr<DesktopAppearanceServiceHost>
++DesktopAppearanceServiceHost::Create() {
++  auto host = std::unique_ptr<DesktopAppearanceServiceHost>(
++      new DesktopAppearanceServiceHost());
++  if (!host->Start()) {
++    return nullptr;
++  }
++  return host;
++}
++
++bool DesktopAppearanceServiceHost::Start() {
++  dbus_thread_ =
++      std::make_unique<base::Thread>("AuraDE appearance D-Bus thread");
++  base::Thread::Options thread_options;
++  thread_options.message_pump_type = base::MessagePumpType::IO;
++  if (!dbus_thread_->StartWithOptions(std::move(thread_options))) {
++    LOG(ERROR) << "AuraDE appearance service could not start its D-Bus "
++                  "thread";
++    return false;
++  }
++
++  dbus::Bus::Options bus_options;
++  bus_options.bus_type = dbus::Bus::SESSION;
++  bus_options.connection_type = dbus::Bus::PRIVATE;
++  bus_options.dbus_task_runner = dbus_thread_->task_runner();
++  bus_ = new dbus::Bus(std::move(bus_options));
++  exported_object_ = bus_->GetExportedObject(dbus::ObjectPath(kObjectPath));
++  service_ = std::make_unique<DesktopAppearanceService>();
++  service_->Start(exported_object_);
++  bus_->RequestOwnership(
++      kServiceName, dbus::Bus::REQUIRE_PRIMARY_ALLOW_REPLACEMENT,
++      base::BindOnce(&DesktopAppearanceServiceHost::OnOwnership,
++                     weak_ptr_factory_.GetWeakPtr()));
++  return true;
++}
++
++void DesktopAppearanceServiceHost::OnOwnership(const std::string& service_name,
++                                               bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not own " << service_name;
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 4db9aec721bd..c21f62f93475 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -85,6 +85,7 @@
+ #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
+ #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
+ #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
++#include "chrome/browser/ash/dbus/desktop_appearance_service.h"
+ #include "chrome/browser/ash/dbus/desktop_notification_service.h"
+ #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
+ #include "chrome/browser/ash/dbus/drive_file_stream_service_provider.h"
+@@ -427,6 +428,10 @@ class DBusServices {
+       // the system services above, then translate requests into Ash state.
+       desktop_notification_service_host_ =
+           DesktopNotificationServiceHost::Create();
++      // AuraDE compatibility: the same applications ask xdg-desktop-portal
++      // whether the desktop is light or dark and what its accent is. Ash
++      // answers, so they follow it rather than a fixed default.
++      desktop_appearance_service_host_ = DesktopAppearanceServiceHost::Create();
+     }
+ 
+     virtual_file_request_service_ = CrosDBusService::Create(
+@@ -662,6 +667,7 @@ class DBusServices {
+     // Services depending on ash should be released here.
+     SetBluetoothConfigServiceBinderForGenericLinux({});
+     aurade_bluetooth_service_.reset();
++    desktop_appearance_service_host_.reset();
+     desktop_notification_service_host_.reset();
+     machine_learning_decision_service_.reset();
+   }
+@@ -674,6 +680,8 @@ class DBusServices {
+   std::unique_ptr<AuraDeBluetoothService> aurade_bluetooth_service_;
+   std::unique_ptr<DesktopNotificationServiceHost>
+       desktop_notification_service_host_;
++  std::unique_ptr<DesktopAppearanceServiceHost>
++      desktop_appearance_service_host_;
+   std::unique_ptr<CrosDBusService> virtual_file_request_service_;
+   std::unique_ptr<CrosDBusService> component_updater_service_;
+   std::unique_ptr<CrosDBusService> chrome_features_service_;
