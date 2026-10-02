@@ -14,15 +14,25 @@
 # a firmware framebuffer that comes up at some other resolution first, are
 # kept; the script falls back to the nearest size it finds.
 #
-# The keyboard. Plymouth reads keys with the layout /etc/vconsole.conf names
-# in XKBLAYOUT, and with a US layout when there is none, whatever KEYMAP says.
-# A passphrase typed on the wrong layout unlocks nothing, so when the layout
-# is not plain US, or the console keymap and plymouth's layout disagree, the
-# screen names the layout it is using. The name reaches the script as a theme
-# variable, in a copy of the theme file written here.
+# The keyboard. Plymouth reads keys with the XKB layout /etc/vconsole.conf
+# names in XKBLAYOUT, or with a US layout when there is none, whatever KEYMAP
+# says; with plymouth.use-legacy-input on the kernel command line it reads
+# them through the console instead, with KEYMAP. A passphrase typed on the
+# wrong layout unlocks nothing, so whenever the layout is not plain US the
+# screen names it. The name reaches the script as a theme variable, in a copy
+# of the theme file written here. A KEYMAP with nothing to say plymouth will
+# honour it is the one setup that types a passphrase on the wrong layout
+# without a word, and the build says so.
+
+# The places this reads, overridable so tests/hook-test.sh can stand up a
+# machine of its own.
+AURADE_BOOT_DRM=${AURADE_BOOT_DRM:-/sys/class/drm}
+AURADE_BOOT_VCONSOLE=${AURADE_BOOT_VCONSOLE:-/etc/vconsole.conf}
+AURADE_BOOT_XKB_RULES=${AURADE_BOOT_XKB_RULES:-/usr/share/X11/xkb/rules/base.lst}
+AURADE_BOOT_THEME=${AURADE_BOOT_THEME:-/usr/share/plymouth/themes/aurade-boot}
 
 build() {
-    local theme=/usr/share/plymouth/themes/aurade-boot link target keyboard
+    local theme=$AURADE_BOOT_THEME link target keyboard
 
     [[ $(plymouth-set-default-theme 2>/dev/null) == aurade-boot ]] || return 0
 
@@ -65,7 +75,7 @@ aurade_boot_keep_sizes() {
     done
     (( ${#sizes[@]} )) || return 0
 
-    for status in /sys/class/drm/card*-*/status; do
+    for status in "$AURADE_BOOT_DRM"/card*-*/status; do
         [[ -r $status && $(<"$status") == connected ]] || continue
         read -r mode <"${status%/status}/modes" || continue
         [[ $mode =~ ^([0-9]+)x([0-9]+) ]] || continue
@@ -87,28 +97,30 @@ aurade_boot_keep_sizes() {
     done
 }
 
-# The layout plymouth will type with, as words, or nothing when it is US and
-# the console agrees.
+# The layout the passphrase is typed with, as words, or nothing when it is US.
 aurade_boot_keyboard_name() {
-    local keymap='' layout='' variant='' rules=/usr/share/X11/xkb/rules/base.lst name=''
+    local keymap='' layout='' variant='' rules=$AURADE_BOOT_XKB_RULES name=''
+    local conf=$AURADE_BOOT_VCONSOLE
 
-    if [[ -r /etc/vconsole.conf ]]; then
-        keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
-        layout=$(sed -n 's/^XKBLAYOUT=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
-        variant=$(sed -n 's/^XKBVARIANT=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
+    if [[ -r $conf ]]; then
+        keymap=$(sed -n 's/^KEYMAP=//p' "$conf" | tr -d '"' | tail -n 1)
+        layout=$(sed -n 's/^XKBLAYOUT=//p' "$conf" | tr -d '"' | tail -n 1)
+        variant=$(sed -n 's/^XKBVARIANT=//p' "$conf" | tr -d '"' | tail -n 1)
     fi
     # Plymouth starts on the first of several layouts.
     layout=${layout%%,*}
     variant=${variant%%,*}
 
     if [[ -z $layout ]]; then
-        # No layout at all is US to plymouth. Say so only if the console was
-        # set to something else, because that is the case that locks people out.
         [[ -z $keymap || $keymap == us ]] && return 0
-        layout=us
-    elif [[ $layout == us && -z $variant ]]; then
+        if ! aurade_boot_legacy_input; then
+            warning "aurade-boot: vconsole.conf sets KEYMAP=%s but no XKBLAYOUT, so the unlock screen reads the passphrase with a US layout. Add XKBLAYOUT, or plymouth.use-legacy-input to the kernel command line." "$keymap"
+        fi
+        # Through the console, with the keymap the system was told to use.
+        printf '%s\n' "$keymap"
         return 0
     fi
+    [[ $layout == us && -z $variant ]] && return 0
 
     [[ -r $rules ]] || { printf '%s\n' "$layout"; return 0; }
     if [[ -n $variant ]]; then
@@ -126,6 +138,17 @@ aurade_boot_keyboard_name() {
             }' "$rules")
     fi
     printf '%s\n' "${name:-$layout}"
+}
+
+# Whether plymouth will be told to read keys through the console: on the
+# command line of this boot, or of the entries the next boots will use.
+aurade_boot_legacy_input() {
+    local file
+    [[ ${AURADE_BOOT_LEGACY_INPUT:-0} == 1 ]] && return 0
+    for file in ${AURADE_BOOT_CMDLINES:-/proc/cmdline /etc/kernel/cmdline /boot/loader/entries/*.conf /efi/loader/entries/*.conf}; do
+        [[ -r $file ]] && grep -qw -- 'plymouth.use-legacy-input' "$file" && return 0
+    done
+    return 1
 }
 
 help() {

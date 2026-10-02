@@ -832,8 +832,9 @@ write_target_file() {
 # no XKB layout (lib/aurade-keyboard.sh).
 #
 # Everything graphical reads keys through XKB and ignores KEYMAP. The login
-# screen types with these lines, and the graphical installer typed the
-# passwords with the same conversion, so the two agree.
+# screen, and on an encrypted install the unlock screen, type with these
+# lines, and the graphical installer typed the passwords with the same
+# conversion, so all of them agree.
 keymap_xkb_lines() {
   local layout model variant options
   IFS=$'\t' read -r layout model variant options < <(aurade_keymap_xkb "$1") || return 0
@@ -1864,11 +1865,41 @@ if [[ -n ${LOCKED_NAMES[aurade-greeter]:-} ]]; then
     "$MOUNTPOINT/etc/greetd/aurade.toml"
 fi
 
+# The unlock screen: the disk passphrase asked for on a photograph, in the
+# greeter's type, instead of on a text console. It needs aurade-boot from the
+# bundle, and plymouth in the initramfs ahead of `sd-encrypt` so the screen is
+# up before the question is. Without the package the question stays on the
+# console, which is how every encrypted install before it booted.
+BOOT_SCREEN=0
+BOOT_SCREEN_OPTIONS=''
+MKINITCPIO_ENV=()
+if (( LUKS )) && [[ -n ${LOCKED_NAMES[aurade-boot]:-} ]]; then
+  BOOT_SCREEN=1
+  BOOT_SCREEN_OPTIONS=' splash'
+  # A keymap with no XKB layout beside it is read through the console, which
+  # holds exactly the keymap the passphrase was typed with in this installer.
+  if [[ -z $VCONSOLE_XKB && $KEYMAP != us ]]; then
+    BOOT_SCREEN_OPTIONS+=' plymouth.use-legacy-input'
+    # The hook names the layout on the screen, and the boot entry that tells
+    # it the keys come through the console is not written yet.
+    MKINITCPIO_ENV=(env AURADE_BOOT_LEGACY_INPUT=1)
+  fi
+fi
+
 if (( LUKS )); then
+  luks_hooks='base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck'
+  (( BOOT_SCREEN )) &&
+    luks_hooks='base systemd autodetect microcode modconf kms keyboard sd-vconsole plymouth aurade-boot block sd-encrypt filesystems fsck'
   if [[ $MODE == execute ]]; then
-    sed -i -E 's|^HOOKS=.*|HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)|' "$MOUNTPOINT/etc/mkinitcpio.conf"
+    sed -i -E "s|^HOOKS=.*|HOOKS=(${luks_hooks})|" "$MOUNTPOINT/etc/mkinitcpio.conf"
   else
-    printf ' + configure mkinitcpio sd-encrypt hook\n'
+    printf ' + configure mkinitcpio hooks: %s\n' "$luks_hooks"
+  fi
+  if (( BOOT_SCREEN )); then
+    # The theme scales itself to the screen. Plymouth's own device scale
+    # would double it again on a high density panel, and soften every line.
+    write_target_file /etc/plymouth/plymouthd.conf 0644 \
+      "[Daemon]\nTheme=aurade-boot\nDeviceScale=1\n"
   fi
 elif [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
   # The systemd-based hook set the encrypted path uses already resumes from
@@ -1880,7 +1911,7 @@ elif [[ $SWAP_SIZE == hibernate && -n $SWAP_FILE ]]; then
     printf ' + add the mkinitcpio resume hook for hibernation\n'
   fi
 fi
-run arch-chroot "$MOUNTPOINT" mkinitcpio -P
+run arch-chroot "$MOUNTPOINT" "${MKINITCPIO_ENV[@]}" mkinitcpio -P
 if (( SECURE_BOOT_SIGN )); then
   # Keep the signing key on the installed system for the pacman hook, but
   # never put it in a command line, journal, or diagnostic bundle.
@@ -1910,18 +1941,22 @@ if (( SECURE_BOOT_SETUP_MODE )); then
 fi
 run "${BOOTCTL_INSTALL[@]}" install
 
+# Ask again after a wrong passphrase for as long as it takes. systemd stops at
+# three, and what follows the third is an emergency shell on a machine whose
+# disk is still locked, which nobody at that screen can do anything with.
+LUKS_OPTIONS='rd.luks.options=tries=0'
 if [[ $MODE == execute ]]; then
   ROOT_UUID=$(blkid -s UUID -o value "$ROOT_DEVICE")
   if (( LUKS )); then
     LUKS_UUID=$(cryptsetup luksUUID "$ROOT_PART")
-    ROOT_OPTIONS="rd.luks.name=${LUKS_UUID}=${CRYPT_NAME} root=/dev/mapper/${CRYPT_NAME} rw"
+    ROOT_OPTIONS="rd.luks.name=${LUKS_UUID}=${CRYPT_NAME} ${LUKS_OPTIONS} root=/dev/mapper/${CRYPT_NAME} rw"
   else
     ROOT_OPTIONS="root=UUID=${ROOT_UUID} rw"
   fi
 else
   ROOT_UUID='<root-filesystem-uuid>'
   ROOT_OPTIONS='root=UUID=<root-filesystem-uuid> rw'
-  (( LUKS )) && ROOT_OPTIONS='rd.luks.name=<luks-uuid>=aurade-root root=/dev/mapper/aurade-root rw'
+  (( LUKS )) && ROOT_OPTIONS="rd.luks.name=<luks-uuid>=aurade-root ${LUKS_OPTIONS} root=/dev/mapper/aurade-root rw"
 fi
 
 # Hibernation needs the kernel to be told which filesystem holds the swap file
@@ -1978,8 +2013,8 @@ ROOT_FLAGS=
 # whether the installed system finds its root, unlocks its disk and resumes
 # from hibernation, and until now the only way to see it was to boot the
 # result and read it off the running system.
-log "boot options: ${ROOT_OPTIONS}${ROOT_FLAGS} quiet"
-normal_entry+="initrd /initramfs-linux.img\noptions ${ROOT_OPTIONS}${ROOT_FLAGS} quiet\n"
+log "boot options: ${ROOT_OPTIONS}${ROOT_FLAGS} quiet${BOOT_SCREEN_OPTIONS}"
+normal_entry+="initrd /initramfs-linux.img\noptions ${ROOT_OPTIONS}${ROOT_FLAGS} quiet${BOOT_SCREEN_OPTIONS}\n"
 rollback_entry+="initrd /aurade-rollback/factory/initramfs-linux.img\noptions ${ROOT_OPTIONS} rootflags=subvol=@snapshots/0/snapshot systemd.unit=multi-user.target\n"
 write_target_file /boot/loader/entries/aurade.conf 0644 "$normal_entry"
 BOOT_ARTIFACTS=(vmlinuz-linux initramfs-linux.img)

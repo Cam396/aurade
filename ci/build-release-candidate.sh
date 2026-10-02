@@ -101,6 +101,7 @@ rsync -a --delete --exclude pkg --exclude src --exclude __pycache__ \
   "${REPO_ROOT}/aurade-system-helper" \
   "${REPO_ROOT}/aurade-power" \
   "${REPO_ROOT}/aurade-wallpapers" \
+  "${REPO_ROOT}/aurade-boot" \
   "${REPO_ROOT}/aurade-host-bridge" \
   "${REPO_ROOT}/aurade-login" \
   "${REPO_ROOT}/shill-nm-adapter" \

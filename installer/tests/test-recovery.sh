@@ -228,4 +228,20 @@ if find "$TMP/root/boot/aurade-rollback" -mindepth 1 -maxdepth 1 \
   exit 1
 fi
 
+# An encrypted install boots to the unlock screen. Its rollback boot shows its
+# messages instead, so `splash` goes with `quiet`, even side by side; what the
+# keys go through stays, or the passphrase stops being typed the same way.
+cat >"$TMP/root/boot/loader/entries/aurade.conf" <<'EOF'
+title AuraDE
+linux /vmlinuz-linux
+initrd /intel-ucode.img
+initrd /initramfs-linux.img
+options rd.luks.name=test=aurade-root root=/dev/mapper/aurade-root rw rootflags=subvol=@ quiet splash plymouth.use-legacy-input
+EOF
+PATH="$TMP/bin:$PATH" \
+  "$ROOT/installer/bin/aurade-recovery" snapshot --root "$TMP/root" \
+    --label unlock-screen --set-rollback >/dev/null
+grep -Eq '^options rd.luks.name=test=aurade-root root=/dev/mapper/aurade-root rw rootflags=subvol=@snapshots/manual-[0-9]{8}T[0-9]{6}Z-unlock-screen/snapshot plymouth.use-legacy-input$' \
+  "$TMP/root/boot/loader/entries/aurade-rollback.conf"
+
 echo 'recovery rollback test: PASS'
