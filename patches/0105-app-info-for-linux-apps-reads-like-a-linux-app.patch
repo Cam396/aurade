@@ -1,0 +1,241 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index 8c9a2d9abd88..8042994f2678 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -80,6 +80,7 @@ using apps::AuraDeHostDesktopApp;
+ struct AuraDeHostPackageMetadata {
+   std::string name;
+   std::string version;
++  int64_t installed_size = 0;
+ };
+ 
+ std::string TrimASCII(std::string value) {
+@@ -261,6 +262,10 @@ BuildAuraDeHostPackageMetadataMap() {
+     AuraDeHostPackageMetadata metadata;
+     metadata.name = *name;
+     metadata.version = version.value_or(std::string());
++    if (std::optional<std::string> size =
++            ReadPacmanDescField(desc_contents, "SIZE")) {
++      base::StringToInt64(*size, &metadata.installed_size);
++    }
+ 
+     bool in_files = false;
+     for (std::string_view raw_line :
+@@ -758,6 +763,7 @@ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
+       if (package != packages_by_file.end()) {
+         app.package_name = package->second.name;
+         app.package_version = package->second.version;
++        app.package_size = package->second.installed_size;
+       }
+       apps.push_back(std::move(app));
+     }
+@@ -816,6 +822,14 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+   if (!environment->HasVar("QT_QPA_PLATFORMTHEME")) {
+     options.environment["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal";
+   }
++  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
++  // when installed, is the modern one and still takes its colours from the
++  // desktop. A style the session already chose is kept.
++  if (!environment->HasVar("QT_STYLE_OVERRIDE") &&
++      base::PathExists(
++          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
++    options.environment["QT_STYLE_OVERRIDE"] = "Breeze";
++  }
+   options.environment["SDL_VIDEODRIVER"] = "wayland";
+   options.environment["MOZ_ENABLE_WAYLAND"] = "1";
+   options.environment["NO_AT_BRIDGE"] = "1";
+@@ -1043,12 +1057,13 @@ void CrostiniApps::CreateAppOverrides(
+   }
+ 
+   app->SetExtraField("source", "AuraDE Linux apps");
+-  if (!metadata.package_name.empty()) {
+-    app->version = metadata.package_name;
+-    if (!metadata.package_version.empty()) {
+-      app->version->append(" ");
+-      app->version->append(metadata.package_version);
+-    }
++  // AuraDE compatibility: App info shows the version and the size the way it
++  // does for any other app; the package name travels in its own field.
++  if (!metadata.package_version.empty()) {
++    app->version = metadata.package_version;
++  }
++  if (metadata.package_size > 0) {
++    app->app_size_in_bytes = static_cast<uint64_t>(metadata.package_size);
+   }
+   app->SetExtraField("desktop_file_id", metadata.desktop_file_id);
+   app->SetExtraField("desktop_file_path", metadata.desktop_path.value());
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+index 0506df0570e3..cdb588db9da7 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_APPS_APP_SERVICE_PUBLISHERS_CROSTINI_APPS_H_
+ #define CHROME_BROWSER_APPS_APP_SERVICE_PUBLISHERS_CROSTINI_APPS_H_
+ 
++#include <cstdint>
+ #include <map>
+ #include <memory>
+ #include <string>
+@@ -32,6 +33,8 @@ struct AuraDeHostDesktopApp {
+   std::string icon;
+   std::string package_name;
+   std::string package_version;
++  // What the package takes on disk, as pacman recorded it.
++  int64_t package_size = 0;
+   base::FilePath icon_path;
+   base::FilePath desktop_path;
+   std::vector<std::string> categories;
+diff --git a/ui/webui/resources/cr_components/app_management/app_management.mojom b/ui/webui/resources/cr_components/app_management/app_management.mojom
+index fa8df8eac978..17d3710e3f9a 100644
+--- a/ui/webui/resources/cr_components/app_management/app_management.mojom
++++ b/ui/webui/resources/cr_components/app_management/app_management.mojom
+@@ -160,6 +160,8 @@ struct App {
+   string? app_size;
+   string? data_size;
+   string publisher_id;
++  // AuraDE: the pacman package a Linux app was installed by, if any.
++  string? linux_package;
+   // A string of the formatted origin URL where it is no longer a valid URL,
+   // such as "foo.com".
+   string? formatted_origin;
+diff --git a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+index b26a6a0ee975..77da301daa1a 100644
+--- a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
++++ b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+@@ -341,6 +341,12 @@ AppManagementPageHandlerBase::CreateAppFromAppUpdate(
+   app->data_size = MaybeFormatBytes(update.DataSizeInBytes());
+ 
+   app->publisher_id = update.PublisherId();
++  if (std::optional<base::DictValue> extra = update.Extra()) {
++    if (const std::string* package = extra->FindString("package_name");
++        package && !package->empty()) {
++      app->linux_package = *package;
++    }
++  }
+ 
+   bool is_browser_tab_app = (update.AppType() == apps::AppType::kWeb) &&
+                             (update.WindowMode() == apps::WindowMode::kBrowser);
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
+index d1b6855509a9..fd7f9a936575 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
+@@ -104,12 +104,11 @@
+   </div>
+ </template>
+ <template is="dom-if" if="[[isAuraDeLinuxApp_(app)]]" restamp>
+-  <div class="indented-app-details" id="auradeLinuxSource">
+-    Source: AuraDE Linux apps
+-  </div>
+-  <div class="indented-app-details" id="auradeLinuxDesktopEntry">
+-    Desktop entry: [[getAuraDeDesktopEntry_(app)]]
+-  </div>
++  <template is="dom-if" if="[[app.version]]" restamp>
++    <div class="indented-app-details" id="auradeLinuxVersion">
++      [[i18n('appManagementAppDetailsVersion', app.version)]]
++    </div>
++  </template>
+   <template is="dom-if" if="[[shouldShowAuraDeLinuxPackage_(app)]]" restamp>
+     <div class="indented-app-details" id="auradeLinuxPackage">
+       Package: [[getAuraDeLinuxPackage_(app)]]
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
+index 50d0c01f4c18..5776aefd91d7 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
+@@ -135,7 +135,8 @@ export class AppManagementAppDetailsItem extends
+   }
+ 
+   private shouldShowAuraDeLinuxPackage_(app: App): boolean {
+-    return this.isAuraDeLinuxApp_(app) && Boolean(app.version);
++    return this.isAuraDeLinuxApp_(app) &&
++        Boolean(this.getAuraDeLinuxPackage_(app));
+   }
+ 
+   private isIsolatedWebApp_(app: App): boolean {
+@@ -274,12 +275,8 @@ export class AppManagementAppDetailsItem extends
+     return app.publisherId.startsWith('aurade-host:');
+   }
+ 
+-  private getAuraDeDesktopEntry_(app: App): string {
+-    return app.publisherId.replace(/^aurade-host:/, '');
+-  }
+-
+   private getAuraDeLinuxPackage_(app: App): string {
+-    return app.version || '';
++    return app.linuxPackage || '';
+   }
+ 
+   private shouldShowInfoIcon_(app: App): boolean {
+@@ -334,7 +331,8 @@ export class AppManagementAppDetailsItem extends
+ 
+   private getTypeAndSourceString_(app: App): string {
+     if (this.isAuraDeLinuxApp_(app)) {
+-      return 'Linux app from AuraDE host';
++      return this.getAuraDeLinuxPackage_(app) ? 'Linux app installed with pacman' :
++                                                'Linux app';
+     }
+     if (app.installReason === InstallReason.kPolicy) {
+       return this.getTypeString_(app, 'InstallReasonPolicy');
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.html b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.html
+index 58b766ca58f5..7989d0d3da62 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.html
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.html
+@@ -15,7 +15,8 @@
+         app="[[app_]]">
+     </app-management-pin-to-shelf-item>
+ 
+-    <div id="permissionsCard" class="permission-card-row">
++    <div id="permissionsCard" class="permission-card-row"
++        hidden$="[[isLinuxApp_(app_)]]">
+       <div class="permission-section-header">
+         <div class="header-text">$i18n{appManagementPermissionsLabel}</div>
+       </div>
+@@ -45,7 +46,7 @@
+ 
+     <app-management-more-permissions-item id="moreSettings"
+         class="permission-card-row separated-row" app="[[app_]]"
+-        hidden$="[[app_.hideMoreSettings]]"
++        hidden$="[[hideMoreSettings_(app_)]]"
+         more-permissions-label="$i18n{appManagementMorePermissionsLabelChromeApp}">
+     </app-management-more-permissions-item>
+     <app-management-app-details-item
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.ts
+index 9f3bb54b7ed9..fbd4a30e75f3 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/chrome_app_detail_view.ts
+@@ -9,7 +9,7 @@ import './app_management_cros_shared_style.css.js';
+ 
+ import {I18nMixin} from 'chrome://resources/ash/common/cr_elements/i18n_mixin.js';
+ import type {App, ExtensionAppPermissionMessage} from 'chrome://resources/cr_components/app_management/app_management.mojom-webui.js';
+-import {browserProxyFactory} from 'chrome://resources/cr_components/app_management/app_management.mojom-webui.js';
++import {AppType, browserProxyFactory} from 'chrome://resources/cr_components/app_management/app_management.mojom-webui.js';
+ import {getSelectedApp} from 'chrome://resources/cr_components/app_management/util.js';
+ import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+ 
+@@ -52,6 +52,10 @@ export class AppManagementChromeAppDetailViewElement extends
+   }
+ 
+   private async onAppChanged_(): Promise<void> {
++    if (this.isLinuxApp_(this.app_)) {
++      this.messages_ = [];
++      return;
++    }
+     try {
+       const {messages: messages} =
+           await browserProxyFactory.getInstance()
+@@ -80,6 +84,16 @@ export class AppManagementChromeAppDetailViewElement extends
+   private hasPermissions_(messages: ExtensionAppPermissionMessage[]): boolean {
+     return messages.length > 0;
+   }
++
++  private hideMoreSettings_(app: App): boolean {
++    return Boolean(app) && (app.hideMoreSettings || this.isLinuxApp_(app));
++  }
++
++  // AuraDE compatibility: Linux apps share this view with Chrome apps, but
++  // Chrome's extension permissions and settings mean nothing for them.
++  private isLinuxApp_(app: App): boolean {
++    return Boolean(app) && app.type === AppType.kCrostini;
++  }
+ }
+ 
+ declare global {
