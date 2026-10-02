@@ -339,12 +339,33 @@ with session(**LIVE_ENV) as model:
     ok, error = model.set("keymap", "xx")
     check(not ok, "a keymap with no XKB layout was accepted, so a password set "
                   "here would be typed on US and asked for on that keymap")
-    check("cannot type on" in error, f"the refusal does not say why: {error}")
+    check("cannot type the layout" in error, f"the refusal does not say why: {error}")
     check('include "pc+de+inet(evdev)"' in layout_file(),
           "a refused keymap changed the layout file")
     equal(logged("udevadm.log"), [], "a refused keymap plugged the keyboards in again")
     check("xx" not in logged("loadkeys.log"), "a refused keymap was loaded onto the console")
     equal(model.get("keymap"), "de", "a refused keymap replaced the answer")
+
+    # Every Next past the page sends the layout again; the keyboards stay put.
+    open(os.path.join(TMP, "udevadm.log"), "w").close()
+    ok, error = model.set("keymap", "de")
+    check(ok, f"the layout already in use was refused: {error}")
+    equal(logged("udevadm.log"), [], "the layout already in use plugged the keyboards in again")
+
+    # A replug that fails leaves the keyboards on nothing anyone knows, so the
+    # next layout asked for, even the one before, is plugged in again.
+    fail = os.path.join(TMP, "udevadm.log.fail")
+    open(fail, "w").close()
+    ok, error = model.set("keymap", "fr")
+    os.remove(fail)
+    check(not ok, "a layout the keyboards could not be plugged in on was accepted")
+    check('include "pc+de+inet(evdev)"' in layout_file(),
+          "a layout that failed to plug in was left in the file cage reads")
+    open(os.path.join(TMP, "udevadm.log"), "w").close()
+    ok, error = model.set("keymap", "de")
+    check(ok, f"the layout before a failed one was refused: {error}")
+    equal(len(logged("udevadm.log")), 2,
+          "after a failed replug, the same layout was taken as already plugged in")
 
 # A layout file that does not compile never goes where `cage` reads it: cage
 # drops a keyboard it cannot compile a keymap for, and here that is every one.

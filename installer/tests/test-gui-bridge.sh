@@ -169,6 +169,7 @@ case $1 in
   trigger)
     shift
     printf 'trigger %s\n' "$*" >>"$AURADE_TEST_UDEVADM_LOG"
+    [[ ! -e $AURADE_TEST_UDEVADM_LOG.fail || $1 != --action=add ]] || exit 1
     ;;
 esac
 STUB

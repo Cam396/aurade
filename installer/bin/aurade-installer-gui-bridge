@@ -855,7 +855,10 @@ gb_layout_symbols() {
   GB_LAYOUT_ERROR=
   GB_LAYOUT_SYMBOLS=
   if ! declare -F aurade_keymap_xkb >/dev/null || ! xkb=$(aurade_keymap_xkb "$keymap"); then
-    GB_LAYOUT_ERROR="This screen cannot type on the $keymap layout, so a password set here would not match the keyboard when the computer starts. Choose another layout, or use the text installer, which can use this one."
+    # Short enough for the one line a toast has; the longer version was cut
+    # off before it said what to do. Typed on US here, a password would not
+    # match the keyboard when the computer starts, which is why this refuses.
+    GB_LAYOUT_ERROR="This screen cannot type the layout you picked. Choose another, or use the text installer."
     return 1
   fi
   IFS=$'\t' read -r layout model variant options <<<"$xkb"
@@ -865,12 +868,15 @@ gb_layout_symbols() {
       --layout "$layout" --variant "$variant" --options "$options" 2>/dev/null |
     sed -n 's/^[[:space:]]*xkb_symbols[[:space:]]*{[[:space:]]*include "\([^"]*\)".*/\1/p') || true
   if [[ -z $GB_LAYOUT_SYMBOLS ]]; then
-    GB_LAYOUT_ERROR="The $keymap layout could not be set up on this screen. Choose another layout, or use the text installer."
+    GB_LAYOUT_ERROR="The layout you picked could not be set up on this screen. Choose another, or use the text installer."
     return 1
   fi
 }
 
 # Every keyboard udev knows of, by its event device.
+# The symbols the keyboards were last plugged in on, when that worked.
+GB_LIVE_SYMBOLS=''
+
 gb_keyboards() {
   local event props
   for event in "${AURADE_INPUT_SYSFS:-/sys/class/input}"/event*; do
@@ -900,6 +906,9 @@ gb_replug_keyboards() {
 # drops the next time one appears, and on this screen that is every keyboard.
 gb_apply_layout() {
   local symbols=$1 dir=$AURADE_LIVE_XKB/symbols previous=''
+  # Already what every keyboard was plugged in on. The page sends its layout
+  # again on every Next, and a replug for nothing lets go of a held key.
+  [[ -z $GB_LIVE_SYMBOLS || $symbols != "$GB_LIVE_SYMBOLS" ]] || return 0
   printf 'default partial alphanumeric_keys modifier_keys\nxkb_symbols "basic" {\n  include "%s"\n};\n' \
     "$symbols" >"$dir/aurade-next" || return 1
   if ! XKB_CONFIG_EXTRA_PATH=$AURADE_LIVE_XKB xkbcli compile-keymap --layout aurade-next >/dev/null 2>&1; then
@@ -908,9 +917,14 @@ gb_apply_layout() {
   fi
   [[ ! -r $dir/aurade ]] || previous=$(<"$dir/aurade")
   mv -f -- "$dir/aurade-next" "$dir/aurade" || return 1
-  gb_replug_keyboards && return 0
+  if gb_replug_keyboards; then
+    GB_LIVE_SYMBOLS=$symbols
+    return 0
+  fi
   # Plugged back in on the layout it had, as far as that goes, rather than
-  # left on one no answer names.
+  # left on one no answer names. What the keyboards are on is not known after
+  # this, so the next layout asked for is plugged in whatever it is.
+  GB_LIVE_SYMBOLS=''
   [[ -z $previous ]] || printf '%s\n' "$previous" >"$dir/aurade"
   gb_replug_keyboards || true
   return 1
@@ -937,7 +951,7 @@ gb_set() {
     # The console back on the answer this screen still types, so nothing is
     # left on a layout that no answer names.
     apply_answer keymap "${ANSWERS[keymap]:-us}" || true
-    _gb_err "The $value layout could not be set up on this screen. Choose another layout, or use the text installer."
+    _gb_err "The layout you picked could not be set up on this screen. Choose another, or use the text installer."
     return 0
   fi
   ANSWERS[$id]=$value
