@@ -47,7 +47,9 @@ SCRIPT = os.path.join(THEME, "aurade-boot.script")
 #: them from. Only the archive is kept in the repository.
 DRAWN = os.path.join(PACKAGE, "build", "drawn")
 ARCHIVE = os.path.join(PACKAGE, "aurade-boot-drawn.tar")
-WALLPAPERS = os.path.join(REPO, "aurade-wallpapers")
+#: The photographs, where the repository keeps them. aurade-wallpapers is
+#: built from these; its own directory only holds them once staged.
+WALLPAPERS = os.path.join(REPO, "installer", "wallpapers")
 TITLES = os.path.join(REPO, "installer", "wallpapers", "titles.tsv")
 MARK = os.path.join(REPO, "installer", "assets", "aurade-mark.png")
 
