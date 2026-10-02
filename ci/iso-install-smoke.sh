@@ -230,7 +230,8 @@ shot() {
 # centred at 0.64 of the height. While the screen waits for a passphrase the
 # accent is only the caret (about 26 pixels at 1280x800, and it blinks); once
 # something is typed the button fills with it (about 520). After a refusal the
-# ring is the error colour. Nothing under the shade comes near either colour.
+# edge and the message are the error colour (25 to 45). Nothing under the shade
+# comes near either colour, so a dozen pixels is already a state.
 ACCENT=209,188,255
 REFUSED=254,180,171
 field_pixels() {
@@ -282,7 +283,7 @@ if [[ -n $ENCRYPT ]]; then
   echo "   it asks: $WORK/0a-unlock-asks.ppm"
   type_text "$WRONG_PASSPHRASE"
   keys ret
-  wait_field 0b-unlock-refused "$REFUSED" 90 || fail 'a wrong passphrase was not refused on screen'
+  wait_field 0b-unlock-refused "$REFUSED" 90 12 || fail 'a wrong passphrase was not refused on screen'
   echo "   it refused a wrong passphrase: $WORK/0b-unlock-refused.ppm"
   type_text "$PASSPHRASE"
   sleep 1
@@ -295,7 +296,7 @@ if [[ -n $ENCRYPT ]]; then
   for _ in $(seq 1 10); do
     sleep 2
     shot 0e-after-unlock >/dev/null
-    (( $(field_pixels 0e-after-unlock "$REFUSED") < 200 )) ||
+    (( $(field_pixels 0e-after-unlock "$REFUSED") < 12 )) ||
       fail "the right passphrase was refused, typed on a $KEYMAP keyboard"
   done
 fi

@@ -273,30 +273,25 @@ def field(state: str, s: float) -> Image.Image:
     # Asking, the glass edge catches more light rather than taking a coloured
     # outline: a flat accent stroke laid over a photograph read as a form
     # field, not as glass. The accent stays for the caret and the button.
+    # A refusal is the same glass with its edge lit in the error colour.
     asking = state in ("focus", "ready")
-    body = pill(w, h, rgba((14, 15, 20), 0.60),
-                border=rgba((255, 255, 255), 0.30 if asking else 0.10),
-                border_w=1 * s, top_light=rgba((255, 255, 255), 0.62 if asking else 0.16))
+    edge = {"error": (ERROR, 0.55, 0.85)}.get(state, ((255, 255, 255), 0.30, 0.62)
+                                                  if asking else ((255, 255, 255), 0.10, 0.16))
+    body = pill(w, h, rgba((14, 15, 20), 0.60), border=rgba(edge[0], edge[1]),
+                border_w=1 * s, top_light=rgba(edge[0], edge[2]))
     # box-shadow: 0 4px 18px rgba(0, 0, 0, 0.34)
     solid = Image.new("RGBA", size, (0, 0, 0, 0))
     solid.alpha_composite(body, (pad, pad))
     canvas = Image.alpha_composite(canvas, shadow_layer(
         solid.getchannel("A").point(lambda v: 255 if v > 8 else 0), size, (0, 0),
         4 * s, 9 * s, 0.34))
-    if asking:
+    if asking or state == "error":
         halo = Image.new("RGBA", size, (0, 0, 0, 0))
-        halo.alpha_composite(pill(w, h, (0, 0, 0, 0), border=rgba((255, 255, 255), 1.0),
+        halo.alpha_composite(pill(w, h, (0, 0, 0, 0), border=rgba(edge[0], 1.0),
                                   border_w=2 * s), (pad, pad))
-        canvas = Image.alpha_composite(canvas, glow(halo, (255, 255, 255), 9 * s, 0.16))
+        canvas = Image.alpha_composite(canvas, glow(halo, edge[0], 9 * s,
+                                                    0.30 if state == "error" else 0.16))
         canvas.alpha_composite(body, (pad, pad))
-    elif state == "error":
-        ring_colour = ERROR
-        ring = Image.new("RGBA", size, (0, 0, 0, 0))
-        ring.alpha_composite(pill(w, h, (0, 0, 0, 0), border=rgba(ring_colour, 0.92),
-                                  border_w=2 * s), (pad, pad))
-        canvas = Image.alpha_composite(canvas, glow(ring, ring_colour, 5 * s, 0.55))
-        canvas.alpha_composite(body, (pad, pad))
-        canvas = Image.alpha_composite(canvas, ring)
     else:
         canvas.alpha_composite(body, (pad, pad))
     d = px(LAYOUT["go"], s)
