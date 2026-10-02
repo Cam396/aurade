@@ -2,6 +2,20 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## 1.1.3, unreleased
+
+### Changed
+- Setup starts the display name with your Linux account's full name, and an
+  empty name field shows your login name.
+- The display size preview in setup shows Files, Chromium and Settings, apps
+  that are on the machine, instead of Photos, Camera and A4.
+- The installer shows how much of the package download has arrived.
+
+### Fixed
+- The text installer's done screen stays up until you press a key: enter
+  restarts, esc leaves to the console. Before, it closed at once and nobody
+  saw that the install had finished.
+
 ## 1.1.2, 2026-10-01
 
 ### Added
