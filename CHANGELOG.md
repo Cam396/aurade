@@ -12,6 +12,13 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
+- Wi-Fi firmware for Marvell chips is on the installer and on installed
+  systems. Arch stopped including it by default, and the Surface Laptop 1
+  and 2, Pro 4 to 7 and Book 1 and 2 need it.
+- The installer has sound firmware for recent Intel laptops, so speech mode
+  is no longer silent on them.
+- With no working Wi-Fi, the installer suggests USB tethering from a phone,
+  and iPhones can be trusted for tethering from the installer.
 - The erase confirmation field in the graphical installer shows one focus
   ring instead of two.
 - The login screen says "Welcome" to an account signing in for the first

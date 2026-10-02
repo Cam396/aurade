@@ -65,6 +65,9 @@ grep -Fq -- '/boot/aurade-rollback/factory/vmlinuz-linux' "$TMP/plain.out"
 grep -Fq -- 'intel-ucode' "$TMP/plain.out"
 grep -Fq -- 'amd-ucode' "$TMP/plain.out"
 grep -Fq -- 'sof-firmware' "$TMP/plain.out"
+# Surface Laptop 1 and 2, Pro 4 to 7 and Book 1 and 2 have Marvell Wi-Fi, and
+# linux-firmware stopped pulling in its firmware when it was split up.
+grep -Fq -- 'linux-firmware-marvell' "$TMP/plain.out"
 grep -Fq -- 'file:///var/cache/aurade/repo' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'pacstrap -M -G -C' "$ROOT/installer/bin/aurade-install"
 grep -Fq -- 'GPGDir = ${ARCH_GPG_DIR}' "$ROOT/installer/bin/aurade-install"

@@ -2400,8 +2400,8 @@ class InstallerWindow(Adw.ApplicationWindow):
             item.set_subtitle(status.get("reason", ""))
             self.widgets["wifi.list"].set_visible(False)
             self.widgets["wifi.empty"].set_label(
-                "This image has no way to set up Wi-Fi. Connect a cable to "
-                "get online.")
+                "This image has no way to set up Wi-Fi. Use a cable, or USB "
+                "tethering from a phone.")
             self.widgets["wifi.empty"].set_visible(True)
             return
         if status.get("wired"):

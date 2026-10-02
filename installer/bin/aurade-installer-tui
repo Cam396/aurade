@@ -1077,7 +1077,7 @@ screen_network() {
   tui_blank
   if [[ $AURADE_WIFI_AVAILABLE != true ]]; then
     status='Wi-Fi cannot be set up here'
-    subtitle='This image has no way to set up Wi-Fi. Connect a cable to get online.'
+    subtitle='This image has no way to set up Wi-Fi. Use a cable, or USB tethering from a phone.'
   elif [[ $AURADE_WIFI_WIRED == true ]]; then
     status='Connected by cable'
     subtitle='A wired connection is up. Wi-Fi is optional.'
@@ -1124,7 +1124,7 @@ screen_network() {
       tui_wrap "Showing $(( start + 1 )) to $end of $count networks." dim
     fi
   elif [[ $AURADE_WIFI_AVAILABLE == true && $AURADE_WIFI_WIFI == false ]]; then
-    tui_wrap 'No Wi-Fi device was found. Plug in a cable or a supported adapter.' dim
+    tui_wrap 'No working Wi-Fi was found. Use a cable, or a phone: plug it in by USB and turn on USB tethering.' dim
   elif [[ $AURADE_WIFI_RADIO == enabled ]]; then
     tui_wrap 'Nothing in range. Move closer to the router, or use a cable.' dim
   fi
@@ -1389,7 +1389,7 @@ prompt_wifi_hidden_security() {
 run_wifi_hidden() {
   local ssid='' auth='' error=''
   if [[ $AURADE_WIFI_AVAILABLE != true || $AURADE_WIFI_WIFI != true ]]; then
-    WIFI_NOTICE='No Wi-Fi device was found. Plug in a cable or a supported adapter.'
+    WIFI_NOTICE='No working Wi-Fi was found. Use a cable, or a phone: plug it in by USB and turn on USB tethering.'
     WIFI_NOTICE_KIND=warn
     return 0
   fi
