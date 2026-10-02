@@ -2141,8 +2141,13 @@ class GreeterWindow(Adw.ApplicationWindow):
             holder.remove(child)
             child = following
         holder.append(Avatar(account, 72) if account is not None else Mark(64))
-        self.widgets["handoff.title"].set_label(
-            C.HANDOFF_TITLE.format(first=first) if first else C.HANDOFF_TITLE_PLAIN)
+        name = account.name if account is not None else self.typed_name
+        if ACC.signed_in_before(name):
+            text = C.HANDOFF_TITLE.format(first=first) if first else C.HANDOFF_TITLE_PLAIN
+        else:
+            text = (C.HANDOFF_TITLE_FIRST.format(first=first) if first
+                    else C.HANDOFF_TITLE_FIRST_PLAIN)
+        self.widgets["handoff.title"].set_label(text)
         self.stack.set_visible_child_name("handoff")
         A.announce(self.widgets["handoff.note"], C.HANDOFF_NOTE)
         self._start_handoff_pulse()

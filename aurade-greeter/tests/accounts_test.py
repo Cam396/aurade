@@ -267,6 +267,45 @@ def test_remembering_survives_a_read_only_disk() -> None:
         fixture.close()
 
 
+def test_a_first_sign_in_is_told_apart_from_a_return() -> None:
+    """The handoff says welcome to a new account and welcome back to the rest."""
+    fixture = Fixture()
+    try:
+        check(A.signed_in_before("ada") is False,
+              "an account that never signed in was treated as returning")
+        check(A.remember("ada") is True, "remembering ada failed")
+        check(A.signed_in_before("ada") is True,
+              "an account that just signed in was still treated as new")
+        check(A.remember("grace") is True, "remembering grace failed")
+        check(A.signed_in_before("ada") is True,
+              "ada was forgotten once somebody else signed in")
+        A.remember("ada")
+        with open(os.path.join(os.path.dirname(fixture.state), "signed-in"),
+                  encoding="utf-8") as handle:
+            lines = handle.read().split()
+        check(lines == ["ada", "grace"],
+              f"the signed in list is not one line per account: {lines!r}")
+        check(A.signed_in_before("../ada") is False,
+              "a name with a path separator was looked up")
+    finally:
+        fixture.close()
+
+
+def test_an_upgraded_machine_still_knows_its_owner() -> None:
+    """Before the list existed only the last name was kept, and it still counts."""
+    fixture = Fixture()
+    try:
+        os.makedirs(os.path.dirname(fixture.state), exist_ok=True)
+        with open(fixture.state, "w", encoding="utf-8") as handle:
+            handle.write("grace\n")
+        check(A.signed_in_before("grace") is True,
+              "the last user of an upgraded machine was greeted as new")
+        check(A.signed_in_before("ada") is False,
+              "an account nobody remembered was treated as returning")
+    finally:
+        fixture.close()
+
+
 def main() -> int:
     for name, function in sorted(globals().items()):
         if name.startswith("test_") and callable(function):

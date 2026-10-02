@@ -47,6 +47,9 @@ CHECKING = _("One moment.")
 # looking at black assumes it broke.
 HANDOFF_TITLE = _("Welcome back, {first}.")
 HANDOFF_TITLE_PLAIN = _("Welcome back.")
+#: The same moment, for an account signing in here for the first time.
+HANDOFF_TITLE_FIRST = _("Welcome, {first}.")
+HANDOFF_TITLE_FIRST_PLAIN = _("Welcome.")
 HANDOFF_NOTE = _("Setting up your desktop.")
 BACK = _("Choose a different account")
 
