@@ -1,0 +1,66 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index 97bc6d4b43dd..82b158a49339 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -12,7 +12,10 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "ash/constants/ash_switches.h"
+ #include "ash/public/cpp/app_menu_constants.h"
++#include "ash/public/cpp/system/toast_data.h"
++#include "ash/public/cpp/system/toast_manager.h"
+ #include "ash/strings/grit/ash_strings.h"
+ #include "base/command_line.h"
+ #include "base/environment.h"
+@@ -646,8 +649,14 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+   }
+   options.environment["WAYLAND_DISPLAY"] = wayland_display;
+   options.environment["GDK_BACKEND"] = "wayland";
+-  options.environment["GSK_RENDERER"] = "cairo";
+-  options.environment["LIBGL_ALWAYS_SOFTWARE"] = "1";
++  // AuraDE compatibility: X11 applications reach exo through
++  // xwayland-satellite, which the session starts on this display once exo is
++  // up. Without it an X11-only application had nowhere to draw and exited.
++  if (std::optional<std::string> x11_display =
++          environment->GetVar("AURADE_HOST_APP_X11_DISPLAY");
++      x11_display && !x11_display->empty()) {
++    options.environment["DISPLAY"] = *x11_display;
++  }
+   options.environment["QT_QPA_PLATFORM"] = "wayland";
+   options.environment["SDL_VIDEODRIVER"] = "wayland";
+   options.environment["MOZ_ENABLE_WAYLAND"] = "1";
+@@ -655,8 +664,12 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+   options.environment["XDG_CURRENT_DESKTOP"] = "AuraDE";
+   options.environment["XDG_SESSION_DESKTOP"] = "aurade";
+   options.environment["DESKTOP_SESSION"] = "aurade";
+-  options.environment["LANG"] = "C.UTF-8";
+-  options.environment["LC_ALL"] = "C.UTF-8";
++  // AuraDE compatibility: the language and the GPU are the session's. Both
++  // were pinned here once (C.UTF-8, and software GL with GTK's cairo
++  // renderer), which opened every application in English and drew Firefox on
++  // the processor beside a working GPU. Left alone, the login shell the
++  // command runs in reads locale.conf the way a terminal does, and exo only
++  // runs at all where there is a GPU to hand buffers to.
+   base::LaunchProcess(command_line, options);
+ }
+ 
+@@ -924,6 +937,18 @@ bool CrostiniApps::LaunchAuraDeHostApp(const std::string& app_id) {
+     return false;
+   }
+ 
++  // AuraDE compatibility: with no GPU the session draws in software and
++  // leaves exo off, so there is no display for the application to open on.
++  // It used to start, find nothing, and exit without a word. Say so instead.
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
++          ash::switches::kAshEnableWaylandServer)) {
++    ash::ToastManager::Get()->Show(ash::ToastData(
++        "aurade-host-app-no-display", ash::ToastCatalogName::kAppNotAvailable,
++        u"Linux apps can't open while the desktop is drawing without a "
++        u"graphics card."));
++    return true;
++  }
++
+   if (registry()) {
+     registry()->AppLaunched(app_id);
+   }
