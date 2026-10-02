@@ -1,0 +1,26 @@
+diff --git a/gpu/command_buffer/service/shared_image/shared_memory_image_backing.cc b/gpu/command_buffer/service/shared_image/shared_memory_image_backing.cc
+index d98fbf736a36..2ca6674232cb 100644
+--- a/gpu/command_buffer/service/shared_image/shared_memory_image_backing.cc
++++ b/gpu/command_buffer/service/shared_image/shared_memory_image_backing.cc
+@@ -41,7 +41,20 @@ class MemoryImageRepresentationImpl : public MemoryImageRepresentation {
+ 
+  protected:
+   SkPixmap BeginReadAccess() override {
+-    return shared_image_shared_memory()->pixmaps()[0];
++    SkPixmap pixmap = shared_image_shared_memory()->pixmaps()[0];
++    // AuraDE compatibility: Skia has no BGRX colour type, so BGRX memory is
++    // described as RGBX, and the compositor uploaded it that way with red and
++    // blue swapped. Wayland clients drawing XRGB8888 into shared memory, Qt
++    // among them, showed every blue as orange. Read as opaque BGRA the bytes
++    // keep their real order and the padding byte is never taken for alpha.
++    if (backing()->format() == viz::SinglePlaneFormat::kBGRX_8888 &&
++        pixmap.colorType() == kRGB_888x_SkColorType) {
++      pixmap.reset(pixmap.info()
++                       .makeColorType(kBGRA_8888_SkColorType)
++                       .makeAlphaType(kOpaque_SkAlphaType),
++                   pixmap.addr(), pixmap.rowBytes());
++    }
++    return pixmap;
+   }
+ 
+  private:
