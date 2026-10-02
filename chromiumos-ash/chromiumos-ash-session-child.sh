@@ -112,6 +112,26 @@ fi
 # socket left by the previous desktop can be found first and refuse the
 # connection, so a bridge that ends early is started again, a bounded number
 # of times rather than in a tight loop.
+# X11 applications read their settings from the X server, which comes up
+# fresh with every bridge. AuraDE's defaults go first so the user's own
+# ~/.Xresources, merged after them, wins. xrdb runs cpp unless told not to,
+# and cpp is not always installed.
+load_x11_resources() {
+    command -v xrdb >/dev/null 2>&1 || return 0
+    local x_socket="${AURADE_X11_SOCKET_DIR:-/tmp/.X11-unix}/X${X11_DISPLAY#:}"
+    local waited=0 file
+    while [ ! -S "${x_socket}" ] && [ "${waited}" -lt 40 ]; do
+        sleep 0.25
+        waited="$((waited + 1))"
+    done
+    [ -S "${x_socket}" ] || return 0
+    for file in "${AURADE_X11_RESOURCES:-/usr/share/aurade/Xresources}" "${HOME}/.Xresources"; do
+        [ -r "${file}" ] || continue
+        DISPLAY="${X11_DISPLAY}" xrdb -merge "${file}" 2>/dev/null ||
+            DISPLAY="${X11_DISPLAY}" xrdb -nocpp -merge "${file}" || true
+    done
+}
+
 start_x11_bridge() {
     [ -n "${X11_DISPLAY}" ] || return 0
     local socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${EXO_SOCKET_NAME}"
@@ -129,6 +149,7 @@ start_x11_bridge() {
             [ -S "${socket}" ] || exit 0
             WAYLAND_DISPLAY="${EXO_SOCKET_NAME}" xwayland-satellite "${X11_DISPLAY}" &
             child="$!"
+            load_x11_resources &
             wait "${child}"
             child=""
             sleep 2
