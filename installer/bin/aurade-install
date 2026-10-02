@@ -101,7 +101,7 @@ SECURE_BOOT_SIGN=0
 SECURE_BOOT_SETUP_MODE=0
 SECURE_BOOT_ENROLL=${AURADE_SECURE_BOOT_ENROLL:-manual}
 BASE_PACKAGES=(
-  base archlinux-keyring linux linux-firmware intel-ucode amd-ucode sof-firmware btrfs-progs seatd dosfstools cryptsetup
+  base archlinux-keyring linux linux-firmware linux-firmware-marvell wireless-regdb intel-ucode amd-ucode sof-firmware btrfs-progs seatd dosfstools cryptsetup
   gptfdisk efibootmgr sbsigntools networkmanager sudo pipewire pipewire-alsa
   pipewire-pulse wireplumber alsa-utils upower brightnessctl udisks2
   xdg-utils polkit openssh bluez bluez-utils vim
