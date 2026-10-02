@@ -227,9 +227,10 @@ shot() {
 }
 
 # How many pixels near a colour a screenshot has in the unlock field's row,
-# centred at 0.64 of the height. The field's ring is the accent colour while
-# the screen waits for a passphrase and the error colour after a refusal;
-# nothing under the shade comes near either.
+# centred at 0.64 of the height. While the screen waits for a passphrase the
+# accent is only the caret (about 26 pixels at 1280x800, and it blinks); once
+# something is typed the button fills with it (about 520). After a refusal the
+# ring is the error colour. Nothing under the shade comes near either colour.
 ACCENT=209,188,255
 REFUSED=254,180,171
 field_pixels() {
@@ -263,12 +264,13 @@ for y in range(int(h * 0.59), int(h * 0.69)):
 print(count)
 PY
 }
-# A screenshot every two seconds until the field's row shows the colour.
+# A screenshot every two seconds until the field's row shows the colour, at
+# least MIN pixels of it (200 unless given).
 wait_field() {
-  local name=$1 colour=$2 seconds=$3 waited
+  local name=$1 colour=$2 seconds=$3 min=${4:-200} waited
   for (( waited = 0; waited < seconds; waited += 2 )); do
     shot "$name" >/dev/null
-    (( $(field_pixels "$name" "$colour") >= 200 )) && return 0
+    (( $(field_pixels "$name" "$colour") >= min )) && return 0
     sleep 2
   done
   return 1
@@ -276,7 +278,7 @@ wait_field() {
 
 if [[ -n $ENCRYPT ]]; then
   echo "==> the unlock screen, on a $KEYMAP keyboard"
-  wait_field 0a-unlock-asks "$ACCENT" 240 || fail 'the unlock screen never asked for the passphrase'
+  wait_field 0a-unlock-asks "$ACCENT" 240 12 || fail 'the unlock screen never asked for the passphrase'
   echo "   it asks: $WORK/0a-unlock-asks.ppm"
   type_text "$WRONG_PASSPHRASE"
   keys ret
