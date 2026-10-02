@@ -1,0 +1,13 @@
+[Plymouth Theme]
+Name=AuraDE
+Description=The AuraDE boot screen, and the disk unlock in it.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/aurade-boot
+ScriptFile=/usr/share/plymouth/themes/aurade-boot/aurade-boot.script
+# The one face plymouth's initramfs hook copies in, as Plymouth.ttf. Every
+# fixed sentence is drawn ahead of time; this only sets messages that arrive
+# while the screen is up, such as a filesystem check.
+Font=Adwaita Sans
+ConsoleLogBackgroundColor=0x121318

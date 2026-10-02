@@ -1,0 +1,138 @@
+#!/bin/bash
+# aurade-boot: what the AuraDE unlock screen needs in the initramfs beyond
+# what plymouth's own hook copies. Goes after `plymouth` in HOOKS.
+#
+# The photographs. The theme links its photographs to the wallpaper package,
+# so they exist once on the disk, and plymouth's hook copies the links but not
+# what they point at. This adds a few of them, a different few each time the
+# image is built, because every one is a megabyte and a half read from the
+# EFI partition on every boot. A link left unresolved is a slot the screen
+# skips.
+#
+# The sizes. The screen is drawn ahead of time at eight sizes and uses the one
+# nearest the screen. Only the sizes for the screens connected now, and 1x for
+# a firmware framebuffer that comes up at some other resolution first, are
+# kept; the script falls back to the nearest size it finds.
+#
+# The keyboard. Plymouth reads keys with the layout /etc/vconsole.conf names
+# in XKBLAYOUT, and with a US layout when there is none, whatever KEYMAP says.
+# A passphrase typed on the wrong layout unlocks nothing, so when the layout
+# is not plain US, or the console keymap and plymouth's layout disagree, the
+# screen names the layout it is using. The name reaches the script as a theme
+# variable, in a copy of the theme file written here.
+
+build() {
+    local theme=/usr/share/plymouth/themes/aurade-boot link target keyboard
+
+    [[ $(plymouth-set-default-theme 2>/dev/null) == aurade-boot ]] || return 0
+
+    while read -r link; do
+        target=$(readlink -f -- "$link") || continue
+        [[ -f $target ]] || continue
+        # The copied link goes first: add_file looks through a link it finds
+        # in the way, to the host's file, sees the same picture, and copies
+        # nothing.
+        rm -f -- "${BUILDROOT:?}$link"
+        add_file "$target" "$link"
+    done < <(compgen -G "$theme/photo-*.png" | shuf -n "${AURADE_BOOT_PHOTOS:-4}")
+
+    aurade_boot_keep_sizes "$theme"
+
+    keyboard=$(aurade_boot_keyboard_name)
+    if [[ -n $keyboard ]]; then
+        # A file rather than `add_file -`: add_file compares its source with
+        # what is already there before copying, and a pipe read once by that
+        # comparison has nothing left to copy.
+        local copy
+        copy=$(mktemp) || return 1
+        {
+            cat "$theme/aurade-boot.plymouth"
+            printf '\n[script-env-vars]\nkeyboard=%s\n' "$keyboard"
+        } >"$copy"
+        add_file "$copy" "$theme/aurade-boot.plymouth" 644
+        rm -f -- "$copy"
+    fi
+}
+
+# Drop the drawn sizes no screen connected now would use. With no screen to
+# measure (a build in a container, say) everything stays.
+aurade_boot_keep_sizes() {
+    local theme=$1 status mode keep=' s100 ' dir
+    local -a sizes=()
+
+    for dir in "$theme"/s[0-9][0-9][0-9]; do
+        [[ -d $dir ]] && sizes+=("${dir##*/}")
+    done
+    (( ${#sizes[@]} )) || return 0
+
+    for status in /sys/class/drm/card*-*/status; do
+        [[ -r $status && $(<"$status") == connected ]] || continue
+        read -r mode <"${status%/status}/modes" || continue
+        [[ $mode =~ ^([0-9]+)x([0-9]+) ]] || continue
+        keep+="$(awk -v w="${BASH_REMATCH[1]}" -v h="${BASH_REMATCH[2]}" -v list="${sizes[*]}" '
+            BEGIN {
+                u = h / 1080; if (w / 1600 < u) u = w / 1600
+                n = split(list, names, " ")
+                for (i = 1; i <= n; i++) {
+                    s = substr(names[i], 2) / 100; d = s - u; if (d < 0) d = -d
+                    if (best == "" || d < bestd - 0.0001) { best = names[i]; bestd = d }
+                }
+                print best
+            }') "
+    done
+    [[ $keep != ' s100 ' ]] || return 0
+
+    for dir in "${sizes[@]}"; do
+        [[ $keep == *" $dir "* ]] || rm -rf -- "${BUILDROOT:?}$theme/$dir"
+    done
+}
+
+# The layout plymouth will type with, as words, or nothing when it is US and
+# the console agrees.
+aurade_boot_keyboard_name() {
+    local keymap='' layout='' variant='' rules=/usr/share/X11/xkb/rules/base.lst name=''
+
+    if [[ -r /etc/vconsole.conf ]]; then
+        keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
+        layout=$(sed -n 's/^XKBLAYOUT=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
+        variant=$(sed -n 's/^XKBVARIANT=//p' /etc/vconsole.conf | tr -d '"' | tail -n 1)
+    fi
+    # Plymouth starts on the first of several layouts.
+    layout=${layout%%,*}
+    variant=${variant%%,*}
+
+    if [[ -z $layout ]]; then
+        # No layout at all is US to plymouth. Say so only if the console was
+        # set to something else, because that is the case that locks people out.
+        [[ -z $keymap || $keymap == us ]] && return 0
+        layout=us
+    elif [[ $layout == us && -z $variant ]]; then
+        return 0
+    fi
+
+    [[ -r $rules ]] || { printf '%s\n' "$layout"; return 0; }
+    if [[ -n $variant ]]; then
+        name=$(awk -v l="$layout" -v v="$variant" '
+            /^! / { section = $2; next }
+            section == "variant" && $1 == v && $2 == l ":" {
+                sub(/^[ \t]*[^ \t]+[ \t]+[^ \t]+[ \t]+/, ""); print; exit
+            }' "$rules")
+    fi
+    if [[ -z $name ]]; then
+        name=$(awk -v l="$layout" '
+            /^! / { section = $2; next }
+            section == "layout" && $1 == l {
+                sub(/^[ \t]*[^ \t]+[ \t]+/, ""); print; exit
+            }' "$rules")
+    fi
+    printf '%s\n' "${name:-$layout}"
+}
+
+help() {
+    cat <<HELPEOF
+Adds what the AuraDE unlock screen needs beyond its plymouth theme: a few of
+the photographs from aurade-wallpapers, the drawn sizes the connected screens
+use, and the name of the keyboard layout the passphrase is typed with. Place
+it after the plymouth hook.
+HELPEOF
+}
