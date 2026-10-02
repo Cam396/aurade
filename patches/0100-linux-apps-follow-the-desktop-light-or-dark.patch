@@ -1,0 +1,132 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index 82b158a49339..2e3087a377ae 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -14,6 +14,7 @@
+ 
+ #include "ash/constants/ash_switches.h"
+ #include "ash/public/cpp/app_menu_constants.h"
++#include "ash/public/cpp/style/dark_light_mode_controller.h"
+ #include "ash/public/cpp/system/toast_data.h"
+ #include "ash/public/cpp/system/toast_manager.h"
+ #include "ash/strings/grit/ash_strings.h"
+@@ -658,6 +659,13 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+     options.environment["DISPLAY"] = *x11_display;
+   }
+   options.environment["QT_QPA_PLATFORM"] = "wayland";
++  // AuraDE compatibility: with no platform theme Qt drew every application in
++  // its light default whatever the desktop was. Its portal theme reads the
++  // same light or dark setting GTK does. A theme the session already chose,
++  // such as qt6ct, is kept.
++  if (!environment->HasVar("QT_QPA_PLATFORMTHEME")) {
++    options.environment["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal";
++  }
+   options.environment["SDL_VIDEODRIVER"] = "wayland";
+   options.environment["MOZ_ENABLE_WAYLAND"] = "1";
+   options.environment["NO_AT_BRIDGE"] = "1";
+@@ -673,21 +681,73 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+   base::LaunchProcess(command_line, options);
+ }
+ 
++
++// AuraDE compatibility: host applications draw their own light or dark look
++// from GNOME's settings, which xdg-desktop-portal hands to GTK, libadwaita,
++// Qt and Firefox alike. Nothing set them, so every application stayed light
++// on a dark desktop. The GTK theme only follows when it is still one of the
++// two stock Adwaita names, so a theme someone picked is left alone.
++std::string GetAuraDeGnomeSetting(const char* key) {
++  std::string value;
++  base::GetAppOutput(
++      {"/usr/bin/gsettings", "get", "org.gnome.desktop.interface", key},
++      &value);
++  return std::string(base::TrimWhitespaceASCII(value, base::TRIM_ALL));
++}
++
++void SetAuraDeGnomeSetting(const char* key, const std::string& value) {
++  if (GetAuraDeGnomeSetting(key) == "'" + value + "'") {
++    return;
++  }
++  std::string output;
++  base::GetAppOutputAndError(
++      {"/usr/bin/gsettings", "set", "org.gnome.desktop.interface", key, value},
++      &output);
++}
++
++void ApplyAuraDeHostColorSchemeOnThread(bool dark_mode_enabled) {
++  if (!base::PathExists(base::FilePath("/usr/bin/gsettings"))) {
++    return;
++  }
++  SetAuraDeGnomeSetting("color-scheme",
++                        dark_mode_enabled ? "prefer-dark" : "default");
++  const std::string gtk_theme = GetAuraDeGnomeSetting("gtk-theme");
++  if (gtk_theme == "'Adwaita'" || gtk_theme == "'Adwaita-dark'") {
++    SetAuraDeGnomeSetting("gtk-theme",
++                          dark_mode_enabled ? "Adwaita-dark" : "Adwaita");
++  }
++}
++
+ }  // namespace
+ 
+ namespace apps {
+ 
+ CrostiniApps::CrostiniApps(AppServiceProxy* proxy) : GuestOSApps(proxy) {}
+ 
+-CrostiniApps::~CrostiniApps() = default;
++CrostiniApps::~CrostiniApps() {
++  if (auto* dark_light_mode_controller = ash::DarkLightModeController::Get()) {
++    dark_light_mode_controller->RemoveObserver(this);
++  }
++}
+ 
+ void CrostiniApps::Initialize() {
+   GuestOSApps::Initialize();
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
+     RefreshAuraDeHostApps();
++    if (auto* dark_light_mode_controller =
++            ash::DarkLightModeController::Get()) {
++      dark_light_mode_controller->AddObserver(this);
++      OnColorModeChanged(dark_light_mode_controller->IsDarkModeEnabled());
++    }
+   }
+ }
+ 
++void CrostiniApps::OnColorModeChanged(bool dark_mode_enabled) {
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ApplyAuraDeHostColorSchemeOnThread, dark_mode_enabled));
++}
++
+ bool CrostiniApps::CouldBeAllowed() const {
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
+     return true;
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+index a544a090f315..0506df0570e3 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+@@ -10,6 +10,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "ash/public/cpp/style/color_mode_observer.h"
+ #include "base/files/file_path.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+@@ -42,7 +43,7 @@ struct AuraDeHostDesktopApp {
+ 
+ // An app publisher (in the App Service sense) of Crostini apps,
+ // See components/services/app_service/README.md.
+-class CrostiniApps : public GuestOSApps {
++class CrostiniApps : public GuestOSApps, public ash::ColorModeObserver {
+  public:
+   explicit CrostiniApps(AppServiceProxy* proxy);
+   CrostiniApps(const CrostiniApps&) = delete;
+@@ -51,6 +52,9 @@ class CrostiniApps : public GuestOSApps {
+ 
+   void Initialize() override;
+ 
++  // ash::ColorModeObserver:
++  void OnColorModeChanged(bool dark_mode_enabled) override;
++
+  private:
+   bool CouldBeAllowed() const override;
+   apps::AppType AppType() const override;
