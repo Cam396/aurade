@@ -253,4 +253,52 @@ for height in 24 26 30 40; do
     { echo "progress screen overflowed a $height row console" >&2; exit 1; }
 done
 
+# --- how much has arrived, reported by the engine as the cache fills --------
+# The functions are lifted out of the engine, which cannot be sourced, and run
+# against a stand in for pacman that writes ten megabytes a second.
+ENGINE="$ROOT/installer/bin/aurade-install"
+awk '/^_DOWNLOAD_TICK=/,/^download_arch_packages\(\) \{/' "$ENGINE" | sed '$d' >"$TMP/download.sh"
+grep -q '^run_download_logged()' "$TMP/download.sh" ||
+  { echo 'run_download_logged is missing from the engine' >&2; exit 1; }
+(
+  set -Eeuo pipefail
+  aurade_journal_progress() { printf '%s %s %s\n' "$1" "$2" "$3"; }
+  # shellcheck source=/dev/null
+  . "$TMP/download.sh"
+  ARCH_CACHE="$TMP/dlcache"
+  mkdir -p "$ARCH_CACHE"
+  ARCH_PACKAGE_BYTES=$(( 30 * 1048576 ))
+  AURADE_DOWNLOAD_TICK_SECONDS=1
+  fake_pacman() {
+    local i
+    for i in 1 2 3; do
+      head -c $(( 10 * 1048576 )) /dev/zero >"$ARCH_CACHE/p$i"
+      echo "p$i downloading..."
+      sleep 1.2
+    done
+    return "$1"
+  }
+  run_download_logged acquire "$TMP/download.log" fake_pacman 0
+  rc=0
+  rm -f -- "${ARCH_CACHE:?}"/*
+  run_download_logged acquire-target "$TMP/download.log" fake_pacman 17 || rc=$?
+  echo "status $rc"
+) >"$TMP/download.out"
+# It climbs, it never claims the stage is finished, and it names both sizes.
+grep -q '^acquire [1-9][0-9]* 10 MB of 30 MB$' "$TMP/download.out" ||
+  { cat "$TMP/download.out" >&2; echo 'no progress record for the first package' >&2; exit 1; }
+grep -q '^acquire 99 30 MB of 30 MB$' "$TMP/download.out" ||
+  { cat "$TMP/download.out" >&2; echo 'a full cache did not read as 99 percent' >&2; exit 1; }
+! grep -q ' 100 ' "$TMP/download.out" ||
+  { echo 'the download reported 100 percent before the signatures were checked' >&2; exit 1; }
+grep -q '^acquire-target ' "$TMP/download.out" ||
+  { echo 'the stage name was not passed through' >&2; exit 1; }
+# pacman's exit status survives the stream, so a failed download is retried.
+grep -qx 'status 17' "$TMP/download.out" ||
+  { echo 'the download exit status was lost' >&2; exit 1; }
+# The log holds what pacman said and nothing the ticker wrote.
+! grep -q '@@aurade' "$TMP/download.log" ||
+  { echo 'the ticker wrote into the download log' >&2; exit 1; }
+[[ $(wc -l <"$TMP/download.log") -eq 6 ]]
+
 echo 'download rate test: PASS'

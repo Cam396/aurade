@@ -643,8 +643,75 @@ plan_arch_package_set() {
     >/dev/null || die 'the pinned package archive did not answer before the disk was changed'
 }
 
+# The download, with how much of it has arrived reported as it goes.
+#
+# This is the fifteen minute step on a slow archive, and it used to report
+# nothing: the bar sat at the start of the stage while the only sign of life
+# was the rate meter. The total is already known, `plan_arch_package_set`
+# added it up from the package list, so what is missing is how much is on
+# disk, and that is measured rather than read out of pacman. Its transfer
+# lines redraw in place with carriage returns, see bin/aurade-rate-sampler.
+#
+# A ticker beside the command writes a mark into the same stream every two
+# seconds, and on each mark this shell measures the cache. It is the pacstrap
+# arrangement again, for the same reason: the loop has to run in this shell so
+# the journal's sequence counter survives it. The ticker never goes through
+# `tee`, so the log holds only what pacman said. A mark that lands in the
+# middle of a pacman line is a missed tick and nothing else.
+_DOWNLOAD_TICK='@@aurade-download-tick@@'
+_DOWNLOAD_MARK='@@aurade-download-status@@'
+
+download_size_label() {
+  local bytes=$1
+  if (( bytes >= 1073741824 )); then
+    printf '%d.%d GB' $(( bytes / 1073741824 )) $(( bytes % 1073741824 * 10 / 1073741824 ))
+  else
+    printf '%d MB' $(( bytes / 1048576 ))
+  fi
+}
+
+run_download_logged() {
+  local stage=$1 log_path=$2 total=${ARCH_PACKAGE_BYTES:-0}
+  shift 2
+  local line bytes pct last=-1 status=1
+  while IFS= read -r line; do
+    if [[ $line == "$_DOWNLOAD_MARK"* ]]; then
+      status=${line#"$_DOWNLOAD_MARK"}
+      continue
+    fi
+    [[ $line == "$_DOWNLOAD_TICK" ]] || continue
+    (( total > 0 )) || continue
+    bytes=$(du -sb "$ARCH_CACHE" 2>/dev/null | cut -f1) || continue
+    [[ $bytes =~ ^[0-9]+$ ]] || continue
+    (( bytes <= total )) || bytes=$total
+    # Never 100 from here. Signatures still have to be checked, and the stage
+    # finishing is what says it is done.
+    pct=$(( bytes * 100 / total ))
+    (( pct < 100 )) || pct=99
+    (( pct != last )) || continue
+    last=$pct
+    aurade_journal_progress "$stage" "$pct" \
+      "$(printf '%s of %s' "$(download_size_label "$bytes")" "$(download_size_label "$total")")"
+  done < <( ( while sleep "${AURADE_DOWNLOAD_TICK_SECONDS:-2}"; do
+                printf '%s\n' "$_DOWNLOAD_TICK" || exit 0
+              done ) &
+            ticker=$!
+            if "$@" 2>&1 | tee -a "$log_path"; then
+              status=0
+            else
+              # See run_pacstrap_logged for why this is an `if`.
+              status=${PIPESTATUS[0]}
+            fi
+            kill "$ticker" 2>/dev/null || true
+            wait "$ticker" 2>/dev/null || true
+            printf '%s%s\n' "$_DOWNLOAD_MARK" "$status" )
+  [[ $status =~ ^[0-9]+$ ]] || status=1
+  return "$status"
+}
+
 download_arch_packages() {
-  local changed_disk=$1 attempt acquired=0 signature_failure_seen=0
+  local changed_disk=$1 attempt acquired=0 signature_failure_seen=0 stage=acquire
+  (( ! changed_disk )) || stage=acquire-target
   local acquire_timeout=${AURADE_ARCH_ACQUIRE_TIMEOUT:-30m}
   command -v repo-add >/dev/null || die 'repo-add is required to prepare the offline Arch package set'
   command -v timeout >/dev/null || die 'timeout is required to bound Arch package acquisition'
@@ -660,7 +727,7 @@ download_arch_packages() {
     else
       log "downloading the pinned package set before changing $TARGET (attempt ${attempt}/3)"
     fi
-    if run_logged "$attempt_log" timeout --foreground "$acquire_timeout" \
+    if run_download_logged "$stage" "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
         --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
       mapfile -t ARCH_PACKAGE_FILES < <(
