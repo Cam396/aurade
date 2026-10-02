@@ -157,7 +157,10 @@ case "$COMMAND" in
         }
         /^options[[:space:]]/ {
           line = $0
-          gsub(/[[:space:]]quiet([[:space:]]|$)/, " ", line)
+          # A rollback boot shows its messages: no quiet, and no unlock screen
+          # over them. Repeated, because one pass consumes the space between
+          # two neighbours and leaves the second standing.
+          while (gsub(/[[:space:]](quiet|splash)([[:space:]]|$)/, " ", line) > 0) {}
           sub(/[[:space:]]+$/, "", line)
           if (!sub(/rootflags=subvol=[^[:space:]]+/, "rootflags=subvol=" subvolume, line))
             exit 42

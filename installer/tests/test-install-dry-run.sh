@@ -28,6 +28,7 @@ make_package() {
 
 make_package aurade
 make_package chromiumos-ash
+make_package aurade-boot
 {
   printf '%s\n' '# sha256 filename pkgname pkgver arch'
   LC_ALL=C sort -k3,3 "$TMP/packages.lock.unsorted"
@@ -213,6 +214,17 @@ grep -Fq -- '--typecode=2:8309' "$TMP/encrypted.out"
 grep -Fq -- 'cryptsetup luksFormat --type luks2 --batch-mode' "$TMP/encrypted.out"
 grep -Fq -- '/boot/aurade-rollback/factory/initramfs-linux.img' "$TMP/encrypted.out"
 
+# The unlock screen. An encrypted install with aurade-boot in the bundle asks
+# for the passphrase through plymouth, and asks again after a wrong one for as
+# long as it takes; an unencrypted one is left exactly as it was.
+grep -Fq -- 'configure mkinitcpio hooks: base systemd autodetect microcode modconf kms keyboard sd-vconsole plymouth aurade-boot block sd-encrypt filesystems fsck' "$TMP/encrypted.out"
+grep -Fq -- '/etc/plymouth/plymouthd.conf' "$TMP/encrypted.out"
+grep -Fq -- 'rd.luks.options=tries=0 root=/dev/mapper/aurade-root rw rootflags=subvol=@ quiet splash' "$TMP/encrypted.out"
+grep -Fq -- 'keyboard: KEYMAP=us with XKBLAYOUT=us XKBMODEL=pc105+inet XKBOPTIONS=terminate:ctrl_alt_bksp' "$TMP/encrypted.out"
+refute grep -Fq -- 'use-legacy-input' "$TMP/encrypted.out"
+refute grep -Fq -- 'plymouth' "$TMP/plain.out"
+refute grep -Fq -- 'splash' "$TMP/plain.out"
+
 # ---------------------------------------------------------------------------
 # Storage shape
 #
@@ -253,6 +265,22 @@ plan kb-cz --keymap cz
 grep -Fq -- 'keyboard: KEYMAP=cz with XKBLAYOUT=cz XKBMODEL=pc105 XKBVARIANT=qwerty' "$TMP/kb-cz.out"
 plan kb-ua --keymap ua
 grep -Fq -- 'keyboard: KEYMAP=ua, which has no XKB layout, so the login screen stays on US' "$TMP/kb-ua.out"
+
+# The keyboard the passphrase is typed with at the unlock screen. A keymap
+# with an XKB layout gets it written beside it, which is what plymouth reads.
+# One without is read through the console instead, with the keymap the
+# passphrase was typed with here, and the first initramfs build is told so,
+# because the boot entry that says it is written after that build.
+plan luks-de --encrypt --luks-passphrase-file "$TMP/luks.passphrase" --keymap de-latin1
+grep -Fq -- 'keyboard: KEYMAP=de-latin1 with XKBLAYOUT=de XKBMODEL=pc105 XKBOPTIONS=terminate:ctrl_alt_bksp' "$TMP/luks-de.out"
+refute grep -Fq -- 'use-legacy-input' "$TMP/luks-de.out"
+plan luks-ua --encrypt --luks-passphrase-file "$TMP/luks.passphrase" --keymap ua
+grep -Fq -- 'keyboard: KEYMAP=ua, which has no XKB layout' "$TMP/luks-ua.out"
+grep -Fq -- 'quiet splash plymouth.use-legacy-input' "$TMP/luks-ua.out"
+grep -Fq -- 'env AURADE_BOOT_LEGACY_INPUT=1 mkinitcpio -P' "$TMP/luks-ua.out"
+plan plain-ua --keymap ua
+refute grep -Fq -- 'use-legacy-input' "$TMP/plain-ua.out"
+refute grep -Fq -- 'AURADE_BOOT_LEGACY_INPUT' "$TMP/plain-ua.out"
 
 grep -Fq 'compare package size with available memory and swap' "$TMP/plain.out"
 grep -Fq 'download to the target disk after mount when memory headroom is low' "$TMP/plain.out"
