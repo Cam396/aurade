@@ -12,6 +12,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
+- The login screen says "Welcome" to an account signing in for the first
+  time, and "Welcome back" only after that.
 - The text installer's done screen stays up until you press a key: enter
   restarts, esc leaves to the console. Before, it closed at once and nobody
   saw that the install had finished.

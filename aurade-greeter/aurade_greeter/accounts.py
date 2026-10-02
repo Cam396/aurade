@@ -219,6 +219,31 @@ def last_user(state_path: str | None = None) -> str:
     return name
 
 
+def _seen_file(state_path: str | None = None) -> str:
+    return os.path.join(os.path.dirname(_state_file(state_path)), "signed-in")
+
+
+def _valid_name(name: str) -> bool:
+    return bool(name) and len(name) <= 64 and "/" not in name and "\x00" not in name
+
+
+def signed_in_before(name: str, state_path: str | None = None) -> bool:
+    """Whether this account has signed in on this machine before.
+
+    The last user counts even without the list, so a machine upgraded from a
+    greeter that only kept the last name does not greet its owner as new.
+    """
+    if not _valid_name(name):
+        return False
+    if name == last_user(state_path):
+        return True
+    try:
+        with open(_seen_file(state_path), "r", encoding="utf-8") as handle:
+            return any(line.strip() == name for line in handle)
+    except OSError:
+        return False
+
+
 def remember(name: str, state_path: str | None = None) -> bool:
     """Record who just signed in, for the next boot.
 
@@ -237,4 +262,17 @@ def remember(name: str, state_path: str | None = None) -> bool:
         os.replace(temporary, path)
     except OSError:
         return False
+    # Everyone who has signed in, so the handoff can tell a first sign in from
+    # a return. Losing this costs one "Welcome" where "Welcome back" belonged.
+    seen = _seen_file(state_path)
+    try:
+        known = set()
+        if os.path.exists(seen):
+            with open(seen, "r", encoding="utf-8") as handle:
+                known = {line.strip() for line in handle}
+        if name not in known:
+            with open(seen, "a", encoding="utf-8") as handle:
+                handle.write(name + "\n")
+    except OSError:
+        pass
     return True
