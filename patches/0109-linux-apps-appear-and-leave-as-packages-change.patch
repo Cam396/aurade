@@ -1,0 +1,303 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index 8042994f2678..a4963438f3c9 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -23,13 +23,16 @@
+ #include "base/environment.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/files/file_path.h"
++#include "base/files/file_path_watcher.h"
+ #include "base/files/file_util.h"
+ #include "base/json/json_reader.h"
+ #include "base/process/launch.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "base/system/sys_info.h"
++#include "base/task/bind_post_task.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/platform_thread.h"
+ #include "base/time/time.h"
+@@ -680,26 +683,49 @@ bool IsAuraDeProtectedPackage(std::string_view package_name) {
+   return std::ranges::contains(kProtectedPackages, package_name);
+ }
+ 
+-bool RunAuraDePacmanUninstall(const std::string& package_name) {
++std::optional<base::Value> RunAuraDeHostctl(base::CommandLine command) {
++  std::string output;
++  int exit_code = 1;
++  // hostctl reports refusals as JSON with a nonzero exit, so the output is
++  // read whatever the exit code.
++  base::GetAppOutputWithExitCode(command, &output, &exit_code);
++  std::optional<base::Value> response =
++      base::JSONReader::Read(output, base::JSON_PARSE_RFC);
++  if (!response || !response->is_dict()) {
++    return std::nullopt;
++  }
++  return response;
++}
++
++apps::AuraDeUninstallResult RunAuraDePacmanUninstall(
++    const std::string& package_name) {
++  using Outcome = apps::AuraDeUninstallResult::Outcome;
+   base::CommandLine uninstall(base::FilePath("/usr/bin/aurade-hostctl"));
+   uninstall.AppendArg("pacman");
+   uninstall.AppendArg("uninstall");
+   uninstall.AppendArg(package_name);
+ 
+-  std::string output;
+-  int exit_code = 1;
+-  if (!base::GetAppOutputWithExitCode(uninstall, &output, &exit_code) ||
+-      exit_code != 0) {
+-    return false;
++  std::optional<base::Value> response = RunAuraDeHostctl(uninstall);
++  if (!response) {
++    return {Outcome::kFailed, u""};
+   }
+-  std::optional<base::Value> response =
+-      base::JSONReader::Read(output, base::JSON_PARSE_RFC);
+-  const base::DictValue* data = response && response->is_dict()
+-                                    ? response->GetDict().FindDict("data")
+-                                    : nullptr;
++  const base::DictValue* data = response->GetDict().FindDict("data");
+   const std::string* job_id = data ? data->FindString("job_id") : nullptr;
+   if (!job_id) {
+-    return false;
++    const std::string* code =
++        response->GetDict().FindStringByDottedPath("error.code");
++    if (code && *code == "not_authorized") {
++      return {Outcome::kDeclined, u""};
++    }
++    if (code && *code == "busy") {
++      return {Outcome::kFailed,
++              u"Another app is being installed or removed. Try again when "
++              u"it's done."};
++    }
++    if (code && *code == "protected_package") {
++      return {Outcome::kFailed, u"It's part of the system."};
++    }
++    return {Outcome::kFailed, u""};
+   }
+ 
+   // AuraDE compatibility: package jobs are asynchronous and serialized by the
+@@ -711,26 +737,32 @@ bool RunAuraDePacmanUninstall(const std::string& package_name) {
+     query.AppendArg("pacman");
+     query.AppendArg("job");
+     query.AppendArg(*job_id);
+-    output.clear();
+-    exit_code = 1;
+-    if (!base::GetAppOutputWithExitCode(query, &output, &exit_code) ||
+-        exit_code != 0) {
+-      continue;
+-    }
+-    response = base::JSONReader::Read(output, base::JSON_PARSE_RFC);
+-    data = response && response->is_dict()
+-               ? response->GetDict().FindDict("data")
+-               : nullptr;
+-    const std::string* state = data ? data->FindString("state") : nullptr;
++    std::optional<base::Value> job = RunAuraDeHostctl(query);
++    const base::DictValue* job_data =
++        job ? job->GetDict().FindDict("data") : nullptr;
++    const std::string* state =
++        job_data ? job_data->FindString("state") : nullptr;
+     if (!state || *state == "running") {
+       continue;
+     }
+-    return *state == "succeeded";
++    if (*state == "succeeded") {
++      return {Outcome::kRemoved, u""};
++    }
++    // pacman -R leaves a package that something else still needs, and says
++    // so on stdout; that is the failure people will meet.
++    for (const char* stream : {"stdout", "stderr"}) {
++      const std::string* text = job_data->FindString(stream);
++      if (text && text->find("breaks dependency") != std::string::npos) {
++        return {Outcome::kFailed, u"Something else installed needs it."};
++      }
++    }
++    return {Outcome::kFailed, u""};
+   }
+-  return false;
++  return {Outcome::kFailed, u""};
+ }
+ 
+-std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
++// Where host applications' desktop entries live, the user's own first.
++std::vector<base::FilePath> AuraDeHostApplicationDirs() {
+   std::vector<base::FilePath> dirs;
+   auto environment = base::Environment::Create();
+   if (std::optional<std::string> home = environment->GetVar("HOME");
+@@ -740,6 +772,49 @@ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
+   }
+   dirs.emplace_back("/usr/local/share/applications");
+   dirs.emplace_back("/usr/share/applications");
++  return dirs;
++}
++
++}  // namespace
++
++namespace apps {
++
++// AuraDE compatibility: apps come and go with packages installed or removed
++// while the desktop is up, by pacman in a terminal or by an update. Watch the
++// directories their entries live in, on a sequence that may block, and say
++// when one changes.
++class AuraDeHostAppsWatcher {
++ public:
++  explicit AuraDeHostAppsWatcher(base::RepeatingClosure on_change)
++      : on_change_(std::move(on_change)) {
++    for (const base::FilePath& dir : AuraDeHostApplicationDirs()) {
++      auto watcher = std::make_unique<base::FilePathWatcher>();
++      if (watcher->Watch(
++              dir, base::FilePathWatcher::Type::kNonRecursive,
++              base::BindRepeating(&AuraDeHostAppsWatcher::OnChanged,
++                                  base::Unretained(this)))) {
++        watchers_.push_back(std::move(watcher));
++      }
++    }
++  }
++  AuraDeHostAppsWatcher(const AuraDeHostAppsWatcher&) = delete;
++  AuraDeHostAppsWatcher& operator=(const AuraDeHostAppsWatcher&) = delete;
++  ~AuraDeHostAppsWatcher() = default;
++
++ private:
++  void OnChanged(const base::FilePath& path, bool error) { on_change_.Run(); }
++
++  base::RepeatingClosure on_change_;
++  std::vector<std::unique_ptr<base::FilePathWatcher>> watchers_;
++};
++
++}  // namespace apps
++
++namespace {
++
++std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
++  const std::vector<base::FilePath> dirs = AuraDeHostApplicationDirs();
++  auto environment = base::Environment::Create();
+ 
+   std::vector<AuraDeHostDesktopApp> apps;
+   std::set<std::string> seen_desktop_ids;
+@@ -898,6 +973,12 @@ void CrostiniApps::Initialize() {
+   GuestOSApps::Initialize();
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
+     RefreshAuraDeHostApps();
++    aurade_host_apps_watcher_ = base::SequenceBound<AuraDeHostAppsWatcher>(
++        base::ThreadPool::CreateSequencedTaskRunner(
++            {base::MayBlock(), base::TaskPriority::BEST_EFFORT}),
++        base::BindPostTaskToCurrentDefault(
++            base::BindRepeating(&CrostiniApps::OnAuraDeHostAppsChanged,
++                                weak_ptr_factory_.GetWeakPtr())));
+     if (auto* dark_light_mode_controller =
+             ash::DarkLightModeController::Get()) {
+       dark_light_mode_controller->AddObserver(this);
+@@ -1088,6 +1169,14 @@ void CrostiniApps::CreateAppOverrides(
+   }
+ }
+ 
++void CrostiniApps::OnAuraDeHostAppsChanged() {
++  // A package brings or takes many files at once; scan once it settles.
++  aurade_host_apps_refresh_timer_.Start(
++      FROM_HERE, base::Seconds(2),
++      base::BindOnce(&CrostiniApps::RefreshAuraDeHostApps,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
+ void CrostiniApps::RefreshAuraDeHostApps() {
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+@@ -1200,15 +1289,33 @@ void CrostiniApps::Uninstall(const std::string& app_id,
+       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+       base::BindOnce(&RunAuraDePacmanUninstall, app->second.package_name),
+       base::BindOnce(&CrostiniApps::OnAuraDePackageUninstalled,
+-                     weak_ptr_factory_.GetWeakPtr()));
++                     weak_ptr_factory_.GetWeakPtr(), app->second.name));
+ }
+ 
+-void CrostiniApps::OnAuraDePackageUninstalled(bool success) {
+-  if (!success) {
+-    LOG(ERROR) << "AuraDE host package uninstall failed";
+-    return;
++void CrostiniApps::OnAuraDePackageUninstalled(const std::string& app_name,
++                                              AuraDeUninstallResult result) {
++  using Outcome = AuraDeUninstallResult::Outcome;
++  switch (result.outcome) {
++    case Outcome::kRemoved:
++      RefreshAuraDeHostApps();
++      return;
++    case Outcome::kDeclined:
++      // The person cancelled the password prompt; they know.
++      return;
++    case Outcome::kFailed:
++      break;
+   }
+-  RefreshAuraDeHostApps();
++  LOG(ERROR) << "AuraDE host package uninstall failed for " << app_name;
++  // AuraDE compatibility: the confirmation has closed by now, so without a
++  // word here a failed removal looked like nothing happened at all.
++  std::u16string text = u"Couldn't uninstall " + base::UTF8ToUTF16(app_name) +
++                        u".";
++  if (!result.reason.empty()) {
++    text += u" " + result.reason;
++  }
++  ash::ToastManager::Get()->Show(ash::ToastData(
++      "aurade-host-app-uninstall-failed",
++      ash::ToastCatalogName::kAppNotAvailable, text));
+ }
+ 
+ }  // namespace apps
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.h b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+index cdb588db9da7..95626ce61f25 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.h
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.h
+@@ -14,6 +14,8 @@
+ #include "ash/public/cpp/style/color_mode_observer.h"
+ #include "base/files/file_path.h"
+ #include "base/memory/weak_ptr.h"
++#include "base/threading/sequence_bound.h"
++#include "base/timer/timer.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/publishers/guest_os_apps.h"
+ #include "chrome/browser/ash/guest_os/guest_os_registry_service.h"
+@@ -24,6 +26,21 @@
+ 
+ namespace apps {
+ 
++// How a request to remove a Linux app's package ended.
++struct AuraDeUninstallResult {
++  enum class Outcome {
++    kRemoved,
++    // Nobody vouched for it: the password prompt was cancelled.
++    kDeclined,
++    kFailed,
++  };
++  Outcome outcome = Outcome::kFailed;
++  // Why it failed, in words for the person who asked, if known.
++  std::u16string reason;
++};
++
++class AuraDeHostAppsWatcher;
++
+ struct AuraDeHostDesktopApp {
+   std::string desktop_file_id;
+   std::string name;
+@@ -88,14 +105,18 @@ class CrostiniApps : public GuestOSApps, public ash::ColorModeObserver {
+       const guest_os::GuestOsRegistryService::Registration& registration,
+       App* app) override;
+ 
++  void OnAuraDeHostAppsChanged();
+   void RefreshAuraDeHostApps();
+   void OnAuraDeHostAppsScanned(std::vector<AuraDeHostDesktopApp> apps);
+   void OnAuraDeHostIconInstalled(bool success);
+   bool LaunchAuraDeHostApp(const std::string& app_id);
+-  void OnAuraDePackageUninstalled(bool success);
++  void OnAuraDePackageUninstalled(const std::string& app_name,
++                                  AuraDeUninstallResult result);
+ 
+   std::map<std::string, std::string> aurade_host_execs_;
+   std::map<std::string, AuraDeHostDesktopApp> aurade_host_apps_;
++  base::SequenceBound<AuraDeHostAppsWatcher> aurade_host_apps_watcher_;
++  base::OneShotTimer aurade_host_apps_refresh_timer_;
+ 
+   base::WeakPtrFactory<CrostiniApps> weak_ptr_factory_{this};
+ };
