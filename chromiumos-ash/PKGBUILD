@@ -133,6 +133,7 @@ source=(
     'aurade-gtk-settings.ini'
     '90_aurade.gschema.override'
     'aurade-Xresources'
+    'aurade-gtk4.css'
     'aurade.portal'
     'aurade-portals.conf'
     'LICENSE'
@@ -140,7 +141,7 @@ source=(
 noextract=()
 sha256sums=('b0ac96686616b4936ba8c991ee43d78db530ab6015587f6f36cfbac99d81eaac'
             'c3903b2880039de8b92b06bb7a51f903b1557eea1e17b3fafe888d9a7ad6ddff'
-            '39b02e0979594c5504377796b30241b6915984f1f422955eff56ae3fff26f39f'
+            'bd8d1c125cd1b15398d36d4c0d63970f6e7db44687114347f8d5fa79df62bc2a'
             'c067de2ae32f0e0b453eca3f71610ed4b9af2877a7baf93b5050eaff574711f6'
             '1848e3590df7dbc3c36e8630f860589a827697c35aa1df4cbebe942000eae25b'
             'db54599f7528f763ab340801c364ed03383506fdccd18b3851c7469bb9a7076a'
@@ -158,6 +159,7 @@ sha256sums=('b0ac96686616b4936ba8c991ee43d78db530ab6015587f6f36cfbac99d81eaac'
             'd221fc6c43e22aa1f2893bfb4829a371803849a626092857becb2d62b226d585'
             '4ab3f13ebbb764391ff75b81328ef9d06e8ba60480483183fcb93f172314c332'
             '3afd212b7652f6191a3074c62ce64a176d650e556af6ace7bcd25e01603829a8'
+            '29094930a4e20992b9317a9237daa1eb780e27e364fcd743de5c8192cc8e4e87'
             'cd2320b18e5d1159a19b95b461b7641a92c9cfdfcb9d42eb6019c2b52b1c84a4'
             'ffa96b789946669f3406eff34013f21b6904997f518cd68a0ecc0cd0e55c9abe'
             'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
@@ -482,6 +484,10 @@ EOF
     # comes up; ~/.Xresources still wins.
     install -Dm644 "${srcdir}/aurade-Xresources" \
         "${pkgdir}/usr/share/aurade/Xresources"
+    # GTK 4 window controls drawn as Ash draws its own; the session points the
+    # user's gtk.css at it.
+    install -Dm644 "${srcdir}/aurade-gtk4.css" \
+        "${pkgdir}/usr/share/aurade/gtk-4.0/gtk.css"
     # Ash answers xdg-desktop-portal's appearance settings (light or dark,
     # accent colour); GTK's backend answers everything else.
     install -Dm644 "${srcdir}/aurade.portal" \
