@@ -1,0 +1,15 @@
+/* AuraDE: window controls drawn the way Ash draws its own, flat glyphs with
+   a soft circle only under the pointer, so GTK apps sit beside Ash windows
+   without looking borrowed from another desktop. */
+windowcontrols > button > image {
+  background: none;
+  box-shadow: none;
+}
+
+windowcontrols > button:hover > image {
+  background-color: alpha(currentColor, 0.08);
+}
+
+windowcontrols > button:active > image {
+  background-color: alpha(currentColor, 0.16);
+}

@@ -115,4 +115,14 @@ session AURADE_TEST_XSOCKET=1 AURADE_TEST_NO_CPP=1
   fail "without cpp the resources were not loaded: $(cat "$EVENTS")"
 rm -f "$TMP/home/.Xresources"
 
-echo 'session x11 bridge test: PASS (handed to the desktop, served on its exo, skips taken displays, one per desktop, none in software or without the bridge, X defaults then the user'"'"'s)'
+# 7. GTK 4 apps are pointed at AuraDE's stylesheet through the user's gtk.css,
+# made only when there is none; one the user has, even emptied, is theirs.
+echo 'windowcontrols {}' >"$TMP/gtk4.css"
+session AURADE_GTK4_STYLE="$TMP/gtk4.css"
+grep -Fxq "@import url(\"file://$TMP/gtk4.css\");" "$TMP/home/.config/gtk-4.0/gtk.css" 2>/dev/null || \
+  fail "the user's gtk.css does not import AuraDE's style: $(cat "$TMP/home/.config/gtk-4.0/gtk.css" 2>&1)"
+: >"$TMP/home/.config/gtk-4.0/gtk.css"
+session AURADE_GTK4_STYLE="$TMP/gtk4.css"
+[[ ! -s $TMP/home/.config/gtk-4.0/gtk.css ]] || fail "the user's own gtk.css was overwritten"
+
+echo 'session x11 bridge test: PASS (handed to the desktop, served on its exo, skips taken displays, one per desktop, none in software or without the bridge, X defaults then the user'"'"'s, GTK style only where the user has none)'

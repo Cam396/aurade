@@ -132,6 +132,23 @@ load_x11_resources() {
     done
 }
 
+# GTK 4 and libadwaita read one stylesheet from the user's config and none
+# from the system, so AuraDE's look reaches them through a file there that only
+# imports the shared one, which updates with the package. An existing file is
+# the user's and is left alone, an emptied one included, so clearing the
+# import line is how to opt out.
+link_gtk_style() {
+    local style="${AURADE_GTK4_STYLE:-/usr/share/aurade/gtk-4.0/gtk.css}"
+    local dir="${XDG_CONFIG_HOME:-${HOME}/.config}/gtk-4.0"
+    [ -r "${style}" ] || return 0
+    [ -e "${dir}/gtk.css" ] || [ -L "${dir}/gtk.css" ] && return 0
+    mkdir -p "${dir}" 2>/dev/null || return 0
+    printf '%s\n' \
+        "/* Added by AuraDE so GTK apps match the desktop. Remove the line below" \
+        "   to opt out; anything else in this file is yours. */" \
+        "@import url(\"file://${style}\");" >"${dir}/gtk.css" 2>/dev/null || true
+}
+
 start_x11_bridge() {
     [ -n "${X11_DISPLAY}" ] || return 0
     local socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${EXO_SOCKET_NAME}"
@@ -302,6 +319,7 @@ while :; do
         exit 0
     fi
     START_TIME="$(date +%s)"
+    link_gtk_style
     start_x11_bridge
     if [ -n "${AURADE_LOG}" ]; then
         # A desktop that logs its way through the disk is its own outage, so
