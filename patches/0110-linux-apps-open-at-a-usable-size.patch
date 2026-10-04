@@ -1,0 +1,47 @@
+diff --git a/components/exo/shell_surface_base.cc b/components/exo/shell_surface_base.cc
+index 71f536dab28e..8d5298d0934c 100644
+--- a/components/exo/shell_surface_base.cc
++++ b/components/exo/shell_surface_base.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <stdint.h>
+ 
++#include <algorithm>
+ #include <optional>
+ 
+ #include "ash/display/screen_orientation_controller.h"
+@@ -2554,7 +2555,33 @@ void ShellSurfaceBase::CommitWidget() {
+     // TODO(crbug.com/40212799): Hook this up with the WM's window positioning
+     // logic.
+     if (needs_layout_on_show_) {
+-      widget_->CenterWindow(GetWidgetBoundsFromVisibleBounds().size());
++      gfx::Size widget_size = GetWidgetBoundsFromVisibleBounds().size();
++      // AuraDE compatibility: a Linux application with no size saved yet
++      // shows at whatever size it asks for first, and some ask for almost
++      // nothing (Dolphin's first window is 173 by 158). A resizable main
++      // window that small is a first run, not a design, so it opens at the
++      // size a new window on this desktop would have; the client is told
++      // through the configure that follows.
++      if (IsAuraDeDesktop() && !parent_ && CanResize() && window_state &&
++          !window_state->IsMaximizedOrFullscreenOrPinned()) {
++        const gfx::Size visible = GetVisibleBounds().size();
++        if (!visible.IsEmpty() && visible.width() < 360 &&
++            visible.height() < 280) {
++          const gfx::Rect work_area = display::Screen::Get()
++                                          ->GetDisplayNearestWindow(window)
++                                          .work_area();
++          gfx::Size wanted(std::min(work_area.width() * 7 / 10, 1100),
++                           std::min(work_area.height() * 3 / 4, 760));
++          wanted.SetToMax(requested_minimum_size_);
++          if (!requested_maximum_size_.IsEmpty()) {
++            wanted.SetToMin(requested_maximum_size_);
++          }
++          widget_size.Enlarge(wanted.width() - visible.width(),
++                              wanted.height() - visible.height());
++          widget_size.SetToMin(work_area.size());
++        }
++      }
++      widget_->CenterWindow(widget_size);
+       needs_layout_on_show_ = false;
+     }
+ 
