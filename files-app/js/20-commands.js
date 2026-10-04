@@ -181,7 +181,7 @@ __BUILD("COMMAND_REGISTRATIONS")
       return !!t && t.histIdx < t.history.length - 1;
     }});
   cmd('NavigateUp', {run: () => goNavUp()});
-  cmd('NavigateHome', {run: () => navigateTo('~', 'Home', true, true)});
+  cmd('NavigateHome', {run: () => window.__showHome()});
   cmd('NewWindow', {run: () => window.open(location.href, '_blank')});
   cmd('NextTab', {run: () => stepTab(1), enabled: () => tabs.length > 1});
   cmd('PreviousTab', {run: () => stepTab(-1), enabled: () => tabs.length > 1});

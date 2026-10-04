@@ -2606,6 +2606,34 @@ def main():
                      "  vb.height > 200, cb.width > 40, cb.height > 8,"
                      "  act ? (act.textContent || '').trim() : 'none']; })()"),
                   [True, True, True, True, True, True, "none"])
+            # Back, Forward and Up over live folders. A live listing never
+            # reached the tab's history, so Back went nowhere, and Up was
+            # baked off. Up from a folder under Home lands on the Home page
+            # and Back from there has to be live: it read off. The home
+            # path is pointed at the scratch folder for this one gate.
+            check("live-back-and-up-walk-the-folders",
+                  ev("() => (async () => {"
+                     " const w = ms => new Promise(r => setTimeout(r, ms));"
+                     " const n = p => (p || '').replace(/\\/+$/, '');"
+                     " const was = window.__homePath();"
+                     " const top = " + json.dumps(scratch) + ";"
+                     " window.__setHome(top);"
+                     " await window.__live.render(top + '/pics'); await w(500);"
+                     " const click = s => document.querySelector(s).click();"
+                     " const off = s => document.querySelector(s).classList.contains('off');"
+                     " const hw = () => document.getElementById('home-widgets').hidden;"
+                     " const out = [off('.nav .nbtn[title=\"Up\"]')];"
+                     " click('.nav .nbtn[title=\"Up\"]'); await w(500);"
+                     " out.push(hw(), off('#nav-back'), off('.nav .nbtn[title=\"Up\"]'));"
+                     " click('#nav-back'); await w(500);"
+                     " out.push(hw(), n(window.__livePath) === n(top + '/pics'),"
+                     "  off('#nav-fwd'));"
+                     " click('#nav-fwd'); await w(500);"
+                     " out.push(hw());"
+                     " window.__setHome(was);"
+                     " await window.__live.render(top); await w(500);"
+                     " out.push(hw()); return out; })()"),
+                  [False, False, False, True, True, True, False, False, True])
             with urllib.request.urlopen(
                     "http://127.0.0.1:8902/api/preview?path=" +
                     os.path.join(scratch, "note.txt"),

@@ -364,6 +364,14 @@ html[data-gridsize="large"] {
 .thumb .art { position:absolute; }
 .thumb .thumbimg { position:relative; z-index:1; }
 html.no-thumbs .thumbimg { display:none; }
+/* The glyph is the fallback, not a backing: a picture with transparency in
+   it showed the generic image icon through itself. While a picture that
+   decoded is on top, the glyph under it is not drawn; one that failed is
+   marked and taken away, and the glyph is back. */
+html:not(.no-thumbs) :is(.thumb, .rico, .ricobox):has(> .thumbimg:not(.thumb-broken)) > .art {
+  visibility:hidden;
+}
+.thumbimg.thumb-broken { display:none; }
 .thumbimg {
   max-width:76px; max-height:76px; object-fit:contain; display:block;
   border-radius:3px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35));
