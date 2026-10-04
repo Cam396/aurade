@@ -256,3 +256,53 @@ body.light-theme .open-with-btn.primary,
 }
 
 
+/* The live dialog's extras: a real icon in the row, More apps under the
+   list, and the Always use box above the buttons. */
+.open-with-app-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.open-with-more {
+  align-self: flex-start;
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-ctl, 4px);
+  background: transparent;
+  color: var(--accent, #60cdff);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.open-with-more:hover {
+  background: var(--subtle-2, rgba(255, 255, 255, 0.07));
+}
+
+.open-with-always {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px 16px;
+  font-size: 13px;
+  color: var(--text-1, #ffffff);
+  cursor: pointer;
+}
+
+.open-with-always[hidden] {
+  display: none;
+}
+
+.open-with-always input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent, #60cdff);
+}
+
+.open-with-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

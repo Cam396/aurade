@@ -569,6 +569,9 @@
     //: default art, and a folder with an icon of its own has to get it back.
     if (window.__customIcons) window.__customIcons.sync();
     if (window.__git) window.__git.sync();
+    //: A picker greys out what cannot be picked, row by row, so it has to
+    //: hear about every rebuild too.
+    if (window.__picker) window.__picker.sync();
     return items.length;
   }
 
@@ -1226,8 +1229,13 @@
 
   async function enterLive() {
     const win = document.querySelector('.win');
-    const start = win ? win.getAttribute('data-path') : null;
+    let start = win ? win.getAttribute('data-path') : null;
     if (!start) return;
+    //: Where the window was asked to open: Ash's Show in folder, an
+    //: application's file chooser, or a folder another program wanted shown.
+    //: Without one it is the page's own start, which is home.
+    const asked = window.__launch && window.__launch.directory;
+    if (asked) start = asked;
     let ok = false;
     for (let tries = 0; tries < 4 && !ok; tries += 1) {
       if (tries) await new Promise(go => setTimeout(go, 700));
@@ -1266,7 +1274,14 @@
     //: it: the widgets wait on the recent list, which is a walk, and the
     //: first listing must not queue behind that.
     const places = paintPlaces().catch(() => false);
-    await renderLive(start, false);
+    //: A folder Ash asked for is gone to, the way a click goes to it: Home
+    //: and its widgets give way to the listing. The page's own start stays
+    //: on Home.
+    const shown = await renderLive(start, !!asked);
+    //: A folder that has gone since it was asked for still opens a window,
+    //: on home, rather than an empty one.
+    if (!shown && start !== '~') await renderLive('~', false);
+    if (window.__launch) window.__launch.started();
     await places;
   }
 
@@ -2551,9 +2566,16 @@
   document.addEventListener('dblclick', e => {
     if (!live()) return;
     const it = e.target.closest(ITEMS);
-    if (it && it.getAttribute('data-k') === 'Folder') {
-      const p = it.getAttribute('data-p');
+    if (!it) return;
+    const p = it.getAttribute('data-p');
+    if (it.getAttribute('data-k') === 'Folder') {
       if (p) renderLive(p);
+    } else if (window.__picker && window.__picker.active()) {
+      window.__picker.choose([it]);
+    } else if (p) {
+      //: A file opens in its application. This did nothing at all, which
+      //: in a file manager is the one thing a double click cannot do.
+      window.__openFiles([p]);
     }
   });
   document.addEventListener('click', e => {

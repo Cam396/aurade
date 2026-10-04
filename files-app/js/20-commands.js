@@ -762,6 +762,7 @@ __BUILD("COMMAND_REGISTRATIONS")
   const lockscreen = COMMANDS.get('SetAsLockscreenBackground');
   if (lockscreen) lockscreen.shown = () => false;
 
+
   // PowerShell is a real program on this system when it is installed, so this
   // is the command Files has and not a stand in. `-File`, so the script's
   // path is one argument to the interpreter and never part of a string it
@@ -788,6 +789,54 @@ __BUILD("COMMAND_REGISTRATIONS")
     await ask('/api/unpin-from-launcher', {path: path});
     if (window.__toast) window.__toast('Unpinned from the launcher');
   }), enabled: () => !!(onePath(null) || here())});
+
+  //: Rows that belong to one kind of item. Opening in a tab, a window or a
+  //: pane is for folders, as Files has it (areAllItemsFolders), and turning
+  //: or showing a slideshow of pictures is for pictures; on a text file each
+  //: was a row that did nothing useful. A row whose menu is about something
+  //: other than the list (the sidebar, Home, a tab) has no item kind and
+  //: keeps its row.
+  const isFolderRow = el => el.getAttribute('data-k') === 'Folder';
+  const listRows = target => {
+    if (!target || !target.matches ||
+        !target.matches('.cell, .row, .lrow, .tile, .crow')) return null;
+    const sel = selectedItems();
+    return sel.indexOf(target) !== -1 ? sel : [target];
+  };
+  const allFolders = target => {
+    const rows = listRows(target);
+    return !rows || rows.every(isFolderRow);
+  };
+  const allImages = target => {
+    const rows = listRows(target);
+    if (!rows) return oneImage() || selectedPaths().some(p => IMAGE_NAME.test(p));
+    return rows.length > 0 && rows.every(el =>
+      !isFolderRow(el) && IMAGE_NAME.test(el.getAttribute('data-n') || ''));
+  };
+  ['OpenInNewTab', 'OpenInNewWindow', 'OpenInNewPane', 'OpenInOtherPane',
+   'PinFolderToSidebar', 'UnpinFolderFromSidebar', 'PinToStart',
+   'UnpinFromStart', 'FlattenFolder']
+    .forEach(code => {
+      const c = COMMANDS.get(code);
+      if (c) c.shown = allFolders;
+    });
+  ['RotateLeft', 'RotateRight', 'SetAsSlideshowBackground'].forEach(code => {
+    const c = COMMANDS.get(code);
+    if (c) c.shown = allImages;
+  });
+  const ARCHIVE_NAME = /\.(zip|7z|rar|tar|tgz|txz|tzst|tbz2?|gz|xz|zst|bz2|lz|lzma)$/i;
+  const allArchives = target => {
+    const rows = listRows(target);
+    const names = rows ? rows.filter(el => !isFolderRow(el))
+      .map(el => el.getAttribute('data-n') || '') : selectedPaths();
+    return names.length > 0 && (!rows || names.length === rows.length) &&
+      names.every(n => ARCHIVE_NAME.test(n));
+  };
+  ['DecompressArchive', 'DecompressArchiveHere', 'DecompressArchiveHereSmart',
+   'DecompressArchiveToChildFolder'].forEach(code => {
+    const c = COMMANDS.get(code);
+    if (c) c.shown = allArchives;
+  });
 
   // ---- the keyboard ------------------------------------------------------
   //
@@ -1138,6 +1187,14 @@ __BUILD("COMMAND_REGISTRATIONS")
         const h = ctxHref();
         const p = ctxTarget ? (ctxTarget.getAttribute('data-p') || ctxTarget.getAttribute('data-path') || ctxTarget.getAttribute('data-root')) : null;
         const n = ctxTarget ? (ctxTarget.getAttribute('data-n') || 'Folder') : 'Folder';
+        //: A file opens in its application. Open on a file used to navigate
+        //: to it as though it were a folder, and the listing failed.
+        if (p && window.__openFiles && ctxTarget.hasAttribute('data-k') &&
+            ctxTarget.getAttribute('data-k') !== 'Folder') {
+          const sel = selectedPaths();
+          window.__openFiles(sel.indexOf(p) !== -1 ? sel : [p]);
+          break;
+        }
         if (p) {
           const isH = (isHomePath(p) || n === 'Home');
           navigateTo(p, n, isH, true);
@@ -1829,7 +1886,8 @@ __BUILD("COMMAND_REGISTRATIONS")
       navigateTo(p, it.getAttribute('data-n') || 'Folder', false, true);
       return;
     }
-    if (getPref('dblclickUp') && e.target.closest('#filearea')) {
+    //: The background only: a double click on a file is the file's.
+    if (!it && getPref('dblclickUp') && e.target.closest('#filearea')) {
       goNavUp();
     }
   });
@@ -1984,6 +2042,14 @@ __BUILD("COMMAND_REGISTRATIONS")
         e.preventDefault();
         openFolder(cur.getAttribute('data-p') || cur.getAttribute('data-n'),
           cur.getAttribute('data-n') || 'Folder');
+      } else if (cur && window.__picker && window.__picker.active()) {
+        e.preventDefault();
+        window.__picker.choose(selectedItems());
+      } else if (cur && window.__openFiles && cur.getAttribute('data-p')) {
+        //: Enter opens what is selected, files as well as a folder.
+        e.preventDefault();
+        const sel = selectedPaths();
+        window.__openFiles(sel.length ? sel : [cur.getAttribute('data-p')]);
       }
       return;
     }

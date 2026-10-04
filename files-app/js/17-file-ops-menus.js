@@ -1259,6 +1259,17 @@
 
       var list = document.createElement('div');
       list.className = 'open-with-list';
+      list.setAttribute('role', 'listbox');
+
+      var always = document.createElement('label');
+      always.className = 'open-with-always';
+      always.hidden = true;
+      var alwaysBox = document.createElement('input');
+      alwaysBox.type = 'checkbox';
+      alwaysBox.className = 'open-with-always-box';
+      var alwaysText = document.createElement('span');
+      always.appendChild(alwaysBox);
+      always.appendChild(alwaysText);
 
       var footer = document.createElement('div');
       footer.className = 'open-with-footer';
@@ -1279,6 +1290,7 @@
       dialog.appendChild(title);
       dialog.appendChild(subtitle);
       dialog.appendChild(list);
+      dialog.appendChild(always);
       dialog.appendChild(footer);
       openWithScrim.appendChild(dialog);
       document.body.appendChild(openWithScrim);
@@ -1286,15 +1298,32 @@
     return openWithScrim;
   }
 
+  //: With the file service up the list is this machine's: the applications
+  //: that open the type, its default first, as the launcher and every other
+  //: program on the desktop know them, and choosing one opens the file in
+  //: it. AVAILABLE_APPS is what the page shows built without a service,
+  //: where there is nothing to open anything with.
+  function openWithIsLive() {
+    return !!window.__api && document.body.getAttribute('data-live') === '1';
+  }
+
   function openWith(item) {
     var targets = getActiveTargets(item);
     if (!targets.length) return;
     var it = targets[0];
     var fileName = it.getAttribute('data-n') || it.textContent.trim();
+    var paths = targets.map(function (t) { return t.getAttribute('data-p'); })
+      .filter(Boolean);
+    if (openWithIsLive() && paths.length) {
+      openWithApps(paths, fileName);
+      return;
+    }
 
     var scrim = ensureOpenWithDialog();
     var subtitle = scrim.querySelector('.open-with-subtitle');
     subtitle.textContent = 'Choose an app to open "' + fileName + '"';
+    scrim.querySelector('.open-with-always').hidden = true;
+    scrim.querySelector('.open-with-ok').disabled = false;
 
     var list = scrim.querySelector('.open-with-list');
     list.replaceChildren();
@@ -1386,6 +1415,235 @@
     scrim.hidden = false;
     scrim.classList.add('visible');
   }
+
+  //: The live dialog. One row per application, with the icon the launcher
+  //: shows for it; More apps adds every other one installed, because a
+  //: file whose type nothing declares still has to be openable in
+  //: something. Always use writes the default the whole desktop reads.
+  function openWithIcon(app) {
+    var box = document.createElement('span');
+    box.className = 'open-with-app-icon';
+    var glyph = createSvg(28, 28, '0 0 28 28');
+    glyph.appendChild(createSvgPath(
+      'M6 4h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+      'var(--ico-accent, #60cdff)'));
+    box.appendChild(glyph);
+    function show(uri) {
+      if (!uri) return;
+      var img = document.createElement('img');
+      img.className = 'open-with-app-img';
+      img.alt = '';
+      img.decoding = 'async';
+      img.src = uri;
+      box.replaceChildren(img);
+    }
+    if (app.iconUri) {
+      show(app.iconUri);
+    } else if (app.icon) {
+      box.__iconName = app.icon;
+      box.__show = show;
+    }
+    return box;
+  }
+
+  async function openWithApps(paths, fileName) {
+    var scrim = ensureOpenWithDialog();
+    var subtitle = scrim.querySelector('.open-with-subtitle');
+    var list = scrim.querySelector('.open-with-list');
+    var always = scrim.querySelector('.open-with-always');
+    var alwaysBox = always.querySelector('input');
+    var okBtn = scrim.querySelector('.open-with-ok');
+    var cancelBtn = scrim.querySelector('.open-with-cancel');
+    var answer;
+    try {
+      var r = await fetch(window.__api + '/api/apps?path=' + encodeURIComponent(paths[0]));
+      answer = await r.json();
+      if (!r.ok) throw new Error(answer.error || ('http ' + r.status));
+    } catch (err) {
+      showToast(err.message || 'The applications could not be listed');
+      return;
+    }
+
+    subtitle.textContent = paths.length > 1
+      ? 'Choose an app to open ' + paths.length + ' files'
+      : 'Choose an app to open "' + fileName + '"';
+    list.replaceChildren();
+    var dot = fileName.lastIndexOf('.');
+    var ext = dot > 0 ? fileName.slice(dot).toLowerCase() : '';
+    always.querySelector('span').textContent = 'Always use this app to open ' +
+      (ext ? ext + ' files' : (answer.mimeType || 'files like this'));
+    alwaysBox.checked = false;
+    always.hidden = !answer.mimeType;
+
+    var defaultId = answer.default ? answer.default.id : '';
+    var listed = {};
+    var chosen = null;
+
+    function pick(el, app) {
+      list.querySelectorAll('.open-with-app').forEach(function (other) {
+        other.classList.remove('selected');
+        other.setAttribute('aria-selected', 'false');
+      });
+      el.classList.add('selected');
+      el.setAttribute('aria-selected', 'true');
+      chosen = app;
+      okBtn.disabled = false;
+    }
+
+    function row(app) {
+      listed[app.id] = true;
+      var el = document.createElement('div');
+      el.className = 'open-with-app open-with-app-card';
+      el.tabIndex = 0;
+      el.setAttribute('role', 'option');
+      el.setAttribute('data-app', app.id);
+      el.appendChild(openWithIcon(app));
+      var details = document.createElement('div');
+      details.className = 'open-with-app-details';
+      var nameEl = document.createElement('div');
+      nameEl.className = 'open-with-app-name';
+      nameEl.textContent = app.name;
+      var descEl = document.createElement('div');
+      descEl.className = 'open-with-app-desc';
+      descEl.textContent = app.id === defaultId
+        ? 'Default for this type of file' : (app.comment || '');
+      details.appendChild(nameEl);
+      details.appendChild(descEl);
+      el.appendChild(details);
+      el.addEventListener('click', function () { pick(el, app); });
+      el.addEventListener('dblclick', function () { pick(el, app); go(); });
+      el.addEventListener('focus', function () { pick(el, app); });
+      return el;
+    }
+
+    //: Icons the answer did not carry are asked for one at a time, in the
+    //: order the rows are, so a long list does not open a hundred requests
+    //: at once.
+    async function fillIcons() {
+      var boxes = Array.prototype.slice.call(list.querySelectorAll('.open-with-app-icon'));
+      for (var i = 0; i < boxes.length; i++) {
+        var box = boxes[i];
+        if (!box.__iconName || !box.isConnected || scrim.hidden) continue;
+        try {
+          var ir = await fetch(window.__api + '/api/app-icon?name=' +
+                               encodeURIComponent(box.__iconName));
+          var ij = await ir.json();
+          if (ir.ok && ij.uri) box.__show(ij.uri);
+        } catch (err) {}
+        box.__iconName = '';
+      }
+    }
+
+    (answer.handlers || []).forEach(function (app) { list.appendChild(row(app)); });
+    var first = list.querySelector('.open-with-app');
+    if (first) pick(first, (answer.handlers || [])[0]);
+    else okBtn.disabled = true;
+
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'open-with-more';
+    more.textContent = (answer.handlers || []).length ? 'More apps' : 'Look for an app on this device';
+    more.addEventListener('click', async function () {
+      more.disabled = true;
+      var all;
+      try {
+        var ar = await fetch(window.__api + '/api/apps/all');
+        all = await ar.json();
+        if (!ar.ok) throw new Error(all.error || ('http ' + ar.status));
+      } catch (err) {
+        more.disabled = false;
+        showToast(err.message || 'The applications could not be listed');
+        return;
+      }
+      more.remove();
+      (all.apps || []).filter(function (app) { return !listed[app.id]; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .forEach(function (app) { list.appendChild(row(app)); });
+      if (!chosen) {
+        var top = list.querySelector('.open-with-app');
+        if (top) pick(top, null);
+      }
+      fillIcons();
+    });
+    list.appendChild(more);
+
+    async function go() {
+      if (!chosen) {
+        var el = list.querySelector('.open-with-app.selected');
+        if (!el) return;
+        chosen = {id: el.getAttribute('data-app'),
+                  name: el.querySelector('.open-with-app-name').textContent};
+      }
+      var app = chosen;
+      var remember = !always.hidden && alwaysBox.checked;
+      closeModal();
+      try {
+        var r = await fetch(window.__api + '/api/open-with', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({paths: paths, app: app.id})});
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) throw new Error(j.error || ('http ' + r.status));
+        showToast('Opening in ' + app.name);
+        if (remember) {
+          var d = await fetch(window.__api + '/api/set-default', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mime: answer.mimeType, app: app.id})});
+          if (!d.ok) {
+            var dj = await d.json().catch(function () { return {}; });
+            showToast(dj.error || 'The default could not be saved');
+          }
+        }
+      } catch (err) {
+        showToast(err.message || ('Could not open with ' + app.name));
+      }
+    }
+
+    function closeModal() {
+      scrim.hidden = true;
+      scrim.classList.remove('visible');
+      document.removeEventListener('keydown', onKeyDown, true);
+    }
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeModal();
+      } else if (e.key === 'Enter' && e.target !== alwaysBox &&
+                 !(e.target && e.target.tagName === 'BUTTON')) {
+        e.preventDefault();
+        e.stopPropagation();
+        go();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        var rows = Array.prototype.slice.call(list.querySelectorAll('.open-with-app'));
+        var at = rows.indexOf(list.querySelector('.open-with-app.selected'));
+        var next = rows[Math.max(0, Math.min(rows.length - 1,
+                                             at + (e.key === 'ArrowDown' ? 1 : -1)))];
+        if (next) {
+          e.preventDefault();
+          e.stopPropagation();
+          next.focus();
+          next.scrollIntoView({block: 'nearest'});
+        }
+      }
+    }
+
+    cancelBtn.onclick = closeModal;
+    okBtn.onclick = go;
+    scrim.onclick = function (e) {
+      if (e.target === scrim) closeModal();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    scrim.hidden = false;
+    scrim.classList.add('visible');
+    var focusRow = list.querySelector('.open-with-app.selected');
+    if (focusRow) focusRow.focus();
+    fillIcons();
+  }
+  //: For the live layer: a file nothing is set to open asks here.
+  window.__openWith = function (paths) {
+    if (paths && paths.length) openWithApps(paths, paths[0].split('/').pop());
+  };
 
   function compressToZip(items) {
     var targets = getActiveTargets(items);
