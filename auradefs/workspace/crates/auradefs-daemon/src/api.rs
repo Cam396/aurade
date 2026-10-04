@@ -7,10 +7,11 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 use auradefs_core::{
     Error, Result,
+    appicons,
     apps::{self, Registry},
     cover, git, media, mime,
     mime::MimeDb,
@@ -29,6 +30,8 @@ use crate::jobs::Jobs;
 pub struct Service {
     pub mime: MimeDb,
     pub apps: RwLock<Registry>,
+    /// When the registry was last compared with the files it was read from.
+    pub apps_checked: Mutex<std::time::Instant>,
     pub jobs: Jobs,
     pub started: std::time::Instant,
 }
@@ -38,9 +41,28 @@ impl Service {
         Service {
             mime: MimeDb::load(),
             apps: RwLock::new(Registry::load()),
+            apps_checked: Mutex::new(std::time::Instant::now()),
             jobs: Jobs::new(),
             started: std::time::Instant::now(),
         }
+    }
+
+    /// The applications, read again first if anything they were read from
+    /// has changed: an application installed from the launcher shows up in
+    /// Open with without this service being restarted. Compared at most once
+    /// a second, which is a handful of stats.
+    pub fn registry(&self) -> RwLockReadGuard<'_, Registry> {
+        {
+            let mut checked = self.apps_checked.lock().unwrap_or_else(|e| e.into_inner());
+            if checked.elapsed() >= std::time::Duration::from_secs(1) {
+                *checked = std::time::Instant::now();
+                let stale = self.apps.read().unwrap_or_else(|e| e.into_inner()).is_stale();
+                if stale {
+                    *self.apps.write().unwrap_or_else(|e| e.into_inner()) = Registry::load();
+                }
+            }
+        }
+        self.apps.read().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -1949,7 +1971,7 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
 
         // ------------------------------------------------------- applications
         ("GET", "/api/apps") => {
-            let registry = service.apps.read().unwrap_or_else(|e| e.into_inner());
+            let registry = service.registry();
             let mime_type = match req.param("path") {
                 Some(_) => service.mime.of_path(&path_param(req, "path")?)?,
                 None => req
@@ -1963,6 +1985,9 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
                 "name": e.name,
                 "comment": e.comment,
                 "icon": e.icon,
+                //: The picture itself, so Open with shows the icon the
+                //: launcher does without a request per row.
+                "iconUri": e.icon.as_deref().and_then(app_icon_uri),
                 "terminal": e.terminal,
                 "actions": e.actions.iter().map(|a| json!({"id": a.id, "name": a.name})).collect::<Vec<_>>(),
             });
@@ -1977,7 +2002,7 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
             })
         }
         ("GET", "/api/apps/all") => {
-            let registry = service.apps.read().unwrap_or_else(|e| e.into_inner());
+            let registry = service.registry();
             json!({
                 "apps": registry
                     .all()
@@ -1988,23 +2013,41 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
         }
         ("POST", "/api/open") => {
             let paths = body_paths(body, "paths")?;
-            let registry = service.apps.read().unwrap_or_else(|e| e.into_inner());
-            let mut opened = 0;
+            let registry = service.registry();
+            let mut opened = Vec::new();
             for path in &paths {
                 let mime_type = service.mime.of_path(path)?;
-                let entry = registry.default_for(&mime_type).ok_or_else(|| {
-                    Error::NotFound(format!("nothing on this system opens {mime_type}"))
-                })?;
+                //: The type's default, and with none chosen the application
+                //: Open with would list first: the default of a parent type,
+                //: then one associated with the type, then any that declares
+                //: it. A Python file opens in the text editor rather than
+                //: failing for want of a line naming text/x-python.
+                let ancestry = service.mime.ancestry(&mime_type);
+                let entry = registry
+                    .default_for(&mime_type)
+                    .or_else(|| {
+                        registry.handlers_for(&mime_type, &ancestry[1..]).into_iter().next()
+                    })
+                    .ok_or_else(|| {
+                        Error::NotFound(format!("nothing on this system opens {mime_type}"))
+                    })?;
                 apps::open_with(&registry, &entry.id, std::slice::from_ref(path))?;
                 let _ = places::add_recent(path, &mime_type, "auradefs");
-                opened += 1;
+                opened.push(entry.name.clone());
             }
-            json!({"opened": opened})
+            json!({"opened": opened.len(), "apps": opened})
+        }
+        ("GET", "/api/app-icon") => {
+            let name = req
+                .param("name")
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| Error::BadRequest("name is required".into()))?;
+            json!({"name": name, "uri": app_icon_uri(name)})
         }
         ("POST", "/api/open-with") => {
             let paths = body_paths(body, "paths")?;
             let id = body_str(body, "app")?;
-            let registry = service.apps.read().unwrap_or_else(|e| e.into_inner());
+            let registry = service.registry();
             apps::open_with(&registry, &id, &paths)?;
             json!({"ok": true})
         }
@@ -2376,8 +2419,11 @@ fn sidebar_volumes() -> Result<Vec<Value>> {
         out.push(record("trash".into(), bin.root(), "Trash".into(), "trash", None, false));
     }
     //: And the real mounts, which is what makes a plugged in stick a row.
-    for mount in volumes::mounts()? {
-        if !Path::new(&mount.source).is_absolute() || volumes::is_system_mount(&mount.mount_point) {
+    //: One row a device, the first place it is mounted.
+    let mounts = volumes::mounts()?;
+    let mut shown = std::collections::HashSet::new();
+    for mount in &mounts {
+        if !volumes::is_own_place(mount, &mounts) || !shown.insert(mount.source.clone()) {
             continue;
         }
         let numbers = usage_of(&mount.mount_point);
@@ -2402,6 +2448,14 @@ fn sidebar_volumes() -> Result<Vec<Value>> {
         }));
     }
     Ok(out)
+}
+
+/// An application's icon as a data URI, the form this page is given every
+/// picture in.
+fn app_icon_uri(icon: &str) -> Option<String> {
+    let path = appicons::find(icon)?;
+    let bytes = std::fs::read(&path).ok()?;
+    Some(crate::b64::data_uri(appicons::mime_of(&path), &bytes))
 }
 
 fn archive_formats() -> Value {
