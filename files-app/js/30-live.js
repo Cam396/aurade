@@ -391,6 +391,17 @@
   const THUMB_LIVE_BUDGET = 80;
   const THUMB_RE = /\.(png|jpe?g|gif|bmp|webp|tiff?|ico|avif|pdf|mp4|mkv|mov|webm|avi|m4v|mpg|mpeg|ogv|mp3|flac|ogg|oga|opus|m4a|m4b|wav|aiff?|ape|wv|mpc|aac)$/i;
 
+  //: A thumbnail that will not decode gives its glyph back. The glyph under
+  //: a picture is hidden while the picture stands (css/00-window.css), so a
+  //: broken one is marked, which takes it away and uncovers the glyph.
+  //: Errors do not bubble, so this listens on the way down.
+  document.addEventListener('error', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('thumbimg')) {
+      t.classList.add('thumb-broken');
+    }
+  }, true);
+
   function liveThumb(box, o) {
     // A live entry carries no picture, so ask the backend for one. The glyph
     // is already in the box and stays there until a thumbnail actually
@@ -1009,45 +1020,84 @@
     paint: applyGit
   };
 
+  //: The chevron between crumbs. The served markup carries its own, but a
+  //: live repaint built empty separators, so after the first navigation the
+  //: crumbs ran together ("home auratest").
+  function crumbChevron() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('viewBox', '0 0 12 12');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.25');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const d = document.createElementNS(NS, 'path');
+    d.setAttribute('d', 'M4.5 2.5 8 6l-3.5 3.5');
+    svg.appendChild(d);
+    return svg;
+  }
+
   function paintCrumbs(path) {
     const box = $('#crumbs');
     if (!box) return;
-    const oldIcon = box.querySelector('svg');
-    const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
+    const oldIcon = box.querySelector('svg:not(.csep svg)');
+    const clean = path.replace(/\/+$/, '') || '/';
+    //: Inside the home folder the trail starts at Home, the way Files and
+    //: every other file manager writes it, rather than at /home and the
+    //: account's name.
+    const home = (window.__homePath && window.__homePath()) || '';
+    const inHome = home.charAt(0) === '/' && home !== '/' &&
+      (clean === home || clean.indexOf(home + '/') === 0);
+    const rel = inHome ? clean.slice(home.length) : clean;
+    const parts = rel.split('/').filter(Boolean);
     clearRoot(box);
-    let acc = '';
+    let acc = inHome ? home : '';
     const mk = (label, p, last, withIcon) => {
       const el = document.createElement('span');
       el.className = last ? 'crumb last' : 'crumb';
       el.setAttribute('data-p', p);
-      if (withIcon && oldIcon) el.appendChild(oldIcon.cloneNode(true));
+      //: Home's crumb carries the house whatever the last paint left there;
+      //: copying the old first icon turned it into a folder after a
+      //: sidebar click repainted the trail.
+      const icon = withIcon && ((inHome &&
+        document.querySelector('#artlib [data-ico="Home"] svg')) || oldIcon);
+      if (icon) el.appendChild(icon.cloneNode(true));
       const s = document.createElement('span');
       s.textContent = label;
       el.appendChild(s);
       box.appendChild(el);
     };
-    mk(parts.length ? '' : '/', path, parts.length === 0, true);
+    mk(inHome ? 'Home' : (parts.length ? '' : '/'), inHome ? home : '/',
+       parts.length === 0, true);
     parts.forEach((part, i) => {
       acc += '/' + part;
       const sep = document.createElement('span');
       sep.className = 'csep';
+      sep.appendChild(crumbChevron());
       box.appendChild(sep);
       mk(part, acc, i === parts.length - 1, false);
     });
     const tn = document.querySelector('.tname');
     if (tn) {
-      let label = parts.length ? parts[parts.length - 1] : '/';
+      let label = parts.length ? parts[parts.length - 1] : (inHome ? 'Home' : '/');
       try {
         const cat = window.__DIR_CATALOG || {};
-        const entry = cat[path] || cat[path.replace(/\/+$/, '')];
+        const entry = cat[path] || cat[clean];
         if (entry && entry.name) label = entry.name;
-        else if (!parts.length || (parts.length === 1 && parts[0] === 'root')) label = 'Home';
       } catch (err) {}
       tn.textContent = label;
+      //: The window's title is the folder, as the tab is. Ash puts the
+      //: app's name in front, so it read "Files - AuraDE Files" everywhere.
+      //: A file chooser keeps the title its caller gave it.
+      if (!(window.__picker && window.__picker.active())) document.title = label;
     }
   }
 
   function paintStatus(n) {
+    if (window.__picker && window.__picker.active()) n = window.__picker.shown();
     if (typeof window.__updateStatus === 'function') {
       try { window.__updateStatus(n); } catch (err) {}
     }
@@ -1069,7 +1119,7 @@
   }
 
   let searching = '';
-  async function renderLive(path, push = true) {
+  async function renderLive(path, push = true, fromHistory = false) {
     let data;
     try {
       const showH = window.__getPref && window.__getPref('showHidden') ? '&hidden=1' : '';
@@ -1095,11 +1145,17 @@
       if (window.__sidebarActive) window.__sidebarActive(data.path, false);
     }
     searching = '';
+    //: Listing a folder is leaving Home, whichever way it was reached; the
+    //: boot listing behind Home's widgets is not.
+    const widgets = document.getElementById('home-widgets');
+    if (window.__syncActiveTab && (!widgets || widgets.hidden)) {
+      window.__syncActiveTab(data.path, data.name, false, push && !fromHistory);
+    }
     const n = buildRows(data);
     paintCrumbs(data.path);
     paintStatus(n);
     paintFolderDetails(data.path, n);
-    if (push) {
+    if (push && !fromHistory) {
       try { history.pushState({p: data.path}, '', location.pathname + location.search); }
       catch (err) {}
     }
@@ -2559,7 +2615,12 @@
       e.preventDefault();
       let p = nav.getAttribute('data-p');
       if (!p) p = (nav.getAttribute('data-root') || '').replace(/^file:\/\//, '');
-      if (p) renderLive(p);
+      if (p && window.__showHome && window.__isHome(p) &&
+          !(window.__picker && window.__picker.active())) {
+        window.__showHome();
+      } else if (p) {
+        renderLive(p);
+      }
       return;
     }
   });
@@ -2626,6 +2687,11 @@
   window.__live = {
     get path() { return window.__livePath || null; },
     render: path => renderLive(path),
+    //: Back and Forward: leave Home if it is up, but the step is already
+    //: in the tab's history.
+    visit: path => renderLive(path, true, true),
+    //: The listing behind the Home page, which is not a navigation.
+    quiet: path => renderLive(path, false),
   };
   //: Ask once when the page comes up. Without a backend this clears the map
   //: and paints nothing, which is the right answer rather than an error.

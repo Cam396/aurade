@@ -2,6 +2,32 @@
     const nb = $("#nav-back"), nf = $("#nav-fwd");
     if (nb) nb.classList.toggle("off", tab.histIdx <= 0);
     if (nf) nf.classList.toggle("off", tab.histIdx >= tab.history.length - 1);
+    //: Up has somewhere to go from any folder but Home and the root. The
+    //: static build bakes it per page; a live folder has to say so itself.
+    const up = $('.nav .nbtn[title="Up"]');
+    if (up && window.__livePath) {
+      up.classList.toggle("off", !!tab.isHome || liveParent(tab.path) === null);
+    }
+  }
+
+  //: The folder above a live path, or null where there is none.
+  function liveParent(path) {
+    const p = (path || "").replace(/\/+$/, "");
+    if (!p || window.__isHome(p)) return null;
+    const cut = p.lastIndexOf("/");
+    if (cut < 0) return null;
+    return cut === 0 ? "/" : p.slice(0, cut);
+  }
+
+  //: Back, Forward and Up over live folders go to the live listing; the
+  //: Home page is the tab machinery's own.
+  function goLive(st) {
+    if (st.isHome) {
+      navigateTo(st.path, st.name, true, false);
+      if (window.__live) window.__live.quiet(window.__homePath());
+    } else {
+      window.__live.visit(st.path);
+    }
   }
 
   function updateCrumbUI(name, isHome) {
@@ -70,6 +96,44 @@
     }
     hideOverlays();
   }
+
+  //: The live layer lists a folder itself rather than through navigateTo,
+  //: so it tells the active tab where it now is. Without this a tab that
+  //: left Home kept believing it was there: the house stayed on the tab and
+  //: the status bar said Ready over a folder full of files.
+  window.__syncActiveTab = function (path, name, isHome, push) {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab) return;
+    const here = tab.history[tab.histIdx];
+    if (push && (!here || here.path !== path)) {
+      tab.history = tab.history.slice(0, tab.histIdx + 1);
+      tab.history.push({ path: path, name: name, isHome: !!isHome });
+      tab.histIdx = tab.history.length - 1;
+    }
+    tab.path = path;
+    tab.name = name || tab.name;
+    const changed = tab.isHome !== !!isHome;
+    tab.isHome = !!isHome;
+    if (changed && tab.el) {
+      const ti = tab.el.querySelector(".tico");
+      const art = document.querySelector('#artlib [data-ico="' +
+                    (tab.isHome ? "Home" : "Folder") + '"] svg');
+      if (ti && art) ti.replaceChildren(art.cloneNode(true));
+    }
+    if (tab.el) tab.el.setAttribute("title", tab.name);
+    updateToolbarHomeGating(tab.isHome);
+    updateNavButtons(tab);
+  };
+
+  //: Home in the sidebar or the trail is the Home page, widgets and all,
+  //: the way the reference has it, not a listing of the home folder.
+  //: Live, the listing behind it follows, which is not a navigation.
+  window.__showHome = function () {
+    navigateTo(window.__homePath(), "Home", true, true);
+    if (window.__livePath && window.__live) {
+      window.__live.quiet(window.__homePath());
+    }
+  };
 
   function navigateActiveTab(path, name, isHome) {
     navigateTo(path, name, isHome, true);
@@ -219,6 +283,7 @@
     if (curTab && curTab.histIdx > 0) {
       curTab.histIdx--;
       const st = curTab.history[curTab.histIdx];
+      if (window.__livePath && window.__live) { goLive(st); return; }
       navigateTo(st.path, st.name, st.isHome, false);
     }
   }
@@ -228,12 +293,23 @@
     if (curTab && curTab.histIdx < curTab.history.length - 1) {
       curTab.histIdx++;
       const st = curTab.history[curTab.histIdx];
+      if (window.__livePath && window.__live) { goLive(st); return; }
       navigateTo(st.path, st.name, st.isHome, false);
     }
   }
 
   function goNavUp() {
     const curTab = tabs.find(t => t.id === activeTabId);
+    if (curTab && !curTab.isHome && window.__livePath && window.__live) {
+      const parent = liveParent(curTab.path);
+      if (parent === null) return;
+      if (window.__isHome(parent)) {
+        window.__showHome();
+      } else {
+        window.__live.render(parent);
+      }
+      return;
+    }
     if (curTab && !curTab.isHome) {
       const cat = findCatalogEntry(curTab.path, false);
       if (cat && cat.crumbs && cat.crumbs.length > 1) {

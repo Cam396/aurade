@@ -192,6 +192,7 @@
   let filterIndex = marked || (allFiles || !types.length ? 0 : 1);
 
   let bar = null, nameBox = null, okBtn = null, warn = null, replacing = '';
+  let shownCount = 0;
 
   function shows(el) {
     if (el.getAttribute('data-k') === 'Folder') return true;
@@ -219,6 +220,11 @@
                           el.getAttribute('data-k') !== 'Folder');
       if (hide) el.classList.remove('sel');
     });
+    //: What the filter leaves is what the status bar counts; it said five
+    //: items over a folder showing one picture.
+    shownCount = $$(ITEMS).filter(el =>
+      !el.classList.contains('picker-hide') && onScreen(el)).length;
+    if (window.__updateStatus) window.__updateStatus(shownCount);
     updateOk();
   }
 
@@ -423,6 +429,7 @@
 
   const picker = {
     active: () => !!pickerType,
+    shown: () => shownCount,
     type: () => pickerType,
     sync: syncRows,
     choose,
