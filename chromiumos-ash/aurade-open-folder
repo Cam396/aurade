@@ -1,0 +1,46 @@
+#!/bin/sh
+# Opens folders in AuraDE Files. This is what xdg-open, and an application
+# opening a folder through the desktop's defaults, runs for a folder on
+# AuraDE: Ash shows it through org.freedesktop.FileManager1 on the desktop's
+# session bus, the same call an application's "Show in folder" makes.
+#
+# Usage: aurade-open-folder [PATH-OR-FILE-URI...]   (none: your home folder)
+set -eu
+
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+environment="${runtime}/aurade/app-environment"
+
+# The desktop's bus, which is not the user's systemd bus. Ash writes it down
+# for programs started outside the desktop; one started inside it already
+# has it.
+if [ -r "${environment}" ]; then
+    bus="$(sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p' "${environment}" | head -n 1)"
+    if [ -n "${bus}" ]; then
+        DBUS_SESSION_BUS_ADDRESS="${bus}"
+        export DBUS_SESSION_BUS_ADDRESS
+    fi
+fi
+
+[ "$#" -gt 0 ] || set -- "${HOME}"
+
+count=0
+for arg in "$@"; do
+    case "${arg}" in
+        file://*) ;;
+        /*) ;;
+        *://*)
+            printf 'aurade-open-folder: %s is not a local folder\n' "${arg}" >&2
+            exit 1
+            ;;
+        *) arg="$(pwd)/${arg}" ;;
+    esac
+    set -- "$@" "${arg}"
+    count=$((count + 1))
+done
+# The arguments are now the originals followed by the resolved ones; keep
+# only the resolved.
+shift "${count}"
+
+exec busctl --user call org.freedesktop.FileManager1 \
+    /org/freedesktop/FileManager1 org.freedesktop.FileManager1 \
+    ShowFolders ass "$#" "$@" ""

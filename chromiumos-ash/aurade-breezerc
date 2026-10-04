@@ -1,0 +1,13 @@
+# The Breeze widget style's settings for Qt applications on AuraDE. Ash
+# draws their window frames and title bars, so the style keeps to the
+# contents: menus as solid as Ash's own, no separators between toolbar
+# items, no frames around side panels, and windows moved by their frame
+# rather than by dragging empty space inside them. Your own
+# ~/.config/breezerc wins over anything here.
+[Style]
+MenuOpacity=100
+ToolBarDrawItemSeparator=false
+SidePanelDrawFrame=false
+DockWidgetDrawFrame=false
+ViewDrawFocusIndicator=false
+WindowDragMode=WD_MINIMAL

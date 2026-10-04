@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=156.0.8060.0
-pkgrel=11
+pkgrel=12
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -75,6 +75,8 @@ depends=(
     'pam'
     'shadow'
     'accountsservice'
+    'plasma-integration'
+    'breeze'
 )
 optdepends=(
     'lm_sensors: userspace sensor discovery and setup tools for host hwmon devices'
@@ -86,7 +88,6 @@ optdepends=(
     'auradefs: the file service the Files app reads and changes the machine through'
     'aurade-host-bridge: BlueZ, udisks2, MIME, and pacman host integration'
     'udiskie: opt-in recovery automounter when AURADE_REMOVABLE_AUTOMOUNT=1'
-    'breeze: Qt applications drawn in a modern style that follows the desktop'
 )
 makedepends=(
     'git'
@@ -137,12 +138,17 @@ source=(
     'aurade-gtk4.css'
     'aurade.portal'
     'aurade-portals.conf'
+    'aurade-breezerc'
+    'aurade-kdeglobals'
+    'aurade-mimeapps.list'
+    'aurade-files.desktop'
+    'aurade-open-folder'
     'LICENSE'
 )
 noextract=()
 sha256sums=('b0ac96686616b4936ba8c991ee43d78db530ab6015587f6f36cfbac99d81eaac'
             'c3903b2880039de8b92b06bb7a51f903b1557eea1e17b3fafe888d9a7ad6ddff'
-            'bd8d1c125cd1b15398d36d4c0d63970f6e7db44687114347f8d5fa79df62bc2a'
+            'cb343bb0716cf316f7d23185351255b67128cbc2182c89733f1f674c129cc79b'
             'c067de2ae32f0e0b453eca3f71610ed4b9af2877a7baf93b5050eaff574711f6'
             '1848e3590df7dbc3c36e8630f860589a827697c35aa1df4cbebe942000eae25b'
             'db54599f7528f763ab340801c364ed03383506fdccd18b3851c7469bb9a7076a'
@@ -161,8 +167,13 @@ sha256sums=('b0ac96686616b4936ba8c991ee43d78db530ab6015587f6f36cfbac99d81eaac'
             '4ab3f13ebbb764391ff75b81328ef9d06e8ba60480483183fcb93f172314c332'
             '3afd212b7652f6191a3074c62ce64a176d650e556af6ace7bcd25e01603829a8'
             '29094930a4e20992b9317a9237daa1eb780e27e364fcd743de5c8192cc8e4e87'
-            'cd2320b18e5d1159a19b95b461b7641a92c9cfdfcb9d42eb6019c2b52b1c84a4'
-            'ffa96b789946669f3406eff34013f21b6904997f518cd68a0ecc0cd0e55c9abe'
+            'cedf36384a3789acdd11cab27b810f827702395f7981a4b9b2a5f1f568a0dae6'
+            'fa6cd6003a91df2d0a67e87ae4dcf400ee8a164a5aced310ab1b65d4dd00c0fe'
+            'e5a0e69b5a53d0b8ab9bd96a7aaccf6500cf99d423611f7c88cbdcf38f235034'
+            'f9e3b09d999ad1a1382bf643921ec69af74ff7085df54dcbef66b50f7f8625e2'
+            '5a07b3618c8c2714e3dd768e3b1eb9d3012aa6cfe9597fe8d0f5fe0b074fc5d7'
+            '1c2997d87fadea778d2dc9a5acf399ff0afb85bb18c007c1264dfeb3b5ed3566'
+            '5e76a9d88b013e17bb0c09ac2a1721289d6437ae039cbec2854b9d01cb3c862d'
             'b552ddcde86fe87852be3f5af94409ef625a150521168d02e2bee66d6882d17d')
 backup=('etc/aurade/features.conf' 'etc/aurade/google-api.conf')
 
@@ -495,6 +506,21 @@ EOF
         "${pkgdir}/usr/share/xdg-desktop-portal/portals/aurade.portal"
     install -Dm644 "${srcdir}/aurade-portals.conf" \
         "${pkgdir}/usr/share/xdg-desktop-portal/aurade-portals.conf"
+    # Qt and KDE applications: the Breeze style's settings and a starting
+    # kdeglobals, under the configuration path Ash gives them, behind the
+    # live colour scheme Ash writes into the runtime directory.
+    install -Dm644 "${srcdir}/aurade-breezerc" \
+        "${pkgdir}/usr/share/aurade/xdg/breezerc"
+    install -Dm644 "${srcdir}/aurade-kdeglobals" \
+        "${pkgdir}/usr/share/aurade/xdg/kdeglobals"
+    # Folders open in AuraDE Files, through Ash's FileManager1, whatever
+    # other file manager is installed.
+    install -Dm755 "${srcdir}/aurade-open-folder" \
+        "${pkgdir}/usr/bin/aurade-open-folder"
+    install -Dm644 "${srcdir}/aurade-files.desktop" \
+        "${pkgdir}/usr/share/applications/aurade-files.desktop"
+    install -Dm644 "${srcdir}/aurade-mimeapps.list" \
+        "${pkgdir}/usr/share/applications/aurade-mimeapps.list"
     install -Dm644 "${srcdir}/LICENSE" \
         "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
