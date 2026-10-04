@@ -1,0 +1,22 @@
+diff --git a/components/exo/shell_surface_base.cc b/components/exo/shell_surface_base.cc
+index 8d5298d0934c..a9f77d2426c4 100644
+--- a/components/exo/shell_surface_base.cc
++++ b/components/exo/shell_surface_base.cc
+@@ -2404,8 +2404,16 @@ void ShellSurfaceBase::ShowWidget(bool activate) {
+     // Minimized windows cannot gain focus, when being un-minimized they will
+     // call into `ShowWidget` again which will validate activation permissions.
+     auto* window_state = ash::WindowState::Get(widget_->GetNativeWindow());
++    // AuraDE compatibility: a Linux application's new window takes focus
++    // the way a new window does on any desktop. The permission checked below
++    // is granted by ARC and Crostini when the user launches an app through
++    // them, and nothing grants it to the desktop's own applications, so every
++    // new window and dialog opened behind the one before it and typing went
++    // to the wrong place. A window asking for focus later still needs it.
++    const bool first_show_on_aurade =
++        IsAuraDeDesktop() && !widget_->IsVisible();
+     if (!(window_state && window_state->IsMinimized()) &&
+-        GetSecurityDelegate() &&
++        !first_show_on_aurade && GetSecurityDelegate() &&
+         !GetSecurityDelegate()->CanSelfActivate(widget_->GetNativeWindow())) {
+       activate = false;
+     }
