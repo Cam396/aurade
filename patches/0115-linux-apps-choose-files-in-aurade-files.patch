@@ -1,0 +1,682 @@
+diff --git a/chrome/browser/ash/file_manager/BUILD.gn b/chrome/browser/ash/file_manager/BUILD.gn
+index 3e0b974fd39e..a559abddbde2 100644
+--- a/chrome/browser/ash/file_manager/BUILD.gn
++++ b/chrome/browser/ash/file_manager/BUILD.gn
+@@ -11,6 +11,8 @@ static_library("file_manager") {
+   sources = [
+     "app_service_file_tasks.cc",
+     "app_service_file_tasks.h",
++    "aurade_file_chooser_portal.cc",
++    "aurade_file_chooser_portal.h",
+     "aurade_file_manager_service.cc",
+     "aurade_file_manager_service.h",
+     "cloud_upload_prefs_watcher.cc",
+diff --git a/chrome/browser/ash/file_manager/aurade_file_chooser_portal.cc b/chrome/browser/ash/file_manager/aurade_file_chooser_portal.cc
+new file mode 100644
+index 000000000000..6b203077b2b6
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/aurade_file_chooser_portal.cc
+@@ -0,0 +1,525 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/file_manager/aurade_file_chooser_portal.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/memory/raw_ptr.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "net/base/filename_util.h"
++#include "net/base/mime_util.h"
++#include "ui/shell_dialogs/select_file_policy.h"
++#include "ui/shell_dialogs/selected_file_info.h"
++
++namespace ash {
++namespace {
++
++constexpr char kInterfaceName[] = "org.freedesktop.impl.portal.FileChooser";
++constexpr char kRequestInterface[] = "org.freedesktop.impl.portal.Request";
++constexpr char kInvalidArgsError[] = "org.freedesktop.DBus.Error.InvalidArgs";
++
++// The portal's response codes.
++constexpr uint32_t kSuccess = 0;
++constexpr uint32_t kCancelled = 1;
++constexpr uint32_t kOther = 2;
++
++constexpr uint32_t kGlobPattern = 0;
++constexpr uint32_t kMimePattern = 1;
++
++struct ChooserOptions {
++  bool multiple = false;
++  bool directory = false;
++  std::vector<PortalFileFilter> filters;
++  std::optional<PortalFileFilter> current_filter;
++  std::string current_name;
++  base::FilePath current_folder;
++  base::FilePath current_file;
++  std::vector<std::string> files;
++};
++
++// A path as the portal sends it: bytes, NUL terminated.
++base::FilePath PopBytePath(dbus::MessageReader* reader) {
++  base::span<const uint8_t> bytes;
++  if (!reader->PopArrayOfBytes(&bytes)) {
++    return base::FilePath();
++  }
++  std::string path(bytes.begin(), bytes.end());
++  if (const size_t end = path.find('\0'); end != std::string::npos) {
++    path.resize(end);
++  }
++  return base::FilePath(path);
++}
++
++bool PopFilter(dbus::MessageReader* reader, PortalFileFilter* filter) {
++  dbus::MessageReader fields(nullptr);
++  dbus::MessageReader patterns(nullptr);
++  if (!reader->PopStruct(&fields) || !fields.PopString(&filter->name) ||
++      !fields.PopArray(&patterns)) {
++    return false;
++  }
++  while (patterns.HasMoreData()) {
++    dbus::MessageReader pattern(nullptr);
++    uint32_t type = 0;
++    std::string value;
++    if (!patterns.PopStruct(&pattern) || !pattern.PopUint32(&type) ||
++        !pattern.PopString(&value)) {
++      return false;
++    }
++    filter->patterns.emplace_back(type, std::move(value));
++  }
++  return true;
++}
++
++void AppendFilter(dbus::MessageWriter* writer, const PortalFileFilter& filter) {
++  dbus::MessageWriter fields(nullptr);
++  writer->OpenStruct(&fields);
++  fields.AppendString(filter.name);
++  dbus::MessageWriter patterns(nullptr);
++  fields.OpenArray("(us)", &patterns);
++  for (const auto& [type, value] : filter.patterns) {
++    dbus::MessageWriter pattern(nullptr);
++    patterns.OpenStruct(&pattern);
++    pattern.AppendUint32(type);
++    pattern.AppendString(value);
++    patterns.CloseContainer(&pattern);
++  }
++  fields.CloseContainer(&patterns);
++  writer->CloseContainer(&fields);
++}
++
++bool PopOptions(dbus::MessageReader* reader, ChooserOptions* options) {
++  dbus::MessageReader entries(nullptr);
++  if (!reader->PopArray(&entries)) {
++    return false;
++  }
++  while (entries.HasMoreData()) {
++    dbus::MessageReader entry(nullptr);
++    dbus::MessageReader value(nullptr);
++    std::string key;
++    if (!entries.PopDictEntry(&entry) || !entry.PopString(&key) ||
++        !entry.PopVariant(&value)) {
++      return false;
++    }
++    if (key == "multiple") {
++      value.PopBool(&options->multiple);
++    } else if (key == "directory") {
++      value.PopBool(&options->directory);
++    } else if (key == "filters") {
++      dbus::MessageReader list(nullptr);
++      if (value.PopArray(&list)) {
++        while (list.HasMoreData()) {
++          PortalFileFilter filter;
++          if (!PopFilter(&list, &filter)) {
++            break;
++          }
++          options->filters.push_back(std::move(filter));
++        }
++      }
++    } else if (key == "current_filter") {
++      PortalFileFilter filter;
++      if (PopFilter(&value, &filter)) {
++        options->current_filter = std::move(filter);
++      }
++    } else if (key == "current_name") {
++      value.PopString(&options->current_name);
++    } else if (key == "current_folder") {
++      options->current_folder = PopBytePath(&value);
++    } else if (key == "current_file") {
++      options->current_file = PopBytePath(&value);
++    } else if (key == "files") {
++      dbus::MessageReader list(nullptr);
++      if (value.PopArray(&list)) {
++        while (list.HasMoreData()) {
++          const base::FilePath file = PopBytePath(&list);
++          if (!file.empty()) {
++            options->files.push_back(file.BaseName().value());
++          }
++        }
++      }
++    }
++    // modal, accept_label and choices have nowhere to go in the picker.
++  }
++  return true;
++}
++
++base::FilePath HomeDir() {
++  return base::GetHomeDir();
++}
++
++}  // namespace
++
++PortalFileFilter::PortalFileFilter() = default;
++PortalFileFilter::PortalFileFilter(const PortalFileFilter&) = default;
++PortalFileFilter& PortalFileFilter::operator=(const PortalFileFilter&) =
++    default;
++PortalFileFilter::~PortalFileFilter() = default;
++
++std::optional<std::string> ExtensionOfGlob(const std::string& glob) {
++  if (!glob.starts_with("*.") || glob.size() < 3) {
++    return std::nullopt;
++  }
++  std::string extension;
++  for (size_t i = 2; i < glob.size(); ++i) {
++    const char c = glob[i];
++    if (c == '[' && i + 3 < glob.size() && glob[i + 3] == ']' &&
++        base::ToLowerASCII(glob[i + 1]) == base::ToLowerASCII(glob[i + 2])) {
++      extension += base::ToLowerASCII(glob[i + 1]);
++      i += 3;
++      continue;
++    }
++    if (c == '*' || c == '?' || c == '[' || c == ']' || c == '/') {
++      return std::nullopt;
++    }
++    extension += base::ToLowerASCII(c);
++  }
++  return extension;
++}
++
++ui::SelectFileDialog::FileTypeInfo FileTypesForFilters(
++    const std::vector<PortalFileFilter>& filters,
++    const std::optional<PortalFileFilter>& current,
++    int* file_type_index,
++    std::vector<size_t>* kept) {
++  ui::SelectFileDialog::FileTypeInfo types;
++  types.allowed_paths = ui::SelectFileDialog::FileTypeInfo::NATIVE_PATH;
++  *file_type_index = 0;
++  kept->clear();
++  for (size_t i = 0; i < filters.size(); ++i) {
++    std::vector<base::FilePath::StringType> extensions;
++    bool everything = false;
++    for (const auto& [type, value] : filters[i].patterns) {
++      if (type == kGlobPattern) {
++        if (value == "*" || value == "*.*") {
++          everything = true;
++        } else if (std::optional<std::string> extension =
++                       ExtensionOfGlob(value)) {
++          extensions.push_back(*extension);
++        }
++      } else if (type == kMimePattern) {
++        // Every file is application/octet-stream to shared-mime-info, which
++        // is how Qt spells "All files"; its few registered extensions would
++        // hide everything else.
++        if (value == "application/octet-stream") {
++          everything = true;
++        } else {
++          net::GetExtensionsForMimeType(value, &extensions);
++        }
++      }
++    }
++    std::sort(extensions.begin(), extensions.end());
++    extensions.erase(std::unique(extensions.begin(), extensions.end()),
++                     extensions.end());
++    if (extensions.empty()) {
++      // "All files", or a filter the picker cannot express: either way
++      // everything stays pickable.
++      types.include_all_files |= everything || !filters[i].patterns.empty();
++      continue;
++    }
++    types.extensions.push_back(std::move(extensions));
++    types.extension_description_overrides.push_back(
++        base::UTF8ToUTF16(filters[i].name));
++    kept->push_back(i);
++    if (current && current->name == filters[i].name) {
++      *file_type_index = static_cast<int>(types.extensions.size());
++    }
++  }
++  if (types.extensions.empty()) {
++    types.include_all_files = true;
++  }
++  return types;
++}
++
++// One application's request, from the portal call to the reply.
++class AuraDeFileChooserPortal::Request final
++    : public ui::SelectFileDialog::Listener {
++ public:
++  Request(AuraDeFileChooserPortal* portal,
++          Kind kind,
++          std::string handle,
++          std::u16string title,
++          ChooserOptions options,
++          std::unique_ptr<dbus::Response> response,
++          dbus::ExportedObject::ResponseSender response_sender)
++      : portal_(portal),
++        kind_(kind),
++        handle_(std::move(handle)),
++        title_(std::move(title)),
++        options_(std::move(options)),
++        response_(std::move(response)),
++        response_sender_(std::move(response_sender)) {}
++
++  Request(const Request&) = delete;
++  Request& operator=(const Request&) = delete;
++
++  ~Request() override {
++    if (dialog_) {
++      dialog_->ListenerDestroyed();
++    }
++    if (response_sender_) {
++      Reply(kOther, {});
++    }
++  }
++
++  const std::string& handle() const { return handle_; }
++  bool showing() const { return shown_; }
++
++  void Show() {
++    ui::SelectFileDialog::Type type = ui::SelectFileDialog::SELECT_OPEN_FILE;
++    base::FilePath default_path = options_.current_folder;
++    switch (kind_) {
++      case Kind::kOpenFile:
++        type = options_.directory ? ui::SelectFileDialog::SELECT_FOLDER
++               : options_.multiple
++                   ? ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE
++                   : ui::SelectFileDialog::SELECT_OPEN_FILE;
++        break;
++      case Kind::kSaveFile:
++        type = ui::SelectFileDialog::SELECT_SAVEAS_FILE;
++        if (!options_.current_file.empty()) {
++          default_path = options_.current_file;
++        } else {
++          default_path = (default_path.empty() ? HomeDir() : default_path)
++                             .Append(options_.current_name.empty()
++                                         ? std::string("Untitled")
++                                         : options_.current_name);
++        }
++        break;
++      case Kind::kSaveFiles:
++        // Several files saved at once are saved into a folder chosen here.
++        type = ui::SelectFileDialog::SELECT_FOLDER;
++        break;
++    }
++    if (default_path.empty()) {
++      default_path = HomeDir();
++    }
++
++    shown_ = true;
++    int file_type_index = 0;
++    const ui::SelectFileDialog::FileTypeInfo file_types = FileTypesForFilters(
++        options_.filters, options_.current_filter, &file_type_index, &kept_);
++    dialog_ = ui::SelectFileDialog::Create(this, /*policy=*/nullptr);
++    dialog_->SelectFile(type, title_, default_path, &file_types,
++                        file_type_index,
++                        /*default_extension=*/{}, /*owning_window=*/nullptr);
++  }
++
++  // The frontend gave up on the request: the application went away, or
++  // closed the dialog itself. The picker may stay on screen; whatever it
++  // returns now goes nowhere.
++  void Close() {
++    if (dialog_) {
++      dialog_->ListenerDestroyed();
++      dialog_ = nullptr;
++    }
++    if (response_sender_) {
++      Reply(kCancelled, {});
++    }
++  }
++
++  // ui::SelectFileDialog::Listener:
++  void FileSelected(const ui::SelectedFileInfo& file, int index) override {
++    chosen_filter_ = index;
++    Done(kSuccess, {file});
++  }
++  void MultiFilesSelected(
++      const std::vector<ui::SelectedFileInfo>& files) override {
++    Done(kSuccess, files);
++  }
++  void FileSelectionCanceled() override { Done(kCancelled, {}); }
++
++ private:
++  // The dialog stays referenced until this request is deleted, which is
++  // after the dialog's own call into the listener has returned.
++  void Done(uint32_t code, const std::vector<ui::SelectedFileInfo>& files) {
++    if (!response_sender_) {
++      return;
++    }
++    std::vector<base::FilePath> paths;
++    for (const ui::SelectedFileInfo& file : files) {
++      const base::FilePath& path =
++          file.local_path.empty() ? file.file_path : file.local_path;
++      if (kind_ == Kind::kSaveFiles) {
++        for (const std::string& name : options_.files) {
++          paths.push_back(path.Append(name));
++        }
++      } else {
++        paths.push_back(path);
++      }
++    }
++    Reply(paths.empty() && code == kSuccess ? kCancelled : code, paths);
++    portal_->Finish(this);
++  }
++
++  void Reply(uint32_t code, const std::vector<base::FilePath>& paths) {
++    dbus::MessageWriter writer(response_.get());
++    writer.AppendUint32(code);
++    dbus::MessageWriter results(nullptr);
++    writer.OpenArray("{sv}", &results);
++    if (code == kSuccess) {
++      std::vector<std::string> uris;
++      for (const base::FilePath& path : paths) {
++        uris.push_back(net::FilePathToFileURL(path).spec());
++      }
++      dbus::MessageWriter entry(nullptr);
++      results.OpenDictEntry(&entry);
++      entry.AppendString("uris");
++      dbus::MessageWriter variant(nullptr);
++      entry.OpenVariant("as", &variant);
++      variant.AppendArrayOfStrings(uris);
++      entry.CloseContainer(&variant);
++      results.CloseContainer(&entry);
++
++      // The picker counts its types from one; zero is none.
++      if (chosen_filter_ > 0 &&
++          static_cast<size_t>(chosen_filter_) <= kept_.size()) {
++        dbus::MessageWriter filter_entry(nullptr);
++        results.OpenDictEntry(&filter_entry);
++        filter_entry.AppendString("current_filter");
++        dbus::MessageWriter filter_variant(nullptr);
++        filter_entry.OpenVariant("(sa(us))", &filter_variant);
++        AppendFilter(&filter_variant,
++                     options_.filters[kept_[chosen_filter_ - 1]]);
++        filter_entry.CloseContainer(&filter_variant);
++        results.CloseContainer(&filter_entry);
++      }
++    }
++    writer.CloseContainer(&results);
++    std::move(response_sender_).Run(std::move(response_));
++  }
++
++  const raw_ptr<AuraDeFileChooserPortal> portal_;
++  const Kind kind_;
++  const std::string handle_;
++  const std::u16string title_;
++  const ChooserOptions options_;
++  std::unique_ptr<dbus::Response> response_;
++  dbus::ExportedObject::ResponseSender response_sender_;
++  scoped_refptr<ui::SelectFileDialog> dialog_;
++  // The application's filters behind each of the picker's types.
++  std::vector<size_t> kept_;
++  int chosen_filter_ = 0;
++  bool shown_ = false;
++};
++
++AuraDeFileChooserPortal::AuraDeFileChooserPortal(
++    scoped_refptr<dbus::Bus> bus,
++    scoped_refptr<dbus::ExportedObject> portal_object)
++    : bus_(std::move(bus)), portal_object_(std::move(portal_object)) {
++  const std::pair<const char*, Kind> methods[] = {
++      {"OpenFile", Kind::kOpenFile},
++      {"SaveFile", Kind::kSaveFile},
++      {"SaveFiles", Kind::kSaveFiles},
++  };
++  for (const auto& [method, kind] : methods) {
++    portal_object_->ExportMethod(
++        kInterfaceName, method,
++        base::BindRepeating(&AuraDeFileChooserPortal::HandleChoose,
++                            weak_ptr_factory_.GetWeakPtr(), kind),
++        base::BindOnce(&AuraDeFileChooserPortal::OnExported,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++}
++
++AuraDeFileChooserPortal::~AuraDeFileChooserPortal() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  while (!requests_.empty()) {
++    const std::string handle = requests_.front()->handle();
++    requests_.pop_front();
++    bus_->UnregisterExportedObject(dbus::ObjectPath(handle));
++  }
++}
++
++void AuraDeFileChooserPortal::HandleChoose(
++    Kind kind,
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  dbus::ObjectPath handle;
++  std::string app_id;
++  std::string parent_window;
++  std::string title;
++  ChooserOptions options;
++  if (!reader.PopObjectPath(&handle) || !reader.PopString(&app_id) ||
++      !reader.PopString(&parent_window) || !reader.PopString(&title) ||
++      !PopOptions(&reader, &options) || !handle.IsValid()) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, kInvalidArgsError, "Malformed file chooser request"));
++    return;
++  }
++
++  // The frontend can withdraw the request through this object.
++  bus_->GetExportedObject(handle)->ExportMethod(
++      kRequestInterface, "Close",
++      base::BindRepeating(&AuraDeFileChooserPortal::HandleClose,
++                          weak_ptr_factory_.GetWeakPtr(), handle.value()),
++      base::BindOnce(&AuraDeFileChooserPortal::OnExported,
++                     weak_ptr_factory_.GetWeakPtr()));
++
++  requests_.push_back(std::make_unique<Request>(
++      this, kind, handle.value(), base::UTF8ToUTF16(title), std::move(options),
++      dbus::Response::FromMethodCall(method_call), std::move(response_sender)));
++  ShowNext();
++}
++
++void AuraDeFileChooserPortal::HandleClose(
++    const std::string& handle,
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
++  for (const std::unique_ptr<Request>& request : requests_) {
++    if (request->handle() == handle) {
++      request->Close();
++      Finish(request.get());
++      return;
++    }
++  }
++}
++
++void AuraDeFileChooserPortal::ShowNext() {
++  if (!requests_.empty() && !requests_.front()->showing()) {
++    requests_.front()->Show();
++  }
++}
++
++void AuraDeFileChooserPortal::Finish(Request* request) {
++  auto it = std::find_if(requests_.begin(), requests_.end(),
++                         [request](const std::unique_ptr<Request>& r) {
++                           return r.get() == request;
++                         });
++  if (it == requests_.end()) {
++    return;
++  }
++  const bool was_front = it == requests_.begin();
++  const std::string handle = request->handle();
++  // Finish can run inside the dialog's call into the request, so the request
++  // goes once that call has returned.
++  std::unique_ptr<Request> finished = std::move(*it);
++  requests_.erase(it);
++  base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(
++      FROM_HERE, std::move(finished));
++  bus_->UnregisterExportedObject(dbus::ObjectPath(handle));
++  if (was_front) {
++    ShowNext();
++  }
++}
++
++void AuraDeFileChooserPortal::OnExported(const std::string& interface_name,
++                                         const std::string& method_name,
++                                         bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not export " << interface_name << "."
++                          << method_name;
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/file_manager/aurade_file_chooser_portal.h b/chrome/browser/ash/file_manager/aurade_file_chooser_portal.h
+new file mode 100644
+index 000000000000..b20d0bd0d6b8
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/aurade_file_chooser_portal.h
+@@ -0,0 +1,91 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_CHOOSER_PORTAL_H_
++#define CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_CHOOSER_PORTAL_H_
++
++#include <cstdint>
++#include <deque>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "dbus/exported_object.h"
++#include "ui/shell_dialogs/select_file_dialog.h"
++
++namespace dbus {
++class Bus;
++class MethodCall;
++}  // namespace dbus
++
++namespace ash {
++
++// One filter an application offers: a name and its patterns, each a glob
++// (type 0) or a MIME type (type 1), as the portal hands them over.
++struct PortalFileFilter {
++  PortalFileFilter();
++  PortalFileFilter(const PortalFileFilter&);
++  PortalFileFilter& operator=(const PortalFileFilter&);
++  ~PortalFileFilter();
++
++  std::string name;
++  std::vector<std::pair<uint32_t, std::string>> patterns;
++};
++
++// The extensions a portal glob names, if it names any: "*.png" and GTK's
++// case-blind "*.[pP][nN][gG]" are both "png"; "*" and "*.*" name none.
++std::optional<std::string> ExtensionOfGlob(const std::string& glob);
++
++// The picker's file types for |filters|, with |current| chosen. Fills
++// |kept| with the index in |filters| of each type it made.
++ui::SelectFileDialog::FileTypeInfo FileTypesForFilters(
++    const std::vector<PortalFileFilter>& filters,
++    const std::optional<PortalFileFilter>& current,
++    int* file_type_index,
++    std::vector<size_t>* kept);
++
++// The file chooser half of AuraDE's xdg-desktop-portal backend. When a Linux
++// application asks the portal for a file to open or a place to save one,
++// the AuraDE Files picker asks, the one web pages and Ash itself use, rather
++// than GTK's own dialog. One picker shows at a time; later requests wait.
++class AuraDeFileChooserPortal final {
++ public:
++  AuraDeFileChooserPortal(scoped_refptr<dbus::Bus> bus,
++                          scoped_refptr<dbus::ExportedObject> portal_object);
++  AuraDeFileChooserPortal(const AuraDeFileChooserPortal&) = delete;
++  AuraDeFileChooserPortal& operator=(const AuraDeFileChooserPortal&) = delete;
++  ~AuraDeFileChooserPortal();
++
++ private:
++  class Request;
++  enum class Kind { kOpenFile, kSaveFile, kSaveFiles };
++
++  void HandleChoose(Kind kind,
++                    dbus::MethodCall* method_call,
++                    dbus::ExportedObject::ResponseSender response_sender);
++  void HandleClose(const std::string& handle,
++                   dbus::MethodCall* method_call,
++                   dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++  // Shows the front request's picker, if it is not showing yet.
++  void ShowNext();
++  // Ends |request| and moves on to the next.
++  void Finish(Request* request);
++
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> portal_object_;
++  std::deque<std::unique_ptr<Request>> requests_;
++  base::WeakPtrFactory<AuraDeFileChooserPortal> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_CHOOSER_PORTAL_H_
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 896226479eac..45acb3f40005 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -114,6 +114,7 @@
+ #include "chrome/browser/ash/extensions/default_app_order.h"
+ #include "chrome/browser/ash/extensions/login_screen_ui/ui_handler.h"
+ #include "chrome/browser/ash/external_metrics/external_metrics.h"
++#include "chrome/browser/ash/file_manager/aurade_file_chooser_portal.h"
+ #include "chrome/browser/ash/file_manager/aurade_file_manager_service.h"
+ #include "chrome/browser/ash/fwupd/fwupd_download_client_impl.h"
+ #include "chrome/browser/ash/image_downloader/image_downloader_impl.h"
+@@ -441,6 +442,12 @@ class DBusServices {
+         aurade_file_manager_service_ =
+             std::make_unique<AuraDeFileManagerService>(
+                 desktop_appearance_service_host_->bus());
++        // AuraDE compatibility: and asked for a file to open or a place to
++        // save one through the desktop portal, AuraDE Files asks, as it does
++        // for web pages and for Ash.
++        aurade_file_chooser_portal_ = std::make_unique<AuraDeFileChooserPortal>(
++            desktop_appearance_service_host_->bus(),
++            desktop_appearance_service_host_->portal_object());
+       }
+       // AuraDE compatibility: removing or updating packages from Settings
+       // needs an administrator's password, and polkit refuses outright when
+@@ -682,6 +689,7 @@ class DBusServices {
+     SetBluetoothConfigServiceBinderForGenericLinux({});
+     aurade_bluetooth_service_.reset();
+     polkit_agent_service_.reset();
++    aurade_file_chooser_portal_.reset();
+     aurade_file_manager_service_.reset();
+     desktop_appearance_service_host_.reset();
+     desktop_notification_service_host_.reset();
+@@ -699,6 +707,7 @@ class DBusServices {
+   std::unique_ptr<DesktopAppearanceServiceHost>
+       desktop_appearance_service_host_;
+   std::unique_ptr<AuraDeFileManagerService> aurade_file_manager_service_;
++  std::unique_ptr<AuraDeFileChooserPortal> aurade_file_chooser_portal_;
+   std::unique_ptr<PolkitAgentService> polkit_agent_service_;
+   std::unique_ptr<CrosDBusService> virtual_file_request_service_;
+   std::unique_ptr<CrosDBusService> component_updater_service_;
