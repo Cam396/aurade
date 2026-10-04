@@ -292,6 +292,31 @@ pub fn is_system_mount(mount_point: &Path) -> bool {
     )
 }
 
+/// Whether a mount is a place of its own, worth a row beside the home
+/// folders, rather than a piece of the installed system. A btrfs install
+/// mounts its subvolumes (`/.snapshots`, `/var/log`, `/home`) from the
+/// device the root is on, and each of those showed as a drive that nobody
+/// had plugged in. A hidden directory, and the trees the system keeps for
+/// itself, are left out for the same reason.
+pub fn is_own_place(mount: &Mount, mounts: &[Mount]) -> bool {
+    if !Path::new(&mount.source).is_absolute() || is_system_mount(&mount.mount_point) {
+        return false;
+    }
+    //: The last mount on / is the one in effect.
+    let root = mounts.iter().rev().find(|m| m.mount_point == Path::new("/"));
+    if root.map(|r| r.source == mount.source).unwrap_or(false) {
+        return false;
+    }
+    const SYSTEM_TREES: &[&str] = &["/boot", "/efi", "/usr", "/var", "/proc", "/sys", "/dev", "/snap"];
+    if SYSTEM_TREES.iter().any(|tree| mount.mount_point.starts_with(tree)) {
+        return false;
+    }
+    !mount
+        .mount_point
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+}
+
 // ---------------------------------------------------------------- actions ---
 
 fn udisksctl(args: &[&str]) -> Result<String> {
@@ -368,6 +393,29 @@ mod tests {
         assert_eq!(got[1].fstype, "btrfs");
         assert_eq!(got[1].source, "/dev/sda2");
         assert!(!got[1].read_only);
+    }
+
+    #[test]
+    fn a_btrfs_install_shows_no_drive_of_its_own() {
+        let text = concat!(
+            "28 1 0:31 /@ / rw,relatime shared:1 - btrfs /dev/vda2 rw,subvol=/@\n",
+            "40 28 0:31 /@home /home rw shared:2 - btrfs /dev/vda2 rw,subvol=/@home\n",
+            "41 28 0:31 /@snapshots /.snapshots rw shared:3 - btrfs /dev/vda2 rw\n",
+            "42 28 0:31 /@var_log /var/log rw shared:4 - btrfs /dev/vda2 rw\n",
+            "43 28 254:1 / /boot rw shared:5 - vfat /dev/vda1 rw\n",
+            "44 28 0:40 / /tmp rw shared:6 - tmpfs tmpfs rw\n",
+            "50 28 8:17 / /run/media/cam/STICK rw shared:40 - vfat /dev/sdb1 rw\n",
+            "51 28 8:33 / /data rw shared:41 - ext4 /dev/sdc1 rw\n",
+            "52 28 8:34 / /var/lib/machines rw shared:42 - ext4 /dev/sdc2 rw\n",
+            "53 28 8:35 / /mnt/.hidden rw shared:43 - ext4 /dev/sdc3 rw\n",
+        );
+        let mounts = parse_mountinfo(text);
+        let shown: Vec<_> = mounts
+            .iter()
+            .filter(|m| is_own_place(m, &mounts))
+            .map(|m| m.mount_point.display().to_string())
+            .collect();
+        assert_eq!(shown, ["/run/media/cam/STICK", "/data"]);
     }
 
     #[test]

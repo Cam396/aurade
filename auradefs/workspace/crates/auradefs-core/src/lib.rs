@@ -21,6 +21,7 @@ pub mod error;
 pub mod root;
 pub mod mime;
 pub mod apps;
+pub mod appicons;
 pub mod xattr;
 pub mod tags;
 pub mod git;

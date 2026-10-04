@@ -340,29 +340,45 @@ pub struct Registry {
     defaults: HashMap<String, Vec<String>>,
     /// From each `mimeinfo.cache`, which is what a package manager writes.
     cached: HashMap<String, Vec<String>>,
+    /// When each file and directory it was read from last changed, taken
+    /// before reading, so a change made during a load is seen by the next.
+    stamp: Vec<Option<std::time::SystemTime>>,
 }
 
 impl Registry {
     /// Scan the XDG data path. Earlier directories win, which is what makes a
     /// desktop file in the home directory override the system one.
     pub fn load() -> Self {
-        let mut reg = Registry::default();
+        let mut reg = Registry { stamp: Self::current_stamp(), ..Default::default() };
         for dir in data_dirs() {
             let apps = dir.join("applications");
             reg.scan_applications(&apps, &apps);
             reg.read_mimeinfo_cache(&apps.join("mimeinfo.cache"));
         }
-        //: mimeapps.list is read most specific first and the first answer for a
-        //: type wins, so config comes before data.
-        let mut lists: Vec<PathBuf> = config_dirs()
-            .into_iter()
-            .map(|d| d.join("mimeapps.list"))
-            .collect();
-        lists.extend(data_dirs().into_iter().map(|d| d.join("applications/mimeapps.list")));
-        for list in lists {
+        for list in mimeapps_lists() {
             reg.read_mimeapps(&list);
         }
         reg
+    }
+
+    /// Whether anything it was read from has changed since: a package that
+    /// added or removed an application, or a default chosen in another
+    /// program. Desktop files are installed by rename, which changes their
+    /// directory, so the directories cover the files in them.
+    pub fn is_stale(&self) -> bool {
+        self.stamp != Self::current_stamp()
+    }
+
+    fn current_stamp() -> Vec<Option<std::time::SystemTime>> {
+        let modified = |path: &Path| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let mut stamp: Vec<Option<std::time::SystemTime>> = Vec::new();
+        for dir in data_dirs() {
+            let apps = dir.join("applications");
+            stamp.push(modified(&apps));
+            stamp.push(modified(&apps.join("mimeinfo.cache")));
+        }
+        stamp.extend(mimeapps_lists().iter().map(|list| modified(list)));
+        stamp
     }
 
     fn scan_applications(&mut self, base: &Path, dir: &Path) {
@@ -510,6 +526,36 @@ impl Registry {
     }
 }
 
+/// Every mimeapps.list, in the order the spec reads them: most specific
+/// first, so the first answer for a type wins, config before data, and in
+/// each directory the desktop's own list before the shared one. AuraDE is
+/// always one of the desktops: this is its file manager, and its list is
+/// where it says that AuraDE Files opens folders.
+fn mimeapps_lists() -> Vec<PathBuf> {
+    let mut desktops: Vec<String> = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .split(':')
+        .map(|d| d.trim().to_ascii_lowercase())
+        .filter(|d| !d.is_empty() && !d.contains('/'))
+        .collect();
+    if !desktops.iter().any(|d| d == "aurade") {
+        desktops.push("aurade".into());
+    }
+    let names: Vec<String> = desktops
+        .iter()
+        .map(|d| format!("{d}-mimeapps.list"))
+        .chain(std::iter::once("mimeapps.list".to_string()))
+        .collect();
+    let mut lists = Vec::new();
+    for dir in config_dirs() {
+        lists.extend(names.iter().map(|n| dir.join(n)));
+    }
+    for dir in data_dirs() {
+        lists.extend(names.iter().map(|n| dir.join("applications").join(n)));
+    }
+    lists
+}
+
 fn parse_mime_section(text: &str, section: &str) -> Vec<(String, Vec<String>)> {
     let mut out = Vec::new();
     let mut inside = false;
@@ -649,6 +695,75 @@ pub fn terminal() -> Option<(PathBuf, Vec<String>)> {
     None
 }
 
+/// What the desktop says its applications start with: the display they draw
+/// on, the session bus its file chooser and file manager answer on, and the
+/// toolkit settings that make them look like the rest of it. Ash writes the
+/// file when it starts. This service starts before the desktop and outlives
+/// it, so the file is read at every launch rather than once, and without it
+/// a program gets this service's own environment as before.
+pub fn desktop_environment() -> Vec<(String, String)> {
+    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") else { return Vec::new() };
+    std::fs::read_to_string(Path::new(&dir).join("aurade/app-environment"))
+        .map(|text| parse_environment(&text))
+        .unwrap_or_default()
+}
+
+/// `NAME=value` lines; a comment, a blank line or a name no shell would take
+/// is skipped.
+pub fn parse_environment(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .filter(|(name, _)| is_variable_name(name))
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+}
+
+fn is_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+/// systemd-run, when the user's service manager is there to take a scope.
+fn scope_runner() -> Option<PathBuf> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    if !Path::new(&runtime).join("systemd/private").exists() {
+        return None;
+    }
+    which("systemd-run")
+}
+
+/// The command line that starts `argv`, with `env` set for it. With a scope
+/// runner it is `systemd-run --user --scope ... -- env NAME=value... argv`:
+/// the program gets a scope of its own in the user's service manager rather
+/// than staying in this service's, where restarting the service, as every
+/// update of it does, would have killed every program opened from Files.
+/// The variables go through env and not into systemd-run's own environment,
+/// because the session bus they name is the desktop's, which has no service
+/// manager on it.
+pub fn scoped_argv(
+    runner: Option<&Path>,
+    env: &[(String, String)],
+    argv: &[String],
+) -> Vec<String> {
+    let Some(runner) = runner else { return argv.to_vec() };
+    let mut out = vec![
+        runner.display().to_string(),
+        "--user".into(),
+        "--scope".into(),
+        "--collect".into(),
+        "--quiet".into(),
+        "--".into(),
+    ];
+    if !env.is_empty() {
+        out.push(which("env").map(|p| p.display().to_string()).unwrap_or_else(|| "env".into()));
+        out.extend(env.iter().map(|(name, value)| format!("{name}={value}")));
+    }
+    out.extend(argv.iter().cloned());
+    out
+}
+
 /// Start it, detached, and do not wait for it.
 ///
 /// The child is `setsid --fork`, which forks and exits at once. That gives the
@@ -693,6 +808,9 @@ pub fn spawn(launch: &Launch) -> Result<()> {
         argv = with;
     }
 
+    let env = desktop_environment();
+    let runner = scope_runner();
+    let mut argv = scoped_argv(runner.as_deref(), &env, &argv);
     let program = argv.remove(0);
     let mut command = match which("setsid") {
         Some(setsid) => {
@@ -708,6 +826,9 @@ pub fn spawn(launch: &Launch) -> Result<()> {
             c
         }
     };
+    if runner.is_none() {
+        command.envs(env.iter().map(|(name, value)| (name, value)));
+    }
     if let Some(cwd) = &launch.cwd {
         command.current_dir(cwd);
     }
@@ -1277,6 +1398,58 @@ Exec=gedit --new-window
         let file = apps.parent().unwrap().join("notes.txt");
         std::fs::write(&file, b"hello").unwrap();
         assert!(matches!(pin_into(&apps, &file), Err(Error::BadRequest(_))));
+    }
+
+    #[test]
+    fn the_desktop_environment_file_is_names_and_values_and_nothing_else() {
+        let text = concat!(
+            "# Written by Ash: what Linux applications start with on this desktop.\n",
+            "WAYLAND_DISPLAY=wayland-0\n",
+            "XDG_CONFIG_DIRS=/run/user/1000/aurade/xdg:/etc/xdg\n",
+            "\n",
+            "QT_QPA_PLATFORMTHEME=kde\n",
+            "not a line\n",
+            "1BAD=x\n",
+            "SPACED NAME=x\n",
+            "EMPTY=\n",
+        );
+        assert_eq!(parse_environment(text), [
+            ("WAYLAND_DISPLAY".to_string(), "wayland-0".to_string()),
+            ("XDG_CONFIG_DIRS".to_string(), "/run/user/1000/aurade/xdg:/etc/xdg".to_string()),
+            ("QT_QPA_PLATFORMTHEME".to_string(), "kde".to_string()),
+            ("EMPTY".to_string(), String::new()),
+        ]);
+    }
+
+    #[test]
+    fn a_program_gets_a_scope_of_its_own_and_the_desktop_variables_through_env() {
+        let argv = vec!["/usr/bin/kate".to_string(), "/home/a/b c.txt".to_string()];
+        let env = vec![("WAYLAND_DISPLAY".to_string(), "wayland-0".to_string())];
+        //: Without a service manager it is the program, as it always was.
+        assert_eq!(scoped_argv(None, &env, &argv), argv);
+        let got = scoped_argv(Some(Path::new("/usr/bin/systemd-run")), &env, &argv);
+        assert_eq!(&got[..6], ["/usr/bin/systemd-run", "--user", "--scope", "--collect", "--quiet", "--"]);
+        assert!(got[6].ends_with("env"), "the variables do not go through env: {got:?}");
+        assert_eq!(&got[7..], ["WAYLAND_DISPLAY=wayland-0", "/usr/bin/kate", "/home/a/b c.txt"]);
+        //: And with nothing to set, the program follows the separator.
+        let bare = scoped_argv(Some(Path::new("/usr/bin/systemd-run")), &[], &argv);
+        assert_eq!(&bare[6..], ["/usr/bin/kate", "/home/a/b c.txt"]);
+    }
+
+    #[test]
+    fn a_registry_knows_when_what_it_read_has_changed() {
+        let reg = Registry::load();
+        assert!(!reg.is_stale(), "a registry just read is already stale");
+    }
+
+    #[test]
+    fn the_desktop_list_is_read_before_the_shared_one_in_each_directory() {
+        let lists = mimeapps_lists();
+        let first_aurade = lists.iter().position(|l| l.ends_with("aurade-mimeapps.list"));
+        let first_shared = lists.iter().position(|l| l.ends_with("mimeapps.list")
+            && !l.file_name().unwrap().to_string_lossy().contains('-'));
+        assert!(first_aurade.is_some(), "AuraDE's own list is never read: {lists:?}");
+        assert!(first_aurade < first_shared, "the shared list wins over AuraDE's: {lists:?}");
     }
 
     #[test]
