@@ -49,8 +49,8 @@ other hypervisors, and what to expect from graphics in a VM.
 | Software | The browser, web apps, and pacman and the AUR underneath | The browser, web apps, a Linux container |
 | Hardware | What the Arch kernel supports | Google's certified models list |
 | Updates | pacman, when you choose | Automatic, from Google |
-| Android apps | No | No |
-
+| Android apps | No* | No |
+* Not yet, stay tuned
 Flex is the polished, supported choice if you want ChromeOS on a PC. AuraDE is
 for people who want that interface on a Linux system they own.
 
