@@ -1,0 +1,346 @@
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.h b/chrome/browser/ash/dbus/desktop_appearance_service.h
+index 248f3e218bb2..0a3a7cc5aa58 100644
+--- a/chrome/browser/ash/dbus/desktop_appearance_service.h
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.h
+@@ -91,6 +91,14 @@ class DesktopAppearanceServiceHost final {
+       delete;
+   ~DesktopAppearanceServiceHost();
+ 
++  // The session bus connection, for other services Linux applications reach
++  // there.
++  const scoped_refptr<dbus::Bus>& bus() const { return bus_; }
++  // The portal backend's object, which carries one interface per portal.
++  const scoped_refptr<dbus::ExportedObject>& portal_object() const {
++    return exported_object_;
++  }
++
+  private:
+   DesktopAppearanceServiceHost();
+   bool Start();
+diff --git a/chrome/browser/ash/file_manager/BUILD.gn b/chrome/browser/ash/file_manager/BUILD.gn
+index 1ce1b2f86a6c..3e0b974fd39e 100644
+--- a/chrome/browser/ash/file_manager/BUILD.gn
++++ b/chrome/browser/ash/file_manager/BUILD.gn
+@@ -11,6 +11,8 @@ static_library("file_manager") {
+   sources = [
+     "app_service_file_tasks.cc",
+     "app_service_file_tasks.h",
++    "aurade_file_manager_service.cc",
++    "aurade_file_manager_service.h",
+     "cloud_upload_prefs_watcher.cc",
+     "cloud_upload_prefs_watcher.h",
+     "cloud_upload_prompt_prefs_handler.cc",
+@@ -193,6 +195,7 @@ static_library("file_manager") {
+     "//components/variations/service",
+     "//content/public/browser",
+     "//crypto",
++    "//dbus",
+     "//extensions/browser/api/file_handlers",
+     "//extensions/common",
+     "//google_apis/common",
+diff --git a/chrome/browser/ash/file_manager/aurade_file_manager_service.cc b/chrome/browser/ash/file_manager/aurade_file_manager_service.cc
+new file mode 100644
+index 000000000000..fb07578cc338
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/aurade_file_manager_service.cc
+@@ -0,0 +1,175 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/file_manager/aurade_file_manager_service.h"
++
++#include <map>
++#include <optional>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/json/json_writer.h"
++#include "base/logging.h"
++#include "base/strings/escape.h"
++#include "base/values.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/ui/ash/system_web_apps/system_web_app_ui_utils.h"
++#include "chromeos/ash/components/system_web_apps/system_web_app_type.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "net/base/filename_util.h"
++
++namespace ash {
++namespace {
++
++constexpr char kServiceName[] = "org.freedesktop.FileManager1";
++constexpr char kObjectPath[] = "/org/freedesktop/FileManager1";
++constexpr char kInterfaceName[] = "org.freedesktop.FileManager1";
++constexpr char kInvalidArgsError[] = "org.freedesktop.DBus.Error.InvalidArgs";
++
++// The Files app's own page; it reads what to show from the query.
++constexpr char kFilesAppUrl[] = "chrome://file-manager/";
++
++// One request opens at most this many windows, whatever it asks for.
++constexpr size_t kMaxWindows = 4;
++
++// A file URI, or a plain absolute path as some applications send instead.
++std::optional<base::FilePath> PathOf(const std::string& uri) {
++  base::FilePath path;
++  if (uri.starts_with('/')) {
++    path = base::FilePath(uri);
++  } else if (!net::FileURLToFilePath(GURL(uri), &path)) {
++    return std::nullopt;
++  }
++  if (!path.IsAbsolute() || path.ReferencesParent()) {
++    return std::nullopt;
++  }
++  return path.StripTrailingSeparators();
++}
++
++}  // namespace
++
++AuraDeFileManagerService::AuraDeFileManagerService(scoped_refptr<dbus::Bus> bus)
++    : bus_(std::move(bus)) {
++  exported_object_ = bus_->GetExportedObject(dbus::ObjectPath(kObjectPath));
++  const std::pair<const char*, Show> methods[] = {
++      {"ShowFolders", Show::kFolders},
++      {"ShowItems", Show::kItems},
++      {"ShowItemProperties", Show::kProperties},
++  };
++  for (const auto& [method, show] : methods) {
++    exported_object_->ExportMethod(
++        kInterfaceName, method,
++        base::BindRepeating(&AuraDeFileManagerService::HandleShow,
++                            weak_ptr_factory_.GetWeakPtr(), show),
++        base::BindOnce(&AuraDeFileManagerService::OnExported,
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
++  // Ash starts before any application, so the name is free; an installed
++  // file manager's activation file never gets used, and one already running
++  // as a daemon gives the name up.
++  bus_->RequestOwnership(kServiceName, dbus::Bus::REQUIRE_PRIMARY,
++                         base::BindOnce(&AuraDeFileManagerService::OnOwnership,
++                                        weak_ptr_factory_.GetWeakPtr()));
++}
++
++AuraDeFileManagerService::~AuraDeFileManagerService() {
++  if (bus_) {
++    bus_->UnregisterExportedObject(dbus::ObjectPath(kObjectPath));
++  }
++}
++
++// static
++GURL AuraDeFileManagerService::MakeFilesUrl(
++    const base::FilePath& directory,
++    const std::vector<base::FilePath>& selection,
++    bool properties) {
++  base::DictValue args;
++  args.Set("type", "full-page");
++  args.Set("auradeDirectory", directory.value());
++  base::ListValue selected;
++  for (const base::FilePath& path : selection) {
++    selected.Append(path.value());
++  }
++  args.Set("auradeSelection", std::move(selected));
++  if (properties) {
++    args.Set("auradeProperties", true);
++  }
++  return GURL(std::string(kFilesAppUrl) + "?" +
++              base::EscapeUrlEncodedData(base::WriteJson(args).value_or("{}"),
++                                         /*use_plus=*/false));
++}
++
++// static
++void AuraDeFileManagerService::ShowInFiles(
++    const base::FilePath& directory,
++    const std::vector<base::FilePath>& selection,
++    bool properties) {
++  Profile* profile = ProfileManager::GetActiveUserProfile();
++  if (!profile) {
++    LOG(ERROR) << "AuraDE could not show " << directory
++               << " with no user signed in";
++    return;
++  }
++  SystemAppLaunchParams params;
++  params.url = MakeFilesUrl(directory, selection, properties);
++  LaunchSystemWebAppAsync(profile, SystemWebAppType::FILE_MANAGER, params);
++}
++
++void AuraDeFileManagerService::HandleShow(
++    Show show,
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::vector<std::string> uris;
++  if (!reader.PopArrayOfStrings(&uris)) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(method_call, kInvalidArgsError,
++                                                 "Expected an array of URIs"));
++    return;
++  }
++
++  std::vector<base::FilePath> paths;
++  for (const std::string& uri : uris) {
++    if (std::optional<base::FilePath> path = PathOf(uri)) {
++      paths.push_back(*path);
++    }
++  }
++
++  if (show == Show::kFolders) {
++    for (size_t i = 0; i < paths.size() && i < kMaxWindows; ++i) {
++      ShowInFiles(paths[i], {}, /*properties=*/false);
++    }
++  } else {
++    // One window per folder, with everything asked for in it selected.
++    std::map<base::FilePath, std::vector<base::FilePath>> by_folder;
++    for (const base::FilePath& path : paths) {
++      by_folder[path.DirName()].push_back(path);
++    }
++    size_t windows = 0;
++    for (const auto& [folder, items] : by_folder) {
++      if (windows++ == kMaxWindows) {
++        break;
++      }
++      ShowInFiles(folder, items, show == Show::kProperties);
++    }
++  }
++  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
++}
++
++void AuraDeFileManagerService::OnExported(const std::string& interface_name,
++                                          const std::string& method_name,
++                                          bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not export " << interface_name << "."
++                          << method_name;
++}
++
++void AuraDeFileManagerService::OnOwnership(const std::string& service_name,
++                                           bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE could not own " << service_name;
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/file_manager/aurade_file_manager_service.h b/chrome/browser/ash/file_manager/aurade_file_manager_service.h
+new file mode 100644
+index 000000000000..d8291b9b20e1
+--- /dev/null
++++ b/chrome/browser/ash/file_manager/aurade_file_manager_service.h
+@@ -0,0 +1,64 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_MANAGER_SERVICE_H_
++#define CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_MANAGER_SERVICE_H_
++
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "dbus/exported_object.h"
++#include "url/gurl.h"
++
++namespace dbus {
++class Bus;
++class MethodCall;
++}  // namespace dbus
++
++namespace ash {
++
++// The session's org.freedesktop.FileManager1. Linux applications ask it to
++// show a folder, or a file in its folder ("Show in folder" on a download,
++// "Open containing folder" in an editor), and AuraDE Files does, rather than
++// whichever other file manager is installed starting up to do it.
++class AuraDeFileManagerService final {
++ public:
++  explicit AuraDeFileManagerService(scoped_refptr<dbus::Bus> bus);
++  AuraDeFileManagerService(const AuraDeFileManagerService&) = delete;
++  AuraDeFileManagerService& operator=(const AuraDeFileManagerService&) = delete;
++  ~AuraDeFileManagerService();
++
++  // The Files app's address for showing |directory| with |selection| picked
++  // in it, and the properties of the selection open when |properties|.
++  static GURL MakeFilesUrl(const base::FilePath& directory,
++                           const std::vector<base::FilePath>& selection,
++                           bool properties);
++
++  // Opens a Files window as MakeFilesUrl describes.
++  static void ShowInFiles(const base::FilePath& directory,
++                          const std::vector<base::FilePath>& selection,
++                          bool properties);
++
++ private:
++  enum class Show { kFolders, kItems, kProperties };
++
++  void HandleShow(Show show,
++                  dbus::MethodCall* method_call,
++                  dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++  void OnOwnership(const std::string& service_name, bool success);
++
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  base::WeakPtrFactory<AuraDeFileManagerService> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_MANAGER_SERVICE_H_
+diff --git a/chrome/browser/ash/main_parts/BUILD.gn b/chrome/browser/ash/main_parts/BUILD.gn
+index 5d39eaa2e066..6b50f0a1718b 100644
+--- a/chrome/browser/ash/main_parts/BUILD.gn
++++ b/chrome/browser/ash/main_parts/BUILD.gn
+@@ -55,6 +55,7 @@ static_library("main_parts") {
+     "//chrome/browser/ash/diagnostics",
+     "//chrome/browser/ash/events",
+     "//chrome/browser/ash/extensions",
++    "//chrome/browser/ash/file_manager",
+     "//chrome/browser/ash/extensions/login_screen_ui",
+     "//chrome/browser/ash/fwupd",
+     "//chrome/browser/ash/image_downloader",
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 65d19e210b68..896226479eac 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -114,6 +114,7 @@
+ #include "chrome/browser/ash/extensions/default_app_order.h"
+ #include "chrome/browser/ash/extensions/login_screen_ui/ui_handler.h"
+ #include "chrome/browser/ash/external_metrics/external_metrics.h"
++#include "chrome/browser/ash/file_manager/aurade_file_manager_service.h"
+ #include "chrome/browser/ash/fwupd/fwupd_download_client_impl.h"
+ #include "chrome/browser/ash/image_downloader/image_downloader_impl.h"
+ #include "chrome/browser/ash/input_method/input_method_configuration.h"
+@@ -433,6 +434,14 @@ class DBusServices {
+       // whether the desktop is light or dark and what its accent is. Ash
+       // answers, so they follow it rather than a fixed default.
+       desktop_appearance_service_host_ = DesktopAppearanceServiceHost::Create();
++      // AuraDE compatibility: AuraDE Files is the desktop's file manager.
++      // Applications that show a file in its folder ask the session bus for
++      // one, and found whatever else was installed; Ash answers instead.
++      if (desktop_appearance_service_host_) {
++        aurade_file_manager_service_ =
++            std::make_unique<AuraDeFileManagerService>(
++                desktop_appearance_service_host_->bus());
++      }
+       // AuraDE compatibility: removing or updating packages from Settings
+       // needs an administrator's password, and polkit refuses outright when
+       // the session has no agent to ask for one. Ash is that agent.
+@@ -673,6 +682,7 @@ class DBusServices {
+     SetBluetoothConfigServiceBinderForGenericLinux({});
+     aurade_bluetooth_service_.reset();
+     polkit_agent_service_.reset();
++    aurade_file_manager_service_.reset();
+     desktop_appearance_service_host_.reset();
+     desktop_notification_service_host_.reset();
+     machine_learning_decision_service_.reset();
+@@ -688,6 +698,7 @@ class DBusServices {
+       desktop_notification_service_host_;
+   std::unique_ptr<DesktopAppearanceServiceHost>
+       desktop_appearance_service_host_;
++  std::unique_ptr<AuraDeFileManagerService> aurade_file_manager_service_;
+   std::unique_ptr<PolkitAgentService> polkit_agent_service_;
+   std::unique_ptr<CrosDBusService> virtual_file_request_service_;
+   std::unique_ptr<CrosDBusService> component_updater_service_;
