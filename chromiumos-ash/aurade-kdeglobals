@@ -1,0 +1,13 @@
+# What Qt and KDE applications on AuraDE start from. Ash writes the live
+# colour scheme, fonts and icon theme beside this file in the runtime
+# directory, and those win; this is what an application sees before Ash
+# has written them, or when it is started outside the desktop with the
+# same configuration path. Your own ~/.config/kdeglobals wins over both.
+[General]
+ColorScheme=AuraDE
+
+[Icons]
+Theme=breeze
+
+[KDE]
+widgetStyle=Breeze

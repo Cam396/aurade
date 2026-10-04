@@ -140,13 +140,33 @@ load_x11_resources() {
 link_gtk_style() {
     local style="${AURADE_GTK4_STYLE:-/usr/share/aurade/gtk-4.0/gtk.css}"
     local dir="${XDG_CONFIG_HOME:-${HOME}/.config}/gtk-4.0"
+    # The desktop's colours, which Ash writes into the runtime directory when
+    # it starts and again whenever they change. Imported after the style, so
+    # libadwaita applications take Ash's surfaces in both light and dark.
+    local colors="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/aurade/gtk-4.0/colors.css"
+    local ours="@import url(\"file://${style}\");"
+    local ours_colors="@import url(\"file://${colors}\");"
     [ -r "${style}" ] || return 0
-    [ -e "${dir}/gtk.css" ] || [ -L "${dir}/gtk.css" ] && return 0
+    [ -L "${dir}/gtk.css" ] && return 0
+    if [ -e "${dir}/gtk.css" ]; then
+        # A file an earlier AuraDE wrote gets the colours line under its
+        # style line; one without our line is the person's own and is left
+        # alone.
+        grep -qxF "${ours}" "${dir}/gtk.css" 2>/dev/null || return 0
+        grep -qF "/aurade/gtk-4.0/colors.css" "${dir}/gtk.css" && return 0
+        awk -v ours="${ours}" -v add="${ours_colors}" \
+            '{ print } $0 == ours && !done { print add; done = 1 }' \
+            "${dir}/gtk.css" >"${dir}/gtk.css.aurade-new" 2>/dev/null &&
+            mv -f "${dir}/gtk.css.aurade-new" "${dir}/gtk.css" 2>/dev/null ||
+            rm -f "${dir}/gtk.css.aurade-new" 2>/dev/null || true
+        return 0
+    fi
     mkdir -p "${dir}" 2>/dev/null || return 0
     printf '%s\n' \
-        "/* Added by AuraDE so GTK apps match the desktop. Remove the line below" \
+        "/* Added by AuraDE so GTK apps match the desktop. Remove the lines below" \
         "   to opt out; anything else in this file is yours. */" \
-        "@import url(\"file://${style}\");" >"${dir}/gtk.css" 2>/dev/null || true
+        "${ours}" \
+        "${ours_colors}" >"${dir}/gtk.css" 2>/dev/null || true
 }
 
 start_x11_bridge() {
