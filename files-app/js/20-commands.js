@@ -794,7 +794,7 @@ __BUILD("COMMAND_REGISTRATIONS")
   //: pane is for folders, as Files has it (areAllItemsFolders), and turning
   //: or showing a slideshow of pictures is for pictures; on a text file each
   //: was a row that did nothing useful. A row whose menu is about something
-  //: other than the list (the sidebar, Home, a tab) has no item kind and
+  //: other than an item (the background, the sidebar, Home, a tab) has no item kind and
   //: keeps its row.
   const isFolderRow = el => el.getAttribute('data-k') === 'Folder';
   const listRows = target => {
@@ -809,7 +809,7 @@ __BUILD("COMMAND_REGISTRATIONS")
   };
   const allImages = target => {
     const rows = listRows(target);
-    if (!rows) return oneImage() || selectedPaths().some(p => IMAGE_NAME.test(p));
+    if (!rows) return true;
     return rows.length > 0 && rows.every(el =>
       !isFolderRow(el) && IMAGE_NAME.test(el.getAttribute('data-n') || ''));
   };
@@ -827,10 +827,9 @@ __BUILD("COMMAND_REGISTRATIONS")
   const ARCHIVE_NAME = /\.(zip|7z|rar|tar|tgz|txz|tzst|tbz2?|gz|xz|zst|bz2|lz|lzma)$/i;
   const allArchives = target => {
     const rows = listRows(target);
-    const names = rows ? rows.filter(el => !isFolderRow(el))
-      .map(el => el.getAttribute('data-n') || '') : selectedPaths();
-    return names.length > 0 && (!rows || names.length === rows.length) &&
-      names.every(n => ARCHIVE_NAME.test(n));
+    if (!rows) return true;
+    return rows.every(el => !isFolderRow(el) &&
+      ARCHIVE_NAME.test(el.getAttribute('data-n') || ''));
   };
   ['DecompressArchive', 'DecompressArchiveHere', 'DecompressArchiveHereSmart',
    'DecompressArchiveToChildFolder'].forEach(code => {
