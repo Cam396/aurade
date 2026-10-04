@@ -1,0 +1,81 @@
+diff --git a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.cc b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.cc
+index c4bb3e8675a1..041560d10dcc 100644
+--- a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.cc
++++ b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.h"
+ 
++#include <utility>
++
+ #include "ash/multi_user/multi_user_window_manager.h"
+ #include "ash/public/cpp/shelf_model.h"
+ #include "ash/public/cpp/window_properties.h"
+@@ -11,6 +13,8 @@
+ #include "ash/wm/window_state.h"
+ #include "base/check_deref.h"
+ #include "base/containers/flat_tree.h"
++#include "base/logging.h"
++#include "base/system/sys_info.h"
+ #include "base/time/time.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+@@ -104,8 +108,7 @@ void AppServiceAppWindowCrostiniTracker::OnWindowVisibilityChanged(
+   const AccountId& primary_account_id =
+       user_manager::UserManager::Get()->GetPrimaryUser()->GetAccountId();
+ 
+-  Profile* primary_account_profile =
+-      ash::ProfileHelper::Get()->GetProfileByAccountId(primary_account_id);
++  Profile* primary_account_profile = PrimaryProfile();
+ 
+   // Windows without an application id set will get filtered out here.
+   const std::string& crostini_shelf_app_id = guest_os::GetGuestOsShelfAppId(
+@@ -230,9 +233,7 @@ std::string AppServiceAppWindowCrostiniTracker::GetShelfAppId(
+   // Currently Crostini can only be used from the primary profile. In the
+   // future, this may be replaced by some way of matching the container that
+   // runs this app with the user that owns it.
+-  Profile* primary_account_profile =
+-      ash::ProfileHelper::Get()->GetProfileByAccountId(
+-          user_manager::UserManager::Get()->GetPrimaryUser()->GetAccountId());
++  Profile* primary_account_profile = PrimaryProfile();
+   std::string shelf_app_id = guest_os::GetGuestOsShelfAppId(
+       primary_account_profile, exo::GetShellApplicationId(window),
+       exo::GetShellStartupId(window));
+@@ -252,6 +253,23 @@ std::string AppServiceAppWindowCrostiniTracker::GetShelfAppId(
+   return shelf_app_id;
+ }
+ 
++Profile* AppServiceAppWindowCrostiniTracker::PrimaryProfile() const {
++  Profile* profile = ash::ProfileHelper::Get()->GetProfileByAccountId(
++      user_manager::UserManager::Get()->GetPrimaryUser()->GetAccountId());
++  // AuraDE compatibility: the desktop's own Linux applications belong to its
++  // one user, whose profile the shelf already holds. The lookup by account can
++  // come back empty in an AuraDE session, and then no Linux application window
++  // was ever matched to its app: none had a shelf item or a running dot,
++  // however it was started.
++  if (!profile && !base::SysInfo::IsRunningOnChromeOS()) {
++    static bool logged = false;
++    LOG_IF(WARNING, !std::exchange(logged, true))
++        << "AuraDE: Linux app windows are matched in the shelf's profile";
++    profile = app_service_controller_->owner()->profile();
++  }
++  return profile;
++}
++
+ void AppServiceAppWindowCrostiniTracker::RegisterCrostiniWindowForForceClose(
+     aura::Window* window,
+     const std::string& app_name) {
+diff --git a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.h b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.h
+index e8bd2c9e1303..578671ba8f73 100644
+--- a/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.h
++++ b/chrome/browser/ui/ash/shelf/app_service/app_service_app_window_crostini_tracker.h
+@@ -45,6 +45,9 @@ class AppServiceAppWindowCrostiniTracker {
+   std::string GetShelfAppId(aura::Window* window) const;
+ 
+  private:
++  // The profile Linux application windows belong to.
++  Profile* PrimaryProfile() const;
++
+   void RegisterCrostiniWindowForForceClose(aura::Window* window,
+                                            const std::string& app_name);
+ 
