@@ -1,0 +1,835 @@
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index 5284de61d65a..dfe30e4f775d 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -28,6 +28,8 @@ static_library("dbus") {
+     "desktop_appearance_service.h",
+     "desktop_notification_service.cc",
+     "desktop_notification_service.h",
++    "desktop_theme_exporter.cc",
++    "desktop_theme_exporter.h",
+     "dlp_files_policy_service_provider.cc",
+     "dlp_files_policy_service_provider.h",
+     "drive_file_stream_service_provider.cc",
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.cc b/chrome/browser/ash/dbus/desktop_appearance_service.cc
+index 0b02f16cbba8..bb80113d9fef 100644
+--- a/chrome/browser/ash/dbus/desktop_appearance_service.cc
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.cc
+@@ -8,10 +8,13 @@
+ #include <string_view>
+ #include <utility>
+ 
++#include "base/environment.h"
++#include "base/files/file_path.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/strings/string_util.h"
+ #include "base/threading/thread.h"
++#include "chrome/browser/ash/dbus/desktop_theme_exporter.h"
+ #include "dbus/bus.h"
+ #include "dbus/message.h"
+ #include "dbus/object_path.h"
+@@ -239,6 +242,7 @@ DesktopAppearanceServiceHost::DesktopAppearanceServiceHost() = default;
+ 
+ DesktopAppearanceServiceHost::~DesktopAppearanceServiceHost() {
+   weak_ptr_factory_.InvalidateWeakPtrs();
++  theme_exporter_.reset();
+   service_.reset();
+   exported_object_.reset();
+   if (bus_) {
+@@ -280,6 +284,15 @@ bool DesktopAppearanceServiceHost::Start() {
+   exported_object_ = bus_->GetExportedObject(dbus::ObjectPath(kObjectPath));
+   service_ = std::make_unique<DesktopAppearanceService>();
+   service_->Start(exported_object_);
++  // The colours, fonts and icons KDE and libadwaita applications draw with
++  // go to this session's runtime directory, which the launcher puts first in
++  // their search paths.
++  if (std::optional<std::string> runtime_dir =
++          base::Environment::Create()->GetVar("XDG_RUNTIME_DIR");
++      runtime_dir && !runtime_dir->empty()) {
++    theme_exporter_ = std::make_unique<DesktopThemeExporter>(
++        bus_, base::FilePath(*runtime_dir));
++  }
+   bus_->RequestOwnership(
+       kServiceName, dbus::Bus::REQUIRE_PRIMARY_ALLOW_REPLACEMENT,
+       base::BindOnce(&DesktopAppearanceServiceHost::OnOwnership,
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.h b/chrome/browser/ash/dbus/desktop_appearance_service.h
+index af0c1bae6aaa..248f3e218bb2 100644
+--- a/chrome/browser/ash/dbus/desktop_appearance_service.h
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.h
+@@ -31,6 +31,8 @@ class MessageWriter;
+ 
+ namespace ash {
+ 
++class DesktopThemeExporter;
++
+ // What the desktop looks like, in the terms Linux applications ask for it.
+ struct DesktopAppearance {
+   // org.freedesktop.appearance color-scheme: 1 prefers dark, 2 prefers light.
+@@ -98,6 +100,7 @@ class DesktopAppearanceServiceHost final {
+   scoped_refptr<dbus::Bus> bus_;
+   scoped_refptr<dbus::ExportedObject> exported_object_;
+   std::unique_ptr<DesktopAppearanceService> service_;
++  std::unique_ptr<DesktopThemeExporter> theme_exporter_;
+   base::WeakPtrFactory<DesktopAppearanceServiceHost> weak_ptr_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/ash/dbus/desktop_theme_exporter.cc b/chrome/browser/ash/dbus/desktop_theme_exporter.cc
+new file mode 100644
+index 000000000000..4e5b3caef62a
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_theme_exporter.cc
+@@ -0,0 +1,422 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/desktop_theme_exporter.h"
++
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/strings/strcat.h"
++#include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "dbus/bus.h"
++#include "dbus/exported_object.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "ui/chromeos/styles/cros_tokens_color_mappings.h"
++#include "ui/color/color_provider.h"
++#include "ui/color/color_provider_key.h"
++#include "ui/color/color_provider_manager.h"
++#include "ui/gfx/color_palette.h"
++#include "ui/gfx/color_utils.h"
++#include "ui/gfx/font.h"
++#include "ui/gfx/font_list.h"
++
++namespace ash {
++namespace {
++
++// KDE applications reload their look when told to on the session bus:
++// org.kde.KGlobalSettings.notifyChange(type, arg) for colours and fonts, and
++// org.kde.KIconLoader.iconChanged(group) for icons.
++constexpr char kGlobalSettingsPath[] = "/KGlobalSettings";
++constexpr char kGlobalSettingsInterface[] = "org.kde.KGlobalSettings";
++constexpr char kNotifyChangeSignal[] = "notifyChange";
++constexpr char kIconLoaderPath[] = "/KIconLoader";
++constexpr char kIconLoaderInterface[] = "org.kde.KIconLoader";
++constexpr char kIconChangedSignal[] = "iconChanged";
++constexpr int kPaletteChanged = 0;
++constexpr int kFontChanged = 1;
++constexpr int kIconChanged = 4;
++// KIconLoader's groups, Desktop through Dialog.
++constexpr int kIconGroupCount = 6;
++
++// Ash's theme changes arrive in bursts, one per colour source.
++constexpr base::TimeDelta kExportDelay = base::Milliseconds(250);
++
++// Ash's body text is 13 pixels, ten points at the 96 DPI it is laid out in.
++constexpr int kFontPoints = 10;
++constexpr int kSmallFontPoints = 8;
++
++constexpr char kIconsDir[] = "/usr/share/icons";
++
++SkColor Solid(SkColor color, SkColor base) {
++  return SkColorGetA(color) == SK_AlphaOPAQUE
++             ? color
++             : color_utils::GetResultingPaintColor(color, base);
++}
++
++std::string Kde(SkColor color) {
++  return base::StringPrintf("%d,%d,%d", SkColorGetR(color), SkColorGetG(color),
++                            SkColorGetB(color));
++}
++
++std::string Css(SkColor color) {
++  return base::StringPrintf("#%02x%02x%02x", SkColorGetR(color),
++                            SkColorGetG(color), SkColorGetB(color));
++}
++
++// A font as QFont::toString() writes it: family, points, no pixel size, any
++// style hint, regular weight, upright, and the fields Qt 6 adds.
++std::string KdeFont(const std::string& family, int points) {
++  std::string name;
++  base::ReplaceChars(family, ",", " ", &name);
++  return base::StringPrintf("%s,%d,-1,5,400,0,0,0,0,0,0,0,0,0,0,1",
++                            name.c_str(), points);
++}
++
++void AppendColors(std::string& out,
++                  const char* group,
++                  SkColor background,
++                  SkColor alternate,
++                  SkColor foreground,
++                  SkColor inactive,
++                  SkColor active,
++                  const DesktopPalette& palette) {
++  base::StrAppend(&out, {"[Colors:",
++                         group,
++                         "]\n",
++                         "BackgroundAlternate=",
++                         Kde(alternate),
++                         "\n",
++                         "BackgroundNormal=",
++                         Kde(background),
++                         "\n",
++                         "DecorationFocus=",
++                         Kde(palette.focus),
++                         "\n",
++                         "DecorationHover=",
++                         Kde(palette.accent),
++                         "\n",
++                         "ForegroundActive=",
++                         Kde(active),
++                         "\n",
++                         "ForegroundInactive=",
++                         Kde(inactive),
++                         "\n",
++                         "ForegroundLink=",
++                         Kde(active),
++                         "\n",
++                         "ForegroundNegative=",
++                         Kde(palette.negative),
++                         "\n",
++                         "ForegroundNeutral=",
++                         Kde(palette.neutral),
++                         "\n",
++                         "ForegroundNormal=",
++                         Kde(foreground),
++                         "\n",
++                         "ForegroundPositive=",
++                         Kde(palette.positive),
++                         "\n",
++                         "ForegroundVisited=",
++                         Kde(palette.visited),
++                         "\n\n"});
++}
++
++void AppendGtkColors(std::string& out,
++                     const char* indent,
++                     const DesktopPalette& palette,
++                     bool dark) {
++  // libadwaita's window is nearly white and its sidebars darker in light
++  // mode, and the other way round in dark mode; Ash's surfaces keep that.
++  const SkColor window = dark ? palette.window : palette.view;
++  const SkColor sidebar = dark ? palette.button_alternate : palette.window;
++  const SkColor secondary_sidebar =
++      color_utils::AlphaBlend(sidebar, window, 0.5f);
++  const std::string text = Css(palette.text);
++  const auto line = [&](const char* name, SkColor color) {
++    base::StrAppend(&out, {indent, "--", name, ": ", Css(color), ";\n"});
++  };
++  const auto text_line = [&](const char* name) {
++    base::StrAppend(&out, {indent, "--", name, ": ", text, ";\n"});
++  };
++  line("window-bg-color", window);
++  text_line("window-fg-color");
++  line("view-bg-color", palette.view);
++  text_line("view-fg-color");
++  line("headerbar-bg-color", palette.header);
++  text_line("headerbar-fg-color");
++  line("headerbar-backdrop-color", palette.header_inactive);
++  line("sidebar-bg-color", sidebar);
++  text_line("sidebar-fg-color");
++  line("sidebar-backdrop-color", sidebar);
++  line("secondary-sidebar-bg-color", secondary_sidebar);
++  text_line("secondary-sidebar-fg-color");
++  line("secondary-sidebar-backdrop-color", secondary_sidebar);
++  line("dialog-bg-color", palette.raised);
++  text_line("dialog-fg-color");
++  line("popover-bg-color", palette.raised);
++  text_line("popover-fg-color");
++}
++
++// Writes the files for |theme| under |dir|. Returns the icon theme named in
++// them, or nothing when they could not be written.
++std::optional<std::string> WriteThemeFiles(const base::FilePath& dir,
++                                           const DesktopTheme& theme) {
++  std::string icon_theme;
++  const base::FilePath icons(kIconsDir);
++  if (theme.dark && base::DirectoryExists(icons.Append("breeze-dark"))) {
++    icon_theme = "breeze-dark";
++  } else if (base::DirectoryExists(icons.Append("breeze"))) {
++    icon_theme = "breeze";
++  }
++
++  const base::FilePath kde_dir = dir.Append("xdg");
++  const base::FilePath gtk_dir = dir.Append("gtk-4.0");
++  if (!base::CreateDirectory(kde_dir) || !base::CreateDirectory(gtk_dir)) {
++    LOG(ERROR) << "AuraDE could not make " << dir << " for the desktop theme";
++    return std::nullopt;
++  }
++  const bool kde_written = base::ImportantFileWriter::WriteFileAtomically(
++      kde_dir.Append("kdeglobals"), BuildKdeGlobals(theme, icon_theme));
++  const bool gtk_written = base::ImportantFileWriter::WriteFileAtomically(
++      gtk_dir.Append("colors.css"), BuildGtk4Colors(theme));
++  if (!kde_written || !gtk_written) {
++    LOG(ERROR) << "AuraDE could not write the desktop theme under " << dir;
++    return std::nullopt;
++  }
++  return icon_theme;
++}
++
++}  // namespace
++
++std::optional<DesktopPalette> ReadDesktopPalette(
++    const ui::ColorProvider& provider,
++    bool dark) {
++  const auto get = [&provider](ui::ColorId id) {
++    return provider.GetColor(id);
++  };
++  const SkColor app_base = get(cros_tokens::kCrosSysAppBase);
++  // Until Ash adds its colour mixers its tokens are unresolved.
++  if (app_base == gfx::kPlaceholderColor) {
++    return std::nullopt;
++  }
++
++  DesktopPalette palette;
++  palette.view = Solid(app_base, dark ? SK_ColorBLACK : SK_ColorWHITE);
++  // Ash's shaded surface is pure black in dark mode, too stark for a whole
++  // window; its plain surface is the tone just above the content.
++  palette.window = Solid(get(dark ? cros_tokens::kCrosSysSurface
++                                  : cros_tokens::kCrosSysAppBaseShaded),
++                         palette.view);
++  palette.header = Solid(get(cros_tokens::kCrosSysHeader), palette.window);
++  palette.header_inactive =
++      Solid(get(cros_tokens::kCrosSysHeaderUnfocused), palette.window);
++  palette.text = Solid(get(cros_tokens::kCrosSysOnSurface), palette.view);
++  palette.text_secondary =
++      Solid(get(cros_tokens::kCrosSysOnSurfaceVariant), palette.view);
++  palette.view_alternate =
++      color_utils::AlphaBlend(palette.text, palette.view, SkAlpha{0x08});
++  palette.button = Solid(
++      get(dark ? cros_tokens::kCrosSysSurface3 : cros_tokens::kCrosSysAppBase),
++      palette.window);
++  palette.button_alternate =
++      Solid(get(cros_tokens::kCrosSysSurface2), palette.window);
++  palette.raised =
++      Solid(get(cros_tokens::kCrosSysBaseElevated), palette.window);
++  palette.accent = Solid(get(cros_tokens::kCrosSysPrimary), palette.view);
++  palette.on_accent =
++      Solid(get(cros_tokens::kCrosSysOnPrimary), palette.accent);
++  palette.accent_container =
++      Solid(get(cros_tokens::kCrosSysPrimaryContainer), palette.view);
++  palette.focus = Solid(get(cros_tokens::kCrosSysFocusRing), palette.view);
++  palette.visited = Solid(get(cros_tokens::kCrosSysTertiary), palette.view);
++  palette.negative = Solid(get(cros_tokens::kCrosSysError), palette.view);
++  palette.neutral = Solid(get(cros_tokens::kCrosSysWarning), palette.view);
++  palette.positive = Solid(get(cros_tokens::kCrosSysPositive), palette.view);
++  palette.tooltip =
++      Solid(get(cros_tokens::kCrosSysInverseSurface), palette.view);
++  palette.on_tooltip =
++      Solid(get(cros_tokens::kCrosSysInverseOnSurface), palette.tooltip);
++  return palette;
++}
++
++std::string BuildKdeGlobals(const DesktopTheme& theme,
++                            const std::string& icon_theme) {
++  const DesktopPalette& p = theme.current();
++  std::string out =
++      "# Written by Ash for this session and rewritten when the wallpaper or\n"
++      "# the light or dark mode changes. Settings of your own belong in\n"
++      "# ~/.config/kdeglobals, which is read first.\n\n";
++  // Breeze's own effects: disabled text fades toward the background, and
++  // inactive windows keep their colours, as Ash's do.
++  out +=
++      "[ColorEffects:Disabled]\nColor=56,56,56\nColorAmount=0\nColorEffect=0\n"
++      "ContrastAmount=0.65\nContrastEffect=1\nIntensityAmount=0.1\n"
++      "IntensityEffect=2\n\n"
++      "[ColorEffects:Inactive]\nChangeSelectionColor=false\nEnable=false\n\n";
++  AppendColors(out, "Button", p.button, p.button_alternate, p.text,
++               p.text_secondary, p.accent, p);
++  AppendColors(out, "Complementary", p.tooltip, p.tooltip, p.on_tooltip,
++               p.on_tooltip, p.accent, p);
++  // The toolbar area under Ash's frame, in the frame's colour so the two read
++  // as one header.
++  AppendColors(out, "Header", p.header, p.header, p.text, p.text_secondary,
++               p.accent, p);
++  AppendColors(out, "Header][Inactive", p.header_inactive, p.header_inactive,
++               p.text, p.text_secondary, p.accent, p);
++  AppendColors(out, "Selection", p.accent, p.accent_container, p.on_accent,
++               p.on_accent, p.on_accent, p);
++  AppendColors(out, "Tooltip", p.tooltip, p.tooltip, p.on_tooltip, p.on_tooltip,
++               p.accent, p);
++  AppendColors(out, "View", p.view, p.view_alternate, p.text, p.text_secondary,
++               p.accent, p);
++  AppendColors(out, "Window", p.window, p.view, p.text, p.text_secondary,
++               p.accent, p);
++
++  out += "[General]\nColorScheme=AuraDE\n";
++  if (!theme.font_family.empty()) {
++    const std::string font = KdeFont(theme.font_family, kFontPoints);
++    base::StrAppend(&out, {"font=", font, "\nmenuFont=", font,
++                           "\ntoolBarFont=", font, "\nsmallestReadableFont=",
++                           KdeFont(theme.font_family, kSmallFontPoints), "\n"});
++  }
++  out += "\n";
++  if (!icon_theme.empty()) {
++    base::StrAppend(&out, {"[Icons]\nTheme=", icon_theme, "\n\n"});
++  }
++  out += "[KDE]\ncontrast=4\nwidgetStyle=Breeze\n\n";
++  base::StrAppend(&out, {"[WM]\nactiveBackground=", Kde(p.header),
++                         "\nactiveForeground=", Kde(p.text),
++                         "\ninactiveBackground=", Kde(p.header_inactive),
++                         "\ninactiveForeground=", Kde(p.text_secondary), "\n"});
++  return out;
++}
++
++std::string BuildGtk4Colors(const DesktopTheme& theme) {
++  std::string out =
++      "/* Written by Ash for this session: the desktop's colours for\n"
++      "   libadwaita applications, read when they start. */\n"
++      ":root {\n";
++  AppendGtkColors(out, "  ", theme.light, /*dark=*/false);
++  out += "}\n\n@media (prefers-color-scheme: dark) {\n  :root {\n";
++  AppendGtkColors(out, "    ", theme.dark_palette, /*dark=*/true);
++  out += "  }\n}\n";
++  return out;
++}
++
++DesktopThemeExporter::DesktopThemeExporter(scoped_refptr<dbus::Bus> bus,
++                                           const base::FilePath& runtime_dir)
++    : bus_(std::move(bus)),
++      file_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
++      runtime_dir_(runtime_dir) {
++  global_settings_ =
++      bus_->GetExportedObject(dbus::ObjectPath(kGlobalSettingsPath));
++  icon_loader_ = bus_->GetExportedObject(dbus::ObjectPath(kIconLoaderPath));
++  theme_observation_.Observe(ui::NativeTheme::GetInstanceForNativeUi());
++  Export();
++}
++
++DesktopThemeExporter::~DesktopThemeExporter() = default;
++
++void DesktopThemeExporter::OnNativeThemeUpdated(
++    ui::NativeTheme* observed_theme) {
++  export_timer_.Start(FROM_HERE, kExportDelay,
++                      base::BindOnce(&DesktopThemeExporter::Export,
++                                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void DesktopThemeExporter::Export() {
++  const ui::ColorProviderKey key =
++      ui::NativeTheme::GetInstanceForNativeUi()->GetColorProviderKey(
++          /*custom_theme=*/nullptr);
++  DesktopTheme theme;
++  theme.dark = key.color_mode == ui::ColorProviderKey::ColorMode::kDark;
++
++  // Each mode is read before the next provider is asked for, since asking can
++  // drop an older one from the manager's cache.
++  auto& manager = ui::ColorProviderManager::Get();
++  ui::ColorProviderKey mode_key = key;
++  mode_key.color_mode = ui::ColorProviderKey::ColorMode::kLight;
++  const ui::ColorProvider* provider = manager.GetColorProviderFor(mode_key);
++  std::optional<DesktopPalette> light =
++      provider ? ReadDesktopPalette(*provider, /*dark=*/false) : std::nullopt;
++  mode_key.color_mode = ui::ColorProviderKey::ColorMode::kDark;
++  provider = manager.GetColorProviderFor(mode_key);
++  std::optional<DesktopPalette> dark =
++      provider ? ReadDesktopPalette(*provider, /*dark=*/true) : std::nullopt;
++  if (!light || !dark) {
++    return;
++  }
++  theme.light = *light;
++  theme.dark_palette = *dark;
++  theme.font_family = gfx::FontList().GetPrimaryFont().GetActualFontName();
++  if (written_ && *written_ == theme) {
++    return;
++  }
++
++  file_task_runner_->PostTaskAndReplyWithResult(
++      FROM_HERE,
++      base::BindOnce(&WriteThemeFiles, runtime_dir_.Append("aurade"), theme),
++      base::BindOnce(
++          [](base::WeakPtr<DesktopThemeExporter> exporter, DesktopTheme theme,
++             std::optional<std::string> icon_theme) {
++            if (exporter) {
++              exporter->OnWritten(std::move(theme), icon_theme.value_or(""),
++                                  icon_theme.has_value());
++            }
++          },
++          weak_ptr_factory_.GetWeakPtr(), theme));
++}
++
++void DesktopThemeExporter::OnWritten(DesktopTheme theme,
++                                     const std::string& icon_theme,
++                                     bool written) {
++  if (!written) {
++    return;
++  }
++  // The first write tells everyone everything: applications can outlive an
++  // Ash that restarted in the other mode.
++  const bool first = !written_;
++  const bool palette_changed = first || written_->dark != theme.dark ||
++                               written_->light != theme.light ||
++                               written_->dark_palette != theme.dark_palette;
++  const bool font_changed = first || written_->font_family != theme.font_family;
++  const bool icons_changed = first || written_icon_theme_ != icon_theme;
++  written_ = std::move(theme);
++  written_icon_theme_ = icon_theme;
++
++  if (palette_changed) {
++    NotifyKde(kPaletteChanged, 0);
++  }
++  if (font_changed) {
++    NotifyKde(kFontChanged, 0);
++  }
++  if (icons_changed) {
++    for (int group = 0; group < kIconGroupCount; ++group) {
++      NotifyKde(kIconChanged, group);
++      dbus::Signal signal(kIconLoaderInterface, kIconChangedSignal);
++      dbus::MessageWriter writer(&signal);
++      writer.AppendInt32(group);
++      icon_loader_->SendSignal(&signal);
++    }
++  }
++}
++
++void DesktopThemeExporter::NotifyKde(int type, int arg) {
++  dbus::Signal signal(kGlobalSettingsInterface, kNotifyChangeSignal);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendInt32(type);
++  writer.AppendInt32(arg);
++  global_settings_->SendSignal(&signal);
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/dbus/desktop_theme_exporter.h b/chrome/browser/ash/dbus/desktop_theme_exporter.h
+new file mode 100644
+index 000000000000..62eef7612286
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_theme_exporter.h
+@@ -0,0 +1,132 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_DESKTOP_THEME_EXPORTER_H_
++#define CHROME_BROWSER_ASH_DBUS_DESKTOP_THEME_EXPORTER_H_
++
++#include <optional>
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "base/timer/timer.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
++
++namespace base {
++class SequencedTaskRunner;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class ExportedObject;
++}  // namespace dbus
++
++namespace ui {
++class ColorProvider;
++}  // namespace ui
++
++namespace ash {
++
++// One mode of the desktop's palette, in the roles Linux toolkits draw with.
++struct DesktopPalette {
++  // The window frame Ash draws, and the same when the window is inactive.
++  SkColor header = SK_ColorBLACK;
++  SkColor header_inactive = SK_ColorBLACK;
++  // Panels, toolbars and dialogs; lists and documents; buttons.
++  SkColor window = SK_ColorBLACK;
++  SkColor view = SK_ColorBLACK;
++  SkColor view_alternate = SK_ColorBLACK;
++  SkColor button = SK_ColorBLACK;
++  SkColor button_alternate = SK_ColorBLACK;
++  // Menus, popovers and dialogs raised above the window.
++  SkColor raised = SK_ColorBLACK;
++  SkColor text = SK_ColorBLACK;
++  SkColor text_secondary = SK_ColorBLACK;
++  SkColor accent = SK_ColorBLACK;
++  SkColor on_accent = SK_ColorBLACK;
++  SkColor accent_container = SK_ColorBLACK;
++  SkColor focus = SK_ColorBLACK;
++  SkColor visited = SK_ColorBLACK;
++  SkColor negative = SK_ColorBLACK;
++  SkColor neutral = SK_ColorBLACK;
++  SkColor positive = SK_ColorBLACK;
++  SkColor tooltip = SK_ColorBLACK;
++  SkColor on_tooltip = SK_ColorBLACK;
++
++  bool operator==(const DesktopPalette&) const = default;
++};
++
++// What Linux applications are told the desktop looks like.
++struct DesktopTheme {
++  bool dark = false;
++  DesktopPalette light;
++  DesktopPalette dark_palette;
++  // The family Ash draws its own text in.
++  std::string font_family;
++
++  const DesktopPalette& current() const { return dark ? dark_palette : light; }
++  bool operator==(const DesktopTheme&) const = default;
++};
++
++// Reads |provider|'s colours into the roles above. Returns nothing while
++// Ash's colours are not resolved yet.
++std::optional<DesktopPalette> ReadDesktopPalette(
++    const ui::ColorProvider& provider,
++    bool dark);
++
++// The kdeglobals KDE applications read their colours, fonts and icons from.
++// |icon_theme| is left out when empty.
++std::string BuildKdeGlobals(const DesktopTheme& theme,
++                            const std::string& icon_theme);
++
++// The libadwaita colours for both modes, as a GTK 4 stylesheet.
++std::string BuildGtk4Colors(const DesktopTheme& theme);
++
++// Hands Ash's look to the Linux applications on the desktop. KDE applications
++// read colours, fonts and icons from kdeglobals and reload them when told to
++// on the session bus; libadwaita applications read a stylesheet at startup.
++// Both are written to this session's runtime directory, which the launcher
++// puts first in their search paths, and rewritten whenever the wallpaper or
++// the light or dark mode changes, so the applications follow Ash as its own
++// windows do.
++class DesktopThemeExporter final : public ui::NativeThemeObserver {
++ public:
++  // Writes under |runtime_dir|/aurade and signals on |bus|.
++  DesktopThemeExporter(scoped_refptr<dbus::Bus> bus,
++                       const base::FilePath& runtime_dir);
++  DesktopThemeExporter(const DesktopThemeExporter&) = delete;
++  DesktopThemeExporter& operator=(const DesktopThemeExporter&) = delete;
++  ~DesktopThemeExporter() override;
++
++  // ui::NativeThemeObserver:
++  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
++
++ private:
++  void Export();
++  void OnWritten(DesktopTheme theme,
++                 const std::string& icon_theme,
++                 bool written);
++  void NotifyKde(int type, int arg);
++
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> global_settings_;
++  scoped_refptr<dbus::ExportedObject> icon_loader_;
++  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
++  const base::FilePath runtime_dir_;
++  // What the files on disk say, once written.
++  std::optional<DesktopTheme> written_;
++  std::string written_icon_theme_;
++  base::OneShotTimer export_timer_;
++  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
++      theme_observation_{this};
++  base::WeakPtrFactory<DesktopThemeExporter> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_THEME_EXPORTER_H_
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index a4963438f3c9..f3e213ba8891 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -25,6 +25,7 @@
+ #include "base/files/file_path.h"
+ #include "base/files/file_path_watcher.h"
+ #include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
+ #include "base/json/json_reader.h"
+ #include "base/process/launch.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -49,10 +50,10 @@
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/window_open_disposition.h"
+-#include "ui/gfx/codec/png_codec.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
++#include "ui/gfx/codec/png_codec.h"
+ 
+ namespace {
+ 
+@@ -77,6 +78,8 @@ constexpr char kAuraDeHostVmName[] = "aurade-host";
+ constexpr char kAuraDeHostContainerName[] = "host";
+ constexpr char kAuraDeHostWaylandSocket[] = "wayland-0";
+ constexpr char kAuraDeNestedWestonPath[] = "/usr/bin/weston";
++constexpr char kAuraDeKdePlatformTheme[] =
++    "/usr/lib/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so";
+ 
+ using apps::AuraDeHostDesktopApp;
+ 
+@@ -846,6 +849,109 @@ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
+   return apps;
+ }
+ 
++// The environment a host application starts in, on top of Ash's own.
++base::EnvironmentMap AuraDeHostAppEnvironment(
++    base::Environment& environment,
++    const std::string& wayland_display) {
++  base::EnvironmentMap env;
++  env["WAYLAND_DISPLAY"] = wayland_display;
++  env["GDK_BACKEND"] = "wayland";
++  // AuraDE compatibility: X11 applications reach exo through
++  // xwayland-satellite, which the session starts on this display once exo is
++  // up. Without it an X11-only application had nowhere to draw and exited.
++  if (std::optional<std::string> x11_display =
++          environment.GetVar("AURADE_HOST_APP_X11_DISPLAY");
++      x11_display && !x11_display->empty()) {
++    env["DISPLAY"] = *x11_display;
++  }
++  env["QT_QPA_PLATFORM"] = "wayland";
++  // AuraDE compatibility: with no platform theme Qt drew every application in
++  // its light default whatever the desktop was. KDE's own theme, when
++  // plasma-integration is installed, reads the colours, fonts and icons Ash
++  // writes for this session and follows them as they change; Qt's portal
++  // theme only knows light from dark. A theme the session already chose,
++  // such as qt6ct, is kept.
++  if (!environment.HasVar("QT_QPA_PLATFORMTHEME")) {
++    env["QT_QPA_PLATFORMTHEME"] =
++        base::PathExists(base::FilePath(kAuraDeKdePlatformTheme))
++            ? "kde"
++            : "xdgdesktopportal";
++  }
++  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
++  // when installed, is the modern one and still takes its colours from the
++  // desktop. A style the session already chose is kept.
++  if (!environment.HasVar("QT_STYLE_OVERRIDE") &&
++      base::PathExists(
++          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
++    env["QT_STYLE_OVERRIDE"] = "Breeze";
++  }
++  // AuraDE compatibility: Ash writes this session's kdeglobals under the
++  // runtime directory, and AuraDE ships Breeze's settings beside the system
++  // defaults, so both go ahead of them. The user's own ~/.config is still
++  // read before any of these.
++  std::string config_dirs = "/usr/share/aurade/xdg:";
++  if (std::optional<std::string> runtime_dir =
++          environment.GetVar("XDG_RUNTIME_DIR");
++      runtime_dir && !runtime_dir->empty()) {
++    config_dirs = *runtime_dir + "/aurade/xdg:" + config_dirs;
++  }
++  std::optional<std::string> system_config_dirs =
++      environment.GetVar("XDG_CONFIG_DIRS");
++  config_dirs += system_config_dirs && !system_config_dirs->empty()
++                     ? *system_config_dirs
++                     : std::string("/etc/xdg");
++  env["XDG_CONFIG_DIRS"] = config_dirs;
++  // AuraDE compatibility: open and save dialogs go through the desktop
++  // portal, which Ash answers with the AuraDE Files picker, so KDE, GTK and
++  // Firefox ask for files the way the rest of the desktop does.
++  env["PLASMA_INTEGRATION_USE_PORTAL"] = "1";
++  env["GTK_USE_PORTAL"] = "1";
++  env["SDL_VIDEODRIVER"] = "wayland";
++  env["MOZ_ENABLE_WAYLAND"] = "1";
++  env["NO_AT_BRIDGE"] = "1";
++  env["XDG_CURRENT_DESKTOP"] = "AuraDE";
++  env["XDG_SESSION_DESKTOP"] = "aurade";
++  env["DESKTOP_SESSION"] = "aurade";
++  return env;
++}
++
++// AuraDE compatibility: the Files app opens files in Linux applications
++// through its file service, a user service that has none of this session's
++// display or bus. It reads them from here, so an application it starts lands
++// on this desktop in the environment the launcher would have given it.
++void WriteAuraDeAppEnvironmentOnThread() {
++  auto environment = base::Environment::Create();
++  std::optional<std::string> runtime_dir =
++      environment->GetVar("XDG_RUNTIME_DIR");
++  if (!runtime_dir || runtime_dir->empty()) {
++    return;
++  }
++  base::EnvironmentMap env = AuraDeHostAppEnvironment(
++      *environment, ChooseAuraDeHostWaylandDisplay(*environment));
++  for (const std::string& name : {std::string("DBUS_SESSION_BUS_ADDRESS"),
++                                 std::string("XDG_RUNTIME_DIR"),
++                                 std::string("XDG_SESSION_TYPE")}) {
++    if (std::optional<std::string> value = environment->GetVar(name);
++        value && !value->empty()) {
++      env[name] = *value;
++    }
++  }
++  std::string contents =
++      "# Written by Ash: what Linux applications start with on this "
++      "desktop.\n";
++  for (const auto& [name, value] : env) {
++    if (value.find('\n') == std::string::npos) {
++      contents += name + "=" + value + "\n";
++    }
++  }
++  const base::FilePath dir = base::FilePath(*runtime_dir).Append("aurade");
++  if (!base::CreateDirectory(dir) ||
++      !base::ImportantFileWriter::WriteFileAtomically(
++          dir.Append("app-environment"), contents)) {
++    LOG(ERROR) << "AuraDE could not write the application environment";
++  }
++}
++
+ void LaunchAuraDeHostAppOnThread(std::string command) {
+   auto environment = base::Environment::Create();
+ 
+@@ -879,38 +985,7 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+       home && !home->empty()) {
+     options.current_directory = base::FilePath(*home);
+   }
+-  options.environment["WAYLAND_DISPLAY"] = wayland_display;
+-  options.environment["GDK_BACKEND"] = "wayland";
+-  // AuraDE compatibility: X11 applications reach exo through
+-  // xwayland-satellite, which the session starts on this display once exo is
+-  // up. Without it an X11-only application had nowhere to draw and exited.
+-  if (std::optional<std::string> x11_display =
+-          environment->GetVar("AURADE_HOST_APP_X11_DISPLAY");
+-      x11_display && !x11_display->empty()) {
+-    options.environment["DISPLAY"] = *x11_display;
+-  }
+-  options.environment["QT_QPA_PLATFORM"] = "wayland";
+-  // AuraDE compatibility: with no platform theme Qt drew every application in
+-  // its light default whatever the desktop was. Its portal theme reads the
+-  // same light or dark setting GTK does. A theme the session already chose,
+-  // such as qt6ct, is kept.
+-  if (!environment->HasVar("QT_QPA_PLATFORMTHEME")) {
+-    options.environment["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal";
+-  }
+-  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
+-  // when installed, is the modern one and still takes its colours from the
+-  // desktop. A style the session already chose is kept.
+-  if (!environment->HasVar("QT_STYLE_OVERRIDE") &&
+-      base::PathExists(
+-          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
+-    options.environment["QT_STYLE_OVERRIDE"] = "Breeze";
+-  }
+-  options.environment["SDL_VIDEODRIVER"] = "wayland";
+-  options.environment["MOZ_ENABLE_WAYLAND"] = "1";
+-  options.environment["NO_AT_BRIDGE"] = "1";
+-  options.environment["XDG_CURRENT_DESKTOP"] = "AuraDE";
+-  options.environment["XDG_SESSION_DESKTOP"] = "aurade";
+-  options.environment["DESKTOP_SESSION"] = "aurade";
++  options.environment = AuraDeHostAppEnvironment(*environment, wayland_display);
+   // AuraDE compatibility: the language and the GPU are the session's. Both
+   // were pinned here once (C.UTF-8, and software GL with GTK's cairo
+   // renderer), which opened every application in English and drew Firefox on
+@@ -972,6 +1047,9 @@ CrostiniApps::~CrostiniApps() {
+ void CrostiniApps::Initialize() {
+   GuestOSApps::Initialize();
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
++    base::ThreadPool::PostTask(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++        base::BindOnce(&WriteAuraDeAppEnvironmentOnThread));
+     RefreshAuraDeHostApps();
+     aurade_host_apps_watcher_ = base::SequenceBound<AuraDeHostAppsWatcher>(
+         base::ThreadPool::CreateSequencedTaskRunner(
