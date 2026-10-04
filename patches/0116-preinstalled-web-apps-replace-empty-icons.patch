@@ -1,0 +1,88 @@
+diff --git a/chrome/browser/web_applications/preinstalled_web_app_manager.cc b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
+index a31934718190..d896f5e29141 100644
+--- a/chrome/browser/web_applications/preinstalled_web_app_manager.cc
++++ b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
+@@ -577,6 +577,47 @@ void MaybeForceInstallForRemigration(
+ }
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
++// AuraDE: an unclean shutdown can leave an installed app's icon files at zero
++// bytes. Chrome never fetches them again and the manifest update refuses to run
++// over icons it cannot read, so the app keeps a blank icon for good. Returns
++// the install URLs of the apps whose resources hold an empty icon.
++std::vector<GURL> FindAppsWithEmptyIcons(
++    std::vector<std::pair<GURL, base::FilePath>> app_dirs) {
++  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
++                                                base::BlockingType::MAY_BLOCK);
++  std::vector<GURL> broken;
++  for (const auto& [install_url, dir] : app_dirs) {
++    // ALL, because the default only walks into folders that match the
++    // pattern, and the icons sit in folders such as "Icons".
++    base::FileEnumerator icons(
++        dir, /*recursive=*/true, base::FileEnumerator::FILES,
++        FILE_PATH_LITERAL("*.png"),
++        base::FileEnumerator::FolderSearchPolicy::ALL);
++    for (base::FilePath icon = icons.Next(); !icon.empty();
++         icon = icons.Next()) {
++      if (icons.GetInfo().GetSize() == 0) {
++        broken.push_back(install_url);
++        break;
++      }
++    }
++  }
++  return broken;
++}
++
++void ForceReinstallAppsWithEmptyIcons(
++    PreinstalledWebAppManager::ConsumeInstallOptions callback,
++    std::vector<ExternalInstallOptions> options_list,
++    std::vector<GURL> broken) {
++  for (ExternalInstallOptions& options : options_list) {
++    if (std::ranges::contains(broken, options.install_url)) {
++      LOG(WARNING) << "Reinstalling " << options.install_url
++                   << " to replace its empty icon files";
++      options.force_reinstall = true;
++    }
++  }
++  std::move(callback).Run(std::move(options_list));
++}
++
+ }  // namespace
+ 
+ PreinstalledAppForUpdating::PreinstalledAppForUpdating(
+@@ -1041,7 +1082,34 @@ void PreinstalledWebAppManager::PostProcessConfigs(
+   base::UmaHistogramCounts100(kHistogramCorruptUserUninstallPrefsCount,
+                               corrupt_user_uninstall_prefs_count);
+ 
+-  std::move(callback).Run(parsed_configs.options_list);
++  // AuraDE: look for installed apps left with empty icon files before the
++  // synchronize runs, so it can install them again.
++  std::vector<std::pair<GURL, base::FilePath>> app_dirs;
++  const base::FilePath web_apps_root = GetWebAppsRootDirectory(profile_);
++  for (const ExternalInstallOptions& options : parsed_configs.options_list) {
++    if (options.force_reinstall) {
++      continue;
++    }
++    const WebApp* app =
++        provider_->registrar_unsafe().LookUpAppByInstallSourceInstallUrl(
++            WebAppManagement::Type::kDefault, options.install_url);
++    if (app) {
++      app_dirs.emplace_back(options.install_url,
++                            GetManifestResourcesDirectoryForApp(
++                                web_apps_root, app->app_id()));
++    }
++  }
++  if (app_dirs.empty()) {
++    std::move(callback).Run(parsed_configs.options_list);
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
++      base::BindOnce(&FindAppsWithEmptyIcons, std::move(app_dirs)),
++      base::BindOnce(&ForceReinstallAppsWithEmptyIcons, std::move(callback),
++                     std::move(parsed_configs.options_list)));
+ }
+ 
+ void PreinstalledWebAppManager::Synchronize(
