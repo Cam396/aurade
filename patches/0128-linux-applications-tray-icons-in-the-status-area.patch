@@ -1,0 +1,2538 @@
+diff --git a/ash/BUILD.gn b/ash/BUILD.gn
+index 5d05bed0e10f..39a4762907e7 100644
+--- a/ash/BUILD.gn
++++ b/ash/BUILD.gn
+@@ -2518,6 +2518,8 @@ component("ash") {
+     "system/tray/hover_highlight_view.h",
+     "system/tray/imaged_tray_icon.cc",
+     "system/tray/imaged_tray_icon.h",
++    "system/tray/interactive_tray_icon.cc",
++    "system/tray/interactive_tray_icon.h",
+     "system/tray/interacted_by_tap_recorder.cc",
+     "system/tray/interacted_by_tap_recorder.h",
+     "system/tray/size_range_layout.cc",
+diff --git a/ash/shell.cc b/ash/shell.cc
+index c2e23449db5e..b26076e8cb99 100644
+--- a/ash/shell.cc
++++ b/ash/shell.cc
+@@ -352,6 +352,14 @@ TrayIconConfiguration::TrayIconConfiguration() = default;
+ 
+ TrayIconConfiguration::~TrayIconConfiguration() = default;
+ 
++TrayIconHandlers::TrayIconHandlers() = default;
++
++TrayIconHandlers::TrayIconHandlers(TrayIconHandlers&&) = default;
++
++TrayIconHandlers& TrayIconHandlers::operator=(TrayIconHandlers&&) = default;
++
++TrayIconHandlers::~TrayIconHandlers() = default;
++
+ ////////////////////////////////////////////////////////////////////////////////
+ // Shell, static:
+ 
+@@ -725,6 +733,10 @@ bool Shell::AddStatusTrayIcon(const TrayIconConfiguration& configuration,
+ bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
+                                  int64_t display_id) {
+   aura::Window* root_window = GetRootWindowForDisplayId(display_id);
++  // AuraDE compatibility: a monitor can be unplugged under its icons.
++  if (!root_window) {
++    return false;
++  }
+   auto* status_area = StatusAreaWidget::ForWindow(root_window);
+   return status_area->UpdateTrayIcon(configuration);
+ }
+@@ -732,10 +744,32 @@ bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
+ bool Shell::RemoveStatusTrayIcon(const TrayIconConfiguration& configuration,
+                                  int64_t display_id) {
+   aura::Window* root_window = GetRootWindowForDisplayId(display_id);
++  if (!root_window) {
++    return false;
++  }
+   auto* status_area = StatusAreaWidget::ForWindow(root_window);
+   return status_area->RemoveTrayIcon(configuration);
+ }
+ 
++bool Shell::AddStatusTrayIcon(const TrayIconConfiguration& configuration,
++                              int64_t display_id,
++                              TrayIconHandlers handlers) {
++  // A display can go between a caller looking and asking.
++  aura::Window* root_window = GetRootWindowForDisplayId(display_id);
++  auto* status_area =
++      root_window ? StatusAreaWidget::ForWindow(root_window) : nullptr;
++  return status_area &&
++         status_area->AddTrayIcon(configuration, std::move(handlers));
++}
++
++bool Shell::ShowStatusTrayIconMenu(const TrayIconConfiguration& configuration,
++                                   int64_t display_id) {
++  aura::Window* root_window = GetRootWindowForDisplayId(display_id);
++  auto* status_area =
++      root_window ? StatusAreaWidget::ForWindow(root_window) : nullptr;
++  return status_area && status_area->ShowTrayIconMenu(configuration);
++}
++
+ void Shell::RecreateMultiUserWindowManagerForTesting() {
+   // Destroy the object before instantiating the next one explicitly.
+   multi_user_window_manager_.reset();
+diff --git a/ash/shell.h b/ash/shell.h
+index 38357dcf7fb4..887d7714a27c 100644
+--- a/ash/shell.h
++++ b/ash/shell.h
+@@ -24,6 +24,7 @@
+ #include "ash/system/input_device_settings/touchscreen_metrics_recorder.h"
+ #include "ash/system/toast/system_nudge_pause_manager_impl.h"
+ #include "ash/wm/system_modal_container_event_filter_delegate.h"
++#include "base/functional/callback.h"
+ #include "base/functional/callback_forward.h"
+ #include "base/gtest_prod_util.h"
+ #include "base/memory/raw_ptr.h"
+@@ -73,6 +74,7 @@ class KeyboardUIFactory;
+ namespace ui {
+ class ContextFactory;
+ class KeyboardCapability;
++class SimpleMenuModel;
+ class UserActivityPowerManagerNotifier;
+ }  // namespace ui
+ 
+@@ -313,6 +315,28 @@ struct ASH_EXPORT TrayIconConfiguration {
+   std::optional<std::u16string> tool_tip;
+ };
+ 
++// AuraDE compatibility: how a status tray icon answers besides a plain click,
++// for the icons Linux applications put there. A null callback does nothing.
++struct ASH_EXPORT TrayIconHandlers {
++  TrayIconHandlers();
++  TrayIconHandlers(TrayIconHandlers&&);
++  TrayIconHandlers& operator=(TrayIconHandlers&&);
++  ~TrayIconHandlers();
++
++  // The left button, a tap or the keyboard pressed the icon at `screen_point`.
++  base::RepeatingCallback<void(const gfx::Point& screen_point)> activate;
++  // The middle button pressed it.
++  base::RepeatingCallback<void(const gfx::Point& screen_point)>
++      secondary_activate;
++  // The wheel turned over it, `delta` in wheel units, 120 a notch.
++  base::RepeatingCallback<void(int delta, bool horizontal)> scroll;
++  // The right button, a long press or the menu key, on the icon at
++  // `screen_point`: the menu to show, or null for none.
++  base::RepeatingCallback<std::unique_ptr<ui::SimpleMenuModel>(
++      const gfx::Point& screen_point)>
++      menu;
++};
++
+ // Shell is a singleton object that presents the Shell API and implements the
+ // RootWindow's delegate interface.
+ //
+@@ -964,6 +988,17 @@ class ASH_EXPORT Shell : public SessionObserver,
+   bool RemoveStatusTrayIcon(const TrayIconConfiguration& configuration,
+                             int64_t display_id);
+ 
++  // AuraDE compatibility: adds a status tray icon that answers through
++  // `handlers` rather than one callback.
++  bool AddStatusTrayIcon(const TrayIconConfiguration& configuration,
++                         int64_t display_id,
++                         TrayIconHandlers handlers);
++
++  // AuraDE compatibility: shows the menu of an icon added with handlers, as
++  // its right click would. Returns whether there was such an icon.
++  bool ShowStatusTrayIconMenu(const TrayIconConfiguration& configuration,
++                              int64_t display_id);
++
+   // Workaround for testing to simulat user sign-out without Chrome process
+   // termination, which conflicts with production behavior.
+   void RecreateMultiUserWindowManagerForTesting();
+diff --git a/ash/system/status_area_widget.cc b/ash/system/status_area_widget.cc
+index 2124fc5f279a..dd8451a7136f 100644
+--- a/ash/system/status_area_widget.cc
++++ b/ash/system/status_area_widget.cc
+@@ -40,6 +40,7 @@
+ #include "ash/system/status_area_animation_controller.h"
+ #include "ash/system/status_area_widget_delegate.h"
+ #include "ash/system/tray/imaged_tray_icon.h"
++#include "ash/system/tray/interactive_tray_icon.h"
+ #include "ash/system/tray/status_area_overflow_button_tray.h"
+ #include "ash/system/tray/tray_background_view.h"
+ #include "ash/system/tray/tray_constants.h"
+@@ -64,6 +65,7 @@
+ #include "ui/compositor/scoped_layer_animation_settings.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
++#include "ui/views/view_utils.h"
+ #include "ui/message_center/message_center.h"
+ #include "ui/message_center/message_center_types.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+@@ -78,6 +80,11 @@ uint64_t GetCustomIconId(const TrayIconConfiguration& configuration) {
+   return configuration.id + kCustomIconsBaseId;
+ }
+ 
++// Custom icons show while a user session is in front.
++bool IsCustomIconShown(session_manager::SessionState state) {
++  return !Shell::Get()->session_controller()->IsUserSessionBlocked();
++}
++
+ }  // namespace
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -776,6 +783,48 @@ bool StatusAreaWidget::RemoveTrayIcon(
+   return true;
+ }
+ 
++bool StatusAreaWidget::AddTrayIcon(const TrayIconConfiguration& configuration,
++                                   TrayIconHandlers handlers) {
++  const int64_t icon_id = GetCustomIconId(configuration);
++  if (custom_tray_buttons_ids_.contains(icon_id)) {
++    return false;
++  }
++
++  auto icon = std::make_unique<InteractiveTrayIcon>(
++      shelf_,
++      configuration.image ? ui::ImageModel::FromImageSkia(*configuration.image)
++                          : ui::ImageModel(),
++      configuration.tool_tip.value_or(u""), std::move(handlers));
++  icon->SetID(icon_id);
++  icon->SetVisiblePreferred(true);
++  icon->set_icon_visibility_callback(base::BindRepeating(&IsCustomIconShown));
++
++  custom_tray_buttons_ids_.insert(icon_id);
++
++  AddTrayButton(std::move(icon))->Initialize();
++
++  EnsureTrayOrder();
++  CalculateTargetBounds();
++  UpdateLayout(/*animate=*/true);
++  UpdateCollapseState();
++  return true;
++}
++
++bool StatusAreaWidget::ShowTrayIconMenu(
++    const TrayIconConfiguration& configuration) {
++  const int64_t icon_id = GetCustomIconId(configuration);
++  if (!custom_tray_buttons_ids_.contains(icon_id)) {
++    return false;
++  }
++  auto* icon = views::AsViewClass<InteractiveTrayIcon>(
++      status_area_widget_delegate_->GetViewByID(icon_id));
++  if (!icon) {
++    return false;
++  }
++  icon->ShowMenu();
++  return true;
++}
++
+ void StatusAreaWidget::SetOpenShelfPodBubble(
+     TrayBubbleView* open_shelf_pod_bubble) {
+   if (open_shelf_pod_bubble_ == open_shelf_pod_bubble) {
+@@ -824,6 +873,19 @@ void StatusAreaWidget::OnViewVisibilityChanged(views::View* observed_view,
+ void StatusAreaWidget::OnMouseEvent(ui::MouseEvent* event) {
+   if (event->IsMouseWheelEvent()) {
+     ui::MouseWheelEvent* mouse_wheel_event = event->AsMouseWheelEvent();
++    // AuraDE compatibility: the wheel over a Linux application's tray icon
++    // is the application's, as on other desktops.
++    for (views::View* view =
++             GetRootView()->GetEventHandlerForPoint(event->location());
++         view; view = view->parent()) {
++      if (auto* icon = views::AsViewClass<InteractiveTrayIcon>(view)) {
++        if (icon->OnMouseWheel(*mouse_wheel_event)) {
++          event->SetHandled();
++          return;
++        }
++        break;
++      }
++    }
+     shelf_->ProcessMouseWheelEvent(mouse_wheel_event);
+     return;
+   }
+diff --git a/ash/system/status_area_widget.h b/ash/system/status_area_widget.h
+index 13541a87e6cc..a897c8b6e124 100644
+--- a/ash/system/status_area_widget.h
++++ b/ash/system/status_area_widget.h
+@@ -52,6 +52,7 @@ class StopRecordingButtonTray;
+ class TrayBackgroundView;
+ class TrayBubbleView;
+ struct TrayIconConfiguration;
++struct TrayIconHandlers;
+ class UnifiedSystemTray;
+ class VideoConferenceTray;
+ class VirtualKeyboardTray;
+@@ -207,6 +208,15 @@ class ASH_EXPORT StatusAreaWidget : public SessionObserver,
+   // Returns whether the icon was found and removed.
+   bool RemoveTrayIcon(const TrayIconConfiguration& configuration);
+ 
++  // AuraDE compatibility: adds a tray icon that answers through `handlers`.
++  // Returns false if an icon with the same ID already exists.
++  bool AddTrayIcon(const TrayIconConfiguration& configuration,
++                   TrayIconHandlers handlers);
++
++  // AuraDE compatibility: shows the menu of an icon added with handlers.
++  // Returns whether there was such an icon.
++  bool ShowTrayIconMenu(const TrayIconConfiguration& configuration);
++
+   // TODO(jamescook): Introduce a test API instead of these methods.
+   LogoutButtonTray* logout_button_tray_for_testing() {
+     return logout_button_tray_;
+diff --git a/ash/system/tray/interactive_tray_icon.cc b/ash/system/tray/interactive_tray_icon.cc
+new file mode 100644
+index 000000000000..ea20a13c65d5
+--- /dev/null
++++ b/ash/system/tray/interactive_tray_icon.cc
+@@ -0,0 +1,83 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ash/system/tray/interactive_tray_icon.h"
++
++#include <utility>
++
++#include "ash/constants/tray_background_view_catalog.h"
++#include "ash/shell.h"
++#include "base/functional/bind.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/base/mojom/menu_source_type.mojom-shared.h"
++#include "ui/events/event.h"
++#include "ui/events/event_constants.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/menus/simple_menu_model.h"
++
++namespace ash {
++
++InteractiveTrayIcon::InteractiveTrayIcon(Shelf* shelf,
++                                         const ui::ImageModel& image_model,
++                                         const std::u16string& tooltip,
++                                         TrayIconHandlers handlers)
++    : ImagedTrayIcon(shelf,
++                     image_model,
++                     /*tooltip=*/tooltip,
++                     /*accessibility_name=*/tooltip,
++                     TrayBackgroundViewCatalogName::kChromeCustom),
++      handlers_(std::make_unique<TrayIconHandlers>(std::move(handlers))) {
++  SetCallback(base::BindRepeating(&InteractiveTrayIcon::OnPressed,
++                                  base::Unretained(this)));
++  SetTriggerableEventFlags(ui::EF_LEFT_MOUSE_BUTTON |
++                           ui::EF_MIDDLE_MOUSE_BUTTON);
++  SetContextMenuEnabled(!handlers_->menu.is_null());
++}
++
++InteractiveTrayIcon::~InteractiveTrayIcon() = default;
++
++void InteractiveTrayIcon::ShowMenu() {
++  ShowContextMenu(GetBoundsInScreen().CenterPoint(),
++                  ui::mojom::MenuSourceType::kMouse);
++}
++
++bool InteractiveTrayIcon::OnMouseWheel(const ui::MouseWheelEvent& event) {
++  if (handlers_->scroll.is_null()) {
++    return ImagedTrayIcon::OnMouseWheel(event);
++  }
++  if (event.y_offset()) {
++    handlers_->scroll.Run(event.y_offset(), /*horizontal=*/false);
++  }
++  if (event.x_offset()) {
++    handlers_->scroll.Run(event.x_offset(), /*horizontal=*/true);
++  }
++  return true;
++}
++
++std::unique_ptr<ui::SimpleMenuModel>
++InteractiveTrayIcon::CreateContextMenuModel() {
++  return handlers_->menu.is_null()
++             ? nullptr
++             : handlers_->menu.Run(GetBoundsInScreen().CenterPoint());
++}
++
++void InteractiveTrayIcon::OnPressed(const ui::Event& event) {
++  const gfx::Point point = GetBoundsInScreen().CenterPoint();
++  if (event.IsMouseEvent() && (event.flags() & ui::EF_MIDDLE_MOUSE_BUTTON)) {
++    if (!handlers_->secondary_activate.is_null()) {
++      handlers_->secondary_activate.Run(point);
++    }
++    return;
++  }
++  if (!handlers_->activate.is_null()) {
++    handlers_->activate.Run(point);
++  }
++}
++
++BEGIN_METADATA(InteractiveTrayIcon)
++END_METADATA
++
++}  // namespace ash
+diff --git a/ash/system/tray/interactive_tray_icon.h b/ash/system/tray/interactive_tray_icon.h
+new file mode 100644
+index 000000000000..0fd3679ae06d
+--- /dev/null
++++ b/ash/system/tray/interactive_tray_icon.h
+@@ -0,0 +1,61 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef ASH_SYSTEM_TRAY_INTERACTIVE_TRAY_ICON_H_
++#define ASH_SYSTEM_TRAY_INTERACTIVE_TRAY_ICON_H_
++
++#include <memory>
++#include <string>
++
++#include "ash/ash_export.h"
++#include "ash/system/tray/imaged_tray_icon.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++
++namespace ui {
++class Event;
++class ImageModel;
++class MouseWheelEvent;
++class SimpleMenuModel;
++}  // namespace ui
++
++namespace ash {
++
++class Shelf;
++struct TrayIconHandlers;
++
++// AuraDE compatibility: a status tray icon that answers the way a Linux
++// application's tray icon does on other desktops. The left button activates
++// the application, the middle button does its second action, the wheel
++// scrolls it and the right button opens its menu.
++class ASH_EXPORT InteractiveTrayIcon : public ImagedTrayIcon {
++  METADATA_HEADER(InteractiveTrayIcon, ImagedTrayIcon)
++
++ public:
++  InteractiveTrayIcon(Shelf* shelf,
++                      const ui::ImageModel& image_model,
++                      const std::u16string& tooltip,
++                      TrayIconHandlers handlers);
++  InteractiveTrayIcon(const InteractiveTrayIcon&) = delete;
++  InteractiveTrayIcon& operator=(const InteractiveTrayIcon&) = delete;
++  ~InteractiveTrayIcon() override;
++
++  // Shows the icon's menu as the right button would.
++  void ShowMenu();
++
++  // views::View:
++  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
++
++ protected:
++  // TrayBackgroundView:
++  std::unique_ptr<ui::SimpleMenuModel> CreateContextMenuModel() override;
++
++ private:
++  void OnPressed(const ui::Event& event);
++
++  std::unique_ptr<TrayIconHandlers> handlers_;
++};
++
++}  // namespace ash
++
++#endif  // ASH_SYSTEM_TRAY_INTERACTIVE_TRAY_ICON_H_
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index 92578dcb2217..ebe8e94787bc 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -62,6 +62,8 @@ static_library("dbus") {
+     "service_util.h",
+     "smb_fs_service_provider.cc",
+     "smb_fs_service_provider.h",
++    "status_notifier_host.cc",
++    "status_notifier_host.h",
+     "virtual_file_request_service_provider.cc",
+     "virtual_file_request_service_provider.h",
+   ]
+@@ -96,6 +98,7 @@ static_library("dbus") {
+     "//build/config/chromebox_for_meetings:buildflags",
+     "//build/config/cuttlefish:buildflags",
+     "//build/config/squid:buildflags",
++    "//cc/paint",
+     "//chrome/browser/ash/app_mode",
+     "//chrome/browser/ash/arc/fileapi",
+     "//chrome/browser/ash/arc/session",
+@@ -115,6 +118,7 @@ static_library("dbus") {
+     "//chrome/browser/ash/settings",
+     "//chrome/browser/chromeos/policy/dlp",
+     "//chrome/browser/component_updater",
++    "//chrome/browser/icon_transcoder",
+     "//chrome/browser/profiles:profile",
+     "//chrome/browser/profiles:profile_manager",
+     "//chrome/common:chrome_features",
+@@ -217,9 +221,11 @@ static_library("dbus") {
+     "//ui/base",
+     "//ui/chromeos/styles:cros_tokens_color_mappings",
+     "//ui/color",
++    "//ui/display",
+     "//ui/events",
+     "//ui/gfx",
+     "//ui/gfx/codec",
++    "//ui/menus",
+     "//ui/message_center",
+     "//ui/native_theme",
+     "//ui/views",
+diff --git a/chrome/browser/ash/dbus/DEPS b/chrome/browser/ash/dbus/DEPS
+index 149488920006..f57ac1da747c 100644
+--- a/chrome/browser/ash/dbus/DEPS
++++ b/chrome/browser/ash/dbus/DEPS
+@@ -34,6 +34,7 @@ include_rules = [
+   "+chrome/browser/chromeos/policy/dlp",
+   "+chrome/browser/component_updater",
+   "+chrome/browser/enterprise/browser_management",
++  "+chrome/browser/icon_transcoder",
+   "+chrome/browser/policy",
+   "+chrome/browser/profiles",
+   "+chrome/common/chrome_paths.h",
+diff --git a/chrome/browser/ash/dbus/status_notifier_host.cc b/chrome/browser/ash/dbus/status_notifier_host.cc
+new file mode 100644
+index 000000000000..06d18dd989da
+--- /dev/null
++++ b/chrome/browser/ash/dbus/status_notifier_host.cc
+@@ -0,0 +1,1861 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/status_notifier_host.h"
++
++#include <fcntl.h>
++#include <sys/stat.h>
++
++#include <algorithm>
++#include <cmath>
++#include <cstddef>
++#include <map>
++#include <memory>
++#include <optional>
++#include <set>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include "ash/public/cpp/style/dark_light_mode_controller.h"
++#include "base/containers/span.h"
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_file.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/logging.h"
++#include "base/message_loop/message_pump_type.h"
++#include "base/numerics/safe_conversions.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "base/threading/thread.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "cc/paint/paint_flags.h"
++#include "chrome/browser/icon_transcoder/svg_icon_transcoder.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "dbus/object_proxy.h"
++#include "services/data_decoder/public/cpp/decode_image.h"
++#include "skia/ext/image_operations.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/aura/window.h"
++#include "ui/base/models/menu_separator_types.h"
++#include "ui/display/display.h"
++#include "ui/display/screen.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/codec/png_codec.h"
++#include "ui/gfx/font.h"
++#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/geometry/point_f.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/image/canvas_image_source.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/image/image_skia_operations.h"
++#include "ui/menus/simple_menu_model.h"
++
++namespace ash {
++
++namespace {
++
++constexpr char kWatcherService[] = "org.kde.StatusNotifierWatcher";
++constexpr char kWatcherPath[] = "/StatusNotifierWatcher";
++constexpr char kWatcherInterface[] = "org.kde.StatusNotifierWatcher";
++constexpr char kItemInterface[] = "org.kde.StatusNotifierItem";
++constexpr char kDefaultItemPath[] = "/StatusNotifierItem";
++constexpr char kMenuInterface[] = "com.canonical.dbusmenu";
++constexpr char kPropertiesInterface[] = "org.freedesktop.DBus.Properties";
++constexpr char kIntrospectableInterface[] =
++    "org.freedesktop.DBus.Introspectable";
++constexpr char kBusService[] = "org.freedesktop.DBus";
++constexpr char kBusPath[] = "/org/freedesktop/DBus";
++constexpr char kBusInterface[] = "org.freedesktop.DBus";
++
++// Qt reads the watcher's properties through an interface it builds from
++// this, and gives up on the tray without it.
++constexpr char kWatcherIntrospection[] =
++    R"(<node>
++  <interface name="org.kde.StatusNotifierWatcher">
++    <method name="RegisterStatusNotifierItem">
++      <arg name="service" type="s" direction="in"/>
++    </method>
++    <method name="RegisterStatusNotifierHost">
++      <arg name="service" type="s" direction="in"/>
++    </method>
++    <property name="RegisteredStatusNotifierItems" type="as" access="read"/>
++    <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
++    <property name="ProtocolVersion" type="i" access="read"/>
++    <signal name="StatusNotifierItemRegistered">
++      <arg type="s"/>
++    </signal>
++    <signal name="StatusNotifierItemUnregistered">
++      <arg type="s"/>
++    </signal>
++    <signal name="StatusNotifierHostRegistered"/>
++    <signal name="StatusNotifierHostUnregistered"/>
++  </interface>
++  <interface name="org.freedesktop.DBus.Properties">
++    <method name="Get">
++      <arg name="interface_name" type="s" direction="in"/>
++      <arg name="property_name" type="s" direction="in"/>
++      <arg name="value" type="v" direction="out"/>
++    </method>
++    <method name="GetAll">
++      <arg name="interface_name" type="s" direction="in"/>
++      <arg name="properties" type="a{sv}" direction="out"/>
++    </method>
++  </interface>
++  <interface name="org.freedesktop.DBus.Introspectable">
++    <method name="Introspect">
++      <arg name="xml_data" type="s" direction="out"/>
++    </method>
++  </interface>
++</node>
++)";
++
++// The icons' size in the status area, in DIPs.
++constexpr int kIconSizeDip = 20;
++// SVG icons are drawn at this size and scaled down from it.
++constexpr int kSvgRenderSizePx = 64;
++// The first SVG asks start the renderer that draws them and fail.
++constexpr int kMaxSvgAttempts = 4;
++constexpr base::TimeDelta kSvgRetryDelay = base::Seconds(1);
++
++// Bounds on what one application can make the desktop hold.
++constexpr size_t kMaxItems = 64;
++constexpr int kMaxPixmapSize = 512;
++constexpr size_t kMaxIconFileBytes = 1024 * 1024;
++constexpr size_t kMaxTextBytes = 512;
++constexpr int kMaxMenuDepth = 8;
++constexpr size_t kMaxMenuNodes = 1000;
++constexpr size_t kMaxThemeDirectories = 512;
++constexpr size_t kMaxKnownIconPaths = 64;
++
++// Items change several properties at once, each with its own signal.
++constexpr base::TimeDelta kRefreshDelay = base::Milliseconds(50);
++constexpr base::TimeDelta kMenuFetchDelay = base::Milliseconds(100);
++
++bool IsUniqueName(std::string_view name) {
++  return !name.empty() && name[0] == ':';
++}
++
++std::string Truncated(std::string text) {
++  std::string out;
++  base::TruncateUTF8ToByteSize(text, kMaxTextBytes, &out);
++  return out;
++}
++
++// A string, or an object path where the specification says string, or the
++// other way around.
++bool PopText(dbus::MessageReader* value, std::string* out) {
++  if (value->GetDataType() == dbus::Message::OBJECT_PATH) {
++    dbus::ObjectPath path;
++    if (!value->PopObjectPath(&path)) {
++      return false;
++    }
++    *out = path.value();
++    return true;
++  }
++  std::string text;
++  if (!value->PopString(&text)) {
++    return false;
++  }
++  *out = Truncated(std::move(text));
++  return true;
++}
++
++// Tooltips may carry the markup KDE's trays show.
++std::string StripMarkup(std::string_view text) {
++  std::string out;
++  bool in_tag = false;
++  for (char c : text) {
++    if (c == '<') {
++      in_tag = true;
++    } else if (c == '>') {
++      in_tag = false;
++    } else if (!in_tag) {
++      out += c;
++    }
++  }
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&lt;", "<");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&gt;", ">");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&quot;", "\"");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&apos;", "'");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&#39;", "'");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&nbsp;", " ");
++  base::ReplaceSubstringsAfterOffset(&out, 0, "&amp;", "&");
++  return std::string(base::TrimWhitespaceASCII(out, base::TRIM_ALL));
++}
++
++// One picture in an item's a(iiay): ARGB32 pixels in network byte order.
++struct Pixmap {
++  int width = 0;
++  int height = 0;
++  std::vector<uint8_t> argb;
++};
++
++bool PopPixmaps(dbus::MessageReader* value, std::vector<Pixmap>* out) {
++  out->clear();
++  dbus::MessageReader array(nullptr);
++  if (!value->PopArray(&array)) {
++    return false;
++  }
++  while (array.HasMoreData()) {
++    dbus::MessageReader entry(nullptr);
++    Pixmap pixmap;
++    base::span<const uint8_t> bytes;
++    if (!array.PopStruct(&entry) || !entry.PopInt32(&pixmap.width) ||
++        !entry.PopInt32(&pixmap.height) || !entry.PopArrayOfBytes(&bytes)) {
++      return false;
++    }
++    if (pixmap.width <= 0 || pixmap.height <= 0 ||
++        pixmap.width > kMaxPixmapSize || pixmap.height > kMaxPixmapSize ||
++        bytes.size() != static_cast<size_t>(pixmap.width) *
++                            static_cast<size_t>(pixmap.height) * 4) {
++      continue;
++    }
++    pixmap.argb.assign(bytes.begin(), bytes.end());
++    out->push_back(std::move(pixmap));
++  }
++  return true;
++}
++
++// The smallest picture at least `target_px` across, or else the largest.
++const Pixmap* PickPixmap(const std::vector<Pixmap>& pixmaps, int target_px) {
++  const Pixmap* best = nullptr;
++  for (const Pixmap& pixmap : pixmaps) {
++    const int size = std::max(pixmap.width, pixmap.height);
++    if (!best) {
++      best = &pixmap;
++      continue;
++    }
++    const int best_size = std::max(best->width, best->height);
++    if ((best_size < target_px && size > best_size) ||
++        (size >= target_px && size < best_size)) {
++      best = &pixmap;
++    }
++  }
++  return best;
++}
++
++SkBitmap PixmapToBitmap(const Pixmap& pixmap) {
++  SkBitmap bitmap;
++  if (!bitmap.tryAllocN32Pixels(pixmap.width, pixmap.height)) {
++    return SkBitmap();
++  }
++  size_t i = 0;
++  for (int y = 0; y < pixmap.height; ++y) {
++    for (int x = 0; x < pixmap.width; ++x, i += 4) {
++      *bitmap.getAddr32(x, y) =
++          SkPreMultiplyARGB(pixmap.argb[i], pixmap.argb[i + 1],
++                            pixmap.argb[i + 2], pixmap.argb[i + 3]);
++    }
++  }
++  return bitmap;
++}
++
++// Symbolic icons are drawn in one color that the desktop chooses.
++void TintBitmap(SkBitmap* bitmap, SkColor color) {
++  for (int y = 0; y < bitmap->height(); ++y) {
++    for (int x = 0; x < bitmap->width(); ++x) {
++      *bitmap->getAddr32(x, y) = SkPreMultiplyARGB(
++          SkColorGetA(bitmap->getColor(x, y)), SkColorGetR(color),
++          SkColorGetG(color), SkColorGetB(color));
++    }
++  }
++}
++
++bool IsDarkMode() {
++  auto* controller = DarkLightModeController::Get();
++  return !controller || controller->IsDarkModeEnabled();
++}
++
++SkColor SymbolicColor() {
++  return IsDarkMode() ? SkColorSetRGB(0xE3, 0xE3, 0xE3)
++                      : SkColorSetRGB(0x1F, 0x1F, 0x1F);
++}
++
++// The status area draws icons `kIconSizeDip` across, resampled well for each
++// display's scale, and keeps their shape.
++gfx::ImageSkia ToTrayImage(const SkBitmap& bitmap) {
++  if (bitmap.drawsNothing()) {
++    return gfx::ImageSkia();
++  }
++  const int longest = std::max(bitmap.width(), bitmap.height());
++  const float scale = static_cast<float>(longest) / kIconSizeDip;
++  const gfx::Size size(
++      std::max(1, base::ClampRound(bitmap.width() / scale)),
++      std::max(1, base::ClampRound(bitmap.height() / scale)));
++  return gfx::ImageSkiaOperations::CreateResizedImage(
++      gfx::ImageSkia::CreateFromBitmap(bitmap, scale),
++      skia::ImageOperations::RESIZE_BEST, size);
++}
++
++// The display a point on the screen is on.
++int64_t DisplayIdAt(const gfx::Point& screen_point) {
++  return display::Screen::Get()->GetDisplayNearestPoint(screen_point).id();
++}
++
++// The pixels an icon needs on the densest display.
++int IconTargetPixels() {
++  float scale = 1.f;
++  for (const display::Display& display :
++       display::Screen::Get()->GetAllDisplays()) {
++    scale = std::max(scale, display.device_scale_factor());
++  }
++  return static_cast<int>(std::ceil(kIconSizeDip * scale));
++}
++
++// For an item whose icon cannot be found: its initial on a disc, so it can
++// still be reached.
++class LetterIconSource : public gfx::CanvasImageSource {
++ public:
++  explicit LetterIconSource(std::u16string letter)
++      : gfx::CanvasImageSource(gfx::Size(kIconSizeDip, kIconSizeDip)),
++        letter_(std::move(letter)),
++        dark_(IsDarkMode()) {}
++
++  // gfx::CanvasImageSource:
++  void Draw(gfx::Canvas* canvas) override {
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setColor(dark_ ? SkColorSetRGB(0x5F, 0x63, 0x68)
++                         : SkColorSetRGB(0xDA, 0xDC, 0xE0));
++    canvas->DrawCircle(gfx::PointF(kIconSizeDip / 2.f, kIconSizeDip / 2.f),
++                       kIconSizeDip / 2.f, flags);
++    canvas->DrawStringRectWithFlags(
++        letter_, gfx::FontList().DeriveWithWeight(gfx::Font::Weight::BOLD),
++        dark_ ? SK_ColorWHITE : SkColorSetRGB(0x1F, 0x1F, 0x1F),
++        gfx::Rect(size()), gfx::Canvas::TEXT_ALIGN_CENTER);
++  }
++
++ private:
++  const std::u16string letter_;
++  const bool dark_;
++};
++
++gfx::ImageSkia LetterIcon(const std::string& name) {
++  std::u16string letter = u"?";
++  for (char16_t c : base::UTF8ToUTF16(name)) {
++    if (base::IsAsciiAlphaNumeric(c) || c > 0x7f) {
++      letter = std::u16string(1, base::ToUpperASCII(c));
++      break;
++    }
++  }
++  return gfx::ImageSkia(std::make_unique<LetterIconSource>(std::move(letter)),
++                        gfx::Size(kIconSizeDip, kIconSizeDip));
++}
++
++// What an icon is looked up by, and what was found, on the blocking pool.
++struct IconQuery {
++  std::string name;
++  std::string theme_path;
++  bool dark = true;
++  int target_px = kIconSizeDip;
++  // Where this name was found before, tried first.
++  base::FilePath known_path;
++};
++
++struct IconFile {
++  base::FilePath path;
++  std::string bytes;
++};
++
++// Not base::ReadFileToString: a name could lead to a pipe or a device, and
++// reading one of those may never end.
++std::optional<std::string> ReadIconFile(const base::FilePath& path) {
++  base::ScopedFD fd(HANDLE_EINTR(open(
++      path.value().c_str(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK)));
++  if (!fd.is_valid()) {
++    return std::nullopt;
++  }
++  struct stat info;
++  if (fstat(fd.get(), &info) != 0 || !S_ISREG(info.st_mode) ||
++      info.st_size <= 0 ||
++      static_cast<uint64_t>(info.st_size) > kMaxIconFileBytes) {
++    return std::nullopt;
++  }
++  std::string bytes(static_cast<size_t>(info.st_size), '\0');
++  if (!base::ReadFromFD(fd.get(), bytes)) {
++    return std::nullopt;
++  }
++  return bytes;
++}
++
++bool IsSvg(const base::FilePath& path) {
++  return base::EqualsCaseInsensitiveASCII(path.Extension(), ".svg");
++}
++
++// "22x22", "22x22@2", "22", "22@2x", "scalable" or "symbolic" in an icon
++// theme's directory names: the size in pixels, 0 for any size, -1 for none.
++int IconDirectorySize(std::string_view name) {
++  if (name == "scalable" || name == "symbolic") {
++    return 0;
++  }
++  int scale = 1;
++  if (const size_t at = name.find('@'); at != std::string_view::npos) {
++    std::string_view scale_text = name.substr(at + 1);
++    if (scale_text.ends_with('x')) {
++      scale_text.remove_suffix(1);
++    }
++    if (!base::StringToInt(scale_text, &scale) || scale < 1 || scale > 4) {
++      return -1;
++    }
++    name = name.substr(0, at);
++  }
++  if (const size_t x = name.find('x'); x != std::string_view::npos) {
++    name = name.substr(0, x);
++  }
++  int size = 0;
++  if (!base::StringToInt(name, &size) || size <= 0 || size > 1024) {
++    return -1;
++  }
++  return size * scale;
++}
++
++// The size of the icon at `path`, from the directories it is in: hicolor
++// puts the size first ("22x22/apps"), Breeze puts it last ("apps/22").
++int IconFileSize(const base::FilePath& path) {
++  const base::FilePath parent = path.DirName();
++  const int size = IconDirectorySize(parent.BaseName().value());
++  return size >= 0 ? size
++                   : IconDirectorySize(parent.DirName().BaseName().value());
++}
++
++// The best of `found` for `target_px`: the smallest fixed size at least that,
++// else one that scales, else one of a size its path does not tell, as in an
++// application's own directory, else the largest there is.
++std::optional<base::FilePath> PickIconFile(
++    const std::vector<base::FilePath>& found,
++    int target_px) {
++  std::optional<base::FilePath> larger;
++  int larger_size = 0;
++  std::optional<base::FilePath> scalable;
++  std::optional<base::FilePath> unsized;
++  std::optional<base::FilePath> smaller;
++  int smaller_size = 0;
++  for (const base::FilePath& path : found) {
++    const int size = IconFileSize(path);
++    if (size <= 0) {
++      std::optional<base::FilePath>& slot = IsSvg(path) ? scalable : unsized;
++      if (!slot) {
++        slot = path;
++      }
++    } else if (size >= target_px) {
++      if (!larger || size < larger_size) {
++        larger = path;
++        larger_size = size;
++      }
++    } else if (size > smaller_size) {
++      smaller = path;
++      smaller_size = size;
++    }
++  }
++  if (larger) {
++    return larger;
++  }
++  if (scalable) {
++    return scalable;
++  }
++  if (unsized) {
++    return unsized;
++  }
++  return smaller;
++}
++
++// Icons drawn in one color for the desktop to choose: GNOME's naming, or
++// Breeze's and Adwaita's directory of them.
++bool IsSymbolicIcon(const base::FilePath& path) {
++  return base::EndsWith(path.BaseName().RemoveFinalExtension().value(),
++                        "-symbolic") ||
++         path.value().find("/symbolic/") != std::string::npos;
++}
++
++void AddIfExists(const base::FilePath& dir,
++                 const std::string& name,
++                 std::vector<base::FilePath>* found) {
++  for (const char* extension : {".png", ".svg"}) {
++    const base::FilePath path = dir.Append(name + extension);
++    if (base::PathExists(path)) {
++      found->push_back(path);
++    }
++  }
++}
++
++// Every directory of `theme_dir` that holds `name`, as its index.theme lists
++// them, or two levels down when it has none.
++std::vector<base::FilePath> FindInTheme(const base::FilePath& theme_dir,
++                                        const std::string& name) {
++  std::vector<base::FilePath> found;
++  if (!base::DirectoryExists(theme_dir)) {
++    return found;
++  }
++  std::vector<std::string> directories;
++  std::string index;
++  if (base::ReadFileToStringWithMaxSize(theme_dir.Append("index.theme"),
++                                        &index, 512 * 1024)) {
++    for (std::string_view line : base::SplitStringPiece(
++             index, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++      for (std::string_view key : {"Directories=", "ScaledDirectories="}) {
++        if (base::StartsWith(line, key)) {
++          for (std::string_view directory : base::SplitStringPiece(
++                   line.substr(key.size()), ",", base::TRIM_WHITESPACE,
++                   base::SPLIT_WANT_NONEMPTY)) {
++            if (directories.size() < kMaxThemeDirectories &&
++                directory.find("..") == std::string_view::npos) {
++              directories.emplace_back(directory);
++            }
++          }
++        }
++      }
++    }
++  }
++  if (directories.empty()) {
++    base::FileEnumerator top(theme_dir, /*recursive=*/false,
++                             base::FileEnumerator::DIRECTORIES);
++    for (base::FilePath first = top.Next(); !first.empty();
++         first = top.Next()) {
++      base::FileEnumerator inner(first, /*recursive=*/false,
++                                 base::FileEnumerator::DIRECTORIES);
++      for (base::FilePath second = inner.Next(); !second.empty();
++           second = inner.Next()) {
++        if (directories.size() >= kMaxThemeDirectories) {
++          break;
++        }
++        directories.push_back(
++            first.BaseName().Append(second.BaseName()).value());
++      }
++      AddIfExists(first, name, &found);
++    }
++  }
++  for (const std::string& directory : directories) {
++    AddIfExists(theme_dir.Append(directory), name, &found);
++  }
++  return found;
++}
++
++std::vector<base::FilePath> IconRoots() {
++  std::vector<base::FilePath> roots;
++  std::unique_ptr<base::Environment> environment = base::Environment::Create();
++  if (std::optional<std::string> data_home =
++          environment->GetVar("XDG_DATA_HOME");
++      data_home && !data_home->empty()) {
++    roots.push_back(base::FilePath(*data_home).Append("icons"));
++  } else if (std::optional<std::string> home = environment->GetVar("HOME");
++             home && !home->empty()) {
++    roots.push_back(base::FilePath(*home).Append(".local/share/icons"));
++  }
++  if (std::optional<std::string> home = environment->GetVar("HOME");
++      home && !home->empty()) {
++    roots.push_back(base::FilePath(*home).Append(".icons"));
++  }
++  const std::string data_dirs = environment->GetVar("XDG_DATA_DIRS")
++                                    .value_or("/usr/local/share:/usr/share");
++  for (std::string_view dir : base::SplitStringPiece(
++           data_dirs, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    roots.push_back(base::FilePath(dir).Append("icons"));
++  }
++  return roots;
++}
++
++std::optional<IconFile> ReadIconAt(const base::FilePath& path) {
++  std::optional<std::string> bytes = ReadIconFile(path);
++  if (!bytes) {
++    return std::nullopt;
++  }
++  return IconFile{path, std::move(*bytes)};
++}
++
++// Finds the icon called `name` the way trays on other desktops do: the
++// item's own directory, then the icon themes, then pixmaps.
++std::optional<IconFile> FindNamedIcon(const IconQuery& query,
++                                      const std::string& name) {
++  // Breeze's status icons are drawn for the background they sit on.
++  const std::vector<std::string> themes = {
++      query.dark ? "breeze-dark" : "breeze", "Adwaita", "AdwaitaLegacy",
++      "hicolor"};
++
++  if (!query.theme_path.empty()) {
++    const base::FilePath theme_path(query.theme_path);
++    if (theme_path.IsAbsolute() &&
++        query.theme_path.find("..") == std::string::npos) {
++      std::vector<base::FilePath> found;
++      AddIfExists(theme_path, name, &found);
++      if (found.empty()) {
++        found = FindInTheme(theme_path, name);
++      }
++      if (found.empty()) {
++        for (const std::string& theme : themes) {
++          found = FindInTheme(theme_path.Append(theme), name);
++          if (!found.empty()) {
++            break;
++          }
++        }
++      }
++      if (std::optional<base::FilePath> path =
++              PickIconFile(found, query.target_px)) {
++        if (std::optional<IconFile> file = ReadIconAt(*path)) {
++          return file;
++        }
++      }
++    }
++  }
++
++  const std::vector<base::FilePath> roots = IconRoots();
++  for (const std::string& theme : themes) {
++    std::vector<base::FilePath> found;
++    for (const base::FilePath& root : roots) {
++      std::vector<base::FilePath> in_root =
++          FindInTheme(root.Append(theme), name);
++      found.insert(found.end(), in_root.begin(), in_root.end());
++    }
++    if (std::optional<base::FilePath> path =
++            PickIconFile(found, query.target_px)) {
++      if (std::optional<IconFile> file = ReadIconAt(*path)) {
++        return file;
++      }
++    }
++  }
++
++  std::vector<base::FilePath> found;
++  AddIfExists(base::FilePath("/usr/share/pixmaps"), name, &found);
++  if (std::optional<base::FilePath> path =
++          PickIconFile(found, query.target_px)) {
++    return ReadIconAt(*path);
++  }
++  return std::nullopt;
++}
++
++// An item's icon: a path, or a name looked up where it was found before and
++// then everywhere.
++std::optional<IconFile> FindIconFile(const IconQuery& query) {
++  if (!query.known_path.empty()) {
++    if (std::optional<IconFile> file = ReadIconAt(query.known_path)) {
++      return file;
++    }
++  }
++
++  if (base::FilePath(query.name).IsAbsolute()) {
++    if (query.name.find("..") != std::string::npos) {
++      return std::nullopt;
++    }
++    for (const char* extension : {"", ".png", ".svg"}) {
++      if (std::optional<IconFile> file =
++              ReadIconAt(base::FilePath(query.name + extension))) {
++        return file;
++      }
++    }
++    return std::nullopt;
++  }
++  if (query.name.find('/') != std::string::npos) {
++    return std::nullopt;
++  }
++
++  if (std::optional<IconFile> file = FindNamedIcon(query, query.name)) {
++    return file;
++  }
++  // A theme may draw only the symbolic icon of a name, or only the full
++  // color one; each stands in for the other.
++  constexpr std::string_view kSymbolic = "-symbolic";
++  return FindNamedIcon(
++      query, base::EndsWith(query.name, kSymbolic)
++                 ? query.name.substr(0, query.name.size() - kSymbolic.size())
++                 : query.name + std::string(kSymbolic));
++}
++
++// One entry of an application's dbusmenu layout.
++struct MenuNode {
++  int32_t id = 0;
++  std::string label;
++  bool separator = false;
++  bool enabled = true;
++  bool visible = true;
++  std::string toggle_type;
++  int32_t toggle_state = 0;
++  bool submenu = false;
++  std::vector<MenuNode> children;
++};
++
++bool PopMenuNode(dbus::MessageReader* reader,
++                 int depth,
++                 size_t* count,
++                 MenuNode* node) {
++  if (depth > kMaxMenuDepth || ++*count > kMaxMenuNodes) {
++    return false;
++  }
++  dbus::MessageReader entry(nullptr);
++  dbus::MessageReader properties(nullptr);
++  if (!reader->PopStruct(&entry) || !entry.PopInt32(&node->id) ||
++      !entry.PopArray(&properties)) {
++    return false;
++  }
++  while (properties.HasMoreData()) {
++    dbus::MessageReader property(nullptr);
++    std::string key;
++    dbus::MessageReader value(nullptr);
++    if (!properties.PopDictEntry(&property) || !property.PopString(&key) ||
++        !property.PopVariant(&value)) {
++      return false;
++    }
++    if (key == "type") {
++      std::string type;
++      node->separator = value.PopString(&type) && type == "separator";
++    } else if (key == "label") {
++      PopText(&value, &node->label);
++    } else if (key == "enabled") {
++      value.PopBool(&node->enabled);
++    } else if (key == "visible") {
++      value.PopBool(&node->visible);
++    } else if (key == "toggle-type") {
++      value.PopString(&node->toggle_type);
++    } else if (key == "toggle-state") {
++      value.PopInt32(&node->toggle_state);
++    } else if (key == "children-display") {
++      std::string display;
++      node->submenu = value.PopString(&display) && display == "submenu";
++    }
++  }
++  dbus::MessageReader children(nullptr);
++  if (!entry.PopArray(&children)) {
++    return false;
++  }
++  while (children.HasMoreData()) {
++    dbus::MessageReader child(nullptr);
++    MenuNode child_node;
++    if (!children.PopVariant(&child) ||
++        !PopMenuNode(&child, depth + 1, count, &child_node)) {
++      return false;
++    }
++    node->children.push_back(std::move(child_node));
++  }
++  return true;
++}
++
++// dbusmenu marks a mnemonic with an underscore and doubles a literal one.
++// Ash's tray menus show no mnemonics, so the marks go and labels are drawn
++// as they read.
++std::u16string ToMenuLabel(const std::string& label) {
++  std::string out;
++  for (size_t i = 0; i < label.size(); ++i) {
++    if (label[i] != '_') {
++      out += label[i];
++    } else if (i + 1 < label.size() && label[i + 1] == '_') {
++      out += '_';
++      ++i;
++    }
++  }
++  return base::UTF8ToUTF16(out);
++}
++
++// An application's menu as Ash shows it. It answers through the item while
++// the item lives; command IDs are dbusmenu IDs plus one.
++class DbusMenuModel : public ui::SimpleMenuModel,
++                      public ui::SimpleMenuModel::Delegate {
++ public:
++  using EventCallback =
++      base::RepeatingCallback<void(int32_t id, const std::string& event_id)>;
++
++  DbusMenuModel(const MenuNode& root, EventCallback send_event)
++      : ui::SimpleMenuModel(this), send_event_(std::move(send_event)) {
++    menu_ids_[this] = root.id;
++    Build(this, root);
++  }
++
++  DbusMenuModel(const DbusMenuModel&) = delete;
++  DbusMenuModel& operator=(const DbusMenuModel&) = delete;
++  ~DbusMenuModel() override = default;
++
++  // ui::SimpleMenuModel::Delegate:
++  bool IsCommandIdChecked(int command_id) const override {
++    return checked_.contains(command_id);
++  }
++
++  void ExecuteCommand(int command_id, int event_flags) override {
++    send_event_.Run(command_id - 1, "clicked");
++  }
++
++  void OnMenuWillShow(ui::SimpleMenuModel* source) override {
++    if (auto it = menu_ids_.find(source); it != menu_ids_.end()) {
++      send_event_.Run(it->second, "opened");
++    }
++  }
++
++  void MenuClosed(ui::SimpleMenuModel* source) override {
++    if (auto it = menu_ids_.find(source); it != menu_ids_.end()) {
++      send_event_.Run(it->second, "closed");
++    }
++  }
++
++ private:
++  void Build(ui::SimpleMenuModel* model, const MenuNode& node) {
++    for (const MenuNode& child : node.children) {
++      if (!child.visible) {
++        continue;
++      }
++      if (child.separator) {
++        // No separator first, last or twice.
++        if (model->GetItemCount() &&
++            model->GetTypeAt(model->GetItemCount() - 1) !=
++                ui::MenuModel::TYPE_SEPARATOR) {
++          model->AddSeparator(ui::NORMAL_SEPARATOR);
++        }
++        continue;
++      }
++      const int command_id = child.id + 1;
++      const std::u16string label = ToMenuLabel(child.label);
++      if (!child.children.empty()) {
++        auto submenu = std::make_unique<ui::SimpleMenuModel>(this);
++        menu_ids_[submenu.get()] = child.id;
++        Build(submenu.get(), child);
++        model->AddSubMenu(command_id, label, submenu.get());
++        submenus_.push_back(std::move(submenu));
++      } else if (child.toggle_type == "checkmark") {
++        model->AddCheckItem(command_id, label);
++      } else if (child.toggle_type == "radio") {
++        model->AddRadioItem(command_id, label, /*group_id=*/node.id);
++      } else {
++        model->AddItem(command_id, label);
++      }
++      if (child.toggle_state == 1) {
++        checked_.insert(command_id);
++      }
++      model->SetEnabledAt(model->GetItemCount() - 1, child.enabled);
++    }
++    if (model->GetItemCount() &&
++        model->GetTypeAt(model->GetItemCount() - 1) ==
++            ui::MenuModel::TYPE_SEPARATOR) {
++      model->RemoveItemAt(model->GetItemCount() - 1);
++    }
++  }
++
++  const EventCallback send_event_;
++  std::set<int> checked_;
++  std::vector<std::unique_ptr<ui::SimpleMenuModel>> submenus_;
++  // The dbusmenu ID of each menu, for the events that say it opened.
++  std::map<const ui::SimpleMenuModel*, int32_t> menu_ids_;
++};
++
++}  // namespace
++
++// One StatusNotifierItem, shown as an icon on every monitor's shelf.
++class StatusNotifierHost::Item {
++ public:
++  Item(StatusNotifierHost* host,
++       std::string key,
++       std::string bus_name,
++       std::string owner,
++       std::string path,
++       int64_t icon_id);
++  Item(const Item&) = delete;
++  Item& operator=(const Item&) = delete;
++  ~Item();
++
++  const std::string& bus_name() const { return bus_name_; }
++  const std::string& owner() const { return owner_; }
++  const std::string& path() const { return path_; }
++
++  // Draws the icon again for the monitors and color mode there are now, and
++  // shows it on each monitor.
++  void Reload();
++
++ private:
++  void UpdateIcons();
++  void OnChanged(dbus::Signal* signal);
++  void Refresh();
++  void OnRefreshed(dbus::Response* response);
++  void ReadProperty(const std::string& property, dbus::MessageReader* value);
++  void SetMenuPath(const std::string& menu_path);
++
++  void LoadIcon();
++  void OnIconFile(uint64_t generation, std::optional<IconFile> file);
++  void RenderSvg(uint64_t generation,
++                 std::string svg,
++                 bool symbolic,
++                 int attempt);
++  void OnSvgRendered(uint64_t generation,
++                     std::string svg,
++                     bool symbolic,
++                     int attempt,
++                     std::string png);
++  void OnIconDecoded(uint64_t generation,
++                     bool symbolic,
++                     const SkBitmap& bitmap);
++  void SetImage(gfx::ImageSkia image);
++
++  std::u16string Tooltip() const;
++  bool IsShown() const;
++  TrayIconHandlers MakeHandlers();
++
++  void Activate(const gfx::Point& point);
++  void OnActivated(const gfx::Point& point,
++                   dbus::Response* response,
++                   dbus::ErrorResponse* error);
++  void SecondaryActivate(const gfx::Point& point);
++  void Scroll(int delta, bool horizontal);
++  std::unique_ptr<ui::SimpleMenuModel> CreateMenu(const gfx::Point& point);
++  void ShowMenu(const gfx::Point& point);
++  void CallItem(const char* method, const gfx::Point& point);
++
++  bool HasMenu() const;
++  void OnMenuChanged(dbus::Signal* signal);
++  void FetchMenu();
++  void OnMenu(dbus::Response* response);
++  void OnAboutToShow(dbus::Response* response);
++  void SendMenuEvent(int32_t id, const std::string& event_id);
++
++  const raw_ptr<StatusNotifierHost> host_;
++  const std::string key_;
++  const std::string bus_name_;
++  const std::string owner_;
++  const std::string path_;
++  const int64_t icon_id_;
++  const raw_ptr<dbus::ObjectProxy> proxy_;
++  raw_ptr<dbus::ObjectProxy> menu_proxy_ = nullptr;
++  std::string menu_path_;
++
++  // org.kde.StatusNotifierItem
++  std::string id_;
++  std::string title_;
++  std::string status_ = "Active";
++  std::string icon_name_;
++  std::string attention_icon_name_;
++  std::string theme_path_;
++  std::vector<Pixmap> icon_pixmaps_;
++  std::vector<Pixmap> attention_pixmaps_;
++  std::string tooltip_title_;
++  std::string tooltip_text_;
++  bool item_is_menu_ = false;
++  // Set when the item answers Activate with an error: its menu is all it
++  // has, as with libappindicator.
++  bool activate_unsupported_ = false;
++  bool refreshed_ = false;
++
++  // What the icon was last made from, so a refresh that changed nothing
++  // about it does not make it again.
++  std::string icon_source_;
++  uint64_t icon_generation_ = 0;
++  // The pixels across the icon being made needs, for the densest monitor.
++  int icon_target_px_ = kIconSizeDip;
++  gfx::ImageSkia image_;
++  // Where each named icon was found, by what it was made from.
++  std::map<std::string, base::FilePath> icon_paths_;
++
++  std::optional<MenuNode> menu_;
++
++  base::OneShotTimer refresh_timer_;
++  base::OneShotTimer menu_timer_;
++  base::WeakPtrFactory<Item> weak_ptr_factory_{this};
++};
++
++StatusNotifierHost::Item::Item(StatusNotifierHost* host,
++                               std::string key,
++                               std::string bus_name,
++                               std::string owner,
++                               std::string path,
++                               int64_t icon_id)
++    : host_(host),
++      key_(std::move(key)),
++      bus_name_(std::move(bus_name)),
++      owner_(std::move(owner)),
++      path_(std::move(path)),
++      icon_id_(icon_id),
++      proxy_(host->bus_->GetObjectProxyWithOptions(
++          owner_,
++          dbus::ObjectPath(path_),
++          dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS)) {
++  for (const char* signal :
++       {"NewTitle", "NewIcon", "NewAttentionIcon", "NewOverlayIcon",
++        "NewToolTip", "NewStatus", "NewIconThemePath", "NewMenu"}) {
++    proxy_->ConnectToSignal(kItemInterface, signal,
++                            base::BindRepeating(&Item::OnChanged,
++                                                weak_ptr_factory_.GetWeakPtr()),
++                            base::DoNothing());
++  }
++  Refresh();
++}
++
++StatusNotifierHost::Item::~Item() {
++  if (Shell::HasInstance()) {
++    TrayIconConfiguration configuration;
++    configuration.id = icon_id_;
++    for (aura::Window* root_window : Shell::GetAllRootWindows()) {
++      Shell::Get()->RemoveStatusTrayIcon(
++          configuration,
++          display::Screen::Get()->GetDisplayNearestWindow(root_window).id());
++    }
++  }
++  SetMenuPath(std::string());
++  host_->bus_->RemoveObjectProxyWithOptions(
++      owner_, dbus::ObjectPath(path_),
++      dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS, base::DoNothing());
++}
++
++void StatusNotifierHost::Item::Reload() {
++  if (!refreshed_) {
++    return;
++  }
++  LoadIcon();
++  UpdateIcons();
++}
++
++void StatusNotifierHost::Item::UpdateIcons() {
++  if (!Shell::HasInstance()) {
++    return;
++  }
++  TrayIconConfiguration configuration;
++  configuration.id = icon_id_;
++  const bool shown = IsShown();
++  if (shown) {
++    configuration.image = image_;
++    configuration.tool_tip = Tooltip();
++  }
++  // Each monitor's status area is asked rather than remembered: a monitor
++  // plugged in again comes back with the same display ID and an empty one.
++  for (aura::Window* root_window : Shell::GetAllRootWindows()) {
++    const int64_t display_id =
++        display::Screen::Get()->GetDisplayNearestWindow(root_window).id();
++    if (!shown) {
++      Shell::Get()->RemoveStatusTrayIcon(configuration, display_id);
++    } else if (!Shell::Get()->UpdateStatusTrayIcon(configuration,
++                                                   display_id)) {
++      Shell::Get()->AddStatusTrayIcon(configuration, display_id,
++                                      MakeHandlers());
++    }
++  }
++}
++
++void StatusNotifierHost::Item::OnChanged(dbus::Signal* signal) {
++  refresh_timer_.Start(FROM_HERE, kRefreshDelay,
++                       base::BindOnce(&Item::Refresh, base::Unretained(this)));
++}
++
++void StatusNotifierHost::Item::Refresh() {
++  dbus::MethodCall method_call(kPropertiesInterface, "GetAll");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendString(kItemInterface);
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::BindOnce(&Item::OnRefreshed,
++                                    weak_ptr_factory_.GetWeakPtr()));
++}
++
++void StatusNotifierHost::Item::OnRefreshed(dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  dbus::MessageReader properties(nullptr);
++  if (!reader.PopArray(&properties)) {
++    return;
++  }
++  std::string menu_path;
++  // Properties an item leaves out are as if empty.
++  icon_pixmaps_.clear();
++  attention_pixmaps_.clear();
++  while (properties.HasMoreData()) {
++    dbus::MessageReader entry(nullptr);
++    std::string property;
++    dbus::MessageReader value(nullptr);
++    if (!properties.PopDictEntry(&entry) || !entry.PopString(&property) ||
++        !entry.PopVariant(&value)) {
++      return;
++    }
++    if (property == "Menu") {
++      PopText(&value, &menu_path);
++    } else {
++      ReadProperty(property, &value);
++    }
++  }
++  refreshed_ = true;
++  SetMenuPath(menu_path);
++  LoadIcon();
++  UpdateIcons();
++}
++
++void StatusNotifierHost::Item::ReadProperty(const std::string& property,
++                                            dbus::MessageReader* value) {
++  if (property == "Id") {
++    PopText(value, &id_);
++  } else if (property == "Title") {
++    PopText(value, &title_);
++  } else if (property == "Status") {
++    PopText(value, &status_);
++  } else if (property == "IconName") {
++    PopText(value, &icon_name_);
++  } else if (property == "AttentionIconName") {
++    PopText(value, &attention_icon_name_);
++  } else if (property == "IconThemePath") {
++    PopText(value, &theme_path_);
++  } else if (property == "IconPixmap") {
++    PopPixmaps(value, &icon_pixmaps_);
++  } else if (property == "AttentionIconPixmap") {
++    PopPixmaps(value, &attention_pixmaps_);
++  } else if (property == "ItemIsMenu") {
++    value->PopBool(&item_is_menu_);
++  } else if (property == "ToolTip") {
++    dbus::MessageReader tooltip(nullptr);
++    std::string icon;
++    std::vector<Pixmap> pixmaps;
++    std::string title;
++    std::string text;
++    if (value->PopStruct(&tooltip) && PopText(&tooltip, &icon) &&
++        PopPixmaps(&tooltip, &pixmaps) && PopText(&tooltip, &title) &&
++        PopText(&tooltip, &text)) {
++      tooltip_title_ = StripMarkup(title);
++      tooltip_text_ = StripMarkup(text);
++    }
++  }
++}
++
++void StatusNotifierHost::Item::SetMenuPath(const std::string& menu_path) {
++  // Qt names this path when an item has no menu.
++  const bool valid = dbus::ObjectPath(menu_path).IsValid() &&
++                     menu_path != "/" && menu_path != "/NO_DBUSMENU";
++  const std::string new_path = valid ? menu_path : std::string();
++  if (new_path == menu_path_) {
++    return;
++  }
++  if (menu_proxy_) {
++    // The item and its menu can be one object; that proxy is the item's.
++    if (menu_path_ != path_) {
++      host_->bus_->RemoveObjectProxyWithOptions(
++          owner_, dbus::ObjectPath(menu_path_),
++          dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS, base::DoNothing());
++    }
++    menu_proxy_ = nullptr;
++  }
++  menu_path_ = new_path;
++  menu_.reset();
++  if (menu_path_.empty()) {
++    return;
++  }
++  menu_proxy_ = host_->bus_->GetObjectProxyWithOptions(
++      owner_, dbus::ObjectPath(menu_path_),
++      dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS);
++  for (const char* signal : {"LayoutUpdated", "ItemsPropertiesUpdated"}) {
++    menu_proxy_->ConnectToSignal(
++        kMenuInterface, signal,
++        base::BindRepeating(&Item::OnMenuChanged,
++                            weak_ptr_factory_.GetWeakPtr()),
++        base::DoNothing());
++  }
++  FetchMenu();
++}
++
++void StatusNotifierHost::Item::LoadIcon() {
++  const bool attention = status_ == "NeedsAttention";
++  const std::vector<Pixmap>& pixmaps =
++      attention && !attention_pixmaps_.empty() ? attention_pixmaps_
++                                               : icon_pixmaps_;
++  const std::string& name = attention && !attention_icon_name_.empty()
++                                ? attention_icon_name_
++                                : icon_name_;
++  const bool dark = IsDarkMode();
++  const int target_px = IconTargetPixels();
++
++  // A name is what the application chose to be seen by; its pixmaps are for
++  // trays that cannot look the name up.
++  if (!name.empty()) {
++    const std::string source = "name:" + name + "\n" + theme_path_ + "\n" +
++                               (dark ? "dark" : "light") + "\n" +
++                               base::NumberToString(target_px);
++    if (source == icon_source_ && !image_.isNull()) {
++      return;
++    }
++    icon_source_ = source;
++    icon_target_px_ = target_px;
++    const uint64_t generation = ++icon_generation_;
++    IconQuery query;
++    query.name = name;
++    query.theme_path = theme_path_;
++    query.dark = dark;
++    query.target_px = target_px;
++    if (auto it = icon_paths_.find(icon_source_); it != icon_paths_.end()) {
++      query.known_path = it->second;
++    }
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE,
++        {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
++        base::BindOnce(&FindIconFile, std::move(query)),
++        base::BindOnce(&Item::OnIconFile, weak_ptr_factory_.GetWeakPtr(),
++                       generation));
++    return;
++  }
++
++  if (const Pixmap* pixmap = PickPixmap(pixmaps, target_px)) {
++    std::string source = "pixmap:" + base::NumberToString(pixmap->width) +
++                         "x" + base::NumberToString(pixmap->height) + ":";
++    source.append(pixmap->argb.begin(), pixmap->argb.end());
++    if (source == icon_source_ && !image_.isNull()) {
++      return;
++    }
++    icon_source_ = std::move(source);
++    ++icon_generation_;
++    SetImage(ToTrayImage(PixmapToBitmap(*pixmap)));
++    return;
++  }
++
++  icon_source_.clear();
++  ++icon_generation_;
++  SetImage(gfx::ImageSkia());
++}
++
++void StatusNotifierHost::Item::OnIconFile(uint64_t generation,
++                                          std::optional<IconFile> file) {
++  if (generation != icon_generation_) {
++    return;
++  }
++  if (!file) {
++    // The name leads nowhere; pixmaps, when the item sends them too, are
++    // better than a letter.
++    const std::vector<Pixmap>& pixmaps =
++        status_ == "NeedsAttention" && !attention_pixmaps_.empty()
++            ? attention_pixmaps_
++            : icon_pixmaps_;
++    if (const Pixmap* pixmap = PickPixmap(pixmaps, icon_target_px_)) {
++      SetImage(ToTrayImage(PixmapToBitmap(*pixmap)));
++    } else {
++      SetImage(gfx::ImageSkia());
++    }
++    return;
++  }
++  // Indicators that cycle through many names keep a few of them.
++  if (icon_paths_.size() >= kMaxKnownIconPaths) {
++    icon_paths_.clear();
++  }
++  icon_paths_[icon_source_] = file->path;
++  const bool symbolic = IsSymbolicIcon(file->path);
++  if (IsSvg(file->path)) {
++    RenderSvg(generation, std::move(file->bytes), symbolic, /*attempt=*/1);
++    return;
++  }
++  // Pictures from applications are decoded out of process.
++  data_decoder::DecodeImageIsolated(
++      base::as_byte_span(file->bytes),
++      data_decoder::mojom::ImageCodec::kDefault,
++      /*shrink_to_fit=*/true, data_decoder::kDefaultMaxSizeInBytes,
++      gfx::Size(icon_target_px_, icon_target_px_),
++      base::BindOnce(&Item::OnIconDecoded, weak_ptr_factory_.GetWeakPtr(),
++                     generation, symbolic));
++}
++
++void StatusNotifierHost::Item::RenderSvg(uint64_t generation,
++                                         std::string svg,
++                                         bool symbolic,
++                                         int attempt) {
++  if (generation != icon_generation_) {
++    return;
++  }
++  apps::SvgIconTranscoder* transcoder = host_->GetSvgTranscoder();
++  if (!transcoder) {
++    SetImage(gfx::ImageSkia());
++    return;
++  }
++  // A renderer draws the SVG, so it is never parsed here.
++  const std::string data = svg;
++  const int size = std::max(kSvgRenderSizePx, icon_target_px_);
++  transcoder->Transcode(
++      data, base::FilePath(), gfx::Size(size, size),
++      base::BindOnce(&Item::OnSvgRendered, weak_ptr_factory_.GetWeakPtr(),
++                     generation, std::move(svg), symbolic, attempt));
++}
++
++void StatusNotifierHost::Item::OnSvgRendered(uint64_t generation,
++                                             std::string svg,
++                                             bool symbolic,
++                                             int attempt,
++                                             std::string png) {
++  if (generation != icon_generation_) {
++    return;
++  }
++  if (png.empty()) {
++    if (attempt < kMaxSvgAttempts) {
++      base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
++          FROM_HERE,
++          base::BindOnce(&Item::RenderSvg, weak_ptr_factory_.GetWeakPtr(),
++                         generation, std::move(svg), symbolic, attempt + 1),
++          kSvgRetryDelay);
++    } else {
++      SetImage(gfx::ImageSkia());
++    }
++    return;
++  }
++  // Encoded in this process from the bitmap the renderer drew, so decoding
++  // it here is safe.
++  OnIconDecoded(generation, symbolic,
++                gfx::PNGCodec::Decode(base::as_byte_span(png)));
++}
++
++void StatusNotifierHost::Item::OnIconDecoded(uint64_t generation,
++                                             bool symbolic,
++                                             const SkBitmap& bitmap) {
++  if (generation != icon_generation_) {
++    return;
++  }
++  if (bitmap.drawsNothing()) {
++    SetImage(gfx::ImageSkia());
++    return;
++  }
++  SkBitmap copy;
++  if (symbolic && copy.tryAllocN32Pixels(bitmap.width(), bitmap.height()) &&
++      bitmap.readPixels(copy.info(), copy.getPixels(), copy.rowBytes(), 0,
++                        0)) {
++    TintBitmap(&copy, SymbolicColor());
++    SetImage(ToTrayImage(copy));
++    return;
++  }
++  SetImage(ToTrayImage(bitmap));
++}
++
++void StatusNotifierHost::Item::SetImage(gfx::ImageSkia image) {
++  image_ = image.isNull()
++               ? LetterIcon(!title_.empty() ? title_
++                            : !tooltip_title_.empty() ? tooltip_title_
++                                                      : id_)
++               : std::move(image);
++  UpdateIcons();
++}
++
++std::u16string StatusNotifierHost::Item::Tooltip() const {
++  std::string tooltip = !tooltip_title_.empty() ? tooltip_title_
++                        : !title_.empty()       ? title_
++                                                : id_;
++  if (!tooltip_text_.empty() && tooltip_text_ != tooltip) {
++    tooltip += "\n" + tooltip_text_;
++  }
++  return base::UTF8ToUTF16(tooltip);
++}
++
++bool StatusNotifierHost::Item::IsShown() const {
++  // Passive items are idle; trays on other desktops hide them too.
++  return refreshed_ && status_ != "Passive" && !image_.isNull();
++}
++
++TrayIconHandlers StatusNotifierHost::Item::MakeHandlers() {
++  TrayIconHandlers handlers;
++  handlers.activate =
++      base::BindRepeating(&Item::Activate, weak_ptr_factory_.GetWeakPtr());
++  handlers.secondary_activate = base::BindRepeating(
++      &Item::SecondaryActivate, weak_ptr_factory_.GetWeakPtr());
++  handlers.scroll =
++      base::BindRepeating(&Item::Scroll, weak_ptr_factory_.GetWeakPtr());
++  handlers.menu = base::BindRepeating(
++      [](base::WeakPtr<Item> item, const gfx::Point& point)
++          -> std::unique_ptr<ui::SimpleMenuModel> {
++        return item ? item->CreateMenu(point) : nullptr;
++      },
++      weak_ptr_factory_.GetWeakPtr());
++  return handlers;
++}
++
++void StatusNotifierHost::Item::Activate(const gfx::Point& point) {
++  if (HasMenu() && (item_is_menu_ || activate_unsupported_)) {
++    ShowMenu(point);
++    return;
++  }
++  dbus::MethodCall method_call(kItemInterface, "Activate");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(point.x());
++  writer.AppendInt32(point.y());
++  proxy_->CallMethodWithErrorResponse(
++      &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++      base::BindOnce(&Item::OnActivated, weak_ptr_factory_.GetWeakPtr(),
++                     point));
++}
++
++void StatusNotifierHost::Item::OnActivated(const gfx::Point& point,
++                                           dbus::Response* response,
++                                           dbus::ErrorResponse* error) {
++  if (response || !error || !HasMenu()) {
++    return;
++  }
++  // libappindicator's items have no Activate; their menu is the click.
++  activate_unsupported_ = true;
++  ShowMenu(point);
++}
++
++void StatusNotifierHost::Item::SecondaryActivate(const gfx::Point& point) {
++  CallItem("SecondaryActivate", point);
++}
++
++void StatusNotifierHost::Item::Scroll(int delta, bool horizontal) {
++  dbus::MethodCall method_call(kItemInterface, "Scroll");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(delta);
++  writer.AppendString(horizontal ? "horizontal" : "vertical");
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++std::unique_ptr<ui::SimpleMenuModel> StatusNotifierHost::Item::CreateMenu(
++    const gfx::Point& point) {
++  if (!HasMenu()) {
++    // Without dbusmenu, an application shows its own menu.
++    CallItem("ContextMenu", point);
++    return nullptr;
++  }
++  // Applications that fill their menu as it opens get the chance to.
++  dbus::MethodCall method_call(kMenuInterface, "AboutToShow");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(menu_->id);
++  menu_proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                          base::BindOnce(&Item::OnAboutToShow,
++                                         weak_ptr_factory_.GetWeakPtr()));
++  return std::make_unique<DbusMenuModel>(
++      *menu_, base::BindRepeating(&Item::SendMenuEvent,
++                                  weak_ptr_factory_.GetWeakPtr()));
++}
++
++void StatusNotifierHost::Item::ShowMenu(const gfx::Point& point) {
++  if (!Shell::HasInstance()) {
++    return;
++  }
++  TrayIconConfiguration configuration;
++  configuration.id = icon_id_;
++  Shell::Get()->ShowStatusTrayIconMenu(configuration, DisplayIdAt(point));
++}
++
++void StatusNotifierHost::Item::CallItem(const char* method,
++                                        const gfx::Point& point) {
++  dbus::MethodCall method_call(kItemInterface, method);
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(point.x());
++  writer.AppendInt32(point.y());
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++bool StatusNotifierHost::Item::HasMenu() const {
++  return menu_proxy_ && menu_ && !menu_->children.empty();
++}
++
++void StatusNotifierHost::Item::OnMenuChanged(dbus::Signal* signal) {
++  menu_timer_.Start(FROM_HERE, kMenuFetchDelay,
++                    base::BindOnce(&Item::FetchMenu, base::Unretained(this)));
++}
++
++void StatusNotifierHost::Item::FetchMenu() {
++  if (!menu_proxy_) {
++    return;
++  }
++  dbus::MethodCall method_call(kMenuInterface, "GetLayout");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(0);
++  writer.AppendInt32(-1);
++  writer.AppendArrayOfStrings({});
++  menu_proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                          base::BindOnce(&Item::OnMenu,
++                                         weak_ptr_factory_.GetWeakPtr()));
++}
++
++void StatusNotifierHost::Item::OnMenu(dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  uint32_t revision = 0;
++  MenuNode root;
++  size_t count = 0;
++  if (!reader.PopUint32(&revision) ||
++      !PopMenuNode(&reader, /*depth=*/0, &count, &root)) {
++    LOG(WARNING) << "AuraDE tray could not read the menu of " << key_;
++    return;
++  }
++  menu_ = std::move(root);
++}
++
++void StatusNotifierHost::Item::OnAboutToShow(dbus::Response* response) {
++  bool needs_update = false;
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  if (reader.PopBool(&needs_update) && needs_update) {
++    FetchMenu();
++  }
++}
++
++void StatusNotifierHost::Item::SendMenuEvent(int32_t id,
++                                             const std::string& event_id) {
++  if (!menu_proxy_) {
++    return;
++  }
++  dbus::MethodCall method_call(kMenuInterface, "Event");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt32(id);
++  writer.AppendString(event_id);
++  writer.AppendVariantOfInt32(0);
++  writer.AppendUint32(0);
++  menu_proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                          base::DoNothing());
++}
++
++StatusNotifierHost::StatusNotifierHost() = default;
++
++StatusNotifierHost::~StatusNotifierHost() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  items_.clear();
++  svg_transcoder_.reset();
++  bus_proxy_ = nullptr;
++  watcher_ = nullptr;
++  if (bus_) {
++    bus_->ShutdownOnDBusThreadAndBlock();
++    bus_.reset();
++  }
++  if (dbus_thread_) {
++    dbus_thread_->Stop();
++  }
++}
++
++// static
++std::unique_ptr<StatusNotifierHost> StatusNotifierHost::Create() {
++  auto host = std::unique_ptr<StatusNotifierHost>(new StatusNotifierHost());
++  if (!host->Start()) {
++    return nullptr;
++  }
++  return host;
++}
++
++bool StatusNotifierHost::Start() {
++  if (!Shell::HasInstance()) {
++    return false;
++  }
++  dbus_thread_ = std::make_unique<base::Thread>("AuraDE tray D-Bus thread");
++  base::Thread::Options thread_options;
++  thread_options.message_pump_type = base::MessagePumpType::IO;
++  if (!dbus_thread_->StartWithOptions(std::move(thread_options))) {
++    LOG(ERROR) << "AuraDE tray could not start its D-Bus thread";
++    return false;
++  }
++
++  dbus::Bus::Options bus_options;
++  bus_options.bus_type = dbus::Bus::SESSION;
++  bus_options.connection_type = dbus::Bus::PRIVATE;
++  bus_options.dbus_task_runner = dbus_thread_->task_runner();
++  bus_ = new dbus::Bus(std::move(bus_options));
++
++  watcher_ = bus_->GetExportedObject(dbus::ObjectPath(kWatcherPath));
++  const auto export_method = [this](const char* interface_name,
++                                    const char* method_name,
++                                    auto handler) {
++    watcher_->ExportMethod(
++        interface_name, method_name,
++        base::BindRepeating(handler, weak_ptr_factory_.GetWeakPtr()),
++        base::BindOnce(&StatusNotifierHost::OnExported,
++                       weak_ptr_factory_.GetWeakPtr()));
++  };
++  export_method(kWatcherInterface, "RegisterStatusNotifierItem",
++                &StatusNotifierHost::HandleRegisterItem);
++  export_method(kWatcherInterface, "RegisterStatusNotifierHost",
++                &StatusNotifierHost::HandleRegisterHost);
++  export_method(kPropertiesInterface, "Get", &StatusNotifierHost::HandleGet);
++  export_method(kPropertiesInterface, "GetAll",
++                &StatusNotifierHost::HandleGetAll);
++  export_method(kIntrospectableInterface, "Introspect",
++                &StatusNotifierHost::HandleIntrospect);
++
++  bus_proxy_ = bus_->GetObjectProxy(kBusService, dbus::ObjectPath(kBusPath));
++  bus_proxy_->ConnectToSignal(
++      kBusInterface, "NameOwnerChanged",
++      base::BindRepeating(&StatusNotifierHost::OnNameOwnerChanged,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::DoNothing());
++
++  // The methods are exported on the D-Bus thread before the name is asked
++  // for there, so no application finds the watcher without them.
++  bus_->RequestOwnership(kWatcherService, dbus::Bus::REQUIRE_PRIMARY,
++                         base::BindOnce(&StatusNotifierHost::OnOwnership,
++                                        weak_ptr_factory_.GetWeakPtr()));
++  shell_observation_.Observe(Shell::Get());
++  if (auto* color_mode = DarkLightModeController::Get()) {
++    color_mode_observation_.Observe(color_mode);
++  }
++  return true;
++}
++
++void StatusNotifierHost::OnOwnership(const std::string& service_name,
++                                     bool success) {
++  if (!success) {
++    LOG(ERROR) << "AuraDE could not own " << service_name
++               << "; Linux applications' tray icons will not show";
++    return;
++  }
++  // Applications that found no host wait for one.
++  dbus::Signal signal(kWatcherInterface, "StatusNotifierHostRegistered");
++  watcher_->SendSignal(&signal);
++}
++
++void StatusNotifierHost::OnExported(const std::string& interface_name,
++                                    const std::string& method_name,
++                                    bool success) {
++  LOG_IF(ERROR, !success) << "AuraDE tray could not export " << interface_name
++                          << "." << method_name;
++}
++
++void StatusNotifierHost::HandleRegisterItem(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::string service;
++  if (!reader.PopString(&service) || service.empty()) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, "org.freedesktop.DBus.Error.InvalidArgs",
++            "No service given"));
++    return;
++  }
++  // An item names its bus name, or only its object path on the
++  // connection it called from, or both as the watcher lists them.
++  std::string bus_name = service;
++  std::string path = kDefaultItemPath;
++  if (const size_t slash = service.find('/'); slash != std::string::npos) {
++    bus_name = slash ? service.substr(0, slash) : method_call->GetSender();
++    path = service.substr(slash);
++  }
++  if (bus_name.empty() || !dbus::ObjectPath(path).IsValid()) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, "org.freedesktop.DBus.Error.InvalidArgs",
++            "Not a bus name or object path"));
++    return;
++  }
++  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
++
++  if (items_.contains(bus_name + path)) {
++    return;
++  }
++  if (IsUniqueName(bus_name)) {
++    AddItem(bus_name, bus_name, path);
++    return;
++  }
++  dbus::MethodCall get_owner(kBusInterface, "GetNameOwner");
++  dbus::MessageWriter writer(&get_owner);
++  writer.AppendString(bus_name);
++  bus_proxy_->CallMethod(
++      &get_owner, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++      base::BindOnce(&StatusNotifierHost::OnGetNameOwner,
++                     weak_ptr_factory_.GetWeakPtr(), bus_name, path));
++}
++
++void StatusNotifierHost::HandleRegisterHost(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
++  dbus::Signal signal(kWatcherInterface, "StatusNotifierHostRegistered");
++  watcher_->SendSignal(&signal);
++}
++
++void StatusNotifierHost::HandleGet(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::string interface_name;
++  std::string property;
++  if (!reader.PopString(&interface_name) || !reader.PopString(&property) ||
++      interface_name != kWatcherInterface) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, "org.freedesktop.DBus.Error.UnknownInterface",
++            "No such interface"));
++    return;
++  }
++  std::unique_ptr<dbus::Response> response =
++      dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  if (property == "RegisteredStatusNotifierItems") {
++    std::vector<std::string> keys;
++    for (const auto& [key, item] : items_) {
++      keys.push_back(key);
++    }
++    dbus::MessageWriter variant(nullptr);
++    writer.OpenVariant("as", &variant);
++    variant.AppendArrayOfStrings(keys);
++    writer.CloseContainer(&variant);
++  } else if (property == "IsStatusNotifierHostRegistered") {
++    writer.AppendVariantOfBool(true);
++  } else if (property == "ProtocolVersion") {
++    writer.AppendVariantOfInt32(0);
++  } else {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, "org.freedesktop.DBus.Error.UnknownProperty",
++            "No such property"));
++    return;
++  }
++  std::move(response_sender).Run(std::move(response));
++}
++
++void StatusNotifierHost::HandleGetAll(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  dbus::MessageReader reader(method_call);
++  std::string interface_name;
++  if (!reader.PopString(&interface_name) ||
++      interface_name != kWatcherInterface) {
++    std::move(response_sender)
++        .Run(dbus::ErrorResponse::FromMethodCall(
++            method_call, "org.freedesktop.DBus.Error.UnknownInterface",
++            "No such interface"));
++    return;
++  }
++  std::unique_ptr<dbus::Response> response =
++      dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  dbus::MessageWriter array(nullptr);
++  writer.OpenArray("{sv}", &array);
++
++  dbus::MessageWriter entry(nullptr);
++  array.OpenDictEntry(&entry);
++  entry.AppendString("RegisteredStatusNotifierItems");
++  std::vector<std::string> keys;
++  for (const auto& [key, item] : items_) {
++    keys.push_back(key);
++  }
++  dbus::MessageWriter variant(nullptr);
++  entry.OpenVariant("as", &variant);
++  variant.AppendArrayOfStrings(keys);
++  entry.CloseContainer(&variant);
++  array.CloseContainer(&entry);
++
++  array.OpenDictEntry(&entry);
++  entry.AppendString("IsStatusNotifierHostRegistered");
++  entry.AppendVariantOfBool(true);
++  array.CloseContainer(&entry);
++
++  array.OpenDictEntry(&entry);
++  entry.AppendString("ProtocolVersion");
++  entry.AppendVariantOfInt32(0);
++  array.CloseContainer(&entry);
++
++  writer.CloseContainer(&array);
++  std::move(response_sender).Run(std::move(response));
++}
++
++void StatusNotifierHost::HandleIntrospect(
++    dbus::MethodCall* method_call,
++    dbus::ExportedObject::ResponseSender response_sender) {
++  std::unique_ptr<dbus::Response> response =
++      dbus::Response::FromMethodCall(method_call);
++  dbus::MessageWriter writer(response.get());
++  writer.AppendString(kWatcherIntrospection);
++  std::move(response_sender).Run(std::move(response));
++}
++
++void StatusNotifierHost::OnGetNameOwner(const std::string& bus_name,
++                                        const std::string& path,
++                                        dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  std::string owner;
++  if (reader.PopString(&owner) && IsUniqueName(owner)) {
++    AddItem(bus_name, owner, path);
++  }
++}
++
++void StatusNotifierHost::OnNameOwnerChanged(dbus::Signal* signal) {
++  dbus::MessageReader reader(signal);
++  std::string name;
++  std::string old_owner;
++  std::string new_owner;
++  if (!reader.PopString(&name) || !reader.PopString(&old_owner) ||
++      !reader.PopString(&new_owner) || old_owner.empty()) {
++    return;
++  }
++  // An item goes with its connection, or with the name it registered by
++  // when that changes hands; an application that restarts registers again.
++  std::vector<std::string> gone;
++  for (const auto& [key, item] : items_) {
++    if (item->bus_name() == name || item->owner() == name) {
++      gone.push_back(key);
++    }
++  }
++  for (const std::string& key : gone) {
++    RemoveItem(key);
++  }
++}
++
++void StatusNotifierHost::AddItem(const std::string& bus_name,
++                                 const std::string& owner,
++                                 const std::string& path) {
++  const std::string key = bus_name + path;
++  if (items_.contains(key) || items_.size() >= kMaxItems) {
++    return;
++  }
++  // The same object registered under a second name is one item.
++  for (const auto& [other_key, item] : items_) {
++    if (item->owner() == owner && item->path() == path) {
++      return;
++    }
++  }
++  items_.emplace(key, std::make_unique<Item>(this, key, bus_name, owner, path,
++                                             next_icon_id_++));
++  EmitItemSignal("StatusNotifierItemRegistered", key);
++}
++
++void StatusNotifierHost::RemoveItem(const std::string& key) {
++  if (items_.erase(key)) {
++    EmitItemSignal("StatusNotifierItemUnregistered", key);
++  }
++}
++
++void StatusNotifierHost::EmitItemSignal(const char* signal_name,
++                                        const std::string& key) {
++  dbus::Signal signal(kWatcherInterface, signal_name);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendString(key);
++  watcher_->SendSignal(&signal);
++}
++
++void StatusNotifierHost::OnRootWindowAdded(aura::Window* root_window) {
++  ReloadIcons();
++}
++
++void StatusNotifierHost::OnColorModeChanged(bool dark_mode_enabled) {
++  ReloadIcons();
++}
++
++void StatusNotifierHost::OnDisplayMetricsChanged(
++    const display::Display& display,
++    uint32_t changed_metrics) {
++  if (changed_metrics &
++      display::DisplayObserver::DISPLAY_METRIC_DEVICE_SCALE_FACTOR) {
++    ReloadIcons();
++  }
++}
++
++void StatusNotifierHost::ReloadIcons() {
++  for (const auto& [key, item] : items_) {
++    item->Reload();
++  }
++}
++
++apps::SvgIconTranscoder* StatusNotifierHost::GetSvgTranscoder() {
++  if (!svg_transcoder_) {
++    Profile* profile = ProfileManager::GetPrimaryUserProfile();
++    if (!profile) {
++      return nullptr;
++    }
++    svg_transcoder_ = std::make_unique<apps::SvgIconTranscoder>(profile);
++  }
++  return svg_transcoder_.get();
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/dbus/status_notifier_host.h b/chrome/browser/ash/dbus/status_notifier_host.h
+new file mode 100644
+index 000000000000..f816ae5a49f6
+--- /dev/null
++++ b/chrome/browser/ash/dbus/status_notifier_host.h
+@@ -0,0 +1,133 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_STATUS_NOTIFIER_HOST_H_
++#define CHROME_BROWSER_ASH_DBUS_STATUS_NOTIFIER_HOST_H_
++
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <string>
++
++#include "ash/public/cpp/style/color_mode_observer.h"
++#include "ash/public/cpp/style/dark_light_mode_controller.h"
++#include "ash/shell.h"
++#include "ash/shell_observer.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "dbus/exported_object.h"
++#include "ui/display/display_observer.h"
++
++namespace apps {
++class SvgIconTranscoder;
++}  // namespace apps
++
++namespace aura {
++class Window;
++}  // namespace aura
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class MethodCall;
++class ObjectProxy;
++class Response;
++class Signal;
++}  // namespace dbus
++
++namespace ash {
++
++// AuraDE compatibility: Linux applications put icons in the system tray with
++// StatusNotifierItem, the protocol KDE's and GNOME's trays read; Discord,
++// Steam, Telegram and Nextcloud are among them. Ash is the session's
++// StatusNotifierWatcher and its host: each item shows as an icon in the
++// status area on every monitor, with its tooltip. The left button activates
++// the application, the middle button does its second action, the wheel
++// scrolls it and the right button opens the application's own menu, read
++// over dbusmenu. Icons are drawn for the densest monitor and again when the
++// color mode or a monitor's scale changes.
++class StatusNotifierHost : public ShellObserver,
++                           public ColorModeObserver,
++                           public display::DisplayObserver {
++ public:
++  // Returns null when the host cannot start.
++  static std::unique_ptr<StatusNotifierHost> Create();
++
++  StatusNotifierHost(const StatusNotifierHost&) = delete;
++  StatusNotifierHost& operator=(const StatusNotifierHost&) = delete;
++  ~StatusNotifierHost() override;
++
++  // ShellObserver:
++  void OnRootWindowAdded(aura::Window* root_window) override;
++
++  // ColorModeObserver:
++  void OnColorModeChanged(bool dark_mode_enabled) override;
++
++  // display::DisplayObserver:
++  void OnDisplayMetricsChanged(const display::Display& display,
++                               uint32_t changed_metrics) override;
++
++ private:
++  class Item;
++
++  StatusNotifierHost();
++
++  bool Start();
++  void OnOwnership(const std::string& service_name, bool success);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++
++  // org.kde.StatusNotifierWatcher and what any D-Bus object answers.
++  void HandleRegisterItem(dbus::MethodCall* method_call,
++                          dbus::ExportedObject::ResponseSender response_sender);
++  void HandleRegisterHost(dbus::MethodCall* method_call,
++                          dbus::ExportedObject::ResponseSender response_sender);
++  void HandleGet(dbus::MethodCall* method_call,
++                 dbus::ExportedObject::ResponseSender response_sender);
++  void HandleGetAll(dbus::MethodCall* method_call,
++                    dbus::ExportedObject::ResponseSender response_sender);
++  void HandleIntrospect(dbus::MethodCall* method_call,
++                        dbus::ExportedObject::ResponseSender response_sender);
++
++  void OnGetNameOwner(const std::string& bus_name,
++                      const std::string& path,
++                      dbus::Response* response);
++  void OnNameOwnerChanged(dbus::Signal* signal);
++  void AddItem(const std::string& bus_name,
++               const std::string& owner,
++               const std::string& path);
++  void RemoveItem(const std::string& key);
++  void EmitItemSignal(const char* signal_name, const std::string& key);
++  void ReloadIcons();
++
++  // Rasterizes SVG icons in a renderer for every item, made on first use.
++  apps::SvgIconTranscoder* GetSvgTranscoder();
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  raw_ptr<dbus::ExportedObject> watcher_ = nullptr;
++  raw_ptr<dbus::ObjectProxy> bus_proxy_ = nullptr;
++  std::unique_ptr<apps::SvgIconTranscoder> svg_transcoder_;
++  // The items, by the bus name and object path each registered with, the
++  // form the watcher's own property lists them in.
++  std::map<std::string, std::unique_ptr<Item>> items_;
++  // Clear of the IDs Chrome's own status icons count up from 2, and small
++  // enough to become a view's ID.
++  int64_t next_icon_id_ = int64_t{1} << 24;
++  base::ScopedObservation<Shell, ShellObserver> shell_observation_{this};
++  base::ScopedObservation<DarkLightModeController, ColorModeObserver>
++      color_mode_observation_{this};
++  display::ScopedDisplayObserver display_observer_{this};
++  base::WeakPtrFactory<StatusNotifierHost> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_STATUS_NOTIFIER_HOST_H_
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index f9258595c050..61ef76671347 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -102,6 +102,7 @@
+ #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
+ #include "chrome/browser/ash/dbus/screen_lock_service_provider.h"
+ #include "chrome/browser/ash/dbus/smb_fs_service_provider.h"
++#include "chrome/browser/ash/dbus/status_notifier_host.h"
+ #include "chrome/browser/ash/dbus/virtual_file_request_service_provider.h"
+ #include "chrome/browser/ash/dbus/vm/vm_applications_service_provider.h"
+ #include "chrome/browser/ash/dbus/vm/vm_launch_service_provider.h"
+@@ -1712,6 +1713,8 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+     mpris_media_bridge_ = MprisMediaBridge::Create(
+         &content::GetMediaSessionService(),
+         g_browser_process->shared_url_loader_factory());
++    // AuraDE compatibility: their tray icons show in the status area.
++    status_notifier_host_ = StatusNotifierHost::Create();
+   }
+ 
+   ChromeBrowserMainPartsLinux::PostBrowserStart();
+@@ -1723,6 +1726,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+ // shutdown calls and test |pre_profile_init_called_| if necessary. See
+ // crbug.com/40511182 for details.
+ void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
++  status_notifier_host_.reset();
+   mpris_media_bridge_.reset();
+   video_conference_manager_client_.reset();
+ 
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+index 1ab7cd0e7750..e137190f4d5e 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+@@ -103,6 +103,7 @@ class SessionTerminationManager;
+ class ShortcutMappingPrefService;
+ class ShutdownPolicyForwarder;
+ class SigninProfileHandler;
++class StatusNotifierHost;
+ class SuspendPerfReporter;
+ class SystemTokenCertDBInitializer;
+ class TokenHandleStoreFactory;
+@@ -291,6 +292,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+   // AuraDE compatibility: Linux media players in Ash's media controls.
+   std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
+ 
++  // AuraDE compatibility: Linux applications' icons in the system tray.
++  std::unique_ptr<StatusNotifierHost> status_notifier_host_;
++
+   // Set when PreProfileInit() is called. If PreMainMessageLoopRun() exits
+   // early, this will be false during PostMainMessageLoopRun(), etc.
+   // Used to prevent shutting down classes that were not initialized.
