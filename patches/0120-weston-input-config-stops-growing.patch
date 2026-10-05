@@ -1,0 +1,22 @@
+diff --git a/chrome/browser/ash/system/fake_input_device_settings.cc b/chrome/browser/ash/system/fake_input_device_settings.cc
+index 5aea06041fac..952afb9ba6c5 100644
+--- a/chrome/browser/ash/system/fake_input_device_settings.cc
++++ b/chrome/browser/ash/system/fake_input_device_settings.cc
+@@ -45,8 +45,16 @@ std::string BoolValue(bool value) {
+ std::string BuildUpdatedWestonInputConfig(
+     const std::string& original,
+     const std::map<std::string, std::string>& settings) {
+-  const std::vector<std::string> lines = base::SplitString(
++  std::vector<std::string> lines = base::SplitString(
+       original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
++  // The newline that ends the file splits off an empty last line, and the
++  // join below ends the file with one again, so keeping it grew the file by
++  // a blank line at every save. Trailing blank lines go, including the ones
++  // earlier saves left.
++  while (!lines.empty() &&
++         base::TrimWhitespaceASCII(lines.back(), base::TRIM_ALL).empty()) {
++    lines.pop_back();
++  }
+   std::vector<std::string> output;
+   bool in_libinput_section = false;
+   bool saw_libinput_section = false;
