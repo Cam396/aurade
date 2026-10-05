@@ -1,0 +1,1434 @@
+diff --git a/ash/BUILD.gn b/ash/BUILD.gn
+index 6d6a5f08a318..5d05bed0e10f 100644
+--- a/ash/BUILD.gn
++++ b/ash/BUILD.gn
+@@ -581,6 +581,8 @@ component("ash") {
+     "detachable_base/detachable_base_notification_controller.h",
+     "detachable_base/detachable_base_observer.h",
+     "detachable_base/detachable_base_pairing_status.h",
++    "display/aura_display_source.cc",
++    "display/aura_display_source.h",
+     "display/cros_display_config.cc",
+     "display/cros_display_config.h",
+     "display/cursor_window_controller.cc",
+diff --git a/ash/display/aura_display_source.h b/ash/display/aura_display_source.h
+new file mode 100644
+index 000000000000..4fcba7684eb9
+--- /dev/null
++++ b/ash/display/aura_display_source.h
+@@ -0,0 +1,177 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
++#define ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
++
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "ash/ash_export.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "ui/display/display_observer.h"
++#include "ui/display/manager/display_manager_observer.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/types/display_constants.h"
++#include "ui/events/event_handler.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/native_ui_types.h"
++
++namespace base {
++class SequencedTaskRunner;
++}  // namespace base
++
++namespace display {
++class DisplayManager;
++}  // namespace display
++
++namespace ui {
++class PlatformScreen;
++}  // namespace ui
++
++namespace ash {
++
++// On a Linux host Ash is a client of a Wayland compositor, which owns the
++// monitors, and nothing else tells Ash what they are. This builds Ash's
++// displays out of the compositor's outputs: one display per monitor, with an
++// id that stays the same from one session to the next, its own scale and the
++// monitor's own name. It keeps them current as monitors come and go, puts
++// each display's host window on its monitor, and writes where Ash has
++// arranged the displays for the compositor's shell, so the pointer crosses
++// from one monitor to the next where Ash's arrangement has them meet.
++class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
++                                     public display::DisplayManagerObserver,
++                                     public ui::EventHandler {
++ public:
++  // One monitor, as the compositor reports it.
++  struct Monitor {
++    Monitor();
++    Monitor(const Monitor&);
++    Monitor& operator=(const Monitor&);
++    ~Monitor();
++
++    // The compositor's id for the output, and Ash's for the display.
++    int64_t platform_id = display::kInvalidDisplayId;
++    int64_t display_id = display::kInvalidDisplayId;
++    // The connector, "eDP-1", and what the monitor says it is.
++    std::string connector;
++    std::string make;
++    std::string model;
++    // Where the compositor has the output, in its pixels.
++    gfx::Rect bounds_in_pixels;
++    gfx::Size size_mm;
++    float refresh_rate = 60.f;
++    bool internal = false;
++    // The scale the monitor gets when nobody has chosen one, and the one it
++    // has.
++    float recommended_scale = 1.f;
++    float scale = 1.f;
++    // What the monitor's scale is saved under in display.conf.
++    std::string key;
++  };
++
++  // Whether Ash takes its displays from the compositor: on a Linux host,
++  // under Ozone/Wayland, unless AURADE_DISPLAYS=single asks for the single
++  // display Ash had before or --ash-host-window-bounds lays the hosts out.
++  static bool ShouldUse();
++
++  // The instance, or null when Ash takes its displays from somewhere else.
++  static AuraDisplaySource* Get();
++
++  // Creates the instance and hands Ash the compositor's monitors. Returns
++  // false when the compositor has reported none yet, in which case Ash
++  // starts on its default display and the monitors replace it when they
++  // arrive.
++  static bool Start(display::DisplayManager* display_manager);
++  static void Shutdown();
++
++  AuraDisplaySource(const AuraDisplaySource&) = delete;
++  AuraDisplaySource& operator=(const AuraDisplaySource&) = delete;
++
++  const std::vector<Monitor>& monitors() const { return monitors_; }
++  const Monitor* GetMonitor(int64_t display_id) const;
++
++  // Sets the scale of a display, now and for the sessions after this one.
++  // Returns false for a display this does not know or a scale out of range.
++  bool SetScale(int64_t display_id, float scale);
++
++  // The scales Settings offers, from 100% to 300% in quarter steps.
++  static std::vector<float> GetScaleOptions();
++
++  // The scale a monitor gets when nobody has chosen one. It aims for about
++  // 135 pixels per inch of logical size on a laptop panel or a monitor under
++  // 20 inches across, which sit near the eyes, and about 110 on anything
++  // larger. It rounds to a quarter step, never goes under 100%, and stops
++  // short of leaving the desktop less than 720 logical pixels tall. A monitor
++  // that reports no size, or one that cannot be right, gets 100%.
++  static float RecommendScale(const gfx::Size& pixels,
++                              const gfx::Size& size_mm,
++                              bool internal);
++
++  // Whether a connector name is a laptop's own panel.
++  static bool IsInternalConnector(const std::string& connector);
++
++  // The text of display.conf with |scales| saved, keyed as Monitor::key.
++  // Lines it does not own are kept. The single "scale=" of older sessions
++  // is dropped, since every monitor that used it is given a line of its own.
++  static std::string UpdateConfig(const std::string& text,
++                                  const std::map<std::string, float>& scales);
++
++  // display::DisplayObserver, for the compositor's outputs:
++  void OnDisplayAdded(const display::Display& display) override;
++  void OnDisplaysRemoved(const display::Displays& displays) override;
++  void OnDisplayMetricsChanged(const display::Display& display,
++                               uint32_t changed_metrics) override;
++
++  // display::DisplayManagerObserver, for Ash's displays:
++  void OnDisplaysInitialized() override;
++  void OnDidApplyDisplayChanges() override;
++
++  // ui::EventHandler:
++  void OnMouseEvent(ui::MouseEvent* event) override;
++
++ private:
++  explicit AuraDisplaySource(display::DisplayManager* display_manager);
++  ~AuraDisplaySource() override;
++
++  void ReadConfig(const std::string& text);
++  // Rebuilds |monitors_| from the compositor's outputs. Returns whether
++  // anything Ash cares about changed.
++  bool RefreshMonitors();
++  display::ManagedDisplayInfo BuildDisplayInfo(const Monitor& monitor) const;
++  void ApplyToDisplayManager();
++  void OnOutputsChanged();
++  // Puts each display's host window on its monitor.
++  void PlaceHosts();
++  // Writes Ash's arrangement for the compositor's shell.
++  void WriteLayout();
++  void SaveScales(std::map<std::string, float> scales);
++
++  raw_ptr<display::DisplayManager> display_manager_;
++  std::unique_ptr<ui::PlatformScreen> platform_screen_;
++  std::vector<Monitor> monitors_;
++
++  // Scales from display.conf by monitor key, and the single scale older
++  // sessions saved, which a monitor without a line of its own still uses.
++  std::map<std::string, float> saved_scales_;
++  std::optional<float> legacy_scale_;
++
++  // The output each host window was last put on, by its widget.
++  std::map<gfx::AcceleratedWidget, int64_t> placed_hosts_;
++  std::string last_layout_;
++
++  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
++  base::WeakPtrFactory<AuraDisplaySource> weak_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
+diff --git a/ash/display/aura_display_source.cc b/ash/display/aura_display_source.cc
+new file mode 100644
+index 000000000000..615824ea0506
+--- /dev/null
++++ b/ash/display/aura_display_source.cc
+@@ -0,0 +1,674 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ash/display/aura_display_source.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <set>
++#include <string_view>
++#include <tuple>
++#include <utility>
++
++#include "ash/display/window_tree_host_manager.h"
++#include "ash/host/ash_window_tree_host.h"
++#include "ash/shell.h"
++#include "base/command_line.h"
++#include "base/containers/flat_set.h"
++#include "base/environment.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/hash/hash.h"
++#include "base/logging.h"
++#include "base/strings/cstring_view.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
++#include "base/system/sys_info.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "ui/aura/env.h"
++#include "ui/aura/window_tree_host_platform.h"
++#include "ui/base/l10n/l10n_util.h"
++#include "ui/compositor/compositor.h"
++#include "ui/display/display.h"
++#include "ui/display/display_switches.h"
++#include "ui/display/manager/display_manager.h"
++#include "ui/display/screen.h"
++#include "ui/display/util/display_util.h"
++#include "ui/events/event.h"
++#include "ui/ozone/public/ozone_platform.h"
++#include "ui/ozone/public/platform_screen.h"
++#include "ui/platform_window/platform_window.h"
++#include "ui/strings/grit/ui_strings.h"
++#include "ui/wm/core/cursor_manager.h"
++
++namespace ash {
++namespace {
++
++AuraDisplaySource* g_instance = nullptr;
++
++constexpr char kDisplaysEnv[] = "AURADE_DISPLAYS";
++constexpr char kConfigTextEnv[] = "AURADE_DISPLAY_CONF_TEXT";
++constexpr char kLegacyScaleEnv[] = "AURADE_DISPLAY_SCALE";
++constexpr char kScaleKey[] = "scale";
++constexpr char kMonitorScalePrefix[] = "scale.";
++constexpr float kMinScale = 1.f;
++constexpr float kMaxScale = 3.f;
++constexpr float kScaleStep = 0.25f;
++// Logical pixels per inch a monitor aims for, near the eyes and further off.
++constexpr float kNearTargetDpi = 135.f;
++constexpr float kFarTargetDpi = 110.f;
++constexpr float kNearMonitorMaxInches = 20.f;
++constexpr float kMinLogicalHeight = 720.f;
++
++std::optional<std::string> GetEnv(base::cstring_view name) {
++  return base::Environment::Create()->GetVar(name);
++}
++
++float NormalizeScale(double scale) {
++  if (!std::isfinite(scale)) {
++    return kMinScale;
++  }
++  return std::clamp(static_cast<float>(scale), kMinScale, kMaxScale);
++}
++
++std::string FormatScale(float scale) {
++  return base::NumberToString(std::round(scale * 100.f) / 100.f);
++}
++
++base::FilePath GetConfigPath() {
++  const std::optional<std::string> config_home = GetEnv("XDG_CONFIG_HOME");
++  if (config_home && !config_home->empty()) {
++    return base::FilePath(*config_home).Append("aurade/display.conf");
++  }
++  const std::optional<std::string> home = GetEnv("HOME");
++  if (!home || home->empty()) {
++    return base::FilePath();
++  }
++  return base::FilePath(*home).Append(".config/aurade/display.conf");
++}
++
++base::FilePath GetLayoutPath() {
++  const std::optional<std::string> runtime_dir = GetEnv("XDG_RUNTIME_DIR");
++  if (!runtime_dir || runtime_dir->empty()) {
++    return base::FilePath();
++  }
++  return base::FilePath(*runtime_dir).Append("aurade/display-layout");
++}
++
++bool IsKnownString(const std::string& value) {
++  return !value.empty() && !base::EqualsCaseInsensitiveASCII(value, "unknown");
++}
++
++std::string MonitorKey(const AuraDisplaySource::Monitor& monitor) {
++  std::string key = monitor.connector + "/" + monitor.make + "/" + monitor.model;
++  for (char& c : key) {
++    if (c == '=' || c == '\n' || c == '\r' || c == '\t') {
++      c = '_';
++    }
++  }
++  return std::string(base::TrimWhitespaceASCII(key, base::TRIM_ALL));
++}
++
++// Ash sorts displays by the low byte of their ids, takes the first as the
++// primary display when no arrangement is saved, and requires the bytes to
++// differ, as ChromeOS keeps the connector's index there. This orders
++// connectors the way a graphics card lists them: the laptop's panel, then
++// DisplayPort, HDMI, DVI and VGA, each by its number.
++uint8_t ConnectorIndex(const std::string& connector) {
++  static constexpr std::pair<std::string_view, uint8_t> kTypes[] = {
++      {"eDP", 0x00},   {"LVDS", 0x00},   {"DSI", 0x00}, {"DP", 0x20},
++      {"HDMI", 0x40},  {"DVI", 0x60},    {"VGA", 0x80}, {"USB", 0xA0},
++      {"Virtual", 0xC0},
++  };
++  uint8_t type = 0xE0;
++  for (const auto& [prefix, value] : kTypes) {
++    if (connector.starts_with(prefix)) {
++      type = value;
++      break;
++    }
++  }
++  unsigned number = 0;
++  const size_t dash = connector.rfind('-');
++  if (dash == std::string::npos ||
++      !base::StringToUint(std::string_view(connector).substr(dash + 1),
++                          &number)) {
++    number = base::PersistentHash(connector);
++  }
++  return type | (number & 0x1F);
++}
++
++int64_t MonitorDisplayId(const std::string& key, uint8_t index) {
++  // A positive id well clear of the ones Ash makes up for its default
++  // display, the same for a monitor on the same connector every session.
++  return (int64_t{0x7A} << 40) |
++         (int64_t{base::PersistentHash(key)} << 8) | index;
++}
++
++std::string MonitorName(const AuraDisplaySource::Monitor& monitor) {
++  if (monitor.internal) {
++    return l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_INTERNAL);
++  }
++  if (IsKnownString(monitor.model)) {
++    return monitor.model;
++  }
++  if (IsKnownString(monitor.make)) {
++    return monitor.make + " (" + monitor.connector + ")";
++  }
++  return monitor.connector;
++}
++
++void WriteFileOnBlockingThread(base::FilePath path, std::string text) {
++  if (path.empty() || !base::CreateDirectory(path.DirName())) {
++    return;
++  }
++  if (!base::ImportantFileWriter::WriteFileAtomically(path, text)) {
++    LOG(WARNING) << "Could not write " << path.value();
++  }
++}
++
++void SaveScalesOnBlockingThread(base::FilePath path,
++                                std::map<std::string, float> scales) {
++  if (path.empty()) {
++    return;
++  }
++  std::string text;
++  base::ReadFileToString(path, &text);
++  WriteFileOnBlockingThread(path,
++                            AuraDisplaySource::UpdateConfig(text, scales));
++}
++
++}  // namespace
++
++AuraDisplaySource::Monitor::Monitor() = default;
++AuraDisplaySource::Monitor::Monitor(const Monitor&) = default;
++AuraDisplaySource::Monitor& AuraDisplaySource::Monitor::operator=(
++    const Monitor&) = default;
++AuraDisplaySource::Monitor::~Monitor() = default;
++
++// static
++bool AuraDisplaySource::ShouldUse() {
++  if (base::SysInfo::IsRunningOnChromeOS()) {
++    return false;
++  }
++  if (GetEnv(kDisplaysEnv).value_or(std::string()) == "single") {
++    return false;
++  }
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          ::switches::kHostWindowBounds)) {
++    return false;
++  }
++  return ui::OzonePlatform::IsInitialized() &&
++         ui::OzonePlatform::GetPlatformNameForTest() == "wayland";
++}
++
++// static
++AuraDisplaySource* AuraDisplaySource::Get() {
++  return g_instance;
++}
++
++// static
++bool AuraDisplaySource::Start(display::DisplayManager* display_manager) {
++  CHECK(!g_instance);
++  g_instance = new AuraDisplaySource(display_manager);
++  if (g_instance->monitors_.empty()) {
++    LOG(WARNING) << "The compositor has reported no outputs yet";
++    return false;
++  }
++  g_instance->ApplyToDisplayManager();
++  return true;
++}
++
++// static
++void AuraDisplaySource::Shutdown() {
++  delete g_instance;
++  g_instance = nullptr;
++}
++
++AuraDisplaySource::AuraDisplaySource(display::DisplayManager* display_manager)
++    : display_manager_(display_manager),
++      file_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
++          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++           base::TaskShutdownBehavior::BLOCK_SHUTDOWN})) {
++  // The compositor's outputs, through the same screen a Chrome browser on a
++  // Wayland desktop uses. Ash keeps its own display::Screen; this one is
++  // only read here, and it also lets a host window go fullscreen on a chosen
++  // output.
++  platform_screen_ = ui::OzonePlatform::GetInstance()->CreateScreen();
++  ui::OzonePlatform::GetInstance()->InitScreen(platform_screen_.get());
++  platform_screen_->AddObserver(this);
++
++  // Files cannot be read this early in Ash's start, so the launcher hands
++  // over display.conf's text.
++  ReadConfig(GetEnv(kConfigTextEnv).value_or(std::string()));
++  // One scale for the whole session, which the launcher takes from an older
++  // display.conf unless the environment gives one, counts for every monitor
++  // without a scale of its own.
++  const std::optional<std::string> session_scale = GetEnv(kLegacyScaleEnv);
++  double session_scale_value = 0;
++  if (session_scale &&
++      base::StringToDouble(*session_scale, &session_scale_value)) {
++    legacy_scale_ = NormalizeScale(session_scale_value);
++  }
++  RefreshMonitors();
++
++  display_manager_->AddDisplayManagerObserver(this);
++  aura::Env::GetInstance()->AddPreTargetHandler(
++      this, ui::EventTarget::Priority::kSystem);
++
++  // The host windows are made after the displays, later in Shell::Init().
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(&AuraDisplaySource::PlaceHosts,
++                                weak_factory_.GetWeakPtr()));
++}
++
++AuraDisplaySource::~AuraDisplaySource() {
++  aura::Env::GetInstance()->RemovePreTargetHandler(this);
++  display_manager_->RemoveDisplayManagerObserver(this);
++  platform_screen_->RemoveObserver(this);
++}
++
++const AuraDisplaySource::Monitor* AuraDisplaySource::GetMonitor(
++    int64_t display_id) const {
++  for (const Monitor& monitor : monitors_) {
++    if (monitor.display_id == display_id) {
++      return &monitor;
++    }
++  }
++  return nullptr;
++}
++
++bool AuraDisplaySource::SetScale(int64_t display_id, float scale) {
++  if (!std::isfinite(scale) || scale < kMinScale || scale > kMaxScale) {
++    return false;
++  }
++  auto it = std::ranges::find(monitors_, display_id, &Monitor::display_id);
++  if (it == monitors_.end()) {
++    return false;
++  }
++
++  // Saving a scale for one monitor drops the single scale older sessions
++  // kept, so every other monitor still using it is saved with it too.
++  std::map<std::string, float> to_save;
++  if (legacy_scale_) {
++    for (const Monitor& monitor : monitors_) {
++      if (!saved_scales_.contains(monitor.key)) {
++        to_save[monitor.key] = *legacy_scale_;
++        saved_scales_[monitor.key] = *legacy_scale_;
++      }
++    }
++    legacy_scale_.reset();
++  }
++  to_save[it->key] = scale;
++  saved_scales_[it->key] = scale;
++  SaveScales(std::move(to_save));
++
++  RefreshMonitors();
++  ApplyToDisplayManager();
++  return true;
++}
++
++// static
++std::vector<float> AuraDisplaySource::GetScaleOptions() {
++  std::vector<float> options;
++  for (float scale = kMinScale; scale <= kMaxScale + 0.001f;
++       scale += kScaleStep) {
++    options.push_back(scale);
++  }
++  return options;
++}
++
++// static
++float AuraDisplaySource::RecommendScale(const gfx::Size& pixels,
++                                        const gfx::Size& size_mm,
++                                        bool internal) {
++  if (pixels.IsEmpty() || !display::IsDisplaySizeValid(size_mm)) {
++    return kMinScale;
++  }
++  const float dpi_x = display::kInchInMm * pixels.width() / size_mm.width();
++  const float dpi_y = display::kInchInMm * pixels.height() / size_mm.height();
++  // A size giving the two directions very different densities, or a density
++  // no monitor has, is not the monitor's real size.
++  if (dpi_x < 50.f || dpi_x > 600.f ||
++      std::abs(dpi_x - dpi_y) > 0.2f * dpi_x) {
++    return kMinScale;
++  }
++  const float diagonal_inches =
++      std::hypot(static_cast<float>(size_mm.width()),
++                 static_cast<float>(size_mm.height())) /
++      display::kInchInMm;
++  const float target = internal || diagonal_inches < kNearMonitorMaxInches
++                           ? kNearTargetDpi
++                           : kFarTargetDpi;
++  float scale = std::round(dpi_x / target / kScaleStep) * kScaleStep;
++  scale = std::clamp(scale, kMinScale, kMaxScale);
++  while (scale > kMinScale && pixels.height() / scale < kMinLogicalHeight) {
++    scale -= kScaleStep;
++  }
++  return scale;
++}
++
++// static
++bool AuraDisplaySource::IsInternalConnector(const std::string& connector) {
++  return connector.starts_with("eDP") || connector.starts_with("LVDS") ||
++         connector.starts_with("DSI");
++}
++
++// static
++std::string AuraDisplaySource::UpdateConfig(
++    const std::string& text,
++    const std::map<std::string, float>& scales) {
++  std::vector<std::string> lines;
++  std::set<std::string> written;
++  for (const std::string& line : base::SplitString(
++           text, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    const std::string_view trimmed =
++        base::TrimWhitespaceASCII(line, base::TRIM_ALL);
++    const size_t separator = trimmed.find('=');
++    if (!trimmed.starts_with("#") && separator != std::string::npos) {
++      const std::string key(base::TrimWhitespaceASCII(
++          trimmed.substr(0, separator), base::TRIM_ALL));
++      if (key == kScaleKey) {
++        continue;
++      }
++      if (key.starts_with(kMonitorScalePrefix)) {
++        const std::string monitor_key =
++            key.substr(std::char_traits<char>::length(kMonitorScalePrefix));
++        auto it = scales.find(monitor_key);
++        if (it != scales.end()) {
++          if (written.insert(monitor_key).second) {
++            lines.push_back(key + "=" + FormatScale(it->second));
++          }
++          continue;
++        }
++      }
++    }
++    lines.push_back(line);
++  }
++  while (!lines.empty() &&
++         base::TrimWhitespaceASCII(lines.back(), base::TRIM_ALL).empty()) {
++    lines.pop_back();
++  }
++  if (lines.empty()) {
++    lines.push_back("# AuraDE display settings");
++  }
++  for (const auto& [monitor_key, scale] : scales) {
++    if (!written.contains(monitor_key)) {
++      lines.push_back(std::string(kMonitorScalePrefix) + monitor_key + "=" +
++                      FormatScale(scale));
++    }
++  }
++  return base::JoinString(lines, "\n") + "\n";
++}
++
++void AuraDisplaySource::OnDisplayAdded(const display::Display& display) {
++  OnOutputsChanged();
++}
++
++void AuraDisplaySource::OnDisplaysRemoved(const display::Displays& displays) {
++  OnOutputsChanged();
++}
++
++void AuraDisplaySource::OnDisplayMetricsChanged(const display::Display& display,
++                                                uint32_t changed_metrics) {
++  OnOutputsChanged();
++}
++
++void AuraDisplaySource::OnDisplaysInitialized() {
++  PlaceHosts();
++  WriteLayout();
++}
++
++void AuraDisplaySource::OnDidApplyDisplayChanges() {
++  PlaceHosts();
++  WriteLayout();
++}
++
++void AuraDisplaySource::OnMouseEvent(ui::MouseEvent* event) {
++  if (event->type() != ui::EventType::kMouseMoved &&
++      event->type() != ui::EventType::kMouseDragged) {
++    return;
++  }
++  // Ash only moves the cursor to another display when it warps it there
++  // itself. Here the compositor moves it, so follow it: the cursor is drawn
++  // for the scale of the display it is on.
++  if (!Shell::HasInstance() || !Shell::Get()->cursor_manager()) {
++    return;
++  }
++  Shell* shell = Shell::Get();
++  const display::Display display =
++      display::Screen::Get()->GetDisplayNearestPoint(
++          aura::Env::GetInstance()->last_mouse_location());
++  if (display.is_valid() &&
++      shell->cursor_manager()->GetDisplay().id() != display.id()) {
++    shell->cursor_manager()->SetDisplay(display);
++  }
++}
++
++void AuraDisplaySource::ReadConfig(const std::string& text) {
++  for (const std::string& line : base::SplitString(
++           text, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (line.starts_with("#")) {
++      continue;
++    }
++    const size_t separator = line.find('=');
++    if (separator == std::string::npos) {
++      continue;
++    }
++    const std::string key(
++        base::TrimWhitespaceASCII(line.substr(0, separator), base::TRIM_ALL));
++    double value = 0;
++    if (!base::StringToDouble(
++            base::TrimWhitespaceASCII(line.substr(separator + 1),
++                                      base::TRIM_ALL),
++            &value)) {
++      continue;
++    }
++    if (key == kScaleKey) {
++      legacy_scale_ = NormalizeScale(value);
++    } else if (key.starts_with(kMonitorScalePrefix)) {
++      saved_scales_[key.substr(
++          std::char_traits<char>::length(kMonitorScalePrefix))] =
++          NormalizeScale(value);
++    }
++  }
++}
++
++bool AuraDisplaySource::RefreshMonitors() {
++  std::vector<Monitor> monitors;
++  for (const display::Display& display : platform_screen_->GetAllDisplays()) {
++    Monitor monitor;
++    monitor.platform_id = display.id();
++    if (const std::optional<ui::PlatformScreen::OutputInfo> info =
++            platform_screen_->GetOutputInfo(display.id())) {
++      monitor.connector = info->name;
++      monitor.make = info->make;
++      monitor.model = info->model;
++      monitor.size_mm = gfx::Size(info->width_mm, info->height_mm);
++      if (info->refresh_millihertz > 0) {
++        monitor.refresh_rate = info->refresh_millihertz / 1000.f;
++      }
++    }
++    if (monitor.connector.empty()) {
++      monitor.connector = base::StringPrintf("output-%zu", monitors.size() + 1);
++    }
++    monitor.bounds_in_pixels =
++        gfx::Rect(display.bounds().origin(), display.GetSizeInPixel());
++    monitor.internal = IsInternalConnector(monitor.connector);
++    monitor.key = MonitorKey(monitor);
++    monitor.recommended_scale = RecommendScale(
++        monitor.bounds_in_pixels.size(), monitor.size_mm, monitor.internal);
++    auto saved = saved_scales_.find(monitor.key);
++    monitor.scale = saved != saved_scales_.end()
++                        ? saved->second
++                        : legacy_scale_.value_or(monitor.recommended_scale);
++    monitors.push_back(std::move(monitor));
++  }
++
++  // The laptop's own panel first, then left to right as the compositor has
++  // them, so the first display Ash is given is the one it should make
++  // primary when it has no arrangement saved for this set of monitors.
++  std::ranges::stable_sort(monitors, [](const Monitor& a, const Monitor& b) {
++    return std::make_tuple(!a.internal, a.bounds_in_pixels.x(),
++                           a.bounds_in_pixels.y()) <
++           std::make_tuple(!b.internal, b.bounds_in_pixels.x(),
++                           b.bounds_in_pixels.y());
++  });
++
++  // Two outputs whose connectors give the same index, on two graphics
++  // cards, say, take the next free one.
++  std::set<uint8_t> used_indices;
++  for (Monitor& monitor : monitors) {
++    uint8_t index = ConnectorIndex(monitor.connector);
++    while (!used_indices.insert(index).second) {
++      ++index;
++    }
++    monitor.display_id = MonitorDisplayId(monitor.key, index);
++  }
++
++  auto same = [](const Monitor& a, const Monitor& b) {
++    return a.platform_id == b.platform_id && a.display_id == b.display_id &&
++           a.bounds_in_pixels == b.bounds_in_pixels && a.scale == b.scale &&
++           a.refresh_rate == b.refresh_rate;
++  };
++  const bool changed = !std::ranges::equal(monitors, monitors_, same);
++  monitors_ = std::move(monitors);
++  return changed;
++}
++
++display::ManagedDisplayInfo AuraDisplaySource::BuildDisplayInfo(
++    const Monitor& monitor) const {
++  display::ManagedDisplayInfo info(monitor.display_id, MonitorName(monitor),
++                                   /*has_overscan=*/false);
++  const gfx::Size size = monitor.bounds_in_pixels.size();
++  info.SetBounds(monitor.bounds_in_pixels);
++  // The scale is the display's own device scale factor, which 0027's root
++  // window transformer applies, and display zoom stays at 100%.
++  info.set_device_scale_factor(monitor.scale);
++  info.set_zoom_factor(1.f);
++  info.AddZoomFactorForSize(size.ToString(), 1.f);
++  info.set_refresh_rate(monitor.refresh_rate);
++  info.SetManagedDisplayModes({display::ManagedDisplayMode(
++      size, monitor.refresh_rate, /*is_interlaced=*/false, /*native=*/true,
++      monitor.scale)});
++  info.set_native(true);
++  info.set_from_native_platform(true);
++  info.set_connection_type(monitor.internal
++                               ? display::DISPLAY_CONNECTION_TYPE_INTERNAL
++                               : display::DISPLAY_CONNECTION_TYPE_UNKNOWN);
++  if (display::IsDisplaySizeValid(monitor.size_mm)) {
++    info.set_physical_size(monitor.size_mm);
++    info.set_device_dpi(display::kInchInMm * size.width() /
++                        monitor.size_mm.width());
++  }
++  return info;
++}
++
++void AuraDisplaySource::ApplyToDisplayManager() {
++  if (monitors_.empty()) {
++    return;
++  }
++  base::flat_set<int64_t> internal_ids;
++  display::DisplayInfoList infos;
++  for (const Monitor& monitor : monitors_) {
++    if (monitor.internal) {
++      internal_ids.insert(monitor.display_id);
++    }
++    infos.push_back(BuildDisplayInfo(monitor));
++    LOG(WARNING) << "Display " << monitor.display_id << " is "
++                 << monitor.connector << " (" << monitor.make << " "
++                 << monitor.model << ") "
++                 << monitor.bounds_in_pixels.ToString() << " "
++                 << monitor.size_mm.ToString() << "mm at scale "
++                 << monitor.scale << ", recommended "
++                 << monitor.recommended_scale;
++  }
++  display::SetInternalDisplayIds(std::move(internal_ids));
++  display_manager_->OnNativeDisplaysChanged(infos);
++}
++
++void AuraDisplaySource::OnOutputsChanged() {
++  if (RefreshMonitors()) {
++    ApplyToDisplayManager();
++  }
++}
++
++void AuraDisplaySource::PlaceHosts() {
++  if (!Shell::HasInstance() || !Shell::Get()->window_tree_host_manager()) {
++    return;
++  }
++  Shell* shell = Shell::Get();
++  std::map<gfx::AcceleratedWidget, int64_t> placed;
++  for (const Monitor& monitor : monitors_) {
++    AshWindowTreeHost* ash_host =
++        shell->window_tree_host_manager()->GetAshWindowTreeHostForDisplayId(
++            monitor.display_id);
++    if (!ash_host) {
++      continue;
++    }
++    // Every Ash host on Ozone is a WindowTreeHostPlatform, the mirroring
++    // and unified ones included.
++    auto* host =
++        static_cast<aura::WindowTreeHostPlatform*>(ash_host->AsWindowTreeHost());
++    if (!host->platform_window()) {
++      continue;
++    }
++    // A host's compositor takes up its display's scale only when the
++    // platform window reports new bounds, and a monitor whose scale changes
++    // keeps its size, so the host is told to look again.
++    display::Display display;
++    if (display::Screen::Get()->GetDisplayWithDisplayId(monitor.display_id,
++                                                        &display) &&
++        host->compositor()->device_scale_factor() !=
++            display.device_scale_factor()) {
++      static_cast<ui::PlatformWindowDelegate*>(host)->OnBoundsChanged(
++          ui::PlatformWindowDelegate::BoundsChange(/*origin_changed=*/false));
++    }
++    const gfx::AcceleratedWidget widget = host->GetAcceleratedWidget();
++    placed[widget] = monitor.platform_id;
++    auto it = placed_hosts_.find(widget);
++    if (it != placed_hosts_.end() && it->second == monitor.platform_id) {
++      continue;
++    }
++    host->platform_window()->SetFullscreen(true, monitor.platform_id);
++  }
++  placed_hosts_ = std::move(placed);
++}
++
++void AuraDisplaySource::WriteLayout() {
++  // One line per display Ash shows: the connector, then where Ash has the
++  // display in its logical coordinates.
++  std::string text;
++  for (const Monitor& monitor : monitors_) {
++    display::Display display;
++    if (!display::Screen::Get()->GetDisplayWithDisplayId(monitor.display_id,
++                                                         &display)) {
++      continue;
++    }
++    const gfx::Rect bounds = display.bounds();
++    text += base::StringPrintf("%s %d %d %d %d\n", monitor.connector.c_str(),
++                               bounds.x(), bounds.y(), bounds.width(),
++                               bounds.height());
++  }
++  if (text.empty() || text == last_layout_) {
++    return;
++  }
++  last_layout_ = text;
++  file_task_runner_->PostTask(
++      FROM_HERE,
++      base::BindOnce(&WriteFileOnBlockingThread, GetLayoutPath(), text));
++}
++
++void AuraDisplaySource::SaveScales(std::map<std::string, float> scales) {
++  file_task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&SaveScalesOnBlockingThread, GetConfigPath(),
++                                std::move(scales)));
++}
++
++}  // namespace ash
+diff --git a/ash/display/display_util.cc b/ash/display/display_util.cc
+index 3e7ef93df068..6e7c5c60a9d4 100644
+--- a/ash/display/display_util.cc
++++ b/ash/display/display_util.cc
+@@ -9,6 +9,7 @@
+ #include <utility>
+ 
+ #include "ash/constants/notifier_catalogs.h"
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/display_configuration_controller.h"
+ #include "ash/display/extended_mouse_warp_controller.h"
+ #include "ash/display/null_mouse_warp_controller.h"
+@@ -63,6 +64,13 @@ std::unique_ptr<MouseWarpController> CreateMouseWarpController(
+   if (manager->IsInUnifiedMode() && manager->num_connected_displays() >= 2) {
+     return std::make_unique<UnifiedMouseWarpController>();
+   }
++  // AuraDE: under a Wayland compositor Ash cannot move the pointer, and the
++  // compositor's shell already carries it across the edges Ash's arrangement
++  // has the displays meet at. A warp controller here would only stop events
++  // on the edge pixels of each display.
++  if (AuraDisplaySource::Get()) {
++    return std::make_unique<NullMouseWarpController>();
++  }
+   // Extra check for |num_connected_displays()| is for SystemDisplayApiTest
+   // that injects MockScreen.
+   if (manager->GetNumDisplays() < 2 || manager->num_connected_displays() < 2) {
+diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
+index ddf94619fc89..ebacff2efbbe 100644
+--- a/ash/display/root_window_transformers.cc
++++ b/ash/display/root_window_transformers.cc
+@@ -7,6 +7,7 @@
+ #include <cmath>
+ 
+ #include "ash/accessibility/magnifier/fullscreen_magnifier_controller.h"
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/display_util.h"
+ #include "ash/host/root_window_transformer.h"
+ #include "ash/shell.h"
+@@ -106,13 +107,15 @@ class AshRootWindowTransformer : public RootWindowTransformer {
+     transform_ = insets_and_rotation_transform;
+     insets_and_scale_transform_ = CreateReverseRotatedInsetsTransform(
+         display.panel_rotation(), host_insets_, display.device_scale_factor());
+-    if (!base::SysInfo::IsRunningOnChromeOS()) {
++    if (!base::SysInfo::IsRunningOnChromeOS() && !AuraDisplaySource::Get()) {
+       // AuraDE compatibility: the ChromeOS display stack applies the device
+       // scale factor below Ash. On a generic Linux/Wayland host, Ash still
+       // shrinks the root window bounds to DIP size, but nothing scales that
+       // root layer back up to the native host surface. Apply the same scale to
+       // the visual layer transform and root event transform so shelf,
+       // wallpaper, windows, and hit testing all share one coordinate map.
++      // With the compositor's monitors as its displays, each host draws at
++      // its display's scale as on ChromeOS, and this is not needed.
+       transform_.Scale(display.device_scale_factor(),
+                        display.device_scale_factor());
+       insets_and_scale_transform_.Scale(display.device_scale_factor(),
+diff --git a/ash/display/window_tree_host_manager.cc b/ash/display/window_tree_host_manager.cc
+index 9d5de8e0abdc..f3e8978c916c 100644
+--- a/ash/display/window_tree_host_manager.cc
++++ b/ash/display/window_tree_host_manager.cc
+@@ -12,6 +12,7 @@
+ 
+ #include "ash/accessibility/magnifier/fullscreen_magnifier_controller.h"
+ #include "ash/accessibility/magnifier/partial_magnifier_controller.h"
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/cursor_window_controller.h"
+ #include "ash/display/mirror_window_controller.h"
+ #include "ash/display/refresh_rate_controller.h"
+@@ -134,6 +135,12 @@ bool UpdateLinuxDesktopDisplayModeForHostResize(
+   if (base::SysInfo::IsRunningOnChromeOS() || host_bounds_in_pixels.IsEmpty()) {
+     return false;
+   }
++  // Each monitor's mode and scale come from the compositor and display.conf
++  // through AuraDisplaySource, not from the host's size and one scale for
++  // every display.
++  if (AuraDisplaySource::Get()) {
++    return false;
++  }
+ 
+   display::ManagedDisplayInfo display_info =
+       display_manager->GetDisplayInfo(display_id);
+@@ -1102,6 +1109,9 @@ AshWindowTreeHost* WindowTreeHostManager::AddWindowTreeHostForDisplay(
+   }
+   params_with_bounds.display_id = display.id();
+   params_with_bounds.device_scale_factor = display.device_scale_factor();
++  // AuraDE: on a Linux desktop each host draws at its display's own scale
++  // and the compositor shows it on the monitor pixel for pixel.
++  params_with_bounds.pixel_exact_buffers = !!AuraDisplaySource::Get();
+ 
+   // TODO(crbug.com/40799092): Temporarily increase compositor memory limit for
+   // 4K+ displays to avoid rendering corruption.
+diff --git a/ash/host/ash_window_tree_host.cc b/ash/host/ash_window_tree_host.cc
+index 6aa1f1fc527b..5d7bd45d0780 100644
+--- a/ash/host/ash_window_tree_host.cc
++++ b/ash/host/ash_window_tree_host.cc
+@@ -80,6 +80,7 @@ std::unique_ptr<AshWindowTreeHost> AshWindowTreeHost::Create(
+   properties.enable_compositing_based_throttling = true;
+   properties.compositor_memory_limit_mb =
+       init_params.compositor_memory_limit_mb;
++  properties.pixel_exact_buffers = init_params.pixel_exact_buffers;
+   return std::make_unique<AshWindowTreeHostPlatform>(std::move(properties),
+                                                      init_params.delegate);
+ }
+diff --git a/ash/host/ash_window_tree_host_init_params.h b/ash/host/ash_window_tree_host_init_params.h
+index f8ae7837fb85..130d3ede8e0f 100644
+--- a/ash/host/ash_window_tree_host_init_params.h
++++ b/ash/host/ash_window_tree_host_init_params.h
+@@ -26,6 +26,9 @@ struct ASH_EXPORT AshWindowTreeHostInitParams {
+   float device_scale_factor = 0.0f;
+   // Compositor's memory limit in MB.
+   size_t compositor_memory_limit_mb = 0;
++  // Whether the host draws at its display's scale into buffers that cover
++  // the monitor pixel for pixel, as on a Linux desktop.
++  bool pixel_exact_buffers = false;
+ };
+ 
+ }  // namespace ash
+diff --git a/ash/shell.cc b/ash/shell.cc
+index 04dd47c54d0d..c2e23449db5e 100644
+--- a/ash/shell.cc
++++ b/ash/shell.cc
+@@ -58,6 +58,7 @@
+ #include "ash/dbus/ash_dbus_services.h"
+ #include "ash/detachable_base/detachable_base_handler.h"
+ #include "ash/detachable_base/detachable_base_notification_controller.h"
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/cros_display_config.h"
+ #include "ash/display/cursor_window_controller.h"
+ #include "ash/display/display_alignment_controller.h"
+@@ -825,6 +826,7 @@ Shell::~Shell() {
+   user_metrics_recorder_->OnShellShuttingDown();
+ 
+   cros_display_config_.reset();
++  AuraDisplaySource::Shutdown();
+   display_configuration_observer_.reset();
+   display_prefs_.reset();
+   display_alignment_controller_.reset();
+@@ -1947,6 +1949,11 @@ void Shell::InitializeDisplayManager() {
+ 
+   bool display_initialized = display_manager_->InitFromCommandLine();
+ 
++  // AuraDE: on a Linux host the compositor's outputs are the displays.
++  if (!display_initialized && AuraDisplaySource::ShouldUse()) {
++    display_initialized = AuraDisplaySource::Start(display_manager_.get());
++  }
++
+   if (!display_initialized) {
+     if (base::SysInfo::IsRunningOnChromeOS()) {
+       display_change_observer_ =
+diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
+index 7571a75d86f4..98ab85919a9d 100644
+--- a/ui/display/manager/display_manager.cc
++++ b/ui/display/manager/display_manager.cc
+@@ -884,10 +884,15 @@ void DisplayManager::RegisterDisplayProperty(
+   ManagedDisplayInfo& info = display_info_[display_id];
+   info.SetRotation(rotation, Display::RotationSource::USER);
+   info.SetRotation(rotation, Display::RotationSource::ACTIVE);
+-  info.set_zoom_factor(display_zoom_factor);
++  // AuraDE compatibility: on a Linux host each display's scale is its device
++  // scale factor alone, which Ash's display source sets, so a zoom saved
++  // with the display, by an older session or ChromeOS's own default, is not
++  // brought back.
++  const bool keep_zoom = base::SysInfo::IsRunningOnChromeOS();
++  info.set_zoom_factor(keep_zoom ? display_zoom_factor : 1.f);
+ 
+   for (const auto& it : display_zoom_factor_map) {
+-    info.AddZoomFactorForSize(it.first, it.second);
++    info.AddZoomFactorForSize(it.first, keep_zoom ? it.second : 1.f);
+   }
+ 
+   if (overscan_insets) {
+@@ -2453,6 +2458,12 @@ void DisplayManager::ApplyDefaultZoomFactorIfNecessary(
+     return;
+   }
+ 
++  // AuraDE compatibility: on a Linux host Ash's display source already
++  // scales each monitor for its density; a zoom on top would do it twice.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return;
++  }
++
+   info.UpdateZoomFactorToMatchTargetDPI();
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/host/wayland_connection.h b/ui/ozone/platform/wayland/host/wayland_connection.h
+index 3df2c14baf15..0c0fd8f9d7fd 100644
+--- a/ui/ozone/platform/wayland/host/wayland_connection.h
++++ b/ui/ozone/platform/wayland/host/wayland_connection.h
+@@ -288,6 +288,13 @@ class WaylandConnection {
+ 
+   bool UsePerSurfaceScaling() const;
+   bool IsUiScaleEnabled() const;
++
++  // Whether this client's windows draw at scales of their own into buffers
++  // that cover their outputs pixel for pixel, as Ash on a Linux desktop
++  // does. Its cursors are then drawn at those scales too and shown as they
++  // are. Set by the first such window.
++  bool pixel_exact_buffers() const { return pixel_exact_buffers_; }
++  void set_pixel_exact_buffers() { pixel_exact_buffers_ = true; }
+   bool ShouldUseOverlayDelegation() const;
+ 
+   wl::SerialTracker& serial_tracker() { return serial_tracker_; }
+@@ -499,6 +506,9 @@ class WaylandConnection {
+   // properly scale fractional scaled surfaces.
+   bool supports_viewporter_surface_scaling_ = false;
+ 
++  // See pixel_exact_buffers().
++  bool pixel_exact_buffers_ = false;
++
+   wl::SerialTracker serial_tracker_;
+ 
+   // Global Wayland interfaces available in the current session, with their
+diff --git a/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc b/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
+index 6558c9a16e09..b6445edaf69b 100644
+--- a/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
++++ b/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
+@@ -91,8 +91,10 @@ scoped_refptr<PlatformCursor> WaylandCursorFactory::CreateImageCursor(
+ 
+   // Wayland only supports cursor images with an integer scale, so we
+   // must upscale cursor images with non-integer scales to integer scaled
+-  // images so that the cursor is displayed correctly.
+-  float rounded_scale = GetRoundedScale(scale);
++  // images so that the cursor is displayed correctly. A client that draws
++  // pixel for pixel shows its cursors as drawn.
++  float rounded_scale =
++      connection_->pixel_exact_buffers() ? scale : GetRoundedScale(scale);
+   if (std::abs(rounded_scale - scale) > std::numeric_limits<float>::epsilon()) {
+     const SkBitmap scaled_bitmap = skia::ImageOperations::Resize(
+         bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
+@@ -117,7 +119,8 @@ scoped_refptr<PlatformCursor> WaylandCursorFactory::CreateAnimatedCursor(
+     base::TimeDelta frame_delay) {
+   scoped_refptr<BitmapCursor> bitmap_cursor;
+ 
+-  float rounded_scale = GetRoundedScale(scale);
++  float rounded_scale =
++      connection_->pixel_exact_buffers() ? scale : GetRoundedScale(scale);
+   if (std::abs(rounded_scale - scale) > std::numeric_limits<float>::epsilon()) {
+     std::vector<SkBitmap> scaled_bitmaps;
+     for (const auto& bitmap : bitmaps) {
+diff --git a/ui/ozone/platform/wayland/host/wayland_frame_manager.cc b/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
+index 3c61db968002..6ca6c6113602 100644
+--- a/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
++++ b/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
+@@ -443,8 +443,13 @@ std::optional<bool> WaylandFrameManager::ApplySurfaceConfigure(
+   //   enabled.
+   // - frame's window state has already been latched, which is usually done in
+   // `MaybeProcessSubmittedFrames`, before calling into this function.
++  // A window that draws at a scale of its own covers its output pixel for
++  // pixel whatever scale a frame was drawn at, so its buffers are shown at
++  // the output's scale.
+   const float surface_buffer_scale =
+-      config.surface_scale_factor / window_->latched_state().ui_scale;
++      window_->pixel_exact_buffers()
++          ? window_->latched_state().window_scale
++          : config.surface_scale_factor / window_->latched_state().ui_scale;
+ 
+   surface->set_buffer_transform(
+       std::holds_alternative<gfx::OverlayTransform>(config.transform)
+diff --git a/ui/ozone/platform/wayland/host/wayland_output.cc b/ui/ozone/platform/wayland/host/wayland_output.cc
+index 7a47aa5f627c..135778a6f023 100644
+--- a/ui/ozone/platform/wayland/host/wayland_output.cc
++++ b/ui/ozone/platform/wayland/host/wayland_output.cc
+@@ -6,6 +6,8 @@
+ 
+ #include <xdg-output-unstable-v1-client-protocol.h>
+ 
++#include <algorithm>
++
+ #include "base/logging.h"
+ #include "base/strings/string_util.h"
+ #include "ui/display/display.h"
+@@ -196,6 +198,10 @@ void WaylandOutput::UpdateMetrics() {
+   metrics_.logical_transform = panel_transform_;
+   metrics_.name = name_;
+   metrics_.description = description_;
++  metrics_.make = make_;
++  metrics_.model = model_;
++  metrics_.physical_size_mm = physical_size_mm_;
++  metrics_.refresh_millihertz = refresh_millihertz_;
+ 
+   if (xdg_output_) {
+     xdg_output_->UpdateMetrics(
+@@ -224,6 +230,10 @@ void WaylandOutput::OnGeometry(void* data,
+     MSAN_UNPOISON(&output_transform, sizeof(int32_t));
+     self->origin_ = gfx::Point(x, y);
+     self->panel_transform_ = output_transform;
++    self->physical_size_mm_ = gfx::Size(std::max(physical_width, 0),
++                                        std::max(physical_height, 0));
++    self->make_ = make ? std::string(make) : std::string();
++    self->model_ = model ? std::string(model) : std::string();
+   }
+ }
+ 
+@@ -237,6 +247,7 @@ void WaylandOutput::OnMode(void* data,
+   auto* self = static_cast<WaylandOutput*>(data);
+   if (self && (flags & WL_OUTPUT_MODE_CURRENT)) {
+     self->physical_size_ = gfx::Size(width, height);
++    self->refresh_millihertz_ = refresh;
+   }
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/host/wayland_output.h b/ui/ozone/platform/wayland/host/wayland_output.h
+index 0905fcfca2e0..d19612f67edd 100644
+--- a/ui/ozone/platform/wayland/host/wayland_output.h
++++ b/ui/ozone/platform/wayland/host/wayland_output.h
+@@ -82,6 +82,13 @@ class WaylandOutput : public wl::GlobalObjectRegistrar<WaylandOutput> {
+     int32_t logical_transform = 0;
+     std::string name;
+     std::string description;
++    // From wl_output.geometry and the current wl_output.mode. A display
++    // manager that builds its own displays reads them through
++    // PlatformScreen::GetOutputInfo().
++    std::string make;
++    std::string model;
++    gfx::Size physical_size_mm;
++    int32_t refresh_millihertz = 0;
+ 
+     void DumpState(std::ostream& out) const;
+   };
+@@ -189,6 +196,10 @@ class WaylandOutput : public wl::GlobalObjectRegistrar<WaylandOutput> {
+   gfx::Point origin_;
+   // Size of the output in physical pixels.
+   gfx::Size physical_size_;
++  std::string make_;
++  std::string model_;
++  gfx::Size physical_size_mm_;
++  int32_t refresh_millihertz_ = 0;
+   // Fallback name and description.
+   // The XDG output specification suggests using it as the primary source of
+   // the information about the output.  Two attributes below are used if
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.cc b/ui/ozone/platform/wayland/host/wayland_screen.cc
+index ec1fa207bc5e..fc2fadc55ef2 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.cc
++++ b/ui/ozone/platform/wayland/host/wayland_screen.cc
+@@ -550,6 +550,33 @@ std::optional<float> WaylandScreen::GetPreferredScaleFactorForAcceleratedWidget(
+   return std::nullopt;
+ }
+ 
++std::optional<PlatformScreen::OutputInfo> WaylandScreen::GetOutputInfo(
++    int64_t display_id) const {
++  if (!connection_) {
++    return std::nullopt;
++  }
++  for (const auto& [output_id, id] : display_id_map_) {
++    if (id != display_id) {
++      continue;
++    }
++    const WaylandOutput* output =
++        connection_->wayland_output_manager()->GetOutput(output_id);
++    if (!output) {
++      return std::nullopt;
++    }
++    const WaylandOutput::Metrics& metrics = output->GetMetrics();
++    OutputInfo info;
++    info.name = metrics.name;
++    info.make = metrics.make;
++    info.model = metrics.model;
++    info.width_mm = metrics.physical_size_mm.width();
++    info.height_mm = metrics.physical_size_mm.height();
++    info.refresh_millihertz = metrics.refresh_millihertz;
++    return info;
++  }
++  return std::nullopt;
++}
++
+ bool WaylandScreen::VerifyOutputStateConsistentForTesting() const {
+   // The number of displays tracked by the display_list_ and the display_id_map_
+   // should match.
+diff --git a/ui/ozone/platform/wayland/host/wayland_screen.h b/ui/ozone/platform/wayland/host/wayland_screen.h
+index 10ee3e24cf39..33731eef6ce4 100644
+--- a/ui/ozone/platform/wayland/host/wayland_screen.h
++++ b/ui/ozone/platform/wayland/host/wayland_screen.h
+@@ -84,6 +84,7 @@ class WaylandScreen : public PlatformScreen, public DeviceScaleFactorObserver {
+       const gfx::GpuExtraInfo& gpu_extra_info) override;
+   std::optional<float> GetPreferredScaleFactorForAcceleratedWidget(
+       gfx::AcceleratedWidget widget) const override;
++  std::optional<OutputInfo> GetOutputInfo(int64_t display_id) const override;
+ 
+   // DeviceScaleFactorObserver:
+   void OnDeviceScaleFactorChanged() override;
+diff --git a/ui/ozone/platform/wayland/host/wayland_window.cc b/ui/ozone/platform/wayland/host/wayland_window.cc
+index 029596741226..44fdac0fe5d7 100644
+--- a/ui/ozone/platform/wayland/host/wayland_window.cc
++++ b/ui/ozone/platform/wayland/host/wayland_window.cc
+@@ -989,6 +989,10 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
+ 
+   opacity_ = properties.opacity;
+   type_ = properties.type;
++  pixel_exact_buffers_ = properties.pixel_exact_buffers;
++  if (pixel_exact_buffers_) {
++    connection_->set_pixel_exact_buffers();
++  }
+ 
+   connection_->window_manager()->AddWindow(GetWidget(), this);
+ 
+@@ -1287,27 +1291,32 @@ void WaylandWindow::UpdateCursorShape(scoped_refptr<BitmapCursor> cursor) {
+   std::optional<uint32_t> shape =
+       WaylandCursorShape::ShapeFromType(cursor->type());
+ 
++  // A window that draws at a scale of its own is given cursors drawn at that
++  // scale in its output's pixels, so they are shown at the output's scale.
++  const float cursor_scale = pixel_exact_buffers_
++                                 ? applied_state().window_scale
++                                 : cursor->cursor_image_scale_factor();
++
+   // Round cursor scale factor to ceil as wl_surface.set_buffer_scale accepts
+   // only integers.
+   if (cursor->type() == CursorType::kNone) {  // Hide the cursor.
+-    connection_->SetCursorBitmap(
+-        {}, gfx::Point(), std::ceil(cursor->cursor_image_scale_factor()));
+-  } else if (connection_->wayland_cursor_shape() && shape.has_value()) {
++    connection_->SetCursorBitmap({}, gfx::Point(), std::ceil(cursor_scale));
++  } else if (connection_->wayland_cursor_shape() && shape.has_value() &&
++             !pixel_exact_buffers_) {
+     // Prefer Wayland server-side cursor support, as the compositor knows better
+     // how to draw the cursor.
+     connection_->wayland_cursor_shape()->SetCursorShape(shape.value());
+   } else if (cursor->platform_data()) {  // Check for theme-provided cursor.
+     connection_->SetPlatformCursor(
+         reinterpret_cast<wl_cursor*>(cursor->platform_data()),
+-        std::ceil(cursor->cursor_image_scale_factor()));
++        std::ceil(cursor_scale));
+   } else if (!cursor->bitmaps()
+                   .empty()) {  // Use client-side bitmap cursors as fallback.
+     // Translate physical pixels to DIPs.
+-    gfx::Point hotspot_in_dips = gfx::ScaleToRoundedPoint(
+-        cursor->hotspot(), 1.0f / cursor->cursor_image_scale_factor());
+-    connection_->SetCursorBitmap(
+-        cursor->bitmaps(), hotspot_in_dips,
+-        std::ceil(cursor->cursor_image_scale_factor()));
++    gfx::Point hotspot_in_dips =
++        gfx::ScaleToRoundedPoint(cursor->hotspot(), 1.0f / cursor_scale);
++    connection_->SetCursorBitmap(cursor->bitmaps(), hotspot_in_dips,
++                                 std::ceil(cursor_scale));
+   }
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/host/wayland_window.h b/ui/ozone/platform/wayland/host/wayland_window.h
+index e0e6bb8d525b..24c6262a4afe 100644
+--- a/ui/ozone/platform/wayland/host/wayland_window.h
++++ b/ui/ozone/platform/wayland/host/wayland_window.h
+@@ -313,6 +313,10 @@ class WaylandWindow : public PlatformWindow,
+     return latched_state_;
+   }
+ 
++  // Whether the window draws at a scale of its own into buffers that cover
++  // its output pixel for pixel. See PlatformWindowInitProperties.
++  bool pixel_exact_buffers() const { return pixel_exact_buffers_; }
++
+   // Tells if the surface has already been configured. This will be true after
+   // the first set of configure event and ack request, meaning that wl_surface
+   // can attach buffers.
+@@ -626,6 +630,9 @@ class WaylandWindow : public PlatformWindow,
+ 
+   bool has_touch_focus_ = false;
+ 
++  // See pixel_exact_buffers().
++  bool pixel_exact_buffers_ = false;
++
+   // Stores current opacity of the window. Set on ::Initialize call.
+   ui::PlatformWindowOpacity opacity_;
+ 
+diff --git a/ui/ozone/public/platform_screen.cc b/ui/ozone/public/platform_screen.cc
+index 274a685aecfe..3f20a0f43fdb 100644
+--- a/ui/ozone/public/platform_screen.cc
++++ b/ui/ozone/public/platform_screen.cc
+@@ -66,6 +66,11 @@ bool PlatformScreen::IsHeadless() const {
+   return false;
+ }
+ 
++std::optional<PlatformScreen::OutputInfo> PlatformScreen::GetOutputInfo(
++    int64_t display_id) const {
++  return std::nullopt;
++}
++
+ void PlatformScreen::StorePlatformNameIntoListOfValues(
+     base::ListValue& values,
+     const std::string& platform_name) {
+diff --git a/ui/ozone/public/platform_screen.h b/ui/ozone/public/platform_screen.h
+index 822a86831115..e2373788e559 100644
+--- a/ui/ozone/public/platform_screen.h
++++ b/ui/ozone/public/platform_screen.h
+@@ -5,6 +5,7 @@
+ #ifndef UI_OZONE_PUBLIC_PLATFORM_SCREEN_H_
+ #define UI_OZONE_PUBLIC_PLATFORM_SCREEN_H_
+ 
++#include <cstdint>
+ #include <optional>
+ #include <set>
+ #include <string>
+@@ -140,6 +141,24 @@ class COMPONENT_EXPORT(OZONE_BASE) PlatformScreen {
+   // Returns true when running in headless mode.
+   virtual bool IsHeadless() const;
+ 
++  // What the platform knows about the output a display is shown on, for a
++  // display manager that builds its own displays out of the platform's
++  // outputs. A field the platform does not know is left empty or zero.
++  struct OutputInfo {
++    // The output's name, a DRM connector such as "eDP-1" or "DP-2".
++    std::string name;
++    std::string make;
++    std::string model;
++    // The panel's physical size in millimetres.
++    int width_mm = 0;
++    int height_mm = 0;
++    int refresh_millihertz = 0;
++  };
++
++  // Returns what is known about the output |display_id| is on, or nothing
++  // when the platform has no such display or keeps no such information.
++  virtual std::optional<OutputInfo> GetOutputInfo(int64_t display_id) const;
++
+  protected:
+   void StorePlatformNameIntoListOfValues(base::ListValue& values,
+                                          const std::string& platform_name);
+diff --git a/ui/platform_window/platform_window_init_properties.h b/ui/platform_window/platform_window_init_properties.h
+index 21a542a563f3..7840740c1880 100644
+--- a/ui/platform_window/platform_window_init_properties.h
++++ b/ui/platform_window/platform_window_init_properties.h
+@@ -156,6 +156,12 @@ struct COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowInitProperties {
+   std::string session_id;
+   int32_t session_window_new_id = 0;
+   std::optional<int32_t> session_window_restore_id;
++
++  // Wayland specific. The window draws its content at a scale of its own,
++  // which need not be its output's, into buffers that always cover the
++  // output pixel for pixel, so they are shown at the output's scale. Ash on
++  // a Linux desktop draws each of its displays at that display's scale.
++  bool pixel_exact_buffers = false;
+ #endif
+ 
+   bool enable_compositing_based_throttling = false;
+diff --git a/ui/wm/core/cursor_loader.cc b/ui/wm/core/cursor_loader.cc
+index 13967a22d7f1..0ca38cc963ab 100644
+--- a/ui/wm/core/cursor_loader.cc
++++ b/ui/wm/core/cursor_loader.cc
+@@ -11,6 +11,7 @@
+ #include "base/check.h"
+ #include "base/logging.h"
+ #include "base/memory/scoped_refptr.h"
++#include "base/system/sys_info.h"
+ #include "base/time/time.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkColor.h"
+@@ -214,8 +215,13 @@ scoped_refptr<ui::PlatformCursor> CursorLoader::CursorFromType(
+ 
+ scoped_refptr<ui::PlatformCursor> CursorLoader::LoadCursorFromAsset(
+     CursorType type) {
++  // The cursors are drawn from vector art. AuraDE on a Linux desktop draws
++  // them at the display's own scale rather than at the nearest one there
++  // are image resources for, so a monitor at 150% has a cursor at 150%.
++  const float draw_scale =
++      base::SysInfo::IsRunningOnChromeOS() ? resource_scale_ : scale_;
+   std::optional<ui::CursorData> cursor_data = wm::GetCursorData(
+-      type, resource_scale_,
++      type, draw_scale,
+       size_ == ui::CursorSize::kLarge ? std::make_optional(ConvertDipToPixel(
+                                             large_cursor_size_in_dip_, scale_))
+                                       : std::nullopt,
