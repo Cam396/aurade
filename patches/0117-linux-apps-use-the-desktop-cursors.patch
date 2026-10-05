@@ -1,0 +1,273 @@
+diff --git a/components/exo/wayland/BUILD.gn b/components/exo/wayland/BUILD.gn
+index ad3c2bde54f1..3bf25224786e 100644
+--- a/components/exo/wayland/BUILD.gn
++++ b/components/exo/wayland/BUILD.gn
+@@ -73,6 +73,8 @@ source_set("wayland") {
+     "wl_shm.h",
+     "wl_subcompositor.cc",
+     "wl_subcompositor.h",
++    "wp_cursor_shape.cc",
++    "wp_cursor_shape.h",
+     "wp_fractional_scale.cc",
+     "wp_fractional_scale.h",
+     "wp_presentation.cc",
+@@ -167,6 +169,7 @@ source_set("wayland") {
+     "//third_party/wayland:wayland_server",
+     "//third_party/wayland-protocols:alpha_compositing_protocol",
+     "//third_party/wayland-protocols:content_type_protocol",
++    "//third_party/wayland-protocols:cursor_shape_protocol",
+     "//third_party/wayland-protocols:cursor_shapes_protocol",
+     "//third_party/wayland-protocols:extended_drag",
+     "//third_party/wayland-protocols:fractional_scale_protocol",
+@@ -394,6 +397,7 @@ source_set("client_support") {
+     "//third_party/wayland:wayland_client",
+     "//third_party/wayland-protocols:alpha_compositing_protocol",
+     "//third_party/wayland-protocols:content_type_protocol",
++    "//third_party/wayland-protocols:cursor_shape_protocol",
+     "//third_party/wayland-protocols:cursor_shapes_protocol",
+     "//third_party/wayland-protocols:extended_drag",
+     "//third_party/wayland-protocols:fractional_scale_protocol",
+diff --git a/components/exo/wayland/server.cc b/components/exo/wayland/server.cc
+index d074d45d1aff..975a377c60f9 100644
+--- a/components/exo/wayland/server.cc
++++ b/components/exo/wayland/server.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <alpha-compositing-unstable-v1-server-protocol.h>
+ #include <content-type-v1-server-protocol.h>
++#include <cursor-shape-v1-server-protocol.h>
+ #include <cursor-shapes-unstable-v1-server-protocol.h>
+ #include <extended-drag-unstable-v1-server-protocol.h>
+ #include <gaming-input-unstable-v2-server-protocol.h>
+@@ -63,6 +64,7 @@
+ #include "components/exo/wayland/wl_shell.h"
+ #include "components/exo/wayland/wl_shm.h"
+ #include "components/exo/wayland/wl_subcompositor.h"
++#include "components/exo/wayland/wp_cursor_shape.h"
+ #include "components/exo/wayland/wp_fractional_scale.h"
+ #include "components/exo/wayland/wp_presentation.h"
+ #include "components/exo/wayland/wp_single_pixel_buffer.h"
+@@ -300,6 +302,8 @@ void Server::Initialize() {
+                    /*version=*/1, display_, bind_content_type);
+   wl_global_create(wl_display_.get(), &zcr_cursor_shapes_v1_interface,
+                    /*version=*/1, display_, bind_cursor_shapes);
++  wl_global_create(wl_display_.get(), &wp_cursor_shape_manager_v1_interface,
++                   kCursorShapeVersion, display_, bind_cursor_shape_manager);
+   wl_global_create(wl_display_.get(), &zcr_gaming_input_v2_interface,
+                    /*version=*/3, display_, bind_gaming_input);
+   wl_global_create(wl_display_.get(), &zcr_keyboard_configuration_v1_interface,
+diff --git a/components/exo/wayland/wp_cursor_shape.cc b/components/exo/wayland/wp_cursor_shape.cc
+new file mode 100644
+index 000000000000..1318d3f658ba
+--- /dev/null
++++ b/components/exo/wayland/wp_cursor_shape.cc
+@@ -0,0 +1,178 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/exo/wayland/wp_cursor_shape.h"
++
++#include <cursor-shape-v1-server-protocol.h>
++#include <wayland-server-core.h>
++#include <wayland-server-protocol-core.h>
++
++#include <memory>
++
++#include "base/compiler_specific.h"
++#include "base/memory/raw_ptr.h"
++#include "components/exo/pointer.h"
++#include "components/exo/wayland/server_util.h"
++#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
++
++namespace exo::wayland {
++
++namespace {
++
++ui::mojom::CursorType GetCursorType(uint32_t shape) {
++  switch (shape) {
++#define ADD_CASE(wayland, chrome)                 \
++  case WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_##wayland: \
++    return ui::mojom::CursorType::chrome
++
++    ADD_CASE(DEFAULT, kPointer);
++    ADD_CASE(CONTEXT_MENU, kContextMenu);
++    ADD_CASE(HELP, kHelp);
++    ADD_CASE(POINTER, kHand);
++    ADD_CASE(PROGRESS, kProgress);
++    ADD_CASE(WAIT, kWait);
++    ADD_CASE(CELL, kCell);
++    ADD_CASE(CROSSHAIR, kCross);
++    ADD_CASE(TEXT, kIBeam);
++    ADD_CASE(VERTICAL_TEXT, kVerticalText);
++    ADD_CASE(ALIAS, kAlias);
++    ADD_CASE(COPY, kCopy);
++    ADD_CASE(MOVE, kMove);
++    ADD_CASE(NO_DROP, kNoDrop);
++    ADD_CASE(NOT_ALLOWED, kNotAllowed);
++    ADD_CASE(GRAB, kGrab);
++    ADD_CASE(GRABBING, kGrabbing);
++    ADD_CASE(E_RESIZE, kEastResize);
++    ADD_CASE(N_RESIZE, kNorthResize);
++    ADD_CASE(NE_RESIZE, kNorthEastResize);
++    ADD_CASE(NW_RESIZE, kNorthWestResize);
++    ADD_CASE(S_RESIZE, kSouthResize);
++    ADD_CASE(SE_RESIZE, kSouthEastResize);
++    ADD_CASE(SW_RESIZE, kSouthWestResize);
++    ADD_CASE(W_RESIZE, kWestResize);
++    ADD_CASE(EW_RESIZE, kEastWestResize);
++    ADD_CASE(NS_RESIZE, kNorthSouthResize);
++    ADD_CASE(NESW_RESIZE, kNorthEastSouthWestResize);
++    ADD_CASE(NWSE_RESIZE, kNorthWestSouthEastResize);
++    ADD_CASE(COL_RESIZE, kColumnResize);
++    ADD_CASE(ROW_RESIZE, kRowResize);
++    ADD_CASE(ALL_SCROLL, kMove);
++    ADD_CASE(ZOOM_IN, kZoomIn);
++    ADD_CASE(ZOOM_OUT, kZoomOut);
++    ADD_CASE(DND_ASK, kContextMenu);
++    ADD_CASE(ALL_RESIZE, kMove);
++#undef ADD_CASE
++    default:
++      return ui::mojom::CursorType::kNull;
++  }
++}
++
++// A device names the wl_pointer it was made for. The pointer can go away
++// first, and then the device is inert, as the protocol says.
++struct CursorShapeDevice {
++  raw_ptr<wl_resource> pointer_resource = nullptr;
++  wl_listener pointer_destroyed;
++};
++
++void OnPointerDestroyed(wl_listener* listener, void* data) {
++  // SAFETY: `listener` is the pointer_destroyed member of a
++  // CursorShapeDevice, which is the only listener this notify is set on.
++  CursorShapeDevice* device = UNSAFE_BUFFERS(wl_container_of(
++      listener, /*sample=*/device, /*member=*/pointer_destroyed));
++  device->pointer_resource = nullptr;
++  wl_list_remove(&device->pointer_destroyed.link);
++  wl_list_init(&device->pointer_destroyed.link);
++}
++
++void cursor_shape_device_destroy(wl_client* client, wl_resource* resource) {
++  wl_resource_destroy(resource);
++}
++
++void cursor_shape_device_set_shape(wl_client* client,
++                                   wl_resource* resource,
++                                   uint32_t serial,
++                                   uint32_t shape) {
++  ui::mojom::CursorType cursor_type = GetCursorType(shape);
++  if (cursor_type == ui::mojom::CursorType::kNull) {
++    wl_resource_post_error(resource,
++                           WP_CURSOR_SHAPE_DEVICE_V1_ERROR_INVALID_SHAPE,
++                           "Unrecognized shape %u", shape);
++    return;
++  }
++  auto* device = GetUserDataAs<CursorShapeDevice>(resource);
++  if (!device || !device->pointer_resource) {
++    return;
++  }
++  GetUserDataAs<Pointer>(device->pointer_resource.get())
++      ->SetCursorType(cursor_type);
++}
++
++const struct wp_cursor_shape_device_v1_interface
++    cursor_shape_device_implementation = {cursor_shape_device_destroy,
++                                          cursor_shape_device_set_shape};
++
++void DestroyDevice(wl_resource* resource) {
++  auto* device = GetUserDataAs<CursorShapeDevice>(resource);
++  if (device->pointer_resource) {
++    wl_list_remove(&device->pointer_destroyed.link);
++  }
++  delete device;
++}
++
++void CreateDevice(wl_client* client,
++                  wl_resource* manager,
++                  uint32_t id,
++                  wl_resource* pointer_resource) {
++  wl_resource* resource =
++      wl_resource_create(client, &wp_cursor_shape_device_v1_interface,
++                         wl_resource_get_version(manager), id);
++  auto* device = new CursorShapeDevice();
++  wl_list_init(&device->pointer_destroyed.link);
++  if (pointer_resource) {
++    device->pointer_resource = pointer_resource;
++    device->pointer_destroyed.notify = OnPointerDestroyed;
++    wl_resource_add_destroy_listener(pointer_resource,
++                                     &device->pointer_destroyed);
++  }
++  wl_resource_set_implementation(resource, &cursor_shape_device_implementation,
++                                 device, DestroyDevice);
++}
++
++void cursor_shape_manager_destroy(wl_client* client, wl_resource* resource) {
++  wl_resource_destroy(resource);
++}
++
++void cursor_shape_manager_get_pointer(wl_client* client,
++                                      wl_resource* resource,
++                                      uint32_t id,
++                                      wl_resource* pointer) {
++  CreateDevice(client, resource, id, pointer);
++}
++
++// exo has no tablet tools, so a device made for one never has a cursor to set.
++void cursor_shape_manager_get_tablet_tool_v2(wl_client* client,
++                                             wl_resource* resource,
++                                             uint32_t id,
++                                             wl_resource* tablet_tool) {
++  CreateDevice(client, resource, id, nullptr);
++}
++
++const struct wp_cursor_shape_manager_v1_interface
++    cursor_shape_manager_implementation = {
++        cursor_shape_manager_destroy, cursor_shape_manager_get_pointer,
++        cursor_shape_manager_get_tablet_tool_v2};
++
++}  // namespace
++
++void bind_cursor_shape_manager(wl_client* client,
++                               void* data,
++                               uint32_t version,
++                               uint32_t id) {
++  wl_resource* resource = wl_resource_create(
++      client, &wp_cursor_shape_manager_v1_interface, version, id);
++  wl_resource_set_implementation(resource, &cursor_shape_manager_implementation,
++                                 data, nullptr);
++}
++
++}  // namespace exo::wayland
+diff --git a/components/exo/wayland/wp_cursor_shape.h b/components/exo/wayland/wp_cursor_shape.h
+new file mode 100644
+index 000000000000..af455d276241
+--- /dev/null
++++ b/components/exo/wayland/wp_cursor_shape.h
+@@ -0,0 +1,25 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_EXO_WAYLAND_WP_CURSOR_SHAPE_H_
++#define COMPONENTS_EXO_WAYLAND_WP_CURSOR_SHAPE_H_
++
++#include <stdint.h>
++
++struct wl_client;
++
++namespace exo::wayland {
++
++// AuraDE: the standard cursor-shape protocol, so Linux apps that name a CSS
++// shape get Ash's own cursor instead of drawing one from their theme.
++constexpr uint32_t kCursorShapeVersion = 2;
++
++void bind_cursor_shape_manager(wl_client* client,
++                               void* data,
++                               uint32_t version,
++                               uint32_t id);
++
++}  // namespace exo::wayland
++
++#endif  // COMPONENTS_EXO_WAYLAND_WP_CURSOR_SHAPE_H_
