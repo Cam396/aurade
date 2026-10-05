@@ -40,7 +40,12 @@
  *    arrangement in Settings is the one the mouse follows, and a monitor at
  *    200% meets one at 100% where Ash shows them meeting. Ash writes the
  *    arrangement to $XDG_RUNTIME_DIR/aurade/display-layout, one line per
- *    display: the output's name, then x, y, width and height.
+ *    display: the output's name, then x, y, width and height, then how far
+ *    clockwise, in degrees, the display is turned.
+ *
+ *  - A display turned in Ash's Settings is turned here, with the output's
+ *    transform, so the pointer and the cursor turn with the picture, and
+ *    Ash draws it upright at the turned size.
  *
  *  - A drag that starts in one Ash host window carries on into the host
  *    window on the next monitor, so a window or a tab can be dragged from
@@ -78,6 +83,8 @@
 struct aurade_layout_entry {
 	char name[64];
 	double x, y, width, height;
+	/* How far clockwise Ash has the display turned, in degrees. */
+	int rotation;
 };
 
 struct aurade_shell {
@@ -97,6 +104,7 @@ struct aurade_shell {
 
 	struct wl_list output_list;
 	struct wl_list seat_list;
+	struct wl_list surface_list;	/* aurade_shell_surface::link */
 
 	struct weston_config *config;
 
@@ -134,6 +142,8 @@ struct aurade_shell_surface {
 	int focus_count;
 
 	int32_t last_width, last_height;
+
+	struct wl_list link;	/* aurade_shell::surface_list */
 };
 
 struct aurade_shell_seat {
@@ -505,6 +515,42 @@ aurade_shell_surface_set_parent(struct aurade_shell_surface *shsurf,
 	}
 }
 
+/* A surface shows on its own output only. While a monitor is turned, Ash's
+ * host window has its old size for a frame or two, and the part past the
+ * output's edge would show on the monitor next to it. A surface that fits is
+ * left unclipped, so it can still be scanned out directly. */
+static void
+aurade_shell_surface_clip_to_output(struct aurade_shell_surface *shsurf)
+{
+	struct weston_surface *surface =
+		weston_desktop_surface_get_surface(shsurf->desktop_surface);
+	struct weston_view *view = shsurf->view;
+	struct weston_output *output;
+	struct weston_coord_global pos;
+	int x, y;
+
+	if (view->geometry.parent ||
+	    !(shsurf->shell->compositor->capabilities &
+	      WESTON_CAP_VIEW_CLIP_MASK))
+		return;
+
+	if (shsurf->output) {
+		output = shsurf->output->output;
+		pos = weston_view_get_pos_offset_global(view);
+		x = (int) (output->pos.c.x - pos.c.x);
+		y = (int) (output->pos.c.y - pos.c.y);
+		if (x > 0 || y > 0 ||
+		    x + output->width < surface->width ||
+		    y + output->height < surface->height) {
+			weston_view_set_mask(view, x, y,
+					     output->width, output->height);
+			return;
+		}
+	}
+	if (view->geometry.scissor_enabled)
+		weston_view_set_mask_infinite(view);
+}
+
 static void
 aurade_shell_surface_reconfigure_for_output(struct aurade_shell_surface *shsurf)
 {
@@ -517,14 +563,24 @@ aurade_shell_surface_reconfigure_for_output(struct aurade_shell_surface *shsurf)
 	w_output = shsurf->output->output;
 	desktop_surface = shsurf->desktop_surface;
 
+	/* A surface made fullscreen a moment ago may not have taken it yet,
+	 * and the size sent with it is the output's old one. */
 	if (weston_desktop_surface_get_maximized(desktop_surface) ||
-	    weston_desktop_surface_get_fullscreen(desktop_surface)) {
+	    weston_desktop_surface_get_fullscreen(desktop_surface) ||
+	    weston_desktop_surface_get_pending_maximized(desktop_surface) ||
+	    weston_desktop_surface_get_pending_fullscreen(desktop_surface)) {
 		weston_desktop_surface_set_size(desktop_surface,
 						w_output->width,
 						w_output->height);
 	}
 
+	/* One not shown yet is centred when it is. */
+	if (!weston_surface_is_mapped(
+		    weston_desktop_surface_get_surface(desktop_surface)))
+		return;
+
 	weston_shell_utils_center_on_output(shsurf->view, w_output);
+	aurade_shell_surface_clip_to_output(shsurf);
 	weston_view_update_transform(shsurf->view);
 }
 
@@ -533,6 +589,7 @@ aurade_shell_surface_destroy(struct aurade_shell_surface *shsurf)
 {
 	wl_signal_emit(&shsurf->destroy_signal, shsurf);
 	wl_list_remove(&shsurf->surface_tree_link);
+	wl_list_remove(&shsurf->link);
 
 	weston_desktop_surface_set_user_data(shsurf->desktop_surface, NULL);
 	shsurf->desktop_surface = NULL;
@@ -582,6 +639,7 @@ aurade_shell_surface_create(struct aurade_shell *shell,
 	shsurf->desktop_surface = desktop_surface;
 	shsurf->view = view;
 	shsurf->shell = shell;
+	wl_list_insert(&shell->surface_list, &shsurf->link);
 
 	weston_desktop_surface_set_user_data(desktop_surface, shsurf);
 
@@ -870,6 +928,81 @@ aurade_shell_install_pointer_grab(struct aurade_shell *shell,
 						   &shell->pointer_grab);
 }
 
+/* Ash turns a display clockwise. An output's transform turns the picture
+ * counter-clockwise. */
+static uint32_t
+aurade_shell_transform_for_rotation(int rotation)
+{
+	switch (rotation) {
+	case 90:
+		return WL_OUTPUT_TRANSFORM_270;
+	case 180:
+		return WL_OUTPUT_TRANSFORM_180;
+	case 270:
+		return WL_OUTPUT_TRANSFORM_90;
+	default:
+		return WL_OUTPUT_TRANSFORM_NORMAL;
+	}
+}
+
+/* Weston keeps its outputs in a line, left to right, and moves the ones
+ * right of an output that a new mode makes wider or narrower, but not when
+ * a new transform does, so that is done here. Then the output counts as
+ * resized, as after a new mode: its background and its surfaces take the
+ * turned size. */
+static void
+aurade_shell_turn_output(struct aurade_shell *shell,
+			 struct weston_output *output, uint32_t transform)
+{
+	struct weston_output *other;
+	int32_t old_width = output->width;
+	int32_t delta;
+
+	weston_log("aurade-shell: turning output %s to transform %u\n",
+		   output->name, transform);
+	weston_output_set_transform(output, transform);
+
+	delta = output->width - old_width;
+	if (delta != 0) {
+		wl_list_for_each(other, &shell->compositor->output_list, link) {
+			struct weston_coord_global pos = other->pos;
+
+			if (other == output || other->destroying ||
+			    pos.c.x <= output->pos.c.x)
+				continue;
+			pos.c.x += delta;
+			weston_output_set_position(other, pos);
+		}
+	}
+
+	wl_signal_emit(&shell->compositor->output_resized_signal, output);
+	/* The outputs right of it moved too. */
+	weston_compositor_damage_all(shell->compositor);
+}
+
+/* Turns each output the way Ash has its display turned. An output Ash has
+ * not placed yet keeps its transform. */
+static void
+aurade_shell_turn_outputs(struct aurade_shell *shell)
+{
+	struct aurade_shell_output *shoutput;
+
+	wl_list_for_each(shoutput, &shell->output_list, link) {
+		struct weston_output *output = shoutput->output;
+		const struct aurade_layout_entry *entry;
+		uint32_t transform;
+
+		if (output->destroying)
+			continue;
+		entry = aurade_shell_layout_for(shell, output);
+		if (!entry)
+			continue;
+		transform = aurade_shell_transform_for_rotation(entry->rotation);
+		if (output->transform != transform)
+			aurade_shell_turn_output(shell, output, transform);
+	}
+}
+
 static void
 aurade_shell_read_layout(struct aurade_shell *shell)
 {
@@ -889,15 +1022,17 @@ aurade_shell_read_layout(struct aurade_shell *shell)
 	while (count < AURADE_LAYOUT_MAX && fgets(line, sizeof line, file)) {
 		struct aurade_layout_entry *entry = &shell->layout[count];
 
-		if (sscanf(line, "%63s %lf %lf %lf %lf", entry->name,
+		entry->rotation = 0;
+		if (sscanf(line, "%63s %lf %lf %lf %lf %d", entry->name,
 			   &entry->x, &entry->y, &entry->width,
-			   &entry->height) == 5 &&
+			   &entry->height, &entry->rotation) >= 5 &&
 		    entry->width > 0 && entry->height > 0)
 			count++;
 	}
 	fclose(file);
 	shell->layout_count = count;
 	weston_log("aurade-shell: %d displays in Ash's arrangement\n", count);
+	aurade_shell_turn_outputs(shell);
 }
 
 static int
@@ -1272,6 +1407,9 @@ aurade_shell_output_create(struct aurade_shell *shell,
 	aurade_shell_output_recreate_background(shoutput);
 	weston_output_set_ready(output);
 
+	/* A monitor plugged back in is turned the way Ash last had it. */
+	aurade_shell_turn_outputs(shell);
+
 	return shoutput;
 }
 
@@ -1470,6 +1608,7 @@ desktop_surface_committed(struct weston_desktop_surface *desktop_surface,
 	if (!weston_surface_is_mapped(surface) || (is_resized && is_fullscreen)) {
 		weston_shell_utils_center_on_output(shsurf->view,
 						    shsurf->output->output);
+		aurade_shell_surface_clip_to_output(shsurf);
 		weston_view_update_transform(shsurf->view);
 	}
 
@@ -1711,19 +1850,16 @@ aurade_shell_handle_output_resized(struct wl_listener *listener, void *data)
 	struct weston_output *output = data;
 	struct aurade_shell_output *shoutput =
 		weston_output_get_shell_private(output);
-	struct weston_view *view;
+	struct aurade_shell_surface *shsurf;
 
 	aurade_shell_output_recreate_background(shoutput);
 
-	wl_list_for_each(view, &shell->normal_layer.view_list.link,
-			 layer_link.link) {
-		struct aurade_shell_surface *shsurf;
-		if (view->output != output)
-			continue;
-		shsurf = get_aurade_shell_surface(view->surface);
-		if (!shsurf)
-			continue;
-		aurade_shell_surface_reconfigure_for_output(shsurf);
+	/* Every surface on the output takes the new size, those not shown yet
+	 * too: a monitor Ash has turned is turned as Ash starts, before its
+	 * host window there has drawn anything. */
+	wl_list_for_each(shsurf, &shell->surface_list, link) {
+		if (shsurf->output == shoutput)
+			aurade_shell_surface_reconfigure_for_output(shsurf);
 	}
 }
 
@@ -1907,6 +2043,7 @@ wet_shell_init(struct weston_compositor *ec,
 	shell->seat_created_listener.notify = aurade_shell_handle_seat_created;
 	wl_signal_add(&ec->seat_created_signal, &shell->seat_created_listener);
 
+	wl_list_init(&shell->surface_list);
 	wl_list_init(&shell->output_list);
 	wl_list_for_each(output, &ec->output_list, link)
 		aurade_shell_output_create(shell, output);
