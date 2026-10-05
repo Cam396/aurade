@@ -22,13 +22,20 @@ The system service owns `org.aurade.HostBridge` at
 | General | `GetCapabilities`, `JobGet` |
 | Bluetooth | `BluetoothGetState`, `BluetoothSetPowered`, `BluetoothStartDiscovery`, `BluetoothStopDiscovery`, `BluetoothPair`, `BluetoothConnect`, `BluetoothDisconnect`, `BluetoothForget` |
 | Storage | `StorageList`, `StorageMount`, `StorageUnmount`, `StorageEject`, `StoragePowerOff`, `StorageFormat` |
-| Packages | `PacmanListInstalled`, `PacmanQuery`, `PacmanListUpdates`, `PacmanUpgrade`, `PacmanUninstall` |
+| Packages | `PacmanListInstalled`, `PacmanQuery`, `PacmanListUpdates`, `PacmanSearch`, `PacmanInstall`, `PacmanUpgrade`, `PacmanUninstall` |
 
 `Event(s json)` reports BlueZ and udisks2 topology/property invalidation plus
 pacman job completion. Consumers should refresh the relevant state method
 after an event instead of treating an event as a complete state snapshot.
 
-Pacman upgrade and uninstall return a job ID immediately. They are serialized
+`PacmanSearch(s query, i limit)` searches the applications in the repositories'
+AppStream catalog (`archlinux-appstream-data`) by name, keyword, package and
+summary, and returns each with its desktop ID, whether it is installed, and its
+64 pixel icon as base64 PNG (Arch caches them as JPEG XL; `djxl` converts
+them). `PacmanInstall(s package)` installs only a package the catalog lists as
+an application.
+
+Pacman install, upgrade and uninstall return a job ID immediately. They are serialized
 because pacman supports only one database writer. `JobGet` exposes status and
 bounded output to the Unix user that started the job, even when that user
 reconnects with a different D-Bus unique name. On an AuraDE-installed Btrfs

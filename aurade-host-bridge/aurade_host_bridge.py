@@ -30,6 +30,7 @@ from gi.repository import GLib
 sys.path.append("/usr/lib/aurade-host-bridge")
 
 from aurade_host_bridge_core import (
+    AppCatalog,
     BLUEZ_SERVICE,
     BridgeError,
     BluetoothBackend,
@@ -56,6 +57,7 @@ ACTION_STORAGE = "org.aurade.host-bridge.storage-control"
 ACTION_FORMAT = "org.aurade.host-bridge.storage-format"
 ACTION_UPGRADE = "org.aurade.host-bridge.package-upgrade"
 ACTION_UNINSTALL = "org.aurade.host-bridge.package-uninstall"
+ACTION_INSTALL = "org.aurade.host-bridge.package-install"
 
 log = logging.getLogger("aurade-host-bridge")
 
@@ -120,6 +122,7 @@ class HostBridge(dbus.service.Object):
         self.runner = CommandRunner()
         self.disk = DiskUsageBackend(self.runner)
         self.pacman = PacmanBackend(self.runner)
+        self.catalog = AppCatalog(self.runner)
         self.authorizer = Authorizer(bus)
         self.jobs: dict[str, dict[str, Any]] = {}
         self.jobs_lock = threading.Lock()
@@ -340,6 +343,10 @@ class HostBridge(dbus.service.Object):
     def PacmanListUpdates(self) -> str:
         return self._invoke("pacman.updates", self.pacman.updates)
 
+    @dbus.service.method(INTERFACE, in_signature="si", out_signature="s")
+    def PacmanSearch(self, query: str, limit: int) -> str:
+        return self._invoke("pacman.search", lambda: self.catalog.search(str(query), int(limit)))
+
     def _start_job(self, sender: str, operation: str, argv: list[str]) -> dict[str, Any]:
         owner_uid = self._sender_uid(sender)
         with self.jobs_lock:
@@ -408,6 +415,16 @@ class HostBridge(dbus.service.Object):
             sender, ACTION_UNINSTALL,
             lambda: self._start_job(sender, "uninstall", self.pacman.uninstall_command(
                 list(map(str, packages)), bool(remove_dependencies)))))
+
+    @dbus.service.method(INTERFACE, in_signature="s", out_signature="s", sender_keyword="sender")
+    def PacmanInstall(self, package: str, sender: str = "") -> str:
+        def install() -> dict[str, Any]:
+            # Checked against the catalog before anyone is asked for a
+            # password to install it.
+            argv = self.pacman.install_command(str(package), self.catalog)
+            return self._authorized(sender, ACTION_INSTALL,
+                                    lambda: self._start_job(sender, "install", argv))
+        return self._invoke("pacman.install", install)
 
     @dbus.service.method(INTERFACE, in_signature="s", out_signature="s", sender_keyword="sender")
     def JobGet(self, job_id: str, sender: str = "") -> str:
