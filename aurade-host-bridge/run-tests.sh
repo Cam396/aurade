@@ -15,6 +15,7 @@ python -m unittest discover -s "${root_dir}/tests" -v
   /org/freedesktop/UDisks2/block_devices/sdb1 ext4 \
   --label TEST --confirm 'FORMAT /dev/sdb1' >/dev/null
 "${root_dir}/aurade_hostctl.py" --dry-run pacman uninstall test-package >/dev/null
+"${root_dir}/aurade_hostctl.py" --dry-run pacman install test-package >/dev/null
 
 if command -v dbus-run-session >/dev/null && command -v gdbus >/dev/null; then
   export AURADE_TEST_ROOT="${root_dir}"

@@ -2,15 +2,17 @@
 
 pkgname=aurade-host-bridge
 pkgver=0.1.0
-pkgrel=3
+pkgrel=4
 pkgdesc="BlueZ, udisks2, pacman, and MIME integration bridge for AuraDE"
 arch=('any')
 url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause')
 depends=(
+  'archlinux-appstream-data'
   'bluez'
   'dbus'
   'glib2'
+  'libjxl'
   'pacman'
   'pacman-contrib'
   'polkit'
@@ -36,18 +38,18 @@ source=(
   'test_core.py'
 )
 sha256sums=(
-  '30183eca4834a7700eab5531af083c0c143e8693d507d0bbc3d2a048728e196a'
-  '01d23963eb3c2949c263f3d5cec2e6dc9013d91a7d6e4b72e35d2026d1bd46bc'
+  '839f5e591c1fb0e7db2521d2f3a5186ac6933cd075377980d92fd533072597a9'
+  '81cd93438a9f8ce2584e2d5beb1f712c1c81cfc9cc80298a19930edfd64dbfe7'
   'edf9ed64f99ac5e884f6b1d48039cee83f8635d15c1e9c1a1c62d090550a7c58'
-  'e493732e7225a48c0ae397632fc5d382249cd48735a7901665763a9086d8e765'
+  'd67d9c56fde6e2df0d2d93a04c20cdf6967ff135bf84b1c138249af5106ef6a6'
   'dfaec2f6befc25702227fa3a685c4ded57c738db60051c90b32a4800e4a070b0'
   '79034ab9e452ae0cecd7a34e6eaa2dbbb8f71b7e36aad7adb491faef9f5ab0c2'
   '80aaa97e064346953c364bc67af4d522eb85439e34728c9c855df24e58e543c8'
   '1af3968226e00bf5e77160fc2451c568f9be0da89d739d661957c204a297da09'
-  'e1c632926d1f77ec2626107c0d45a5bf9706c25a9ae6232f7bd3ade92b229f89'
-  '374cf998b84e6691a7ab1d3705d03781dbd55adbaf68afb66a01d220520e7e2a'
+  'f95190c4dc46e966cacb356952c6349bd3eeef1d416c4e606808dcb5eb04a304'
+  '6d64b29bdb22a68d015a385de0b9f86cee125c98290bf05fe3942bc5022870de'
   '762a71fc35ca50b2c16f8f2dfc9f793d171e885f2a05c30d95507cdecb1d408c'
-  'f546a2b9cbc1ce5b2a0e0c910606ea0153cda48ebc00a86525f27ae9d87ed8ae'
+  'c06326067c4d8ac27da1784874e7a286fa5ecbe7270bcd4b578fa26e4bb24e30'
 )
 
 check() {
@@ -62,6 +64,8 @@ check() {
     --dry-run bluetooth pair AA:BB:CC:DD:EE:FF >/dev/null
   PYTHONPATH="${module_dir}" python aurade_hostctl.py \
     --dry-run pacman uninstall test-package >/dev/null
+  PYTHONPATH="${module_dir}" python aurade_hostctl.py \
+    --dry-run pacman install test-package >/dev/null
   env -u XDG_RUNTIME_DIR dbus-run-session -- bash -c '
     ./aurade_desktop_bridge.py >/tmp/aurade-desktop-bridge-check.log 2>&1 &
     service_pid=$!

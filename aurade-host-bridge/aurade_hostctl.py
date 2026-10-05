@@ -32,7 +32,9 @@ from aurade_host_bridge_core import (
     validate_label,
     validate_mac,
     validate_object_path,
+    validate_package,
     validate_packages,
+    validate_query,
 )
 
 
@@ -85,6 +87,11 @@ def parser() -> argparse.ArgumentParser:
     query = pacman.add_parser("query")
     query.add_argument("package")
     pacman.add_parser("updates")
+    search = pacman.add_parser("search")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=8)
+    install = pacman.add_parser("install")
+    install.add_argument("package")
     pacman.add_parser("upgrade")
     uninstall = pacman.add_parser("uninstall")
     uninstall.add_argument("packages", nargs="+")
@@ -127,6 +134,8 @@ def dry_run(args: argparse.Namespace) -> str:
     elif args.group == "pacman":
         if args.action == "upgrade":
             data = {"action": "upgrade", "command": ["/usr/bin/pacman", "-Syu", "--noconfirm"], "dry_run": True}
+        elif args.action == "install":
+            data = {"action": "install", "package": validate_package(args.package), "dry_run": True}
         elif args.action == "uninstall":
             packages = validate_packages(args.packages)
             data = {"action": "uninstall", "packages": packages,
@@ -205,6 +214,10 @@ def real_call(args: argparse.Namespace) -> str:
             return call_system("PacmanQuery", args.package)
         if args.action == "updates":
             return call_system("PacmanListUpdates", timeout=600)
+        if args.action == "search":
+            return call_system("PacmanSearch", validate_query(args.query), dbus.Int32(args.limit), timeout=60)
+        if args.action == "install":
+            return call_system("PacmanInstall", validate_package(args.package), timeout=600)
         if args.action == "upgrade":
             return call_system("PacmanUpgrade", timeout=600)
         if args.action == "uninstall":

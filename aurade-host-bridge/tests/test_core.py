@@ -8,6 +8,7 @@ import unittest
 
 from aurade_host_bridge import event_payload
 from aurade_host_bridge_core import (
+    AppCatalog,
     BLUEZ_ADAPTER,
     BLUEZ_DEVICE,
     UDISKS_BLOCK,
@@ -22,6 +23,7 @@ from aurade_host_bridge_core import (
     StorageBackend,
     normalize_open_target,
     parse_btrfs_qgroups,
+    parse_catalog,
     parse_btrfs_subvolumes,
     parse_btrfs_usage,
     parse_installed_size,
@@ -31,6 +33,7 @@ from aurade_host_bridge_core import (
     storage_breakdown,
     validate_mac,
     validate_package,
+    validate_query,
 )
 
 
@@ -225,6 +228,113 @@ class PacmanAndMimeTest(unittest.TestCase):
         self.assertEqual(result["pid"], 4242)
         self.assertEqual(calls[0][0], ["/usr/bin/gio", "open", "https://example.test/a?x=$(id)"])
         self.assertNotIn("shell", calls[0][1])
+
+
+CATALOG = b"""<?xml version="1.0" encoding="utf-8"?>
+<components version="1.0" origin="archlinux-arch-extra">
+<component type="desktop-application">
+  <id>org.gimp.GIMP</id>
+  <name>GNU Image Manipulation Program</name>
+  <name xml:lang="de">GNU-Bildbearbeitungsprogramm</name>
+  <summary>Create images and edit photographs</summary>
+  <pkgname>gimp</pkgname>
+  <launchable type="desktop-id">org.gimp.GIMP.desktop</launchable>
+  <icon type="cached" width="128" height="128">gimp_gimp.png</icon>
+  <icon type="cached" width="64" height="64">gimp_gimp.png</icon>
+  <keywords><keyword>photo</keyword><keyword xml:lang="de">Foto</keyword></keywords>
+  <categories><category>Graphics</category></categories>
+</component>
+<component type="desktop-application">
+  <id>org.kde.krita</id>
+  <name>Krita</name>
+  <summary>Digital painting</summary>
+  <pkgname>krita</pkgname>
+  <icon type="cached" width="64" height="64">../../etc/passwd.png</icon>
+</component>
+<component type="desktop-application">
+  <id>org.kde.krita.extra</id>
+  <name>Krita Extra</name>
+  <summary>A second app in the same package</summary>
+  <pkgname>krita</pkgname>
+</component>
+<component type="desktop-application">
+  <id>bad</id>
+  <name>Bad</name>
+  <pkgname>-Syu</pkgname>
+</component>
+<component type="addon">
+  <id>gimp-plugin</id>
+  <name>GIMP plugin</name>
+  <pkgname>gimp-plugin</pkgname>
+</component>
+</components>
+"""
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+
+
+class CatalogTest(unittest.TestCase):
+    def setUp(self):
+        import gzip
+        import os
+        import tempfile
+        self.directory = tempfile.TemporaryDirectory()
+        root = self.directory.name
+        os.makedirs(os.path.join(root, "xml"))
+        with gzip.open(os.path.join(root, "xml", "extra.xml.gz"), "wb") as stream:
+            stream.write(CATALOG)
+        icons = os.path.join(root, "icons", "archlinux-arch-extra", "64x64")
+        os.makedirs(icons)
+        with open(os.path.join(icons, "gimp_gimp.png"), "wb") as stream:
+            stream.write(PNG)
+        self.root = root
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def catalog(self, installed="krita\n"):
+        runner = FakeRunner([CommandResult(0, installed, "")] * 4)
+        return AppCatalog(runner, catalog_dir=self.root, local_db=self.root), runner
+
+    def test_catalog_keeps_applications_with_valid_packages(self):
+        import io
+        apps = parse_catalog(io.BytesIO(CATALOG))
+        self.assertEqual([app.package for app in apps], ["gimp", "krita", "krita"])
+        gimp = apps[0]
+        self.assertEqual(gimp.name, "GNU Image Manipulation Program")
+        self.assertEqual(gimp.keywords, ("photo",))
+        self.assertEqual(gimp.desktop_id, "org.gimp.GIMP.desktop")
+        self.assertEqual(gimp.icon_file, "gimp_gimp.png")
+        self.assertEqual(apps[1].icon_file, "", "an icon name with a path is dropped")
+
+    def test_search_ranks_names_and_reports_installed_and_icons(self):
+        import base64
+        catalog, _ = self.catalog()
+        result = catalog.search("krita")
+        self.assertEqual([app["package"] for app in result["apps"]], ["krita"],
+                         "one result per package")
+        self.assertTrue(result["apps"][0]["installed"])
+        self.assertEqual(result["apps"][0]["icon_png"], "")
+        gimp = catalog.search("photo")["apps"][0]
+        self.assertEqual(gimp["package"], "gimp")
+        self.assertFalse(gimp["installed"])
+        self.assertEqual(base64.b64decode(gimp["icon_png"]), PNG)
+        self.assertEqual(catalog.search("image photographs")["apps"][0]["package"], "gimp")
+        self.assertEqual(catalog.search("image painting")["apps"], [], "every word must match")
+
+    def test_queries_are_bounded(self):
+        self.assertEqual(validate_query("  photo   editor "), "photo editor")
+        for value in ("", "   ", "x" * 65, "a\x00b"):
+            with self.assertRaises(BridgeError):
+                validate_query(value)
+
+    def test_only_catalog_applications_install(self):
+        catalog, _ = self.catalog()
+        backend = PacmanBackend(FakeRunner([]))
+        self.assertEqual(backend.install_command("gimp", catalog),
+                         ["/usr/bin/pacman", "-S", "--needed", "--noconfirm", "gimp"])
+        for value in ("glibc", "gimp-plugin", "-Syu"):
+            with self.assertRaises(BridgeError):
+                backend.install_command(value, catalog)
 
 
 if __name__ == "__main__":

@@ -857,6 +857,246 @@ class PacmanBackend:
         mode = "-Rns" if remove_dependencies else "-R"
         return [self.pacman, mode, "--noconfirm", *packages]
 
+    def install_command(self, name: str, catalog: "AppCatalog") -> list[str]:
+        name = validate_package(name)
+        # Only applications the distribution's catalog describes can be
+        # installed from the desktop: a person picks an app by its name and
+        # picture, never a library or a system package.
+        if catalog.find(name) is None:
+            raise BridgeError("not_in_catalog", "the package is not an application in the catalog",
+                              {"package": name})
+        return [self.pacman, "-S", "--needed", "--noconfirm", name]
+
+
+@dataclass
+class CatalogApp:
+    id: str
+    name: str
+    summary: str
+    package: str
+    desktop_id: str
+    keywords: tuple[str, ...]
+    categories: tuple[str, ...]
+    icon_origin: str
+    icon_file: str
+
+
+def _lang_free(element: Any) -> bool:
+    return not any(key.endswith("}lang") or key == "lang" for key in element.attrib)
+
+
+def parse_catalog(stream: Any) -> list[CatalogApp]:
+    """Desktop applications in one AppStream catalog, as Arch ships them."""
+    import xml.etree.ElementTree as ElementTree
+
+    apps = []
+    origin = ""
+    for event, element in ElementTree.iterparse(stream, events=("start", "end")):
+        if event == "start":
+            if element.tag == "components":
+                origin = element.get("origin", "")
+            continue
+        if element.tag != "component":
+            continue
+        if element.get("type") == "desktop-application":
+            fields: dict[str, str] = {}
+            keywords: list[str] = []
+            categories: list[str] = []
+            icon_file = ""
+            icon_width = 0
+            desktop_id = ""
+            for child in element:
+                text = (child.text or "").strip()
+                if child.tag in ("id", "pkgname") or (child.tag in ("name", "summary") and _lang_free(child)):
+                    fields.setdefault(child.tag, text)
+                elif child.tag == "launchable" and child.get("type") == "desktop-id":
+                    desktop_id = desktop_id or text
+                elif child.tag == "keywords":
+                    keywords += [(k.text or "").strip() for k in child if _lang_free(k) and k.text]
+                elif child.tag == "categories":
+                    categories += [(c.text or "").strip() for c in child if c.text]
+                elif child.tag == "icon" and child.get("type") == "cached":
+                    width = int(child.get("width") or 0)
+                    # 64 pixels is drawn crisply at the launcher's size on
+                    # most screens; the nearest to it otherwise.
+                    if not icon_file or abs(width - 64) < abs(icon_width - 64):
+                        icon_file, icon_width = text, width
+            package = fields.get("pkgname", "")
+            if package and PACKAGE_RE.fullmatch(package) and fields.get("name"):
+                apps.append(CatalogApp(
+                    id=fields.get("id", ""), name=fields["name"][:200],
+                    summary=fields.get("summary", "")[:400], package=package,
+                    desktop_id=desktop_id, keywords=tuple(keywords[:64]),
+                    categories=tuple(categories[:16]), icon_origin=origin,
+                    icon_file=icon_file if ICON_FILE_RE.fullmatch(icon_file) else "",
+                ))
+        element.clear()
+    return apps
+
+
+ICON_FILE_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,200}\.(?:png|jxl)$")
+ORIGIN_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+MAX_QUERY_LENGTH = 64
+MAX_SEARCH_RESULTS = 20
+
+
+def validate_query(query: str) -> str:
+    query = " ".join(str(query).split())
+    if not query or len(query) > MAX_QUERY_LENGTH or not query.isprintable():
+        raise BridgeError("invalid_argument", "a search is one to 64 printable characters")
+    return query
+
+
+def _term_score(term: str, app: CatalogApp) -> int:
+    name = app.name.lower()
+    if name == term:
+        return 100
+    if name.startswith(term):
+        return 80
+    if any(word.startswith(term) for word in re.split(r"[\s\-_.]+", name)):
+        return 60
+    if term in name:
+        return 40
+    if any(keyword.lower().startswith(term) for keyword in app.keywords):
+        return 30
+    if app.package.startswith(term):
+        return 25
+    if len(term) >= 3 and term in app.summary.lower():
+        return 10
+    return 0
+
+
+class AppCatalog:
+    """Searches the AppStream catalog of the distribution's repositories."""
+
+    def __init__(self, runner: CommandRunner, catalog_dir: str = "/usr/share/swcatalog",
+                 pacman: str = "/usr/bin/pacman", djxl: str = "/usr/bin/djxl",
+                 local_db: str = "/var/lib/pacman/local", scratch: str = "/tmp"):
+        self.runner = runner
+        self.catalog_dir = catalog_dir
+        self.pacman = pacman
+        self.djxl = djxl
+        self.local_db = local_db
+        self.scratch = scratch
+        self._signature: tuple[Any, ...] | None = None
+        self._apps: list[CatalogApp] = []
+        self._by_package: dict[str, CatalogApp] = {}
+        self._installed_signature: float | None = None
+        self._installed: frozenset[str] = frozenset()
+        self._icons: dict[str, str] = {}
+
+    def _files(self) -> list[str]:
+        directory = os.path.join(self.catalog_dir, "xml")
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            return []
+        return [os.path.join(directory, name) for name in names if name.endswith((".xml.gz", ".xml"))]
+
+    def load(self) -> None:
+        files = self._files()
+        signature = tuple((path, os.stat(path).st_mtime_ns, os.stat(path).st_size) for path in files)
+        if signature == self._signature:
+            return
+        import gzip
+
+        apps: list[CatalogApp] = []
+        for path in files:
+            opener = gzip.open if path.endswith(".gz") else open
+            try:
+                with opener(path, "rb") as stream:
+                    apps += parse_catalog(stream)
+            except (OSError, EOFError, SyntaxError) as exc:
+                raise BridgeError("catalog_unavailable", "the application catalog could not be read",
+                                  {"file": os.path.basename(path), "reason": str(exc)[:200]}) from exc
+        by_package: dict[str, CatalogApp] = {}
+        for app in apps:
+            by_package.setdefault(app.package, app)
+        self._apps, self._by_package, self._signature = apps, by_package, signature
+
+    def find(self, package: str) -> CatalogApp | None:
+        self.load()
+        return self._by_package.get(package)
+
+    def installed(self) -> frozenset[str]:
+        try:
+            signature = os.stat(self.local_db).st_mtime
+        except OSError:
+            signature = None
+        if signature is None or signature != self._installed_signature:
+            result = self.runner.run([self.pacman, "-Qq"], timeout=60)
+            if result.returncode != 0:
+                raise BridgeError("pacman_failed", "could not list installed packages", {"stderr": result.stderr})
+            self._installed = frozenset(line.strip() for line in result.stdout.splitlines() if line.strip())
+            self._installed_signature = signature
+        return self._installed
+
+    def icon(self, app: CatalogApp) -> str:
+        """The app's picture as base64 PNG, or empty when there is none."""
+        import base64
+        import tempfile
+
+        if not app.icon_file or not ORIGIN_RE.fullmatch(app.icon_origin):
+            return ""
+        key = f"{app.icon_origin}/{app.icon_file}"
+        if key in self._icons:
+            return self._icons[key]
+        source = ""
+        for size in ("64x64", "128x128", "48x48"):
+            candidate = os.path.join(self.catalog_dir, "icons", app.icon_origin, size, app.icon_file)
+            if os.path.isfile(candidate):
+                source = candidate
+                break
+        data = b""
+        if source.endswith(".png"):
+            with open(source, "rb") as stream:
+                data = stream.read(1024 * 1024)
+        elif source and os.path.exists(self.djxl):
+            # Arch's catalog draws its icons in JPEG XL; the desktop reads PNG.
+            with tempfile.TemporaryDirectory(dir=self.scratch) as directory:
+                target = os.path.join(directory, "icon.png")
+                result = self.runner.run([self.djxl, source, target, "--quiet"], timeout=20)
+                if result.returncode == 0 and os.path.isfile(target):
+                    with open(target, "rb") as stream:
+                        data = stream.read(1024 * 1024)
+        encoded = base64.b64encode(data).decode("ascii") if data.startswith(b"\x89PNG") else ""
+        if len(self._icons) >= 256:
+            self._icons.clear()
+        self._icons[key] = encoded
+        return encoded
+
+    def search(self, query: str, limit: int = 8) -> dict[str, Any]:
+        query = validate_query(query)
+        limit = max(1, min(int(limit), MAX_SEARCH_RESULTS))
+        self.load()
+        terms = query.lower().split()
+        ranked = []
+        for app in self._apps:
+            scores = [_term_score(term, app) for term in terms]
+            if all(scores):
+                ranked.append((-sum(scores), app.name.lower(), app.package, app))
+        ranked.sort(key=lambda item: item[:3])
+        installed = self.installed()
+        seen: set[str] = set()
+        results = []
+        for _, _, _, app in ranked:
+            if app.package in seen:
+                continue
+            seen.add(app.package)
+            results.append({
+                "id": app.id,
+                "name": app.name,
+                "summary": app.summary,
+                "package": app.package,
+                "desktop_id": app.desktop_id,
+                "categories": list(app.categories),
+                "installed": app.package in installed,
+                "icon_png": self.icon(app),
+            })
+            if len(results) >= limit:
+                break
+        return {"query": query, "apps": results, "catalog_size": len(self._apps)}
+
 
 class MimeLauncher:
     def __init__(self, which: Callable[[str], str | None] = shutil.which,
