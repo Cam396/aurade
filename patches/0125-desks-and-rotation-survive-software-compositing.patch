@@ -1,0 +1,112 @@
+diff --git a/ash/utility/layer_util.h b/ash/utility/layer_util.h
+index f5286a166c2a..0bf8de1e914c 100644
+--- a/ash/utility/layer_util.h
++++ b/ash/utility/layer_util.h
+@@ -25,6 +25,12 @@ class CopyOutputResult;
+ 
+ namespace ash {
+ 
++// Whether CreateLayerFromCopyOutputResult() can use |copy_result|. A copy
++// asked for as a shared image comes back as a bitmap under software
++// compositing, as on a machine with no GPU, and a layer cannot show that.
++ASH_EXPORT bool CanCreateLayerFromCopyOutputResult(
++    const viz::CopyOutputResult& copy_result);
++
+ // Creates the new layer with |layer_size| using the image in |copy_result|.
+ ASH_EXPORT std::unique_ptr<ui::LayerWithExternalTexture>
+ CreateLayerFromCopyOutputResult(
+diff --git a/ash/utility/layer_util.cc b/ash/utility/layer_util.cc
+index 671ddd989a90..c7b00bd900d7 100644
+--- a/ash/utility/layer_util.cc
++++ b/ash/utility/layer_util.cc
+@@ -42,7 +42,7 @@ void CopyToNewLayerOnCopyRequestFinished(
+     LayerCopyCallback layer_copy_callback,
+     const gfx::Size& layer_size,
+     std::unique_ptr<viz::CopyOutputResult> copy_result) {
+-  if (!copy_result || copy_result->IsEmpty()) {
++  if (!copy_result || !CanCreateLayerFromCopyOutputResult(*copy_result)) {
+     if (layer_copy_callback) {
+       std::move(layer_copy_callback).Run(nullptr);
+     }
+@@ -60,7 +60,7 @@ void CopyToLayerOnCopyRequestFinished(
+   if (get_target_layer_callback.IsCancelled())
+     return;
+ 
+-  if (!copy_result || copy_result->IsEmpty())
++  if (!copy_result || !CanCreateLayerFromCopyOutputResult(*copy_result))
+     return;
+ 
+   ui::LayerWithExternalTexture* layer = nullptr;
+@@ -73,6 +73,13 @@ void CopyToLayerOnCopyRequestFinished(
+ 
+ }  // namespace
+ 
++bool CanCreateLayerFromCopyOutputResult(
++    const viz::CopyOutputResult& copy_result) {
++  return !copy_result.IsEmpty() &&
++         copy_result.destination() ==
++             viz::CopyOutputResult::Destination::kSharedImage;
++}
++
+ std::unique_ptr<ui::LayerWithExternalTexture> CreateLayerFromCopyOutputResult(
+     std::unique_ptr<viz::CopyOutputResult> copy_result,
+     const gfx::Size& layer_size) {
+diff --git a/ash/rotator/screen_rotation_animator.cc b/ash/rotator/screen_rotation_animator.cc
+index 0fa448086878..05fd949aed92 100644
+--- a/ash/rotator/screen_rotation_animator.cc
++++ b/ash/rotator/screen_rotation_animator.cc
+@@ -281,8 +281,9 @@ void ScreenRotationAnimator::OnScreenRotationContainerLayerCopiedBeforeRotation(
+   // Abort animation and set the rotation to target rotation when the copy
+   // request has been canceled or failed. It would fail if, for examples: a) The
+   // layer is removed from the compositor and destroyed before committing the
+-  // request to the compositor. b) The compositor is shutdown.
+-  if (result->IsEmpty()) {
++  // request to the compositor. b) The compositor is shutdown. AuraDE: or when
++  // the copy is a bitmap, under software compositing.
++  if (!CanCreateLayerFromCopyOutputResult(*result)) {
+     Shell::Get()->display_manager()->SetDisplayRotation(
+         rotation_request->display_id, rotation_request->new_rotation,
+         rotation_request->source);
+@@ -343,7 +344,7 @@ void ScreenRotationAnimator::OnScreenRotationContainerLayerCopiedAfterRotation(
+   // shutdown.
+   if (RootWindowChangedForDisplayId(root_window_,
+                                     rotation_request->display_id) ||
+-      result->IsEmpty()) {
++      !CanCreateLayerFromCopyOutputResult(*result)) {
+     ProcessAnimationQueue();
+     return;
+   }
+diff --git a/ash/wm/desks/root_window_desk_switch_animator.cc b/ash/wm/desks/root_window_desk_switch_animator.cc
+index 673c6beec224..150f81666a61 100644
+--- a/ash/wm/desks/root_window_desk_switch_animator.cc
++++ b/ash/wm/desks/root_window_desk_switch_animator.cc
+@@ -509,6 +509,15 @@ void RootWindowDeskSwitchAnimator::OnStartingDeskScreenshotTaken(
+     return;
+   }
+ 
++  // AuraDE: under software compositing a screenshot is a bitmap, which no
++  // retry turns into a layer, so the desks switch without sliding.
++  if (copy_result && !copy_result->IsEmpty() &&
++      !CanCreateLayerFromCopyOutputResult(*copy_result)) {
++    animator_failed_ = true;
++    delegate_->OnStartingDeskScreenshotTaken(ending_desk_index_);
++    return;
++  }
++
+   if (!copy_result || copy_result->IsEmpty()) {
+     // A frame may be activated before the screenshot requests are satisfied,
+     // leading to us getting an empty |result|. Rerequest the screenshot.
+@@ -537,6 +546,13 @@ void RootWindowDeskSwitchAnimator::OnEndingDeskScreenshotTaken(
+     return;
+   }
+ 
++  if (copy_result && !copy_result->IsEmpty() &&
++      !CanCreateLayerFromCopyOutputResult(*copy_result)) {
++    animator_failed_ = true;
++    delegate_->OnEndingDeskScreenshotTaken();
++    return;
++  }
++
+   if (!copy_result || copy_result->IsEmpty()) {
+     // A frame may be activated before the screenshot requests are satisfied,
+     // leading to us getting an empty |result|. Rerequest the screenshot.
