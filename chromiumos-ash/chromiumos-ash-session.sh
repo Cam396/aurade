@@ -136,13 +136,39 @@ if ! command -v weston >/dev/null 2>&1; then
     exit 78
 fi
 
+# AuraDE's own weston shell spreads the desktop over every monitor. Without
+# it, or under a newer weston than it was built for, which cannot load it,
+# kiosk-shell shows the desktop on one.
+AURADE_DEFAULT_WESTON_SHELL=kiosk-shell.so
+AURADE_SHELL_MODULE=/usr/lib/chromiumos-ash/aurade-shell.so
+if [ -r "${AURADE_SHELL_MODULE}" ] &&
+   ! ldd "${AURADE_SHELL_MODULE}" 2>/dev/null | grep -q 'not found'; then
+    AURADE_DEFAULT_WESTON_SHELL="${AURADE_SHELL_MODULE}"
+fi
+
+# Weston's own messages go beside ash.log. Without a file they go to the
+# console, where nobody sees them, and monitor hotplugs, mode sets and output
+# failures are only ever reported there. The previous session's is kept as .1.
+WESTON_LOG=""
+WESTON_LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/aurade"
+if mkdir -p "${WESTON_LOG_DIR}" 2>/dev/null; then
+    WESTON_LOG="${WESTON_LOG_DIR}/weston.log"
+    if [ -f "${WESTON_LOG}" ]; then
+        mv -f "${WESTON_LOG}" "${WESTON_LOG}.1" 2>/dev/null || WESTON_LOG=""
+    fi
+fi
+
 WESTON_ARGS=(
     --backend="${WESTON_BACKEND}"
-    --shell="${AURADE_WESTON_SHELL:-kiosk-shell.so}"
+    --shell="${AURADE_WESTON_SHELL:-${AURADE_DEFAULT_WESTON_SHELL}}"
     --renderer="${AURADE_WESTON_RENDERER:-auto}"
     --socket="${AURADE_WESTON_SOCKET:-wayland-1}"
     --idle-time=0
 )
+
+if [ -n "${WESTON_LOG}" ]; then
+    WESTON_ARGS+=(--log="${WESTON_LOG}")
+fi
 
 if [ "${WESTON_BACKEND}" = "drm" ]; then
     WESTON_ARGS+=(--continue-without-input)
