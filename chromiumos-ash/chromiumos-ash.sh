@@ -274,6 +274,15 @@ if [ -z "${AURADE_DISPLAY_SCALE}" ]; then
     fi
 fi
 export AURADE_DISPLAY_SCALE
+# display.conf keeps a scale for each monitor. Ash starts before it may read
+# files, so it is handed the text.
+if [ -z "${AURADE_DISPLAY_CONF_TEXT:-}" ]; then
+    AURADE_DISPLAY_CONFIG="${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/display.conf"
+    if [ -r "${AURADE_DISPLAY_CONFIG}" ]; then
+        AURADE_DISPLAY_CONF_TEXT="$(head -c 65536 -- "${AURADE_DISPLAY_CONFIG}")"
+    fi
+fi
+export AURADE_DISPLAY_CONF_TEXT
 
 AURADE_USER_FEATURES_CONFIG="${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/features.conf"
 AURADE_CONFIGURED_FEATURE_PROFILE="$(aurade_read_feature_profile_config "${AURADE_USER_FEATURES_CONFIG}")"

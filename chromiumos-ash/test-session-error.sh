@@ -131,11 +131,20 @@ run_session() {
     AURADE_TEST_WESTON_LOG="${workdir}/weston.log" \
     AURADE_TEST_LOGGER_LOG="${workdir}/logger.log" \
     XDG_RUNTIME_DIR="${workdir}/runtime" \
+    XDG_STATE_HOME="${workdir}/state" \
     PATH="${stubs}:${PATH}" \
     bash "${session_script}" >"${workdir}/session-stdout" 2>"${workdir}/session-stderr"
   session_status=$?
   set -e
 }
+
+# Weston logs beside ash.log, and the session before keeps its log as .1.
+mkdir -p "${workdir}/state/aurade"
+printf 'previous session\n' >"${workdir}/state/aurade/weston.log"
+run_session "${workdir}/dri-gpu"
+grep -Fxq "arg=--log=${workdir}/state/aurade/weston.log" "${workdir}/weston.log"
+grep -Fxq 'previous session' "${workdir}/state/aurade/weston.log.1"
+[[ ! -e "${workdir}/state/aurade/weston.log" ]]
 
 # No render node at all: the desktop draws in software, and says so.
 run_session "${workdir}/dri-none"
