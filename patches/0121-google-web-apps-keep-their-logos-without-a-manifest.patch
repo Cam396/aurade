@@ -1,0 +1,204 @@
+diff --git a/chrome/browser/web_applications/external_install_options.h b/chrome/browser/web_applications/external_install_options.h
+index 35a7a4b8a9cb..f858c39ed52e 100644
+--- a/chrome/browser/web_applications/external_install_options.h
++++ b/chrome/browser/web_applications/external_install_options.h
+@@ -78,6 +78,11 @@ struct ExternalInstallOptions {
+   // SHA256 hash of an icon that replaces the app's real icons.
+   std::optional<std::string> override_icon_hash;
+ 
++  // AuraDE: an icon for an app installed from |app_info_factory| alone, which
++  // has no manifest to take one from and otherwise gets a letter. Unlike
++  // |override_icon_url| it never replaces the icons a manifest gives.
++  std::optional<GURL> fallback_icon_url;
++
+   // If true, a shortcut is added to the Applications folder on macOS, and Start
+   // Menu on Linux and Windows and launcher on Chrome OS. If false, we skip
+   // adding a shortcut to desktop as well, regardless of the value of
+diff --git a/chrome/browser/web_applications/external_install_options.cc b/chrome/browser/web_applications/external_install_options.cc
+index a46cff62fc4d..ddfb7768759d 100644
+--- a/chrome/browser/web_applications/external_install_options.cc
++++ b/chrome/browser/web_applications/external_install_options.cc
+@@ -91,7 +91,8 @@ bool ExternalInstallOptions::operator==(
+         options.install_without_os_integration,
+         options.only_uninstall_and_replace_when_compatible_,
+         options.override_icon_url,
+-        options.override_icon_hash
++        options.override_icon_hash,
++        options.fallback_icon_url
+         // clang-format on
+     );
+   };
+@@ -136,6 +137,9 @@ base::Value ExternalInstallOptions::AsDebugValue() const {
+                                     ? base::Value(override_icon_url->spec())
+                                     : base::Value());
+   root.Set("override_icon_sha256_hash", ConvertOptional(override_icon_hash));
++  root.Set("fallback_icon_url", fallback_icon_url
++                                    ? base::Value(fallback_icon_url->spec())
++                                    : base::Value());
+   root.Set("force_reinstall", force_reinstall);
+   root.Set("force_reinstall_for_milestone",
+            ConvertOptional(force_reinstall_for_milestone));
+diff --git a/chrome/browser/web_applications/commands/external_app_resolution_command.h b/chrome/browser/web_applications/commands/external_app_resolution_command.h
+index d59b167f46d2..18c3b82a22cd 100644
+--- a/chrome/browser/web_applications/commands/external_app_resolution_command.h
++++ b/chrome/browser/web_applications/commands/external_app_resolution_command.h
+@@ -30,6 +30,7 @@
+ #include "components/webapps/browser/installable/installable_logging.h"
+ #include "components/webapps/browser/installable/installable_metrics.h"
+ #include "components/webapps/browser/uninstall_result_code.h"
++#include "third_party/skia/include/core/SkBitmap.h"
+ 
+ class BrowserWindowInterface;
+ class Profile;
+@@ -147,6 +148,8 @@ class ExternalAppResolutionCommand
+ 
+   // Offline installation path:
+   void InstallFromInfo();
++  void OnFallbackIconFetched(std::optional<SkBitmap> bitmap);
++  void ContinueInstallFromInfo();
+   void OnInstallFromInfoAppLockAcquired();
+   void OnInstallFromInfoCompleted(webapps::AppId app_id,
+                                   webapps::InstallResultCode code);
+diff --git a/chrome/browser/web_applications/commands/external_app_resolution_command.cc b/chrome/browser/web_applications/commands/external_app_resolution_command.cc
+index 97012a39098e..d091acd44ef7 100644
+--- a/chrome/browser/web_applications/commands/external_app_resolution_command.cc
++++ b/chrome/browser/web_applications/commands/external_app_resolution_command.cc
+@@ -770,6 +770,39 @@ void ExternalAppResolutionCommand::InstallFromInfo() {
+                std::move(install_params_->additional_search_terms));
+   web_app_info_->install_url = install_params_->install_url;
+ 
++  // AuraDE compatibility: with no manifest there is no icon to download, and
++  // the app would be drawn as the first letter of its name for good. The
++  // options can name one to fetch instead.
++  if (install_options_.fallback_icon_url &&
++      install_options_.fallback_icon_url->is_valid() &&
++      web_app_info_->icon_bitmaps.any.empty()) {
++    custom_icon_fetcher_ = std::make_unique<CustomIconFetcher>(
++        &profile_.get(), install_options_.fallback_icon_url.value(),
++        /*expected_hash=*/std::nullopt);
++    custom_icon_fetcher_->StartRequest(
++        base::BindOnce(&ExternalAppResolutionCommand::OnFallbackIconFetched,
++                       weak_ptr_factory_.GetWeakPtr()));
++    return;
++  }
++  ContinueInstallFromInfo();
++}
++
++void ExternalAppResolutionCommand::OnFallbackIconFetched(
++    std::optional<SkBitmap> bitmap) {
++  custom_icon_fetcher_.reset();
++  GetMutableDebugValue().Set("fallback_icon_fetched", bitmap.has_value());
++  if (bitmap && !bitmap->drawsNothing() && bitmap->width() > 0 &&
++      bitmap->width() == bitmap->height()) {
++    apps::IconInfo icon_info(install_options_.fallback_icon_url.value(),
++                             bitmap->width());
++    icon_info.purpose = apps::IconInfo::Purpose::kAny;
++    web_app_info_->manifest_icons = {icon_info};
++    web_app_info_->icon_bitmaps.any[bitmap->width()] = std::move(*bitmap);
++  }
++  ContinueInstallFromInfo();
++}
++
++void ExternalAppResolutionCommand::ContinueInstallFromInfo() {
+   // External installs are considered trusted, all manifest icons can be used
+   // as trusted ones.
+   // Do note that we don't set the trusted icon bitmaps here. That will be
+diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+index d50b6ca7ef92..9a3044db5cfc 100644
+--- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
++++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
+@@ -13,6 +13,7 @@
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/system/sys_info.h"
+ #include "build/branding_buildflags.h"
+@@ -219,6 +220,58 @@ std::vector<ExternalInstallOptions> GetAuraDeGoogleWebApps() {
+                     "https://gemini.google.com/", u"Gemini", ash::kGeminiAppId);
+   gemini.only_use_app_info_factory = true;
+   apps.push_back(std::move(gemini));
++
++  // An app installed without its manifest, which is every one of these before
++  // the user signs in to Google, and every one on a first boot with no
++  // network, has no icon but the first letter of its name. These are the
++  // products' own logos, fetched the way a manifest's icons are.
++  static constexpr struct {
++    const char* install_url_prefix;
++    const char* icon_url;
++  } kFallbackIcons[] = {
++      {"https://mail.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/gmail_2026/v2/"
++       "web-512dp/logo_gmail_2026_color_1x_web_512dp.png"},
++      {"https://drive.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/drive_2026/v2/"
++       "web-512dp/logo_drive_2026_color_1x_web_512dp.png"},
++      {"https://calendar.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/calendar_2026/v2/"
++       "web-512dp/logo_calendar_2026_color_1x_web_512dp.png"},
++      {"https://docs.google.com/document/",
++       "https://www.gstatic.com/images/branding/productlogos/docs_2026/v2/"
++       "web-512dp/logo_docs_2026_color_1x_web_512dp.png"},
++      {"https://docs.google.com/spreadsheets/",
++       "https://www.gstatic.com/images/branding/productlogos/sheets_2026/v2/"
++       "web-512dp/logo_sheets_2026_color_1x_web_512dp.png"},
++      {"https://docs.google.com/presentation/",
++       "https://www.gstatic.com/images/branding/productlogos/slides_2026/v2/"
++       "web-512dp/logo_slides_2026_color_1x_web_512dp.png"},
++      {"https://www.youtube.com/",
++       "https://www.gstatic.com/images/branding/productlogos/youtube/v9/"
++       "web-512dp/logo_youtube_color_1x_web_512dp.png"},
++      {"https://meet.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/meet_2026/v2/"
++       "web-512dp/logo_meet_2026_color_1x_web_512dp.png"},
++      {"https://keep.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/keep_2026/v2/"
++       "web-512dp/logo_keep_2026_color_1x_web_512dp.png"},
++      {"https://photos.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/photos_2025/v1/"
++       "web-512dp/logo_photos_2025_color_1x_web_512dp.png"},
++      {"https://gemini.google.com/",
++       "https://www.gstatic.com/images/branding/productlogos/gemini_2026/v1/"
++       "web-512dp/logo_gemini_2026_color_1x_web_512dp.png"},
++  };
++  for (ExternalInstallOptions& options : apps) {
++    for (const auto& fallback : kFallbackIcons) {
++      if (base::StartsWith(options.install_url.spec(),
++                           fallback.install_url_prefix)) {
++        options.fallback_icon_url = GURL(fallback.icon_url);
++        break;
++      }
++    }
++  }
+   return apps;
+ }
+ 
+diff --git a/chrome/browser/web_applications/preinstalled_web_app_manager.cc b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
+index d896f5e29141..0e1940edb2a5 100644
+--- a/chrome/browser/web_applications/preinstalled_web_app_manager.cc
++++ b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
+@@ -1086,13 +1086,22 @@ void PreinstalledWebAppManager::PostProcessConfigs(
+   // synchronize runs, so it can install them again.
+   std::vector<std::pair<GURL, base::FilePath>> app_dirs;
+   const base::FilePath web_apps_root = GetWebAppsRootDirectory(profile_);
+-  for (const ExternalInstallOptions& options : parsed_configs.options_list) {
++  for (ExternalInstallOptions& options : parsed_configs.options_list) {
+     if (options.force_reinstall) {
+       continue;
+     }
+     const WebApp* app =
+         provider_->registrar_unsafe().LookUpAppByInstallSourceInstallUrl(
+             WebAppManagement::Type::kDefault, options.install_url);
++    // An app that went in without its manifest wears a letter, and nothing
++    // fetches it a picture later. One with an icon to fall back on installs
++    // again, which fetches that icon, or the manifest's if it can now be had.
++    if (app && app->is_generated_icon() && options.fallback_icon_url) {
++      LOG(WARNING) << "Reinstalling " << options.install_url
++                   << " to replace its generated icon";
++      options.force_reinstall = true;
++      continue;
++    }
+     if (app) {
+       app_dirs.emplace_back(options.install_url,
+                             GetManifestResourcesDirectoryForApp(
