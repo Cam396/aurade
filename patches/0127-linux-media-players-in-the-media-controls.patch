@@ -1,0 +1,1442 @@
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index dfe30e4f775d..92578dcb2217 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -48,6 +48,8 @@ static_library("dbus") {
+     "machine_learning_decision_service_provider.h",
+     "mojo_connection_service_provider.cc",
+     "mojo_connection_service_provider.h",
++    "mpris_media_bridge.cc",
++    "mpris_media_bridge.h",
+     "polkit_agent_service.cc",
+     "polkit_agent_service.h",
+     "printers_service_provider.cc",
+@@ -204,6 +206,10 @@ static_library("dbus") {
+     "//device/bluetooth",
+     "//extensions/common",
+     "//mojo/public/cpp/bindings",
++    "//services/data_decoder/public/cpp",
++    "//services/media_session/public/cpp",
++    "//services/media_session/public/mojom",
++    "//services/network/public/cpp",
+     "//services/network/public/mojom",
+     "//skia",
+     "//third_party/boringssl",
+diff --git a/chrome/browser/ash/dbus/mpris_media_bridge.h b/chrome/browser/ash/dbus/mpris_media_bridge.h
+new file mode 100644
+index 000000000000..a7067392058c
+--- /dev/null
++++ b/chrome/browser/ash/dbus/mpris_media_bridge.h
+@@ -0,0 +1,109 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
++#define CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
++
++#include <list>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++
++#include "base/functional/callback_forward.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "services/media_session/public/mojom/audio_focus.mojom.h"
++
++class GURL;
++class SkBitmap;
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class ObjectProxy;
++class Response;
++class Signal;
++}  // namespace dbus
++
++namespace media_session {
++class MediaSessionService;
++}  // namespace media_session
++
++namespace network {
++class SharedURLLoaderFactory;
++class SimpleURLLoader;
++}  // namespace network
++
++namespace ash {
++
++// AuraDE compatibility: media players among the Linux applications, music
++// players and browsers alike, announce themselves on the session bus with
++// MPRIS, which is what KDE's and GNOME's media controls read. This shows each
++// one in Ash's media controls the way Ash shows a web page playing media: its
++// title, artist and artwork, with play, pause, next, previous and seeking
++// passed back to the player, and the keyboard's media keys reaching the one
++// that last played. Players take part in Ash's audio focus as web pages do:
++// with focus enforcement on, one that starts playing pauses the one that was.
++class MprisMediaBridge {
++ public:
++  // Returns null when the bridge cannot start.
++  static std::unique_ptr<MprisMediaBridge> Create(
++      media_session::MediaSessionService* media_session_service,
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  MprisMediaBridge(const MprisMediaBridge&) = delete;
++  MprisMediaBridge& operator=(const MprisMediaBridge&) = delete;
++  ~MprisMediaBridge();
++
++ private:
++  class Player;
++  using ArtworkCallback = base::OnceCallback<void(const SkBitmap&)>;
++  using ArtworkLoaders = std::list<std::unique_ptr<network::SimpleURLLoader>>;
++
++  MprisMediaBridge(
++      media_session::MediaSessionService* media_session_service,
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  bool Start();
++  void OnNameOwnerChangedConnected(const std::string& interface_name,
++                                   const std::string& signal_name,
++                                   bool success);
++  void OnListNames(dbus::Response* response);
++  void OnGetNameOwner(const std::string& name, dbus::Response* response);
++  void OnNameOwnerChanged(dbus::Signal* signal);
++  void AddPlayer(const std::string& name, const std::string& owner);
++  void RemovePlayer(const std::string& name, const std::string& owner);
++
++  // Reads, fetches or unpacks a player's artwork and decodes it out of
++  // process, no larger than `desired_size_px` on its longest side. Runs
++  // `callback` with an empty bitmap when there is none to show.
++  void LoadArtwork(const GURL& url,
++                   int desired_size_px,
++                   ArtworkCallback callback);
++  void OnArtworkDownloaded(ArtworkLoaders::iterator loader,
++                           int desired_size_px,
++                           ArtworkCallback callback,
++                           std::optional<std::string> body);
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  raw_ptr<dbus::ObjectProxy> bus_proxy_ = nullptr;
++  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_manager_;
++  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
++  ArtworkLoaders artwork_loaders_;
++  // The players, by the unique name of their connection to the bus. A
++  // player that owns two MPRIS names, as some do, is shown once.
++  std::map<std::string, std::unique_ptr<Player>> players_;
++  base::WeakPtrFactory<MprisMediaBridge> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
+diff --git a/chrome/browser/ash/dbus/mpris_media_bridge.cc b/chrome/browser/ash/dbus/mpris_media_bridge.cc
+new file mode 100644
+index 000000000000..d203af1c169c
+--- /dev/null
++++ b/chrome/browser/ash/dbus/mpris_media_bridge.cc
+@@ -0,0 +1,1240 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/dbus/mpris_media_bridge.h"
++
++#include <fcntl.h>
++#include <sys/stat.h>
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <iterator>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include "base/containers/flat_map.h"
++#include "base/containers/span.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_file.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/functional/callback_helpers.h"
++#include "base/logging.h"
++#include "base/numerics/safe_conversions.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/thread_pool.h"
++#include "base/threading/thread.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "base/unguessable_token.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_path.h"
++#include "dbus/object_proxy.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote_set.h"
++#include "net/base/data_url.h"
++#include "net/base/filename_util.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "services/data_decoder/public/cpp/decode_image.h"
++#include "services/media_session/public/cpp/media_image.h"
++#include "services/media_session/public/cpp/media_metadata.h"
++#include "services/media_session/public/cpp/media_position.h"
++#include "services/media_session/public/cpp/media_session_service.h"
++#include "services/media_session/public/mojom/media_session.mojom.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++#include "services/network/public/mojom/fetch_api.mojom-shared.h"
++#include "skia/ext/image_operations.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "third_party/skia/include/core/SkImageInfo.h"
++#include "ui/gfx/geometry/size.h"
++#include "url/gurl.h"
++#include "url/url_constants.h"
++
++namespace ash {
++
++namespace {
++
++using media_session::mojom::AudioFocusType;
++using media_session::mojom::MediaPlaybackState;
++using media_session::mojom::MediaSessionAction;
++using media_session::mojom::MediaSessionImageType;
++using media_session::mojom::MediaSessionInfo;
++
++constexpr char kBusService[] = "org.freedesktop.DBus";
++constexpr char kBusPath[] = "/org/freedesktop/DBus";
++constexpr char kBusInterface[] = "org.freedesktop.DBus";
++constexpr char kPropertiesInterface[] = "org.freedesktop.DBus.Properties";
++constexpr char kPlayerNamePrefix[] = "org.mpris.MediaPlayer2.";
++constexpr char kPlayerPath[] = "/org/mpris/MediaPlayer2";
++constexpr char kRootInterface[] = "org.mpris.MediaPlayer2";
++constexpr char kPlayerInterface[] = "org.mpris.MediaPlayer2.Player";
++constexpr char kNoTrack[] = "/org/mpris/MediaPlayer2/TrackList/NoTrack";
++
++// More players than anyone runs at once. An application that claims MPRIS
++// names without end does not grow the controls without end.
++constexpr size_t kMaxPlayers = 32;
++// Titles, artists and albums are cut to this; the controls show a line each.
++constexpr size_t kMaxTextBytes = 1024;
++constexpr size_t kMaxArtists = 16;
++// The longest URL a media session can carry, artwork as a data URL included.
++constexpr size_t kMaxArtUrlBytes = 2 * 1024 * 1024;
++// Artwork files and downloads larger than this are not shown.
++constexpr size_t kMaxArtworkBytes = 16 * 1024 * 1024;
++// Artwork that decodes larger than this is shrunk while it is decoded.
++constexpr uint64_t kMaxDecodedArtworkBytes = 16 * 1024 * 1024;
++constexpr base::TimeDelta kArtworkDownloadTimeout = base::Seconds(30);
++// Players pass through Stopped between tracks; the controls keep a player
++// this long after it stops rather than flicker.
++constexpr base::TimeDelta kStoppedGrace = base::Seconds(2);
++// A request for focus fails while the one it replaces, given up on another
++// pipe, has not yet gone; it is asked again after this.
++constexpr base::TimeDelta kFocusRetryDelay = base::Milliseconds(250);
++constexpr int kMaxFocusRetries = 4;
++
++constexpr net::NetworkTrafficAnnotationTag kArtworkTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("aurade_media_player_artwork", R"(
++        semantics {
++          sender: "AuraDE media controls"
++          description:
++            "A media player among the Linux applications on the device can "
++            "name the artwork of what it plays by a web address. The "
++            "desktop fetches that picture to show it beside the player's "
++            "controls in quick settings and on the lock screen."
++          trigger:
++            "A Linux media player plays something whose artwork it names by "
++            "a web address."
++          data: "Nothing beyond a request for the address the player named."
++          destination: OTHER
++          destination_other: "The server the media player names."
++        }
++        policy {
++          cookies_allowed: NO
++          setting: "This cannot be turned off; close the media player."
++          policy_exception_justification:
++            "The request carries no user data and follows a local "
++            "application's own choice of picture."
++        })");
++
++bool IsPlayerName(std::string_view name) {
++  return name.size() > std::size(kPlayerNamePrefix) - 1 &&
++         base::StartsWith(name, kPlayerNamePrefix);
++}
++
++// Reads a string, or an object path that a player sent where the
++// specification says string, or the other way around.
++bool PopText(dbus::MessageReader* value, size_t max_bytes, std::string* out) {
++  switch (value->GetDataType()) {
++    case dbus::Message::STRING: {
++      std::string text;
++      if (!value->PopString(&text)) {
++        return false;
++      }
++      base::TruncateUTF8ToByteSize(text, max_bytes, out);
++      return true;
++    }
++    case dbus::Message::OBJECT_PATH: {
++      dbus::ObjectPath path;
++      if (!value->PopObjectPath(&path)) {
++        return false;
++      }
++      *out = path.value();
++      return true;
++    }
++    default:
++      return false;
++  }
++}
++
++// xesam:artist is a list of strings; some players send one string.
++bool PopTexts(dbus::MessageReader* value, std::vector<std::string>* out) {
++  out->clear();
++  if (value->GetDataType() != dbus::Message::ARRAY) {
++    std::string text;
++    if (!PopText(value, kMaxTextBytes, &text)) {
++      return false;
++    }
++    if (!text.empty()) {
++      out->push_back(std::move(text));
++    }
++    return true;
++  }
++  dbus::MessageReader array(nullptr);
++  if (!value->PopArray(&array)) {
++    return false;
++  }
++  while (array.HasMoreData()) {
++    std::string text;
++    if (!PopText(&array, kMaxTextBytes, &text)) {
++      return false;
++    }
++    if (!text.empty() && out->size() < kMaxArtists) {
++      out->push_back(std::move(text));
++    }
++  }
++  return true;
++}
++
++bool PopBool(dbus::MessageReader* value, bool* out) {
++  return value->GetDataType() == dbus::Message::BOOL && value->PopBool(out);
++}
++
++// Lengths and positions are 64 bit microseconds; players send all kinds of
++// numbers for them.
++std::optional<int64_t> PopNumber(dbus::MessageReader* value) {
++  switch (value->GetDataType()) {
++    case dbus::Message::INT64: {
++      int64_t number;
++      if (value->PopInt64(&number)) {
++        return number;
++      }
++      break;
++    }
++    case dbus::Message::UINT64: {
++      uint64_t number;
++      if (value->PopUint64(&number)) {
++        return base::saturated_cast<int64_t>(number);
++      }
++      break;
++    }
++    case dbus::Message::INT32: {
++      int32_t number;
++      if (value->PopInt32(&number)) {
++        return number;
++      }
++      break;
++    }
++    case dbus::Message::UINT32: {
++      uint32_t number;
++      if (value->PopUint32(&number)) {
++        return number;
++      }
++      break;
++    }
++    case dbus::Message::DOUBLE: {
++      double number;
++      if (value->PopDouble(&number)) {
++        return base::saturated_cast<int64_t>(number);
++      }
++      break;
++    }
++    default:
++      break;
++  }
++  return std::nullopt;
++}
++
++// Not base::ReadFileToString: a player could name a pipe or a device, and
++// reading one of those may never end.
++std::optional<std::string> ReadArtworkFile(const base::FilePath& path) {
++  base::ScopedFD fd(HANDLE_EINTR(open(
++      path.value().c_str(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK)));
++  if (!fd.is_valid()) {
++    return std::nullopt;
++  }
++  struct stat info;
++  if (fstat(fd.get(), &info) != 0 || !S_ISREG(info.st_mode) ||
++      info.st_size <= 0 ||
++      static_cast<uint64_t>(info.st_size) > kMaxArtworkBytes) {
++    return std::nullopt;
++  }
++  std::string bytes(static_cast<size_t>(info.st_size), '\0');
++  if (!base::ReadFromFD(fd.get(), bytes)) {
++    return std::nullopt;
++  }
++  return bytes;
++}
++
++// Media sessions hand artwork on as tightly packed 32 bit pixels, no larger
++// than asked for.
++SkBitmap ToArtwork(const SkBitmap& image, int desired_size_px) {
++  if (image.drawsNothing()) {
++    return SkBitmap();
++  }
++  SkBitmap scaled = image;
++  const int longest = std::max(image.width(), image.height());
++  if (desired_size_px > 0 && longest > desired_size_px) {
++    const double scale = static_cast<double>(desired_size_px) / longest;
++    scaled = skia::ImageOperations::Resize(
++        image, skia::ImageOperations::RESIZE_GOOD,
++        std::max(1, base::ClampRound(image.width() * scale)),
++        std::max(1, base::ClampRound(image.height() * scale)));
++    if (scaled.drawsNothing()) {
++      return SkBitmap();
++    }
++  }
++  const SkImageInfo info = scaled.info()
++                               .makeColorType(kN32_SkColorType)
++                               .makeAlphaType(kPremul_SkAlphaType);
++  if (scaled.info() == info && scaled.rowBytes() == info.minRowBytes()) {
++    return scaled;
++  }
++  SkBitmap packed;
++  if (!packed.tryAllocPixels(info) ||
++      !scaled.readPixels(info, packed.getPixels(), packed.rowBytes(), 0, 0)) {
++    return SkBitmap();
++  }
++  return packed;
++}
++
++void OnArtworkDecoded(int desired_size_px,
++                      base::OnceCallback<void(const SkBitmap&)> callback,
++                      const SkBitmap& image) {
++  std::move(callback).Run(ToArtwork(image, desired_size_px));
++}
++
++// Artwork comes from whatever the player names, so it is decoded in the
++// sandboxed data decoder, never here.
++void DecodeArtwork(int desired_size_px,
++                   base::OnceCallback<void(const SkBitmap&)> callback,
++                   std::optional<std::string> bytes) {
++  if (!bytes || bytes->empty()) {
++    std::move(callback).Run(SkBitmap());
++    return;
++  }
++  data_decoder::DecodeImageIsolated(
++      base::as_byte_span(*bytes), data_decoder::mojom::ImageCodec::kDefault,
++      /*shrink_to_fit=*/true, kMaxDecodedArtworkBytes,
++      gfx::Size(desired_size_px, desired_size_px),
++      base::BindOnce(&OnArtworkDecoded, desired_size_px, std::move(callback)));
++}
++
++}  // namespace
++
++// One MPRIS player, as a media session in Ash's audio focus.
++class MprisMediaBridge::Player : public media_session::mojom::MediaSession {
++ public:
++  Player(MprisMediaBridge* bridge, std::string name, std::string owner);
++  Player(const Player&) = delete;
++  Player& operator=(const Player&) = delete;
++  ~Player() override;
++
++  const std::string& name() const { return name_; }
++
++  // media_session::mojom::MediaSession:
++  void GetMediaSessionInfo(GetMediaSessionInfoCallback callback) override;
++  void GetDebugInfo(GetDebugInfoCallback callback) override;
++  void StartDucking() override {}
++  void StopDucking() override {}
++  void Suspend(SuspendType suspend_type) override;
++  void Resume(SuspendType suspend_type) override;
++  void AddObserver(
++      mojo::PendingRemote<media_session::mojom::MediaSessionObserver> observer)
++      override;
++  void PreviousTrack() override;
++  void NextTrack() override;
++  void Seek(base::TimeDelta seek_time) override;
++  void Stop(SuspendType suspend_type) override;
++  void SkipAd() override {}
++  void GetMediaImageBitmap(const media_session::MediaImage& image,
++                           int32_t minimum_size_px,
++                           int32_t desired_size_px,
++                           GetMediaImageBitmapCallback callback) override;
++  void SeekTo(base::TimeDelta seek_time) override;
++  void ScrubTo(base::TimeDelta seek_time) override;
++  void EnterPictureInPicture() override {}
++  void ExitPictureInPicture() override {}
++  void SetAudioSinkId(const std::optional<std::string>& id) override {}
++  void ToggleMicrophone() override {}
++  void ToggleCamera() override {}
++  void HangUp() override {}
++  void Raise() override;
++  void SetMute(bool mute) override {}
++  void RequestMediaRemoting() override {}
++  void PreviousSlide() override {}
++  void NextSlide() override {}
++  void EnterAutoPictureInPicture() override {}
++  void GetVisibility(GetVisibilityCallback callback) override;
++  void SaveVideoFrame() override {}
++
++ private:
++  enum class Status { kStopped, kPaused, kPlaying };
++
++  void GetAll(const std::string& interface_name);
++  void OnGetAll(const std::string& interface_name, dbus::Response* response);
++  void OnPropertiesChanged(dbus::Signal* signal);
++  void OnSeeked(dbus::Signal* signal);
++  void FetchPosition();
++  void OnPosition(dbus::Response* response);
++
++  void ReadProperties(const std::string& interface_name,
++                      dbus::MessageReader* properties);
++  void ReadRootProperty(const std::string& property,
++                        dbus::MessageReader* value);
++  void ReadPlayerProperty(const std::string& property,
++                          dbus::MessageReader* value);
++  void ReadMetadata(dbus::MessageReader* value);
++
++  // Where the player is now, from the last position it reported.
++  base::TimeDelta EstimatedPosition() const;
++  // Carries the estimate forward before the rate or status it rests on
++  // changes.
++  void RebasePosition();
++  void SetPosition(base::TimeDelta position);
++
++  void CallPlayer(const char* method);
++
++  std::string DisplayTitle() const;
++  media_session::mojom::MediaSessionInfoPtr GetInfo() const;
++  media_session::MediaMetadata GetMetadata() const;
++  std::vector<MediaSessionAction> GetActions() const;
++  base::flat_map<MediaSessionImageType, std::vector<media_session::MediaImage>>
++  GetImages() const;
++  std::optional<media_session::MediaPosition> GetPosition() const;
++
++  // Takes, keeps or gives up audio focus for what the player is doing now,
++  // and tells the media controls what changed.
++  void Update();
++  void RequestFocus(AudioFocusType type);
++  void OnFocusRequested(bool success);
++  void AbandonFocus();
++  void NotifyObservers();
++
++  const raw_ptr<MprisMediaBridge> bridge_;
++  // The MPRIS name and the unique name of the player's connection.
++  const std::string name_;
++  const std::string owner_;
++  const raw_ptr<dbus::ObjectProxy> proxy_;
++  // Kept for the player's life, so the controls showing it survive a pause
++  // in its focus as they do for a web page.
++  const base::UnguessableToken request_id_ = base::UnguessableToken::Create();
++  const base::UnguessableToken group_id_ = base::UnguessableToken::Create();
++
++  // org.mpris.MediaPlayer2
++  std::string identity_;
++  bool can_raise_ = false;
++
++  // org.mpris.MediaPlayer2.Player
++  bool player_read_ = false;
++  Status status_ = Status::kStopped;
++  std::string title_;
++  std::vector<std::string> artists_;
++  std::string album_;
++  GURL art_url_;
++  std::string track_id_;
++  base::TimeDelta length_;
++  double rate_ = 1.0;
++  bool can_play_ = false;
++  bool can_pause_ = false;
++  bool can_go_next_ = false;
++  bool can_go_previous_ = false;
++  bool can_seek_ = false;
++  bool can_control_ = false;
++  base::TimeDelta position_;
++  base::TimeTicks position_time_;
++  bool position_stale_ = false;
++  bool position_changed_ = false;
++
++  // Audio focus, while the player is shown.
++  mojo::Receiver<media_session::mojom::MediaSession> receiver_{this};
++  mojo::Remote<media_session::mojom::AudioFocusRequestClient> client_;
++  AudioFocusType focus_type_ = AudioFocusType::kAmbient;
++  bool focus_ever_requested_ = false;
++  bool was_playing_ = false;
++  base::OneShotTimer stopped_timer_;
++  base::OneShotTimer retry_timer_;
++  int focus_retries_ = 0;
++
++  mojo::RemoteSet<media_session::mojom::MediaSessionObserver> observers_;
++  // What the observers were last told.
++  media_session::mojom::MediaSessionInfoPtr sent_info_;
++  std::optional<media_session::MediaMetadata> sent_metadata_;
++  std::optional<std::vector<MediaSessionAction>> sent_actions_;
++  std::optional<base::flat_map<MediaSessionImageType,
++                               std::vector<media_session::MediaImage>>>
++      sent_images_;
++
++  base::WeakPtrFactory<Player> weak_ptr_factory_{this};
++};
++
++MprisMediaBridge::Player::Player(MprisMediaBridge* bridge,
++                                 std::string name,
++                                 std::string owner)
++    : bridge_(bridge),
++      name_(std::move(name)),
++      owner_(std::move(owner)),
++      proxy_(bridge->bus_->GetObjectProxyWithOptions(
++          owner_,
++          dbus::ObjectPath(kPlayerPath),
++          dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS)) {
++  proxy_->ConnectToSignal(
++      kPropertiesInterface, "PropertiesChanged",
++      base::BindRepeating(&Player::OnPropertiesChanged,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::DoNothing());
++  proxy_->ConnectToSignal(kPlayerInterface, "Seeked",
++                          base::BindRepeating(&Player::OnSeeked,
++                                              weak_ptr_factory_.GetWeakPtr()),
++                          base::DoNothing());
++  GetAll(kRootInterface);
++  GetAll(kPlayerInterface);
++}
++
++MprisMediaBridge::Player::~Player() {
++  AbandonFocus();
++  if (focus_ever_requested_) {
++    // The controls drop the player now rather than wait for it to return.
++    bridge_->audio_focus_manager_->RequestIdReleased(request_id_);
++  }
++  bridge_->bus_->RemoveObjectProxyWithOptions(
++      owner_, dbus::ObjectPath(kPlayerPath),
++      dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS, base::DoNothing());
++}
++
++void MprisMediaBridge::Player::GetMediaSessionInfo(
++    GetMediaSessionInfoCallback callback) {
++  std::move(callback).Run(GetInfo());
++}
++
++void MprisMediaBridge::Player::GetDebugInfo(GetDebugInfoCallback callback) {
++  auto info = media_session::mojom::MediaSessionDebugInfo::New();
++  info->name = identity_;
++  info->owner = name_;
++  info->state = status_ == Status::kPlaying  ? "Playing"
++                : status_ == Status::kPaused ? "Paused"
++                                             : "Stopped";
++  std::move(callback).Run(std::move(info));
++}
++
++void MprisMediaBridge::Player::Suspend(SuspendType suspend_type) {
++  // Audio focus suspends every session under the one that gained it each
++  // time it is enforced; a player already quiet is not asked again.
++  if (suspend_type == SuspendType::kSystem && status_ != Status::kPlaying) {
++    return;
++  }
++  // A player that cannot pause, a radio stream say, has to stop instead.
++  CallPlayer(can_pause_ ? "Pause" : "Stop");
++}
++
++void MprisMediaBridge::Player::Resume(SuspendType suspend_type) {
++  CallPlayer("Play");
++}
++
++void MprisMediaBridge::Player::AddObserver(
++    mojo::PendingRemote<media_session::mojom::MediaSessionObserver> observer) {
++  mojo::Remote<media_session::mojom::MediaSessionObserver> remote(
++      std::move(observer));
++  remote->MediaSessionInfoChanged(GetInfo());
++  remote->MediaSessionMetadataChanged(GetMetadata());
++  remote->MediaSessionActionsChanged(GetActions());
++  remote->MediaSessionImagesChanged(GetImages());
++  remote->MediaSessionPositionChanged(GetPosition());
++  observers_.Add(std::move(remote));
++}
++
++void MprisMediaBridge::Player::PreviousTrack() {
++  CallPlayer("Previous");
++}
++
++void MprisMediaBridge::Player::NextTrack() {
++  CallPlayer("Next");
++}
++
++void MprisMediaBridge::Player::Seek(base::TimeDelta seek_time) {
++  dbus::MethodCall method_call(kPlayerInterface, "Seek");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendInt64(seek_time.InMicroseconds());
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++void MprisMediaBridge::Player::Stop(SuspendType suspend_type) {
++  CallPlayer("Stop");
++}
++
++void MprisMediaBridge::Player::GetMediaImageBitmap(
++    const media_session::MediaImage& image,
++    int32_t minimum_size_px,
++    int32_t desired_size_px,
++    GetMediaImageBitmapCallback callback) {
++  // Only the artwork this player named; the controls ask by URL.
++  if (image.src != art_url_) {
++    std::move(callback).Run(SkBitmap());
++    return;
++  }
++  bridge_->LoadArtwork(image.src, desired_size_px, std::move(callback));
++}
++
++void MprisMediaBridge::Player::SeekTo(base::TimeDelta seek_time) {
++  if (!length_.is_positive()) {
++    return;
++  }
++  seek_time = std::clamp(seek_time, base::TimeDelta(), length_);
++  const dbus::ObjectPath track(track_id_);
++  if (!track.IsValid() || track.value() == kNoTrack) {
++    // SetPosition needs the track; without one, seek by the difference.
++    Seek(seek_time - EstimatedPosition());
++    return;
++  }
++  dbus::MethodCall method_call(kPlayerInterface, "SetPosition");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendObjectPath(track);
++  writer.AppendInt64(seek_time.InMicroseconds());
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++void MprisMediaBridge::Player::ScrubTo(base::TimeDelta seek_time) {
++  SeekTo(seek_time);
++}
++
++void MprisMediaBridge::Player::Raise() {
++  dbus::MethodCall method_call(kRootInterface, "Raise");
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++void MprisMediaBridge::Player::GetVisibility(GetVisibilityCallback callback) {
++  std::move(callback).Run(false);
++}
++
++void MprisMediaBridge::Player::GetAll(const std::string& interface_name) {
++  dbus::MethodCall method_call(kPropertiesInterface, "GetAll");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendString(interface_name);
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::BindOnce(&Player::OnGetAll,
++                                    weak_ptr_factory_.GetWeakPtr(),
++                                    interface_name));
++}
++
++void MprisMediaBridge::Player::OnGetAll(const std::string& interface_name,
++                                        dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  ReadProperties(interface_name, &reader);
++  if (interface_name == kPlayerInterface) {
++    player_read_ = true;
++  }
++  Update();
++}
++
++void MprisMediaBridge::Player::OnPropertiesChanged(dbus::Signal* signal) {
++  dbus::MessageReader reader(signal);
++  std::string interface_name;
++  if (!reader.PopString(&interface_name) ||
++      (interface_name != kRootInterface &&
++       interface_name != kPlayerInterface)) {
++    return;
++  }
++  ReadProperties(interface_name, &reader);
++  // Some players announce that a property changed without its new value.
++  std::vector<std::string> invalidated;
++  if (reader.PopArrayOfStrings(&invalidated) && !invalidated.empty()) {
++    GetAll(interface_name);
++  }
++  Update();
++}
++
++void MprisMediaBridge::Player::OnSeeked(dbus::Signal* signal) {
++  dbus::MessageReader reader(signal);
++  if (std::optional<int64_t> position = PopNumber(&reader)) {
++    SetPosition(base::Microseconds(*position));
++    NotifyObservers();
++  }
++}
++
++void MprisMediaBridge::Player::FetchPosition() {
++  position_stale_ = false;
++  dbus::MethodCall method_call(kPropertiesInterface, "Get");
++  dbus::MessageWriter writer(&method_call);
++  writer.AppendString(kPlayerInterface);
++  writer.AppendString("Position");
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::BindOnce(&Player::OnPosition,
++                                    weak_ptr_factory_.GetWeakPtr()));
++}
++
++void MprisMediaBridge::Player::OnPosition(dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  dbus::MessageReader value(nullptr);
++  if (!reader.PopVariant(&value)) {
++    return;
++  }
++  if (std::optional<int64_t> position = PopNumber(&value)) {
++    SetPosition(base::Microseconds(*position));
++    NotifyObservers();
++  }
++}
++
++void MprisMediaBridge::Player::ReadProperties(const std::string& interface_name,
++                                              dbus::MessageReader* properties) {
++  dbus::MessageReader array(nullptr);
++  if (!properties->PopArray(&array)) {
++    return;
++  }
++  while (array.HasMoreData()) {
++    dbus::MessageReader entry(nullptr);
++    std::string property;
++    dbus::MessageReader value(nullptr);
++    if (!array.PopDictEntry(&entry) || !entry.PopString(&property) ||
++        !entry.PopVariant(&value)) {
++      return;
++    }
++    if (interface_name == kRootInterface) {
++      ReadRootProperty(property, &value);
++    } else {
++      ReadPlayerProperty(property, &value);
++    }
++  }
++  // MPRIS never signals the position as it moves, only when it jumps; a new
++  // track, rate or status is when to ask for it again.
++  if (position_stale_) {
++    FetchPosition();
++  }
++}
++
++void MprisMediaBridge::Player::ReadRootProperty(const std::string& property,
++                                                dbus::MessageReader* value) {
++  if (property == "Identity") {
++    PopText(value, kMaxTextBytes, &identity_);
++  } else if (property == "CanRaise") {
++    PopBool(value, &can_raise_);
++  }
++}
++
++void MprisMediaBridge::Player::ReadPlayerProperty(const std::string& property,
++                                                  dbus::MessageReader* value) {
++  if (property == "PlaybackStatus") {
++    std::string status_name;
++    if (!PopText(value, kMaxTextBytes, &status_name)) {
++      return;
++    }
++    const Status status = status_name == "Playing"  ? Status::kPlaying
++                          : status_name == "Paused" ? Status::kPaused
++                                                    : Status::kStopped;
++    if (status != status_) {
++      RebasePosition();
++      status_ = status;
++      position_stale_ = true;
++    }
++  } else if (property == "Metadata") {
++    ReadMetadata(value);
++    position_stale_ = true;
++  } else if (property == "Rate") {
++    double rate;
++    if (value->GetDataType() == dbus::Message::DOUBLE &&
++        value->PopDouble(&rate) && rate != rate_) {
++      RebasePosition();
++      rate_ = rate;
++      position_stale_ = true;
++    }
++  } else if (property == "Position") {
++    if (std::optional<int64_t> position = PopNumber(value)) {
++      SetPosition(base::Microseconds(*position));
++    }
++  } else if (property == "CanPlay") {
++    PopBool(value, &can_play_);
++  } else if (property == "CanPause") {
++    PopBool(value, &can_pause_);
++  } else if (property == "CanGoNext") {
++    PopBool(value, &can_go_next_);
++  } else if (property == "CanGoPrevious") {
++    PopBool(value, &can_go_previous_);
++  } else if (property == "CanSeek") {
++    PopBool(value, &can_seek_);
++  } else if (property == "CanControl") {
++    PopBool(value, &can_control_);
++  }
++}
++
++void MprisMediaBridge::Player::ReadMetadata(dbus::MessageReader* value) {
++  const base::TimeDelta old_length = length_;
++  title_.clear();
++  artists_.clear();
++  album_.clear();
++  art_url_ = GURL();
++  track_id_.clear();
++  length_ = base::TimeDelta();
++
++  dbus::MessageReader array(nullptr);
++  if (value->PopArray(&array)) {
++    while (array.HasMoreData()) {
++      dbus::MessageReader entry(nullptr);
++      std::string key;
++      dbus::MessageReader field(nullptr);
++      if (!array.PopDictEntry(&entry) || !entry.PopString(&key) ||
++          !entry.PopVariant(&field)) {
++        break;
++      }
++      if (key == "xesam:title") {
++        PopText(&field, kMaxTextBytes, &title_);
++      } else if (key == "xesam:artist") {
++        PopTexts(&field, &artists_);
++      } else if (key == "xesam:album") {
++        PopText(&field, kMaxTextBytes, &album_);
++      } else if (key == "mpris:artUrl") {
++        std::string url;
++        if (PopText(&field, kMaxArtUrlBytes, &url) &&
++            url.size() < kMaxArtUrlBytes) {
++          art_url_ = GURL(url);
++        }
++      } else if (key == "mpris:trackid") {
++        PopText(&field, kMaxTextBytes, &track_id_);
++      } else if (key == "mpris:length") {
++        if (std::optional<int64_t> length = PopNumber(&field)) {
++          length_ = base::Microseconds(std::max<int64_t>(*length, 0));
++        }
++      }
++    }
++  }
++  if (length_ != old_length) {
++    position_changed_ = true;
++  }
++}
++
++base::TimeDelta MprisMediaBridge::Player::EstimatedPosition() const {
++  base::TimeDelta position = position_;
++  if (status_ == Status::kPlaying && !position_time_.is_null()) {
++    position += (base::TimeTicks::Now() - position_time_) * rate_;
++  }
++  if (length_.is_positive()) {
++    position = std::min(position, length_);
++  }
++  return std::max(position, base::TimeDelta());
++}
++
++void MprisMediaBridge::Player::RebasePosition() {
++  position_ = EstimatedPosition();
++  position_time_ = base::TimeTicks::Now();
++  position_changed_ = true;
++}
++
++void MprisMediaBridge::Player::SetPosition(base::TimeDelta position) {
++  position_ = std::max(position, base::TimeDelta());
++  position_time_ = base::TimeTicks::Now();
++  position_stale_ = false;
++  position_changed_ = true;
++}
++
++void MprisMediaBridge::Player::CallPlayer(const char* method) {
++  dbus::MethodCall method_call(kPlayerInterface, method);
++  proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                     base::DoNothing());
++}
++
++std::string MprisMediaBridge::Player::DisplayTitle() const {
++  // A stream or a player between tracks may have no title; the controls show
++  // nothing without one, so the player's own name stands in.
++  return title_.empty() ? identity_ : title_;
++}
++
++media_session::mojom::MediaSessionInfoPtr MprisMediaBridge::Player::GetInfo()
++    const {
++  auto info = MediaSessionInfo::New();
++  const bool playing = status_ == Status::kPlaying;
++  info->state = playing ? MediaSessionInfo::SessionState::kActive
++                        : MediaSessionInfo::SessionState::kSuspended;
++  info->playback_state =
++      playing ? MediaPlaybackState::kPlaying : MediaPlaybackState::kPaused;
++  info->is_controllable = can_control_;
++  // A player that has not played since it was shown does not take the
++  // media keys or the lock screen from one that has.
++  info->ignore_for_active_session = focus_type_ != AudioFocusType::kGain;
++  return info;
++}
++
++media_session::MediaMetadata MprisMediaBridge::Player::GetMetadata() const {
++  media_session::MediaMetadata metadata;
++  metadata.title = base::UTF8ToUTF16(DisplayTitle());
++  metadata.artist = base::UTF8ToUTF16(base::JoinString(artists_, ", "));
++  metadata.album = base::UTF8ToUTF16(album_);
++  if (!title_.empty()) {
++    metadata.source_title = base::UTF8ToUTF16(identity_);
++  }
++  return metadata;
++}
++
++std::vector<MediaSessionAction> MprisMediaBridge::Player::GetActions() const {
++  std::vector<MediaSessionAction> actions;
++  if (!can_control_) {
++    return actions;
++  }
++  if (can_play_) {
++    actions.push_back(MediaSessionAction::kPlay);
++  }
++  if (can_pause_) {
++    actions.push_back(MediaSessionAction::kPause);
++  }
++  actions.push_back(MediaSessionAction::kStop);
++  if (can_go_previous_) {
++    actions.push_back(MediaSessionAction::kPreviousTrack);
++  }
++  if (can_go_next_) {
++    actions.push_back(MediaSessionAction::kNextTrack);
++  }
++  if (can_seek_ && length_.is_positive()) {
++    actions.push_back(MediaSessionAction::kSeekTo);
++    actions.push_back(MediaSessionAction::kScrubTo);
++    actions.push_back(MediaSessionAction::kSeekForward);
++    actions.push_back(MediaSessionAction::kSeekBackward);
++  }
++  if (can_raise_) {
++    actions.push_back(MediaSessionAction::kRaise);
++  }
++  return actions;
++}
++
++base::flat_map<MediaSessionImageType, std::vector<media_session::MediaImage>>
++MprisMediaBridge::Player::GetImages() const {
++  base::flat_map<MediaSessionImageType, std::vector<media_session::MediaImage>>
++      images;
++  if (art_url_.SchemeIsFile() || art_url_.SchemeIsHTTPOrHTTPS() ||
++      art_url_.SchemeIs(url::kDataScheme)) {
++    media_session::MediaImage image;
++    image.src = art_url_;
++    images[MediaSessionImageType::kArtwork].push_back(std::move(image));
++  }
++  return images;
++}
++
++std::optional<media_session::MediaPosition>
++MprisMediaBridge::Player::GetPosition() const {
++  if (!length_.is_positive()) {
++    return std::nullopt;
++  }
++  return media_session::MediaPosition(
++      status_ == Status::kPlaying ? rate_ : 0.0, length_, EstimatedPosition(),
++      /*end_of_media=*/false);
++}
++
++void MprisMediaBridge::Player::Update() {
++  if (!player_read_) {
++    return;
++  }
++  const bool playing = status_ == Status::kPlaying;
++  // Shown while it plays, and while paused once it has played or has a
++  // track loaded, as GNOME and KDE show a paused player.
++  const bool shown =
++      can_control_ && !DisplayTitle().empty() &&
++      (playing || (status_ == Status::kPaused &&
++                   (client_.is_bound() || !title_.empty())));
++  if (!shown) {
++    if (client_.is_bound()) {
++      client_->MediaSessionInfoChanged(GetInfo());
++      if (!stopped_timer_.IsRunning()) {
++        stopped_timer_.Start(
++            FROM_HERE, kStoppedGrace,
++            base::BindOnce(&Player::AbandonFocus, base::Unretained(this)));
++      }
++    }
++    was_playing_ = false;
++    NotifyObservers();
++    return;
++  }
++  stopped_timer_.Stop();
++  if (!client_.is_bound()) {
++    // Paused, the player shows without pausing whatever else plays.
++    RequestFocus(playing ? AudioFocusType::kGain : AudioFocusType::kAmbient);
++  } else if (playing && !was_playing_) {
++    // Started, from its own window or from the controls: what else plays
++    // pauses, as it would for a web page.
++    focus_type_ = AudioFocusType::kGain;
++    client_->RequestAudioFocus(GetInfo(), AudioFocusType::kGain,
++                               base::DoNothing());
++  } else {
++    client_->MediaSessionInfoChanged(GetInfo());
++  }
++  was_playing_ = playing && client_.is_bound();
++  NotifyObservers();
++}
++
++void MprisMediaBridge::Player::RequestFocus(AudioFocusType type) {
++  if (!bridge_->audio_focus_manager_.is_bound()) {
++    return;
++  }
++  focus_type_ = type;
++  focus_ever_requested_ = true;
++  bridge_->audio_focus_manager_->RequestGroupedAudioFocus(
++      request_id_, client_.BindNewPipeAndPassReceiver(),
++      receiver_.BindNewPipeAndPassRemote(), GetInfo(), type, group_id_,
++      base::BindOnce(&Player::OnFocusRequested,
++                     weak_ptr_factory_.GetWeakPtr()));
++  // The service going away takes the focus with it; the next change asks
++  // again.
++  client_.set_disconnect_handler(
++      base::BindOnce(&Player::AbandonFocus, base::Unretained(this)));
++}
++
++void MprisMediaBridge::Player::OnFocusRequested(bool success) {
++  if (success) {
++    focus_retries_ = 0;
++    return;
++  }
++  AbandonFocus();
++  if (++focus_retries_ > kMaxFocusRetries) {
++    LOG(WARNING) << "AuraDE media controls could not show " << name_;
++    return;
++  }
++  retry_timer_.Start(FROM_HERE, kFocusRetryDelay,
++                     base::BindOnce(&Player::Update, base::Unretained(this)));
++}
++
++void MprisMediaBridge::Player::AbandonFocus() {
++  stopped_timer_.Stop();
++  if (client_.is_bound()) {
++    client_->AbandonAudioFocus();
++  }
++  client_.reset();
++  receiver_.reset();
++  focus_type_ = AudioFocusType::kAmbient;
++  was_playing_ = false;
++}
++
++void MprisMediaBridge::Player::NotifyObservers() {
++  media_session::mojom::MediaSessionInfoPtr info = GetInfo();
++  if (!sent_info_ || !sent_info_.Equals(info)) {
++    for (auto& observer : observers_) {
++      observer->MediaSessionInfoChanged(info.Clone());
++    }
++    sent_info_ = std::move(info);
++  }
++
++  media_session::MediaMetadata metadata = GetMetadata();
++  if (sent_metadata_ != metadata) {
++    for (auto& observer : observers_) {
++      observer->MediaSessionMetadataChanged(metadata);
++    }
++    sent_metadata_ = std::move(metadata);
++  }
++
++  std::vector<MediaSessionAction> actions = GetActions();
++  if (sent_actions_ != actions) {
++    for (auto& observer : observers_) {
++      observer->MediaSessionActionsChanged(actions);
++    }
++    sent_actions_ = std::move(actions);
++  }
++
++  auto images = GetImages();
++  if (sent_images_ != images) {
++    for (auto& observer : observers_) {
++      observer->MediaSessionImagesChanged(images);
++    }
++    sent_images_ = std::move(images);
++  }
++
++  if (position_changed_) {
++    position_changed_ = false;
++    const std::optional<media_session::MediaPosition> position = GetPosition();
++    for (auto& observer : observers_) {
++      observer->MediaSessionPositionChanged(position);
++    }
++  }
++}
++
++MprisMediaBridge::MprisMediaBridge(
++    media_session::MediaSessionService* media_session_service,
++    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
++    : url_loader_factory_(std::move(url_loader_factory)) {
++  if (media_session_service) {
++    media_session_service->BindAudioFocusManager(
++        audio_focus_manager_.BindNewPipeAndPassReceiver());
++  }
++}
++
++MprisMediaBridge::~MprisMediaBridge() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  players_.clear();
++  artwork_loaders_.clear();
++  bus_proxy_ = nullptr;
++  if (bus_) {
++    bus_->ShutdownOnDBusThreadAndBlock();
++    bus_.reset();
++  }
++  if (dbus_thread_) {
++    dbus_thread_->Stop();
++  }
++}
++
++// static
++std::unique_ptr<MprisMediaBridge> MprisMediaBridge::Create(
++    media_session::MediaSessionService* media_session_service,
++    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
++  auto bridge = std::unique_ptr<MprisMediaBridge>(new MprisMediaBridge(
++      media_session_service, std::move(url_loader_factory)));
++  if (!bridge->Start()) {
++    return nullptr;
++  }
++  return bridge;
++}
++
++bool MprisMediaBridge::Start() {
++  dbus_thread_ = std::make_unique<base::Thread>("AuraDE media D-Bus thread");
++  base::Thread::Options thread_options;
++  thread_options.message_pump_type = base::MessagePumpType::IO;
++  if (!dbus_thread_->StartWithOptions(std::move(thread_options))) {
++    LOG(ERROR) << "AuraDE media controls could not start their D-Bus thread";
++    return false;
++  }
++
++  dbus::Bus::Options bus_options;
++  bus_options.bus_type = dbus::Bus::SESSION;
++  bus_options.connection_type = dbus::Bus::PRIVATE;
++  bus_options.dbus_task_runner = dbus_thread_->task_runner();
++  bus_ = new dbus::Bus(std::move(bus_options));
++  bus_proxy_ =
++      bus_->GetObjectProxy(kBusService, dbus::ObjectPath(kBusPath));
++  // Listen first, then list, so no player that starts in between is missed.
++  bus_proxy_->ConnectToSignal(
++      kBusInterface, "NameOwnerChanged",
++      base::BindRepeating(&MprisMediaBridge::OnNameOwnerChanged,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce(&MprisMediaBridge::OnNameOwnerChangedConnected,
++                     weak_ptr_factory_.GetWeakPtr()));
++  return true;
++}
++
++void MprisMediaBridge::OnNameOwnerChangedConnected(
++    const std::string& interface_name,
++    const std::string& signal_name,
++    bool success) {
++  LOG_IF(WARNING, !success)
++      << "AuraDE media controls will not see players start and stop";
++  dbus::MethodCall method_call(kBusInterface, "ListNames");
++  bus_proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                         base::BindOnce(&MprisMediaBridge::OnListNames,
++                                        weak_ptr_factory_.GetWeakPtr()));
++}
++
++void MprisMediaBridge::OnListNames(dbus::Response* response) {
++  std::vector<std::string> names;
++  if (!response) {
++    LOG(WARNING) << "AuraDE media controls could not list the session bus";
++    return;
++  }
++  dbus::MessageReader reader(response);
++  if (!reader.PopArrayOfStrings(&names)) {
++    return;
++  }
++  for (const std::string& name : names) {
++    if (!IsPlayerName(name)) {
++      continue;
++    }
++    dbus::MethodCall method_call(kBusInterface, "GetNameOwner");
++    dbus::MessageWriter writer(&method_call);
++    writer.AppendString(name);
++    bus_proxy_->CallMethod(&method_call,
++                           dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++                           base::BindOnce(&MprisMediaBridge::OnGetNameOwner,
++                                          weak_ptr_factory_.GetWeakPtr(),
++                                          name));
++  }
++}
++
++void MprisMediaBridge::OnGetNameOwner(const std::string& name,
++                                      dbus::Response* response) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  std::string owner;
++  if (reader.PopString(&owner) && !owner.empty()) {
++    AddPlayer(name, owner);
++  }
++}
++
++void MprisMediaBridge::OnNameOwnerChanged(dbus::Signal* signal) {
++  dbus::MessageReader reader(signal);
++  std::string name;
++  std::string old_owner;
++  std::string new_owner;
++  if (!reader.PopString(&name) || !reader.PopString(&old_owner) ||
++      !reader.PopString(&new_owner) || !IsPlayerName(name)) {
++    return;
++  }
++  if (!old_owner.empty()) {
++    RemovePlayer(name, old_owner);
++  }
++  if (!new_owner.empty()) {
++    AddPlayer(name, new_owner);
++  }
++}
++
++void MprisMediaBridge::AddPlayer(const std::string& name,
++                                 const std::string& owner) {
++  if (players_.contains(owner) || players_.size() >= kMaxPlayers) {
++    return;
++  }
++  players_.emplace(owner, std::make_unique<Player>(this, name, owner));
++}
++
++void MprisMediaBridge::RemovePlayer(const std::string& name,
++                                    const std::string& owner) {
++  auto player = players_.find(owner);
++  if (player != players_.end() && player->second->name() == name) {
++    players_.erase(player);
++  }
++}
++
++void MprisMediaBridge::LoadArtwork(const GURL& url,
++                                   int desired_size_px,
++                                   ArtworkCallback callback) {
++  if (url.SchemeIsFile()) {
++    base::FilePath path;
++    if (!net::FileURLToFilePath(url, &path)) {
++      std::move(callback).Run(SkBitmap());
++      return;
++    }
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE,
++        {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
++        base::BindOnce(&ReadArtworkFile, path),
++        base::BindOnce(&DecodeArtwork, desired_size_px, std::move(callback)));
++    return;
++  }
++  if (url.SchemeIs(url::kDataScheme)) {
++    std::string mime_type;
++    std::string charset;
++    std::string data;
++    if (!net::DataURL::Parse(url, &mime_type, &charset, &data)) {
++      std::move(callback).Run(SkBitmap());
++      return;
++    }
++    DecodeArtwork(desired_size_px, std::move(callback), std::move(data));
++    return;
++  }
++  if (!url.SchemeIsHTTPOrHTTPS() || !url_loader_factory_) {
++    std::move(callback).Run(SkBitmap());
++    return;
++  }
++  auto request = std::make_unique<network::ResourceRequest>();
++  request->url = url;
++  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++  artwork_loaders_.push_front(network::SimpleURLLoader::Create(
++      std::move(request), kArtworkTrafficAnnotation));
++  auto loader = artwork_loaders_.begin();
++  (*loader)->SetTimeoutDuration(kArtworkDownloadTimeout);
++  // Unretained: the loader is this bridge's and never calls back once gone.
++  (*loader)->DownloadToString(
++      url_loader_factory_.get(),
++      base::BindOnce(&MprisMediaBridge::OnArtworkDownloaded,
++                     base::Unretained(this), loader, desired_size_px,
++                     std::move(callback)),
++      kMaxArtworkBytes);
++}
++
++void MprisMediaBridge::OnArtworkDownloaded(ArtworkLoaders::iterator loader,
++                                           int desired_size_px,
++                                           ArtworkCallback callback,
++                                           std::optional<std::string> body) {
++  artwork_loaders_.erase(loader);
++  DecodeArtwork(desired_size_px, std::move(callback), std::move(body));
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+index 5bb2c875b2f5..1ab7cd0e7750 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+@@ -90,6 +90,7 @@ class LoginScreenExtensionsStorageCleaner;
+ class LowDiskNotification;
+ class MagicBoostControllerImpl;
+ class MisconfiguredUserCleaner;
++class MprisMediaBridge;
+ class NetworkChangeManagerClient;
+ class NetworkPrefStateObserver;
+ class NetworkThrottlingObserver;
+@@ -287,6 +288,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+ 
+   std::unique_ptr<chromeos::MahiWebContentsManager> mahi_web_contents_manager_;
+ 
++  // AuraDE compatibility: Linux media players in Ash's media controls.
++  std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
++
+   // Set when PreProfileInit() is called. If PreMainMessageLoopRun() exits
+   // early, this will be false during PostMainMessageLoopRun(), etc.
+   // Used to prevent shutting down classes that were not initialized.
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+index 45acb3f40005..f9258595c050 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
+@@ -96,6 +96,7 @@
+ #include "chrome/browser/ash/dbus/lock_to_single_user_service_provider.h"
+ #include "chrome/browser/ash/dbus/machine_learning_decision_service_provider.h"
+ #include "chrome/browser/ash/dbus/mojo_connection_service_provider.h"
++#include "chrome/browser/ash/dbus/mpris_media_bridge.h"
+ #include "chrome/browser/ash/dbus/polkit_agent_service.h"
+ #include "chrome/browser/ash/dbus/printers_service_provider.h"
+ #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
+@@ -1705,6 +1706,14 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+         std::make_unique<mahi::MahiWebContentsManagerImpl>();
+   }
+ 
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: media players among the Linux applications show
++    // in Ash's media controls beside web pages that play.
++    mpris_media_bridge_ = MprisMediaBridge::Create(
++        &content::GetMediaSessionService(),
++        g_browser_process->shared_url_loader_factory());
++  }
++
+   ChromeBrowserMainPartsLinux::PostBrowserStart();
+ }
+ 
+@@ -1714,6 +1723,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+ // shutdown calls and test |pre_profile_init_called_| if necessary. See
+ // crbug.com/40511182 for details.
+ void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
++  mpris_media_bridge_.reset();
+   video_conference_manager_client_.reset();
+ 
+   arc_container_app_killer_.reset();
