@@ -1,0 +1,703 @@
+diff --git a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+index c30a3a2b39ca..e66f22626c46 100644
+--- a/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
++++ b/chrome/browser/resources/ash/settings/device_page/device_page_browser_proxy.ts
+@@ -115,6 +115,11 @@ export interface AuraDisplayInfo {
+   scaleOptions: number[];
+   requiresRestart: boolean;
+   status: string;
++  // Set when the info is for one monitor, as when Ash's displays are the
++  // compositor's monitors.
++  perDisplay?: boolean;
++  displayId?: string;
++  recommendedScale?: number;
+ }
+ 
+ export interface AuraFeatureProfileInfo {
+@@ -232,14 +237,19 @@ export interface DevicePageBrowserProxy {
+    */
+   dragDisplayDelta(displayId: string, deltaX: number, deltaY: number): void;
+ 
+-  /** Gets host DRM modes and current AuraDE compositor display config. */
+-  getAuraDisplayInfo(): Promise<AuraDisplayInfo>;
++  /**
++   * Gets host DRM modes and current AuraDE compositor display config, for
++   * the display |displayId| when given and Ash has one per monitor.
++   */
++  getAuraDisplayInfo(displayId?: string): Promise<AuraDisplayInfo>;
+ 
+   /** Saves the compositor display mode used by the next AuraDE session. */
+-  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo>;
++  setAuraDisplayMode(mode: string, displayId?: string):
++      Promise<AuraDisplayInfo>;
+ 
+   /** Saves and applies the AuraDE UI scale factor. */
+-  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo>;
++  setAuraDisplayScale(scale: number, displayId?: string):
++      Promise<AuraDisplayInfo>;
+ 
+   /** Gets the AuraDE feature profile used for ChromeOS feature gates. */
+   getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo>;
+@@ -355,16 +365,18 @@ export class DevicePageBrowserProxyImpl implements DevicePageBrowserProxy {
+     chrome.send('dragDisplayDelta', [displayId, deltaX, deltaY]);
+   }
+ 
+-  getAuraDisplayInfo(): Promise<AuraDisplayInfo> {
+-    return sendWithPromise('getAuraDisplayInfo');
++  getAuraDisplayInfo(displayId?: string): Promise<AuraDisplayInfo> {
++    return sendWithPromise('getAuraDisplayInfo', displayId || '');
+   }
+ 
+-  setAuraDisplayMode(mode: string): Promise<AuraDisplayInfo> {
+-    return sendWithPromise('setAuraDisplayMode', mode);
++  setAuraDisplayMode(mode: string, displayId?: string):
++      Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayMode', mode, displayId || '');
+   }
+ 
+-  setAuraDisplayScale(scale: number): Promise<AuraDisplayInfo> {
+-    return sendWithPromise('setAuraDisplayScale', scale);
++  setAuraDisplayScale(scale: number, displayId?: string):
++      Promise<AuraDisplayInfo> {
++    return sendWithPromise('setAuraDisplayScale', scale, displayId || '');
+   }
+ 
+   getAuraFeatureProfileInfo(): Promise<AuraFeatureProfileInfo> {
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.html b/chrome/browser/resources/ash/settings/device_page/display.html
+index 43867417f652..1fd827490d16 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.html
++++ b/chrome/browser/resources/ash/settings/device_page/display.html
+@@ -59,6 +59,7 @@
+   }
+ 
+   #auraDisplayActions,
++  #auraDisplayScaleActions,
+   #auraFeatureProfileActions {
+     align-items: center;
+     display: flex;
+@@ -68,6 +69,7 @@
+   }
+ 
+   #auraDisplayModeSelector,
++  #auraDisplayScaleSelector,
+   #auraFeatureProfileSelector {
+     min-width: 180px;
+   }
+@@ -254,34 +256,27 @@
+ 
+   <div class="settings-box indented two-line">
+     <div class="start text-area layout vertical" aria-hidden="true">
+-      <div>AuraDE UI scale</div>
++      <div>Scale</div>
+       <div class="secondary self-start" id="auraDisplayScaleSublabel">
+         [[auraDisplayScaleStatus_]]
+       </div>
+     </div>
+     <div id="auraDisplayScaleActions">
+-      <settings-slider id="auraDisplayScaleSlider"
+-          ticks="[[auraDisplayScaleOptions_]]"
++      <settings-dropdown-menu id="auraDisplayScaleSelector"
+           pref="{{auraDisplayScalePref_}}"
+-          label-aria="AuraDE UI scale"
+-          label-min="Small"
+-          label-max="Large"
+-          disabled="[[!auraDisplayScaleAvailable_]]"
+-          aria-describedby="auraDisplayScaleSublabel">
+-      </settings-slider>
+-      <cr-button on-click="onAuraDisplayScaleApplyClick_"
+-          disabled$="[[isAuraDisplayScaleApplyDisabled_(
+-              auraDisplayScaleAvailable_,
+-              auraDisplayScaleApplyInProgress_,
+-              auraDisplayScalePref_.value)]]">
+-        Apply
+-      </cr-button>
++          disabled="[[isAuraDisplayScaleSelectorDisabled_(
++              auraDisplayScaleAvailable_, auraDisplayScaleApplyInProgress_)]]"
++          label="Scale"
++          aria-describedby="auraDisplayScaleSublabel"
++          menu-options="[[auraDisplayScaleMenuOptions_]]"
++          on-settings-control-change="onAuraDisplayScaleChange_">
++      </settings-dropdown-menu>
+     </div>
+   </div>
+ 
+   <div class="settings-box indented two-line">
+     <div class="start text-area layout vertical" aria-hidden="true">
+-      <div>AuraDE display mode</div>
++      <div>Resolution</div>
+       <div class="secondary self-start" id="auraDisplaySublabel">
+         [[auraDisplayStatus_]]
+       </div>
+@@ -290,7 +285,7 @@
+       <settings-dropdown-menu id="auraDisplayModeSelector"
+           pref="{{auraDisplayModePref_}}"
+           disabled="[[!auraDisplayAvailable_]]"
+-          label="AuraDE display mode"
++          label="Resolution"
+           aria-describedby="auraDisplaySublabel"
+           menu-options="[[auraDisplayModeOptions_]]">
+       </settings-dropdown-menu>
+@@ -331,7 +326,8 @@
+ 
+   <!-- Drop down select menu for resolution -->
+   <template is="dom-if"
+-      if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
++      if="[[showDropDownResolutionSetting_(selectedDisplay,
++          auraDisplayAvailable_)]]" restamp>
+     <div class="settings-box indented two-line">
+       <div class="start text-area layout vertical" aria-hidden="true">
+         <div>$i18n{displayResolutionTitle}</div>
+@@ -359,8 +355,8 @@
+   </template>
+ 
+   <!-- Drop down select menu for refresh rate -->
+-  <template is="dom-if" if="[[showRefreshRateSetting_(selectedDisplay)]]"
+-      restamp>
++  <template is="dom-if" if="[[showRefreshRateSetting_(selectedDisplay,
++      auraDisplayAvailable_)]]" restamp>
+     <div class="settings-box indented two-line">
+       <div class="start text-area layout vertical" aria-hidden="true">
+         <div>$i18n{displayRefreshRateTitle}</div>
+diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
+index 7a142147cacf..3221b6426b4c 100644
+--- a/chrome/browser/resources/ash/settings/device_page/display.ts
++++ b/chrome/browser/resources/ash/settings/device_page/display.ts
+@@ -159,7 +159,7 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         value: false,
+       },
+ 
+-      auraDisplayScaleOptions_: {
++      auraDisplayScaleMenuOptions_: {
+         type: Array,
+         value: [],
+       },
+@@ -437,7 +437,7 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+   declare private unifiedDesktopMode_: boolean;
+   private auraDisplayScaleApplyInProgress_: boolean;
+   private auraDisplayScaleAvailable_: boolean;
+-  private auraDisplayScaleOptions_: SliderTick[];
++  private auraDisplayScaleMenuOptions_: DropdownMenuOptionList;
+   private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
+   private auraDisplayScaleStatus_: string;
+   declare private zoomValues_: SliderTick[];
+@@ -644,28 +644,14 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         (displays: DisplayUnitInfo[]) => this.displayInfoFetched_(displays));
+   }
+ 
++  /**
++   * The scale and resolution controls follow the selected display when Ash's
++   * displays are the compositor's monitors, each with a scale of its own.
++   */
+   private refreshAuraDisplayInfo_(): void {
+-    this.browserProxy_.getAuraDisplayInfo()
+-        .then(info => {
+-          this.auraDisplayAvailable_ = info.available;
+-          this.auraDisplayModeOptions_ =
+-              info.modes.map(mode => ({name: mode, value: mode}));
+-          const selectedMode = info.currentMode || info.configuredMode ||
+-              (info.modes.length ? info.modes[0] : '');
+-          this.set('auraDisplayModePref_.value', selectedMode);
+-          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
+-          this.auraDisplayScaleOptions_ =
+-              info.scaleOptions.map(scale => ({
+-                value: scale,
+-                ariaValue: Math.round(scale * 100),
+-                label: `${Math.round(scale * 100)}%`,
+-              }));
+-          const selectedScale = info.configuredScale || info.currentScale || 1;
+-          this.set('auraDisplayScalePref_.value', selectedScale);
+-          this.auraDisplayStatus_ = this.getAuraDisplayStatus_(info);
+-          this.auraDisplayScaleStatus_ =
+-              this.getAuraDisplayScaleStatus_(info);
+-        })
++    const displayId = this.selectedDisplay ? this.selectedDisplay.id : '';
++    this.browserProxy_.getAuraDisplayInfo(displayId)
++        .then(info => this.showAuraDisplayInfo_(info))
+         .catch(error => {
+           console.warn('Unable to load AuraDE display info', error);
+           this.auraDisplayAvailable_ = false;
+@@ -676,6 +662,39 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         });
+   }
+ 
++  private showAuraDisplayInfo_(info: AuraDisplayInfo): void {
++    this.auraDisplayAvailable_ = info.available;
++    // The monitor's preferred mode comes first.
++    this.auraDisplayModeOptions_ = info.modes.map(
++        (mode, index) => ({
++          name: index === 0 ? `${mode} (Recommended)` : mode,
++          value: mode,
++        }));
++    const selectedMode = info.configuredMode || info.currentMode ||
++        (info.modes.length ? info.modes[0] : '');
++    this.set('auraDisplayModePref_.value', selectedMode);
++    this.auraDisplayScaleAvailable_ = info.scaleAvailable;
++    const selectedScale = info.currentScale || info.configuredScale || 1;
++    // A scale typed into display.conf by hand stays selectable.
++    const scales = info.scaleOptions.slice();
++    if (!scales.some(scale => Math.abs(scale - selectedScale) < 0.001)) {
++      scales.push(selectedScale);
++      scales.sort((a, b) => a - b);
++    }
++    this.auraDisplayScaleMenuOptions_ = scales.map(scale => {
++      const percent = Math.round(scale * 100);
++      const recommended = info.recommendedScale !== undefined &&
++          Math.abs(scale - info.recommendedScale) < 0.001;
++      return {
++        name: recommended ? `${percent}% (Recommended)` : `${percent}%`,
++        value: scale,
++      };
++    });
++    this.set('auraDisplayScalePref_.value', selectedScale);
++    this.auraDisplayStatus_ = this.getAuraDisplayStatus_(info);
++    this.auraDisplayScaleStatus_ = this.getAuraDisplayScaleStatus_(info);
++  }
++
+   private refreshAuraFeatureProfileInfo_(): void {
+     this.browserProxy_.getAuraFeatureProfileInfo()
+         .then(info => {
+@@ -777,19 +796,25 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+     }
+ 
+     const connector = info.connector || 'display';
+-    const currentMode = info.currentMode || info.configuredMode || 'not set';
+-    return `Output ${connector}, configured for ${currentMode}`;
++    const currentMode = info.currentMode || info.configuredMode;
++    if (info.configuredMode && currentMode &&
++        info.configuredMode !== currentMode) {
++      return `${connector} at ${currentMode}, ${info.configuredMode} ` +
++          'from the next sign-in';
++    }
++    return currentMode ? `${connector} at ${currentMode}` : connector;
+   }
+ 
+   private getAuraDisplayScaleStatus_(info: AuraDisplayInfo): string {
+-    const configuredScale = info.configuredScale || 1;
+-    const currentScale = info.currentScale || configuredScale;
+-    const configuredPercent = Math.round(configuredScale * 100);
+-    const currentPercent = Math.round(currentScale * 100);
+-    if (Math.abs(configuredScale - currentScale) < 0.001) {
+-      return `Currently ${currentPercent}%`;
++    const scale = info.currentScale || info.configuredScale || 1;
++    // What the desktop looks like at this scale, as Windows and ChromeOS
++    // describe it.
++    const mode = (info.currentMode || '').split('x').map(Number);
++    if (mode.length === 2 && mode[0] > 0 && mode[1] > 0) {
++      return `Looks like ${Math.round(mode[0] / scale)} x ` +
++          `${Math.round(mode[1] / scale)}`;
+     }
+-    return `Configured ${configuredPercent}%, currently ${currentPercent}%`;
++    return `${Math.round(scale * 100)}%`;
+   }
+ 
+   private onAuraDisplayApplyClick_(): void {
+@@ -799,12 +824,13 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+     }
+ 
+     this.auraDisplayApplyInProgress_ = true;
+-    this.browserProxy_.setAuraDisplayMode(mode)
++    this.browserProxy_
++        .setAuraDisplayMode(
++            mode, this.selectedDisplay ? this.selectedDisplay.id : '')
+         .then(info => {
+           this.auraDisplayAvailable_ = info.available;
+           this.set('auraDisplayModePref_.value', info.configuredMode || mode);
+-          this.auraDisplayStatus_ =
+-              `${this.getAuraDisplayStatus_(info)}. Restart AuraDE to apply.`;
++          this.showAuraDisplayInfo_(info);
+         })
+         .catch(error => {
+           console.warn('Unable to save AuraDE display mode', error);
+@@ -820,22 +846,18 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+     return !available || applyInProgress || !mode;
+   }
+ 
+-  private onAuraDisplayScaleApplyClick_(): void {
++  /** A scale picked from the menu applies at once, as on Windows. */
++  private onAuraDisplayScaleChange_(): void {
+     const scale = Number(this.auraDisplayScalePref_.value || 1);
+     if (!scale || this.auraDisplayScaleApplyInProgress_) {
+       return;
+     }
+ 
+     this.auraDisplayScaleApplyInProgress_ = true;
+-    this.browserProxy_.setAuraDisplayScale(scale)
+-        .then(info => {
+-          this.auraDisplayScaleAvailable_ = info.scaleAvailable;
+-          this.set(
+-              'auraDisplayScalePref_.value',
+-              info.configuredScale || info.currentScale || scale);
+-          this.auraDisplayScaleStatus_ =
+-              `${this.getAuraDisplayScaleStatus_(info)}. Applied.`;
+-        })
++    this.browserProxy_
++        .setAuraDisplayScale(
++            scale, this.selectedDisplay ? this.selectedDisplay.id : '')
++        .then(info => this.showAuraDisplayInfo_(info))
+         .catch(error => {
+           console.warn('Unable to save AuraDE display scale', error);
+           this.auraDisplayScaleStatus_ = 'Could not apply display scale';
+@@ -845,9 +867,9 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         });
+   }
+ 
+-  private isAuraDisplayScaleApplyDisabled_(
+-      available: boolean, applyInProgress: boolean, scale: number): boolean {
+-    return !available || applyInProgress || !scale;
++  private isAuraDisplayScaleSelectorDisabled_(
++      available: boolean, applyInProgress: boolean): boolean {
++    return !available || applyInProgress;
+   }
+ 
+   private shouldHideChromeOsDisplayZoom_(
+@@ -1226,20 +1248,28 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
+         'selectedParentModePref_.value', this.currentSelectedParentModeIndex_);
+ 
+     this.updateLogicalResolutionText_(this.selectedZoomPref_.value);
++    this.refreshAuraDisplayInfo_();
+   }
+ 
+   /**
+-   * Returns true if the resolution setting needs to be displayed.
++   * Returns true if the resolution setting needs to be displayed. AuraDE's
++   * Resolution row stands in for it once the compositor's modes are known,
++   * since Ash then sees only the mode the compositor runs.
+    */
+-  private showDropDownResolutionSetting_(display: DisplayUnitInfo): boolean {
+-    return !display.isInternal;
++  private showDropDownResolutionSetting_(
++      display: DisplayUnitInfo|undefined,
++      auraDisplayAvailable = false): boolean {
++    // With two arguments Polymer runs this before a display is selected.
++    return !!display && !display.isInternal && !auraDisplayAvailable;
+   }
+ 
+   /**
+    * Returns true if the refresh rate setting needs to be displayed.
+    */
+-  private showRefreshRateSetting_(display: DisplayUnitInfo): boolean {
+-    return this.showDropDownResolutionSetting_(display);
++  private showRefreshRateSetting_(
++      display: DisplayUnitInfo|undefined,
++      auraDisplayAvailable = false): boolean {
++    return this.showDropDownResolutionSetting_(display, auraDisplayAvailable);
+   }
+ 
+   /**
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/DEPS b/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
+index e5c60381c2ab..51f6dc507441 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
+@@ -30,5 +30,6 @@ include_rules = [
+ 
+   "+ash/shell.h",
+   "+ash/shell_observer.h",
++  "+ash/display/aura_display_source.h",
+   "+ash/display/cros_display_config.h",
+ ]
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+index a304ddd8bca3..408e34ef64e4 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
+@@ -11,6 +11,7 @@
+ #include <optional>
+ #include <vector>
+ 
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/cros_display_config.h"
+ #include "ash/shell.h"
+ #include "base/check_deref.h"
+@@ -21,6 +22,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+@@ -169,9 +171,37 @@ bool WriteAuraDisplayScale(double scale) {
+     return false;
+   }
+ 
+-  scale = NormalizeAuraDisplayScale(scale);
+-  return base::WriteFile(*config_path, "# AuraDE display settings\nscale=" +
+-                                           base::NumberToString(scale) + "\n");
++  // Only the single scale line changes; the scale each monitor keeps when
++  // the compositor's monitors are Ash's displays stays as it is.
++  const std::string scale_line =
++      "scale=" + base::NumberToString(NormalizeAuraDisplayScale(scale));
++  std::string original;
++  base::ReadFileToString(*config_path, &original);
++  std::vector<std::string> lines;
++  bool replaced = false;
++  for (const std::string& line : base::SplitString(
++           original, "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::string trimmed;
++    base::TrimWhitespaceASCII(line, base::TRIM_ALL, &trimmed);
++    if (trimmed.starts_with("scale=")) {
++      if (!replaced) {
++        lines.push_back(scale_line);
++        replaced = true;
++      }
++      continue;
++    }
++    lines.push_back(line);
++  }
++  while (!lines.empty() && lines.back().empty()) {
++    lines.pop_back();
++  }
++  if (lines.empty()) {
++    lines.push_back("# AuraDE display settings");
++  }
++  if (!replaced) {
++    lines.push_back(scale_line);
++  }
++  return base::WriteFile(*config_path, base::JoinString(lines, "\n") + "\n");
+ }
+ 
+ std::string NormalizeAuraFeatureProfile(std::string profile) {
+@@ -408,7 +438,10 @@ std::string GetConfiguredWestonMode(const std::string& connector) {
+   return in_output_section && matching_output ? section_mode : std::string();
+ }
+ 
+-AuraDisplayState GetAuraDisplayState() {
++// The display state of |wanted_connector|'s monitor, or of the first
++// connector with modes when none is named.
++AuraDisplayState GetAuraDisplayState(
++    const std::string& wanted_connector = std::string()) {
+   AuraDisplayState state;
+ 
+   base::FileEnumerator drm_outputs(base::FilePath(kSysDrmPath),
+@@ -422,6 +455,11 @@ AuraDisplayState GetAuraDisplayState() {
+       continue;
+     }
+ 
++    if (!wanted_connector.empty() &&
++        ConnectorNameFromPath(output) != wanted_connector) {
++      continue;
++    }
++
+     std::string modes_text;
+     if (!base::ReadFileToString(output.Append("modes"), &modes_text) ||
+         modes_text.empty()) {
+@@ -476,6 +514,10 @@ base::DictValue GetAuraDisplayValueOnBlockingThread() {
+   return AuraDisplayStateToValue(GetAuraDisplayState());
+ }
+ 
++base::DictValue GetAuraMonitorValueOnBlockingThread(std::string connector) {
++  return AuraDisplayStateToValue(GetAuraDisplayState(connector));
++}
++
+ std::string BuildUpdatedWestonConfig(const std::string& original,
+                                      const std::string& connector,
+                                      const std::string& mode) {
+@@ -562,8 +604,11 @@ bool WriteWestonDisplayMode(const std::string& connector,
+                          BuildUpdatedWestonConfig(original, connector, mode));
+ }
+ 
+-base::DictValue SetAuraDisplayModeOnBlockingThread(std::string requested_mode) {
+-  AuraDisplayState state = GetAuraDisplayState();
++// Saves |requested_mode| for |connector|'s monitor, or for the first
++// connector with modes when none is named, for the next session.
++base::DictValue SetAuraDisplayModeOnBlockingThread(std::string connector,
++                                                   std::string requested_mode) {
++  AuraDisplayState state = GetAuraDisplayState(connector);
+   const bool valid_mode = IsValidMode(requested_mode) &&
+                           std::find(state.modes.begin(), state.modes.end(),
+                                     requested_mode) != state.modes.end();
+@@ -610,6 +655,45 @@ base::DictValue SetAuraDisplayScaleOnBlockingThread(double requested_scale) {
+   return result;
+ }
+ 
++// The monitor a message names by its display id in |args[index]|, when the
++// compositor's monitors are Ash's displays.
++const AuraDisplaySource::Monitor* GetAuraMonitorArg(const base::ListValue& args,
++                                                    size_t index,
++                                                    int64_t* display_id) {
++  AuraDisplaySource* source = AuraDisplaySource::Get();
++  if (!source || args.size() <= index || !args[index].is_string() ||
++      !base::StringToInt64(args[index].GetString(), display_id)) {
++    return nullptr;
++  }
++  return source->GetMonitor(*display_id);
++}
++
++// Adds what Ash knows of a monitor to the display state read from the
++// system: its scale, the scale it is recommended, and its current mode.
++void AddAuraMonitorState(int64_t display_id, base::DictValue& value) {
++  AuraDisplaySource* source = AuraDisplaySource::Get();
++  const AuraDisplaySource::Monitor* monitor =
++      source ? source->GetMonitor(display_id) : nullptr;
++  if (!monitor) {
++    return;
++  }
++  base::ListValue scale_options;
++  for (float scale : AuraDisplaySource::GetScaleOptions()) {
++    scale_options.Append(scale);
++  }
++  value.Set("perDisplay", true);
++  value.Set("displayId", base::NumberToString(display_id));
++  value.Set("connector", monitor->connector);
++  value.Set("configuredScale", monitor->scale);
++  value.Set("currentScale", monitor->scale);
++  value.Set("recommendedScale", monitor->recommended_scale);
++  value.Set("scaleOptions", std::move(scale_options));
++  value.Set("scaleAvailable", true);
++  value.Set("currentMode",
++            base::StringPrintf("%dx%d", monitor->bounds_in_pixels.width(),
++                               monitor->bounds_in_pixels.height()));
++}
++
+ double GetCurrentAuraDisplayScale() {
+   if (base::SysInfo::IsRunningOnChromeOS()) {
+     return kAuraDisplayScaleDefault;
+@@ -757,8 +841,20 @@ void DisplayHandler::HandleDragDisplayDelta(const base::ListValue& args) {
+ void DisplayHandler::HandleGetAuraDisplayInfo(const base::ListValue& args) {
+   AllowJavascript();
+ 
+-  CHECK_EQ(1U, args.size());
++  CHECK_GE(args.size(), 1U);
+   std::string callback_id = args[0].GetString();
++  int64_t display_id = display::kInvalidDisplayId;
++  if (const AuraDisplaySource::Monitor* monitor =
++          GetAuraMonitorArg(args, 1, &display_id)) {
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&GetAuraMonitorValueOnBlockingThread,
++                       monitor->connector),
++        base::BindOnce(&DisplayHandler::ResolveAuraMonitorInfo,
++                       weak_ptr_factory_.GetWeakPtr(), std::move(callback_id),
++                       display_id));
++    return;
++  }
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+       base::BindOnce(&GetAuraDisplayValueOnBlockingThread),
+@@ -769,12 +865,24 @@ void DisplayHandler::HandleGetAuraDisplayInfo(const base::ListValue& args) {
+ void DisplayHandler::HandleSetAuraDisplayMode(const base::ListValue& args) {
+   AllowJavascript();
+ 
+-  CHECK_EQ(2U, args.size());
++  CHECK_GE(args.size(), 2U);
+   std::string callback_id = args[0].GetString();
+   std::string requested_mode = args[1].GetString();
++  int64_t display_id = display::kInvalidDisplayId;
++  if (const AuraDisplaySource::Monitor* monitor =
++          GetAuraMonitorArg(args, 2, &display_id)) {
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&SetAuraDisplayModeOnBlockingThread, monitor->connector,
++                       std::move(requested_mode)),
++        base::BindOnce(&DisplayHandler::ResolveAuraMonitorMode,
++                       weak_ptr_factory_.GetWeakPtr(), std::move(callback_id),
++                       display_id));
++    return;
++  }
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+-      base::BindOnce(&SetAuraDisplayModeOnBlockingThread,
++      base::BindOnce(&SetAuraDisplayModeOnBlockingThread, std::string(),
+                      std::move(requested_mode)),
+       base::BindOnce(&DisplayHandler::ResolveAuraDisplayMode,
+                      weak_ptr_factory_.GetWeakPtr(), std::move(callback_id)));
+@@ -783,7 +891,7 @@ void DisplayHandler::HandleSetAuraDisplayMode(const base::ListValue& args) {
+ void DisplayHandler::HandleSetAuraDisplayScale(const base::ListValue& args) {
+   AllowJavascript();
+ 
+-  CHECK_EQ(2U, args.size());
++  CHECK_GE(args.size(), 2U);
+   std::string callback_id = args[0].GetString();
+   double requested_scale = kAuraDisplayScaleDefault;
+   if (args[1].is_double()) {
+@@ -792,6 +900,29 @@ void DisplayHandler::HandleSetAuraDisplayScale(const base::ListValue& args) {
+     requested_scale = args[1].GetInt();
+   }
+ 
++  // One monitor's scale, applied at once and kept for later sessions.
++  int64_t display_id = display::kInvalidDisplayId;
++  if (const AuraDisplaySource::Monitor* monitor =
++          GetAuraMonitorArg(args, 2, &display_id)) {
++    // Setting the scale rebuilds the monitor list, so the name is taken
++    // first.
++    std::string connector = monitor->connector;
++    if (!AuraDisplaySource::Get()->SetScale(
++            display_id, static_cast<float>(requested_scale))) {
++      RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                               base::Value("Unsupported display scale"));
++      return;
++    }
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&GetAuraMonitorValueOnBlockingThread,
++                       std::move(connector)),
++        base::BindOnce(&DisplayHandler::ResolveAuraMonitorInfo,
++                       weak_ptr_factory_.GetWeakPtr(), std::move(callback_id),
++                       display_id));
++    return;
++  }
++
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+       base::BindOnce(&SetAuraDisplayScaleOnBlockingThread, requested_scale),
+@@ -836,6 +967,35 @@ void DisplayHandler::ResolveAuraDisplayInfo(std::string callback_id,
+   ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
+ }
+ 
++void DisplayHandler::ResolveAuraMonitorInfo(std::string callback_id,
++                                            int64_t display_id,
++                                            base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  AddAuraMonitorState(display_id, info);
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), info);
++}
++
++void DisplayHandler::ResolveAuraMonitorMode(std::string callback_id,
++                                            int64_t display_id,
++                                            base::DictValue result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++
++  if (!result.FindBool("success").value_or(false)) {
++    const std::string* status = result.FindString("status");
++    RejectJavascriptCallback(base::Value(std::move(callback_id)),
++                             base::Value(status ? *status : "Failed"));
++    return;
++  }
++
++  AddAuraMonitorState(display_id, result);
++  ResolveJavascriptCallback(base::Value(std::move(callback_id)), result);
++}
++
+ void DisplayHandler::ResolveAuraDisplayMode(std::string callback_id,
+                                             base::DictValue result) {
+   if (!IsJavascriptAllowed()) {
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+index c35d9d8f9a41..0cf6c553a925 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.h
+@@ -5,6 +5,7 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
+ #define CHROME_BROWSER_UI_WEBUI_ASH_SETTINGS_PAGES_DEVICE_DEVICE_DISPLAY_HANDLER_H_
+ 
++#include <cstdint>
+ #include <string>
+ 
+ #include "base/memory/raw_ref.h"
+@@ -45,6 +46,13 @@ class DisplayHandler : public content::WebUIMessageHandler {
+   void HandleSetAuraFeatureProfile(const base::ListValue& args);
+   void ResolveAuraDisplayInfo(std::string callback_id, base::DictValue info);
+   void ResolveAuraDisplayMode(std::string callback_id, base::DictValue result);
++  // For one monitor, when the compositor's monitors are Ash's displays.
++  void ResolveAuraMonitorInfo(std::string callback_id,
++                              int64_t display_id,
++                              base::DictValue info);
++  void ResolveAuraMonitorMode(std::string callback_id,
++                              int64_t display_id,
++                              base::DictValue result);
+   void ResolveAuraDisplayScale(std::string callback_id, base::DictValue result);
+   void ResolveAuraFeatureProfileInfo(std::string callback_id,
+                                      base::DictValue info);
