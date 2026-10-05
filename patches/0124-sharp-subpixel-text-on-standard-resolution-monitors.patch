@@ -1,0 +1,99 @@
+diff --git a/ui/gfx/linux/fontconfig_util.h b/ui/gfx/linux/fontconfig_util.h
+index 83381db06ca1..fc3b0e09f9d7 100644
+--- a/ui/gfx/linux/fontconfig_util.h
++++ b/ui/gfx/linux/fontconfig_util.h
+@@ -41,6 +41,10 @@ COMPONENT_EXPORT(GFX)
+ void GetFontRenderParamsFromFcPattern(FcPattern* pattern,
+                                       FontRenderParams* param_out);
+ 
++// The subpixel order text is drawn with where fontconfig names none.
++COMPONENT_EXPORT(GFX)
++FontRenderParams::SubpixelRendering GetDefaultSubpixelRendering();
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ // Adds a given directory to the available fonts in the application.
+ // Directory must start with `/run/imageloader/` (guaranteed by DLC).
+diff --git a/ui/gfx/linux/fontconfig_util.cc b/ui/gfx/linux/fontconfig_util.cc
+index a1aecb9e4839..e0dc70143c07 100644
+--- a/ui/gfx/linux/fontconfig_util.cc
++++ b/ui/gfx/linux/fontconfig_util.cc
+@@ -17,6 +17,7 @@
+ #include "base/containers/flat_set.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
++#include "base/system/sys_info.h"
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+ namespace gfx {
+@@ -303,6 +304,19 @@ void GetFontRenderParamsFromFcPattern(FcPattern* pattern,
+   }
+ }
+ 
++FontRenderParams::SubpixelRendering GetDefaultSubpixelRendering() {
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE: on a Linux host, text is drawn with RGB subpixels unless
++  // fontconfig says otherwise, as KDE and Windows draw it, so a standard
++  // resolution monitor shows text as sharply as it can. Most LCD monitors
++  // are RGB; a choice in fontconfig, grayscale included, still wins.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    return FontRenderParams::SUBPIXEL_RENDERING_RGB;
++  }
++#endif  // BUILDFLAG(IS_CHROMEOS)
++  return FontRenderParams::SUBPIXEL_RENDERING_NONE;
++}
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ bool AddAppFontDir(const base::FilePath& dir) {
+   return CHECK_DEREF(GlobalFontConfig::GetInstance()).AddAppFontDir(dir);
+diff --git a/ui/gfx/font_render_params_linux.cc b/ui/gfx/font_render_params_linux.cc
+index 84d1d860614f..fbfc575c780b 100644
+--- a/ui/gfx/font_render_params_linux.cc
++++ b/ui/gfx/font_render_params_linux.cc
+@@ -241,6 +241,8 @@ FontRenderParams GetFontRenderParams(const FontRenderParamsQuery& query,
+   if (auto* linux_ui = ui::LinuxUi::instance()) {
+     params = linux_ui->GetDefaultFontRenderParams();
+   }
++#else
++  params.subpixel_rendering = GetDefaultSubpixelRendering();
+ #endif
+   QueryFontconfig(actual_query, &params, family_out);
+ 
+diff --git a/ui/gfx/font_fallback_linux.cc b/ui/gfx/font_fallback_linux.cc
+index 0f13c9899684..77e773efae5d 100644
+--- a/ui/gfx/font_fallback_linux.cc
++++ b/ui/gfx/font_fallback_linux.cc
+@@ -283,8 +283,11 @@ bool GetFallbackFont(const Font& font,
+         if (fc_result != FcResultMatch || char_set == nullptr)
+           continue;
+ 
+-        // Retrieve the font render params.
++        // Retrieve the font render params. A fallback font takes the same
++        // default as the font it stands in for, so one line of text is not
++        // drawn two ways.
+         FontRenderParams font_params;
++        font_params.subpixel_rendering = GetDefaultSubpixelRendering();
+         GetFontRenderParamsFromFcPattern(current_font, &font_params);
+ 
+         fallback_font_entries.push_back(FallbackFontEntry(
+diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
+index 98ab85919a9d..caf4c7349e7a 100644
+--- a/ui/display/manager/display_manager.cc
++++ b/ui/display/manager/display_manager.cc
+@@ -557,6 +557,17 @@ void DisplayManager::RefreshFontParams() {
+     }
+   }
+ 
++  // AuraDE: the subpixel order is one setting for every monitor, and a
++  // monitor turned on its side would show it the wrong way round.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    for (const auto& display : active_display_list_) {
++      if (GetDisplayInfo(display.id()).GetLogicalActiveRotation() !=
++          Display::ROTATE_0) {
++        force_disable_subpixel_font_rendering = true;
++      }
++    }
++  }
++
+   if (features::IsOledScaleFactorEnabled()) {
+     force_disable_subpixel_font_rendering = true;
+   }
