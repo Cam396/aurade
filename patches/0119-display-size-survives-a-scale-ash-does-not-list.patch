@@ -1,0 +1,34 @@
+diff --git a/ui/display/manager/util/display_manager_util.cc b/ui/display/manager/util/display_manager_util.cc
+index 21ec087bb5b8..68e77220c47e 100644
+--- a/ui/display/manager/util/display_manager_util.cc
++++ b/ui/display/manager/util/display_manager_util.cc
+@@ -16,6 +16,7 @@
+ 
+ #include "base/check_op.h"
+ #include "base/command_line.h"
++#include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/notreached.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -184,7 +185,20 @@ std::vector<float> GetDisplayZoomFactorForDsf(float dsf) {
+       return std::vector<float>(bucket.second.begin(), bucket.second.end());
+     }
+   }
+-  NOTREACHED() << "Received a DSF not on the list: " << dsf;
++  // AuraDE compatibility: the list holds the scale factors of the panels
++  // ChromeOS ships on. Ash on a Wayland host takes whatever scale the host
++  // gives it, and after a display size change that can be one the list does
++  // not have, 1.75 for one. Stopping here took the session down at every
++  // start, because the size is saved. The nearest entry gives a usable list.
++  const auto* nearest = &kZoomListBucketsForDsf[0];
++  for (const auto& bucket : kZoomListBucketsForDsf) {
++    if (std::abs(bucket.first - dsf) < std::abs(nearest->first - dsf)) {
++      nearest = &bucket;
++    }
++  }
++  LOG(WARNING) << "Using the zoom list for scale " << nearest->first
++               << " for scale " << dsf;
++  return std::vector<float>(nearest->second.begin(), nearest->second.end());
+ }
+ 
+ ManagedDisplayInfo::ManagedDisplayModeList CreateInternalManagedDisplayModeList(
