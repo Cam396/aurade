@@ -1,0 +1,694 @@
+diff --git a/chrome/browser/ash/app_list/search/BUILD.gn b/chrome/browser/ash/app_list/search/BUILD.gn
+index 2a2fe2d6813b..708c77b4f910 100644
+--- a/chrome/browser/ash/app_list/search/BUILD.gn
++++ b/chrome/browser/ash/app_list/search/BUILD.gn
+@@ -20,6 +20,8 @@ static_library("search") {
+     "app_service_app_result.h",
+     "app_zero_state_provider.cc",
+     "app_zero_state_provider.h",
++    "aurade_install_provider.cc",
++    "aurade_install_provider.h",
+     "burn_in_controller.cc",
+     "burn_in_controller.h",
+     "chrome_search_result.cc",
+@@ -101,15 +103,18 @@ static_library("search") {
+     "//chromeos/components/mahi/public/cpp",
+     "//chromeos/strings:strings_grit",
+     "//components/account_id",
++    "//components/crx_file",
+     "//components/drive",
+     "//components/feature_engagement/public",
+     "//components/metrics/structured:structured_events",
+     "//components/omnibox/browser",
+     "//components/services/app_service",
+     "//components/session_manager/core",
++    "//components/vector_icons",
+     "//content/public/browser",
+     "//extensions/common",
+     "//mojo/public/cpp/bindings",
++    "//services/data_decoder/public/cpp",
+     "//ui/base",
+     "//ui/chromeos/styles:cros_tokens_color_mappings_generator",
+     "//ui/events",
+diff --git a/chrome/browser/ash/app_list/search/search_controller_factory.cc b/chrome/browser/ash/app_list/search/search_controller_factory.cc
+index 271f7557427a..87b86b772496 100644
+--- a/chrome/browser/ash/app_list/search/search_controller_factory.cc
++++ b/chrome/browser/ash/app_list/search/search_controller_factory.cc
+@@ -10,12 +10,14 @@
+ #include "ash/public/cpp/app_list/app_list_features.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/system/sys_info.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+ #include "chrome/browser/ash/app_list/search/app_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/app_zero_state_provider.h"
+ #include "chrome/browser/ash/app_list/search/arc/arc_app_shortcuts_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/arc/arc_playstore_search_provider.h"
++#include "chrome/browser/ash/app_list/search/aurade_install_provider.h"
+ #include "chrome/browser/ash/app_list/search/desks_admin_template_provider.h"
+ #include "chrome/browser/ash/app_list/search/files/drive_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/files/file_search_provider.h"
+@@ -85,6 +87,12 @@ std::unique_ptr<SearchController> CreateSearchController(
+   controller->AddProvider(std::make_unique<ArcPlayStoreSearchProvider>(
+       kMaxPlayStoreResults, profile, list_controller));
+ 
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: apps not installed yet, from the distribution's
++    // catalog, where Play Store results would be.
++    controller->AddProvider(std::make_unique<AuraDeInstallProvider>(profile));
++  }
++
+   if (arc::IsArcAllowedForProfile(profile)) {
+     controller->AddProvider(std::make_unique<ArcAppShortcutsSearchProvider>(
+         kMaxAppShortcutResults, profile, list_controller));
+diff --git a/chrome/browser/ash/app_list/search/aurade_install_provider.h b/chrome/browser/ash/app_list/search/aurade_install_provider.h
+new file mode 100644
+index 000000000000..9a76c6902904
+--- /dev/null
++++ b/chrome/browser/ash/app_list/search/aurade_install_provider.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
++#define CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
++
++#include <cstdint>
++#include <optional>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/timer/timer.h"
++#include "base/values.h"
++#include "chrome/browser/ash/app_list/search/search_provider.h"
++
++class Profile;
++
++namespace app_list {
++
++// AuraDE compatibility: the launcher finds applications that are not
++// installed yet. A search also asks the host bridge, which reads the
++// distribution's AppStream catalog, and each application it finds and the
++// computer lacks shows under "Apps to install" with its picture and summary.
++// Choosing one installs its package; the administrator password is asked for
++// first, a notification follows the install, and once it is done the app is
++// in the launcher and the notification opens it.
++class AuraDeInstallProvider : public SearchProvider {
++ public:
++  explicit AuraDeInstallProvider(Profile* profile);
++  AuraDeInstallProvider(const AuraDeInstallProvider&) = delete;
++  AuraDeInstallProvider& operator=(const AuraDeInstallProvider&) = delete;
++  ~AuraDeInstallProvider() override;
++
++  // SearchProvider:
++  void Start(const std::u16string& query,
++             OnSearchResultsCallback on_search_done) override;
++  void StopQuery() override;
++  ash::AppListSearchResultType ResultType() const override;
++
++ private:
++  void Search();
++  void OnSearched(uint64_t generation, std::optional<base::Value> response);
++
++  const raw_ptr<Profile> profile_;
++  std::string query_;
++  // Searches answer out of order; only the latest one's results show.
++  uint64_t generation_ = 0;
++  // Typing waits for a pause before the catalog is asked.
++  base::OneShotTimer debounce_;
++  base::WeakPtrFactory<AuraDeInstallProvider> weak_ptr_factory_{this};
++};
++
++}  // namespace app_list
++
++#endif  // CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
+diff --git a/chrome/browser/ash/app_list/search/aurade_install_provider.cc b/chrome/browser/ash/app_list/search/aurade_install_provider.cc
+new file mode 100644
+index 000000000000..d068a5cda161
+--- /dev/null
++++ b/chrome/browser/ash/app_list/search/aurade_install_provider.cc
+@@ -0,0 +1,474 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/app_list/search/aurade_install_provider.h"
++
++#include <algorithm>
++#include <memory>
++#include <set>
++#include <utility>
++#include <vector>
++
++#include "ash/public/cpp/app_list/app_list_types.h"
++#include "base/base64.h"
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/no_destructor.h"
++#include "base/process/launch.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "base/threading/platform_thread.h"
++#include "base/time/time.h"
++#include "chrome/browser/apps/app_service/app_service_proxy.h"
++#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
++#include "chrome/browser/ash/app_list/search/chrome_search_result.h"
++#include "chrome/browser/ash/app_list/search/common/icon_constants.h"
++#include "chrome/browser/notifications/notification_display_service.h"
++#include "chrome/browser/notifications/notification_display_service_factory.h"
++#include "chrome/browser/notifications/notification_handler.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "components/crx_file/id_util.h"
++#include "components/services/app_service/public/cpp/app_registry_cache.h"
++#include "components/services/app_service/public/cpp/app_types.h"
++#include "components/services/app_service/public/cpp/app_update.h"
++#include "components/services/app_service/public/cpp/app_launch_util.h"
++#include "components/vector_icons/vector_icons.h"
++#include "services/data_decoder/public/cpp/decode_image.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
++#include "ui/events/event_constants.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/message_center/public/cpp/notification.h"
++#include "ui/message_center/public/cpp/notification_delegate.h"
++#include "ui/message_center/public/cpp/notifier_id.h"
++#include "url/gurl.h"
++
++namespace app_list {
++
++namespace {
++
++constexpr char kHostctl[] = "/usr/bin/aurade-hostctl";
++constexpr char kResultPrefix[] = "aurade-install://";
++constexpr char kNotificationPrefix[] = "aurade-install-";
++constexpr char kNotifierId[] = "aurade.install";
++// The app ID AuraDE's apps publisher gives the computer's own application
++// with this desktop entry: GuestOsRegistryService::GenerateAppId for its
++// "aurade-host" VM and "host" container, which this target cannot depend on.
++std::string HostAppId(const std::string& desktop_id) {
++  return crx_file::id_util::GenerateId("crostini:aurade-host/host/" +
++                                       desktop_id);
++}
++
++constexpr size_t kMinQueryLength = 2;
++constexpr int kMaxResults = 5;
++constexpr base::TimeDelta kDebounce = base::Milliseconds(250);
++constexpr base::TimeDelta kJobPollInterval = base::Seconds(1);
++// Large applications on a slow mirror take a while; an hour is the limit.
++constexpr int kMaxJobPolls = 3600;
++
++std::optional<base::Value> RunHostctl(const std::vector<std::string>& args) {
++  const base::FilePath hostctl(kHostctl);
++  if (!base::PathExists(hostctl)) {
++    return std::nullopt;
++  }
++  base::CommandLine command(hostctl);
++  for (const std::string& arg : args) {
++    command.AppendArg(arg);
++  }
++  std::string output;
++  int exit_code = 1;
++  // hostctl reports refusals as JSON with a nonzero exit, so the output is
++  // read whatever the exit code.
++  base::GetAppOutputWithExitCode(command, &output, &exit_code);
++  std::optional<base::Value> response =
++      base::JSONReader::Read(output, base::JSON_PARSE_RFC);
++  if (!response || !response->is_dict()) {
++    return std::nullopt;
++  }
++  return response;
++}
++
++std::optional<base::Value> SearchCatalog(const std::string& query) {
++  return RunHostctl({"pacman", "search", query, "--limit",
++                     base::NumberToString(kMaxResults * 2)});
++}
++
++struct InstallRequest {
++  std::string package;
++  std::u16string name;
++  std::string desktop_id;
++  gfx::ImageSkia icon;
++};
++
++struct InstallResult {
++  enum class Outcome { kInstalled, kDeclined, kFailed };
++  Outcome outcome = Outcome::kFailed;
++  std::u16string reason;
++};
++
++InstallResult RunInstall(const std::string& package) {
++  using Outcome = InstallResult::Outcome;
++  std::optional<base::Value> response =
++      RunHostctl({"pacman", "install", package});
++  if (!response) {
++    return {Outcome::kFailed, u""};
++  }
++  const base::DictValue* data = response->GetDict().FindDict("data");
++  const std::string* job_id = data ? data->FindString("job_id") : nullptr;
++  if (!job_id) {
++    const std::string* code =
++        response->GetDict().FindStringByDottedPath("error.code");
++    if (code && *code == "not_authorized") {
++      return {Outcome::kDeclined, u""};
++    }
++    if (code && *code == "busy") {
++      return {Outcome::kFailed,
++              u"Another app is being installed or removed. Try again when "
++              u"it's done."};
++    }
++    return {Outcome::kFailed, u""};
++  }
++
++  // The bridge runs pacman as a job and serializes them; wait for this one
++  // off the UI thread.
++  for (int poll = 0; poll < kMaxJobPolls; ++poll) {
++    base::PlatformThread::Sleep(kJobPollInterval);
++    std::optional<base::Value> job = RunHostctl({"pacman", "job", *job_id});
++    const base::DictValue* job_data =
++        job ? job->GetDict().FindDict("data") : nullptr;
++    const std::string* state =
++        job_data ? job_data->FindString("state") : nullptr;
++    if (!state || *state == "running") {
++      continue;
++    }
++    if (*state == "succeeded") {
++      return {Outcome::kInstalled, u""};
++    }
++    // What people meet: no network, or a package newer than the local
++    // package lists know.
++    for (const char* stream : {"stdout", "stderr"}) {
++      const std::string* text = job_data->FindString(stream);
++      if (!text) {
++        continue;
++      }
++      if (text->find("failed retrieving file") != std::string::npos ||
++          text->find("failed to retrieve some files") != std::string::npos) {
++        return {Outcome::kFailed,
++                u"It couldn't be downloaded. Check the connection, or update "
++                u"the computer and try again."};
++      }
++      if (text->find("not enough free disk space") != std::string::npos) {
++        return {Outcome::kFailed, u"There isn't enough free space."};
++      }
++    }
++    return {Outcome::kFailed, u""};
++  }
++  return {Outcome::kFailed, u""};
++}
++
++// Installs one app at a time per package and reports each in a
++// notification. It outlives the launcher's searches, which come and go.
++class AuraDeAppInstaller {
++ public:
++  static AuraDeAppInstaller* Get() {
++    static base::NoDestructor<AuraDeAppInstaller> installer;
++    return installer.get();
++  }
++
++  void Install(Profile* profile, InstallRequest request) {
++    if (!installing_.insert(request.package).second) {
++      return;
++    }
++    Notify(profile, request, message_center::NOTIFICATION_TYPE_PROGRESS,
++           u"Installing " + request.name,
++           u"You may be asked for the administrator password.",
++           /*clickable=*/false);
++    const std::string package = request.package;
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++        base::BindOnce(&RunInstall, package),
++        base::BindOnce(&AuraDeAppInstaller::OnInstalled,
++                       base::Unretained(this), std::move(request)));
++  }
++
++ private:
++  friend class base::NoDestructor<AuraDeAppInstaller>;
++  AuraDeAppInstaller() = default;
++
++  void OnInstalled(InstallRequest request, InstallResult result) {
++    installing_.erase(request.package);
++    // The person who asked may have signed out while it ran.
++    Profile* profile = ProfileManager::GetPrimaryUserProfile();
++    if (!profile) {
++      return;
++    }
++    using Outcome = InstallResult::Outcome;
++    switch (result.outcome) {
++      case Outcome::kInstalled:
++        NotifyWhenListed(std::move(request), /*tries_left=*/40);
++        return;
++      case Outcome::kDeclined:
++        // Cancelling the password prompt needs no message of its own.
++        NotificationDisplayServiceFactory::GetForProfile(profile)->Close(
++            NotificationHandler::Type::TRANSIENT,
++            kNotificationPrefix + request.package);
++        return;
++      case Outcome::kFailed:
++        Notify(profile, request, message_center::NOTIFICATION_TYPE_SIMPLE,
++               request.name + u" couldn't be installed",
++               result.reason.empty() ? u"Something went wrong. Try again later."
++                                     : result.reason,
++               /*clickable=*/false);
++        return;
++    }
++  }
++
++  // The launcher lists the app a few seconds after pacman is done: it waits
++  // for the package's files to settle, then scans. Saying it is in the
++  // launcher, and offering to open it, waits for that, but not forever.
++  void NotifyWhenListed(InstallRequest request, int tries_left) {
++    Profile* profile = ProfileManager::GetPrimaryUserProfile();
++    if (!profile) {
++      return;
++    }
++    bool listed = request.desktop_id.empty();
++    if (!listed) {
++      apps::AppServiceProxyFactory::GetForProfile(profile)
++          ->AppRegistryCache()
++          .ForOneApp(HostAppId(request.desktop_id),
++                     [&listed](const apps::AppUpdate& update) {
++                       listed = update.Readiness() == apps::Readiness::kReady;
++                     });
++    }
++    if (!listed && tries_left > 0) {
++      base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
++          FROM_HERE,
++          base::BindOnce(&AuraDeAppInstaller::NotifyWhenListed,
++                         base::Unretained(this), std::move(request),
++                         tries_left - 1),
++          base::Milliseconds(500));
++      return;
++    }
++    Notify(profile, request, message_center::NOTIFICATION_TYPE_SIMPLE,
++           request.name + u" is installed",
++           listed ? u"It's in the launcher with your other apps."
++                  : u"It will be in the launcher in a moment.",
++           /*clickable=*/listed && !request.desktop_id.empty());
++  }
++
++  static void Launch(const std::string& package,
++                     const std::string& desktop_id,
++                     std::optional<int> button_index) {
++    Profile* profile = ProfileManager::GetPrimaryUserProfile();
++    if (!profile) {
++      return;
++    }
++    apps::AppServiceProxyFactory::GetForProfile(profile)->Launch(
++        HostAppId(desktop_id),
++        ui::EF_NONE, apps::LaunchSource::kFromInstaller, nullptr);
++    NotificationDisplayServiceFactory::GetForProfile(profile)->Close(
++        NotificationHandler::Type::TRANSIENT, kNotificationPrefix + package);
++  }
++
++  void Notify(Profile* profile,
++              const InstallRequest& request,
++              message_center::NotificationType type,
++              const std::u16string& title,
++              const std::u16string& message,
++              bool clickable) {
++    message_center::RichNotificationData data;
++    if (type == message_center::NOTIFICATION_TYPE_PROGRESS) {
++      // pacman says nothing about how far along it is that is worth showing.
++      data.progress = -1;
++    }
++    scoped_refptr<message_center::NotificationDelegate> delegate;
++    if (clickable) {
++      data.buttons.emplace_back(u"Open");
++      delegate =
++          base::MakeRefCounted<message_center::HandleNotificationClickDelegate>(
++              base::BindRepeating(&AuraDeAppInstaller::Launch,
++                                  request.package, request.desktop_id));
++    }
++    message_center::Notification notification(
++        type, kNotificationPrefix + request.package, title, message,
++        request.icon.isNull() ? ui::ImageModel()
++                              : ui::ImageModel::FromImageSkia(request.icon),
++        /*display_source=*/u"Apps", GURL(),
++        message_center::NotifierId(
++            message_center::NotifierType::SYSTEM_COMPONENT, kNotifierId),
++        data, delegate);
++    // The outcome replaces the progress notification, and would otherwise do
++    // so silently in the closed tray; it shows itself again.
++    notification.set_renotify(type !=
++                              message_center::NOTIFICATION_TYPE_PROGRESS);
++    NotificationDisplayServiceFactory::GetForProfile(profile)->Display(
++        NotificationHandler::Type::TRANSIENT, notification,
++        /*metadata=*/nullptr);
++  }
++
++  std::set<std::string> installing_;
++};
++
++// An application in the catalog that can be installed.
++class AuraDeInstallResult : public ChromeSearchResult {
++ public:
++  AuraDeInstallResult(Profile* profile,
++                      const std::string& package,
++                      const std::string& name,
++                      const std::string& summary,
++                      const std::string& desktop_id,
++                      const std::string& icon_png,
++                      double relevance)
++      : profile_(profile),
++        package_(package),
++        name_(base::UTF8ToUTF16(name)),
++        desktop_id_(desktop_id) {
++    set_id(kResultPrefix + package);
++    SetTitle(name_);
++    SetDetails(base::UTF8ToUTF16(summary));
++    SetAccessibleName(u"Install " + name_ + u", " + base::UTF8ToUTF16(summary));
++    SetCategory(Category::kPlayStore);
++    SetDisplayType(ash::SearchResultDisplayType::kList);
++    SetResultType(ash::AppListSearchResultType::kPlayStoreApp);
++    SetMetricsType(ash::PLAY_STORE_UNINSTALLED_APP);
++    set_relevance(relevance);
++    // A list row with a badge draws the badge where the picture goes, so the
++    // download arrow is only the stand in for an app the catalog has no
++    // picture for.
++    std::string png;
++    if (icon_png.empty() || !base::Base64Decode(icon_png, &png) ||
++        png.size() > 1024 * 1024) {
++      SetIcon(IconInfo(
++          ui::ImageModel::FromVectorIcon(vector_icons::kDownloadIcon,
++                                         ui::kColorIcon, kAppIconDimension),
++          kAppIconDimension));
++    } else {
++      // The picture came from a root service's conversion of the catalog's;
++      // it is decoded out of process all the same.
++      data_decoder::DecodeImageIsolated(
++          base::as_byte_span(png), data_decoder::mojom::ImageCodec::kDefault,
++          /*shrink_to_fit=*/true, data_decoder::kDefaultMaxSizeInBytes,
++          gfx::Size(), base::BindOnce(&AuraDeInstallResult::OnIconDecoded,
++                                      weak_ptr_factory_.GetWeakPtr()));
++    }
++  }
++  AuraDeInstallResult(const AuraDeInstallResult&) = delete;
++  AuraDeInstallResult& operator=(const AuraDeInstallResult&) = delete;
++  ~AuraDeInstallResult() override = default;
++
++  // ChromeSearchResult:
++  void Open(int event_flags) override {
++    AuraDeAppInstaller::Get()->Install(
++        profile_, {package_, name_, desktop_id_, icon_});
++  }
++
++ private:
++  void OnIconDecoded(const SkBitmap& bitmap) {
++    if (bitmap.drawsNothing()) {
++      return;
++    }
++    // The catalog's pictures are 64 pixels for a 32 point icon: their pixels
++    // stay sharp on a high density screen instead of being blown up.
++    icon_ = gfx::ImageSkia::CreateFromBitmap(
++        bitmap, std::max(1.0f, static_cast<float>(bitmap.width()) /
++                                   kAppIconDimension));
++    SetIcon(IconInfo(ui::ImageModel::FromImageSkia(icon_), kAppIconDimension));
++  }
++
++  const raw_ptr<Profile> profile_;
++  const std::string package_;
++  const std::u16string name_;
++  const std::string desktop_id_;
++  gfx::ImageSkia icon_;
++  base::WeakPtrFactory<AuraDeInstallResult> weak_ptr_factory_{this};
++};
++
++}  // namespace
++
++AuraDeInstallProvider::AuraDeInstallProvider(Profile* profile)
++    : SearchProvider(SearchCategory::kPlayStore), profile_(profile) {}
++
++AuraDeInstallProvider::~AuraDeInstallProvider() = default;
++
++void AuraDeInstallProvider::Start(const std::u16string& query,
++                                  OnSearchResultsCallback on_search_done) {
++  on_search_done_ = std::move(on_search_done);
++  ++generation_;
++  query_ = base::UTF16ToUTF8(query);
++  if (query.size() < kMinQueryLength) {
++    debounce_.Stop();
++    return;
++  }
++  debounce_.Start(FROM_HERE, kDebounce,
++                  base::BindOnce(&AuraDeInstallProvider::Search,
++                                 base::Unretained(this)));
++}
++
++void AuraDeInstallProvider::StopQuery() {
++  ++generation_;
++  debounce_.Stop();
++}
++
++ash::AppListSearchResultType AuraDeInstallProvider::ResultType() const {
++  return ash::AppListSearchResultType::kPlayStoreApp;
++}
++
++void AuraDeInstallProvider::Search() {
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
++       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
++      base::BindOnce(&SearchCatalog, query_),
++      base::BindOnce(&AuraDeInstallProvider::OnSearched,
++                     weak_ptr_factory_.GetWeakPtr(), generation_));
++}
++
++void AuraDeInstallProvider::OnSearched(uint64_t generation,
++                                       std::optional<base::Value> response) {
++  if (generation != generation_ || !response || !on_search_done_) {
++    return;
++  }
++  const base::ListValue* apps =
++      response->GetDict().FindListByDottedPath("data.apps");
++  if (!apps) {
++    return;
++  }
++  Results results;
++  for (const base::Value& entry : *apps) {
++    const base::DictValue* app = entry.GetIfDict();
++    if (!app || app->FindBool("installed").value_or(true)) {
++      continue;
++    }
++    const std::string* package = app->FindString("package");
++    const std::string* name = app->FindString("name");
++    if (!package || !name || package->empty() || name->empty()) {
++      continue;
++    }
++    auto value = [&](const char* key) {
++      const std::string* text = app->FindString(key);
++      return text ? *text : std::string();
++    };
++    // The catalog already ranked them; installed apps outrank them all.
++    const double relevance = 0.5 - 0.05 * results.size();
++    results.push_back(std::make_unique<AuraDeInstallResult>(
++        profile_, *package, *name, value("summary"), value("desktop_id"),
++        value("icon_png"), relevance));
++    if (results.size() >= static_cast<size_t>(kMaxResults)) {
++      break;
++    }
++  }
++  on_search_done_.Run(ResultType(), std::move(results));
++}
++
++}  // namespace app_list
+diff --git a/ash/app_list/views/search_box_view.cc b/ash/app_list/views/search_box_view.cc
+index b31524db00e8..19dede285eeb 100644
+--- a/ash/app_list/views/search_box_view.cc
++++ b/ash/app_list/views/search_box_view.cc
+@@ -56,6 +56,7 @@
+ #include "base/rand_util.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/ash/services/assistant/public/cpp/assistant_browser_delegate.h"
+ #include "chromeos/constants/chromeos_features.h"
+ #include "chromeos/ui/vector_icons/vector_icons.h"
+@@ -167,6 +168,15 @@ constexpr auto kCategories =
+          {AppListSearchControlCategory::kWeb,
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_WEB}});
+ 
++// AuraDE compatibility: without ARC the Play Store category holds the apps
++// from the distribution's catalog that can be installed.
++std::u16string PlayStoreCategoryLabel() {
++  return base::SysInfo::IsRunningOnChromeOS()
++             ? l10n_util::GetStringUTF16(
++                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
++             : u"Apps to install";
++}
++
+ bool IsTrimmedQueryEmpty(const std::u16string& query) {
+   std::u16string trimmed_query;
+   base::TrimWhitespace(query, base::TrimPositions::TRIM_ALL, &trimmed_query);
+@@ -194,8 +204,7 @@ std::u16string GetCategoryName(SearchResult* search_result) {
+       return l10n_util::GetStringUTF16(
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP);
+     case ash::AppListSearchResultCategory::kPlayStore:
+-      return l10n_util::GetStringUTF16(
+-          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE);
++      return PlayStoreCategoryLabel();
+     case ash::AppListSearchResultCategory::kSearchAndAssistant:
+       return l10n_util::GetStringUTF16(
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_SEARCH_AND_ASSISTANT);
+@@ -1717,7 +1726,9 @@ ui::SimpleMenuModel* SearchBoxView::BuildFilterMenuModel() {
+ 
+     filter_menu_model_->AddItemWithIcon(
+         static_cast<int>(category),
+-        l10n_util::GetStringUTF16(kCategories.at(category)),
++        category == AppListSearchControlCategory::kPlayStore
++            ? PlayStoreCategoryLabel()
++            : l10n_util::GetStringUTF16(kCategories.at(category)),
+         GetCheckboxImage(view_delegate_->IsCategoryEnabled(category)));
+   }
+ 
+diff --git a/ash/app_list/views/search_result_list_view.cc b/ash/app_list/views/search_result_list_view.cc
+index 56945795e33a..3f76736dd16b 100644
+--- a/ash/app_list/views/search_result_list_view.cc
++++ b/ash/app_list/views/search_result_list_view.cc
+@@ -24,6 +24,7 @@
+ #include "ash/style/ash_color_id.h"
+ #include "ash/style/typography.h"
+ #include "base/dcheck_is_on.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/constants/chromeos_features.h"
+ #include "ui/accessibility/ax_node_data.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -41,6 +42,15 @@ namespace ash {
+ 
+ namespace {
+ 
++// AuraDE compatibility: without ARC the Play Store category holds the apps
++// from the distribution's catalog that can be installed.
++std::u16string PlayStoreCategoryLabel() {
++  return base::SysInfo::IsRunningOnChromeOS()
++             ? l10n_util::GetStringUTF16(
++                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
++             : u"Apps to install";
++}
++
+ constexpr int kPreferredTitleHorizontalMargins = 16;
+ constexpr int kPreferredTitleTopMargins = 12;
+ constexpr int kPreferredTitleBottomMargins = 4;
+@@ -162,8 +172,7 @@ void SearchResultListView::SetListType(SearchResultListType list_type) {
+           l10n_util::GetStringUTF16(IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP));
+       break;
+     case SearchResultListType::kPlayStore:
+-      title_label_->SetText(l10n_util::GetStringUTF16(
+-          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE));
++      title_label_->SetText(PlayStoreCategoryLabel());
+       break;
+     case SearchResultListType::kSearchAndAssistant:
+       title_label_->SetText(l10n_util::GetStringUTF16(
