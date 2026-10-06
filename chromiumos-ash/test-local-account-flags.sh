@@ -23,6 +23,7 @@ printf '%s\n' "$@" >"${AURADE_TEST_OUTPUT}"
 CHROME
 chmod 755 "${TMP_DIR}/chrome"
 
+EXTRA_ENV=()
 run_launcher() {
     local local_accounts=$1 profile=$2 connected=$3
     rm -f "${TMP_DIR}/output"
@@ -33,6 +34,7 @@ run_launcher() {
         AURADE_CHROME="${TMP_DIR}/chrome" \
         AURADE_CHROME_SANDBOX=/bin/false \
         AURADE_GOOGLE_API_CONF=/dev/null \
+        AURADE_FEATURES_CONF=/dev/null \
         AURADE_TEST_OUTPUT="${TMP_DIR}/output" \
         AURADE_SKIP_SHILL_CHECK=1 \
         AURADE_ENABLE_PIPEWIRE_AUDIO=0 \
@@ -43,6 +45,7 @@ run_launcher() {
         AURADE_OZONE_PLATFORM=x11 \
         AURADE_DISABLE_SANDBOX=1 \
         DBUS_SESSION_BUS_ADDRESS=disabled \
+        "${EXTRA_ENV[@]}" \
         bash "${LAUNCHER}"
     [[ -s ${TMP_DIR}/output ]] || fail 'the launcher never reached Chrome'
 }
@@ -77,5 +80,16 @@ run_launcher 1 plus 1
 [[ $(enabled_flags) == 1 ]] || fail "plus: expected one --enable-features, found $(enabled_flags)"
 enabled_list | grep -Fxq AudioFocusEnforcement || fail 'plus: the Plus features replaced the rest'
 enabled_list | grep -Fxq FeatureManagement16Desks || fail 'plus: the Plus features are missing'
+
+# The DevTools port takes over the desktop with no password, so a session
+# starts without it, and only a test machine that asks for it gets it.
+devtools() { grep -c -- '^--remote-debugging-port=' "${TMP_DIR}/output" || true; }
+run_launcher 1 standard 1
+[[ $(devtools) == 0 ]] || fail 'the DevTools port is open by default, so any program can take over the desktop'
+EXTRA_ENV=(AURADE_ENABLE_DEVTOOLS_PORT=1)
+run_launcher 1 standard 1
+grep -Fxq -- '--remote-debugging-port=9222' "${TMP_DIR}/output" || fail 'a test machine that asks for the DevTools port does not get it'
+grep -Fxq -- '--remote-debugging-address=127.0.0.1' "${TMP_DIR}/output" || fail 'the DevTools port is not limited to this machine'
+EXTRA_ENV=()
 
 echo "local account flags test: PASS"

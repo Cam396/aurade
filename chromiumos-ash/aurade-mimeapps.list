@@ -1,6 +1,11 @@
 # AuraDE's own defaults, read by applications in an AuraDE session
 # (XDG_CURRENT_DESKTOP=AuraDE) before the shared list. Folders open in
-# AuraDE Files, whatever other file manager is installed. A default you
-# choose yourself, in ~/.config/mimeapps.list, wins over this.
+# AuraDE Files, whatever other file manager is installed, and links in the
+# AuraDE browser, whatever other browser is. A default you choose yourself,
+# in ~/.config/mimeapps.list, wins over this.
 [Default Applications]
 inode/directory=aurade-files.desktop
+x-scheme-handler/http=aurade-browser.desktop
+x-scheme-handler/https=aurade-browser.desktop
+text/html=aurade-browser.desktop
+application/xhtml+xml=aurade-browser.desktop

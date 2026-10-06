@@ -25,6 +25,10 @@ Checks a running AuraDE VM over SSH. This script does not build Chromium and
 does not launch/restart the desktop; it verifies the live session that is
 already running.
 
+It reads the desktop through Chrome's DevTools port, which installed systems
+keep closed. Open it on the test VM first: add AURADE_ENABLE_DEVTOOLS_PORT=1
+to /etc/aurade/features.conf and sign in again. Never on a machine in use.
+
 Options:
   --host HOST              VM SSH host (required; or set AURADE_VM_HOST).
   --user USER              VM SSH user. Default: AURADE_VM_USER or root.
@@ -154,7 +158,10 @@ require_remote() {
 }
 
 cdp_targets() {
-  remote 'curl -fsS http://127.0.0.1:9222/json/list'
+  remote 'curl -fsS http://127.0.0.1:9222/json/list' || {
+    echo "The DevTools port is closed; see --help for opening it on a test VM." >&2
+    return 1
+  }
 }
 
 verify_cdp_target() {

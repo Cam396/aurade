@@ -6,9 +6,7 @@ CHROME="${AURADE_CHROME:-/usr/lib/chromiumos-ash/chrome}"
 AURADE_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/aurade"
 USER_DATA_DIR="${AURADE_CHROME_USER_DATA_DIR:-${AURADE_DATA_HOME}/chromiumos-ash}"
 AURADE_OZONE_PLATFORM="${AURADE_OZONE_PLATFORM:-}"
-AURADE_WEB_SESSION_CDP_URL="${AURADE_WEB_SESSION_CDP_URL:-http://127.0.0.1:${AURADE_WEB_SESSION_REMOTE_DEBUGGING_PORT:-9222}}"
 AURADE_WEB_SESSION_ALLOW_CHROME="${AURADE_WEB_SESSION_ALLOW_CHROME:-0}"
-AURADE_WEB_SESSION_OPEN_TIMEOUT="${AURADE_WEB_SESSION_OPEN_TIMEOUT:-4}"
 
 usage() {
     cat >&2 <<'EOF'
@@ -84,15 +82,10 @@ chrome_flags() {
     fi
 }
 
-cdp_open_url() {
-    local url="$1"
-    local endpoint="${AURADE_WEB_SESSION_CDP_URL%/}/json/new?${url}"
-
-    command -v curl >/dev/null 2>&1 || return 1
-    curl --fail --silent --show-error \
-        --connect-timeout "${AURADE_WEB_SESSION_OPEN_TIMEOUT}" \
-        --max-time "${AURADE_WEB_SESSION_OPEN_TIMEOUT}" \
-        --request PUT "${endpoint}" >/dev/null
+# A tab in the running AuraDE browser, asked for on the desktop's session bus.
+desktop_open_url() {
+    command -v aurade-open-url >/dev/null 2>&1 || return 1
+    aurade-open-url "$1" 2>/dev/null
 }
 
 chrome_open_url() {
@@ -102,9 +95,9 @@ chrome_open_url() {
 
     if [ "${AURADE_WEB_SESSION_ALLOW_CHROME}" != "1" ]; then
         cat >&2 <<EOF
-aurade-web-session: AuraDE web session bridge is unavailable.
-Restart AuraDE with AURADE_ENABLE_WEB_SESSION_BRIDGE=1, or set
-AURADE_WEB_SESSION_ALLOW_CHROME=1 for unsafe direct Chrome launching.
+aurade-web-session: the AuraDE desktop is not running, so there is no
+browser to open this in. Set AURADE_WEB_SESSION_ALLOW_CHROME=1 to start
+Chrome on its own instead, which is unsafe while the desktop is running.
 EOF
         return 69
     fi
@@ -138,7 +131,7 @@ open_url() {
         return 2
     fi
 
-    cdp_open_url "${url}" || chrome_open_url "${url}" "${mode}"
+    desktop_open_url "${url}" || chrome_open_url "${url}" "${mode}"
 }
 
 if [ "$#" -lt 2 ]; then

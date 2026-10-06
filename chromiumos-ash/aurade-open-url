@@ -1,0 +1,55 @@
+#!/bin/sh
+# Opens web pages in the AuraDE browser. This is what xdg-open runs for a link
+# on AuraDE, so a link clicked in a Linux application, or one a program opens
+# through the desktop portal, becomes a tab in the browser the desktop is
+# built on: Ash opens it through org.aurade.Browser on the desktop's session
+# bus. Only programs of the signed in person can reach that bus.
+#
+# Usage: aurade-open-url URL-OR-FILE...
+set -eu
+
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+environment="${runtime}/aurade/app-environment"
+
+# The desktop's bus, which is not the user's systemd bus. Ash writes it down
+# for programs started outside the desktop; one started inside it already
+# has it.
+if [ -r "${environment}" ]; then
+    bus="$(sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p' "${environment}" | head -n 1)"
+    if [ -n "${bus}" ]; then
+        DBUS_SESSION_BUS_ADDRESS="${bus}"
+        export DBUS_SESSION_BUS_ADDRESS
+    fi
+fi
+
+if [ "$#" -eq 0 ]; then
+    printf 'usage: aurade-open-url URL-OR-FILE...\n' >&2
+    exit 2
+fi
+
+# A file name as the path of a file URL: %, # and ? would otherwise be read as
+# an escape, a fragment and a query.
+file_url() {
+    printf 'file://%s' "$(printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/#/%23/g' -e 's/?/%3F/g')"
+}
+
+status=0
+for arg in "$@"; do
+    case "${arg}" in
+        *://*) url="${arg}" ;;
+        /*) url="$(file_url "${arg}")" ;;
+        *)
+            if [ ! -e "${arg}" ] && printf '%s' "${arg}" | grep -Eq '^[A-Za-z][A-Za-z0-9+.-]*:'; then
+                # mailto:, javascript: and the like: a link this does not
+                # open, rather than a file of that name.
+                printf 'aurade-open-url: %s is not a web page or a file\n' "${arg}" >&2
+                status=1
+                continue
+            fi
+            url="$(file_url "$(pwd)/${arg}")"
+            ;;
+    esac
+    busctl --user call org.aurade.Browser /org/aurade/Browser \
+        org.aurade.Browser OpenURL s "${url}" || status=1
+done
+exit "${status}"
