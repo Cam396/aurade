@@ -200,8 +200,7 @@ mod tests {
     /// These share one process wide environment variable, so they run under a
     /// lock rather than in parallel.
     fn with_data_home<T>(tag: &str, body: impl FnOnce(&Path) -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env();
         let base = std::env::temp_dir().join(format!("auradefs-tags-{tag}"));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("files")).unwrap();

@@ -630,19 +630,21 @@ pub fn run_with_options(path: &Path) -> Result<()> {
     let options = launch_options(path)?;
     let mut argv = vec![path.display().to_string()];
     argv.extend(options.args.iter().cloned());
-    //: The environment is deliberately not merged into this process's own:
-    //: `spawn` starts a fresh child, and anything it needs has to be on that
-    //: child's command line or in its own environment.
-    for pair in &options.env {
-        if let Some((name, value)) = pair.split_once('=') {
-            unsafe { std::env::set_var(name, value) };
-        }
-    }
+    //: The variables go to the child alone. Setting them on this process
+    //: never reached a program started in its own scope, and without one
+    //: they stayed behind for every program started after it.
+    let env = options
+        .env
+        .iter()
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
     crate::apps::spawn(&crate::apps::Launch {
         argv,
         cwd: path.parent().map(Path::to_path_buf),
         in_terminal: options.in_terminal,
         hold: options.in_terminal,
+        env,
         ..Default::default()
     })
 }
@@ -882,6 +884,8 @@ mod tests {
 
     #[test]
     fn the_backdrop_sample_is_small_and_keeps_the_proportions() {
+        let _guard = crate::test_env();
+        let _config = crate::RestoreVar::new("XDG_CONFIG_HOME");
         let base = std::env::temp_dir().join("auradefs-system-sample");
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
@@ -905,6 +909,9 @@ mod tests {
 
     #[test]
     fn setting_and_reading_the_wallpaper_uses_the_sessions_own_file() {
+        let _guard = crate::test_env();
+        let _config = crate::RestoreVar::new("XDG_CONFIG_HOME");
+        let _wallpaper = crate::RestoreVar::new("AURADE_WALLPAPER");
         let base = std::env::temp_dir().join("auradefs-system-wall-set");
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();

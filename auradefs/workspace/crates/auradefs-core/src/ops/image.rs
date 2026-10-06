@@ -472,8 +472,7 @@ mod tests {
         std::fs::create_dir_all(base.join("cache")).unwrap();
         let file = jpeg_facing(&base, "photo.jpg", 1);
 
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env();
         let before_var = std::env::var("XDG_CACHE_HOME").ok();
         unsafe { std::env::set_var("XDG_CACHE_HOME", base.join("cache")) };
 

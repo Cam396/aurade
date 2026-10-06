@@ -652,6 +652,9 @@ mod tests {
     /// process wide environment, and two of them in parallel would fight.
     #[test]
     fn pinning_unpinning_reordering_and_the_recent_list_all_write_correctly() {
+        let _guard = crate::test_env();
+        let _config = crate::RestoreVar::new("XDG_CONFIG_HOME");
+        let _data = crate::RestoreVar::new("XDG_DATA_HOME");
         let base = std::env::temp_dir().join("auradefs-places-write");
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("config")).unwrap();
