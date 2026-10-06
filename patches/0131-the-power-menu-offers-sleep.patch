@@ -1,0 +1,99 @@
+diff --git a/ash/system/unified/power_button.cc b/ash/system/unified/power_button.cc
+index f792fda51e81..f04144d80564 100644
+--- a/ash/system/unified/power_button.cc
++++ b/ash/system/unified/power_button.cc
+@@ -4,7 +4,11 @@
+ 
+ #include "ash/system/unified/power_button.h"
+ 
++#include <algorithm>
++#include <atomic>
++#include <string>
+ #include <utility>
++#include <vector>
+ 
+ #include "ash/constants/quick_settings_catalogs.h"
+ #include "ash/public/cpp/ash_view_ids.h"
+@@ -24,9 +28,15 @@
+ #include "ash/system/unified/unified_system_tray_controller.h"
+ #include "ash/system/unified/user_chooser_detailed_view_controller.h"
+ #include "ash/wm/lock_state_controller.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
+ #include "base/i18n/rtl.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/strings/string_split.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/system/sys_info.h"
++#include "base/task/thread_pool.h"
++#include "chromeos/dbus/power/power_manager_client.h"
+ #include "components/user_manager/user_type.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+@@ -60,6 +70,25 @@
+ namespace ash {
+ 
+ namespace {
++
++// AuraDE: Sleep, which a Chromebook leaves to its lid and a Linux desktop
++// offers in its power menu. Its command is local to this menu, so it needs no
++// view id. Whether the computer can sleep is read once, off the UI thread,
++// and the item shows only when it can.
++constexpr int kAuraDeSleepCommand = 0x5a5e;
++std::atomic<int> g_can_sleep{-1};
++
++void ReadCanSleep() {
++  std::string states;
++  if (!base::ReadFileToString(base::FilePath("/sys/power/state"), &states)) {
++    g_can_sleep = 0;
++    return;
++  }
++  const std::vector<std::string> parts = base::SplitString(
++      states, " \n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
++  g_can_sleep = std::ranges::find(parts, "mem") != parts.end() ? 1 : 0;
++}
++
+ // Rounded corner constants.
+ static constexpr int kRoundedCornerRadius = 16;
+ static constexpr int kNonRoundedCornerRadius = 4;
+@@ -226,6 +255,13 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+             QsButtonCatalogName::kPowerLockMenuButton);
+         Shell::Get()->session_controller()->LockScreen();
+         break;
++      case kAuraDeSleepCommand:
++        // The power manager tells the desktop it is about to sleep first,
++        // which locks it when the user has asked for that.
++        chromeos::PowerManagerClient::Get()->RequestSuspend(
++            std::nullopt, /*duration_secs=*/0,
++            power_manager::REQUEST_SUSPEND_DEFAULT);
++        break;
+       default:
+         NOTREACHED();
+     }
+@@ -289,6 +325,15 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+       context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+     }
+ 
++    if (!is_on_login_screen && !base::SysInfo::IsRunningOnChromeOS() &&
++        g_can_sleep == 1 && chromeos::PowerManagerClient::Get()) {
++      context_menu_model_->AddItemWithIcon(
++          kAuraDeSleepCommand, u"Sleep",
++          ui::ImageModel::FromVectorIcon(kLockScreenTimeLimitMoonIcon,
++                                         cros_tokens::kCrosSysOnSurface,
++                                         kTrayTopShortcutButtonIconSize));
++    }
++
+     if (show_power_off_button) {
+       context_menu_model_->AddItemWithIcon(
+           VIEW_ID_QS_POWER_OFF_MENU_BUTTON,
+@@ -401,6 +446,10 @@ PowerButton::PowerButton(UnifiedSystemTrayController* tray_controller)
+       context_menu_(std::make_unique<MenuController>(/*button=*/this)),
+       tray_controller_(tray_controller) {
+   CHECK(tray_controller_);
++  if (g_can_sleep < 0 && !base::SysInfo::IsRunningOnChromeOS()) {
++    base::ThreadPool::PostTask(FROM_HERE, {base::MayBlock()},
++                               base::BindOnce(&ReadCanSleep));
++  }
+ 
+   SetID(VIEW_ID_QS_POWER_BUTTON);
+   SetLayoutManager(std::make_unique<views::FillLayout>());
