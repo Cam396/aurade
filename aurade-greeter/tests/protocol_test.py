@@ -484,6 +484,17 @@ def test_started_outside_greetd_says_so() -> None:
             os.environ["GREETD_SOCK"] = saved
 
 
+def test_the_bare_password_question_is_not_repeated() -> None:
+    # The field is a password field already; PAM's "Password: " under it read
+    # like a label that had slipped. Anything more particular still shows.
+    for text in ("Password: ", "password:", "  Password  ", ""):
+        check(not P.Prompt(P.SECRET, text).worth_showing,
+              f"{text!r} is shown under the field, where it repeats the field")
+    for text in ("Verification code: ", "PIN for smart card: ", "Password expired."):
+        check(P.Prompt(P.SECRET, text).worth_showing,
+              f"{text!r} is hidden, and it says something the field does not")
+
+
 def main() -> int:
     for name, function in sorted(globals().items()):
         if name.startswith("test_") and callable(function):
