@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## 1.1.3, unreleased
+## 1.2.0, unreleased
 
 ### Added
 - Encrypted installs ask for the disk passphrase on a graphical unlock
