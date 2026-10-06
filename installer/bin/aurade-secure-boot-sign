@@ -56,4 +56,16 @@ sign_loader() {
 }
 
 sign_loader
-sign_in_place "${ROOT}/boot/vmlinuz-linux"
+# Every kernel on the machine: the standard one, and the one a Surface boots
+# by default. An unsigned kernel is one Secure Boot refuses to start.
+shopt -s nullglob
+kernels=("${ROOT}"/boot/vmlinuz-*)
+((${#kernels[@]} > 0)) || {
+  printf '%s\n' 'aurade-secure-boot-sign: no kernel in /boot' >&2
+  exit 1
+}
+status=0
+for kernel in "${kernels[@]}"; do
+  sign_in_place "$kernel" || status=1
+done
+exit "$status"

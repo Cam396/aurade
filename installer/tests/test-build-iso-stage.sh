@@ -128,6 +128,7 @@ done
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-staging.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-wifi.sh ]]
 [[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-keyboard.sh ]]
+[[ -r $TMP/work/profile/airootfs/usr/local/lib/aurade/aurade-hardware.sh ]]
 grep -Fxq DisableDownloadTimeout "$ROOT/installer/archiso/pacman.conf"
 grep -Fq 'MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}' "$ROOT/installer/build-iso.sh"
 grep -Fq 'iso_bytes=' "$ROOT/installer/build-iso.sh"

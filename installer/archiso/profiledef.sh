@@ -42,6 +42,7 @@ file_permissions=(
   ["/usr/local/lib/aurade/aurade-questions.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-wifi.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-keyboard.sh"]=0:0:644
+  ["/usr/local/lib/aurade/aurade-hardware.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-tui.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-copy.sh"]=0:0:644
   ["/usr/local/lib/aurade/aurade-wait.sh"]=0:0:644

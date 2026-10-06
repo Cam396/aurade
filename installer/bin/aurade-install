@@ -41,6 +41,15 @@ KEYBOARD_LIB=${AURADE_KEYBOARD_LIB:-/usr/local/lib/aurade/aurade-keyboard.sh}
 # shellcheck source=../lib/aurade-keyboard.sh
 . "$KEYBOARD_LIB"
 
+HARDWARE_LIB=${AURADE_HARDWARE_LIB:-/usr/local/lib/aurade/aurade-hardware.sh}
+[[ -r $HARDWARE_LIB ]] || HARDWARE_LIB="$SELF_DIR/../lib/aurade-hardware.sh"
+[[ -r $HARDWARE_LIB ]] || {
+  printf '%s: hardware library not found\n' "${0##*/}" >&2
+  exit 1
+}
+# shellcheck source=../lib/aurade-hardware.sh
+. "$HARDWARE_LIB"
+
 # The install fingerprint. Optional: a machine that cannot find the library
 # gets an install without a mark on it, which is a missing file in /etc and
 # nothing else.
@@ -102,6 +111,7 @@ REDUCE_MOTION=no
 CURSOR_SIZE=24
 SPACING=normal
 TYPEFACE=system
+HARDWARE_SUPPORT=${AURADE_HARDWARE_SUPPORT:-auto}
 SWAP_SIZE=auto
 LAYOUT=wipe
 SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
@@ -169,6 +179,8 @@ Storage and identity:
   --swap-size SIZE             auto (default), hibernate, or a size like 8G
   --staging MODE               auto (default), workspace or target
   --layout MODE                wipe (default) or alongside
+  --hardware-support MODE      auto (default): drivers this machine needs, such as
+                               broadcom-wl-dkms; off: stock packages only
   --secure-boot-key FILE       PEM private key for an already-enrolled Secure Boot db key
   --secure-boot-cert FILE      PEM certificate matching --secure-boot-key
   --secure-boot-enroll MODE    manual (default) or if-safe for setup-mode enrollment
@@ -1004,6 +1016,7 @@ while (($#)); do
     --cursor-size) CURSOR_SIZE=${2:?}; shift 2 ;;
     --spacing) SPACING=${2:?}; shift 2 ;;
     --typeface) TYPEFACE=${2:?}; shift 2 ;;
+    --hardware-support) HARDWARE_SUPPORT=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
     --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
     --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
@@ -1050,6 +1063,7 @@ case $TEXT_SCALE in 100|125|150) ;; *) die '--text-scale must be 100, 125 or 150
 case $CURSOR_SIZE in 24|32|48) ;; *) die '--cursor-size must be 24, 32 or 48' ;; esac
 case $SPACING in normal|roomy|roomier) ;; *) die '--spacing must be normal, roomy or roomier' ;; esac
 case $TYPEFACE in system|atkinson|opendyslexic) ;; *) die '--typeface must be system, atkinson or opendyslexic' ;; esac
+case $HARDWARE_SUPPORT in auto|off) ;; *) die '--hardware-support must be auto or off' ;; esac
 
 case $SWAP in
   none|file|zram) ;;
@@ -1213,6 +1227,19 @@ case $TYPEFACE in
   atkinson)     BASE_PACKAGES+=(ttf-atkinson-hyperlegible) ;;
   opendyslexic) BASE_PACKAGES+=(otf-opendyslexic-nerd) ;;
 esac
+# What this machine needs beyond what every install carries, such as
+# Broadcom's own Wi-Fi driver. Worked out from the machine the installer runs
+# on; --hardware-support off is for an install made for a different machine.
+if [[ $HARDWARE_SUPPORT == auto ]]; then
+  aurade_hw_detect
+else
+  HW_PACKAGES=() HW_NOTES=() HW_SUMMARY=generic
+fi
+log "hardware: ${HW_SUMMARY}"
+for note in "${HW_NOTES[@]}"; do
+  log "hardware: $note"
+done
+BASE_PACKAGES+=("${HW_PACKAGES[@]}")
 
 # The tools this shape needs, checked in both modes.
 #
@@ -1925,7 +1952,12 @@ if (( SECURE_BOOT_SIGN )); then
   [[ -r $secure_boot_hook ]] || secure_boot_hook="$SELF_DIR/../secure-boot/90-aurade-secure-boot.hook"
   run install -Dm0644 "$secure_boot_hook" \
     "$MOUNTPOINT/usr/share/libalpm/hooks/90-aurade-secure-boot.hook"
-  secure_boot_sign_in_place "$MOUNTPOINT/boot/vmlinuz-linux"
+  # Every kernel on the machine, so a second one installed later, such as
+  # linux-lts, is not one Secure Boot refuses to start.
+  for kernel_image in "$MOUNTPOINT"/boot/vmlinuz-*; do
+    [[ -e $kernel_image ]] || kernel_image=$MOUNTPOINT/boot/vmlinuz-linux
+    secure_boot_sign_in_place "$kernel_image"
+  done
 fi
 aurade_journal_ok configure
 

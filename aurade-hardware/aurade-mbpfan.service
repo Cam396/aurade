@@ -1,0 +1,18 @@
+[Unit]
+Description=Fan control for Intel Macs
+Documentation=man:mbpfan(8)
+# An Intel Mac leaves its fans to the operating system, and without this they
+# idle at their slowest while the machine heats up. Apple's System Management
+# Controller is what an Intel Mac has and nothing else does, so on any other
+# machine this never starts.
+ConditionPathExists=/sys/devices/platform/applesmc.768
+After=sysinit.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mbpfan -f
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

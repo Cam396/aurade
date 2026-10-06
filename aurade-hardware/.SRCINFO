@@ -1,0 +1,27 @@
+pkgbase = aurade-hardware
+	pkgdesc = Hardware support for AuraDE on Surface laptops and Intel Macs
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/Cam396/aurade
+	arch = x86_64
+	license = BSD-3-Clause
+	license = GPL-3.0-only
+	depends = glibc
+	depends = mkinitcpio
+	depends = systemd
+	provides = mbpfan
+	conflicts = mbpfan
+	backup = etc/mkinitcpio.conf.d/90-aurade-hardware.conf
+	backup = etc/mbpfan.conf
+	source = mbpfan-2.4.0.tar.gz::https://github.com/linux-on-mac/mbpfan/archive/refs/tags/v2.4.0.tar.gz
+	source = 90-aurade-hardware.conf
+	source = aurade-mbpfan.service
+	source = test-hardware-initramfs.sh
+	source = LICENSE
+	sha256sums = e1cdcffaba52be215ae40a8568949190866d500d6ae2a1e96b71ab5372f3580b
+	sha256sums = e6501fe9f55ce7061e94ff5f1baf5bd19f0164251dfa9d1d9976d9f6fb64e554
+	sha256sums = a98e4a2dee959fcfe4ddb27e050281a582c86c75ef5941d283719f3f28b6ba35
+	sha256sums = 0f7b4eb46dedf54eab65ff4e47ccc733cac6f73ec79ffbef19ea43c97864c975
+	sha256sums = add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2
+
+pkgname = aurade-hardware

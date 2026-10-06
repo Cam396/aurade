@@ -4,6 +4,21 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
 ## 1.1.3, unreleased
 
+### Added
+- A hardware package, aurade-hardware, on every install. Its pieces switch
+  themselves on only on the machines that need them:
+  - On an encrypted install, the built-in keyboard of a Surface laptop, or of
+    a 2015 to 2017 MacBook or MacBook Pro, works at the disk unlock prompt.
+    Before, nobody could type the passphrase on them.
+  - Intel Macs get fan control. Without it their fans stayed at their
+    slowest while the machine heated up.
+- Broadcom Wi-Fi that only works with Broadcom's own driver, as in most Intel
+  Macs, gets that driver, built for the installed kernel. Other Broadcom chips
+  keep the open one.
+- The installer says what it found: on a Surface, that the touchscreen and pen
+  need a kernel AuraDE does not install; on a Mac with Apple's T2 chip, that
+  the built-in keyboard, trackpad and Wi-Fi do too.
+
 ### Changed
 - Setup starts the display name with your Linux account's full name, and an
   empty name field shows your login name.
@@ -12,9 +27,10 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
-- Wi-Fi firmware for Marvell chips is on the installer and on installed
-  systems. Arch stopped including it by default, and the Surface Laptop 1
-  and 2, Pro 4 to 7 and Book 1 and 2 need it.
+- Wi-Fi works on Surfaces. Their Marvell Wi-Fi firmware is on the installer
+  and on installed systems: Arch stopped including it by default, and without
+  it the Surface Laptop 1 and 2, Pro 4 to 6 and Book 1 and 2 had no Wi-Fi at
+  all, whatever the kernel.
 - The installer has sound firmware for recent Intel laptops, so speech mode
   is no longer silent on them.
 - With no working Wi-Fi, the installer suggests USB tethering from a phone,
