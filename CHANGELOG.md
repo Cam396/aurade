@@ -40,7 +40,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   the chips the open drivers cannot run, and uses it only on those.
 - The installer says what it found: on a Surface, that the touchscreen and pen
   need a kernel AuraDE does not install; on a Mac with Apple's T2 chip, that
-  the built-in keyboard, trackpad and Wi-Fi do too.
+  the built-in keyboard, trackpad and Wi-Fi do too; on a Chromebook, that its
+  speakers and microphone may need a fix made for that model, and where it is.
 
 ### Changed
 - Text on standard resolution monitors is drawn with subpixels, so it is

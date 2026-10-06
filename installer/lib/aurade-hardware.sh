@@ -23,6 +23,10 @@
 #   Surface touch    The touchscreen and pen need the linux-surface kernel,
 #                    which AuraDE does not install. Said, so nobody thinks the
 #                    install broke it.
+#   Chromebook sound Speakers and microphones need per-model sound settings
+#                    that Arch does not carry, and on some models the wrong
+#                    ones can damage the speakers. Said, with where the fix
+#                    for each model is, rather than guessed at.
 #
 # Everything reads under AURADE_HW_ROOT (default /), so tests can describe a
 # machine with a directory of files.
@@ -91,6 +95,7 @@ aurade_hw_detect() {
     HW_NOTES+=("this is a Surface: Wi-Fi, keyboard, touchpad and battery work with the standard kernel; the touchscreen and pen need the linux-surface kernel, which AuraDE does not install")
   elif aurade_hw_is_chromebook; then
     HW_SUMMARY="Chromebook ($(_aurade_hw_dmi product_name))"
+    HW_NOTES+=("this is a Chromebook: Wi-Fi works, and its speakers and microphone may not yet; the fix is per model, at docs.chrultrabook.com, and on some models a wrong one can damage the speakers, so follow its steps for this model only")
   elif aurade_hw_is_mac; then
     HW_SUMMARY="Mac ($(_aurade_hw_dmi product_name))"
   fi
