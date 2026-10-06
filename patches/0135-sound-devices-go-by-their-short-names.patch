@@ -1,0 +1,45 @@
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+index 4e2863538237..cc074d079a3c 100644
+--- a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
++++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+@@ -191,6 +191,15 @@ std::string FirstNonEmpty(const std::vector<std::string>& values) {
+   return std::string();
+ }
+ 
++// AuraDE: a name read from the PCI ids database, such as "ES1371/ES1373 /
++// Creative Labs CT2518 (Audio PCI 64V/128/5200 / ...)", makes a notification
++// that runs to four lines and a settings row that cannot be read. The sound
++// card's own short name says the same thing.
++bool IsUnwieldyName(const std::string& name) {
++  return name.size() > 40 || name.find(" / ") != std::string::npos ||
++         name.find('[') != std::string::npos;
++}
++
+ std::string DeviceIdentityKey(bool is_input,
+                               const std::string& node_name,
+                               const spa_dict* props) {
+@@ -509,6 +518,14 @@ struct PipeWireCrasAudioClient::State {
+     if (description.empty()) {
+       description = DictString(props, PW_KEY_DEVICE_DESCRIPTION);
+     }
++    const std::string card_name =
++        FirstNonEmpty({DictString(props, "device.nick"),
++                       DictString(props, SPA_KEY_API_ALSA_CARD_NAME)});
++    if (IsUnwieldyName(description) && !card_name.empty()) {
++      const std::string profile =
++          DictString(props, "device.profile.description");
++      description = profile.empty() ? card_name : card_name + " " + profile;
++    }
+     if (!description.empty()) {
+       node.description = description;
+     }
+@@ -521,6 +538,9 @@ struct PipeWireCrasAudioClient::State {
+         node.description,
+         node.node_name,
+     });
++    if (IsUnwieldyName(node.device_name) && !card_name.empty()) {
++      node.device_name = card_name;
++    }
+     node.device_bus = DictString(props, PW_KEY_DEVICE_BUS);
+     node.device_form_factor = DictString(props, PW_KEY_DEVICE_FORM_FACTOR);
+     node.device_api = DictString(props, PW_KEY_DEVICE_API);
