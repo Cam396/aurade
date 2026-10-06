@@ -1,0 +1,6 @@
+# Broadcom's wl for the Broadcom chips only it drives, the Wi-Fi in most Intel
+# Macs among them: BCM4331, BCM43227, BCM43228, BCM43142, BCM4360 and BCM4352.
+# By name with modprobe, because its own alias would load it for every Wi-Fi
+# card and is blacklisted, and udev's own loader would honour that. The list
+# is AURADE_HW_WL_DEVICES in /usr/local/lib/aurade/aurade-hardware.sh.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x14e4", ATTR{device}=="0x4331|0x4358|0x4359|0x4365|0x43a0|0x43b1", RUN+="/usr/bin/modprobe wl"
