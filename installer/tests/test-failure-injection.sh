@@ -151,6 +151,7 @@ cp "$ROOT/installer/lib/aurade-journal.sh" "$TMP/engine/lib/aurade-journal.sh"
 cp "$ROOT/installer/lib/aurade-staging.sh" "$TMP/lib/aurade-staging.sh"
 cp "$ROOT/installer/lib/aurade-wifi.sh" "$TMP/lib/aurade-wifi.sh"
 cp "$ROOT/installer/lib/aurade-keyboard.sh" "$TMP/lib/aurade-keyboard.sh"
+cp "$ROOT/installer/lib/aurade-hardware.sh" "$TMP/lib/aurade-hardware.sh"
 chmod 0755 "$TMP/engine/aurade-install"
 if AURADE_JOURNAL_LIB="$TMP/engine/lib/aurade-journal.sh" \
   "$TMP/engine/aurade-install" "${common[@]}" >"$TMP/helper.out" 2>&1; then
