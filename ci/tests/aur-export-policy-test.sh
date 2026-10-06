@@ -15,7 +15,7 @@ AURADE_AUR_OUTPUT="$TMP/aur" AURADE_AUR_REF=v9.9.9 \
   "$ROOT/ci/export-aur-bundles.sh" >"$TMP/export.out"
 
 count=$(find "$TMP/aur" -mindepth 1 -maxdepth 1 -type d | wc -l)
-[[ $count -eq 14 ]] || fail "expected 14 AUR package directories, found $count"
+[[ $count -eq 15 ]] || fail "expected 15 AUR package directories, found $count"
 
 # The binary package is the release build, and its dependencies are the real
 # package's, read rather than copied.

@@ -36,6 +36,7 @@ SOURCE_PACKAGES=(
   aurade-system-helper
   shill-nm-adapter
   aurade-power
+  aurade-hardware
   aurade-host-bridge
   aurade-login
   aurade-greeter

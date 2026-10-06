@@ -150,6 +150,7 @@ rsync -a --delete --exclude __pycache__ \
   "${REPO_ROOT}/aurade-account-helper" \
   "${REPO_ROOT}/aurade-system-helper" \
   "${REPO_ROOT}/aurade-power" \
+  "${REPO_ROOT}/aurade-hardware" \
   "${REPO_ROOT}/aurade-host-bridge" \
   "${REPO_ROOT}/aurade-login" \
   "${REPO_ROOT}/aurade" \

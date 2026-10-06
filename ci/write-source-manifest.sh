@@ -64,6 +64,7 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
     aurade-system-helper
     shill-nm-adapter
     aurade-power
+    aurade-hardware
     aurade-host-bridge
     chromiumos-ash
     aurade-login

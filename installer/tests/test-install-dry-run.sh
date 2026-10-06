@@ -43,6 +43,10 @@ printf '%s\n' "\$6\$audit\$not-a-plaintext-password" >"$TMP/password.hash"
 printf '%s\n' 'audit-passphrase' >"$TMP/luks.passphrase"
 chmod 0600 "$TMP/password.hash" "$TMP/luks.passphrase"
 export AURADE_JOURNAL_PATH="$TMP/journal.jsonl" AURADE_JOURNAL_RAW="$TMP/install.log"
+# Whatever machine runs the test, the install it plans is for a machine with
+# no special hardware, unless a case says otherwise.
+mkdir -p "$TMP/generic-hw"
+export AURADE_HW_ROOT="$TMP/generic-hw"
 
 common=(
   --target /dev/aurade-test-disk
@@ -427,6 +431,27 @@ grep -Fq -- 'sgdisk --largest-new=0' "$TMP/alongside.out"
 grep -Fq -- 'keeping the existing EFI system partition' "$TMP/alongside.out"
 grep -Fq -- 'INSTALL:/dev/aurade-test-disk' "$TMP/alongside.out"
 grep -Fq -- 'ERASE:/dev/aurade-test-disk' "$TMP/plain.out"
+
+# A MacBook whose Wi-Fi only Broadcom's own driver runs: the driver, and the
+# headers it is built against, join the package set. Switched off, and on any
+# other machine, they do not.
+mkdir -p "$TMP/macbook/sys/class/dmi/id" "$TMP/macbook/sys/bus/pci/devices/0000:03:00.0"
+printf '%s\n' 'Apple Inc.' >"$TMP/macbook/sys/class/dmi/id/sys_vendor"
+printf '%s\n' 'MacBookPro11,1' >"$TMP/macbook/sys/class/dmi/id/product_name"
+printf '0x14e4\n' >"$TMP/macbook/sys/bus/pci/devices/0000:03:00.0/vendor"
+printf '0x43a0\n' >"$TMP/macbook/sys/bus/pci/devices/0000:03:00.0/device"
+if ! AURADE_HW_ROOT="$TMP/macbook" "$ROOT/installer/bin/aurade-install" "${common[@]}" \
+    >"$TMP/macbook.out" 2>&1; then
+  cat "$TMP/macbook.out" >&2
+  exit 1
+fi
+grep -Fq -- 'hardware: Mac (MacBookPro11,1)' "$TMP/macbook.out"
+grep -Eq -- '--needed --noconfirm .* broadcom-wl-dkms linux-headers' "$TMP/macbook.out"
+AURADE_HW_ROOT="$TMP/macbook" "$ROOT/installer/bin/aurade-install" "${common[@]}" \
+  --hardware-support off >"$TMP/macbook-off.out" 2>&1
+refute grep -Fq -- 'broadcom-wl' "$TMP/macbook-off.out"
+refute grep -Fq -- 'broadcom-wl' "$TMP/plain.out"
+grep -Fq -- 'hardware: generic' "$TMP/plain.out"
 
 refuses '--filesystem must be btrfs, ext4 or xfs' --filesystem zfs
 refuses '--swap must be none, file or zram' --swap partition

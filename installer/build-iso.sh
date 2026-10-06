@@ -220,6 +220,7 @@ install -Dm0644 "$ROOT/lib/aurade-staging.sh" "$STAGE/airootfs/usr/local/lib/aur
 install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-questions.sh"
 install -Dm0644 "$ROOT/lib/aurade-wifi.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-wifi.sh"
 install -Dm0644 "$ROOT/lib/aurade-keyboard.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-keyboard.sh"
+install -Dm0644 "$ROOT/lib/aurade-hardware.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-hardware.sh"
 install -Dm0644 "$ROOT/lib/aurade-tui.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tui.sh"
 install -Dm0644 "$ROOT/lib/aurade-copy.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-copy.sh"
 install -Dm0644 "$ROOT/lib/aurade-wait.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-wait.sh"
