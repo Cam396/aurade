@@ -49,6 +49,10 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - Linux app windows have the same frame as the desktop's own.
 - Sound devices go by their short names in the volume menu, instead of long
   hardware descriptions.
+- The volume and mute buttons set the sound card's own volume, the one Linux
+  mixers show. Before, the desktop turned down a second, software volume of
+  its own on top of it, so the two never agreed and sound was quieter than
+  either said.
 - The volume bubble only shows when somebody changes the volume, not at every
   start of the desktop.
 - Files: double click and Enter open a file, Open with lists the apps that
