@@ -1,0 +1,56 @@
+diff --git a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+index 047fb816b5d8..4e2863538237 100644
+--- a/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
++++ b/chromeos/ash/components/dbus/audio/pipewire_cras_audio_client.cc
+@@ -297,12 +297,16 @@ struct PipeWireCrasAudioClient::State {
+     std::string node_latency;
+     int32_t volume = 100;
+     bool muted = false;
++    // Whether the node has reported its volume and mute yet. The first
++    // report is where the node starts, not a change anybody made.
++    bool props_seen = false;
+     uint64_t plugged_time = 0;
+     raw_ptr<pw_node> node = nullptr;
+     spa_hook listener = {};
+   };
+ 
+   struct NodeParamChange {
++    bool initial = false;
+     bool is_input = false;
+     bool is_active = false;
+     bool volume_changed = false;
+@@ -567,6 +571,8 @@ struct PipeWireCrasAudioClient::State {
+     bool muted = node.muted;
+     const int32_t previous_volume = node.volume;
+     const bool previous_muted = node.muted;
++    const bool first_report = !node.props_seen;
++    node.props_seen = true;
+     uint32_t child_size = 0;
+     uint32_t child_type = 0;
+     uint32_t n_values = 0;
+@@ -593,8 +599,13 @@ struct PipeWireCrasAudioClient::State {
+     change.is_active =
+         node.cras_node_id ==
+         (node.is_input ? active_input_node_id : active_output_node_id);
+-    change.volume_changed = previous_volume != node.volume;
+-    change.mute_changed = previous_muted != node.muted;
++    // AuraDE: a node's first report is not announced as a change. Ash shows
++    // the volume bubble for every output volume change, so it popped up at
++    // every start of the desktop, and whenever a device came back, with
++    // nobody touching the volume. The node list update carries it instead.
++    change.initial = first_report;
++    change.volume_changed = !first_report && previous_volume != node.volume;
++    change.mute_changed = !first_report && previous_muted != node.muted;
+     change.volume = node.volume;
+     change.muted = node.muted;
+     return change;
+@@ -872,6 +883,9 @@ struct PipeWireCrasAudioClient::State {
+       base::AutoLock locked(state->lock);
+       change = state->ApplyPropsParamLocked(*node_data, param);
+     }
++    if (change.initial) {
++      state->PostNodesChangedIfNeeded();
++    }
+     if (change.volume_changed) {
+       if (change.is_input) {
+         state->PostInputNodeGainChanged(change.node_id, change.volume);
