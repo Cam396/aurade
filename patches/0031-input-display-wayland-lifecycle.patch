@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
-index 5df73ce587fe..e35a724eccdb 100644
+index 7877867c0b9b..ced91bb4d9c8 100644
 --- a/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
 +++ b/chrome/browser/ash/events/event_rewriter_delegate_impl.cc
 @@ -13,7 +13,9 @@
@@ -502,10 +502,10 @@ index 5fe3499233c6..a304ddd8bca3 100644
        output.push_back(std::string());
      }
 diff --git a/ui/events/ash/keyboard_capability.cc b/ui/events/ash/keyboard_capability.cc
-index 93b3f1848e95..fe8c3ea9fc75 100644
+index 10eb322c72ed..4f221b792a59 100644
 --- a/ui/events/ash/keyboard_capability.cc
 +++ b/ui/events/ash/keyboard_capability.cc
-@@ -22,6 +22,7 @@
+@@ -23,6 +23,7 @@
  #include "base/containers/fixed_flat_map.h"
  #include "base/containers/fixed_flat_set.h"
  #include "base/containers/flat_set.h"
@@ -513,15 +513,15 @@ index 93b3f1848e95..fe8c3ea9fc75 100644
  #include "base/files/scoped_file.h"
  #include "base/functional/bind.h"
  #include "base/no_destructor.h"
-@@ -86,6 +87,7 @@ constexpr std::string_view kRevenBoardName = "reven";
+@@ -87,6 +88,7 @@ constexpr std::string_view kRevenBoardName = "reven";
  constexpr char kLayoutProperty[] = "CROS_KEYBOARD_TOP_ROW_LAYOUT";
  constexpr char kCustomTopRowLayoutAttribute[] = "function_row_physmap";
  constexpr char kCustomTopRowLayoutProperty[] = "FUNCTION_ROW_PHYSMAP";
 +constexpr char kAuraTopRowLayoutEnv[] = "AURADE_CHROMEOS_TOP_ROW_LAYOUT";
  
- constexpr KeyboardCode kFunctionKeys[] = {
+ constexpr std::array<KeyboardCode, 15> kFunctionKeys = {
      VKEY_F1,  VKEY_F2,  VKEY_F3,  VKEY_F4,  VKEY_F5,
-@@ -230,9 +232,8 @@ std::optional<uint32_t> ConvertScanCodeToEvdevKey(const base::ScopedFD& fd,
+@@ -231,9 +233,8 @@ std::optional<uint32_t> ConvertScanCodeToEvdevKey(const base::ScopedFD& fd,
      return std::nullopt;
    }
  
@@ -533,7 +533,7 @@ index 93b3f1848e95..fe8c3ea9fc75 100644
    UNSAFE_TODO(memcpy(keymap_entry.scancode, &scancode, sizeof(scancode)));
  
    int ret = ioctl(fd.get(), EVIOCGKEYCODE_V2, &keymap_entry);
-@@ -307,6 +308,27 @@ bool ParseKeyboardTopRowLayout(const std::string& layout_string,
+@@ -308,6 +309,27 @@ bool ParseKeyboardTopRowLayout(const std::string& layout_string,
    return true;
  }
  
@@ -561,7 +561,7 @@ index 93b3f1848e95..fe8c3ea9fc75 100644
  // Determines the type of |keyboard_device| we are dealing with.
  // |has_chromeos_top_row| argument indicates that the keyboard's top
  // row has "action" keys (such as back, refresh, etc.) instead of the
-@@ -337,20 +359,20 @@ KeyboardCapability::DeviceType IdentifyKeyboardType(
+@@ -338,20 +360,20 @@ KeyboardCapability::DeviceType IdentifyKeyboardType(
                 : KeyboardCapability::DeviceType::kDeviceInternalKeyboard;
    }
  
@@ -595,7 +595,7 @@ index 93b3f1848e95..fe8c3ea9fc75 100644
  
    const std::vector<std::string> tokens =
        base::SplitString(keyboard_device.name, " .", base::KEEP_WHITESPACE,
-@@ -791,6 +813,11 @@ DeviceType KeyboardCapability::GetDeviceType(int device_id) const {
+@@ -792,6 +814,11 @@ DeviceType KeyboardCapability::GetDeviceType(int device_id) const {
  
  KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(
      const KeyboardDevice& keyboard) const {
@@ -607,7 +607,7 @@ index 93b3f1848e95..fe8c3ea9fc75 100644
    const auto* keyboard_info = GetKeyboardInfo(keyboard);
    if (!keyboard_info) {
      return KeyboardTopRowLayout::kKbdTopRowLayoutDefault;
-@@ -802,6 +829,10 @@ KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(
+@@ -803,6 +830,10 @@ KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(
  KeyboardTopRowLayout KeyboardCapability::GetTopRowLayout(int device_id) const {
    auto keyboard = FindKeyboardWithId(device_id);
    if (!keyboard) {
@@ -643,10 +643,10 @@ index d7468056917b..ddbe2d1588d2 100644
  DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_manager_v1)
  DECLARE_WAYLAND_OBJECT_TRAITS(zwp_primary_selection_device_v1)
 diff --git a/ui/ozone/platform/wayland/host/wayland_event_source.cc b/ui/ozone/platform/wayland/host/wayland_event_source.cc
-index eac1847d02cb..4a41964d0100 100644
+index 5a3773742a97..2f6281a16179 100644
 --- a/ui/ozone/platform/wayland/host/wayland_event_source.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_event_source.cc
-@@ -905,6 +905,26 @@ const WaylandWindow* WaylandEventSource::GetTouchTarget(PointerId id) const {
+@@ -909,6 +909,26 @@ const WaylandWindow* WaylandEventSource::GetTouchTarget(PointerId id) const {
    return it == touch_points_.end() ? nullptr : it->second->window.get();
  }
  

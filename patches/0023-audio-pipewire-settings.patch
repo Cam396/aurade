@@ -361,10 +361,10 @@ index 70f14bd94d59..05dc3e51d7b4 100644
     * Returns true if hfpMicSrState is enabled on the device with id `deviceId`.
     */
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-index 871635959964..51ee7453b0ac 100644
+index 8e836a430606..e651321be328 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-@@ -792,6 +792,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
+@@ -793,6 +793,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
  
    html_source->AddLocalizedStrings(kAudioStrings);
  

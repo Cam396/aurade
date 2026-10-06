@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index 3b533c76924f..d6fdaf14653c 100644
+index 8ae6e1f89f73..4c44da969ab3 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -22,6 +22,8 @@ static_library("dbus") {
@@ -33,7 +33,7 @@ index 3b533c76924f..d6fdaf14653c 100644
      "dlp_files_policy_service_provider_unittest.cc",
      "encrypted_reporting_service_provider_unittest.cc",
      "proxy_resolution_service_provider_unittest.cc",
-@@ -307,6 +315,32 @@ source_set("unit_tests") {
+@@ -308,6 +316,32 @@ source_set("unit_tests") {
    ]
  }
  
@@ -1542,10 +1542,10 @@ index 000000000000..12907e59cb95
 +
 +}  // namespace ash
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index ae68e8655646..8e01bd25d6fb 100644
+index ece06b6ec8e8..3953c7066f64 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -83,6 +83,7 @@
+@@ -89,6 +89,7 @@
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
@@ -1553,7 +1553,7 @@ index ae68e8655646..8e01bd25d6fb 100644
  #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
  #include "chrome/browser/ash/dbus/drive_file_stream_service_provider.h"
  #include "chrome/browser/ash/dbus/encrypted_reporting_service_provider.h"
-@@ -409,6 +410,14 @@ class DBusServices {
+@@ -415,6 +416,14 @@ class DBusServices {
          CrosDBusService::CreateServiceProviderList(
              std::make_unique<ScreenLockServiceProvider>()));
  
@@ -1568,7 +1568,7 @@ index ae68e8655646..8e01bd25d6fb 100644
      virtual_file_request_service_ = CrosDBusService::Create(
          system_bus, chromeos::kVirtualFileRequestServiceName,
          dbus::ObjectPath(chromeos::kVirtualFileRequestServicePath),
-@@ -638,6 +647,7 @@ class DBusServices {
+@@ -644,6 +653,7 @@ class DBusServices {
  
    void PreAshShutdown() {
      // Services depending on ash should be released here.
@@ -1576,7 +1576,7 @@ index ae68e8655646..8e01bd25d6fb 100644
      machine_learning_decision_service_.reset();
    }
  
-@@ -646,6 +656,8 @@ class DBusServices {
+@@ -652,6 +662,8 @@ class DBusServices {
    std::unique_ptr<CrosDBusService> kiosk_info_service_;
    std::unique_ptr<CrosDBusService> printers_service_;
    std::unique_ptr<CrosDBusService> screen_lock_service_;

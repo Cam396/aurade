@@ -1,3 +1,16 @@
+diff --git a/chrome/browser/apps/app_service/publishers/BUILD.gn b/chrome/browser/apps/app_service/publishers/BUILD.gn
+index 4ad3702daf2e..aaa3bbb6a3c8 100644
+--- a/chrome/browser/apps/app_service/publishers/BUILD.gn
++++ b/chrome/browser/apps/app_service/publishers/BUILD.gn
+@@ -111,6 +111,8 @@ source_set("publishers") {
+       "//chromeos/ash/experiences/arc/session",
+       "//chromeos/ash/experiences/guest_os/borealis/motd",
+       "//components/app_constants",
++      "//skia",
++      "//ui/gfx/codec",
+     ]
+ 
+     # Caused by KeyedService dependency. We should revisit to resolve this.
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 index 2e3087a377ae..8c9a2d9abd88 100644
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
@@ -194,16 +207,3 @@ index 2e3087a377ae..8c9a2d9abd88 100644
  
    return false;
  }
-diff --git a/chrome/browser/apps/app_service/publishers/BUILD.gn b/chrome/browser/apps/app_service/publishers/BUILD.gn
-index e4f9e7a15050..6b7057701847 100644
---- a/chrome/browser/apps/app_service/publishers/BUILD.gn
-+++ b/chrome/browser/apps/app_service/publishers/BUILD.gn
-@@ -111,6 +111,8 @@ source_set("publishers") {
-       "//chromeos/ash/experiences/arc/session",
-       "//chromeos/ash/experiences/guest_os/borealis/motd",
-       "//components/app_constants",
-+      "//skia",
-+      "//ui/gfx/codec",
-     ]
- 
-     # Caused by KeyedService dependency. We should revisit to resolve this.

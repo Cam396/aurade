@@ -1,7 +1,8 @@
 diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/resources/chromeos/login/BUILD.gn
+index 9f83cc9c2004..268e98dc1be9 100644
 --- a/chrome/browser/resources/chromeos/login/BUILD.gn
 +++ b/chrome/browser/resources/chromeos/login/BUILD.gn
-@@ -25,6 +25,7 @@
+@@ -25,6 +25,7 @@ build_webui("build") {
      "images/app_icons/a4.svg",
      "images/app_icons/calculator.svg",
      "images/app_icons/camera.svg",
@@ -10,6 +11,7 @@ diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/r
      "images/app_icons/photos.svg",
      "images/app_icons/settings.svg",
 diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
+index 9651009a3f19..03cc023a7899 100644
 --- a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
 +++ b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.html
 @@ -59,6 +59,10 @@
@@ -33,9 +35,10 @@ diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_siz
            <div>
              <img class="app-icon" srcset="[[app.icon]]">
 diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
+index 29e7c34ecfd7..6b5bf6d1a4ec 100644
 --- a/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
 +++ b/chrome/browser/resources/chromeos/login/components/oobe_display_size_selector.ts
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,7 @@ import '//resources/ash/common/cr_elements/cr_slider/cr_slider.js';
  import '//resources/ash/common/cr_elements/icons.html.js';
  
  import {CrSliderElement} from '//resources/ash/common/cr_elements/cr_slider/cr_slider.js';
@@ -43,7 +46,7 @@ diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_siz
  import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
  import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
  import {assert} from 'chrome://resources/js/assert.js';
-@@ -104,6 +105,24 @@
+@@ -104,6 +105,24 @@ export class OobeDisplaySizeSelector extends OobeDisplaySizeSelectorBase {
      this.tickedSizeIndex = currentSizeIndex;
      this.markerCounts = this.availableSizesTicks.length;
  
@@ -68,7 +71,7 @@ diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_siz
      this.apps = [
        {icon: 'images/app_icons/files.svg', name: 'displaySizeFilesApp'},
        {icon: 'images/app_icons/photos.svg', name: 'displaySizePhotosApp'},
-@@ -124,6 +143,11 @@
+@@ -124,6 +143,11 @@ export class OobeDisplaySizeSelector extends OobeDisplaySizeSelectorBase {
      return this.availableSizesTicks[this.tickedSizeIndex].value;
    }
  
@@ -80,10 +83,19 @@ diff --git a/chrome/browser/resources/chromeos/login/components/oobe_display_siz
    // Called upon `tickedSizeIndex` property changes.
    private updatePreviewSizes(): void {
      const selectedSize = this.availableSizesTicks[this.tickedSizeIndex].value;
+diff --git a/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
+new file mode 100644
+index 000000000000..5e0b254b8dba
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
+@@ -0,0 +1 @@
++<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#a)"><path d="M128 191.995c35.346 0 64-28.654 64-64 0-35.347-28.654-64-64-64-35.346 0-64 28.654-64 64 0 35.346 28.654 64 64 64Z" fill="#fff"/><path d="M96.01 183.41a63.681 63.681 0 0 1-23.42-23.43l-.007.004-55.425-96a128.027 128.027 0 0 0 110.841 192.018l55.436-96.018a63.985 63.985 0 0 1-16.465 18.775 64.007 64.007 0 0 1-70.96 4.651Z" fill="#669DF6"/><path d="M191.991 127.984a63.683 63.683 0 0 1-8.581 31.996l.007.004-55.426 96a128.029 128.029 0 0 0 110.872-192H127.991a64 64 0 0 1 64 64Z" fill="#AECBFA"/><path d="M128 180c28.719 0 52-23.281 52-52s-23.281-52-52-52-52 23.281-52 52 23.281 52 52 52Z" fill="#1A73E8"/><path d="M95.99 72.59a63.684 63.684 0 0 1 32.001-8.566v-.008h110.851A128.035 128.035 0 0 0 127.991.026 128.028 128.028 0 0 0 17.13 63.999l55.436 96.018a64.003 64.003 0 0 1 4.65-70.961A64 64 0 0 1 95.991 72.59Z" fill="#1967D2"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h256v256H0z"/></clipPath></defs></svg>
+\ No newline at end of file
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
+index 23707a59344f..75e0a6619157 100644
 --- a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
 +++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
-@@ -12,6 +12,7 @@
+@@ -12,6 +12,7 @@ import '../../components/common_styles/oobe_dialog_host_styles.css.js';
  import '../../components/dialogs/oobe_adaptive_dialog.js';
  import '../../components/oobe_icons.html.js';
  
@@ -91,7 +103,7 @@ diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_a
  import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
  import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
  
-@@ -59,6 +60,12 @@
+@@ -59,6 +60,12 @@ export class AuraLocalAccount extends AuraLocalAccountBase {
    override ready(): void {
      super.ready();
      this.initializeLoginScreen('AuraLocalAccountScreen');
@@ -105,6 +117,7 @@ diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_a
  
    override getOobeUIInitialState(): OobeUiState {
 diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
+index b260a7a79c86..38fbf8a53f21 100644
 --- a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler.cc
 @@ -4,6 +4,11 @@
@@ -119,7 +132,7 @@ diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler
  #include "components/login/localized_values_builder.h"
  
  namespace ash {
-@@ -13,6 +18,34 @@
+@@ -13,6 +18,34 @@ AuraLocalAccountScreenHandler::AuraLocalAccountScreenHandler()
  
  AuraLocalAccountScreenHandler::~AuraLocalAccountScreenHandler() = default;
  
@@ -154,7 +167,7 @@ diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler
  void AuraLocalAccountScreenHandler::DeclareLocalizedValues(
      ::login::LocalizedValuesBuilder* builder) {
    builder->Add("auraLocalAccountTitle", "Set up your local account");
-@@ -20,7 +53,12 @@
+@@ -20,7 +53,12 @@ void AuraLocalAccountScreenHandler::DeclareLocalizedValues(
                 "AuraDE will use this Linux user and store files in your home "
                 "folder.");
    builder->Add("auraLocalAccountDisplayName", "Display name");
@@ -169,9 +182,10 @@ diff --git a/chrome/browser/ui/webui/ash/login/aura_local_account_screen_handler
    builder->Add("auraLocalAccountPasswordHintPlaceholder",
                 "Optional hint shown only on this device");
 diff --git a/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc b/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
+index 80d00332bfb1..b5918f0bf5d6 100644
 --- a/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc
-@@ -32,6 +32,8 @@
+@@ -32,6 +32,8 @@ void DisplaySizeScreenHandler::DeclareLocalizedValues(
    builder->Add("displaySizeCalculatorApp",
                 IDS_OOBE_DISPLAY_SIZE_CALCULATOR_APP_NAME);
    builder->Add("displaySizeCameraApp", IDS_OOBE_DISPLAY_SIZE_CAMERA_APP_NAME);
@@ -180,10 +194,3 @@ diff --git a/chrome/browser/ui/webui/ash/login/display_size_screen_handler.cc b/
    builder->Add("displaySizeFilesApp", IDS_OOBE_DISPLAY_SIZE_FILES_APP_NAME);
    builder->Add("displaySizePhotosApp", IDS_OOBE_DISPLAY_SIZE_PHOTOS_APP_NAME);
    builder->Add("displaySizeSettingsApp",
-diff --git a/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
-new file mode 100644
---- /dev/null
-+++ b/chrome/browser/resources/chromeos/login/images/app_icons/chromium.svg
-@@ -0,0 +1 @@
-+<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#a)"><path d="M128 191.995c35.346 0 64-28.654 64-64 0-35.347-28.654-64-64-64-35.346 0-64 28.654-64 64 0 35.346 28.654 64 64 64Z" fill="#fff"/><path d="M96.01 183.41a63.681 63.681 0 0 1-23.42-23.43l-.007.004-55.425-96a128.027 128.027 0 0 0 110.841 192.018l55.436-96.018a63.985 63.985 0 0 1-16.465 18.775 64.007 64.007 0 0 1-70.96 4.651Z" fill="#669DF6"/><path d="M191.991 127.984a63.683 63.683 0 0 1-8.581 31.996l.007.004-55.426 96a128.029 128.029 0 0 0 110.872-192H127.991a64 64 0 0 1 64 64Z" fill="#AECBFA"/><path d="M128 180c28.719 0 52-23.281 52-52s-23.281-52-52-52-52 23.281-52 52 23.281 52 52 52Z" fill="#1A73E8"/><path d="M95.99 72.59a63.684 63.684 0 0 1 32.001-8.566v-.008h110.851A128.035 128.035 0 0 0 127.991.026 128.028 128.028 0 0 0 17.13 63.999l55.436 96.018a64.003 64.003 0 0 1 4.65-70.961A64 64 0 0 1 95.991 72.59Z" fill="#1967D2"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h256v256H0z"/></clipPath></defs></svg>
-\ No newline at end of file

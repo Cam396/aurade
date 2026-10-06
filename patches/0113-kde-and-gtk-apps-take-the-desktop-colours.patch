@@ -1,5 +1,198 @@
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+index a4963438f3c9..f3e213ba8891 100644
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -25,6 +25,7 @@
+ #include "base/files/file_path.h"
+ #include "base/files/file_path_watcher.h"
+ #include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
+ #include "base/json/json_reader.h"
+ #include "base/process/launch.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -49,10 +50,10 @@
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/window_open_disposition.h"
+-#include "ui/gfx/codec/png_codec.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
++#include "ui/gfx/codec/png_codec.h"
+ 
+ namespace {
+ 
+@@ -77,6 +78,8 @@ constexpr char kAuraDeHostVmName[] = "aurade-host";
+ constexpr char kAuraDeHostContainerName[] = "host";
+ constexpr char kAuraDeHostWaylandSocket[] = "wayland-0";
+ constexpr char kAuraDeNestedWestonPath[] = "/usr/bin/weston";
++constexpr char kAuraDeKdePlatformTheme[] =
++    "/usr/lib/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so";
+ 
+ using apps::AuraDeHostDesktopApp;
+ 
+@@ -846,6 +849,109 @@ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
+   return apps;
+ }
+ 
++// The environment a host application starts in, on top of Ash's own.
++base::EnvironmentMap AuraDeHostAppEnvironment(
++    base::Environment& environment,
++    const std::string& wayland_display) {
++  base::EnvironmentMap env;
++  env["WAYLAND_DISPLAY"] = wayland_display;
++  env["GDK_BACKEND"] = "wayland";
++  // AuraDE compatibility: X11 applications reach exo through
++  // xwayland-satellite, which the session starts on this display once exo is
++  // up. Without it an X11-only application had nowhere to draw and exited.
++  if (std::optional<std::string> x11_display =
++          environment.GetVar("AURADE_HOST_APP_X11_DISPLAY");
++      x11_display && !x11_display->empty()) {
++    env["DISPLAY"] = *x11_display;
++  }
++  env["QT_QPA_PLATFORM"] = "wayland";
++  // AuraDE compatibility: with no platform theme Qt drew every application in
++  // its light default whatever the desktop was. KDE's own theme, when
++  // plasma-integration is installed, reads the colours, fonts and icons Ash
++  // writes for this session and follows them as they change; Qt's portal
++  // theme only knows light from dark. A theme the session already chose,
++  // such as qt6ct, is kept.
++  if (!environment.HasVar("QT_QPA_PLATFORMTHEME")) {
++    env["QT_QPA_PLATFORMTHEME"] =
++        base::PathExists(base::FilePath(kAuraDeKdePlatformTheme))
++            ? "kde"
++            : "xdgdesktopportal";
++  }
++  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
++  // when installed, is the modern one and still takes its colours from the
++  // desktop. A style the session already chose is kept.
++  if (!environment.HasVar("QT_STYLE_OVERRIDE") &&
++      base::PathExists(
++          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
++    env["QT_STYLE_OVERRIDE"] = "Breeze";
++  }
++  // AuraDE compatibility: Ash writes this session's kdeglobals under the
++  // runtime directory, and AuraDE ships Breeze's settings beside the system
++  // defaults, so both go ahead of them. The user's own ~/.config is still
++  // read before any of these.
++  std::string config_dirs = "/usr/share/aurade/xdg:";
++  if (std::optional<std::string> runtime_dir =
++          environment.GetVar("XDG_RUNTIME_DIR");
++      runtime_dir && !runtime_dir->empty()) {
++    config_dirs = *runtime_dir + "/aurade/xdg:" + config_dirs;
++  }
++  std::optional<std::string> system_config_dirs =
++      environment.GetVar("XDG_CONFIG_DIRS");
++  config_dirs += system_config_dirs && !system_config_dirs->empty()
++                     ? *system_config_dirs
++                     : std::string("/etc/xdg");
++  env["XDG_CONFIG_DIRS"] = config_dirs;
++  // AuraDE compatibility: open and save dialogs go through the desktop
++  // portal, which Ash answers with the AuraDE Files picker, so KDE, GTK and
++  // Firefox ask for files the way the rest of the desktop does.
++  env["PLASMA_INTEGRATION_USE_PORTAL"] = "1";
++  env["GTK_USE_PORTAL"] = "1";
++  env["SDL_VIDEODRIVER"] = "wayland";
++  env["MOZ_ENABLE_WAYLAND"] = "1";
++  env["NO_AT_BRIDGE"] = "1";
++  env["XDG_CURRENT_DESKTOP"] = "AuraDE";
++  env["XDG_SESSION_DESKTOP"] = "aurade";
++  env["DESKTOP_SESSION"] = "aurade";
++  return env;
++}
++
++// AuraDE compatibility: the Files app opens files in Linux applications
++// through its file service, a user service that has none of this session's
++// display or bus. It reads them from here, so an application it starts lands
++// on this desktop in the environment the launcher would have given it.
++void WriteAuraDeAppEnvironmentOnThread() {
++  auto environment = base::Environment::Create();
++  std::optional<std::string> runtime_dir =
++      environment->GetVar("XDG_RUNTIME_DIR");
++  if (!runtime_dir || runtime_dir->empty()) {
++    return;
++  }
++  base::EnvironmentMap env = AuraDeHostAppEnvironment(
++      *environment, ChooseAuraDeHostWaylandDisplay(*environment));
++  for (const std::string& name : {std::string("DBUS_SESSION_BUS_ADDRESS"),
++                                 std::string("XDG_RUNTIME_DIR"),
++                                 std::string("XDG_SESSION_TYPE")}) {
++    if (std::optional<std::string> value = environment->GetVar(name);
++        value && !value->empty()) {
++      env[name] = *value;
++    }
++  }
++  std::string contents =
++      "# Written by Ash: what Linux applications start with on this "
++      "desktop.\n";
++  for (const auto& [name, value] : env) {
++    if (value.find('\n') == std::string::npos) {
++      contents += name + "=" + value + "\n";
++    }
++  }
++  const base::FilePath dir = base::FilePath(*runtime_dir).Append("aurade");
++  if (!base::CreateDirectory(dir) ||
++      !base::ImportantFileWriter::WriteFileAtomically(
++          dir.Append("app-environment"), contents)) {
++    LOG(ERROR) << "AuraDE could not write the application environment";
++  }
++}
++
+ void LaunchAuraDeHostAppOnThread(std::string command) {
+   auto environment = base::Environment::Create();
+ 
+@@ -879,38 +985,7 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
+       home && !home->empty()) {
+     options.current_directory = base::FilePath(*home);
+   }
+-  options.environment["WAYLAND_DISPLAY"] = wayland_display;
+-  options.environment["GDK_BACKEND"] = "wayland";
+-  // AuraDE compatibility: X11 applications reach exo through
+-  // xwayland-satellite, which the session starts on this display once exo is
+-  // up. Without it an X11-only application had nowhere to draw and exited.
+-  if (std::optional<std::string> x11_display =
+-          environment->GetVar("AURADE_HOST_APP_X11_DISPLAY");
+-      x11_display && !x11_display->empty()) {
+-    options.environment["DISPLAY"] = *x11_display;
+-  }
+-  options.environment["QT_QPA_PLATFORM"] = "wayland";
+-  // AuraDE compatibility: with no platform theme Qt drew every application in
+-  // its light default whatever the desktop was. Its portal theme reads the
+-  // same light or dark setting GTK does. A theme the session already chose,
+-  // such as qt6ct, is kept.
+-  if (!environment->HasVar("QT_QPA_PLATFORMTHEME")) {
+-    options.environment["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal";
+-  }
+-  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
+-  // when installed, is the modern one and still takes its colours from the
+-  // desktop. A style the session already chose is kept.
+-  if (!environment->HasVar("QT_STYLE_OVERRIDE") &&
+-      base::PathExists(
+-          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
+-    options.environment["QT_STYLE_OVERRIDE"] = "Breeze";
+-  }
+-  options.environment["SDL_VIDEODRIVER"] = "wayland";
+-  options.environment["MOZ_ENABLE_WAYLAND"] = "1";
+-  options.environment["NO_AT_BRIDGE"] = "1";
+-  options.environment["XDG_CURRENT_DESKTOP"] = "AuraDE";
+-  options.environment["XDG_SESSION_DESKTOP"] = "aurade";
+-  options.environment["DESKTOP_SESSION"] = "aurade";
++  options.environment = AuraDeHostAppEnvironment(*environment, wayland_display);
+   // AuraDE compatibility: the language and the GPU are the session's. Both
+   // were pinned here once (C.UTF-8, and software GL with GTK's cairo
+   // renderer), which opened every application in English and drew Firefox on
+@@ -972,6 +1047,9 @@ CrostiniApps::~CrostiniApps() {
+ void CrostiniApps::Initialize() {
+   GuestOSApps::Initialize();
+   if (!base::SysInfo::IsRunningOnChromeOS()) {
++    base::ThreadPool::PostTask(
++        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
++        base::BindOnce(&WriteAuraDeAppEnvironmentOnThread));
+     RefreshAuraDeHostApps();
+     aurade_host_apps_watcher_ = base::SequenceBound<AuraDeHostAppsWatcher>(
+         base::ThreadPool::CreateSequencedTaskRunner(
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index 5284de61d65a..dfe30e4f775d 100644
+index a2402c14db99..1b5c0114a41f 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -28,6 +28,8 @@ static_library("dbus") {
@@ -640,196 +833,3 @@ index 000000000000..62eef7612286
 +}  // namespace ash
 +
 +#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_THEME_EXPORTER_H_
-diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-index a4963438f3c9..f3e213ba8891 100644
---- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-+++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-@@ -25,6 +25,7 @@
- #include "base/files/file_path.h"
- #include "base/files/file_path_watcher.h"
- #include "base/files/file_util.h"
-+#include "base/files/important_file_writer.h"
- #include "base/json/json_reader.h"
- #include "base/process/launch.h"
- #include "base/strings/string_number_conversions.h"
-@@ -49,10 +50,10 @@
- #include "third_party/skia/include/core/SkBitmap.h"
- #include "third_party/skia/include/core/SkColor.h"
- #include "ui/base/window_open_disposition.h"
--#include "ui/gfx/codec/png_codec.h"
- #include "ui/display/display.h"
- #include "ui/display/screen.h"
- #include "ui/display/types/display_constants.h"
-+#include "ui/gfx/codec/png_codec.h"
- 
- namespace {
- 
-@@ -77,6 +78,8 @@ constexpr char kAuraDeHostVmName[] = "aurade-host";
- constexpr char kAuraDeHostContainerName[] = "host";
- constexpr char kAuraDeHostWaylandSocket[] = "wayland-0";
- constexpr char kAuraDeNestedWestonPath[] = "/usr/bin/weston";
-+constexpr char kAuraDeKdePlatformTheme[] =
-+    "/usr/lib/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so";
- 
- using apps::AuraDeHostDesktopApp;
- 
-@@ -846,6 +849,109 @@ std::vector<AuraDeHostDesktopApp> ScanAuraDeHostDesktopApps() {
-   return apps;
- }
- 
-+// The environment a host application starts in, on top of Ash's own.
-+base::EnvironmentMap AuraDeHostAppEnvironment(
-+    base::Environment& environment,
-+    const std::string& wayland_display) {
-+  base::EnvironmentMap env;
-+  env["WAYLAND_DISPLAY"] = wayland_display;
-+  env["GDK_BACKEND"] = "wayland";
-+  // AuraDE compatibility: X11 applications reach exo through
-+  // xwayland-satellite, which the session starts on this display once exo is
-+  // up. Without it an X11-only application had nowhere to draw and exited.
-+  if (std::optional<std::string> x11_display =
-+          environment.GetVar("AURADE_HOST_APP_X11_DISPLAY");
-+      x11_display && !x11_display->empty()) {
-+    env["DISPLAY"] = *x11_display;
-+  }
-+  env["QT_QPA_PLATFORM"] = "wayland";
-+  // AuraDE compatibility: with no platform theme Qt drew every application in
-+  // its light default whatever the desktop was. KDE's own theme, when
-+  // plasma-integration is installed, reads the colours, fonts and icons Ash
-+  // writes for this session and follows them as they change; Qt's portal
-+  // theme only knows light from dark. A theme the session already chose,
-+  // such as qt6ct, is kept.
-+  if (!environment.HasVar("QT_QPA_PLATFORMTHEME")) {
-+    env["QT_QPA_PLATFORMTHEME"] =
-+        base::PathExists(base::FilePath(kAuraDeKdePlatformTheme))
-+            ? "kde"
-+            : "xdgdesktopportal";
-+  }
-+  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
-+  // when installed, is the modern one and still takes its colours from the
-+  // desktop. A style the session already chose is kept.
-+  if (!environment.HasVar("QT_STYLE_OVERRIDE") &&
-+      base::PathExists(
-+          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
-+    env["QT_STYLE_OVERRIDE"] = "Breeze";
-+  }
-+  // AuraDE compatibility: Ash writes this session's kdeglobals under the
-+  // runtime directory, and AuraDE ships Breeze's settings beside the system
-+  // defaults, so both go ahead of them. The user's own ~/.config is still
-+  // read before any of these.
-+  std::string config_dirs = "/usr/share/aurade/xdg:";
-+  if (std::optional<std::string> runtime_dir =
-+          environment.GetVar("XDG_RUNTIME_DIR");
-+      runtime_dir && !runtime_dir->empty()) {
-+    config_dirs = *runtime_dir + "/aurade/xdg:" + config_dirs;
-+  }
-+  std::optional<std::string> system_config_dirs =
-+      environment.GetVar("XDG_CONFIG_DIRS");
-+  config_dirs += system_config_dirs && !system_config_dirs->empty()
-+                     ? *system_config_dirs
-+                     : std::string("/etc/xdg");
-+  env["XDG_CONFIG_DIRS"] = config_dirs;
-+  // AuraDE compatibility: open and save dialogs go through the desktop
-+  // portal, which Ash answers with the AuraDE Files picker, so KDE, GTK and
-+  // Firefox ask for files the way the rest of the desktop does.
-+  env["PLASMA_INTEGRATION_USE_PORTAL"] = "1";
-+  env["GTK_USE_PORTAL"] = "1";
-+  env["SDL_VIDEODRIVER"] = "wayland";
-+  env["MOZ_ENABLE_WAYLAND"] = "1";
-+  env["NO_AT_BRIDGE"] = "1";
-+  env["XDG_CURRENT_DESKTOP"] = "AuraDE";
-+  env["XDG_SESSION_DESKTOP"] = "aurade";
-+  env["DESKTOP_SESSION"] = "aurade";
-+  return env;
-+}
-+
-+// AuraDE compatibility: the Files app opens files in Linux applications
-+// through its file service, a user service that has none of this session's
-+// display or bus. It reads them from here, so an application it starts lands
-+// on this desktop in the environment the launcher would have given it.
-+void WriteAuraDeAppEnvironmentOnThread() {
-+  auto environment = base::Environment::Create();
-+  std::optional<std::string> runtime_dir =
-+      environment->GetVar("XDG_RUNTIME_DIR");
-+  if (!runtime_dir || runtime_dir->empty()) {
-+    return;
-+  }
-+  base::EnvironmentMap env = AuraDeHostAppEnvironment(
-+      *environment, ChooseAuraDeHostWaylandDisplay(*environment));
-+  for (const std::string& name : {std::string("DBUS_SESSION_BUS_ADDRESS"),
-+                                 std::string("XDG_RUNTIME_DIR"),
-+                                 std::string("XDG_SESSION_TYPE")}) {
-+    if (std::optional<std::string> value = environment->GetVar(name);
-+        value && !value->empty()) {
-+      env[name] = *value;
-+    }
-+  }
-+  std::string contents =
-+      "# Written by Ash: what Linux applications start with on this "
-+      "desktop.\n";
-+  for (const auto& [name, value] : env) {
-+    if (value.find('\n') == std::string::npos) {
-+      contents += name + "=" + value + "\n";
-+    }
-+  }
-+  const base::FilePath dir = base::FilePath(*runtime_dir).Append("aurade");
-+  if (!base::CreateDirectory(dir) ||
-+      !base::ImportantFileWriter::WriteFileAtomically(
-+          dir.Append("app-environment"), contents)) {
-+    LOG(ERROR) << "AuraDE could not write the application environment";
-+  }
-+}
-+
- void LaunchAuraDeHostAppOnThread(std::string command) {
-   auto environment = base::Environment::Create();
- 
-@@ -879,38 +985,7 @@ void LaunchAuraDeHostAppOnThread(std::string command) {
-       home && !home->empty()) {
-     options.current_directory = base::FilePath(*home);
-   }
--  options.environment["WAYLAND_DISPLAY"] = wayland_display;
--  options.environment["GDK_BACKEND"] = "wayland";
--  // AuraDE compatibility: X11 applications reach exo through
--  // xwayland-satellite, which the session starts on this display once exo is
--  // up. Without it an X11-only application had nowhere to draw and exited.
--  if (std::optional<std::string> x11_display =
--          environment->GetVar("AURADE_HOST_APP_X11_DISPLAY");
--      x11_display && !x11_display->empty()) {
--    options.environment["DISPLAY"] = *x11_display;
--  }
--  options.environment["QT_QPA_PLATFORM"] = "wayland";
--  // AuraDE compatibility: with no platform theme Qt drew every application in
--  // its light default whatever the desktop was. Its portal theme reads the
--  // same light or dark setting GTK does. A theme the session already chose,
--  // such as qt6ct, is kept.
--  if (!environment->HasVar("QT_QPA_PLATFORMTHEME")) {
--    options.environment["QT_QPA_PLATFORMTHEME"] = "xdgdesktopportal";
--  }
--  // AuraDE compatibility: Qt's own Fusion style is its oldest look. Breeze,
--  // when installed, is the modern one and still takes its colours from the
--  // desktop. A style the session already chose is kept.
--  if (!environment->HasVar("QT_STYLE_OVERRIDE") &&
--      base::PathExists(
--          base::FilePath("/usr/lib/qt6/plugins/styles/breeze6.so"))) {
--    options.environment["QT_STYLE_OVERRIDE"] = "Breeze";
--  }
--  options.environment["SDL_VIDEODRIVER"] = "wayland";
--  options.environment["MOZ_ENABLE_WAYLAND"] = "1";
--  options.environment["NO_AT_BRIDGE"] = "1";
--  options.environment["XDG_CURRENT_DESKTOP"] = "AuraDE";
--  options.environment["XDG_SESSION_DESKTOP"] = "aurade";
--  options.environment["DESKTOP_SESSION"] = "aurade";
-+  options.environment = AuraDeHostAppEnvironment(*environment, wayland_display);
-   // AuraDE compatibility: the language and the GPU are the session's. Both
-   // were pinned here once (C.UTF-8, and software GL with GTK's cairo
-   // renderer), which opened every application in English and drew Firefox on
-@@ -972,6 +1047,9 @@ CrostiniApps::~CrostiniApps() {
- void CrostiniApps::Initialize() {
-   GuestOSApps::Initialize();
-   if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    base::ThreadPool::PostTask(
-+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-+        base::BindOnce(&WriteAuraDeAppEnvironmentOnThread));
-     RefreshAuraDeHostApps();
-     aurade_host_apps_watcher_ = base::SequenceBound<AuraDeHostAppsWatcher>(
-         base::ThreadPool::CreateSequencedTaskRunner(

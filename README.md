@@ -57,7 +57,7 @@ for people who want that interface on a Linux system they own.
 ## Security updates
 
 Be aware of this before you rely on AuraDE: its desktop and browser are built
-from a Chromium 156 development snapshot (156.0.8060.0). They do not get
+from a Chromium 157 development snapshot (157.0.8090.0). They do not get
 Chromium's upstream security fixes as those are released. Arch packages
 (the kernel, systemd, NetworkManager and the rest) update through pacman as
 usual. Moving the desktop to a current Chromium release is planned. Until

@@ -242,7 +242,7 @@ index aa6e9f2437a1..919d01bbbff0 100644
  component("linux") {
    output_name = "ui_base_ime_linux"
 diff --git a/ui/linux/BUILD.gn b/ui/linux/BUILD.gn
-index eaee77fb5033..f0eab1504aa6 100644
+index d189afddfd78..25edd784577b 100644
 --- a/ui/linux/BUILD.gn
 +++ b/ui/linux/BUILD.gn
 @@ -6,7 +6,7 @@ import("//build/config/features.gni")
@@ -255,10 +255,10 @@ index eaee77fb5033..f0eab1504aa6 100644
  component("linux_ui") {
    defines = [ "IS_LINUX_UI_IMPL" ]
 diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-index 9b8cef1d1adb..ef304a811097 100644
+index 27eea5ab9d47..c8f0c67ff078 100644
 --- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
 +++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-@@ -369,7 +369,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
+@@ -371,7 +371,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
  }
  
  void DrmDisplayHostManager::RemoveDelegate(DrmNativeDisplayDelegate* delegate) {
@@ -293,7 +293,7 @@ index 5b239de06670..03d15f1388e7 100644
        "host/org_gnome_mutter_idle_monitor.cc",
        "host/org_gnome_mutter_idle_monitor.h",
 diff --git a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
-index c553d6503ace..744ce36a0435 100644
+index a98e14776370..f8a45624f0a5 100644
 --- a/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
 +++ b/ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.cc
 @@ -5,6 +5,7 @@

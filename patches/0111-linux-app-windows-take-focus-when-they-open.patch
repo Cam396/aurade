@@ -1,8 +1,8 @@
 diff --git a/components/exo/shell_surface_base.cc b/components/exo/shell_surface_base.cc
-index 8d5298d0934c..a9f77d2426c4 100644
+index 534732b20ac2..c0f3d5db2a0b 100644
 --- a/components/exo/shell_surface_base.cc
 +++ b/components/exo/shell_surface_base.cc
-@@ -2404,8 +2404,16 @@ void ShellSurfaceBase::ShowWidget(bool activate) {
+@@ -2410,8 +2410,16 @@ void ShellSurfaceBase::ShowWidget(bool activate) {
      // Minimized windows cannot gain focus, when being un-minimized they will
      // call into `ShowWidget` again which will validate activation permissions.
      auto* window_state = ash::WindowState::Get(widget_->GetNativeWindow());

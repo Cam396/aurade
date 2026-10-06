@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 1b7e44688f26..37b8d67bd2b3 100644
+index 90b6fa26f17c..d107c9fdc659 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -611,6 +611,9 @@ if (is_chromeos) {
+@@ -616,6 +616,9 @@ if (is_chromeos) {
        "//chrome/browser/ash/exo",
        "//chromeos/ash/experiences/arc",
        "//components/exo/server",
@@ -56,7 +56,7 @@ index 730c043bd604..458f6a9c1fb9 100644
  }
  
 diff --git a/content/browser/compositor/viz_process_transport_factory.cc b/content/browser/compositor/viz_process_transport_factory.cc
-index 7ca2539e761b..956ff9108ac7 100644
+index 53219f0aaeb8..b403b3765f8b 100644
 --- a/content/browser/compositor/viz_process_transport_factory.cc
 +++ b/content/browser/compositor/viz_process_transport_factory.cc
 @@ -4,11 +4,14 @@
@@ -121,7 +121,7 @@ index 7ca2539e761b..956ff9108ac7 100644
  
  void VizProcessTransportFactory::OnGpuProcessLost() {
 diff --git a/content/browser/gpu/gpu_process_host.cc b/content/browser/gpu/gpu_process_host.cc
-index 456ef0928171..8772426f59d2 100644
+index 1b29f20028bf..bfa557d8ceef 100644
 --- a/content/browser/gpu/gpu_process_host.cc
 +++ b/content/browser/gpu/gpu_process_host.cc
 @@ -10,6 +10,8 @@
@@ -141,7 +141,7 @@ index 456ef0928171..8772426f59d2 100644
  #include "base/feature_list.h"
  #include "base/functional/bind.h"
  #include "base/functional/callback_helpers.h"
-@@ -1250,9 +1253,24 @@ bool GpuProcessHost::GpuAccessAllowed() const {
+@@ -1249,9 +1252,24 @@ bool GpuProcessHost::GpuAccessAllowed() const {
  }
  
  void GpuProcessHost::DisableGpuCompositing() {

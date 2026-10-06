@@ -1,17 +1,17 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/command_handler.ts b/ui/file_manager/file_manager/foreground/js/command_handler.ts
-index f65180766bba..b843bd523c95 100644
+index 8a58159a2771..15ec3a3314c0 100644
 --- a/ui/file_manager/file_manager/foreground/js/command_handler.ts
 +++ b/ui/file_manager/file_manager/foreground/js/command_handler.ts
 @@ -18,7 +18,7 @@ import {DEFAULT_BRUSCHETTA_VM, DEFAULT_CROSTINI_VM} from './constants.js';
  import type {FileFilter} from './directory_contents.js';
  import type {DirectoryModel} from './directory_model.js';
  import type {DirectoryTreeNamingController} from './directory_tree_naming_controller.js';
--import {BrowserBackCommand, CalculateSizeCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
-+import {AboutAuraDeCommand, BrowserBackCommand, CalculateSizeCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, ManageMirrorsyncCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
+-import {BrowserBackCommand, CalculateSizeCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
++import {AboutAuraDeCommand, BrowserBackCommand, CalculateSizeCommand, ConfigureCommand, CopyNameCommand, CopyPathCommand, CutCopyCommand, DefaultTaskCommand, DeleteCommand, DlpRestrictionDetailsCommand, DriveBuyMoreSpaceCommand, DriveGoToDriveCommand, DriveSyncSettingsCommand, EmptyTrashCommand, ExtractAllCommand, FilesSettingsCommand, FocusActionBarCommand, FormatCommand, GetInfoCommand, GoToFileLocationCommand, GuestOsManagingSharingCommand, GuestOsManagingSharingGearCommand, GuestOsShareCommand, InspectConsoleCommand, InspectElementCommand, InspectNormalCommand, InvokeSharesheetCommand, ManageInDriveCommand, NewFolderCommand, NewWindowCommand, OpenGearMenuCommand, OpenWithCommand, PasteCommand, PasteIntoCurrentFolderCommand, PasteIntoFolderCommand, PinFolderCommand, RefreshCommand, RenameCommand, RestoreFromTrashCommand, SearchCommand, SelectAllCommand, SendFeedbackCommand, SetWallpaperCommand, ShowProvidersSubmenuCommand, SortByDateCommand, SortByNameCommand, SortBySizeCommand, SortByTypeCommand, ToggleHiddenAndroidFoldersCommand, ToggleHiddenFilesCommand, ToggleHoldingSpaceCommand, TogglePinnedCommand, UnmountCommand, UnpinFolderCommand, VolumeHelpCommand, VolumeStorageCommand, VolumeSwitchCommand, ZipSelectionCommand, ZoomInCommand, ZoomOutCommand, ZoomResetCommand} from './file_manager_commands.js';
  import {shouldIgnoreEvents} from './file_manager_commands_util.js';
  import type {FileSelection, FileSelectionHandler} from './file_selection.js';
  import type {FileTransferController} from './file_transfer_controller.js';
-@@ -163,6 +163,7 @@ const FilesCommands = {
+@@ -162,6 +162,7 @@ const FilesCommands = {
    'copy-name': new CopyNameCommand(),
    'copy-path': new CopyPathCommand(),
    'calculate-size': new CalculateSizeCommand(),
@@ -20,7 +20,7 @@ index f65180766bba..b843bd523c95 100644
    'volume-switch-1': new VolumeSwitchCommand(1),
    'volume-switch-2': new VolumeSwitchCommand(2),
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
-index 6442295f8ddb..fa86d8f7c2a6 100644
+index 0a5f9995c300..815df8566e42 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 @@ -11,7 +11,6 @@ import {assert} from 'chrome://resources/js/assert.js';
@@ -72,7 +72,7 @@ index 6442295f8ddb..fa86d8f7c2a6 100644
  }
  
  /**
-@@ -2622,6 +2630,29 @@ export class CalculateSizeCommand extends FilesCommand {
+@@ -2603,6 +2611,29 @@ export class CalculateSizeCommand extends FilesCommand {
    }
  }
  
@@ -103,7 +103,7 @@ index 6442295f8ddb..fa86d8f7c2a6 100644
   * Opens "providers menu" to allow users to use providers/FSPs.
   */
 diff --git a/ui/file_manager/file_manager/main.html b/ui/file_manager/file_manager/main.html
-index 1733a333ce2d..d826411ffdc6 100644
+index 5e3b8142e1a1..065d6ff4ae17 100644
 --- a/ui/file_manager/file_manager/main.html
 +++ b/ui/file_manager/file_manager/main.html
 @@ -99,6 +99,7 @@ found in the LICENSE file.
@@ -114,7 +114,7 @@ index 1733a333ce2d..d826411ffdc6 100644
        <command id="volume-storage">
        <command id="drive-buy-more-space"
                 label="$i18n{DRIVE_BUY_MORE_SPACE}">
-@@ -282,10 +283,9 @@ found in the LICENSE file.
+@@ -278,10 +279,9 @@ found in the LICENSE file.
                        command="#drive-buy-more-space"></cr-menu-item>
          <cr-menu-item id="gear-menu-drive-go-to-drive"
                        command="#drive-go-to-drive"></cr-menu-item>

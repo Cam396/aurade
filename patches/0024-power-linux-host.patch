@@ -76,10 +76,10 @@ index 6ad26996dd9d..e4ba6ad800d4 100644
    }
  
 diff --git a/ash/system/unified/power_button.cc b/ash/system/unified/power_button.cc
-index 4ecd6b702c8b..f792fda51e81 100644
+index b67f9c00fc7c..36c5ba568761 100644
 --- a/ash/system/unified/power_button.cc
 +++ b/ash/system/unified/power_button.cc
-@@ -216,6 +216,11 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+@@ -217,6 +217,11 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
          Shell::Get()->lock_state_controller()->RequestRestart(
              power_manager::REQUEST_RESTART_FOR_USER, "Reboot by user");
          break;
@@ -91,7 +91,7 @@ index 4ecd6b702c8b..f792fda51e81 100644
        case VIEW_ID_QS_POWER_LOCK_MENU_BUTTON:
          quick_settings_metrics_util::RecordQsButtonActivated(
              QsButtonCatalogName::kPowerLockMenuButton);
-@@ -300,6 +305,12 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+@@ -301,6 +306,12 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
                                         cros_tokens::kCrosSysOnSurface,
                                         kTrayTopShortcutButtonIconSize));
      if (!is_on_login_screen) {

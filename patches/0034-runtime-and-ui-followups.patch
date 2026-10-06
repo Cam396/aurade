@@ -63,10 +63,10 @@ index 73fe634d5a31..7e8c9ce75346 100644
          let result = '';
          const message = this.currentUpdateStatusEvent_.message;
 diff --git a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
-index a0d01bf1968a..370a1b128b15 100644
+index 1f0cfb7fda36..fd127bcf0089 100644
 --- a/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
 +++ b/chrome/browser/ui/ash/editor_menu/editor_menu_controller_impl.cc
-@@ -54,8 +54,14 @@ namespace chromeos::editor_menu {
+@@ -52,8 +52,14 @@ namespace chromeos::editor_menu {
  namespace {
  
  ui::TextInputClient* GetCurrentTextInputClient() {
@@ -83,7 +83,7 @@ index a0d01bf1968a..370a1b128b15 100644
  
    return input_method != nullptr ? input_method->GetTextInputClient() : nullptr;
  }
-@@ -260,6 +266,12 @@ void EditorMenuControllerImpl::LogEditorMode(const EditorMode& editor_mode) {
+@@ -231,6 +237,12 @@ void EditorMenuControllerImpl::LogEditorMode(const EditorMode& editor_mode) {
  void EditorMenuControllerImpl::GetEditorMenuCardContext(
      base::OnceCallback<void(const EditorMenuCardContext&)> callback) {
    if (card_session_ == nullptr) {
@@ -97,7 +97,7 @@ index a0d01bf1968a..370a1b128b15 100644
    }
  
 diff --git a/chrome/browser/ui/ash/read_write_cards/BUILD.gn b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
-index d8ffa567a7c2..3715d63f441a 100644
+index f21a7d049c2d..8698104a0762 100644
 --- a/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 +++ b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 @@ -59,6 +59,7 @@ source_set("unit_tests") {
@@ -108,7 +108,7 @@ index d8ffa567a7c2..3715d63f441a 100644
      "//base/test:test_support",
      "//chrome/browser:global_features",
      "//chrome/browser/ash/magic_boost",
-@@ -77,6 +78,7 @@ source_set("unit_tests") {
+@@ -78,6 +79,7 @@ source_set("unit_tests") {
      "//chromeos/constants",
      "//content/public/browser",
      "//ui/base",
@@ -251,7 +251,7 @@ index f6483434ca6c..432fbe6e5eb9 100644
 +
  }  // namespace chromeos
 diff --git a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
-index 9e48bbb95e29..8a18f21d57b0 100644
+index 3b28fd4e9717..fcc4c6da2ff2 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 @@ -226,6 +226,7 @@ suite('<settings-device-page>', () => {
@@ -1155,7 +1155,7 @@ index c1fc21dbfd67..469521736fb4 100644
      }
    }
 diff --git a/components/history_embeddings/content/history_embeddings_service.cc b/components/history_embeddings/content/history_embeddings_service.cc
-index f42c3c00ec9d..4e53cd10ec49 100644
+index e0fcc5d5ff1e..355c26cbe026 100644
 --- a/components/history_embeddings/content/history_embeddings_service.cc
 +++ b/components/history_embeddings/content/history_embeddings_service.cc
 @@ -16,6 +16,7 @@
@@ -1166,7 +1166,7 @@ index f42c3c00ec9d..4e53cd10ec49 100644
  #include "base/task/sequenced_task_runner.h"
  #include "base/task/task_traits.h"
  #include "base/task/thread_pool.h"
-@@ -840,7 +841,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
+@@ -843,7 +844,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
  
    if (!is_visibility_model_available || scored_url_rows.empty()) {
      OnPassageVisibilityCalculated(std::move(callback), std::move(result),
@@ -1176,7 +1176,7 @@ index f42c3c00ec9d..4e53cd10ec49 100644
      return;
    }
  
-@@ -852,7 +854,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
+@@ -855,7 +857,8 @@ void HistoryEmbeddingsService::DeterminePassageVisibility(
    page_content_annotations_service_->BatchAnnotate(
        base::BindOnce(&HistoryEmbeddingsService::OnPassageVisibilityCalculated,
                       weak_ptr_factory_.GetWeakPtr(), std::move(callback),
@@ -1186,7 +1186,7 @@ index f42c3c00ec9d..4e53cd10ec49 100644
        std::move(inputs),
        page_content_annotations::AnnotationType::kContentVisibility);
  }
-@@ -861,10 +864,16 @@ void HistoryEmbeddingsService::OnPassageVisibilityCalculated(
+@@ -864,10 +867,16 @@ void HistoryEmbeddingsService::OnPassageVisibilityCalculated(
      SearchResultCallback callback,
      SearchResult result,
      std::vector<ScoredUrlRow> scored_url_rows,

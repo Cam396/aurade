@@ -18,7 +18,7 @@ index 248f3e218bb2..0a3a7cc5aa58 100644
    DesktopAppearanceServiceHost();
    bool Start();
 diff --git a/chrome/browser/ash/file_manager/BUILD.gn b/chrome/browser/ash/file_manager/BUILD.gn
-index 1ce1b2f86a6c..3e0b974fd39e 100644
+index e6bf78b870f8..12b521c98147 100644
 --- a/chrome/browser/ash/file_manager/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/BUILD.gn
 @@ -11,6 +11,8 @@ static_library("file_manager") {
@@ -30,7 +30,7 @@ index 1ce1b2f86a6c..3e0b974fd39e 100644
      "cloud_upload_prefs_watcher.cc",
      "cloud_upload_prefs_watcher.h",
      "cloud_upload_prompt_prefs_handler.cc",
-@@ -193,6 +195,7 @@ static_library("file_manager") {
+@@ -197,6 +199,7 @@ static_library("file_manager") {
      "//components/variations/service",
      "//content/public/browser",
      "//crypto",
@@ -290,7 +290,7 @@ index 000000000000..d8291b9b20e1
 +
 +#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_MANAGER_SERVICE_H_
 diff --git a/chrome/browser/ash/main_parts/BUILD.gn b/chrome/browser/ash/main_parts/BUILD.gn
-index 5d39eaa2e066..6b50f0a1718b 100644
+index 8b7505ea6c82..c5b3eae270e5 100644
 --- a/chrome/browser/ash/main_parts/BUILD.gn
 +++ b/chrome/browser/ash/main_parts/BUILD.gn
 @@ -55,6 +55,7 @@ static_library("main_parts") {
@@ -302,10 +302,10 @@ index 5d39eaa2e066..6b50f0a1718b 100644
      "//chrome/browser/ash/fwupd",
      "//chrome/browser/ash/image_downloader",
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 65d19e210b68..896226479eac 100644
+index 34813668bdc0..d6106e067234 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -114,6 +114,7 @@
+@@ -120,6 +120,7 @@
  #include "chrome/browser/ash/extensions/default_app_order.h"
  #include "chrome/browser/ash/extensions/login_screen_ui/ui_handler.h"
  #include "chrome/browser/ash/external_metrics/external_metrics.h"
@@ -313,7 +313,7 @@ index 65d19e210b68..896226479eac 100644
  #include "chrome/browser/ash/fwupd/fwupd_download_client_impl.h"
  #include "chrome/browser/ash/image_downloader/image_downloader_impl.h"
  #include "chrome/browser/ash/input_method/input_method_configuration.h"
-@@ -433,6 +434,14 @@ class DBusServices {
+@@ -439,6 +440,14 @@ class DBusServices {
        // whether the desktop is light or dark and what its accent is. Ash
        // answers, so they follow it rather than a fixed default.
        desktop_appearance_service_host_ = DesktopAppearanceServiceHost::Create();
@@ -328,7 +328,7 @@ index 65d19e210b68..896226479eac 100644
        // AuraDE compatibility: removing or updating packages from Settings
        // needs an administrator's password, and polkit refuses outright when
        // the session has no agent to ask for one. Ash is that agent.
-@@ -673,6 +682,7 @@ class DBusServices {
+@@ -679,6 +688,7 @@ class DBusServices {
      SetBluetoothConfigServiceBinderForGenericLinux({});
      aurade_bluetooth_service_.reset();
      polkit_agent_service_.reset();
@@ -336,7 +336,7 @@ index 65d19e210b68..896226479eac 100644
      desktop_appearance_service_host_.reset();
      desktop_notification_service_host_.reset();
      machine_learning_decision_service_.reset();
-@@ -688,6 +698,7 @@ class DBusServices {
+@@ -694,6 +704,7 @@ class DBusServices {
        desktop_notification_service_host_;
    std::unique_ptr<DesktopAppearanceServiceHost>
        desktop_appearance_service_host_;

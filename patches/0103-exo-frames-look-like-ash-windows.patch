@@ -1,5 +1,17 @@
+diff --git a/components/exo/BUILD.gn b/components/exo/BUILD.gn
+index d487acb5a4b8..fb4a261e84d0 100644
+--- a/components/exo/BUILD.gn
++++ b/components/exo/BUILD.gn
+@@ -158,6 +158,7 @@ static_library("exo") {
+     "//services/viz/privileged/mojom/compositing",
+     "//skia",
+     "//third_party/blink/public/common",
++    "//ui/chromeos/styles:cros_tokens_color_mappings",
+     "//ui/accessibility",
+     "//ui/accessibility:ax_base",
+     "//ui/aura",
 diff --git a/components/exo/shell_surface_base.cc b/components/exo/shell_surface_base.cc
-index 843b0991c7ee..71f536dab28e 100644
+index 152d08a9de66..13103dd209dc 100644
 --- a/components/exo/shell_surface_base.cc
 +++ b/components/exo/shell_surface_base.cc
 @@ -27,6 +27,7 @@
@@ -19,7 +31,7 @@ index 843b0991c7ee..71f536dab28e 100644
  #include "ui/aura/client/capture_client.h"
  #include "ui/aura/client/focus_client.h"
  #include "ui/aura/env.h"
-@@ -112,6 +115,15 @@ class ShellSurfaceWidget : public views::Widget {
+@@ -113,6 +116,15 @@ class ShellSurfaceWidget : public views::Widget {
    }
  };
  
@@ -35,7 +47,7 @@ index 843b0991c7ee..71f536dab28e 100644
  class CustomFrameView : public ash::FrameViewAsh {
   public:
    using ShapeRects = std::vector<gfx::Rect>;
-@@ -145,6 +157,26 @@ class CustomFrameView : public ash::FrameViewAsh {
+@@ -146,6 +158,26 @@ class CustomFrameView : public ash::FrameViewAsh {
      return bounds();
    }
  
@@ -62,7 +74,7 @@ index 843b0991c7ee..71f536dab28e 100644
    // Overridden from views::FrameView:
    void UpdateWindowRoundedCorners() override {
      if (!GetWidget()) {
-@@ -159,6 +191,23 @@ class CustomFrameView : public ash::FrameViewAsh {
+@@ -160,6 +192,23 @@ class CustomFrameView : public ash::FrameViewAsh {
      aura::Window* window = GetWidget()->GetNativeWindow();
      const ash::WindowState* window_state = ash::WindowState::Get(window);
  
@@ -86,7 +98,7 @@ index 843b0991c7ee..71f536dab28e 100644
      std::optional<gfx::RoundedCornersF> rounded_corners;
      if (window_state->IsPip()) {
        rounded_corners = gfx::RoundedCornersF(chromeos::kPipRoundedCornerRadius);
-@@ -452,7 +501,7 @@ ShellSurfaceBase::ShellSurfaceBase(Surface* surface,
+@@ -453,7 +502,7 @@ ShellSurfaceBase::ShellSurfaceBase(Surface* surface,
    SetCanMaximize(ash::desks_util::IsDeskContainerId(container_));
    SetCanFullscreen(ash::desks_util::IsDeskContainerId(container_));
    SetCanResize(true);
@@ -95,7 +107,7 @@ index 843b0991c7ee..71f536dab28e 100644
    GetViewAccessibility().SetRole(ax::mojom::Role::kClient);
  }
  
-@@ -1083,7 +1132,7 @@ void ShellSurfaceBase::RebindRootSurface(Surface* root_surface,
+@@ -1084,7 +1133,7 @@ void ShellSurfaceBase::RebindRootSurface(Surface* root_surface,
    SetCanMaximize(ash::desks_util::IsDeskContainerId(container_));
    SetCanFullscreen(ash::desks_util::IsDeskContainerId(container_));
    SetCanResize(true);
@@ -104,15 +116,3 @@ index 843b0991c7ee..71f536dab28e 100644
  }
  
  std::unique_ptr<base::trace_event::TracedValue>
-diff --git a/components/exo/BUILD.gn b/components/exo/BUILD.gn
-index 4435b653b3a3..e473870daf1c 100644
---- a/components/exo/BUILD.gn
-+++ b/components/exo/BUILD.gn
-@@ -158,6 +158,7 @@ static_library("exo") {
-     "//services/viz/privileged/mojom/compositing",
-     "//skia",
-     "//third_party/blink/public/common",
-+    "//ui/chromeos/styles:cros_tokens_color_mappings",
-     "//ui/accessibility",
-     "//ui/accessibility:ax_base",
-     "//ui/aura",

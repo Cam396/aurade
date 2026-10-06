@@ -1,5 +1,92 @@
+diff --git a/ash/app_list/views/search_box_view.cc b/ash/app_list/views/search_box_view.cc
+index 58cb7328f208..baeda91c5da1 100644
+--- a/ash/app_list/views/search_box_view.cc
++++ b/ash/app_list/views/search_box_view.cc
+@@ -56,6 +56,7 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chromeos/constants/chromeos_features.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/ui/vector_icons/vector_icons.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "ui/accessibility/ax_enums.mojom.h"
+@@ -155,6 +156,15 @@ constexpr auto kCategories =
+          {AppListSearchControlCategory::kWeb,
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_WEB}});
+ 
++// AuraDE compatibility: without ARC the Play Store category holds the apps
++// from the distribution's catalog that can be installed.
++std::u16string PlayStoreCategoryLabel() {
++  return base::SysInfo::IsRunningOnChromeOS()
++             ? l10n_util::GetStringUTF16(
++                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
++             : u"Apps to install";
++}
++
+ bool IsTrimmedQueryEmpty(const std::u16string& query) {
+   std::u16string trimmed_query;
+   base::TrimWhitespace(query, base::TrimPositions::TRIM_ALL, &trimmed_query);
+@@ -182,8 +192,7 @@ std::u16string GetCategoryName(SearchResult* search_result) {
+       return l10n_util::GetStringUTF16(
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP);
+     case ash::AppListSearchResultCategory::kPlayStore:
+-      return l10n_util::GetStringUTF16(
+-          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE);
++      return PlayStoreCategoryLabel();
+     case ash::AppListSearchResultCategory::kSearchAndAssistant:
+       return l10n_util::GetStringUTF16(
+           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_SEARCH_AND_ASSISTANT);
+@@ -1687,7 +1696,9 @@ ui::SimpleMenuModel* SearchBoxView::BuildFilterMenuModel() {
+ 
+     filter_menu_model_->AddItemWithIcon(
+         static_cast<int>(category),
+-        l10n_util::GetStringUTF16(kCategories.at(category)),
++        category == AppListSearchControlCategory::kPlayStore
++            ? PlayStoreCategoryLabel()
++            : l10n_util::GetStringUTF16(kCategories.at(category)),
+         GetCheckboxImage(view_delegate_->IsCategoryEnabled(category)));
+   }
+ 
+diff --git a/ash/app_list/views/search_result_list_view.cc b/ash/app_list/views/search_result_list_view.cc
+index 4671248c3bde..57b6006ad9a3 100644
+--- a/ash/app_list/views/search_result_list_view.cc
++++ b/ash/app_list/views/search_result_list_view.cc
+@@ -24,6 +24,7 @@
+ #include "ash/style/ash_color_id.h"
+ #include "ash/style/typography.h"
+ #include "base/dcheck_is_on.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/constants/chromeos_features.h"
+ #include "ui/accessibility/ax_node_data.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -41,6 +42,15 @@ namespace ash {
+ 
+ namespace {
+ 
++// AuraDE compatibility: without ARC the Play Store category holds the apps
++// from the distribution's catalog that can be installed.
++std::u16string PlayStoreCategoryLabel() {
++  return base::SysInfo::IsRunningOnChromeOS()
++             ? l10n_util::GetStringUTF16(
++                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
++             : u"Apps to install";
++}
++
+ constexpr int kPreferredTitleHorizontalMargins = 16;
+ constexpr int kPreferredTitleTopMargins = 12;
+ constexpr int kPreferredTitleBottomMargins = 4;
+@@ -162,8 +172,7 @@ void SearchResultListView::SetListType(SearchResultListType list_type) {
+           l10n_util::GetStringUTF16(IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP));
+       break;
+     case SearchResultListType::kPlayStore:
+-      title_label_->SetText(l10n_util::GetStringUTF16(
+-          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE));
++      title_label_->SetText(PlayStoreCategoryLabel());
+       break;
+     case SearchResultListType::kSearchAndAssistant:
+       title_label_->SetText(l10n_util::GetStringUTF16(
 diff --git a/chrome/browser/ash/app_list/search/BUILD.gn b/chrome/browser/ash/app_list/search/BUILD.gn
-index 2a2fe2d6813b..708c77b4f910 100644
+index e865290b20f8..877de7082bd8 100644
 --- a/chrome/browser/ash/app_list/search/BUILD.gn
 +++ b/chrome/browser/ash/app_list/search/BUILD.gn
 @@ -20,6 +20,8 @@ static_library("search") {
@@ -11,7 +98,7 @@ index 2a2fe2d6813b..708c77b4f910 100644
      "burn_in_controller.cc",
      "burn_in_controller.h",
      "chrome_search_result.cc",
-@@ -101,15 +103,18 @@ static_library("search") {
+@@ -103,15 +105,18 @@ static_library("search") {
      "//chromeos/components/mahi/public/cpp",
      "//chromeos/strings:strings_grit",
      "//components/account_id",
@@ -30,101 +117,6 @@ index 2a2fe2d6813b..708c77b4f910 100644
      "//ui/base",
      "//ui/chromeos/styles:cros_tokens_color_mappings_generator",
      "//ui/events",
-diff --git a/chrome/browser/ash/app_list/search/search_controller_factory.cc b/chrome/browser/ash/app_list/search/search_controller_factory.cc
-index 271f7557427a..87b86b772496 100644
---- a/chrome/browser/ash/app_list/search/search_controller_factory.cc
-+++ b/chrome/browser/ash/app_list/search/search_controller_factory.cc
-@@ -10,12 +10,14 @@
- #include "ash/public/cpp/app_list/app_list_features.h"
- #include "base/files/file_enumerator.h"
- #include "base/metrics/field_trial_params.h"
-+#include "base/system/sys_info.h"
- #include "build/build_config.h"
- #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
- #include "chrome/browser/ash/app_list/search/app_search_provider.h"
- #include "chrome/browser/ash/app_list/search/app_zero_state_provider.h"
- #include "chrome/browser/ash/app_list/search/arc/arc_app_shortcuts_search_provider.h"
- #include "chrome/browser/ash/app_list/search/arc/arc_playstore_search_provider.h"
-+#include "chrome/browser/ash/app_list/search/aurade_install_provider.h"
- #include "chrome/browser/ash/app_list/search/desks_admin_template_provider.h"
- #include "chrome/browser/ash/app_list/search/files/drive_search_provider.h"
- #include "chrome/browser/ash/app_list/search/files/file_search_provider.h"
-@@ -85,6 +87,12 @@ std::unique_ptr<SearchController> CreateSearchController(
-   controller->AddProvider(std::make_unique<ArcPlayStoreSearchProvider>(
-       kMaxPlayStoreResults, profile, list_controller));
- 
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    // AuraDE compatibility: apps not installed yet, from the distribution's
-+    // catalog, where Play Store results would be.
-+    controller->AddProvider(std::make_unique<AuraDeInstallProvider>(profile));
-+  }
-+
-   if (arc::IsArcAllowedForProfile(profile)) {
-     controller->AddProvider(std::make_unique<ArcAppShortcutsSearchProvider>(
-         kMaxAppShortcutResults, profile, list_controller));
-diff --git a/chrome/browser/ash/app_list/search/aurade_install_provider.h b/chrome/browser/ash/app_list/search/aurade_install_provider.h
-new file mode 100644
-index 000000000000..9a76c6902904
---- /dev/null
-+++ b/chrome/browser/ash/app_list/search/aurade_install_provider.h
-@@ -0,0 +1,57 @@
-+// Copyright 2026 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
-+#define CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
-+
-+#include <cstdint>
-+#include <optional>
-+#include <string>
-+
-+#include "base/memory/raw_ptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/timer/timer.h"
-+#include "base/values.h"
-+#include "chrome/browser/ash/app_list/search/search_provider.h"
-+
-+class Profile;
-+
-+namespace app_list {
-+
-+// AuraDE compatibility: the launcher finds applications that are not
-+// installed yet. A search also asks the host bridge, which reads the
-+// distribution's AppStream catalog, and each application it finds and the
-+// computer lacks shows under "Apps to install" with its picture and summary.
-+// Choosing one installs its package; the administrator password is asked for
-+// first, a notification follows the install, and once it is done the app is
-+// in the launcher and the notification opens it.
-+class AuraDeInstallProvider : public SearchProvider {
-+ public:
-+  explicit AuraDeInstallProvider(Profile* profile);
-+  AuraDeInstallProvider(const AuraDeInstallProvider&) = delete;
-+  AuraDeInstallProvider& operator=(const AuraDeInstallProvider&) = delete;
-+  ~AuraDeInstallProvider() override;
-+
-+  // SearchProvider:
-+  void Start(const std::u16string& query,
-+             OnSearchResultsCallback on_search_done) override;
-+  void StopQuery() override;
-+  ash::AppListSearchResultType ResultType() const override;
-+
-+ private:
-+  void Search();
-+  void OnSearched(uint64_t generation, std::optional<base::Value> response);
-+
-+  const raw_ptr<Profile> profile_;
-+  std::string query_;
-+  // Searches answer out of order; only the latest one's results show.
-+  uint64_t generation_ = 0;
-+  // Typing waits for a pause before the catalog is asked.
-+  base::OneShotTimer debounce_;
-+  base::WeakPtrFactory<AuraDeInstallProvider> weak_ptr_factory_{this};
-+};
-+
-+}  // namespace app_list
-+
-+#endif  // CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
 diff --git a/chrome/browser/ash/app_list/search/aurade_install_provider.cc b/chrome/browser/ash/app_list/search/aurade_install_provider.cc
 new file mode 100644
 index 000000000000..d068a5cda161
@@ -605,90 +597,98 @@ index 000000000000..d068a5cda161
 +}
 +
 +}  // namespace app_list
-diff --git a/ash/app_list/views/search_box_view.cc b/ash/app_list/views/search_box_view.cc
-index b31524db00e8..19dede285eeb 100644
---- a/ash/app_list/views/search_box_view.cc
-+++ b/ash/app_list/views/search_box_view.cc
-@@ -56,6 +56,7 @@
- #include "base/rand_util.h"
- #include "base/strings/string_util.h"
- #include "base/strings/utf_string_conversions.h"
-+#include "base/system/sys_info.h"
- #include "chromeos/ash/services/assistant/public/cpp/assistant_browser_delegate.h"
- #include "chromeos/constants/chromeos_features.h"
- #include "chromeos/ui/vector_icons/vector_icons.h"
-@@ -167,6 +168,15 @@ constexpr auto kCategories =
-          {AppListSearchControlCategory::kWeb,
-           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_WEB}});
- 
-+// AuraDE compatibility: without ARC the Play Store category holds the apps
-+// from the distribution's catalog that can be installed.
-+std::u16string PlayStoreCategoryLabel() {
-+  return base::SysInfo::IsRunningOnChromeOS()
-+             ? l10n_util::GetStringUTF16(
-+                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
-+             : u"Apps to install";
-+}
+diff --git a/chrome/browser/ash/app_list/search/aurade_install_provider.h b/chrome/browser/ash/app_list/search/aurade_install_provider.h
+new file mode 100644
+index 000000000000..9a76c6902904
+--- /dev/null
++++ b/chrome/browser/ash/app_list/search/aurade_install_provider.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
 +
- bool IsTrimmedQueryEmpty(const std::u16string& query) {
-   std::u16string trimmed_query;
-   base::TrimWhitespace(query, base::TrimPositions::TRIM_ALL, &trimmed_query);
-@@ -194,8 +204,7 @@ std::u16string GetCategoryName(SearchResult* search_result) {
-       return l10n_util::GetStringUTF16(
-           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP);
-     case ash::AppListSearchResultCategory::kPlayStore:
--      return l10n_util::GetStringUTF16(
--          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE);
-+      return PlayStoreCategoryLabel();
-     case ash::AppListSearchResultCategory::kSearchAndAssistant:
-       return l10n_util::GetStringUTF16(
-           IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_SEARCH_AND_ASSISTANT);
-@@ -1717,7 +1726,9 @@ ui::SimpleMenuModel* SearchBoxView::BuildFilterMenuModel() {
- 
-     filter_menu_model_->AddItemWithIcon(
-         static_cast<int>(category),
--        l10n_util::GetStringUTF16(kCategories.at(category)),
-+        category == AppListSearchControlCategory::kPlayStore
-+            ? PlayStoreCategoryLabel()
-+            : l10n_util::GetStringUTF16(kCategories.at(category)),
-         GetCheckboxImage(view_delegate_->IsCategoryEnabled(category)));
-   }
- 
-diff --git a/ash/app_list/views/search_result_list_view.cc b/ash/app_list/views/search_result_list_view.cc
-index 56945795e33a..3f76736dd16b 100644
---- a/ash/app_list/views/search_result_list_view.cc
-+++ b/ash/app_list/views/search_result_list_view.cc
-@@ -24,6 +24,7 @@
- #include "ash/style/ash_color_id.h"
- #include "ash/style/typography.h"
- #include "base/dcheck_is_on.h"
-+#include "base/system/sys_info.h"
- #include "chromeos/constants/chromeos_features.h"
- #include "ui/accessibility/ax_node_data.h"
- #include "ui/base/l10n/l10n_util.h"
-@@ -41,6 +42,15 @@ namespace ash {
- 
- namespace {
- 
-+// AuraDE compatibility: without ARC the Play Store category holds the apps
-+// from the distribution's catalog that can be installed.
-+std::u16string PlayStoreCategoryLabel() {
-+  return base::SysInfo::IsRunningOnChromeOS()
-+             ? l10n_util::GetStringUTF16(
-+                   IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE)
-+             : u"Apps to install";
-+}
++#ifndef CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
++#define CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
 +
- constexpr int kPreferredTitleHorizontalMargins = 16;
- constexpr int kPreferredTitleTopMargins = 12;
- constexpr int kPreferredTitleBottomMargins = 4;
-@@ -162,8 +172,7 @@ void SearchResultListView::SetListType(SearchResultListType list_type) {
-           l10n_util::GetStringUTF16(IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_HELP));
-       break;
-     case SearchResultListType::kPlayStore:
--      title_label_->SetText(l10n_util::GetStringUTF16(
--          IDS_ASH_SEARCH_RESULT_CATEGORY_LABEL_PLAY_STORE));
-+      title_label_->SetText(PlayStoreCategoryLabel());
-       break;
-     case SearchResultListType::kSearchAndAssistant:
-       title_label_->SetText(l10n_util::GetStringUTF16(
++#include <cstdint>
++#include <optional>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/timer/timer.h"
++#include "base/values.h"
++#include "chrome/browser/ash/app_list/search/search_provider.h"
++
++class Profile;
++
++namespace app_list {
++
++// AuraDE compatibility: the launcher finds applications that are not
++// installed yet. A search also asks the host bridge, which reads the
++// distribution's AppStream catalog, and each application it finds and the
++// computer lacks shows under "Apps to install" with its picture and summary.
++// Choosing one installs its package; the administrator password is asked for
++// first, a notification follows the install, and once it is done the app is
++// in the launcher and the notification opens it.
++class AuraDeInstallProvider : public SearchProvider {
++ public:
++  explicit AuraDeInstallProvider(Profile* profile);
++  AuraDeInstallProvider(const AuraDeInstallProvider&) = delete;
++  AuraDeInstallProvider& operator=(const AuraDeInstallProvider&) = delete;
++  ~AuraDeInstallProvider() override;
++
++  // SearchProvider:
++  void Start(const std::u16string& query,
++             OnSearchResultsCallback on_search_done) override;
++  void StopQuery() override;
++  ash::AppListSearchResultType ResultType() const override;
++
++ private:
++  void Search();
++  void OnSearched(uint64_t generation, std::optional<base::Value> response);
++
++  const raw_ptr<Profile> profile_;
++  std::string query_;
++  // Searches answer out of order; only the latest one's results show.
++  uint64_t generation_ = 0;
++  // Typing waits for a pause before the catalog is asked.
++  base::OneShotTimer debounce_;
++  base::WeakPtrFactory<AuraDeInstallProvider> weak_ptr_factory_{this};
++};
++
++}  // namespace app_list
++
++#endif  // CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
+diff --git a/chrome/browser/ash/app_list/search/search_controller_factory.cc b/chrome/browser/ash/app_list/search/search_controller_factory.cc
+index b368b4312526..8e1f9f39da25 100644
+--- a/chrome/browser/ash/app_list/search/search_controller_factory.cc
++++ b/chrome/browser/ash/app_list/search/search_controller_factory.cc
+@@ -11,12 +11,14 @@
+ #include "base/check_deref.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/system/sys_info.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+ #include "chrome/browser/ash/app_list/search/app_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/app_zero_state_provider.h"
+ #include "chrome/browser/ash/app_list/search/arc/arc_app_shortcuts_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/arc/arc_playstore_search_provider.h"
++#include "chrome/browser/ash/app_list/search/aurade_install_provider.h"
+ #include "chrome/browser/ash/app_list/search/desks_admin_template_provider.h"
+ #include "chrome/browser/ash/app_list/search/files/drive_search_provider.h"
+ #include "chrome/browser/ash/app_list/search/files/file_search_provider.h"
+@@ -97,6 +99,12 @@ std::unique_ptr<SearchController> CreateSearchController(
+   controller->AddProvider(std::make_unique<ArcPlayStoreSearchProvider>(
+       kMaxPlayStoreResults, profile, list_controller));
+ 
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    // AuraDE compatibility: apps not installed yet, from the distribution's
++    // catalog, where Play Store results would be.
++    controller->AddProvider(std::make_unique<AuraDeInstallProvider>(profile));
++  }
++
+   if (arc::IsArcAllowedForProfile(profile)) {
+     controller->AddProvider(std::make_unique<ArcAppShortcutsSearchProvider>(
+         kMaxAppShortcutResults, profile, list_controller));

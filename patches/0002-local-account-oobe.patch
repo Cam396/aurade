@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/login/screens/BUILD.gn b/chrome/browser/ash/login/screens/BUILD.gn
-index 06f25aff2b5a..32320bf8e1c1 100644
+index 196720ac1020..18c0956af25f 100644
 --- a/chrome/browser/ash/login/screens/BUILD.gn
 +++ b/chrome/browser/ash/login/screens/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("screens") {
@@ -351,7 +351,7 @@ index 6677e6b8517d..ca40b8ff82a8 100644
      SIGNIN_TRIAGE,
      ADD_CHILD,
 diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
-index f7f2fdfd0c84..9078e2d341dc 100644
+index 4c6222d574b5..9ce01b6905e3 100644
 --- a/chrome/browser/ash/login/wizard_controller.cc
 +++ b/chrome/browser/ash/login/wizard_controller.cc
 @@ -25,6 +25,7 @@
@@ -526,7 +526,7 @@ index f7f2fdfd0c84..9078e2d341dc 100644
  void WizardController::OnConsumerUpdateScreenExit(
      ConsumerUpdateScreen::Result result) {
    OnScreenExit(ConsumerUpdateScreenView::kScreenId,
-@@ -3736,6 +3826,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
+@@ -3739,6 +3829,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
               screen_id == FamilyLinkNoticeView::kScreenId ||
               screen_id == GaiaView::kScreenId ||
               screen_id == UserCreationView::kScreenId ||
@@ -1008,7 +1008,7 @@ index 6ac20c3e9a38..64adeceeb4af 100644
  
    private cancel(): void {
 diff --git a/chrome/browser/ui/webui/ash/login/BUILD.gn b/chrome/browser/ui/webui/ash/login/BUILD.gn
-index 282254485ba7..650c034b8803 100644
+index 9c2ace206752..ff489df5b2be 100644
 --- a/chrome/browser/ui/webui/ash/login/BUILD.gn
 +++ b/chrome/browser/ui/webui/ash/login/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("login") {
@@ -1124,7 +1124,7 @@ index 000000000000..5fd1e6bfa3d2
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
 diff --git a/chrome/browser/ui/webui/ash/login/oobe_ui.cc b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
-index 1aa16d897184..2eaa74baaabb 100644
+index b134116155e5..53afc860ea82 100644
 --- a/chrome/browser/ui/webui/ash/login/oobe_ui.cc
 +++ b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
 @@ -54,6 +54,7 @@

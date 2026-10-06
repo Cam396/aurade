@@ -63,7 +63,7 @@ index 7c5187937c2d..63bdfa8a1474 100644
  // function as the main entrypoint to the Mojo API.
  //
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index d6fdaf14653c..cbda58345eef 100644
+index 4c44da969ab3..c9968254a28f 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -16,6 +16,8 @@ static_library("dbus") {
@@ -91,7 +91,7 @@ index d6fdaf14653c..cbda58345eef 100644
      "chrome_features_service_provider_unittest.cc",
      "desktop_notification_service_unittest.cc",
      "dlp_files_policy_service_provider_unittest.cc",
-@@ -315,6 +319,25 @@ source_set("unit_tests") {
+@@ -316,6 +320,25 @@ source_set("unit_tests") {
    ]
  }
  
@@ -1496,7 +1496,7 @@ index 000000000000..71af2a5d7181
 +
 +}  // namespace ash
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 8e01bd25d6fb..4db9aec721bd 100644
+index 3953c7066f64..b3a73ea3a84f 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 @@ -18,6 +18,7 @@
@@ -1507,7 +1507,7 @@ index 8e01bd25d6fb..4db9aec721bd 100644
  #include "ash/public/cpp/event_rewriter_controller.h"
  #include "ash/public/cpp/keyboard/keyboard_controller.h"
  #include "ash/public/cpp/session/session_controller.h"
-@@ -80,6 +81,7 @@
+@@ -86,6 +87,7 @@
  #include "chrome/browser/ash/dbus/arc_crosh_service_provider.h"
  #include "chrome/browser/ash/dbus/arc_tracing_service_provider.h"
  #include "chrome/browser/ash/dbus/ash_dbus_helper.h"
@@ -1515,7 +1515,7 @@ index 8e01bd25d6fb..4db9aec721bd 100644
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
-@@ -411,6 +413,15 @@ class DBusServices {
+@@ -417,6 +419,15 @@ class DBusServices {
              std::make_unique<ScreenLockServiceProvider>()));
  
      if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -1531,7 +1531,7 @@ index 8e01bd25d6fb..4db9aec721bd 100644
        // AuraDE compatibility: Linux applications send notifications on the
        // user's session bus. Keep that unprivileged connection separate from
        // the system services above, then translate requests into Ash state.
-@@ -609,6 +620,8 @@ class DBusServices {
+@@ -615,6 +626,8 @@ class DBusServices {
    DBusServices& operator=(const DBusServices&) = delete;
  
    ~DBusServices() {
@@ -1540,7 +1540,7 @@ index 8e01bd25d6fb..4db9aec721bd 100644
      rollback_network_config::Shutdown();
      chromeos::sensors::SensorHalDispatcher::Shutdown();
      NetworkHandler::Shutdown();
-@@ -647,6 +660,8 @@ class DBusServices {
+@@ -653,6 +666,8 @@ class DBusServices {
  
    void PreAshShutdown() {
      // Services depending on ash should be released here.
@@ -1549,7 +1549,7 @@ index 8e01bd25d6fb..4db9aec721bd 100644
      desktop_notification_service_host_.reset();
      machine_learning_decision_service_.reset();
    }
-@@ -656,6 +671,7 @@ class DBusServices {
+@@ -662,6 +677,7 @@ class DBusServices {
    std::unique_ptr<CrosDBusService> kiosk_info_service_;
    std::unique_ptr<CrosDBusService> printers_service_;
    std::unique_ptr<CrosDBusService> screen_lock_service_;

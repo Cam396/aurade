@@ -1,8 +1,8 @@
 diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
-index 4a838ae5582b..b39fe5d9570f 100644
+index 369c6cb0824d..2455dc214505 100644
 --- a/ash/app_list/app_list_controller_impl.cc
 +++ b/ash/app_list/app_list_controller_impl.cc
-@@ -90,6 +90,7 @@
+@@ -89,6 +89,7 @@
  #include "components/services/app_service/public/cpp/app_registry_cache.h"
  #include "components/services/app_service/public/cpp/app_registry_cache_wrapper.h"
  #include "ui/base/models/image_model.h"
@@ -10,7 +10,7 @@ index 4a838ae5582b..b39fe5d9570f 100644
  #include "ui/base/mojom/menu_source_type.mojom-forward.h"
  #include "ui/compositor/compositor.h"
  #include "ui/compositor/layer.h"
-@@ -1985,11 +1986,14 @@ void AppListControllerImpl::MaybeShowSunfishLauncherNudge(
+@@ -1981,11 +1982,14 @@ void AppListControllerImpl::MaybeShowSunfishLauncherNudge(
    pref_service->SetTime(prefs::kSunfishLauncherNudgeLastShown, now);
  
    // TODO(hewer): Upload string for translation.
@@ -28,7 +28,7 @@ index 4a838ae5582b..b39fe5d9570f 100644
  
    AnchoredNudgeManager::Get()->Show(nudge_data);
 diff --git a/chrome/browser/ash/app_list/search/files/file_search_provider.cc b/chrome/browser/ash/app_list/search/files/file_search_provider.cc
-index 839d47dcad88..3da76f3fa9c3 100644
+index 17151e8eb1dd..ffb20b29ca0d 100644
 --- a/chrome/browser/ash/app_list/search/files/file_search_provider.cc
 +++ b/chrome/browser/ash/app_list/search/files/file_search_provider.cc
 @@ -4,6 +4,8 @@

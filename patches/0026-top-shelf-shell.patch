@@ -1,8 +1,8 @@
 diff --git a/ash/app_list/app_list_bubble_presenter.cc b/ash/app_list/app_list_bubble_presenter.cc
-index c0beef7153bd..1f7d79575cad 100644
+index 6fdd0c84943c..b014102823cf 100644
 --- a/ash/app_list/app_list_bubble_presenter.cc
 +++ b/ash/app_list/app_list_bubble_presenter.cc
-@@ -137,6 +137,13 @@ gfx::Rect ComputeBubbleBounds(aura::Window* root_window,
+@@ -135,6 +135,13 @@ gfx::Rect ComputeBubbleBounds(aura::Window* root_window,
        x = work_area.right() - padding - bubble_size.width();
        y = work_area.y() + padding;
        break;
@@ -17,7 +17,7 @@ index c0beef7153bd..1f7d79575cad 100644
    return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
  }
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 7ee10e62ba7d..da7a1d238d76 100644
+index 133fcb13f700..3c33db0e8723 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -282,6 +282,9 @@ Style notes:
@@ -64,7 +64,7 @@ index 7ee10e62ba7d..da7a1d238d76 100644
          Shut down
        </message>
 diff --git a/ash/public/cpp/shelf_config.h b/ash/public/cpp/shelf_config.h
-index e9f8a993ee14..e3fd19835408 100644
+index f8400c3a28f2..cc7b26f55611 100644
 --- a/ash/public/cpp/shelf_config.h
 +++ b/ash/public/cpp/shelf_config.h
 @@ -5,6 +5,7 @@
@@ -92,7 +92,7 @@ index e9f8a993ee14..e3fd19835408 100644
  
    // DisplayObserver:
    void OnDisplayMetricsChanged(const display::Display& display,
-@@ -191,6 +195,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -195,6 +199,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
  
    bool is_dense() const { return is_dense_; }
  
@@ -101,7 +101,7 @@ index e9f8a993ee14..e3fd19835408 100644
    bool is_in_app() const { return is_in_app_; }
  
    bool in_split_view_with_overview() const {
-@@ -254,6 +260,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -258,6 +264,8 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Updates 'elevate_tablet_mode_app_bar_' for `inline_app_bar_size`.
    void UpdateShowElevatedAppBar(const gfx::Size& inline_app_bar_size);
  
@@ -110,7 +110,7 @@ index e9f8a993ee14..e3fd19835408 100644
   private:
    friend class ShelfConfigTest;
  
-@@ -299,6 +307,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -303,6 +311,9 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Whether shelf is currently standard or dense.
    bool is_dense_ = false;
  
@@ -120,7 +120,7 @@ index e9f8a993ee14..e3fd19835408 100644
    // Whether the shelf is currently in in-app state.
    bool is_in_app_ = false;
  
-@@ -315,8 +326,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -319,8 +330,10 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    // Whether the app list (or home launcher in tablet mode) is visible.
    bool is_app_list_visible_ = false;
  
@@ -132,7 +132,7 @@ index e9f8a993ee14..e3fd19835408 100644
    const int shelf_button_icon_size_median_;
    const int shelf_button_icon_size_dense_;
  
-@@ -336,12 +349,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
+@@ -340,12 +353,12 @@ class ASH_EXPORT ShelfConfig : public SessionObserver,
    const int shelf_shortcut_teardrop_corner_radius_;
  
    // Size allocated for each app button on the shelf.
@@ -230,10 +230,10 @@ index 620246e153d6..6595e7d8454f 100644
    // The locked alignment is set temporarily and not saved to preferences.
    kBottomLocked,
 diff --git a/ash/shelf/home_button.cc b/ash/shelf/home_button.cc
-index 34a4b67fd3c1..85b3d94a1c30 100644
+index 7fddb4c30006..5293c08e93ef 100644
 --- a/ash/shelf/home_button.cc
 +++ b/ash/shelf/home_button.cc
-@@ -812,11 +812,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
+@@ -792,11 +792,13 @@ void HomeButton::AnimateNudgeBounce(views::AnimationBuilder& builder) {
    gfx::PointF bounce_up_point = shelf()->SelectValueForShelfAlignment(
        gfx::PointF(0, -kAnimationBounceUpOffset),
        gfx::PointF(kAnimationBounceUpOffset, 0),
@@ -250,7 +250,7 @@ index 34a4b67fd3c1..85b3d94a1c30 100644
    gfx::Transform move_up;
    move_up.Translate(bounce_up_point.x(), bounce_up_point.y());
 diff --git a/ash/shelf/hotseat_widget.cc b/ash/shelf/hotseat_widget.cc
-index f76c27d4f99c..d13e53780077 100644
+index 2cdfbfc2d47d..a97fb59cecdf 100644
 --- a/ash/shelf/hotseat_widget.cc
 +++ b/ash/shelf/hotseat_widget.cc
 @@ -4,6 +4,7 @@
@@ -261,7 +261,7 @@ index f76c27d4f99c..d13e53780077 100644
  #include <memory>
  #include <utility>
  
-@@ -852,6 +853,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
+@@ -853,6 +854,38 @@ int HotseatWidget::CalculateHotseatYInScreen(
    DCHECK(shelf_->IsHorizontalAlignment());
    int hotseat_distance_from_bottom_of_display = 0;
    const int hotseat_size = GetHotseatSize();
@@ -300,7 +300,7 @@ index f76c27d4f99c..d13e53780077 100644
    switch (hotseat_target_state) {
      case HotseatState::kShownClamshell:
        hotseat_distance_from_bottom_of_display = hotseat_size;
-@@ -884,11 +917,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
+@@ -885,11 +918,8 @@ int HotseatWidget::CalculateHotseatYInScreen(
      case HotseatState::kNone:
        NOTREACHED();
    }
@@ -399,10 +399,10 @@ index 1fc09e689e24..24a3b45a9d98 100644
  
    // Returns |horizontal| if shelf is horizontal, otherwise |vertical|.
 diff --git a/ash/shelf/shelf_app_button.cc b/ash/shelf/shelf_app_button.cc
-index 15b8a00383a8..f5d8f35f14be 100644
+index 0fc4cdfd1de4..476b5cfa8563 100644
 --- a/ash/shelf/shelf_app_button.cc
 +++ b/ash/shelf/shelf_app_button.cc
-@@ -1043,6 +1043,10 @@ void ShelfAppButton::Layout(PassKey) {
+@@ -1004,6 +1004,10 @@ void ShelfAppButton::Layout(PassKey) {
                                 kStatusIndicatorRadiusDip -
                                 status_indicator_offet_from_shelf_edge);
        break;
@@ -427,7 +427,7 @@ index d54514e3f18d..b9bf5565eb2f 100644
    return views::BubbleBorder::Arrow::NONE;
  }
 diff --git a/ash/shelf/shelf_config.cc b/ash/shelf/shelf_config.cc
-index 7bc8b9d3ac4a..5fc000668026 100644
+index 9ee7c8711f75..66f78bcfd9e4 100644
 --- a/ash/shelf/shelf_config.cc
 +++ b/ash/shelf/shelf_config.cc
 @@ -6,6 +6,9 @@
@@ -448,7 +448,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
  #include "ui/display/tablet_state.h"
  
-@@ -169,6 +173,7 @@ void ShelfConfig::Init() {
+@@ -173,6 +177,7 @@ void ShelfConfig::Init() {
  void ShelfConfig::Shutdown() {
    Shell* const shell = Shell::Get();
  
@@ -456,7 +456,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
    shell->session_controller()->RemoveObserver(this);
    shell->overview_controller()->RemoveObserver(this);
    shell->system_tray_model()->virtual_keyboard()->RemoveObserver(this);
-@@ -208,6 +213,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
+@@ -212,6 +217,16 @@ void ShelfConfig::OnSessionStateChanged(session_manager::SessionState state) {
    UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/false);
  }
  
@@ -473,7 +473,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  void ShelfConfig::UpdateForTabletMode(bool in_tablet_mode) {
    in_tablet_mode_ = in_tablet_mode;
    UpdateConfig(is_app_list_visible_, /*tablet_mode_changed=*/true);
-@@ -243,7 +258,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
+@@ -247,7 +262,7 @@ bool ShelfConfig::ShelfControlsForcedShownForAccessibility() const {
  
  int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
    if (is_dense_)
@@ -482,7 +482,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  
    switch (density) {
      case HotseatDensity::kNormal:
-@@ -257,7 +272,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
+@@ -261,7 +276,7 @@ int ShelfConfig::GetShelfButtonSize(HotseatDensity density) const {
  
  int ShelfConfig::GetShelfButtonIconSize(HotseatDensity density) const {
    if (is_dense_)
@@ -491,7 +491,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  
    switch (density) {
      case HotseatDensity::kNormal:
-@@ -305,6 +320,8 @@ int ShelfConfig::shelf_size() const {
+@@ -309,6 +324,8 @@ int ShelfConfig::shelf_size() const {
  }
  
  int ShelfConfig::in_app_shelf_size() const {
@@ -500,7 +500,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
    return is_dense_ ? 36 : 40;
  }
  
-@@ -330,7 +347,7 @@ int ShelfConfig::button_spacing() const {
+@@ -334,7 +351,7 @@ int ShelfConfig::button_spacing() const {
  
  int ShelfConfig::control_size() const {
    if (!in_tablet_mode_)
@@ -509,7 +509,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  
    return is_dense_ ? 36 : 40;
  }
-@@ -390,12 +407,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+@@ -394,12 +411,18 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
    const bool new_is_in_app =
        CalculateIsInApp(new_is_app_list_visible, new_is_virtual_keyboard_shown);
  
@@ -529,7 +529,7 @@ index 7bc8b9d3ac4a..5fc000668026 100644
  
    if (!changed)
      return;
-@@ -405,14 +428,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
+@@ -409,14 +432,25 @@ void ShelfConfig::UpdateConfig(bool new_is_app_list_visible,
    is_virtual_keyboard_shown_ = new_is_virtual_keyboard_shown;
    is_app_list_visible_ = new_is_app_list_visible;
    is_in_app_ = new_is_in_app;
@@ -833,7 +833,7 @@ index 82fdf6bb2d06..474161baf795 100644
    pref_change_registrar_->Add(
        prefs::kAppNotificationBadgingEnabled,
 diff --git a/ash/shelf/shelf_layout_manager.cc b/ash/shelf/shelf_layout_manager.cc
-index e7cf6b4954d5..30ba33ec02ff 100644
+index 45d76a46371d..1565dac9d222 100644
 --- a/ash/shelf/shelf_layout_manager.cc
 +++ b/ash/shelf/shelf_layout_manager.cc
 @@ -238,7 +238,8 @@ gfx::Insets CalculateShelfInsets(ShelfAlignment alignment,
@@ -917,10 +917,10 @@ index e7cf6b4954d5..30ba33ec02ff 100644
          return drag_amount_ < 0;
        return drag_amount_ > 0;
 diff --git a/ash/shelf/shelf_view.cc b/ash/shelf/shelf_view.cc
-index 1dc8781f613f..dbc0b20160e5 100644
+index 331e1c4680e7..d77203bbb27b 100644
 --- a/ash/shelf/shelf_view.cc
 +++ b/ash/shelf/shelf_view.cc
-@@ -1254,7 +1254,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
+@@ -1274,7 +1274,8 @@ void ShelfView::PointerPressedOnButton(views::View* view,
                                  shelf_->SelectValueForShelfAlignment(
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
                                      SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
@@ -930,7 +930,7 @@ index 1dc8781f613f..dbc0b20160e5 100644
                              SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
  }
  
-@@ -1970,6 +1971,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
+@@ -1988,6 +1989,9 @@ gfx::Rect ShelfView::GetMenuAnchorRect(const views::View& source,
      case ShelfAlignment::kRight:
        origin = gfx::Point(shelf_bounds_in_screen.x(), location.y());
        break;
@@ -940,7 +940,7 @@ index 1dc8781f613f..dbc0b20160e5 100644
    }
    return gfx::Rect(origin, gfx::Size());
  }
-@@ -1987,6 +1991,9 @@ void ShelfView::AnnounceShelfAlignment() {
+@@ -2005,6 +2009,9 @@ void ShelfView::AnnounceShelfAlignment() {
      case ShelfAlignment::kRight:
        announcement = l10n_util::GetStringUTF16(IDS_SHELF_ALIGNMENT_RIGHT);
        break;
@@ -950,7 +950,7 @@ index 1dc8781f613f..dbc0b20160e5 100644
    }
    announcement_view_->GetViewAccessibility().AnnounceText(announcement);
  }
-@@ -2641,9 +2648,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
+@@ -2660,9 +2667,11 @@ const ShelfItem* ShelfView::ShelfItemForView(const views::View* view) const {
  
  int ShelfView::CalculateShelfDistance(const gfx::Point& coordinate) const {
    const gfx::Rect bounds = GetBoundsInScreen();
@@ -964,7 +964,7 @@ index 1dc8781f613f..dbc0b20160e5 100644
  }
  
 diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
-index 89c4920f1652..b66b3892a288 100644
+index 7868a827a379..273469817f0f 100644
 --- a/ash/shelf/shelf_widget.cc
 +++ b/ash/shelf/shelf_widget.cc
 @@ -34,6 +34,7 @@
@@ -1143,10 +1143,10 @@ index 891d8661be58..2da7246fdd2d 100644
  
  int HoldingSpaceTrayBubble::CalculateChildBubbleContainerMaxHeight() const {
 diff --git a/ash/system/holding_space/holding_space_tray_icon_preview.cc b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-index 40fa2ec66c22..9ccd25333b79 100644
+index 41adfb3a5894..3236f3d5573d 100644
 --- a/ash/system/holding_space/holding_space_tray_icon_preview.cc
 +++ b/ash/system/holding_space/holding_space_tray_icon_preview.cc
-@@ -88,6 +88,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
+@@ -89,6 +89,7 @@ bool IsHorizontal(ShelfAlignment shelf_alignment) {
    switch (shelf_alignment) {
      case ShelfAlignment::kBottom:
      case ShelfAlignment::kBottomLocked:
@@ -1255,10 +1255,10 @@ index ccb93d04bc35..da0c9c74c8ce 100644
  
    bubble_->bubble_view()->ChangeAnchorRect(anchor_rect);
 diff --git a/ash/system/toast/anchored_nudge.cc b/ash/system/toast/anchored_nudge.cc
-index a7bb13b5a6aa..557bf32c1414 100644
+index 131a423b6566..cc061bdd4e87 100644
 --- a/ash/system/toast/anchored_nudge.cc
 +++ b/ash/system/toast/anchored_nudge.cc
-@@ -350,11 +350,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
+@@ -336,11 +336,11 @@ void AnchoredNudge::SetArrowFromShelf(Shelf* shelf) {
    if (is_corner_anchored_) {
      SetArrow(shelf->SelectValueForShelfAlignment(
          views::BubbleBorder::BOTTOM_RIGHT, views::BubbleBorder::LEFT_BOTTOM,
@@ -1273,7 +1273,7 @@ index a7bb13b5a6aa..557bf32c1414 100644
  }
  
 diff --git a/ash/system/tray/tray_background_view.cc b/ash/system/tray/tray_background_view.cc
-index a103119cfe50..bc6d70e47eef 100644
+index 13013f2ed40b..b8f84951597b 100644
 --- a/ash/system/tray/tray_background_view.cc
 +++ b/ash/system/tray/tray_background_view.cc
 @@ -579,6 +579,9 @@ void TrayBackgroundView::ShowContextMenuForViewImpl(
@@ -1458,10 +1458,10 @@ index 3308b2d26c12..630f141c0ba8 100644
    NOTREACHED();
  }
 diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-index 04937db0552e..558725b7f9e7 100644
+index 0338c5d4d798..0461f0a82ffe 100644
 --- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
 +++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-@@ -3496,6 +3496,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
+@@ -3504,6 +3504,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
      case ash::ShelfAlignment::kRight:
        alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
        break;
@@ -1471,7 +1471,7 @@ index 04937db0552e..558725b7f9e7 100644
      case ash::ShelfAlignment::kBottomLocked:
        // ShelfAlignment::kBottomLocked not supported by
        // shelf_prefs.cc
-@@ -3534,10 +3537,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
+@@ -3542,10 +3545,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
      case api::autotest_private::ShelfAlignmentType::kRight:
        alignment = ash::ShelfAlignment::kRight;
        break;

@@ -181,7 +181,7 @@ index d797ccc4c727..3e1d8a6769a5 100644
      // before OnActiveUserPrefServiceChanged(), so defer notifying the
      // observers until the sign in prefs are received.
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index 7419bb65d4e8..c2a20f3a3933 100644
+index 875647f2ddfe..f1dd8ff39fd2 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -4,13 +4,19 @@
@@ -309,10 +309,10 @@ index 7419bb65d4e8..c2a20f3a3933 100644
    // Depends on `DlcserviceClient`.
    language_packs::LanguagePackManager::Shutdown();
 diff --git a/chrome/browser/ash/login/session/user_session_manager.cc b/chrome/browser/ash/login/session/user_session_manager.cc
-index 5f1a9d4bc697..973ce4e0938d 100644
+index d85eef91248f..498d42fbcd8e 100644
 --- a/chrome/browser/ash/login/session/user_session_manager.cc
 +++ b/chrome/browser/ash/login/session/user_session_manager.cc
-@@ -461,6 +461,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
+@@ -438,6 +438,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
           user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML;
  }
  
@@ -334,7 +334,7 @@ index 5f1a9d4bc697..973ce4e0938d 100644
  // Stores the information about the challenge-response keys, that were used for
  // authentication, persistently in the known_user database for future
  // authentication attempts.
-@@ -1229,8 +1244,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
+@@ -1207,8 +1222,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
    // Otherwise, auth token dependent code would be in an invalid state.
    // Important piece such as policy code might be broken because of this and
    // subject to an exploit. See http://crbug.com/41292933.
@@ -346,7 +346,7 @@ index 5f1a9d4bc697..973ce4e0938d 100644
      SYSLOG(ERROR)
          << "Session restore failed for online sign-in, terminating session.";
      session_manager::SessionManager::Get()->RequestSignOut();
-@@ -1556,7 +1573,8 @@ void UserSessionManager::InitProfilePreferences(
+@@ -1535,7 +1552,8 @@ void UserSessionManager::InitProfilePreferences(
      }
    }
  
@@ -356,7 +356,7 @@ index 5f1a9d4bc697..973ce4e0938d 100644
      // Get the Gaia ID from the user context. This may not be available when
      // unlocking a previously opened profile, or when creating a supervised
      // user. However, in these cases the gaia_id should be already available in
-@@ -1866,7 +1884,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
+@@ -1849,7 +1867,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
    TRACE_EVENT0("login", "UserSessionManager::FinalizePrepareProfile");
    user_manager::UserManager* user_manager = user_manager::UserManager::Get();
    user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
@@ -367,23 +367,23 @@ index 5f1a9d4bc697..973ce4e0938d 100644
      if (auth_flow == UserContext::AUTH_FLOW_GAIA_WITH_SAML ||
          auth_flow == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML) {
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 861d575ad6ee..0e25bb5aac45 100644
+index 4e8e43b5c300..6ee56b552556 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -340,12 +340,6 @@ void ApplySigninProfileModifications(Profile* profile) {
+@@ -346,12 +346,6 @@ void ApplySigninProfileModifications(Profile* profile) {
  }
  
  #if !defined(USE_REAL_DBUS_CLIENTS)
 -FakeSessionManagerClient* FakeSessionManagerClient() {
 -  auto* fake_session_manager_client = FakeSessionManagerClient::Get();
--  DCHECK(fake_session_manager_client);
+-  CHECK(fake_session_manager_client, base::NotFatalUntil::M161);
 -  return fake_session_manager_client;
 -}
 -
  chromeos::FakePowerManagerClient* FakePowerManagerClient() {
    chromeos::FakePowerManagerClient* fake_power_manager_client =
        chromeos::FakePowerManagerClient::Get();
-@@ -360,8 +354,12 @@ void FakeShutdownSignal() {
+@@ -366,8 +360,12 @@ void FakeShutdownSignal() {
  }
  
  void InstallFakeShutdownCalls() {
@@ -399,7 +399,7 @@ index 861d575ad6ee..0e25bb5aac45 100644
        base::BindOnce(&FakeShutdownSignal));
  }
 diff --git a/chrome/browser/ash/settings/device_settings_service.cc b/chrome/browser/ash/settings/device_settings_service.cc
-index 38168d864386..34fecb1d2e52 100644
+index 320db788cd41..2771126456ba 100644
 --- a/chrome/browser/ash/settings/device_settings_service.cc
 +++ b/chrome/browser/ash/settings/device_settings_service.cc
 @@ -14,6 +14,7 @@
@@ -413,7 +413,7 @@ index 38168d864386..34fecb1d2e52 100644
 @@ -162,8 +163,9 @@ DeviceSettingsService::DeviceSettingsService() {
  
  DeviceSettingsService::~DeviceSettingsService() {
-   DCHECK(pending_operations_.empty());
+   CHECK(pending_operations_.empty(), base::NotFatalUntil::M160);
 -  for (auto& observer : observers_)
 +  for (auto& observer : observers_) {
      observer.OnDeviceSettingsServiceShutdown();
@@ -442,8 +442,8 @@ index 38168d864386..34fecb1d2e52 100644
 +  }
  
    // Device mode can only change if was not set yet.
-   DCHECK(policy::DEVICE_MODE_PENDING == device_mode_ ||
-@@ -232,8 +236,9 @@ void DeviceSettingsService::LoadIfNotPresent() {
+   CHECK(policy::DEVICE_MODE_PENDING == device_mode_ ||
+@@ -233,8 +237,9 @@ void DeviceSettingsService::LoadIfNotPresent() {
    // operation is in the queue, then a request to load will be issued soon. If a
    // store operation is pending, then the policy data is already available and
    // will be stored soon. In either case, it's not needed to load again.
@@ -454,7 +454,7 @@ index 38168d864386..34fecb1d2e52 100644
  
    EnqueueLoad(false);
  }
-@@ -262,9 +267,10 @@ void DeviceSettingsService::Store(
+@@ -263,9 +268,10 @@ void DeviceSettingsService::Store(
  
  DeviceSettingsService::OwnershipStatus
  DeviceSettingsService::GetOwnershipStatus() {
@@ -466,7 +466,7 @@ index 38168d864386..34fecb1d2e52 100644
    return OwnershipStatus::kOwnershipUnknown;
  }
  
-@@ -281,8 +287,9 @@ void DeviceSettingsService::GetOwnershipStatusAsync(
+@@ -282,8 +288,9 @@ void DeviceSettingsService::GetOwnershipStatusAsync(
      // the next SessionManagerOperation completes. If no operation is pending,
      // start a load operation to fetch the key and report the result.
      pending_ownership_status_callbacks_.push_back(std::move(callback));
@@ -477,7 +477,7 @@ index 38168d864386..34fecb1d2e52 100644
    }
  }
  
-@@ -308,8 +315,9 @@ void DeviceSettingsService::InitOwner(
+@@ -309,8 +316,9 @@ void DeviceSettingsService::InitOwner(
          owner_settings_service) {
    // When InitOwner() is called twice with the same |username| it's
    // worth to reload settings since owner key may become available.
@@ -488,7 +488,7 @@ index 38168d864386..34fecb1d2e52 100644
    username_ = username;
    owner_settings_service_ = owner_settings_service;
  
-@@ -373,8 +381,9 @@ void DeviceSettingsService::Enqueue(
+@@ -374,8 +382,9 @@ void DeviceSettingsService::Enqueue(
      std::unique_ptr<SessionManagerOperation> operation) {
    const bool was_empty = pending_operations_.empty();
    pending_operations_.push_back(std::move(operation));
@@ -499,7 +499,7 @@ index 38168d864386..34fecb1d2e52 100644
  }
  
  void DeviceSettingsService::EnqueueLoad(bool request_key_load) {
-@@ -385,10 +394,11 @@ void DeviceSettingsService::EnqueueLoad(bool request_key_load) {
+@@ -386,10 +395,11 @@ void DeviceSettingsService::EnqueueLoad(bool request_key_load) {
  }
  
  void DeviceSettingsService::EnsureReload(bool request_key_load) {
@@ -513,7 +513,7 @@ index 38168d864386..34fecb1d2e52 100644
  }
  
  void DeviceSettingsService::StartNextOperation() {
-@@ -439,12 +449,16 @@ void DeviceSettingsService::HandleCompletedOperation(
+@@ -441,12 +451,16 @@ void DeviceSettingsService::HandleCompletedOperation(
      if (device_off_hours_controller_->is_off_hours_mode()) {
        std::unique_ptr<em::ChromeDeviceSettingsProto> off_device_settings =
            policy::off_hours::ApplyOffHoursPolicyToProto(*device_settings_);
@@ -534,7 +534,7 @@ index 38168d864386..34fecb1d2e52 100644
    }
  
    public_key_ = scoped_refptr<PublicKey>(operation->public_key());
-@@ -464,18 +478,21 @@ void DeviceSettingsService::HandleCompletedOperation(
+@@ -466,18 +480,21 @@ void DeviceSettingsService::HandleCompletedOperation(
  
    // The completion callback happens after the notification so clients can
    // filter self-triggered updates.

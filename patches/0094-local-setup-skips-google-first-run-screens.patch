@@ -1,4 +1,5 @@
 diff --git a/chrome/browser/ash/login/screens/ai_intro_screen.cc b/chrome/browser/ash/login/screens/ai_intro_screen.cc
+index e545a4f2a7ac..eea80cdcc9c0 100644
 --- a/chrome/browser/ash/login/screens/ai_intro_screen.cc
 +++ b/chrome/browser/ash/login/screens/ai_intro_screen.cc
 @@ -7,6 +7,7 @@
@@ -9,7 +10,7 @@ diff --git a/chrome/browser/ash/login/screens/ai_intro_screen.cc b/chrome/browse
  #include "base/memory/weak_ptr.h"
  #include "base/values.h"
  #include "chrome/browser/ash/accessibility/accessibility_manager.h"
-@@ -65,6 +66,13 @@
+@@ -65,6 +66,13 @@ AiIntroScreen::AiIntroScreen(base::WeakPtr<AiIntroScreenView> view,
  AiIntroScreen::~AiIntroScreen() = default;
  
  bool AiIntroScreen::MaybeSkip(WizardContext& context) {
@@ -24,6 +25,7 @@ diff --git a/chrome/browser/ash/login/screens/ai_intro_screen.cc b/chrome/browse
      exit_callback_.Run(Result::kNotApplicable);
      return true;
 diff --git a/chrome/browser/ash/login/screens/gemini_intro_screen.cc b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
+index e61528322add..7a68cbff6fd6 100644
 --- a/chrome/browser/ash/login/screens/gemini_intro_screen.cc
 +++ b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
 @@ -8,6 +8,7 @@
@@ -34,7 +36,7 @@ diff --git a/chrome/browser/ash/login/screens/gemini_intro_screen.cc b/chrome/br
  #include "base/memory/weak_ptr.h"
  #include "base/values.h"
  #include "chrome/browser/ash/login/oobe_screen.h"
-@@ -72,6 +73,13 @@
+@@ -72,6 +73,13 @@ GeminiIntroScreen::GeminiIntroScreen(base::WeakPtr<GeminiIntroScreenView> view,
  GeminiIntroScreen::~GeminiIntroScreen() = default;
  
  bool GeminiIntroScreen::MaybeSkip(WizardContext& context) {
@@ -49,6 +51,7 @@ diff --git a/chrome/browser/ash/login/screens/gemini_intro_screen.cc b/chrome/br
      exit_callback_.Run(Result::kNotApplicable);
      return true;
 diff --git a/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc b/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
+index 38a663c4cd01..8b6848bd3ce1 100644
 --- a/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
 +++ b/chrome/browser/ash/login/screens/osauth/password_selection_screen.cc
 @@ -10,6 +10,7 @@
@@ -59,7 +62,7 @@ diff --git a/chrome/browser/ash/login/screens/osauth/password_selection_screen.c
  #include "base/debug/crash_logging.h"
  #include "base/debug/dump_without_crashing.h"
  #include "base/functional/bind.h"
-@@ -143,6 +144,14 @@
+@@ -143,6 +144,14 @@ void PasswordSelectionScreen::OnUserAction(const base::ListValue& args) {
  }
  
  bool PasswordSelectionScreen::MaybeSkip(WizardContext& wizard_context) {

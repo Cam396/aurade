@@ -910,7 +910,7 @@ index 6fe976dc60cd..026e2e7efc6b 100644
                 << " provided is not prefixed with "
                 << kGuestOsWindowAppIdPrefix;
 diff --git a/chrome/browser/resources/app_settings/app.html.ts b/chrome/browser/resources/app_settings/app.html.ts
-index 71f200673796..785b2cef180e 100644
+index 0e8da416e1f0..89d4f0c01a21 100644
 --- a/chrome/browser/resources/app_settings/app.html.ts
 +++ b/chrome/browser/resources/app_settings/app.html.ts
 @@ -22,7 +22,29 @@ export function getHtml(this: AppElement) {
@@ -1017,10 +1017,10 @@ index be186e1e23b1..d1b6855509a9 100644
    <div class="indented-app-details" id="version">
      [[i18n('appManagementAppDetailsVersion', app.version)]]
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
-index cc79b2c11b8d..50d0c01f4c18 100644
+index 2310131425a0..12d9e87c9a9a 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
-@@ -125,12 +125,19 @@ export class AppManagementAppDetailsItem extends
+@@ -127,12 +127,19 @@ export class AppManagementAppDetailsItem extends
      if (app.installReason === InstallReason.kSystem) {
        return false;
      }
@@ -1040,7 +1040,7 @@ index cc79b2c11b8d..50d0c01f4c18 100644
    private isIsolatedWebApp_(app: App): boolean {
      return loadTimeData.getBoolean('isIwaInlineUpdateEnabled') && app &&
          app.type === AppType.kWeb &&
-@@ -259,6 +266,22 @@ export class AppManagementAppDetailsItem extends
+@@ -290,6 +297,22 @@ export class AppManagementAppDetailsItem extends
      return Boolean(app.dataSize);
    }
  
@@ -1063,7 +1063,7 @@ index cc79b2c11b8d..50d0c01f4c18 100644
    private shouldShowInfoIcon_(app: App): boolean {
      return app.type === AppType.kWeb &&
          (app.installSource === InstallSource.kBrowser ||
-@@ -289,6 +312,8 @@ export class AppManagementAppDetailsItem extends
+@@ -320,6 +343,8 @@ export class AppManagementAppDetailsItem extends
        case AppType.kWeb:
        case AppType.kExtension:
          return this.i18n('appManagementAppDetailsTypeWeb' + suffix);
@@ -1072,7 +1072,7 @@ index cc79b2c11b8d..50d0c01f4c18 100644
        default:
          console.error('App type not handled by app management.');
          return '';
-@@ -308,6 +333,9 @@ export class AppManagementAppDetailsItem extends
+@@ -339,6 +364,9 @@ export class AppManagementAppDetailsItem extends
    }
  
    private getTypeAndSourceString_(app: App): string {
