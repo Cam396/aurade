@@ -1,0 +1,19 @@
+diff --git a/ui/views/corewm/tooltip_aura.cc b/ui/views/corewm/tooltip_aura.cc
+index 4a593a63bfea..af6ca7a5e9b9 100644
+--- a/ui/views/corewm/tooltip_aura.cc
++++ b/ui/views/corewm/tooltip_aura.cc
+@@ -52,7 +52,13 @@ bool CanUseTranslucentTooltipWidget() {
+ }
+ 
+ bool ShouldIgnoreScreenBounds() {
+-#if BUILDFLAG(IS_OZONE)
++#if BUILDFLAG(IS_CHROMEOS)
++  // AuraDE: Ash draws every window itself, tooltips included, inside the one
++  // window it has on the host compositor. Nothing on the host side keeps a
++  // tooltip on screen, so the bounds below have to, or a tooltip over the
++  // shelf opened below the bottom edge of the screen.
++  return false;
++#elif BUILDFLAG(IS_OZONE)
+   // Some platforms, such as Wayland, disallow client applications to manipulate
+   // global screen coordinates, requiring popups to be positioned relative to
+   // their parent windows and partially handled at display server side. See
