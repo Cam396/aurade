@@ -56,7 +56,7 @@ The AuraDE installer does all four on an encrypted install.
 ## Changing it
 
     python3 aurade-boot/tools/build-assets.py
-    python3 aurade-boot/tools/build-assets.py --no-build --mock /tmp/m.png --photo 1 --state ready --size 2560x1440
+    python3 aurade-boot/tools/build-assets.py --no-build --mock unlock-mock.png --photo 1 --state ready --size 2560x1440
 
 The first draws and packs everything; the second composes a screen from the
 drawn pieces with the script's own layout, without booting anything. States
