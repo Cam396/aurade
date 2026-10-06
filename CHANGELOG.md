@@ -36,6 +36,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - Broadcom Wi-Fi that only works with Broadcom's own driver, as in most Intel
   Macs, gets that driver, built for the installed kernel. Other Broadcom chips
   keep the open one.
+- The installer has Wi-Fi on most Intel Macs: it carries Broadcom's driver for
+  the chips the open drivers cannot run, and uses it only on those.
 - The installer says what it found: on a Surface, that the touchscreen and pen
   need a kernel AuraDE does not install; on a Mac with Apple's T2 chip, that
   the built-in keyboard, trackpad and Wi-Fi do too.

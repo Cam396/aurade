@@ -34,6 +34,7 @@ REPO_URL=${AURADE_REPO_URL:-file:///var/cache/aurade/repo}
 ALLOW_UNSIGNED=${AURADE_ALLOW_UNSIGNED:-0}
 RELEASE_CHANNEL=${AURADE_RELEASE_CHANNEL:-development}
 GUI_RELEASE=${AURADE_GUI_RELEASE:-0}
+LIVE_WL=${AURADE_LIVE_WL:-1}
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u -d "${AURADE_ARCH_SNAPSHOT//\//-} 00:00:00" +%s)}
 MAX_ISO_BYTES=${AURADE_MAX_ISO_BYTES:-4294967296}
 ISO_SIGNING_KEY=${AURADE_ISO_SIGNING_KEY:-}
@@ -57,6 +58,10 @@ case $RELEASE_CHANNEL in
     exit 2
     ;;
 esac
+[[ $LIVE_WL == 0 || $LIVE_WL == 1 ]] || {
+  echo 'build-iso: AURADE_LIVE_WL must be 0 or 1' >&2
+  exit 2
+}
 [[ $GUI_RELEASE == 0 || $GUI_RELEASE == 1 ]] || {
   echo 'build-iso: AURADE_GUI_RELEASE must be 0 or 1' >&2
   exit 2
@@ -221,6 +226,7 @@ install -Dm0644 "$ROOT/lib/aurade-questions.sh" "$STAGE/airootfs/usr/local/lib/a
 install -Dm0644 "$ROOT/lib/aurade-wifi.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-wifi.sh"
 install -Dm0644 "$ROOT/lib/aurade-keyboard.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-keyboard.sh"
 install -Dm0644 "$ROOT/lib/aurade-hardware.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-hardware.sh"
+install -Dm0755 "$ROOT/lib/aurade-live-wl-guard" "$STAGE/airootfs/usr/local/lib/aurade/aurade-live-wl-guard"
 install -Dm0644 "$ROOT/lib/aurade-tui.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-tui.sh"
 install -Dm0644 "$ROOT/lib/aurade-copy.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-copy.sh"
 install -Dm0644 "$ROOT/lib/aurade-wait.sh" "$STAGE/airootfs/usr/local/lib/aurade/aurade-wait.sh"
@@ -356,6 +362,15 @@ if (( STAGE_ONLY )); then
   printf 'staged_profile=%s\nsource_date_epoch=%s\n' "$STAGE" "$SOURCE_DATE_EPOCH"
   sha256sum "$STAGE/airootfs/opt/aurade/repo/packages.lock"
   exit 0
+fi
+
+# Broadcom's wl, built for the image's kernel, so most Intel Macs have Wi-Fi
+# in the installer. build-live-wl.sh says how. AURADE_LIVE_WL=0 leaves it out,
+# for a builder without a compiler; those Macs then need a cable or a phone.
+if (( LIVE_WL )); then
+  "$ROOT/build-live-wl.sh" "$STAGE" "$WORK_ROOT/live-wl"
+  find "$STAGE/airootfs/usr/lib/modules" "$STAGE/airootfs/usr/share/licenses" \
+    -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 fi
 
 mkarchiso -v -w "$BUILD_WORK" -o "$OUTPUT_DIR" "$STAGE"

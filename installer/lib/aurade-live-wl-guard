@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# The open Broadcom drivers on the installer, through a modprobe install hook.
+#
+#   install bcma /usr/local/lib/aurade/aurade-live-wl-guard bcma $CMDLINE_OPTS
+#
+# A few Broadcom chips, the Wi-Fi in most Intel Macs among them, only work with
+# Broadcom's own driver, wl, which the image carries built for its kernel. The
+# open drivers claim some of those chips too, get there first and then fail, so
+# the installer had no Wi-Fi on them. On a machine with one of those chips,
+# wl is loaded instead of the module asked for. On any other machine, which
+# is nearly all of them and every other Broadcom chip, the module loads as if
+# this hook were not here.
+set -u
+
+MODPROBE=${AURADE_MODPROBE:-/usr/bin/modprobe}
+HARDWARE_LIB=${AURADE_HARDWARE_LIB:-/usr/local/lib/aurade/aurade-hardware.sh}
+
+[[ $# -ge 1 ]] || exit 2
+
+# shellcheck source=installer/lib/aurade-hardware.sh
+if . "$HARDWARE_LIB" 2>/dev/null &&
+    aurade_hw_pci_has 14e4 "${AURADE_HW_WL_DEVICES[@]}" &&
+    "$MODPROBE" -q wl; then
+  exit 0
+fi
+# No such chip, or no wl on this image: the module the kernel asked for.
+exec "$MODPROBE" --ignore-install "$@"
