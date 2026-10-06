@@ -1,0 +1,18 @@
+diff --git a/base/check.cc b/base/check.cc
+index a91851e30eee..a86eb4318199 100644
+--- a/base/check.cc
++++ b/base/check.cc
+@@ -58,6 +58,13 @@ constexpr char kCheckFailureMessageSeparator[] =
+ LogSeverity GetDumpSeverity() {
+ #if defined(OFFICIAL_BUILD)
+   return DCHECK_IS_ON() ? LOGGING_DCHECK : LOGGING_ERROR;
++#elif !DCHECK_IS_ON()
++  // AuraDE: the release cannot be an official build (that needs Google
++  // branding), but it is the user-facing build. Log these the way an official
++  // ChromeOS release does instead of aborting the desktop: DUMP_WILL_BE_CHECK
++  // and CHECK(..., base::NotFatalUntil::M...) before its milestone are the
++  // DCHECKs upstream is migrating, and a release build turns DCHECKs off.
++  return LOGGING_ERROR;
+ #else
+   // Crash outside official builds (outside user-facing builds) to detect
+   // invariant violations early in release-build testing like fuzzing, etc.
