@@ -81,6 +81,18 @@ class Prompt:
     def secret(self) -> bool:
         return self.kind == SECRET
 
+    @property
+    def worth_showing(self) -> bool:
+        """Whether the question tells the person more than the field does.
+
+        PAM's usual question is "Password: ", which a password field already
+        says by being one; shown again as the note under it, it read like a
+        label that had slipped below its field. A question that is anything
+        else, a one time code or the PIN of a smart card, is worth its words.
+        """
+        words = self.text.strip().rstrip(":").strip().lower()
+        return bool(words) and words != "password"
+
     def __repr__(self) -> str:  # pragma: no cover - debugging only
         return f"Prompt({self.kind!r}, {self.text!r})"
 

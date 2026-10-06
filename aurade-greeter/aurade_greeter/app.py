@@ -2697,7 +2697,7 @@ class GreeterWindow(Adw.ApplicationWindow):
                 self.name_entry.set_text("")
                 GLib.idle_add(self._focus_field, self.name_entry)
             self.widgets["password.note"].set_label(
-                prompt.text or C.PASSWORD_HELP)
+                prompt.text if prompt.worth_showing else C.PASSWORD_HELP)
             return False
         self._start_session()
         return False
