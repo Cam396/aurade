@@ -373,6 +373,14 @@ sremote 'read -r boot count </var/lib/aurade-greeter/quick-exits 2>/dev/null || 
 sleep 5
 shot 1-greeter
 
+echo "==> the DevTools port is closed, then opened for this test"
+# It drives the whole desktop with no password, so an installed system must
+# start without it. The rest of this test steers the desktop through it, so
+# this disposable machine opens it before anybody signs in.
+sremote 'grep -qx "AURADE_ENABLE_DEVTOOLS_PORT=0" /etc/aurade/features.conf' ||
+  fail 'the installed system does not ship with the DevTools port closed'
+sremote 'printf "AURADE_ENABLE_DEVTOOLS_PORT=1\n" >>/etc/aurade/features.conf'
+
 echo "==> sign in through the login screen"
 keys ret; sleep 2
 keys ret; sleep 2

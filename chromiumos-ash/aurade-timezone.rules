@@ -1,0 +1,9 @@
+// The person at the machine may change its time zone from AuraDE's Settings
+// without an administrator's password, as on a Chromebook, a Mac or Windows.
+// Only the time zone: setting the clock itself still asks.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.timedate1.set-timezone" &&
+        subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

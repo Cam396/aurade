@@ -79,6 +79,16 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   colours, and old style icons show.
 - Google web apps show their logos instead of a letter, and preinstalled web
   apps whose icons went missing install again.
+- Security: the desktop no longer listens on a debugging port. Every install
+  had one open on 127.0.0.1:9222, without a password, and any program on the
+  machine, run by any account, could use it to take over the desktop and read
+  the browser's sign-ins. It is now off, and only test machines turn it on.
+- A link clicked in a Linux application opens in a tab of the AuraDE browser.
+  Before, it opened in whatever other browser was installed, or nowhere.
+- Changing the time zone in Settings changes it for the whole computer: Linux
+  apps, the login screen and the system clock follow it, not only the
+  desktop's clock. Automatic time zone starts off, since it needs a Google
+  service this build cannot use, and it kept the time zone list greyed out.
 - Wi-Fi works on Surfaces. Their Marvell Wi-Fi firmware is on the installer
   and on installed systems: Arch stopped including it by default, and without
   it the Surface Laptop 1 and 2, Pro 4 to 6 and Book 1 and 2 had no Wi-Fi at
