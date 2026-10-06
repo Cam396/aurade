@@ -66,7 +66,7 @@ as_root() {
   if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
 }
 
-UBUNTU_PACKAGES=(libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0)
+UBUNTU_PACKAGES=(libarchive-tools squashfs-tools gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-glib-2.0 libspa-0.2-dev)
 job_setup_ubuntu() {
   group 'distribution packages'
   local -a missing=()
