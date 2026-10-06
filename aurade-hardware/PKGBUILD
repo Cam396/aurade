@@ -2,7 +2,7 @@
 
 pkgname=aurade-hardware
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 _mbpfan_ver=2.4.0
 pkgdesc="Hardware support for AuraDE on Surface laptops and Intel Macs"
 arch=('x86_64')
@@ -16,14 +16,16 @@ backup=('etc/mkinitcpio.conf.d/90-aurade-hardware.conf'
 source=(
   "mbpfan-${_mbpfan_ver}.tar.gz::https://github.com/linux-on-mac/mbpfan/archive/refs/tags/v${_mbpfan_ver}.tar.gz"
   '90-aurade-hardware.conf'
+  'aurade-hardware-initcpio.conf'
   'aurade-mbpfan.service'
   'test-hardware-initramfs.sh'
   'LICENSE'
 )
 sha256sums=('e1cdcffaba52be215ae40a8568949190866d500d6ae2a1e96b71ab5372f3580b'
-            'e6501fe9f55ce7061e94ff5f1baf5bd19f0164251dfa9d1d9976d9f6fb64e554'
+            'b210efee7ab94c02c9cfd44a8b219956d265743a37530976c82658669152a712'
+            '540547e39e4afe3cb38ba9937a0eada3f13c22af160f827d8c44edb461f1f4de'
             'a98e4a2dee959fcfe4ddb27e050281a582c86c75ef5941d283719f3f28b6ba35'
-            '0f7b4eb46dedf54eab65ff4e47ccc733cac6f73ec79ffbef19ea43c97864c975'
+            'b2d7f08f7a178e4874d1a5a38276f3e13e524e7d962dd9143ecea4ec893b326f'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
 
 build() {
@@ -33,12 +35,17 @@ build() {
 }
 
 check() {
-  bash "${srcdir}/test-hardware-initramfs.sh" "${srcdir}/90-aurade-hardware.conf"
+  bash "${srcdir}/test-hardware-initramfs.sh" "${srcdir}/90-aurade-hardware.conf" \
+    "${srcdir}/aurade-hardware-initcpio.conf"
 }
 
 package() {
   install -Dm644 90-aurade-hardware.conf \
     "${pkgdir}/etc/mkinitcpio.conf.d/90-aurade-hardware.conf"
+  # The rules themselves. Under usr/lib/initcpio, so installing or updating
+  # this package makes mkinitcpio's own hook rebuild the initramfs.
+  install -Dm644 aurade-hardware-initcpio.conf \
+    "${pkgdir}/usr/lib/initcpio/aurade-hardware.conf"
 
   install -Dm755 "mbpfan-${_mbpfan_ver}/bin/mbpfan" "${pkgdir}/usr/bin/mbpfan"
   install -Dm644 "mbpfan-${_mbpfan_ver}/mbpfan.conf" "${pkgdir}/etc/mbpfan.conf"

@@ -4,11 +4,14 @@
 #
 # Sources the mkinitcpio drop-in the way mkinitcpio does, after the main
 # configuration, against firmware names written to a directory, and checks
-# the MODULES it leaves behind.
+# the MODULES it leaves behind. The drop-in reads its rules from the file the
+# package puts in /usr/lib/initcpio; here, from the one beside it.
 set -Eeuo pipefail
 
 HERE=$(cd -- "$(dirname -- "$0")" && pwd -P)
 DROPIN=${1:-$HERE/90-aurade-hardware.conf}
+RULES=${2:-$HERE/aurade-hardware-initcpio.conf}
+export AURADE_HW_INITCPIO=$RULES
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -53,9 +56,14 @@ out=$(modules_for 'XPS 13 9310')
 out=$(AURADE_HW_ROOT="$TMP/nowhere" bash -c 'MODULES=(existing); . "$1"; printf "%s\n" "${MODULES[@]}"' _ "$DROPIN")
 [[ $out == existing ]] || fail "with no firmware name the drop-in still added: $out"
 
+# Installed, the drop-in reads the rules from /usr/lib/initcpio, where a
+# package update to them rebuilds the initramfs.
+grep -Fq '${AURADE_HW_INITCPIO:-/usr/lib/initcpio/aurade-hardware.conf}' "$DROPIN" ||
+  fail 'the drop-in does not read its rules from /usr/lib/initcpio'
+
 # Every module is optional, so a kernel without one still builds.
 if awk '/MODULES\+=\(/ {in_list = 1; sub(/.*MODULES\+=\(/, "")}
-         in_list {line = $0; if (sub(/\).*/, "", line)) in_list = 0; print line}' "$DROPIN" |
+         in_list {line = $0; if (sub(/\).*/, "", line)) in_list = 0; print line}' "$RULES" |
     tr -s ' ' '\n' | grep -Eq '^[a-z0-9_]+$'; then
   fail 'a module is not marked optional, and a kernel without it would fail the build'
 fi
