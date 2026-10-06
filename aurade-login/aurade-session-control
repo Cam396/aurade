@@ -100,11 +100,13 @@ status() {
     "${session_id}" "$(id -u)" "${active}" "${state}" "${type}" "${seat}" "${locked}"
 }
 
+# The desktop's own lock screen does the locking. logind passes the request
+# to the session, the desktop listens for it, and it sets the session's
+# LockedHint while the lock screen is up. A separate locker cannot cover the
+# screen, because the compositor has no session lock protocol.
 lock_session() {
   require_own_session
-  command -v gtklock >/dev/null 2>&1 || die "gtklock is not installed"
-  loginctl lock-session "${session_id}" || true
-  gtklock --daemonize
+  loginctl lock-session "${session_id}" || die "cannot lock session ${session_id}"
 }
 
 switch_user() {
@@ -113,8 +115,6 @@ switch_user() {
   seat="$(session_property Seat)"
   [[ -n "${seat}" ]] || die "current session has no seat"
   loginctl lock-session "${session_id}" || true
-  command -v gtklock >/dev/null 2>&1 || die "gtklock is not installed"
-  gtklock --daemonize
   greeter_session="$(find_greeter_session "${seat}" || true)"
   if [[ -z "${greeter_session}" ]]; then
     used_ttys="$(used_session_ttys)"

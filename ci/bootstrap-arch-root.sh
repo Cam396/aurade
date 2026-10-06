@@ -37,7 +37,6 @@ PACKAGES=(
   brightnessctl
   greetd
   greetd-tuigreet
-  gtklock
   pipewire
   pipewire-alsa
   pipewire-pulse

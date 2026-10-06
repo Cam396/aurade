@@ -294,6 +294,7 @@ if mkdir -p "${AURADE_LOG_DIR}" 2>/dev/null; then
     fi
 fi
 
+SESSION_STARTED="$(date +%s)"
 while :; do
     if parent_is_gone; then
         detail="the session that started this desktop is gone"
@@ -358,6 +359,27 @@ while :; do
     fi
     stop_x11_bridge
     END_TIME="$(date +%s)"
+
+    # AuraDE: a desktop that went away while its lock screen was up is not
+    # started again, because it would come back unlocked. The session ends
+    # instead, and the greeter asks for the password. The session manager
+    # stand in keeps the marker, as root, from lock to unlock. One older than
+    # this session was left by a session that ended locked, and the next
+    # desktop to start clears it; it says nothing about this one.
+    LOCK_MARKER="${AURADE_LOCK_STATE_DIR:-/run/aurade-lock}/$(id -u)"
+    LOCK_TIME="$(stat -c %Y "${LOCK_MARKER}" 2>/dev/null || echo 0)"
+    if [ -e "${LOCK_MARKER}" ] && [ "${LOCK_TIME}" -ge "${SESSION_STARTED}" ]; then
+        echo "AuraDE: the desktop exited while locked; ending the session." >&2
+        if [ -n "${AURADE_LOG}" ]; then
+            printf '=== AuraDE desktop exited while locked %s; session ends ===\n' \
+                "$(date -Is 2>/dev/null || date)" >>"${AURADE_LOG}" 2>/dev/null || true
+        fi
+        if [ -x "${AURADE_SESSION_CONTROL:-/usr/bin/aurade-session-control}" ]; then
+            AURADE_SIGN_OUT_DETACHED=1 \
+                "${AURADE_SESSION_CONTROL:-/usr/bin/aurade-session-control}" sign-out || true
+        fi
+        exit 0
+    fi
     RUNTIME="$((END_TIME - START_TIME))"
 
     if [ "${AURADE_SESSION_ON_EXIT:-restart}" = "exit" ]; then
