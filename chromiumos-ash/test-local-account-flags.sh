@@ -65,4 +65,17 @@ if grep -Fxq -- '--disable-first-run-ui' "${TMP_DIR}/output"; then
 fi
 [[ $(disabled_flags) == 0 ]] || fail 'features are disabled without a reason'
 
+# Features switched on go in one flag as well, and the Plus profile's join
+# the same one rather than replacing it.
+enabled_flags() { grep -c '^--enable-features=' "${TMP_DIR}/output" || true; }
+enabled_list() { sed -n 's/^--enable-features=//p' "${TMP_DIR}/output" | tr ',' '\n'; }
+run_launcher 1 standard 1
+[[ $(enabled_flags) == 1 ]] || fail "expected one --enable-features, found $(enabled_flags)"
+enabled_list | grep -Fxq AudioFocusEnforcement || \
+    fail 'starting one player no longer pauses the others'
+run_launcher 1 plus 1
+[[ $(enabled_flags) == 1 ]] || fail "plus: expected one --enable-features, found $(enabled_flags)"
+enabled_list | grep -Fxq AudioFocusEnforcement || fail 'plus: the Plus features replaced the rest'
+enabled_list | grep -Fxq FeatureManagement16Desks || fail 'plus: the Plus features are missing'
+
 echo "local account flags test: PASS"

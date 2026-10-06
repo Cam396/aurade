@@ -424,6 +424,14 @@ FLAGS=(
     --enable-wayland-server
 )
 
+# Chrome keeps only the last --enable-features it is given too, so every
+# block adds to this list and it is passed once, beside the disabled list.
+#
+# AudioFocusEnforcement: something that starts playing pauses what was
+# playing, web pages and Linux players alike, as on a Chromebook. The field
+# trial testing config that AuraDE builds read turns it off on ChromeOS.
+AURADE_ENABLED_FEATURES=(AudioFocusEnforcement)
+
 if [ "${AURADE_FEATURE_PROFILE}" = "plus" ] || \
     [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus" ] || \
     [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus_ai" ]; then
@@ -475,7 +483,7 @@ if [ "${AURADE_FEATURE_PROFILE}" = "plus" ] || \
         # only when the local provider contract is enabled.
         FLAGS+=(--mahi-restrictions-override)
     fi
-    FLAGS+=(--enable-features="$(aurade_join_csv "${AURADE_PLUS_FEATURES[@]}")")
+    AURADE_ENABLED_FEATURES+=("${AURADE_PLUS_FEATURES[@]}")
 fi
 
 if [ -n "${AURADE_ASH_HOST_WINDOW_BOUNDS}" ]; then
@@ -560,6 +568,10 @@ if [ "${AURADE_SOFTWARE_RENDERING:-0}" = "1" ]; then
         [ "${flag}" = "--enable-wayland-server" ] || SOFTWARE_FLAGS+=("${flag}")
     done
     FLAGS=("${SOFTWARE_FLAGS[@]}")
+fi
+
+if [ "${#AURADE_ENABLED_FEATURES[@]}" -gt 0 ]; then
+    FLAGS+=(--enable-features="$(aurade_join_csv "${AURADE_ENABLED_FEATURES[@]}")")
 fi
 
 if [ "${#AURADE_DISABLED_FEATURES[@]}" -gt 0 ]; then
