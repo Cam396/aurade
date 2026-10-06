@@ -81,6 +81,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - Linux apps: a new window takes focus, a window that asks to be tiny opens
   at a usable size, every window finds its shelf icon, Qt apps show the right
   colours, and old style icons show.
+- Files: variables set for a program in its launch options reach the program.
+  Before, they never did, and were left set for every program started after.
 - Google web apps show their logos instead of a letter, and preinstalled web
   apps whose icons went missing install again.
 - Security: the desktop no longer listens on a debugging port. Every install
