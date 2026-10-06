@@ -1,0 +1,73 @@
+diff --git a/chromeos/dbus/power/fake_power_manager_client.cc b/chromeos/dbus/power/fake_power_manager_client.cc
+index fc28f28c2575..639efea5e2e4 100644
+--- a/chromeos/dbus/power/fake_power_manager_client.cc
++++ b/chromeos/dbus/power/fake_power_manager_client.cc
+@@ -22,6 +22,7 @@
+ #include "base/location.h"
+ #include "base/logging.h"
+ #include "base/posix/unix_domain_socket.h"
++#include "base/power_monitor/power_monitor_device_source.h"
+ #include "base/process/launch.h"
+ #include "base/process/process.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -926,6 +927,7 @@ void FakePowerManagerClient::OnHostLifecycleState(
+   if (*preparing) {
+     host_suspend_started_at_ = base::TimeTicks::Now();
+     SendSuspendImminent(power_manager::SuspendImminent_Reason_OTHER);
++    base::PowerMonitorDeviceSource::HandleSystemSuspending();
+     return;
+   }
+   if (was_preparing) {
+@@ -935,6 +937,9 @@ void FakePowerManagerClient::OnHostLifecycleState(
+             : base::TimeTicks::Now() - host_suspend_started_at_;
+     host_suspend_started_at_ = base::TimeTicks();
+     SendSuspendDone(sleep_duration);
++    // Timers and the rest of the browser learn the computer slept, as they
++    // do from the real power manager.
++    base::PowerMonitorDeviceSource::HandleSystemResumed();
+     RequestStatusUpdate();
+     GetScreenBrightnessPercent(base::BindOnce(
+         &FakePowerManagerClient::OnHostScreenBrightnessChanged,
+@@ -1228,8 +1233,16 @@ void FakePowerManagerClient::SendSuspendDone(base::TimeDelta sleep_duration) {
+   if (render_process_manager_delegate_)
+     render_process_manager_delegate_->SuspendDone();
+ 
++  // AuraDE: as the real client does, the observers hear SuspendDoneEx, whose
++  // default passes the duration on to SuspendDone. Ash's power event observer
++  // only listens for SuspendDoneEx, and that is where it starts compositing
++  // again after stopping it for sleep: with SuspendDone alone, the desktop
++  // came back from sleep frozen, only the pointer moving.
++  power_manager::SuspendDone proto;
++  proto.set_suspend_duration(sleep_duration.ToInternalValue());
++  proto.set_deepest_state(power_manager::SuspendDone_SuspendState_TO_RAM);
+   for (auto& observer : observers_)
+-    observer.SuspendDone(sleep_duration);
++    observer.SuspendDoneEx(proto);
+ }
+ 
+ void FakePowerManagerClient::SendDarkSuspendImminent() {
+diff --git a/ash/system/power/power_prefs.cc b/ash/system/power/power_prefs.cc
+index f48dd6535737..06ccf89f1be2 100644
+--- a/ash/system/power/power_prefs.cc
++++ b/ash/system/power/power_prefs.cc
+@@ -17,6 +17,7 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/system/sys_info.h"
+ #include "base/time/default_tick_clock.h"
+ #include "chromeos/ash/components/human_presence/human_presence_configuration.h"
+ #include "chromeos/dbus/power/power_policy_controller.h"
+@@ -124,8 +125,11 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
+                                 hps::GetQuickLockDelay().InMilliseconds());
+ 
+   registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
++  // AuraDE: a computer that wakes from sleep, or has its lid opened, shows
++  // the lock screen, as a Linux or Windows desktop does; Settings can still
++  // turn that off. A Chromebook leaves it off for a consumer account.
+   registry->RegisterBooleanPref(
+-      prefs::kEnableAutoScreenLock, false,
++      prefs::kEnableAutoScreenLock, !base::SysInfo::IsRunningOnChromeOS(),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+ }
+ 
