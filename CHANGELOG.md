@@ -5,6 +5,27 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 ## 1.1.3, unreleased
 
 ### Added
+- Encrypted installs ask for the disk passphrase on a graphical unlock
+  screen, in the keyboard layout chosen in the installer. It stays sharp on a
+  4K screen, even one connected after installing.
+- Linux applications fit in:
+  - KDE, GTK and Qt apps take the desktop's light or dark mode, accent colour,
+    fonts and icons, and follow them when they change.
+  - Opening and saving files happens in AuraDE Files, and "Show in folder"
+    opens it.
+  - Their tray icons show in the status area on every monitor, with their
+    menus.
+  - Music and video players show in the media controls, with artwork, seeking
+    and the media keys. Starting one pauses the others, as on a Chromebook.
+  - Unread counts and other badges show on their shelf and launcher icons.
+  - X11 apps work, and every app shows the desktop's cursors.
+  - App info shows an app's package, version and size.
+- Apps install from the launcher: search for one that is not installed and
+  install it from there.
+- Every monitor is its own display, each with its own scale and resolution,
+  set in Settings, and a monitor can be turned.
+- Lock locks: the lock screen asks for your account password and stays
+  locked. The power menu has Sleep, and the computer wakes up locked.
 - A hardware package, aurade-hardware, on every install. Its pieces switch
   themselves on only on the machines that need them:
   - On an encrypted install, the built-in keyboard of a Surface laptop, or of
@@ -20,6 +41,16 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   the built-in keyboard, trackpad and Wi-Fi do too.
 
 ### Changed
+- Text on standard resolution monitors is drawn with subpixels, so it is
+  sharper, unless your font settings say otherwise.
+- Linux app windows have the same frame as the desktop's own.
+- Sound devices go by their short names in the volume menu, instead of long
+  hardware descriptions.
+- The volume bubble only shows when somebody changes the volume, not at every
+  start of the desktop.
+- Files: double click and Enter open a file, Open with lists the apps that
+  can, thumbnails replace the icons, the path starts at Home, and Back,
+  Forward and Up move through real folders.
 - Setup starts the display name with your Linux account's full name, and an
   empty name field shows your login name.
 - The display size preview in setup shows Files, Chromium and Settings, apps
@@ -27,6 +58,24 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
+- The graphical installer typed in a US layout whatever keyboard was picked.
+  On an encrypted install that set a passphrase nobody could type again at
+  the unlock prompt. The layout chosen is now the one used, in the installer,
+  at the unlock prompt and at the login screen.
+- Choosing a display size of 150, 175, 250 or 300 percent in Settings no
+  longer makes the desktop crash at every start.
+- On a computer without a GPU, switching desks and turning a monitor no
+  longer crash the desktop.
+- Tooltips stay on the screen.
+- The login screen no longer says Password twice under the password field.
+- Removing or updating a Linux app asks for your password when it needs one,
+  uninstalling asks first instead of crashing the desktop, and a failed
+  uninstall says why.
+- Linux apps: a new window takes focus, a window that asks to be tiny opens
+  at a usable size, every window finds its shelf icon, Qt apps show the right
+  colours, and old style icons show.
+- Google web apps show their logos instead of a letter, and preinstalled web
+  apps whose icons went missing install again.
 - Wi-Fi works on Surfaces. Their Marvell Wi-Fi firmware is on the installer
   and on installed systems: Arch stopped including it by default, and without
   it the Surface Laptop 1 and 2, Pro 4 to 6 and Book 1 and 2 had no Wi-Fi at
