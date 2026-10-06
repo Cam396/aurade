@@ -26,7 +26,7 @@ index 4fe0edda5ac1..dae57f9d85bb 100644
      return false;
    }
 diff --git a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
-index 486516df2474..a73fda2a3271 100644
+index 4c6f30a493c7..28b3ea3605b5 100644
 --- a/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
 +++ b/chrome/browser/ash/platform_keys/key_permissions/key_permissions_manager_impl.cc
 @@ -12,6 +12,7 @@
@@ -76,10 +76,10 @@ index 486516df2474..a73fda2a3271 100644
    VLOG(0) << "One-time key permissions migration started for token: "
            << static_cast<int>(token_id_) << ".";
 diff --git a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-index be60ecfa787c..9e7bacb90b5e 100644
+index 8b1612612174..2a24577aec59 100644
 --- a/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
 +++ b/chrome/browser/ash/system_web_apps/apps/media_app/chrome_media_app_ui_delegate.cc
-@@ -141,6 +141,7 @@ void ChromeMediaAppUIDelegate::IsFileArcWritableImpl(
+@@ -122,6 +122,7 @@ void ChromeMediaAppUIDelegate::IsFileArcWritableImpl(
      case VolumeType::VOLUME_TYPE_SMB:
      case VolumeType::VOLUME_TYPE_SYSTEM_INTERNAL:
      case VolumeType::VOLUME_TYPE_GUEST_OS:
@@ -88,7 +88,7 @@ index be60ecfa787c..9e7bacb90b5e 100644
        return;
      case VolumeType::NUM_VOLUME_TYPE:
 diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
-index a05f8507ea25..de649ff67356 100644
+index c0f35a08a381..bfdbd9e1e88b 100644
 --- a/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
 +++ b/chrome/browser/ash/system_web_apps/system_web_app_manager.cc
 @@ -26,6 +26,7 @@
@@ -180,7 +180,7 @@ index a05f8507ea25..de649ff67356 100644
  #endif  // !defined(OFFICIAL_BUILD)
  
    SystemWebAppDelegateMap delegate_map;
-@@ -373,6 +425,15 @@ void SystemWebAppManager::Start() {
+@@ -375,6 +427,15 @@ void SystemWebAppManager::Start() {
    if (should_force_install_apps) {
      UpdateLastAttemptedInfo();
    }
@@ -196,7 +196,7 @@ index a05f8507ea25..de649ff67356 100644
  
    const auto& disabled_system_apps =
        provider_->policy_manager().GetDisabledSystemWebApps();
-@@ -383,7 +444,8 @@ void SystemWebAppManager::Start() {
+@@ -385,7 +446,8 @@ void SystemWebAppManager::Start() {
          app.first, *app.second, should_force_install_apps, is_disabled));
    }
  
@@ -206,7 +206,7 @@ index a05f8507ea25..de649ff67356 100644
    if (exceeded_retries) {
      LOG(ERROR)
          << "Exceeded SWA install retry attempts.  Skipping installation, will "
-@@ -391,6 +453,15 @@ void SystemWebAppManager::Start() {
+@@ -393,6 +455,15 @@ void SystemWebAppManager::Start() {
      SCOPED_CRASH_KEY_BOOL("SystemWebAppManager", "broken_icons",
                            PreviousSessionHadBrokenIcons());
      base::debug::DumpWithoutCrashing();
@@ -223,7 +223,7 @@ index a05f8507ea25..de649ff67356 100644
    }
  
 diff --git a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
-index d530a784337f..7e50f93ff996 100644
+index bbe2492aa357..49acaf78caf0 100644
 --- a/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
 +++ b/chrome/browser/ash/system_web_apps/system_web_app_manager_factory.cc
 @@ -5,6 +5,7 @@
@@ -234,7 +234,7 @@ index d530a784337f..7e50f93ff996 100644
  #include "chrome/browser/ash/profiles/profile_helper.h"
  #include "chrome/browser/ash/system_web_apps/system_web_app_manager.h"
  #include "chrome/browser/browser_process.h"
-@@ -77,7 +78,23 @@ content::BrowserContext* SystemWebAppManagerFactory::GetBrowserContextToUse(
+@@ -78,7 +79,23 @@ content::BrowserContext* SystemWebAppManagerFactory::GetBrowserContextToUse(
      return nullptr;
    }
  
@@ -260,10 +260,10 @@ index d530a784337f..7e50f93ff996 100644
  
  void SystemWebAppManagerFactory::RegisterProfilePrefs(
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 19045777b3d8..6c7f5fe0e71a 100644
+index 36b5f14866e4..668a80263225 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -47,6 +47,7 @@
+@@ -48,6 +48,7 @@
  #include "base/strings/string_util.h"
  #include "base/strings/stringprintf.h"
  #include "base/supports_user_data.h"
@@ -271,7 +271,7 @@ index 19045777b3d8..6c7f5fe0e71a 100644
  #include "base/task/sequenced_task_runner.h"
  #include "base/types/expected.h"
  #include "base/types/expected_macros.h"
-@@ -4542,6 +4543,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
+@@ -4659,6 +4660,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
        TtsExtensionEngine::GetInstance());
  #endif
  #if BUILDFLAG(IS_CHROMEOS)
@@ -285,10 +285,10 @@ index 19045777b3d8..6c7f5fe0e71a 100644
  #else
    return nullptr;
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index 80927be5adaa..ade2dabd33d1 100644
+index 95a1d2ca5da9..fa4cdb371479 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
-@@ -555,6 +555,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
+@@ -560,6 +560,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
  }
  
  void ComponentLoader::AddGlicExtension() {
@@ -305,7 +305,7 @@ index 80927be5adaa..ade2dabd33d1 100644
    if (IsApiGlicPrivateEnabled()) {
      Add(IDR_GLIC_EXTENSION_MANIFEST,
          base::FilePath(FILE_PATH_LITERAL("glic_extension")));
-@@ -562,6 +572,16 @@ void ComponentLoader::AddGlicExtension() {
+@@ -567,6 +577,16 @@ void ComponentLoader::AddGlicExtension() {
  }
  
  void ComponentLoader::AddContextualTasksExtension() {
@@ -322,7 +322,7 @@ index 80927be5adaa..ade2dabd33d1 100644
    if (base::FeatureList::IsEnabled(
            extensions_features::kApiContextualTasksPrivate)) {
      Add(IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST_JSON,
-@@ -631,6 +651,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
+@@ -636,6 +656,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
  }
  
  void ComponentLoader::AddKeyboardApp() {
@@ -340,7 +340,7 @@ index 80927be5adaa..ade2dabd33d1 100644
    Add(IDR_KEYBOARD_MANIFEST, base::FilePath(FILE_PATH_LITERAL("keyboard")));
  }
  
-@@ -752,14 +783,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -757,14 +788,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
  
    if (!skip_session_components) {
  #if BUILDFLAG(IS_CHROMEOS)
@@ -370,7 +370,7 @@ index 80927be5adaa..ade2dabd33d1 100644
  #endif  // BUILDFLAG(IS_CHROMEOS)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -778,8 +818,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -783,8 +823,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
      }
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  
@@ -389,7 +389,7 @@ index 80927be5adaa..ade2dabd33d1 100644
  #endif  // BUILDFLAG(IS_CHROMEOS)
    }
  
-@@ -905,14 +953,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
+@@ -910,14 +958,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
  }
  
  void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
@@ -692,7 +692,7 @@ index a0fad3c05abc..0cc24b020c58 100644
    // We want to delay the initial logging of the feature states map to better
    // understand the frequency of when the client is not ready, and we are stuck
 diff --git a/components/exo/wayland/server.cc b/components/exo/wayland/server.cc
-index 8197dbab5f64..d074d45d1aff 100644
+index c0f85f4f0ad0..ab522cee7ace 100644
 --- a/components/exo/wayland/server.cc
 +++ b/components/exo/wayland/server.cc
 @@ -32,6 +32,7 @@
@@ -703,7 +703,7 @@ index 8197dbab5f64..d074d45d1aff 100644
  #include <memory>
  #include <string>
  #include <utility>
-@@ -182,8 +183,19 @@ bool Server::Open() {
+@@ -186,8 +187,19 @@ bool Server::Open() {
    if (wayland_group_res) {
      if (HANDLE_EINTR(chown(socket_path.MaybeAsASCII().c_str(), -1,
                             wayland_group.gr_gid)) < 0) {

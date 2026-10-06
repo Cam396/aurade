@@ -26,7 +26,7 @@ index 9e5414fee1bd..4b0bf455c435 100644
  
      learn_more_label_->SetProperty(
 diff --git a/chrome/browser/ash/login/auth/chrome_login_performer.cc b/chrome/browser/ash/login/auth/chrome_login_performer.cc
-index 583eb57c09c4..da0b5dda9a5a 100644
+index bfdc25af6ca3..87b23354c8a5 100644
 --- a/chrome/browser/ash/login/auth/chrome_login_performer.cc
 +++ b/chrome/browser/ash/login/auth/chrome_login_performer.cc
 @@ -10,8 +10,11 @@
@@ -54,7 +54,7 @@ index 583eb57c09c4..da0b5dda9a5a 100644
    // Use TaskPriority::HIGHEST as this operation blocks
    // user login flow.
 diff --git a/chrome/browser/ash/login/existing_user_controller.cc b/chrome/browser/ash/login/existing_user_controller.cc
-index b9489a56d821..6ff79597dfe0 100644
+index dd99d9e84eb2..ab3b10e3860a 100644
 --- a/chrome/browser/ash/login/existing_user_controller.cc
 +++ b/chrome/browser/ash/login/existing_user_controller.cc
 @@ -26,16 +26,19 @@
@@ -259,10 +259,10 @@ index 3519a3c37d05..ef765e1bc69d 100644
      base::UmaHistogramEnumeration("Login.PasswordChanged.ReauthReason",
                                    reauth_reason,
 diff --git a/chrome/browser/ash/login/screens/sync_consent_screen.cc b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-index d664ffdd06c8..cf2c1aadb084 100644
+index a51f92ab2803..2ca900156f66 100644
 --- a/chrome/browser/ash/login/screens/sync_consent_screen.cc
 +++ b/chrome/browser/ash/login/screens/sync_consent_screen.cc
-@@ -433,6 +433,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
+@@ -461,6 +461,9 @@ void SyncConsentScreen::PrepareScreenBasedOnCapability() {
  
  void SyncConsentScreen::SetSyncEverythingEnabled(bool enabled) {
    syncer::SyncService* sync_service = GetSyncService(profile_);
@@ -273,7 +273,7 @@ index d664ffdd06c8..cf2c1aadb084 100644
    if (enabled != sync_settings->IsSyncEverythingEnabled()) {
      syncer::UserSelectableTypeSet empty_set;
 diff --git a/chrome/browser/ash/login/screens/user_selection_screen.cc b/chrome/browser/ash/login/screens/user_selection_screen.cc
-index 3868fd153c4d..f4e2cfafb63b 100644
+index bcea073725be..d6a3c49ded64 100644
 --- a/chrome/browser/ash/login/screens/user_selection_screen.cc
 +++ b/chrome/browser/ash/login/screens/user_selection_screen.cc
 @@ -26,6 +26,7 @@
@@ -353,7 +353,7 @@ index 3868fd153c4d..f4e2cfafb63b 100644
  
    user_manager::KnownUser known_user(&local_state);
 diff --git a/chrome/browser/ash/login/signin/auth_error_observer.cc b/chrome/browser/ash/login/signin/auth_error_observer.cc
-index 5e3e445d62ac..f776640978b1 100644
+index 466bb1fbb4d2..338ded6032f4 100644
 --- a/chrome/browser/ash/login/signin/auth_error_observer.cc
 +++ b/chrome/browser/ash/login/signin/auth_error_observer.cc
 @@ -8,6 +8,7 @@
@@ -364,7 +364,7 @@ index 5e3e445d62ac..f776640978b1 100644
  #include "chrome/browser/ash/login/reauth_stats.h"
  #include "chrome/browser/ash/login/signin/signin_error_notifier.h"
  #include "chrome/browser/ash/profiles/profile_helper.h"
-@@ -19,12 +20,23 @@
+@@ -17,12 +18,23 @@
  #include "components/user_manager/user_manager.h"
  
  namespace ash {
@@ -389,18 +389,18 @@ index 5e3e445d62ac..f776640978b1 100644
  }
  
  AuthErrorObserver::AuthErrorObserver(PrefService* local_state,
-@@ -84,6 +96,9 @@ void AuthErrorObserver::HandleAuthError(
+@@ -81,6 +93,9 @@ void AuthErrorObserver::HandleAuthError(
      const GoogleServiceAuthError& auth_error) {
    const user_manager::User* const user =
        ProfileHelper::Get()->GetUserByProfile(profile_);
 +  if (IsAuraLocalAccount(user)) {
 +    return;
 +  }
-   DCHECK(user->HasGaiaAccount());
+   CHECK(user->HasGaiaAccount(), base::NotFatalUntil::M161);
  
    if (auth_error.IsPersistentError() && !auth_error.IsScopePersistentError()) {
 diff --git a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
-index 7990e513bb8f..12e9f198afeb 100644
+index 29f4ae658996..c0993082399e 100644
 --- a/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
 +++ b/chrome/browser/ash/login/signin/oauth2_token_fetcher.cc
 @@ -4,6 +4,7 @@
@@ -414,7 +414,7 @@ index 7990e513bb8f..12e9f198afeb 100644
 @@ -43,6 +44,24 @@ void OAuth2TokenFetcher::StartExchangeFromAuthCode(
      const std::string& auth_code,
      const std::string& signin_scoped_device_id) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
 +
 +  // HACK(AuraDE): --stub-auth bypass. Return fake OAuth2 tokens so the login
 +  // flow completes without contacting Google's servers. Needed because we
@@ -437,7 +437,7 @@ index 7990e513bb8f..12e9f198afeb 100644
    signin_scoped_device_id_ = signin_scoped_device_id;
    auth_fetcher_.StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
 diff --git a/chrome/browser/ash/login/signin/signin_error_notifier.cc b/chrome/browser/ash/login/signin/signin_error_notifier.cc
-index f0126c9f5420..80ac9f6a4de8 100644
+index cf743acc378f..431681107901 100644
 --- a/chrome/browser/ash/login/signin/signin_error_notifier.cc
 +++ b/chrome/browser/ash/login/signin/signin_error_notifier.cc
 @@ -14,15 +14,20 @@
@@ -460,8 +460,8 @@ index f0126c9f5420..80ac9f6a4de8 100644
 +#include "chrome/browser/notifications/notification_handler.h"
  #include "chrome/browser/ash/login/signin/token_handle_util.h"
  #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/signin/identity_manager_factory.h"
-@@ -60,6 +65,9 @@ namespace {
+ #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
+@@ -58,6 +63,9 @@ namespace {
  
  constexpr char kSettingsSigninUrl[] = "chrome://settings/signin/";
  constexpr char kSecondaryAccountNotificationIdInfix[] = "secondary-account";
@@ -471,7 +471,7 @@ index f0126c9f5420..80ac9f6a4de8 100644
  
  bool g_ignore_sync_errors_for_test_ = false;
  
-@@ -80,6 +88,12 @@ bool AreAllAccountsMigrated(
+@@ -78,6 +86,12 @@ bool AreAllAccountsMigrated(
    return true;
  }
  
@@ -484,7 +484,7 @@ index f0126c9f5420..80ac9f6a4de8 100644
  // Returns true if the child user has migrated at least one of their
  // secondary edu accounts to ARC++.
  bool IsSecondaryEduAccountMigratedForChildUser(Profile* profile,
-@@ -213,7 +227,8 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -215,7 +229,8 @@ SigninErrorNotifier::SigninErrorNotifier(
    error_controller_->AddObserver(this);
    const AccountId account_id =
        multi_user_util::GetAccountIdFromProfile(profile_);
@@ -494,7 +494,7 @@ index f0126c9f5420..80ac9f6a4de8 100644
        !token_handle_store_->IsRecentlyChecked(account_id)) {
      token_handle_store_->IsReauthRequired(
          account_id, profile->GetURLLoaderFactory(),
-@@ -226,6 +241,10 @@ SigninErrorNotifier::SigninErrorNotifier(PrefService* local_state,
+@@ -228,6 +243,10 @@ SigninErrorNotifier::SigninErrorNotifier(
  void SigninErrorNotifier::OnTokenHandleCheck(const AccountId& account_id,
                                               const std::string& token,
                                               bool reauth_required) {
@@ -505,13 +505,13 @@ index f0126c9f5420..80ac9f6a4de8 100644
    if (ash::features::IsUseTokenHandleStoreEnabled()) {
      account_manager::AccountManager* account_manager =
          AccountManagerFactory::Get()->GetAccountManager(
-@@ -280,8 +299,28 @@ void SigninErrorNotifier::Shutdown() {
+@@ -282,8 +301,28 @@ void SigninErrorNotifier::Shutdown() {
  }
  
  void SigninErrorNotifier::OnErrorChanged() {
 -  if (g_ignore_sync_errors_for_test_)
 +  if (g_ignore_sync_errors_for_test_) {
-     return;
++    return;
 +  }
 +
 +  // AuraDE compatibility: local Linux accounts intentionally do not have
@@ -530,24 +530,13 @@ index f0126c9f5420..80ac9f6a4de8 100644
 +  // therefore cannot satisfy GAIA reauth. Packaged local sessions should be
 +  // handled by the local-account check above.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch("stub-config")) {
-+    return;
+     return;
 +  }
  
    if (!error_controller_->HasError()) {
      message_center::MessageCenter::Get()->RemoveNotification(
-@@ -326,8 +365,9 @@ void SigninErrorNotifier::HandleDeviceAccountError(
-   // to a Family Link Supervised account, then suppress the notification.
-   supervised_user::SupervisedUserService* service =
-       supervised_user::SupervisedUserServiceFactory::GetForProfile(profile_);
--  if (service->signout_required_after_supervision_enabled())
-+  if (service->signout_required_after_supervision_enabled()) {
-     return;
-+  }
- 
-   // We need to save the flag in the local state because
-   // TokenHandleUtil::IsReauthRequired might fail on the login screen due to
 diff --git a/chrome/browser/ash/login/signin/token_handle_service.cc b/chrome/browser/ash/login/signin/token_handle_service.cc
-index 4bd8e9d1e798..3d8b893b3fe5 100644
+index 2a3b73660b0f..9a4ffb15ab50 100644
 --- a/chrome/browser/ash/login/signin/token_handle_service.cc
 +++ b/chrome/browser/ash/login/signin/token_handle_service.cc
 @@ -6,6 +6,7 @@
@@ -558,7 +547,7 @@ index 4bd8e9d1e798..3d8b893b3fe5 100644
  #include "chrome/browser/ash/login/signin/token_handle_store_factory.h"
  #include "chrome/browser/ash/profiles/profile_helper.h"
  #include "chrome/browser/profiles/profile.h"
-@@ -28,6 +29,13 @@
+@@ -27,6 +28,13 @@
  namespace ash {
  namespace {
  
@@ -572,7 +561,7 @@ index 4bd8e9d1e798..3d8b893b3fe5 100644
  account_manager::AccountManager* GetAccountManager(Profile* profile) {
    return AccountManagerFactory::Get()->GetAccountManager(
        profile->GetPath().value());
-@@ -62,6 +70,9 @@ void TokenHandleService::StartObserving() {
+@@ -64,6 +72,9 @@ void TokenHandleService::StartObserving() {
  void TokenHandleService::MaybeFetchForExistingUser(
      const AccountId& account_id) {
    VLOG(1) << "TokenHandleService::MaybeFetchForExistingUser";
@@ -582,7 +571,7 @@ index 4bd8e9d1e798..3d8b893b3fe5 100644
    if (account_id.GetAccountType() != AccountType::GOOGLE) {
      return;
    }
-@@ -73,6 +84,9 @@ void TokenHandleService::MaybeFetchForNewUser(
+@@ -75,6 +86,9 @@ void TokenHandleService::MaybeFetchForNewUser(
      const std::string& access_token,
      const std::string& refresh_token_hash) {
    VLOG(1) << "TokenHandleService::MaybeFetchForNewUser";
@@ -592,7 +581,7 @@ index 4bd8e9d1e798..3d8b893b3fe5 100644
    MaybeFetchTokenHandle(account_id, access_token, refresh_token_hash);
  }
  
-@@ -81,6 +95,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
+@@ -83,6 +97,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
    const AccountId& account_id =
        ProfileHelper::Get()->GetUserByProfile(profile_)->GetAccountId();
  
@@ -602,13 +591,29 @@ index 4bd8e9d1e798..3d8b893b3fe5 100644
    if (account_info.email == account_id.GetUserEmail()) {
      token_handle_store_->SetTokenHandleStale(account_id);
    }
-@@ -88,6 +105,9 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
+@@ -90,13 +107,18 @@ void TokenHandleService::OnRefreshTokenUpdatedForAccount(
  
  void TokenHandleService::FetchAccessToken(const AccountId& account_id) {
    VLOG(1) << "TokenHandleService::FetchAccessToken";
+-  access_token_fetcher_ =
+-      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+-          signin::OAuthConsumerId::kTokenHandleService, identity_manager_,
+-          base::BindOnce(&TokenHandleService::OnAccessTokenFetchComplete,
+-                         weak_factory_.GetWeakPtr(), account_id),
+-          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
+-          signin::ConsentLevel::kSignin);
 +  if (IsAuraLocalAccount(account_id)) {
 +    return;
 +  }
-   if (signin::IdentityManager* const identity_manager =
-           IdentityManagerFactory::GetForProfile(profile_);
-       identity_manager) {
++  if (identity_manager_) {
++    access_token_fetcher_ =
++        std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
++            signin::OAuthConsumerId::kTokenHandleService, identity_manager_,
++            base::BindOnce(&TokenHandleService::OnAccessTokenFetchComplete,
++                           weak_factory_.GetWeakPtr(), account_id),
++            signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
++            signin::ConsentLevel::kSignin);
++  }
+ }
+ 
+ void TokenHandleService::OnAccessTokenFetchComplete(

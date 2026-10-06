@@ -30,7 +30,7 @@ index 4555a096ffcc..7dd3d428051b 100644
       AcceleratorAction::kFocusCameraPreview},
      {true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
 diff --git a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
-index e3772c5604f8..766ef2018818 100644
+index 3856da81031e..7dd32fb11518 100644
 --- a/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
 +++ b/ash/webui/shortcut_customization_ui/backend/accelerator_configuration_provider.cc
 @@ -223,6 +223,14 @@ std::vector<mojom::TextAcceleratorPartPtr> GenerateTextAcceleratorParts(

@@ -1,7 +1,8 @@
 diff --git a/ash/shelf/login_shelf_view.cc b/ash/shelf/login_shelf_view.cc
+index 8c7ab8a0e763..a0ca4d73cc5c 100644
 --- a/ash/shelf/login_shelf_view.cc
 +++ b/ash/shelf/login_shelf_view.cc
-@@ -761,6 +761,11 @@
+@@ -761,6 +761,11 @@ bool LoginShelfView::ShouldShowShutdownButton() const {
  // 6. There are no scoped guest buttons blockers active.
  // 7. The device is not in kiosk license mode.
  bool LoginShelfView::ShouldShowGuestButton() const {
@@ -14,9 +15,10 @@ diff --git a/ash/shelf/login_shelf_view.cc b/ash/shelf/login_shelf_view.cc
      return false;
    }
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index 87499190d761..75b06424c3b1 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
-@@ -3075,7 +3075,7 @@
+@@ -3109,7 +3109,7 @@ Chromium is unable to recover your settings.
        <!-- Memory Saver IPH strings -->
        <if expr="not is_android">
          <message name="IDS_MEMORY_SAVER_MODE_PROMO_TITLE" desc="The title for the Memory Saver mode in-product promo bubble">
@@ -26,6 +28,7 @@ diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
        </if>
  
 diff --git a/chrome/browser/ash/login/screens/categories_selection_screen.cc b/chrome/browser/ash/login/screens/categories_selection_screen.cc
+index 39fe48392df8..05d6de012675 100644
 --- a/chrome/browser/ash/login/screens/categories_selection_screen.cc
 +++ b/chrome/browser/ash/login/screens/categories_selection_screen.cc
 @@ -9,6 +9,7 @@
@@ -36,21 +39,22 @@ diff --git a/chrome/browser/ash/login/screens/categories_selection_screen.cc b/c
  #include "base/metrics/histogram_functions.h"
  #include "base/time/time.h"
  #include "base/timer/timer.h"
-@@ -111,6 +112,13 @@
-     exit_callback_.Run(Result::kNotApplicable);
+@@ -112,6 +113,13 @@ bool CategoriesSelectionScreen::MaybeSkip(WizardContext& context) {
      return true;
    }
-+
+ 
 +  // The categories come from a Google service a local account cannot reach.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
 +          "aurade-enable-local-accounts")) {
 +    exit_callback_.Run(Result::kNotApplicable);
 +    return true;
 +  }
- 
++
    if (!features::IsOobePersonalizedOnboardingEnabled()) {
      exit_callback_.Run(Result::kNotApplicable);
+     return true;
 diff --git a/chrome/browser/ash/login/screens/locale_switch_screen.cc b/chrome/browser/ash/login/screens/locale_switch_screen.cc
+index 9bca7f225c13..d64b70f54b3e 100644
 --- a/chrome/browser/ash/login/screens/locale_switch_screen.cc
 +++ b/chrome/browser/ash/login/screens/locale_switch_screen.cc
 @@ -10,6 +10,7 @@
@@ -61,11 +65,10 @@ diff --git a/chrome/browser/ash/login/screens/locale_switch_screen.cc b/chrome/b
  #include "base/functional/callback.h"
  #include "base/json/json_reader.h"
  #include "base/time/time.h"
-@@ -194,6 +195,14 @@
-     exit_callback_.Run(Result::kNotApplicable);
+@@ -195,6 +196,14 @@ bool LocaleSwitchScreen::MaybeSkip(WizardContext& wizard_context) {
      return true;
    }
-+
+ 
 +  // A local account has no Google profile to take a language from, and
 +  // waiting for one only shows a loading card until the fetch times out.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -73,10 +76,12 @@ diff --git a/chrome/browser/ash/login/screens/locale_switch_screen.cc b/chrome/b
 +    exit_callback_.Run(Result::kNotApplicable);
 +    return true;
 +  }
- 
++
    // Skip GAIA language sync if user specifically set language through the UI
    // on the welcome screen.
+   if (local_state_->GetBoolean(prefs::kOobeLocaleChangedOnWelcomeScreen)) {
 diff --git a/chrome/browser/ash/login/screens/perks_discovery_screen.cc b/chrome/browser/ash/login/screens/perks_discovery_screen.cc
+index 92b67e8bedea..463017ffab94 100644
 --- a/chrome/browser/ash/login/screens/perks_discovery_screen.cc
 +++ b/chrome/browser/ash/login/screens/perks_discovery_screen.cc
 @@ -6,6 +6,7 @@
@@ -87,24 +92,25 @@ diff --git a/chrome/browser/ash/login/screens/perks_discovery_screen.cc b/chrome
  #include "base/metrics/histogram_functions.h"
  #include "chrome/browser/ash/login/wizard_controller.h"
  #include "chrome/browser/policy/profile_policy_connector.h"
-@@ -199,6 +200,13 @@
-     exit_callback_.Run(Result::kNotApplicable);
+@@ -200,6 +201,13 @@ bool PerksDiscoveryScreen::MaybeSkip(WizardContext& context) {
      return true;
    }
-+
+ 
 +  // The perks come from a Google service a local account cannot reach.
 +  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
 +          "aurade-enable-local-accounts")) {
 +    exit_callback_.Run(Result::kNotApplicable);
 +    return true;
 +  }
- 
++
    Profile* profile = ProfileManager::GetActiveUserProfile();
    const user_manager::UserManager* user_manager =
+       user_manager::UserManager::Get();
 diff --git a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
+index 7a999b69a4eb..b38d7f7b8b71 100644
 --- a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
-@@ -110,7 +110,13 @@
+@@ -110,7 +110,13 @@ void WelcomeScreenHandler::ShowRemoraRequisitionDialog() {
  
  void WelcomeScreenHandler::DeclareLocalizedValues(
      ::login::LocalizedValuesBuilder* builder) {

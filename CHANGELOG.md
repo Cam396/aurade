@@ -44,6 +44,9 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   speakers and microphone may need a fix made for that model, and where it is.
 
 ### Changed
+- The desktop and browser are built on Chromium 157 (157.0.8090.0), three
+  weeks newer than the Chromium 156 snapshot before it, with the upstream
+  fixes in between.
 - Text on standard resolution monitors is drawn with subpixels, so it is
   sharper, unless your font settings say otherwise.
 - Linux app windows have the same frame as the desktop's own.
@@ -183,7 +186,7 @@ grep -q Cam396/aurade /etc/pacman.d/aurade-mirrorlist || sudo sed -i '1i Server 
 First stable release.
 
 ### Added
-- The Ash desktop shell (Chromium 156.0.8060.0) on Arch Linux, with the Files app on a live local daemon.
+- The Ash desktop shell (Chromium 156) on Arch Linux, with the Files app on a live local daemon.
 - Graphical and text installers, with plain or LUKS encrypted installs.
 - A signed package repository. `aurade-full` installs the whole desktop.
 - The desktop and login screen draw in software when there is no usable GPU, including virtual machines.

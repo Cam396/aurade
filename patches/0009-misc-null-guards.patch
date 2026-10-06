@@ -1,8 +1,8 @@
 diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
-index 429449ff059c..4a838ae5582b 100644
+index 00004a9e3f62..369c6cb0824d 100644
 --- a/ash/app_list/app_list_controller_impl.cc
 +++ b/ash/app_list/app_list_controller_impl.cc
-@@ -1329,13 +1329,24 @@ bool AppListControllerImpl::HasValidProfile() const {
+@@ -1325,13 +1325,24 @@ bool AppListControllerImpl::HasValidProfile() const {
    return profile_id_ != kAppListInvalidProfileID;
  }
  
@@ -99,7 +99,7 @@ index 07fb3943a3b3..dd55b291419a 100644
                                          !IsDarkModeEnabled());
    active_user_pref_service_->CommitPendingWrite();
 diff --git a/ash/wm/desks/desks_controller.cc b/ash/wm/desks/desks_controller.cc
-index c2f58f5091fc..0571668f2cd6 100644
+index 7cad6999a5df..ffdfed46b7f8 100644
 --- a/ash/wm/desks/desks_controller.cc
 +++ b/ash/wm/desks/desks_controller.cc
 @@ -622,7 +622,11 @@ void DesksController::NewDesk(DesksCreationRemovalSource source,
@@ -209,10 +209,10 @@ index 110a2c1d4ee2..5e00d24d9622 100644
  
  bool BirchBarController::IsDataLoading() const {
 diff --git a/chrome/browser/ash/magic_boost/magic_boost_state.cc b/chrome/browser/ash/magic_boost/magic_boost_state.cc
-index 3cc16db4366b..e5c493546a49 100644
+index e8d77f6e7e99..2ad40e118e2d 100644
 --- a/chrome/browser/ash/magic_boost/magic_boost_state.cc
 +++ b/chrome/browser/ash/magic_boost/magic_boost_state.cc
-@@ -87,11 +87,14 @@ MagicBoostState::MagicBoostState(
+@@ -90,11 +90,14 @@ MagicBoostState::MagicBoostState(
  
    session_observation_.Observe(session_controller);
  
@@ -231,10 +231,10 @@ index 3cc16db4366b..e5c493546a49 100644
  }
  
 diff --git a/chrome/browser/ash/net/vpn_list_forwarder.cc b/chrome/browser/ash/net/vpn_list_forwarder.cc
-index 53a95491eb84..e7f3fbc20645 100644
+index aa45d71abbca..05ff2d19135c 100644
 --- a/chrome/browser/ash/net/vpn_list_forwarder.cc
 +++ b/chrome/browser/ash/net/vpn_list_forwarder.cc
-@@ -170,10 +170,17 @@ void VpnListForwarder::AttachToPrimaryUserProfile() {
+@@ -171,10 +171,17 @@ void VpnListForwarder::AttachToPrimaryUserProfile() {
    AttachToPrimaryUserArcVpnProviderManager();
  }
  
@@ -243,7 +243,7 @@ index 53a95491eb84..e7f3fbc20645 100644
 +// the null check and crashed on CHECK(profile) in the KeyedService factory.
 +// TODO: Move this to happen after profile initialization is complete.
  void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
-   DCHECK(!extension_registry_);
+   CHECK(!extension_registry_, base::NotFatalUntil::M161);
 -  extension_registry_ =
 -      extensions::ExtensionRegistry::Get(GetProfileForPrimaryUser());
 +  Profile* profile = GetProfileForPrimaryUser();
@@ -254,7 +254,7 @@ index 53a95491eb84..e7f3fbc20645 100644
    extension_registry_->AddObserver(this);
  
    for (const auto& extension : extension_registry_->enabled_extensions()) {
-@@ -184,9 +191,15 @@ void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
+@@ -185,9 +192,15 @@ void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
    SetVpnProviders();
  }
  
@@ -302,7 +302,7 @@ index 7e85bf4e4522..4d45608089e8 100644
  }
  
 diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
-index 5856f418248a..2a10e7f8da4b 100644
+index d623d9895966..9900667b758a 100644
 --- a/chrome/browser/profiles/profile_manager.cc
 +++ b/chrome/browser/profiles/profile_manager.cc
 @@ -660,7 +660,10 @@ Profile* ProfileManager::GetPrimaryUserProfile(
@@ -331,48 +331,41 @@ index 4c61cf88d1fc..d55c5982dfcc 100644
  
  void ProfileSelections::SetProfileSelectionForRegular(
 diff --git a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-index 62774023a8e8..db425b049cd0 100644
+index c3d188cf459f..894ef1e2f33c 100644
 --- a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
 +++ b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-@@ -834,10 +834,18 @@ bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
-     const {
-   const user_manager::User* const active_user =
-       user_manager::UserManager::Get()->GetActiveUser();
--  CHECK(active_user);
+@@ -834,11 +834,18 @@ bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
+   // TODO(crbug.com/278643115): Take the account_id from the callers.
+   const auto* active_session =
+       session_manager::SessionManager::Get()->GetActiveSession();
+-  CHECK(active_session);
 +  // HACK(AuraDE): Capture mode can be queried before local account startup
 +  // has selected an active user. Treat that as no Google provider instead of
 +  // crashing the standalone Ash session.
-+  if (!active_user) {
++  if (!active_session) {
 +    return false;
 +  }
  
    TemplateURLService* template_url_service =
-       ash::TemplateURLServiceProvider::Get().Find(active_user->GetAccountId());
+       ash::TemplateURLServiceProvider::Get().Find(active_session->account_id());
+-  CHECK(template_url_service);
 +  if (!template_url_service) {
 +    return false;
 +  }
-   DCHECK(template_url_service);
  
    return search::DefaultSearchProviderIsGoogle(template_url_service);
-@@ -1037,12 +1045,17 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
-   TemplateURLRef::PostContent post_content;
-   const user_manager::User* const active_user =
-       user_manager::UserManager::Get()->GetActiveUser();
--  CHECK(active_user);
-+  if (!active_user) {
-+    return;
-+  }
- 
-   // Get the search provider (must be Google) so we can get the base URL for
+ }
+@@ -1041,7 +1048,9 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
    // image search.
    TemplateURLService* template_url_service =
-       ash::TemplateURLServiceProvider::Get().Find(active_user->GetAccountId());
+       ash::TemplateURLServiceProvider::Get().Find(account_id);
+-  CHECK(template_url_service);
 +  if (!template_url_service) {
 +    return;
 +  }
-   DCHECK(template_url_service);
    CHECK(search::DefaultSearchProviderIsGoogle(template_url_service));
    const TemplateURL* const default_provider =
+       template_url_service->GetDefaultSearchProvider();
 diff --git a/chrome/browser/ui/ash/desks/desks_client.cc b/chrome/browser/ui/ash/desks/desks_client.cc
 index b119d430f693..48540ae8ab22 100644
 --- a/chrome/browser/ui/ash/desks/desks_client.cc
@@ -417,7 +410,7 @@ index 3efa5d15aeef..9f588d3b1296 100644
  }
  
 diff --git a/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc b/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
-index 38adc28ef03b..9f9804282293 100644
+index 71d5fe8348be..f3f37009f7dc 100644
 --- a/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
 +++ b/chrome/browser/ui/ash/read_write_cards/read_write_cards_manager_impl_unittest.cc
 @@ -8,10 +8,12 @@
@@ -441,7 +434,7 @@ index 38adc28ef03b..9f9804282293 100644
  
  namespace chromeos {
  
-@@ -160,6 +163,120 @@ class ReadWriteCardsManagerImplTest : public ChromeAshTestBase {
+@@ -156,6 +159,120 @@ class ReadWriteCardsManagerImplTest : public ChromeAshTestBase {
    TestingProfileManager profile_manager_{TestingBrowserProcess::GetGlobal()};
  };
  
@@ -563,10 +556,10 @@ index 38adc28ef03b..9f9804282293 100644
      : public ReadWriteCardsManagerImplTest,
        public testing::WithParamInterface<bool> {
 diff --git a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
-index 28409f4a3d2a..76f1c680fe29 100644
+index 34c9ebcbe5c7..c7e87324c285 100644
 --- a/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
 +++ b/chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.cc
-@@ -126,8 +126,14 @@ bool MakoBubbleCoordinator::IsShowingUI() const {
+@@ -123,8 +123,14 @@ bool MakoBubbleCoordinator::IsShowingUI() const {
  }
  
  void MakoBubbleCoordinator::CacheContextCaretBounds() {

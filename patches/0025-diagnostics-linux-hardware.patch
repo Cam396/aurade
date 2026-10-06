@@ -1,5 +1,5 @@
 diff --git a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
-index 2bbd60b29118..21845fb98ae4 100644
+index ba9a224fc803..d35d122888e1 100644
 --- a/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
 +++ b/ash/webui/diagnostics_ui/backend/input/input_data_provider.cc
 @@ -46,8 +46,9 @@ bool GetEventNodeId(base::FilePath path, int* id) {
@@ -13,7 +13,7 @@ index 2bbd60b29118..21845fb98ae4 100644
    base_name.erase(0, base_name_prefix.length());
    return base::StringToInt(base_name, id);
  }
-@@ -100,11 +101,26 @@ InputDataProvider::~InputDataProvider() {
+@@ -108,11 +109,26 @@ InputDataProvider::~InputDataProvider() {
    }
  
    BlockShortcuts(/*should_block=*/false);
@@ -45,7 +45,7 @@ index 2bbd60b29118..21845fb98ae4 100644
  }
  
  // static
-@@ -127,21 +143,40 @@ void InputDataProvider::Initialize(aura::Window* window) {
+@@ -135,21 +151,40 @@ void InputDataProvider::Initialize(aura::Window* window) {
    DCHECK(event_rewriter_delegate_);
  
    // Window and widget are needed for security enforcement.
@@ -96,7 +96,7 @@ index 2bbd60b29118..21845fb98ae4 100644
  
    UpdateMaySendEvents();
  }
-@@ -282,14 +317,21 @@ void InputDataProvider::OnPowerStateChanged(
+@@ -290,14 +325,21 @@ void InputDataProvider::OnPowerStateChanged(
  }
  
  void InputDataProvider::MoveAppToTestingScreen(uint32_t evdev_id) {
@@ -119,7 +119,7 @@ index 2bbd60b29118..21845fb98ae4 100644
  
    // Use device name to find the targeting display id.
    // Since we use evdev_id as the device id in our implementation, which
-@@ -318,7 +360,7 @@ void InputDataProvider::MoveAppToTestingScreen(uint32_t evdev_id) {
+@@ -326,7 +368,7 @@ void InputDataProvider::MoveAppToTestingScreen(uint32_t evdev_id) {
  }
  
  void InputDataProvider::MoveAppBackToPreviousScreen() {
@@ -128,7 +128,7 @@ index 2bbd60b29118..21845fb98ae4 100644
      window_util::MoveWindowToDisplay(widget_->GetNativeWindow(),
                                       previous_display_id_);
    }
-@@ -329,11 +371,19 @@ void InputDataProvider::MoveAppBackToPreviousScreen() {
+@@ -337,11 +379,19 @@ void InputDataProvider::MoveAppBackToPreviousScreen() {
  }
  
  void InputDataProvider::SetA11yTouchPassthrough(bool enabled) {
@@ -148,7 +148,7 @@ index 2bbd60b29118..21845fb98ae4 100644
    const bool widget_open = !widget_->IsClosed();
    const bool widget_active = widget_->IsActive();
    const bool widget_visible = widget_->IsVisible();
-@@ -353,10 +403,11 @@ void InputDataProvider::UpdateEventObservers() {
+@@ -361,10 +411,11 @@ void InputDataProvider::UpdateEventObservers() {
        BlockShortcuts(may_send_events_);
      }
  
@@ -162,7 +162,7 @@ index 2bbd60b29118..21845fb98ae4 100644
    }
  }
  
-@@ -440,8 +491,11 @@ void InputDataProvider::OnObservedKeyboardInputDisconnect(
+@@ -448,8 +499,11 @@ void InputDataProvider::OnObservedKeyboardInputDisconnect(
  void InputDataProvider::ObserveKeyEvents(
      uint32_t id,
      mojo::PendingRemote<mojom::KeyboardObserver> observer) {
@@ -176,7 +176,7 @@ index 2bbd60b29118..21845fb98ae4 100644
  
    if (!keyboards_.contains(id)) {
      LOG(ERROR) << "Couldn't find keyboard with ID " << id
-@@ -469,12 +523,14 @@ void InputDataProvider::ObserveKeyEvents(
+@@ -477,12 +531,14 @@ void InputDataProvider::ObserveKeyEvents(
    const auto observer_id = observers.Add(std::move(observer));
  
    // Ensure first callback is 'Paused' if we do not currently have focus
@@ -193,7 +193,7 @@ index 2bbd60b29118..21845fb98ae4 100644
  }
  
  void InputDataProvider::SendPauseEvents() {
-@@ -589,9 +645,9 @@ void InputDataProvider::AddKeyboard(const InputDeviceInformation* device_info) {
+@@ -597,9 +653,9 @@ void InputDataProvider::AddKeyboard(const InputDeviceInformation* device_info) {
    if (is_internal_keyboard &&
        IsSplitModifierKeyboard(device_info->input_device.id) &&
        (keyboard->bottom_left_layout == mojom::BottomLeftLayout::kUnknown ||
@@ -206,7 +206,7 @@ index 2bbd60b29118..21845fb98ae4 100644
    if (!features::IsExternalKeyboardInDiagnosticsAppEnabled() &&
        !is_internal_keyboard) {
      return;
-@@ -623,8 +679,11 @@ void InputDataProvider::SendInputKeyEvent(uint32_t id,
+@@ -631,8 +687,11 @@ void InputDataProvider::SendInputKeyEvent(uint32_t id,
                                            uint32_t key_code,
                                            uint32_t scan_code,
                                            bool down) {

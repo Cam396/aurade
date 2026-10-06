@@ -1,5 +1,5 @@
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
-index 27966e3d9df4..8a1c4162d37f 100644
+index ac139d31dd89..ebeb5ff9a18a 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands.ts
 @@ -802,6 +802,37 @@ export class EmptyTrashCommand extends FilesCommand {
@@ -83,7 +83,7 @@ index 27966e3d9df4..8a1c4162d37f 100644
    }
  }
 diff --git a/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts b/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
-index 314d4a6fd77f..97a23d5b4445 100644
+index 23ee17b9b6aa..9ccd523dc012 100644
 --- a/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
 +++ b/ui/file_manager/file_manager/foreground/js/file_manager_commands_unittest.ts
 @@ -540,6 +540,10 @@ export async function testCommandsForNonInteractiveVolumeAndNoEntries() {

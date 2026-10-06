@@ -1,5 +1,5 @@
 diff --git a/components/exo/wayland/BUILD.gn b/components/exo/wayland/BUILD.gn
-index ad3c2bde54f1..3bf25224786e 100644
+index 26d780607504..7f2ca23eb915 100644
 --- a/components/exo/wayland/BUILD.gn
 +++ b/components/exo/wayland/BUILD.gn
 @@ -73,6 +73,8 @@ source_set("wayland") {
@@ -19,7 +19,7 @@ index ad3c2bde54f1..3bf25224786e 100644
      "//third_party/wayland-protocols:cursor_shapes_protocol",
      "//third_party/wayland-protocols:extended_drag",
      "//third_party/wayland-protocols:fractional_scale_protocol",
-@@ -394,6 +397,7 @@ source_set("client_support") {
+@@ -390,6 +393,7 @@ source_set("client_support") {
      "//third_party/wayland:wayland_client",
      "//third_party/wayland-protocols:alpha_compositing_protocol",
      "//third_party/wayland-protocols:content_type_protocol",
@@ -28,7 +28,7 @@ index ad3c2bde54f1..3bf25224786e 100644
      "//third_party/wayland-protocols:extended_drag",
      "//third_party/wayland-protocols:fractional_scale_protocol",
 diff --git a/components/exo/wayland/server.cc b/components/exo/wayland/server.cc
-index d074d45d1aff..975a377c60f9 100644
+index ab522cee7ace..1af101fa5812 100644
 --- a/components/exo/wayland/server.cc
 +++ b/components/exo/wayland/server.cc
 @@ -6,6 +6,7 @@
@@ -39,7 +39,7 @@ index d074d45d1aff..975a377c60f9 100644
  #include <cursor-shapes-unstable-v1-server-protocol.h>
  #include <extended-drag-unstable-v1-server-protocol.h>
  #include <gaming-input-unstable-v2-server-protocol.h>
-@@ -63,6 +64,7 @@
+@@ -64,6 +65,7 @@
  #include "components/exo/wayland/wl_shell.h"
  #include "components/exo/wayland/wl_shm.h"
  #include "components/exo/wayland/wl_subcompositor.h"
@@ -47,7 +47,7 @@ index d074d45d1aff..975a377c60f9 100644
  #include "components/exo/wayland/wp_fractional_scale.h"
  #include "components/exo/wayland/wp_presentation.h"
  #include "components/exo/wayland/wp_single_pixel_buffer.h"
-@@ -300,6 +302,8 @@ void Server::Initialize() {
+@@ -304,6 +306,8 @@ void Server::Initialize() {
                     /*version=*/1, display_, bind_content_type);
    wl_global_create(wl_display_.get(), &zcr_cursor_shapes_v1_interface,
                     /*version=*/1, display_, bind_cursor_shapes);

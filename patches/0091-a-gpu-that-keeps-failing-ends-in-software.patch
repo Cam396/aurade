@@ -1,5 +1,5 @@
 diff --git a/content/browser/gpu/gpu_data_manager_impl_private.cc b/content/browser/gpu/gpu_data_manager_impl_private.cc
-index 3c714a79b13a..5061e7cc558c 100644
+index d5752767291e..01f43900dd4c 100644
 --- a/content/browser/gpu/gpu_data_manager_impl_private.cc
 +++ b/content/browser/gpu/gpu_data_manager_impl_private.cc
 @@ -19,12 +19,15 @@
@@ -18,7 +18,7 @@ index 3c714a79b13a..5061e7cc558c 100644
  #include "base/feature_list.h"
  #include "base/files/file_path.h"
  #include "base/files/file_util.h"
-@@ -478,6 +481,24 @@ void GpuDataManagerImplPrivate::InitializeGpuModes() {
+@@ -486,6 +489,24 @@ void GpuDataManagerImplPrivate::InitializeGpuModes() {
      fallback_modes_.push_back(gpu::GpuMode::SOFTWARE_GL);
    }
  #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)

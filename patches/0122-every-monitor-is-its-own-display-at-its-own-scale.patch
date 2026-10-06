@@ -1,8 +1,8 @@
 diff --git a/ash/BUILD.gn b/ash/BUILD.gn
-index 6d6a5f08a318..5d05bed0e10f 100644
+index cb229909cd6b..b82533249cd1 100644
 --- a/ash/BUILD.gn
 +++ b/ash/BUILD.gn
-@@ -581,6 +581,8 @@ component("ash") {
+@@ -583,6 +583,8 @@ component("ash") {
      "detachable_base/detachable_base_notification_controller.h",
      "detachable_base/detachable_base_observer.h",
      "detachable_base/detachable_base_pairing_status.h",
@@ -11,189 +11,6 @@ index 6d6a5f08a318..5d05bed0e10f 100644
      "display/cros_display_config.cc",
      "display/cros_display_config.h",
      "display/cursor_window_controller.cc",
-diff --git a/ash/display/aura_display_source.h b/ash/display/aura_display_source.h
-new file mode 100644
-index 000000000000..4fcba7684eb9
---- /dev/null
-+++ b/ash/display/aura_display_source.h
-@@ -0,0 +1,177 @@
-+// Copyright 2026 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
-+#define ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
-+
-+#include <cstdint>
-+#include <map>
-+#include <memory>
-+#include <optional>
-+#include <string>
-+#include <vector>
-+
-+#include "ash/ash_export.h"
-+#include "base/memory/raw_ptr.h"
-+#include "base/memory/scoped_refptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "ui/display/display_observer.h"
-+#include "ui/display/manager/display_manager_observer.h"
-+#include "ui/display/manager/managed_display_info.h"
-+#include "ui/display/types/display_constants.h"
-+#include "ui/events/event_handler.h"
-+#include "ui/gfx/geometry/rect.h"
-+#include "ui/gfx/geometry/size.h"
-+#include "ui/gfx/native_ui_types.h"
-+
-+namespace base {
-+class SequencedTaskRunner;
-+}  // namespace base
-+
-+namespace display {
-+class DisplayManager;
-+}  // namespace display
-+
-+namespace ui {
-+class PlatformScreen;
-+}  // namespace ui
-+
-+namespace ash {
-+
-+// On a Linux host Ash is a client of a Wayland compositor, which owns the
-+// monitors, and nothing else tells Ash what they are. This builds Ash's
-+// displays out of the compositor's outputs: one display per monitor, with an
-+// id that stays the same from one session to the next, its own scale and the
-+// monitor's own name. It keeps them current as monitors come and go, puts
-+// each display's host window on its monitor, and writes where Ash has
-+// arranged the displays for the compositor's shell, so the pointer crosses
-+// from one monitor to the next where Ash's arrangement has them meet.
-+class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
-+                                     public display::DisplayManagerObserver,
-+                                     public ui::EventHandler {
-+ public:
-+  // One monitor, as the compositor reports it.
-+  struct Monitor {
-+    Monitor();
-+    Monitor(const Monitor&);
-+    Monitor& operator=(const Monitor&);
-+    ~Monitor();
-+
-+    // The compositor's id for the output, and Ash's for the display.
-+    int64_t platform_id = display::kInvalidDisplayId;
-+    int64_t display_id = display::kInvalidDisplayId;
-+    // The connector, "eDP-1", and what the monitor says it is.
-+    std::string connector;
-+    std::string make;
-+    std::string model;
-+    // Where the compositor has the output, in its pixels.
-+    gfx::Rect bounds_in_pixels;
-+    gfx::Size size_mm;
-+    float refresh_rate = 60.f;
-+    bool internal = false;
-+    // The scale the monitor gets when nobody has chosen one, and the one it
-+    // has.
-+    float recommended_scale = 1.f;
-+    float scale = 1.f;
-+    // What the monitor's scale is saved under in display.conf.
-+    std::string key;
-+  };
-+
-+  // Whether Ash takes its displays from the compositor: on a Linux host,
-+  // under Ozone/Wayland, unless AURADE_DISPLAYS=single asks for the single
-+  // display Ash had before or --ash-host-window-bounds lays the hosts out.
-+  static bool ShouldUse();
-+
-+  // The instance, or null when Ash takes its displays from somewhere else.
-+  static AuraDisplaySource* Get();
-+
-+  // Creates the instance and hands Ash the compositor's monitors. Returns
-+  // false when the compositor has reported none yet, in which case Ash
-+  // starts on its default display and the monitors replace it when they
-+  // arrive.
-+  static bool Start(display::DisplayManager* display_manager);
-+  static void Shutdown();
-+
-+  AuraDisplaySource(const AuraDisplaySource&) = delete;
-+  AuraDisplaySource& operator=(const AuraDisplaySource&) = delete;
-+
-+  const std::vector<Monitor>& monitors() const { return monitors_; }
-+  const Monitor* GetMonitor(int64_t display_id) const;
-+
-+  // Sets the scale of a display, now and for the sessions after this one.
-+  // Returns false for a display this does not know or a scale out of range.
-+  bool SetScale(int64_t display_id, float scale);
-+
-+  // The scales Settings offers, from 100% to 300% in quarter steps.
-+  static std::vector<float> GetScaleOptions();
-+
-+  // The scale a monitor gets when nobody has chosen one. It aims for about
-+  // 135 pixels per inch of logical size on a laptop panel or a monitor under
-+  // 20 inches across, which sit near the eyes, and about 110 on anything
-+  // larger. It rounds to a quarter step, never goes under 100%, and stops
-+  // short of leaving the desktop less than 720 logical pixels tall. A monitor
-+  // that reports no size, or one that cannot be right, gets 100%.
-+  static float RecommendScale(const gfx::Size& pixels,
-+                              const gfx::Size& size_mm,
-+                              bool internal);
-+
-+  // Whether a connector name is a laptop's own panel.
-+  static bool IsInternalConnector(const std::string& connector);
-+
-+  // The text of display.conf with |scales| saved, keyed as Monitor::key.
-+  // Lines it does not own are kept. The single "scale=" of older sessions
-+  // is dropped, since every monitor that used it is given a line of its own.
-+  static std::string UpdateConfig(const std::string& text,
-+                                  const std::map<std::string, float>& scales);
-+
-+  // display::DisplayObserver, for the compositor's outputs:
-+  void OnDisplayAdded(const display::Display& display) override;
-+  void OnDisplaysRemoved(const display::Displays& displays) override;
-+  void OnDisplayMetricsChanged(const display::Display& display,
-+                               uint32_t changed_metrics) override;
-+
-+  // display::DisplayManagerObserver, for Ash's displays:
-+  void OnDisplaysInitialized() override;
-+  void OnDidApplyDisplayChanges() override;
-+
-+  // ui::EventHandler:
-+  void OnMouseEvent(ui::MouseEvent* event) override;
-+
-+ private:
-+  explicit AuraDisplaySource(display::DisplayManager* display_manager);
-+  ~AuraDisplaySource() override;
-+
-+  void ReadConfig(const std::string& text);
-+  // Rebuilds |monitors_| from the compositor's outputs. Returns whether
-+  // anything Ash cares about changed.
-+  bool RefreshMonitors();
-+  display::ManagedDisplayInfo BuildDisplayInfo(const Monitor& monitor) const;
-+  void ApplyToDisplayManager();
-+  void OnOutputsChanged();
-+  // Puts each display's host window on its monitor.
-+  void PlaceHosts();
-+  // Writes Ash's arrangement for the compositor's shell.
-+  void WriteLayout();
-+  void SaveScales(std::map<std::string, float> scales);
-+
-+  raw_ptr<display::DisplayManager> display_manager_;
-+  std::unique_ptr<ui::PlatformScreen> platform_screen_;
-+  std::vector<Monitor> monitors_;
-+
-+  // Scales from display.conf by monitor key, and the single scale older
-+  // sessions saved, which a monitor without a line of its own still uses.
-+  std::map<std::string, float> saved_scales_;
-+  std::optional<float> legacy_scale_;
-+
-+  // The output each host window was last put on, by its widget.
-+  std::map<gfx::AcceleratedWidget, int64_t> placed_hosts_;
-+  std::string last_layout_;
-+
-+  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
-+  base::WeakPtrFactory<AuraDisplaySource> weak_factory_{this};
-+};
-+
-+}  // namespace ash
-+
-+#endif  // ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
 diff --git a/ash/display/aura_display_source.cc b/ash/display/aura_display_source.cc
 new file mode 100644
 index 000000000000..615824ea0506
@@ -874,6 +691,189 @@ index 000000000000..615824ea0506
 +}
 +
 +}  // namespace ash
+diff --git a/ash/display/aura_display_source.h b/ash/display/aura_display_source.h
+new file mode 100644
+index 000000000000..4fcba7684eb9
+--- /dev/null
++++ b/ash/display/aura_display_source.h
+@@ -0,0 +1,177 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
++#define ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
++
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "ash/ash_export.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "ui/display/display_observer.h"
++#include "ui/display/manager/display_manager_observer.h"
++#include "ui/display/manager/managed_display_info.h"
++#include "ui/display/types/display_constants.h"
++#include "ui/events/event_handler.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/gfx/native_ui_types.h"
++
++namespace base {
++class SequencedTaskRunner;
++}  // namespace base
++
++namespace display {
++class DisplayManager;
++}  // namespace display
++
++namespace ui {
++class PlatformScreen;
++}  // namespace ui
++
++namespace ash {
++
++// On a Linux host Ash is a client of a Wayland compositor, which owns the
++// monitors, and nothing else tells Ash what they are. This builds Ash's
++// displays out of the compositor's outputs: one display per monitor, with an
++// id that stays the same from one session to the next, its own scale and the
++// monitor's own name. It keeps them current as monitors come and go, puts
++// each display's host window on its monitor, and writes where Ash has
++// arranged the displays for the compositor's shell, so the pointer crosses
++// from one monitor to the next where Ash's arrangement has them meet.
++class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
++                                     public display::DisplayManagerObserver,
++                                     public ui::EventHandler {
++ public:
++  // One monitor, as the compositor reports it.
++  struct Monitor {
++    Monitor();
++    Monitor(const Monitor&);
++    Monitor& operator=(const Monitor&);
++    ~Monitor();
++
++    // The compositor's id for the output, and Ash's for the display.
++    int64_t platform_id = display::kInvalidDisplayId;
++    int64_t display_id = display::kInvalidDisplayId;
++    // The connector, "eDP-1", and what the monitor says it is.
++    std::string connector;
++    std::string make;
++    std::string model;
++    // Where the compositor has the output, in its pixels.
++    gfx::Rect bounds_in_pixels;
++    gfx::Size size_mm;
++    float refresh_rate = 60.f;
++    bool internal = false;
++    // The scale the monitor gets when nobody has chosen one, and the one it
++    // has.
++    float recommended_scale = 1.f;
++    float scale = 1.f;
++    // What the monitor's scale is saved under in display.conf.
++    std::string key;
++  };
++
++  // Whether Ash takes its displays from the compositor: on a Linux host,
++  // under Ozone/Wayland, unless AURADE_DISPLAYS=single asks for the single
++  // display Ash had before or --ash-host-window-bounds lays the hosts out.
++  static bool ShouldUse();
++
++  // The instance, or null when Ash takes its displays from somewhere else.
++  static AuraDisplaySource* Get();
++
++  // Creates the instance and hands Ash the compositor's monitors. Returns
++  // false when the compositor has reported none yet, in which case Ash
++  // starts on its default display and the monitors replace it when they
++  // arrive.
++  static bool Start(display::DisplayManager* display_manager);
++  static void Shutdown();
++
++  AuraDisplaySource(const AuraDisplaySource&) = delete;
++  AuraDisplaySource& operator=(const AuraDisplaySource&) = delete;
++
++  const std::vector<Monitor>& monitors() const { return monitors_; }
++  const Monitor* GetMonitor(int64_t display_id) const;
++
++  // Sets the scale of a display, now and for the sessions after this one.
++  // Returns false for a display this does not know or a scale out of range.
++  bool SetScale(int64_t display_id, float scale);
++
++  // The scales Settings offers, from 100% to 300% in quarter steps.
++  static std::vector<float> GetScaleOptions();
++
++  // The scale a monitor gets when nobody has chosen one. It aims for about
++  // 135 pixels per inch of logical size on a laptop panel or a monitor under
++  // 20 inches across, which sit near the eyes, and about 110 on anything
++  // larger. It rounds to a quarter step, never goes under 100%, and stops
++  // short of leaving the desktop less than 720 logical pixels tall. A monitor
++  // that reports no size, or one that cannot be right, gets 100%.
++  static float RecommendScale(const gfx::Size& pixels,
++                              const gfx::Size& size_mm,
++                              bool internal);
++
++  // Whether a connector name is a laptop's own panel.
++  static bool IsInternalConnector(const std::string& connector);
++
++  // The text of display.conf with |scales| saved, keyed as Monitor::key.
++  // Lines it does not own are kept. The single "scale=" of older sessions
++  // is dropped, since every monitor that used it is given a line of its own.
++  static std::string UpdateConfig(const std::string& text,
++                                  const std::map<std::string, float>& scales);
++
++  // display::DisplayObserver, for the compositor's outputs:
++  void OnDisplayAdded(const display::Display& display) override;
++  void OnDisplaysRemoved(const display::Displays& displays) override;
++  void OnDisplayMetricsChanged(const display::Display& display,
++                               uint32_t changed_metrics) override;
++
++  // display::DisplayManagerObserver, for Ash's displays:
++  void OnDisplaysInitialized() override;
++  void OnDidApplyDisplayChanges() override;
++
++  // ui::EventHandler:
++  void OnMouseEvent(ui::MouseEvent* event) override;
++
++ private:
++  explicit AuraDisplaySource(display::DisplayManager* display_manager);
++  ~AuraDisplaySource() override;
++
++  void ReadConfig(const std::string& text);
++  // Rebuilds |monitors_| from the compositor's outputs. Returns whether
++  // anything Ash cares about changed.
++  bool RefreshMonitors();
++  display::ManagedDisplayInfo BuildDisplayInfo(const Monitor& monitor) const;
++  void ApplyToDisplayManager();
++  void OnOutputsChanged();
++  // Puts each display's host window on its monitor.
++  void PlaceHosts();
++  // Writes Ash's arrangement for the compositor's shell.
++  void WriteLayout();
++  void SaveScales(std::map<std::string, float> scales);
++
++  raw_ptr<display::DisplayManager> display_manager_;
++  std::unique_ptr<ui::PlatformScreen> platform_screen_;
++  std::vector<Monitor> monitors_;
++
++  // Scales from display.conf by monitor key, and the single scale older
++  // sessions saved, which a monitor without a line of its own still uses.
++  std::map<std::string, float> saved_scales_;
++  std::optional<float> legacy_scale_;
++
++  // The output each host window was last put on, by its widget.
++  std::map<gfx::AcceleratedWidget, int64_t> placed_hosts_;
++  std::string last_layout_;
++
++  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
++  base::WeakPtrFactory<AuraDisplaySource> weak_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // ASH_DISPLAY_AURA_DISPLAY_SOURCE_H_
 diff --git a/ash/display/display_util.cc b/ash/display/display_util.cc
 index 3e7ef93df068..6e7c5c60a9d4 100644
 --- a/ash/display/display_util.cc
@@ -991,7 +991,7 @@ index f8ae7837fb85..130d3ede8e0f 100644
  
  }  // namespace ash
 diff --git a/ash/shell.cc b/ash/shell.cc
-index 04dd47c54d0d..c2e23449db5e 100644
+index a5126ee9204f..db7f1213570f 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
 @@ -58,6 +58,7 @@
@@ -1010,7 +1010,7 @@ index 04dd47c54d0d..c2e23449db5e 100644
    display_configuration_observer_.reset();
    display_prefs_.reset();
    display_alignment_controller_.reset();
-@@ -1947,6 +1949,11 @@ void Shell::InitializeDisplayManager() {
+@@ -1941,6 +1943,11 @@ void Shell::InitializeDisplayManager() {
  
    bool display_initialized = display_manager_->InitFromCommandLine();
  
@@ -1086,7 +1086,7 @@ index 3df2c14baf15..0c0fd8f9d7fd 100644
  
    // Global Wayland interfaces available in the current session, with their
 diff --git a/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc b/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
-index 6558c9a16e09..b6445edaf69b 100644
+index 19d66b1f16a7..916e3aeb8de4 100644
 --- a/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_cursor_factory.cc
 @@ -91,8 +91,10 @@ scoped_refptr<PlatformCursor> WaylandCursorFactory::CreateImageCursor(
@@ -1254,7 +1254,7 @@ index 10ee3e24cf39..33731eef6ce4 100644
    // DeviceScaleFactorObserver:
    void OnDeviceScaleFactorChanged() override;
 diff --git a/ui/ozone/platform/wayland/host/wayland_window.cc b/ui/ozone/platform/wayland/host/wayland_window.cc
-index 029596741226..44fdac0fe5d7 100644
+index 010e823ac144..7c2b18bb7d29 100644
 --- a/ui/ozone/platform/wayland/host/wayland_window.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_window.cc
 @@ -989,6 +989,10 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {

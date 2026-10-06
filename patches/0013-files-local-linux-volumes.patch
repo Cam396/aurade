@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
-index 267a99ef0fd1..60848f07f700 100644
+index 53e788fee6ad..af7adf513b12 100644
 --- a/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
 +++ b/chrome/browser/ash/extensions/file_manager/fmpi_get_volume_root_function.cc
 @@ -8,12 +8,14 @@
@@ -9,7 +9,7 @@ index 267a99ef0fd1..60848f07f700 100644
 +#include "chrome/browser/ash/file_manager/volume.h"
  #include "chrome/browser/ash/file_manager/volume_manager.h"
  #include "chrome/browser/ash/fileapi/file_system_backend.h"
- #include "chrome/common/extensions/api/file_manager_private_internal.h"
+ #include "chromeos/ash/experiences/extensions/common/api/file_manager_private_internal.h"
  #include "content/public/browser/child_process_security_policy.h"
  #include "content/public/browser/storage_partition.h"
  #include "content/public/common/child_process_id.h"
@@ -19,7 +19,7 @@ index 267a99ef0fd1..60848f07f700 100644
  
 @@ -59,7 +61,26 @@ FileManagerPrivateInternalGetVolumeRootFunction::Run() {
    auto* const backend = ash::FileSystemBackend::Get(*file_system_context);
-   DCHECK(backend);
+   CHECK(backend, base::NotFatalUntil::M160);
    file_manager::util::FileDefinition fd;
 -  if (!backend->GetVirtualPath(volume->mount_path(), &fd.virtual_path)) {
 +  if (volume->type() == file_manager::VOLUME_TYPE_LOCAL_ROOT) {
@@ -46,7 +46,7 @@ index 267a99ef0fd1..60848f07f700 100644
          Error("Cannot get virtual path for volume with ID '*'", volume_id));
    }
 diff --git a/chrome/browser/ash/extensions/file_manager/private_api_util.cc b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
-index 4ecb969d1dcb..bbf8879e7d29 100644
+index 898d07c01953..6a4c3eb869b5 100644
 --- a/chrome/browser/ash/extensions/file_manager/private_api_util.cc
 +++ b/chrome/browser/ash/extensions/file_manager/private_api_util.cc
 @@ -670,6 +670,9 @@ void VolumeToVolumeMetadata(Profile* profile,
@@ -60,7 +60,7 @@ index 4ecb969d1dcb..bbf8879e7d29 100644
        NOTREACHED();
    }
 diff --git a/chrome/browser/ash/file_manager/path_util.cc b/chrome/browser/ash/file_manager/path_util.cc
-index 2c9bd1e3bac6..c38cf56a6631 100644
+index ed2ea576eed8..03337a8892f7 100644
 --- a/chrome/browser/ash/file_manager/path_util.cc
 +++ b/chrome/browser/ash/file_manager/path_util.cc
 @@ -12,6 +12,8 @@
@@ -188,7 +188,7 @@ index 5d47538b887c..ba9ff2a26a14 100644
        base::FilePath path,
        VolumeType volume_type,
 diff --git a/chrome/browser/ash/file_manager/volume_manager.cc b/chrome/browser/ash/file_manager/volume_manager.cc
-index 1db3a1d881e1..d95f034986f4 100644
+index 2670bd62d9aa..0a464ffd4bbc 100644
 --- a/chrome/browser/ash/file_manager/volume_manager.cc
 +++ b/chrome/browser/ash/file_manager/volume_manager.cc
 @@ -330,6 +330,20 @@ void VolumeManager::Initialize() {
@@ -212,7 +212,7 @@ index 1db3a1d881e1..d95f034986f4 100644
    // For GA, also subscribe to SkyVault LocalFilesMigrationManager.
    if (IsSkyVaultV2Enabled()) {
      if (policy::local_user_files::
-@@ -1702,6 +1716,51 @@ void VolumeManager::UnmountDownloadsVolume() {
+@@ -1703,6 +1717,51 @@ void VolumeManager::UnmountDownloadsVolume() {
    DoUnmountEvent(*Volume::CreateForDownloads(localVolume));
  }
  
@@ -262,10 +262,10 @@ index 1db3a1d881e1..d95f034986f4 100644
 +}
 +
  void VolumeManager::MountArcRoots() {
-   DCHECK(IsArcEnabled(profile_));
+   CHECK(IsArcEnabled(profile_), base::NotFatalUntil::M160);
    if (arc_volumes_mounted_) {
 diff --git a/chrome/browser/ash/file_manager/volume_manager.h b/chrome/browser/ash/file_manager/volume_manager.h
-index b87b3b60f116..656b8b0b7d48 100644
+index b4b72fe4d132..5e8a9bd9dfaa 100644
 --- a/chrome/browser/ash/file_manager/volume_manager.h
 +++ b/chrome/browser/ash/file_manager/volume_manager.h
 @@ -359,6 +359,14 @@ class VolumeManager
@@ -284,7 +284,7 @@ index b87b3b60f116..656b8b0b7d48 100644
    void MountArcRoots();
  
 diff --git a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
-index 0675d4fe03e9..5ae1ea7e00a9 100644
+index f08d81e278ca..ac2f98af5cb0 100644
 --- a/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
 +++ b/chrome/browser/enterprise/connectors/analysis/source_destination_matcher_ash.cc
 @@ -100,6 +100,7 @@ SourceDestinationMatcherAsh::FsType SourceDestinationMatcherAsh::VolumeToFsType(
@@ -295,10 +295,10 @@ index 0675d4fe03e9..5ae1ea7e00a9 100644
        return SourceDestinationMatcherAsh::FsType::kUnknown;
      case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
      case file_manager::VOLUME_TYPE_GUEST_OS:
-diff --git a/chrome/common/extensions/api/file_manager_private.idl b/chrome/common/extensions/api/file_manager_private.idl
-index 8ddf427d2cf0..bad7312496f2 100644
---- a/chrome/common/extensions/api/file_manager_private.idl
-+++ b/chrome/common/extensions/api/file_manager_private.idl
+diff --git a/chromeos/ash/experiences/extensions/common/api/file_manager_private.idl b/chromeos/ash/experiences/extensions/common/api/file_manager_private.idl
+index 5ac5e7c01209..0ee5acb527e3 100644
+--- a/chromeos/ash/experiences/extensions/common/api/file_manager_private.idl
++++ b/chromeos/ash/experiences/extensions/common/api/file_manager_private.idl
 @@ -49,7 +49,8 @@ namespace fileManagerPrivate {
  // Type of the mounted volume.
  enum VolumeType { drive, downloads, removable, archive, provided, mtp,

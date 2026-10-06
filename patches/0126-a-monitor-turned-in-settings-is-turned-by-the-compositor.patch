@@ -1,41 +1,3 @@
-diff --git a/ash/display/aura_display_source.h b/ash/display/aura_display_source.h
-index 4fcba7684eb9..c89714cc1f1c 100644
---- a/ash/display/aura_display_source.h
-+++ b/ash/display/aura_display_source.h
-@@ -46,7 +46,9 @@ namespace ash {
- // monitor's own name. It keeps them current as monitors come and go, puts
- // each display's host window on its monitor, and writes where Ash has
- // arranged the displays for the compositor's shell, so the pointer crosses
--// from one monitor to the next where Ash's arrangement has them meet.
-+// from one monitor to the next where Ash's arrangement has them meet. A
-+// display turned in Settings is turned by the shell, which also turns the
-+// pointer and the cursor with it, and Ash draws it upright.
- class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
-                                      public display::DisplayManagerObserver,
-                                      public ui::EventHandler {
-@@ -86,6 +88,12 @@ class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
-   // The instance, or null when Ash takes its displays from somewhere else.
-   static AuraDisplaySource* Get();
- 
-+  // Whether |display_id| is one of the compositor's monitors. The compositor
-+  // turns the picture of such a display when it is rotated, as it turns the
-+  // pointer and the cursor, so Ash draws it upright, and the display's host
-+  // window takes the turned size.
-+  static bool IsMonitorDisplay(int64_t display_id);
-+
-   // Creates the instance and hands Ash the compositor's monitors. Returns
-   // false when the compositor has reported none yet, in which case Ash
-   // starts on its default display and the monitors replace it when they
-@@ -151,7 +159,8 @@ class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
-   void OnOutputsChanged();
-   // Puts each display's host window on its monitor.
-   void PlaceHosts();
--  // Writes Ash's arrangement for the compositor's shell.
-+  // Writes Ash's arrangement, and each display's rotation, for the
-+  // compositor's shell.
-   void WriteLayout();
-   void SaveScales(std::map<std::string, float> scales);
- 
 diff --git a/ash/display/aura_display_source.cc b/ash/display/aura_display_source.cc
 index 615824ea0506..a1dc59953795 100644
 --- a/ash/display/aura_display_source.cc
@@ -96,6 +58,69 @@ index 615824ea0506..a1dc59953795 100644
    }
    if (text.empty() || text == last_layout_) {
      return;
+diff --git a/ash/display/aura_display_source.h b/ash/display/aura_display_source.h
+index 4fcba7684eb9..c89714cc1f1c 100644
+--- a/ash/display/aura_display_source.h
++++ b/ash/display/aura_display_source.h
+@@ -46,7 +46,9 @@ namespace ash {
+ // monitor's own name. It keeps them current as monitors come and go, puts
+ // each display's host window on its monitor, and writes where Ash has
+ // arranged the displays for the compositor's shell, so the pointer crosses
+-// from one monitor to the next where Ash's arrangement has them meet.
++// from one monitor to the next where Ash's arrangement has them meet. A
++// display turned in Settings is turned by the shell, which also turns the
++// pointer and the cursor with it, and Ash draws it upright.
+ class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
+                                      public display::DisplayManagerObserver,
+                                      public ui::EventHandler {
+@@ -86,6 +88,12 @@ class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
+   // The instance, or null when Ash takes its displays from somewhere else.
+   static AuraDisplaySource* Get();
+ 
++  // Whether |display_id| is one of the compositor's monitors. The compositor
++  // turns the picture of such a display when it is rotated, as it turns the
++  // pointer and the cursor, so Ash draws it upright, and the display's host
++  // window takes the turned size.
++  static bool IsMonitorDisplay(int64_t display_id);
++
+   // Creates the instance and hands Ash the compositor's monitors. Returns
+   // false when the compositor has reported none yet, in which case Ash
+   // starts on its default display and the monitors replace it when they
+@@ -151,7 +159,8 @@ class ASH_EXPORT AuraDisplaySource : public display::DisplayObserver,
+   void OnOutputsChanged();
+   // Puts each display's host window on its monitor.
+   void PlaceHosts();
+-  // Writes Ash's arrangement for the compositor's shell.
++  // Writes Ash's arrangement, and each display's rotation, for the
++  // compositor's shell.
+   void WriteLayout();
+   void SaveScales(std::map<std::string, float> scales);
+ 
+diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
+index d6f0fa28c91c..0916fe18a500 100644
+--- a/ash/display/display_configuration_controller.cc
++++ b/ash/display/display_configuration_controller.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <memory>
+ 
++#include "ash/display/aura_display_source.h"
+ #include "ash/display/display_animator.h"
+ #include "ash/display/display_util.h"
+ #include "ash/public/cpp/shelf_types.h"
+@@ -147,8 +148,11 @@ void DisplayConfigurationController::SetDisplayRotation(
+     display::Display::RotationSource source,
+     DisplayConfigurationController::RotationAnimation mode) {
+   // No need to apply animation if the wallpaper isn't set yet during startup.
++  // AuraDE: nor on one of the compositor's monitors, which the compositor
++  // turns, where Ash has no turn of its own to animate.
+   if (display_manager_->IsDisplayIdValid(display_id) &&
+-      Shell::Get()->wallpaper_controller()->is_wallpaper_set()) {
++      Shell::Get()->wallpaper_controller()->is_wallpaper_set() &&
++      !AuraDisplaySource::IsMonitorDisplay(display_id)) {
+     if (GetTargetRotation(display_id) == rotation)
+       return;
+     if (display_animator_) {
 diff --git a/ash/display/root_window_transformers.cc b/ash/display/root_window_transformers.cc
 index ebacff2efbbe..6d4ebeff6bb1 100644
 --- a/ash/display/root_window_transformers.cc
@@ -257,28 +282,3 @@ index 7a9cc6eb5614..22d2e2ef21d0 100644
  
    // Update cursor compositing based on the current display.
    Shell::Get()->UpdateCursorCompositingEnabled();
-diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
-index d6f0fa28c91c..0916fe18a500 100644
---- a/ash/display/display_configuration_controller.cc
-+++ b/ash/display/display_configuration_controller.cc
-@@ -6,6 +6,7 @@
- 
- #include <memory>
- 
-+#include "ash/display/aura_display_source.h"
- #include "ash/display/display_animator.h"
- #include "ash/display/display_util.h"
- #include "ash/public/cpp/shelf_types.h"
-@@ -147,8 +148,11 @@ void DisplayConfigurationController::SetDisplayRotation(
-     display::Display::RotationSource source,
-     DisplayConfigurationController::RotationAnimation mode) {
-   // No need to apply animation if the wallpaper isn't set yet during startup.
-+  // AuraDE: nor on one of the compositor's monitors, which the compositor
-+  // turns, where Ash has no turn of its own to animate.
-   if (display_manager_->IsDisplayIdValid(display_id) &&
--      Shell::Get()->wallpaper_controller()->is_wallpaper_set()) {
-+      Shell::Get()->wallpaper_controller()->is_wallpaper_set() &&
-+      !AuraDisplaySource::IsMonitorDisplay(display_id)) {
-     if (GetTargetRotation(display_id) == rotation)
-       return;
-     if (display_animator_) {

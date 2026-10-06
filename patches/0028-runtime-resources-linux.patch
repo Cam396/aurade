@@ -21,10 +21,10 @@ index f5ff2a32b912..621b70c6d249 100755
  # Insert chromium mojom path to beginning to make sure we prefer this one.
  # https://crbug.com/1422422
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index 5ce078e14bfb..d901bd58f7e6 100644
+index 10598ec0b581..2d014560422c 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
-@@ -170,6 +170,15 @@ std::vector<LanguageTag> GetCandidates() {
+@@ -167,6 +167,15 @@ std::vector<LanguageTag> GetCandidates() {
  
  #endif  // !BUILDFLAG(IS_APPLE)
  
@@ -40,7 +40,7 @@ index 5ce078e14bfb..d901bd58f7e6 100644
  // Preferred locales are enabled everywhere but Linux systems with GLib. This
  // function parses `preferred_locale` into a `LanguageTag` if they are enabled.
  std::optional<LanguageTag> GetPreferredTag(std::string_view preferred_locale) {
-@@ -397,23 +406,26 @@ std::u16string FormatString(const std::u16string& format_string,
+@@ -376,23 +385,26 @@ std::u16string FormatString(const std::u16string& format_string,
                              const std::vector<std::u16string>& replacements,
                              std::vector<size_t>* offsets) {
  #if DCHECK_IS_ON()
@@ -84,7 +84,7 @@ index 5ce078e14bfb..d901bd58f7e6 100644
      }
    }
  #endif
-@@ -508,8 +520,12 @@ std::u16string GetStringFUTF16(int message_id,
+@@ -487,8 +499,12 @@ std::u16string GetStringFUTF16(int message_id,
    std::vector<size_t> offsets;
    std::vector<std::u16string> replacements = {a};
    std::u16string result = GetStringFUTF16(message_id, replacements, &offsets);
@@ -100,10 +100,10 @@ index 5ce078e14bfb..d901bd58f7e6 100644
  }
  
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index d1ee6814618c..9ba8c3d486d9 100644
+index 1c25647fde07..bcf6bd38bd9e 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
-@@ -35,6 +35,7 @@
+@@ -36,6 +36,7 @@
  #include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
  #include "base/synchronization/lock.h"
@@ -111,7 +111,7 @@ index d1ee6814618c..9ba8c3d486d9 100644
  #include "base/trace_event/typed_macros.h"
  #include "build/build_config.h"
  #include "net/filter/gzip_header.h"
-@@ -1133,6 +1134,15 @@ void ResourceBundle::InitDefaultFontList() {
+@@ -1134,6 +1135,15 @@ void ResourceBundle::InitDefaultFontList() {
    // font list doesn't need to be overridden by variations.
    std::string font_family =
        base::UTF16ToUTF8(GetLocalizedStringImpl(IDS_UI_FONT_FAMILY_CROS));

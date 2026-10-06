@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/file_manager/BUILD.gn b/chrome/browser/ash/file_manager/BUILD.gn
-index 3e0b974fd39e..a559abddbde2 100644
+index 12b521c98147..f7c9f1686e2a 100644
 --- a/chrome/browser/ash/file_manager/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/BUILD.gn
 @@ -11,6 +11,8 @@ static_library("file_manager") {
@@ -640,10 +640,10 @@ index 000000000000..b20d0bd0d6b8
 +
 +#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_AURADE_FILE_CHOOSER_PORTAL_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 896226479eac..45acb3f40005 100644
+index d6106e067234..599bb396b878 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -114,6 +114,7 @@
+@@ -120,6 +120,7 @@
  #include "chrome/browser/ash/extensions/default_app_order.h"
  #include "chrome/browser/ash/extensions/login_screen_ui/ui_handler.h"
  #include "chrome/browser/ash/external_metrics/external_metrics.h"
@@ -651,7 +651,7 @@ index 896226479eac..45acb3f40005 100644
  #include "chrome/browser/ash/file_manager/aurade_file_manager_service.h"
  #include "chrome/browser/ash/fwupd/fwupd_download_client_impl.h"
  #include "chrome/browser/ash/image_downloader/image_downloader_impl.h"
-@@ -441,6 +442,12 @@ class DBusServices {
+@@ -447,6 +448,12 @@ class DBusServices {
          aurade_file_manager_service_ =
              std::make_unique<AuraDeFileManagerService>(
                  desktop_appearance_service_host_->bus());
@@ -664,7 +664,7 @@ index 896226479eac..45acb3f40005 100644
        }
        // AuraDE compatibility: removing or updating packages from Settings
        // needs an administrator's password, and polkit refuses outright when
-@@ -682,6 +689,7 @@ class DBusServices {
+@@ -688,6 +695,7 @@ class DBusServices {
      SetBluetoothConfigServiceBinderForGenericLinux({});
      aurade_bluetooth_service_.reset();
      polkit_agent_service_.reset();
@@ -672,7 +672,7 @@ index 896226479eac..45acb3f40005 100644
      aurade_file_manager_service_.reset();
      desktop_appearance_service_host_.reset();
      desktop_notification_service_host_.reset();
-@@ -699,6 +707,7 @@ class DBusServices {
+@@ -705,6 +713,7 @@ class DBusServices {
    std::unique_ptr<DesktopAppearanceServiceHost>
        desktop_appearance_service_host_;
    std::unique_ptr<AuraDeFileManagerService> aurade_file_manager_service_;

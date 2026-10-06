@@ -1,5 +1,5 @@
 diff --git a/ash/shelf/login_shelf_view.cc b/ash/shelf/login_shelf_view.cc
-index 470e516..8c7ab8a 100644
+index 470e5163f658..8c7ab8a0e763 100644
 --- a/ash/shelf/login_shelf_view.cc
 +++ b/ash/shelf/login_shelf_view.cc
 @@ -37,6 +37,7 @@
@@ -33,7 +33,7 @@ index 470e516..8c7ab8a 100644
        Shell::Get()->session_controller()->GetSessionState();
  
 diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
-index e7135c2..1fd952b 100644
+index e7135c2df3cb..1fd952b22d57 100644
 --- a/chrome/browser/ash/login/screens/user_creation_screen.cc
 +++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
 @@ -159,6 +159,11 @@ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
@@ -62,7 +62,7 @@ index e7135c2..1fd952b 100644
      LoginDisplayHost::default_host()->GetWebUILoginView()->RequestFocus();
      RunExitCallback(Result::ENTERPRISE_ENROLL_SHORTCUT);
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
-index 815b8de..b406612 100644
+index 815b8de3ac5d..b4066125df39 100644
 --- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
 +++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
 @@ -26,13 +26,18 @@ found in the LICENSE file.
@@ -101,7 +101,7 @@ index 815b8de..b406612 100644
      [[i18nDynamic(locale, titleKey_)]]
    </h1>
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
-index 6bda2a9..4356c3e 100644
+index 6bda2a9cc7ae..4356c3e8e68e 100644
 --- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
 +++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
 @@ -185,9 +185,9 @@ export class UserCreation extends UserCreationScreenElementBase {
@@ -136,7 +136,7 @@ index 6bda2a9..4356c3e 100644
        return;
      }
 diff --git a/chrome/browser/ui/startup/infobar_utils.cc b/chrome/browser/ui/startup/infobar_utils.cc
-index 598e361..b7fd283 100644
+index 598e361a2988..b7fd28327420 100644
 --- a/chrome/browser/ui/startup/infobar_utils.cc
 +++ b/chrome/browser/ui/startup/infobar_utils.cc
 @@ -253,7 +253,9 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
@@ -151,7 +151,7 @@ index 598e361..b7fd283 100644
              infobars::InfoBarDelegate::GOOGLE_API_KEYS_INFOBAR_DELEGATE)) {
        if (auto* manager =
 diff --git a/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc b/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
-index f52e68e..c8022e6 100644
+index f52e68ef8783..c8022e610399 100644
 --- a/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/core_oobe_handler.cc
 @@ -10,6 +10,7 @@
@@ -174,7 +174,7 @@ index f52e68e..c8022e6 100644
                    base::ASCIIToUTF16(google_apis::kAPIKeysDevelopersHowToURL));
    }
 diff --git a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
-index d7c3df8..97fabf1 100644
+index d7c3df800edf..97fabf18b9b0 100644
 --- a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
 @@ -46,6 +46,9 @@ void UserCreationScreenHandler::DeclareLocalizedValues(

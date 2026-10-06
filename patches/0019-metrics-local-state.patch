@@ -43,7 +43,7 @@ index 3661765def31..2021e36f3eec 100644
  }
  
 diff --git a/chrome/browser/metrics/chromeos_system_profile_provider.cc b/chrome/browser/metrics/chromeos_system_profile_provider.cc
-index e182942bbcde..84f2c4086501 100644
+index 05704a3eee26..7097d4767a90 100644
 --- a/chrome/browser/metrics/chromeos_system_profile_provider.cc
 +++ b/chrome/browser/metrics/chromeos_system_profile_provider.cc
 @@ -8,6 +8,7 @@
@@ -89,7 +89,7 @@ index e182942bbcde..84f2c4086501 100644
  
    const ash::multidevice_setup::MultiDeviceSetupClient::HostStatusWithDevice&
        host_status_with_device = client->GetHostStatus();
-@@ -209,6 +215,12 @@ void ChromeOSSystemProfileProvider::InitTaskWaitForMachineStatisticsLoaded(
+@@ -204,6 +210,12 @@ void ChromeOSSystemProfileProvider::InitTaskWaitForMachineStatisticsLoaded(
  
  void ChromeOSSystemProfileProvider::InitTaskGetArcFeatures(
      base::OnceClosure callback) {
@@ -219,7 +219,7 @@ index 8a095aa132a4..03c539e90f75 100644
  }
  
 diff --git a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
-index a77e46fcf81a..37a9925e4275 100644
+index 49058a4d572f..680d041da689 100644
 --- a/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
 +++ b/chrome/browser/metrics/structured/ash_structured_metrics_recorder.cc
 @@ -5,7 +5,10 @@
@@ -314,7 +314,7 @@ index aee8ad3f8b6b..a9b1c8d82a5f 100644
  }
  CrOSEventsProcessor::~CrOSEventsProcessor() = default;
 diff --git a/chrome/browser/metrics/structured/key_data_provider_ash.cc b/chrome/browser/metrics/structured/key_data_provider_ash.cc
-index d7b3c43cc5f1..a14696cc9dbd 100644
+index fc285b146320..0b58d7aec1a7 100644
 --- a/chrome/browser/metrics/structured/key_data_provider_ash.cc
 +++ b/chrome/browser/metrics/structured/key_data_provider_ash.cc
 @@ -4,6 +4,11 @@

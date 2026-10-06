@@ -60,7 +60,7 @@ index 3030aeb6723c..49efc4ee00ed 100644
  
    // Set the display mode. Note: if this returns an error, other properties
 diff --git a/ash/display/cursor_window_controller.cc b/ash/display/cursor_window_controller.cc
-index 69e09810d995..f5ef5e2a3179 100644
+index 4d4ce0003036..369c951f64df 100644
 --- a/ash/display/cursor_window_controller.cc
 +++ b/ash/display/cursor_window_controller.cc
 @@ -23,6 +23,7 @@
@@ -70,8 +70,8 @@ index 69e09810d995..f5ef5e2a3179 100644
 +#include "base/system/sys_info.h"
  #include "components/prefs/pref_service.h"
  #include "third_party/skia/include/core/SkColor.h"
- #include "ui/accessibility/accessibility_features.h"
-@@ -418,26 +419,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
+ #include "ui/aura/env.h"
+@@ -420,26 +421,30 @@ void CursorWindowController::SetLargeCursorSizeInDip(
    large_cursor_size_in_dip =
        std::max(large_cursor_size_in_dip, kMinLargeCursorSize);
  
@@ -106,7 +106,7 @@ index 69e09810d995..f5ef5e2a3179 100644
  }
  
  void CursorWindowController::SetCursorInverted(bool inverted) {
-@@ -490,8 +495,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+@@ -492,8 +497,9 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
      return true;
    }
  
@@ -117,7 +117,7 @@ index 69e09810d995..f5ef5e2a3179 100644
  
    PrefService* prefs = shell->session_controller()->GetActivePrefService();
    if (!prefs) {
-@@ -526,16 +532,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
+@@ -528,16 +534,19 @@ bool CursorWindowController::ShouldEnableCursorCompositing() {
  }
  
  void CursorWindowController::SetCursorCompositingEnabled(bool enabled) {
@@ -140,7 +140,7 @@ index 69e09810d995..f5ef5e2a3179 100644
  }
  
  void CursorWindowController::UpdateContainer() {
-@@ -544,8 +553,9 @@ void CursorWindowController::UpdateContainer() {
+@@ -546,8 +555,9 @@ void CursorWindowController::UpdateContainer() {
      display::Display display =
          screen->GetDisplayNearestPoint(screen->GetCursorScreenPoint());
      DCHECK(display.is_valid());
@@ -151,7 +151,7 @@ index 69e09810d995..f5ef5e2a3179 100644
    } else {
      SetContainer(nullptr);
    }
-@@ -573,8 +583,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
+@@ -575,8 +585,9 @@ void CursorWindowController::SetDisplay(const display::Display& display) {
    last_updated_.reset();
  
    aura::Window* root_window = Shell::GetRootWindowForDisplayId(display.id());
@@ -162,7 +162,7 @@ index 69e09810d995..f5ef5e2a3179 100644
  
    if (!is_cursor_compositing_enabled_) {
      return;
-@@ -639,8 +650,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
+@@ -641,8 +652,9 @@ void CursorWindowController::UpdateLocation(bool throttle) {
  }
  
  void CursorWindowController::SetCursor(gfx::NativeCursor cursor) {
@@ -210,7 +210,7 @@ index 69e09810d995..f5ef5e2a3179 100644
 +
    // If inverted cursor is enabled, we want to use the aura::Window path to
    // support the inverted cursor feature.
-   if (::features::IsAccessibilityInvertedMouseCursorEnabled() && is_inverted_) {
+   if (is_inverted_) {
 diff --git a/ash/display/display_configuration_controller.cc b/ash/display/display_configuration_controller.cc
 index f010b52a7089..d6f0fa28c91c 100644
 --- a/ash/display/display_configuration_controller.cc

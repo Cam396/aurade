@@ -1,5 +1,5 @@
 diff --git a/ash/wallpaper/views/wallpaper_view.cc b/ash/wallpaper/views/wallpaper_view.cc
-index 995a6a808164..160dbe67b9f6 100644
+index a6f7484fa9b6..c7a859944951 100644
 --- a/ash/wallpaper/views/wallpaper_view.cc
 +++ b/ash/wallpaper/views/wallpaper_view.cc
 @@ -86,8 +86,14 @@ class WallpaperWidgetDelegate : public views::WidgetDelegateView {
@@ -31,7 +31,7 @@ index 995a6a808164..160dbe67b9f6 100644
      parent()->AddChildViewAt(shield_view_.get(), 0);
      shield_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
 diff --git a/ash/wallpaper/views/wallpaper_widget_controller.cc b/ash/wallpaper/views/wallpaper_widget_controller.cc
-index 787e0fec07af..25ec394cb4c5 100644
+index d0d962f4efc3..f1edef22107c 100644
 --- a/ash/wallpaper/views/wallpaper_widget_controller.cc
 +++ b/ash/wallpaper/views/wallpaper_widget_controller.cc
 @@ -17,6 +17,7 @@
@@ -153,7 +153,7 @@ index 4bef940bd670..0c55fc6dcffe 100644
    } else {
      wallpaper_metrics_manager_->LogWallpaperResult(
 diff --git a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
-index 7de80f52a541..c7825f24f354 100644
+index 444f7ff79921..2a25a49db7ff 100644
 --- a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
 +++ b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
 @@ -354,37 +354,62 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {

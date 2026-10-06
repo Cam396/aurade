@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index cbda58345eef..18bad8879045 100644
+index c9968254a28f..197f1bdb67dd 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -24,6 +24,8 @@ static_library("dbus") {
@@ -24,121 +24,6 @@ index cbda58345eef..18bad8879045 100644
      "//url",
    ]
  
-diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.h b/chrome/browser/ash/dbus/desktop_appearance_service.h
-new file mode 100644
-index 000000000000..af0c1bae6aaa
---- /dev/null
-+++ b/chrome/browser/ash/dbus/desktop_appearance_service.h
-@@ -0,0 +1,109 @@
-+// Copyright 2026 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
-+#define CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
-+
-+#include <cstdint>
-+#include <memory>
-+#include <optional>
-+#include <string>
-+#include <vector>
-+
-+#include "base/memory/scoped_refptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "base/scoped_observation.h"
-+#include "dbus/exported_object.h"
-+#include "third_party/skia/include/core/SkColor.h"
-+#include "ui/native_theme/native_theme.h"
-+#include "ui/native_theme/native_theme_observer.h"
-+
-+namespace base {
-+class Thread;
-+}  // namespace base
-+
-+namespace dbus {
-+class Bus;
-+class MethodCall;
-+class MessageWriter;
-+}  // namespace dbus
-+
-+namespace ash {
-+
-+// What the desktop looks like, in the terms Linux applications ask for it.
-+struct DesktopAppearance {
-+  // org.freedesktop.appearance color-scheme: 1 prefers dark, 2 prefers light.
-+  uint32_t color_scheme = 0;
-+  // org.freedesktop.appearance accent-color, when the desktop has one.
-+  std::optional<SkColor> accent_color;
-+
-+  bool operator==(const DesktopAppearance&) const = default;
-+};
-+
-+// Implements the settings half of an xdg-desktop-portal backend for an AuraDE
-+// session, so GTK, libadwaita, Qt and Firefox take their light or dark look
-+// and their accent colour from Ash rather than from a fixed default.
-+// xdg-desktop-portal merges it ahead of the GTK backend, which knows neither.
-+class DesktopAppearanceService final : public ui::NativeThemeObserver {
-+ public:
-+  DesktopAppearanceService();
-+  DesktopAppearanceService(const DesktopAppearanceService&) = delete;
-+  DesktopAppearanceService& operator=(const DesktopAppearanceService&) = delete;
-+  ~DesktopAppearanceService() override;
-+
-+  void Start(scoped_refptr<dbus::ExportedObject> exported_object);
-+
-+  // Whether a namespace a client asked for, which may end in a glob, covers
-+  // org.freedesktop.appearance.
-+  static bool NamespaceRequested(const std::vector<std::string>& requested);
-+
-+  // ui::NativeThemeObserver:
-+  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
-+
-+ private:
-+  void HandleReadAll(dbus::MethodCall* method_call,
-+                     dbus::ExportedObject::ResponseSender response_sender);
-+  void HandleRead(dbus::MethodCall* method_call,
-+                  dbus::ExportedObject::ResponseSender response_sender);
-+  void OnExported(const std::string& interface_name,
-+                  const std::string& method_name,
-+                  bool success);
-+  void EmitSettingChanged(const std::string& key);
-+  void WriteValue(const std::string& key, dbus::MessageWriter* writer) const;
-+
-+  scoped_refptr<dbus::ExportedObject> exported_object_;
-+  DesktopAppearance appearance_;
-+  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
-+      theme_observation_{this};
-+  base::WeakPtrFactory<DesktopAppearanceService> weak_ptr_factory_{this};
-+};
-+
-+// Owns the private session bus connection the appearance service answers on.
-+class DesktopAppearanceServiceHost final {
-+ public:
-+  static std::unique_ptr<DesktopAppearanceServiceHost> Create();
-+
-+  DesktopAppearanceServiceHost(const DesktopAppearanceServiceHost&) = delete;
-+  DesktopAppearanceServiceHost& operator=(const DesktopAppearanceServiceHost&) =
-+      delete;
-+  ~DesktopAppearanceServiceHost();
-+
-+ private:
-+  DesktopAppearanceServiceHost();
-+  bool Start();
-+  void OnOwnership(const std::string& service_name, bool success);
-+
-+  std::unique_ptr<base::Thread> dbus_thread_;
-+  scoped_refptr<dbus::Bus> bus_;
-+  scoped_refptr<dbus::ExportedObject> exported_object_;
-+  std::unique_ptr<DesktopAppearanceService> service_;
-+  base::WeakPtrFactory<DesktopAppearanceServiceHost> weak_ptr_factory_{this};
-+};
-+
-+// Reads the desktop's current appearance from Ash's native theme.
-+DesktopAppearance ReadDesktopAppearance();
-+
-+}  // namespace ash
-+
-+#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
 diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.cc b/chrome/browser/ash/dbus/desktop_appearance_service.cc
 new file mode 100644
 index 000000000000..0b02f16cbba8
@@ -440,11 +325,126 @@ index 000000000000..0b02f16cbba8
 +}
 +
 +}  // namespace ash
+diff --git a/chrome/browser/ash/dbus/desktop_appearance_service.h b/chrome/browser/ash/dbus/desktop_appearance_service.h
+new file mode 100644
+index 000000000000..af0c1bae6aaa
+--- /dev/null
++++ b/chrome/browser/ash/dbus/desktop_appearance_service.h
+@@ -0,0 +1,109 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
++#define CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
++
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "dbus/exported_object.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class MethodCall;
++class MessageWriter;
++}  // namespace dbus
++
++namespace ash {
++
++// What the desktop looks like, in the terms Linux applications ask for it.
++struct DesktopAppearance {
++  // org.freedesktop.appearance color-scheme: 1 prefers dark, 2 prefers light.
++  uint32_t color_scheme = 0;
++  // org.freedesktop.appearance accent-color, when the desktop has one.
++  std::optional<SkColor> accent_color;
++
++  bool operator==(const DesktopAppearance&) const = default;
++};
++
++// Implements the settings half of an xdg-desktop-portal backend for an AuraDE
++// session, so GTK, libadwaita, Qt and Firefox take their light or dark look
++// and their accent colour from Ash rather than from a fixed default.
++// xdg-desktop-portal merges it ahead of the GTK backend, which knows neither.
++class DesktopAppearanceService final : public ui::NativeThemeObserver {
++ public:
++  DesktopAppearanceService();
++  DesktopAppearanceService(const DesktopAppearanceService&) = delete;
++  DesktopAppearanceService& operator=(const DesktopAppearanceService&) = delete;
++  ~DesktopAppearanceService() override;
++
++  void Start(scoped_refptr<dbus::ExportedObject> exported_object);
++
++  // Whether a namespace a client asked for, which may end in a glob, covers
++  // org.freedesktop.appearance.
++  static bool NamespaceRequested(const std::vector<std::string>& requested);
++
++  // ui::NativeThemeObserver:
++  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
++
++ private:
++  void HandleReadAll(dbus::MethodCall* method_call,
++                     dbus::ExportedObject::ResponseSender response_sender);
++  void HandleRead(dbus::MethodCall* method_call,
++                  dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++  void EmitSettingChanged(const std::string& key);
++  void WriteValue(const std::string& key, dbus::MessageWriter* writer) const;
++
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  DesktopAppearance appearance_;
++  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
++      theme_observation_{this};
++  base::WeakPtrFactory<DesktopAppearanceService> weak_ptr_factory_{this};
++};
++
++// Owns the private session bus connection the appearance service answers on.
++class DesktopAppearanceServiceHost final {
++ public:
++  static std::unique_ptr<DesktopAppearanceServiceHost> Create();
++
++  DesktopAppearanceServiceHost(const DesktopAppearanceServiceHost&) = delete;
++  DesktopAppearanceServiceHost& operator=(const DesktopAppearanceServiceHost&) =
++      delete;
++  ~DesktopAppearanceServiceHost();
++
++ private:
++  DesktopAppearanceServiceHost();
++  bool Start();
++  void OnOwnership(const std::string& service_name, bool success);
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  std::unique_ptr<DesktopAppearanceService> service_;
++  base::WeakPtrFactory<DesktopAppearanceServiceHost> weak_ptr_factory_{this};
++};
++
++// Reads the desktop's current appearance from Ash's native theme.
++DesktopAppearance ReadDesktopAppearance();
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 4db9aec721bd..c21f62f93475 100644
+index b3a73ea3a84f..1d37bd59f603 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -85,6 +85,7 @@
+@@ -91,6 +91,7 @@
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
@@ -452,7 +452,7 @@ index 4db9aec721bd..c21f62f93475 100644
  #include "chrome/browser/ash/dbus/desktop_notification_service.h"
  #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
  #include "chrome/browser/ash/dbus/drive_file_stream_service_provider.h"
-@@ -427,6 +428,10 @@ class DBusServices {
+@@ -433,6 +434,10 @@ class DBusServices {
        // the system services above, then translate requests into Ash state.
        desktop_notification_service_host_ =
            DesktopNotificationServiceHost::Create();
@@ -463,7 +463,7 @@ index 4db9aec721bd..c21f62f93475 100644
      }
  
      virtual_file_request_service_ = CrosDBusService::Create(
-@@ -662,6 +667,7 @@ class DBusServices {
+@@ -668,6 +673,7 @@ class DBusServices {
      // Services depending on ash should be released here.
      SetBluetoothConfigServiceBinderForGenericLinux({});
      aurade_bluetooth_service_.reset();
@@ -471,7 +471,7 @@ index 4db9aec721bd..c21f62f93475 100644
      desktop_notification_service_host_.reset();
      machine_learning_decision_service_.reset();
    }
-@@ -674,6 +680,8 @@ class DBusServices {
+@@ -680,6 +686,8 @@ class DBusServices {
    std::unique_ptr<AuraDeBluetoothService> aurade_bluetooth_service_;
    std::unique_ptr<DesktopNotificationServiceHost>
        desktop_notification_service_host_;

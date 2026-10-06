@@ -1,5 +1,5 @@
 diff --git a/components/exo/shell_surface_base.cc b/components/exo/shell_surface_base.cc
-index 71f536dab28e..8d5298d0934c 100644
+index 13103dd209dc..534732b20ac2 100644
 --- a/components/exo/shell_surface_base.cc
 +++ b/components/exo/shell_surface_base.cc
 @@ -6,6 +6,7 @@
@@ -10,7 +10,7 @@ index 71f536dab28e..8d5298d0934c 100644
  #include <optional>
  
  #include "ash/display/screen_orientation_controller.h"
-@@ -2554,7 +2555,33 @@ void ShellSurfaceBase::CommitWidget() {
+@@ -2560,7 +2561,33 @@ void ShellSurfaceBase::CommitWidget() {
      // TODO(crbug.com/40212799): Hook this up with the WM's window positioning
      // logic.
      if (needs_layout_on_show_) {

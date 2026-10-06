@@ -1,3 +1,17 @@
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
+index c69b93cd78af..9923369d3823 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
+@@ -63,6 +63,9 @@ export class AppManagementAppItemElement extends
+       case AppType.kArc:
+         return AppManagementEntryPoint.MAIN_VIEW_ARC;
+       case AppType.kChromeApp:
++      // AuraDE compatibility: Linux apps open the same detail view as Chrome
++      // apps; with no case here, opening one from the list threw.
++      case AppType.kCrostini:
+         return AppManagementEntryPoint.MAIN_VIEW_CHROME_APP;
+       case AppType.kWeb:
+         return AppManagementEntryPoint.MAIN_VIEW_WEB_APP;
 diff --git a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc b/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
 index 62749b9e6e59..c1e2291748a0 100644
 --- a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
@@ -19,20 +33,6 @@ index 62749b9e6e59..c1e2291748a0 100644
      case apps::AppType::kBruschetta:
        // No longer supported
        NOTREACHED();
-diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
-index c69b93cd78af..9923369d3823 100644
---- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
-+++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_item.ts
-@@ -63,6 +63,9 @@ export class AppManagementAppItemElement extends
-       case AppType.kArc:
-         return AppManagementEntryPoint.MAIN_VIEW_ARC;
-       case AppType.kChromeApp:
-+      // AuraDE compatibility: Linux apps open the same detail view as Chrome
-+      // apps; with no case here, opening one from the list threw.
-+      case AppType.kCrostini:
-         return AppManagementEntryPoint.MAIN_VIEW_CHROME_APP;
-       case AppType.kWeb:
-         return AppManagementEntryPoint.MAIN_VIEW_WEB_APP;
 diff --git a/ui/webui/resources/cr_components/app_management/util.ts b/ui/webui/resources/cr_components/app_management/util.ts
 index 88294208788c..03fc56bf6ce1 100644
 --- a/ui/webui/resources/cr_components/app_management/util.ts

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/file_manager/extract_io_task.cc b/chrome/browser/ash/file_manager/extract_io_task.cc
-index 8beb61dde753..f8583d09b9b9 100644
+index 54712f6d7e96..4bc7b6f3a3d0 100644
 --- a/chrome/browser/ash/file_manager/extract_io_task.cc
 +++ b/chrome/browser/ash/file_manager/extract_io_task.cc
 @@ -7,6 +7,7 @@
@@ -133,14 +133,14 @@ index 8beb61dde753..f8583d09b9b9 100644
      any_archive_failed_ = true;
    }
  
--  DCHECK_GT(extractCount_, 0u);
+-  CHECK_GT(extractCount_, 0u, base::NotFatalUntil::M161);
    if (--extractCount_ == 0) {
      cancellation_chain_ = base::DoNothing();
      progress_.state = any_archive_failed_ ? State::kError : State::kSuccess;
 @@ -155,7 +234,20 @@ void ExtractIOTask::ExtractIntoNewDirectory(
      base::FilePath source_file,
      bool created_ok) {
-   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+   CHECK_CURRENTLY_ON(content::BrowserThread::UI, base::NotFatalUntil::M161);
 -  if (created_ok) {
 +  if (!created_ok) {
 +    LOG(ERROR) << "Cannot create directory "
@@ -159,7 +159,7 @@ index 8beb61dde753..f8583d09b9b9 100644
      // Accumulate the new cancellation callback into the cancellation chain.
      cancellation_chain_ =
          unzip::Unzip(unzip::LaunchUnzipper(), source_file,
-@@ -169,10 +261,84 @@ void ExtractIOTask::ExtractIntoNewDirectory(
+@@ -169,12 +261,86 @@ void ExtractIOTask::ExtractIntoNewDirectory(
                                      destination_directory))
              .Then(std::move(cancellation_chain_));
    } else {
@@ -168,9 +168,9 @@ index 8beb61dde753..f8583d09b9b9 100644
 -    ZipExtractCallback(base::FilePath(), false);
 +    // Non-zip archives extracted via CLI tools on a thread pool.
 +    ExtractArchiveViaCli(type, source_file, destination_directory);
-+  }
-+}
-+
+   }
+ }
+ 
 +void ExtractIOTask::ExtractArchiveViaCli(
 +    ArchiveType type,
 +    const base::FilePath& source_file,
@@ -204,7 +204,7 @@ index 8beb61dde753..f8583d09b9b9 100644
 +    case ArchiveType::kUnknown:
 +    case ArchiveType::kZip:
 +      NOTREACHED();
-   }
++  }
 +
 +  // Run extraction on a thread pool (blocking I/O). The process handle stays
 +  // local to the lambda; there is no shared state with the UI thread.
@@ -244,9 +244,11 @@ index 8beb61dde753..f8583d09b9b9 100644
 +      base::BindOnce(&SetDirectoryPermissions, destination_directory, success),
 +      base::BindOnce(&ExtractIOTask::FinishedExtraction,
 +                     weak_ptr_factory_.GetWeakPtr(), destination_directory));
- }
- 
++}
++
  bool CreateExtractionDirectory(const base::FilePath& destination_directory) {
+   if (!base::CreateDirectory(destination_directory)) {
+     return false;
 @@ -241,8 +407,9 @@ void ExtractIOTask::ExtractAllSources() {
    for (size_t index = 0; index < progress_.sources.size(); ++index) {
      const EntryStatus& source = progress_.sources[index];

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index dfe30e4f775d..92578dcb2217 100644
+index 1b5c0114a41f..ba8779e91126 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -48,6 +48,8 @@ static_library("dbus") {
@@ -22,121 +22,6 @@ index dfe30e4f775d..92578dcb2217 100644
      "//services/network/public/mojom",
      "//skia",
      "//third_party/boringssl",
-diff --git a/chrome/browser/ash/dbus/mpris_media_bridge.h b/chrome/browser/ash/dbus/mpris_media_bridge.h
-new file mode 100644
-index 000000000000..a7067392058c
---- /dev/null
-+++ b/chrome/browser/ash/dbus/mpris_media_bridge.h
-@@ -0,0 +1,109 @@
-+// Copyright 2026 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
-+#define CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
-+
-+#include <list>
-+#include <map>
-+#include <memory>
-+#include <optional>
-+#include <string>
-+
-+#include "base/functional/callback_forward.h"
-+#include "base/memory/raw_ptr.h"
-+#include "base/memory/scoped_refptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "mojo/public/cpp/bindings/remote.h"
-+#include "services/media_session/public/mojom/audio_focus.mojom.h"
-+
-+class GURL;
-+class SkBitmap;
-+
-+namespace base {
-+class Thread;
-+}  // namespace base
-+
-+namespace dbus {
-+class Bus;
-+class ObjectProxy;
-+class Response;
-+class Signal;
-+}  // namespace dbus
-+
-+namespace media_session {
-+class MediaSessionService;
-+}  // namespace media_session
-+
-+namespace network {
-+class SharedURLLoaderFactory;
-+class SimpleURLLoader;
-+}  // namespace network
-+
-+namespace ash {
-+
-+// AuraDE compatibility: media players among the Linux applications, music
-+// players and browsers alike, announce themselves on the session bus with
-+// MPRIS, which is what KDE's and GNOME's media controls read. This shows each
-+// one in Ash's media controls the way Ash shows a web page playing media: its
-+// title, artist and artwork, with play, pause, next, previous and seeking
-+// passed back to the player, and the keyboard's media keys reaching the one
-+// that last played. Players take part in Ash's audio focus as web pages do:
-+// with focus enforcement on, one that starts playing pauses the one that was.
-+class MprisMediaBridge {
-+ public:
-+  // Returns null when the bridge cannot start.
-+  static std::unique_ptr<MprisMediaBridge> Create(
-+      media_session::MediaSessionService* media_session_service,
-+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
-+
-+  MprisMediaBridge(const MprisMediaBridge&) = delete;
-+  MprisMediaBridge& operator=(const MprisMediaBridge&) = delete;
-+  ~MprisMediaBridge();
-+
-+ private:
-+  class Player;
-+  using ArtworkCallback = base::OnceCallback<void(const SkBitmap&)>;
-+  using ArtworkLoaders = std::list<std::unique_ptr<network::SimpleURLLoader>>;
-+
-+  MprisMediaBridge(
-+      media_session::MediaSessionService* media_session_service,
-+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
-+
-+  bool Start();
-+  void OnNameOwnerChangedConnected(const std::string& interface_name,
-+                                   const std::string& signal_name,
-+                                   bool success);
-+  void OnListNames(dbus::Response* response);
-+  void OnGetNameOwner(const std::string& name, dbus::Response* response);
-+  void OnNameOwnerChanged(dbus::Signal* signal);
-+  void AddPlayer(const std::string& name, const std::string& owner);
-+  void RemovePlayer(const std::string& name, const std::string& owner);
-+
-+  // Reads, fetches or unpacks a player's artwork and decodes it out of
-+  // process, no larger than `desired_size_px` on its longest side. Runs
-+  // `callback` with an empty bitmap when there is none to show.
-+  void LoadArtwork(const GURL& url,
-+                   int desired_size_px,
-+                   ArtworkCallback callback);
-+  void OnArtworkDownloaded(ArtworkLoaders::iterator loader,
-+                           int desired_size_px,
-+                           ArtworkCallback callback,
-+                           std::optional<std::string> body);
-+
-+  std::unique_ptr<base::Thread> dbus_thread_;
-+  scoped_refptr<dbus::Bus> bus_;
-+  raw_ptr<dbus::ObjectProxy> bus_proxy_ = nullptr;
-+  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_manager_;
-+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-+  ArtworkLoaders artwork_loaders_;
-+  // The players, by the unique name of their connection to the bus. A
-+  // player that owns two MPRIS names, as some do, is shown once.
-+  std::map<std::string, std::unique_ptr<Player>> players_;
-+  base::WeakPtrFactory<MprisMediaBridge> weak_ptr_factory_{this};
-+};
-+
-+}  // namespace ash
-+
-+#endif  // CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
 diff --git a/chrome/browser/ash/dbus/mpris_media_bridge.cc b/chrome/browser/ash/dbus/mpris_media_bridge.cc
 new file mode 100644
 index 000000000000..d203af1c169c
@@ -1383,33 +1268,126 @@ index 000000000000..d203af1c169c
 +}
 +
 +}  // namespace ash
-diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-index 5bb2c875b2f5..1ab7cd0e7750 100644
---- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-+++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-@@ -90,6 +90,7 @@ class LoginScreenExtensionsStorageCleaner;
- class LowDiskNotification;
- class MagicBoostControllerImpl;
- class MisconfiguredUserCleaner;
-+class MprisMediaBridge;
- class NetworkChangeManagerClient;
- class NetworkPrefStateObserver;
- class NetworkThrottlingObserver;
-@@ -287,6 +288,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
- 
-   std::unique_ptr<chromeos::MahiWebContentsManager> mahi_web_contents_manager_;
- 
-+  // AuraDE compatibility: Linux media players in Ash's media controls.
-+  std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
+diff --git a/chrome/browser/ash/dbus/mpris_media_bridge.h b/chrome/browser/ash/dbus/mpris_media_bridge.h
+new file mode 100644
+index 000000000000..a7067392058c
+--- /dev/null
++++ b/chrome/browser/ash/dbus/mpris_media_bridge.h
+@@ -0,0 +1,109 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
 +
-   // Set when PreProfileInit() is called. If PreMainMessageLoopRun() exits
-   // early, this will be false during PostMainMessageLoopRun(), etc.
-   // Used to prevent shutting down classes that were not initialized.
++#ifndef CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
++#define CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
++
++#include <list>
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++
++#include "base/functional/callback_forward.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "mojo/public/cpp/bindings/remote.h"
++#include "services/media_session/public/mojom/audio_focus.mojom.h"
++
++class GURL;
++class SkBitmap;
++
++namespace base {
++class Thread;
++}  // namespace base
++
++namespace dbus {
++class Bus;
++class ObjectProxy;
++class Response;
++class Signal;
++}  // namespace dbus
++
++namespace media_session {
++class MediaSessionService;
++}  // namespace media_session
++
++namespace network {
++class SharedURLLoaderFactory;
++class SimpleURLLoader;
++}  // namespace network
++
++namespace ash {
++
++// AuraDE compatibility: media players among the Linux applications, music
++// players and browsers alike, announce themselves on the session bus with
++// MPRIS, which is what KDE's and GNOME's media controls read. This shows each
++// one in Ash's media controls the way Ash shows a web page playing media: its
++// title, artist and artwork, with play, pause, next, previous and seeking
++// passed back to the player, and the keyboard's media keys reaching the one
++// that last played. Players take part in Ash's audio focus as web pages do:
++// with focus enforcement on, one that starts playing pauses the one that was.
++class MprisMediaBridge {
++ public:
++  // Returns null when the bridge cannot start.
++  static std::unique_ptr<MprisMediaBridge> Create(
++      media_session::MediaSessionService* media_session_service,
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  MprisMediaBridge(const MprisMediaBridge&) = delete;
++  MprisMediaBridge& operator=(const MprisMediaBridge&) = delete;
++  ~MprisMediaBridge();
++
++ private:
++  class Player;
++  using ArtworkCallback = base::OnceCallback<void(const SkBitmap&)>;
++  using ArtworkLoaders = std::list<std::unique_ptr<network::SimpleURLLoader>>;
++
++  MprisMediaBridge(
++      media_session::MediaSessionService* media_session_service,
++      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
++
++  bool Start();
++  void OnNameOwnerChangedConnected(const std::string& interface_name,
++                                   const std::string& signal_name,
++                                   bool success);
++  void OnListNames(dbus::Response* response);
++  void OnGetNameOwner(const std::string& name, dbus::Response* response);
++  void OnNameOwnerChanged(dbus::Signal* signal);
++  void AddPlayer(const std::string& name, const std::string& owner);
++  void RemovePlayer(const std::string& name, const std::string& owner);
++
++  // Reads, fetches or unpacks a player's artwork and decodes it out of
++  // process, no larger than `desired_size_px` on its longest side. Runs
++  // `callback` with an empty bitmap when there is none to show.
++  void LoadArtwork(const GURL& url,
++                   int desired_size_px,
++                   ArtworkCallback callback);
++  void OnArtworkDownloaded(ArtworkLoaders::iterator loader,
++                           int desired_size_px,
++                           ArtworkCallback callback,
++                           std::optional<std::string> body);
++
++  std::unique_ptr<base::Thread> dbus_thread_;
++  scoped_refptr<dbus::Bus> bus_;
++  raw_ptr<dbus::ObjectProxy> bus_proxy_ = nullptr;
++  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_manager_;
++  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
++  ArtworkLoaders artwork_loaders_;
++  // The players, by the unique name of their connection to the bus. A
++  // player that owns two MPRIS names, as some do, is shown once.
++  std::map<std::string, std::unique_ptr<Player>> players_;
++  base::WeakPtrFactory<MprisMediaBridge> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 45acb3f40005..f9258595c050 100644
+index 599bb396b878..f3b2aedf2a7b 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -96,6 +96,7 @@
+@@ -102,6 +102,7 @@
  #include "chrome/browser/ash/dbus/lock_to_single_user_service_provider.h"
  #include "chrome/browser/ash/dbus/machine_learning_decision_service_provider.h"
  #include "chrome/browser/ash/dbus/mojo_connection_service_provider.h"
@@ -1417,7 +1395,7 @@ index 45acb3f40005..f9258595c050 100644
  #include "chrome/browser/ash/dbus/polkit_agent_service.h"
  #include "chrome/browser/ash/dbus/printers_service_provider.h"
  #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
-@@ -1705,6 +1706,14 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1708,6 +1709,14 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
          std::make_unique<mahi::MahiWebContentsManagerImpl>();
    }
  
@@ -1432,7 +1410,7 @@ index 45acb3f40005..f9258595c050 100644
    ChromeBrowserMainPartsLinux::PostBrowserStart();
  }
  
-@@ -1714,6 +1723,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1717,6 +1726,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
  // shutdown calls and test |pre_profile_init_called_| if necessary. See
  // crbug.com/40511182 for details.
  void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
@@ -1440,3 +1418,25 @@ index 45acb3f40005..f9258595c050 100644
    video_conference_manager_client_.reset();
  
    arc_container_app_killer_.reset();
+diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+index 8d58365f92b1..49d2452e74f0 100644
+--- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
++++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
+@@ -96,6 +96,7 @@ class LoginScreenExtensionsStorageCleaner;
+ class LowDiskNotification;
+ class MagicBoostControllerImpl;
+ class MisconfiguredUserCleaner;
++class MprisMediaBridge;
+ class NetworkChangeManagerClient;
+ class NetworkPrefStateObserver;
+ class NetworkThrottlingObserver;
+@@ -301,6 +302,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+ 
+   std::unique_ptr<chromeos::MahiWebContentsManager> mahi_web_contents_manager_;
+ 
++  // AuraDE compatibility: Linux media players in Ash's media controls.
++  std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
++
+   // Set when PreProfileInit() is called. If PreMainMessageLoopRun() exits
+   // early, this will be false during PostMainMessageLoopRun(), etc.
+   // Used to prevent shutting down classes that were not initialized.

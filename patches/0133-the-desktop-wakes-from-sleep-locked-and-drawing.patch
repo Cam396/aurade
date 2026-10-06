@@ -1,3 +1,28 @@
+diff --git a/ash/system/power/power_prefs.cc b/ash/system/power/power_prefs.cc
+index fd816523c828..b53f13a4ea51 100644
+--- a/ash/system/power/power_prefs.cc
++++ b/ash/system/power/power_prefs.cc
+@@ -17,6 +17,7 @@
+ #include "base/functional/callback.h"
+ #include "base/time/default_tick_clock.h"
+ #include "chromeos/ash/components/human_presence/human_presence_configuration.h"
++#include "base/system/sys_info.h"
+ #include "chromeos/dbus/power/power_policy_controller.h"
+ #include "chromeos/dbus/power_manager/idle.pb.h"
+ #include "chromeos/dbus/power_manager/policy.pb.h"
+@@ -120,8 +121,11 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
+                                 hps::GetQuickLockDelay().InMilliseconds());
+ 
+   registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
++  // AuraDE: a computer that wakes from sleep, or has its lid opened, shows
++  // the lock screen, as a Linux or Windows desktop does; Settings can still
++  // turn that off. A Chromebook leaves it off for a consumer account.
+   registry->RegisterBooleanPref(
+-      prefs::kEnableAutoScreenLock, false,
++      prefs::kEnableAutoScreenLock, !base::SysInfo::IsRunningOnChromeOS(),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+ }
+ 
 diff --git a/chromeos/dbus/power/fake_power_manager_client.cc b/chromeos/dbus/power/fake_power_manager_client.cc
 index fc28f28c2575..639efea5e2e4 100644
 --- a/chromeos/dbus/power/fake_power_manager_client.cc
@@ -46,28 +71,3 @@ index fc28f28c2575..639efea5e2e4 100644
  }
  
  void FakePowerManagerClient::SendDarkSuspendImminent() {
-diff --git a/ash/system/power/power_prefs.cc b/ash/system/power/power_prefs.cc
-index f48dd6535737..06ccf89f1be2 100644
---- a/ash/system/power/power_prefs.cc
-+++ b/ash/system/power/power_prefs.cc
-@@ -17,6 +17,7 @@
- #include "base/functional/bind.h"
- #include "base/functional/callback.h"
- #include "base/metrics/histogram_functions.h"
-+#include "base/system/sys_info.h"
- #include "base/time/default_tick_clock.h"
- #include "chromeos/ash/components/human_presence/human_presence_configuration.h"
- #include "chromeos/dbus/power/power_policy_controller.h"
-@@ -124,8 +125,11 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
-                                 hps::GetQuickLockDelay().InMilliseconds());
- 
-   registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
-+  // AuraDE: a computer that wakes from sleep, or has its lid opened, shows
-+  // the lock screen, as a Linux or Windows desktop does; Settings can still
-+  // turn that off. A Chromebook leaves it off for a consumer account.
-   registry->RegisterBooleanPref(
--      prefs::kEnableAutoScreenLock, false,
-+      prefs::kEnableAutoScreenLock, !base::SysInfo::IsRunningOnChromeOS(),
-       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
- }
- 

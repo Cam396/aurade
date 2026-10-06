@@ -1,5 +1,5 @@
 diff --git a/ash/system/unified/power_button.cc b/ash/system/unified/power_button.cc
-index f792fda51e81..f04144d80564 100644
+index 36c5ba568761..6bcc88f4c6f1 100644
 --- a/ash/system/unified/power_button.cc
 +++ b/ash/system/unified/power_button.cc
 @@ -4,7 +4,11 @@
@@ -30,7 +30,7 @@ index f792fda51e81..f04144d80564 100644
  #include "components/user_manager/user_type.h"
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
-@@ -60,6 +70,25 @@
+@@ -61,6 +71,25 @@
  namespace ash {
  
  namespace {
@@ -56,7 +56,7 @@ index f792fda51e81..f04144d80564 100644
  // Rounded corner constants.
  static constexpr int kRoundedCornerRadius = 16;
  static constexpr int kNonRoundedCornerRadius = 4;
-@@ -226,6 +255,13 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+@@ -227,6 +256,13 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
              QsButtonCatalogName::kPowerLockMenuButton);
          Shell::Get()->session_controller()->LockScreen();
          break;
@@ -70,7 +70,7 @@ index f792fda51e81..f04144d80564 100644
        default:
          NOTREACHED();
      }
-@@ -289,6 +325,15 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
+@@ -290,6 +326,15 @@ class PowerButton::MenuController : public ui::SimpleMenuModel::Delegate,
        context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
      }
  
@@ -86,7 +86,7 @@ index f792fda51e81..f04144d80564 100644
      if (show_power_off_button) {
        context_menu_model_->AddItemWithIcon(
            VIEW_ID_QS_POWER_OFF_MENU_BUTTON,
-@@ -401,6 +446,10 @@ PowerButton::PowerButton(UnifiedSystemTrayController* tray_controller)
+@@ -402,6 +447,10 @@ PowerButton::PowerButton(UnifiedSystemTrayController* tray_controller)
        context_menu_(std::make_unique<MenuController>(/*button=*/this)),
        tray_controller_(tray_controller) {
    CHECK(tray_controller_);

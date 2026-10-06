@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/guest_os/guest_os_terminal.cc b/chrome/browser/ash/guest_os/guest_os_terminal.cc
-index cc4e30c208b1..44bdbdeb9bc3 100644
+index b0a134935ca3..57af01fa8336 100644
 --- a/chrome/browser/ash/guest_os/guest_os_terminal.cc
 +++ b/chrome/browser/ash/guest_os/guest_os_terminal.cc
 @@ -10,6 +10,7 @@
@@ -10,7 +10,7 @@ index cc4e30c208b1..44bdbdeb9bc3 100644
  #include "base/functional/bind.h"
  #include "base/json/json_reader.h"
  #include "base/json/json_writer.h"
-@@ -63,6 +64,7 @@ namespace guest_os {
+@@ -64,6 +65,7 @@ namespace guest_os {
  const char kTerminalSystemAppId[] = "fhicihalidkgcimdmhpohldehjmcabcf";
  
  const char kTerminalHomePath[] = "html/terminal.html#home";
@@ -18,7 +18,7 @@ index cc4e30c208b1..44bdbdeb9bc3 100644
  
  const char kShortcutKey[] = "shortcut";
  const char kShortcutValueSSH[] = "ssh";
-@@ -86,6 +88,13 @@ constexpr char kDefaultBackgroundColor[] = "#202124";
+@@ -87,6 +89,13 @@ constexpr char kDefaultBackgroundColor[] = "#202124";
  constexpr char kSettingPassCtrlW[] = "/hterm/profiles/default/pass-ctrl-w";
  constexpr bool kDefaultPassCtrlW = false;
  
@@ -32,7 +32,7 @@ index cc4e30c208b1..44bdbdeb9bc3 100644
  std::string GetSettingsKey(const std::string& prefix,
                             const std::string& profile,
                             const std::string& key) {
-@@ -148,6 +157,11 @@ void LaunchTerminalImpl(Profile* profile,
+@@ -150,6 +159,11 @@ void LaunchTerminalImpl(Profile* profile,
  const std::string& GetTerminalHomeUrl() {
    static const base::NoDestructor<std::string> url(
        base::StrCat({ash::kChromeUIUntrustedTerminalURL, kTerminalHomePath}));
@@ -45,7 +45,7 @@ index cc4e30c208b1..44bdbdeb9bc3 100644
  }
  
 diff --git a/chrome/browser/ash/system_web_apps/apps/BUILD.gn b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
-index c86dc6d2f2c5..9d44e044f099 100644
+index fcc530574fa7..6a94432d0375 100644
 --- a/chrome/browser/ash/system_web_apps/apps/BUILD.gn
 +++ b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
 @@ -91,6 +91,7 @@ static_library("apps") {
@@ -1025,7 +1025,7 @@ index db4260a9e4ce..971b1c870974 100644
  }
  
 diff --git a/chrome/browser/extensions/api/terminal/terminal_private_api.cc b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
-index 598505c9c7d0..bbfe89d14fea 100644
+index 2bdfe2aecfce..e5874648af17 100644
 --- a/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 +++ b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 @@ -96,6 +96,26 @@ const char kCroshName[] = "crosh";

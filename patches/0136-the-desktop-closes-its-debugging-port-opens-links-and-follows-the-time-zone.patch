@@ -1,66 +1,16 @@
-diff --git a/chrome/browser/ash/dbus/aurade_browser_service.h b/chrome/browser/ash/dbus/aurade_browser_service.h
-new file mode 100644
-index 000000000000..bc075c7890a3
---- /dev/null
-+++ b/chrome/browser/ash/dbus/aurade_browser_service.h
-@@ -0,0 +1,57 @@
-+// Copyright 2026 The Chromium Authors
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
-+#define CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
-+
-+#include <string>
-+
-+#include "base/memory/scoped_refptr.h"
-+#include "base/memory/weak_ptr.h"
-+#include "dbus/exported_object.h"
-+#include "url/gurl.h"
-+
-+namespace dbus {
-+class Bus;
-+class MethodCall;
-+}  // namespace dbus
-+
-+namespace ash {
-+
-+// AuraDE compatibility: the desktop's browser, reachable from the user's
-+// session bus as org.aurade.Browser. A link clicked in a Linux application
-+// goes through xdg-open to aurade-open-url, which asks here, and the page
-+// opens in a tab of the AuraDE browser rather than in nothing at all, or in
-+// whatever other browser happens to be installed.
-+//
-+// The session bus only carries this user's own programs, which is the point:
-+// the alternative, Chrome's DevTools port, answers anybody on the machine.
-+class AuraDeBrowserService final {
-+ public:
-+  explicit AuraDeBrowserService(scoped_refptr<dbus::Bus> bus);
-+  AuraDeBrowserService(const AuraDeBrowserService&) = delete;
-+  AuraDeBrowserService& operator=(const AuraDeBrowserService&) = delete;
-+  ~AuraDeBrowserService();
-+
-+  // The page |spec| asks for, if it is one a Linux application may open:
-+  // a web page, or a file by its absolute path. Anything else, the browser's
-+  // own pages among them, is refused.
-+  static GURL AllowedUrl(const std::string& spec);
-+
-+ private:
-+  void HandleOpenUrl(dbus::MethodCall* method_call,
-+                     dbus::ExportedObject::ResponseSender response_sender);
-+  void OnExported(const std::string& interface_name,
-+                  const std::string& method_name,
-+                  bool success);
-+  void OnOwnership(const std::string& service_name, bool success);
-+
-+  scoped_refptr<dbus::Bus> bus_;
-+  scoped_refptr<dbus::ExportedObject> exported_object_;
-+  base::WeakPtrFactory<AuraDeBrowserService> weak_ptr_factory_{this};
-+};
-+
-+}  // namespace ash
-+
-+#endif  // CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
+diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
+index 874d6a2f64d2..c457656db036 100644
+--- a/chrome/browser/ash/dbus/BUILD.gn
++++ b/chrome/browser/ash/dbus/BUILD.gn
+@@ -18,6 +18,8 @@ static_library("dbus") {
+     "ash_dbus_helper.h",
+     "aurade_bluetooth_service.cc",
+     "aurade_bluetooth_service.h",
++    "aurade_browser_service.cc",
++    "aurade_browser_service.h",
+     "chrome_features_service_provider.cc",
+     "chrome_features_service_provider.h",
+     "component_updater_service_provider.cc",
 diff --git a/chrome/browser/ash/dbus/aurade_browser_service.cc b/chrome/browser/ash/dbus/aurade_browser_service.cc
 new file mode 100644
 index 000000000000..740b057229f6
@@ -185,24 +135,74 @@ index 000000000000..740b057229f6
 +}
 +
 +}  // namespace ash
-diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index 03b2b4ce1942..e97d3849dc84 100644
---- a/chrome/browser/ash/dbus/BUILD.gn
-+++ b/chrome/browser/ash/dbus/BUILD.gn
-@@ -18,6 +18,8 @@ static_library("dbus") {
-     "ash_dbus_helper.h",
-     "aurade_bluetooth_service.cc",
-     "aurade_bluetooth_service.h",
-+    "aurade_browser_service.cc",
-+    "aurade_browser_service.h",
-     "chrome_features_service_provider.cc",
-     "chrome_features_service_provider.h",
-     "component_updater_service_provider.cc",
+diff --git a/chrome/browser/ash/dbus/aurade_browser_service.h b/chrome/browser/ash/dbus/aurade_browser_service.h
+new file mode 100644
+index 000000000000..bc075c7890a3
+--- /dev/null
++++ b/chrome/browser/ash/dbus/aurade_browser_service.h
+@@ -0,0 +1,57 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
++#define CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
++
++#include <string>
++
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "dbus/exported_object.h"
++#include "url/gurl.h"
++
++namespace dbus {
++class Bus;
++class MethodCall;
++}  // namespace dbus
++
++namespace ash {
++
++// AuraDE compatibility: the desktop's browser, reachable from the user's
++// session bus as org.aurade.Browser. A link clicked in a Linux application
++// goes through xdg-open to aurade-open-url, which asks here, and the page
++// opens in a tab of the AuraDE browser rather than in nothing at all, or in
++// whatever other browser happens to be installed.
++//
++// The session bus only carries this user's own programs, which is the point:
++// the alternative, Chrome's DevTools port, answers anybody on the machine.
++class AuraDeBrowserService final {
++ public:
++  explicit AuraDeBrowserService(scoped_refptr<dbus::Bus> bus);
++  AuraDeBrowserService(const AuraDeBrowserService&) = delete;
++  AuraDeBrowserService& operator=(const AuraDeBrowserService&) = delete;
++  ~AuraDeBrowserService();
++
++  // The page |spec| asks for, if it is one a Linux application may open:
++  // a web page, or a file by its absolute path. Anything else, the browser's
++  // own pages among them, is refused.
++  static GURL AllowedUrl(const std::string& spec);
++
++ private:
++  void HandleOpenUrl(dbus::MethodCall* method_call,
++                     dbus::ExportedObject::ResponseSender response_sender);
++  void OnExported(const std::string& interface_name,
++                  const std::string& method_name,
++                  bool success);
++  void OnOwnership(const std::string& service_name, bool success);
++
++  scoped_refptr<dbus::Bus> bus_;
++  scoped_refptr<dbus::ExportedObject> exported_object_;
++  base::WeakPtrFactory<AuraDeBrowserService> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_DBUS_AURADE_BROWSER_SERVICE_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 9255e6a5ead2..e6cca126eabc 100644
+index ab2ac2bdd98f..5fdcb857b325 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -85,6 +85,7 @@
+@@ -91,6 +91,7 @@
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
@@ -210,7 +210,7 @@ index 9255e6a5ead2..e6cca126eabc 100644
  #include "chrome/browser/ash/dbus/desktop_appearance_service.h"
  #include "chrome/browser/ash/dbus/desktop_notification_service.h"
  #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
-@@ -451,6 +452,10 @@ class DBusServices {
+@@ -457,6 +458,10 @@ class DBusServices {
          aurade_file_chooser_portal_ = std::make_unique<AuraDeFileChooserPortal>(
              desktop_appearance_service_host_->bus(),
              desktop_appearance_service_host_->portal_object());
@@ -221,7 +221,7 @@ index 9255e6a5ead2..e6cca126eabc 100644
        }
        // AuraDE compatibility: removing or updating packages from Settings
        // needs an administrator's password, and polkit refuses outright when
-@@ -692,6 +697,7 @@ class DBusServices {
+@@ -698,6 +703,7 @@ class DBusServices {
      SetBluetoothConfigServiceBinderForGenericLinux({});
      aurade_bluetooth_service_.reset();
      polkit_agent_service_.reset();
@@ -229,7 +229,7 @@ index 9255e6a5ead2..e6cca126eabc 100644
      aurade_file_chooser_portal_.reset();
      aurade_file_manager_service_.reset();
      desktop_appearance_service_host_.reset();
-@@ -711,6 +717,7 @@ class DBusServices {
+@@ -717,6 +723,7 @@ class DBusServices {
        desktop_appearance_service_host_;
    std::unique_ptr<AuraDeFileManagerService> aurade_file_manager_service_;
    std::unique_ptr<AuraDeFileChooserPortal> aurade_file_chooser_portal_;
@@ -237,8 +237,26 @@ index 9255e6a5ead2..e6cca126eabc 100644
    std::unique_ptr<PolkitAgentService> polkit_agent_service_;
    std::unique_ptr<CrosDBusService> virtual_file_request_service_;
    std::unique_ptr<CrosDBusService> component_updater_service_;
+diff --git a/chrome/browser/ash/preferences/preferences.cc b/chrome/browser/ash/preferences/preferences.cc
+index df5b88f8494f..bbfe4f900dd0 100644
+--- a/chrome/browser/ash/preferences/preferences.cc
++++ b/chrome/browser/ash/preferences/preferences.cc
+@@ -437,6 +437,13 @@ void Preferences::RegisterProfilePrefs(
+           local_state)) {
+     allow_time_zone_resolve_by_default = false;
+   }
++  // AuraDE compatibility: the installer asked where the machine is, and
++  // working it out again from the network needs Google's location service,
++  // which a build without Google API keys cannot reach. Left on, the setting
++  // greyed out the time zone list and the zone stayed wherever it was.
++  if (!base::SysInfo::IsRunningOnChromeOS()) {
++    allow_time_zone_resolve_by_default = false;
++  }
+ 
+   registry->RegisterIntegerPref(
+       ash::prefs::kResolveTimezoneByGeolocationMethod,
 diff --git a/chromeos/ash/components/settings/timezone_settings.cc b/chromeos/ash/components/settings/timezone_settings.cc
-index 71907a8da0c2..bb01e329149b 100644
+index dbca7a93f7a6..8d67e6578029 100644
 --- a/chromeos/ash/components/settings/timezone_settings.cc
 +++ b/chromeos/ash/components/settings/timezone_settings.cc
 @@ -8,6 +8,7 @@
@@ -349,21 +367,3 @@ index 71907a8da0c2..bb01e329149b 100644
    for (auto& observer : observers_)
      observer.TimezoneChanged(*known_timezone);
  }
-diff --git a/chrome/browser/ash/preferences/preferences.cc b/chrome/browser/ash/preferences/preferences.cc
-index dcfaff129fae..1a345d830229 100644
---- a/chrome/browser/ash/preferences/preferences.cc
-+++ b/chrome/browser/ash/preferences/preferences.cc
-@@ -437,6 +437,13 @@ void Preferences::RegisterProfilePrefs(
-           local_state)) {
-     allow_time_zone_resolve_by_default = false;
-   }
-+  // AuraDE compatibility: the installer asked where the machine is, and
-+  // working it out again from the network needs Google's location service,
-+  // which a build without Google API keys cannot reach. Left on, the setting
-+  // greyed out the time zone list and the zone stayed wherever it was.
-+  if (!base::SysInfo::IsRunningOnChromeOS()) {
-+    allow_time_zone_resolve_by_default = false;
-+  }
- 
-   registry->RegisterIntegerPref(
-       ash::prefs::kResolveTimezoneByGeolocationMethod,

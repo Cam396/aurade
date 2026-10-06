@@ -1,8 +1,8 @@
 diff --git a/ash/BUILD.gn b/ash/BUILD.gn
-index 5d05bed0e10f..39a4762907e7 100644
+index b82533249cd1..116fd066fbf6 100644
 --- a/ash/BUILD.gn
 +++ b/ash/BUILD.gn
-@@ -2518,6 +2518,8 @@ component("ash") {
+@@ -2519,6 +2519,8 @@ component("ash") {
      "system/tray/hover_highlight_view.h",
      "system/tray/imaged_tray_icon.cc",
      "system/tray/imaged_tray_icon.h",
@@ -12,7 +12,7 @@ index 5d05bed0e10f..39a4762907e7 100644
      "system/tray/interacted_by_tap_recorder.h",
      "system/tray/size_range_layout.cc",
 diff --git a/ash/shell.cc b/ash/shell.cc
-index c2e23449db5e..b26076e8cb99 100644
+index db7f1213570f..98bd9d038eac 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
 @@ -352,6 +352,14 @@ TrayIconConfiguration::TrayIconConfiguration() = default;
@@ -142,7 +142,7 @@ index 38357dcf7fb4..887d7714a27c 100644
    // termination, which conflicts with production behavior.
    void RecreateMultiUserWindowManagerForTesting();
 diff --git a/ash/system/status_area_widget.cc b/ash/system/status_area_widget.cc
-index 2124fc5f279a..dd8451a7136f 100644
+index a62202411d40..ca8e19faff8c 100644
 --- a/ash/system/status_area_widget.cc
 +++ b/ash/system/status_area_widget.cc
 @@ -40,6 +40,7 @@
@@ -427,7 +427,7 @@ index 000000000000..0fd3679ae06d
 +
 +#endif  // ASH_SYSTEM_TRAY_INTERACTIVE_TRAY_ICON_H_
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index 92578dcb2217..ebe8e94787bc 100644
+index ba8779e91126..6fc7674ea206 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -62,6 +62,8 @@ static_library("dbus") {
@@ -468,17 +468,17 @@ index 92578dcb2217..ebe8e94787bc 100644
      "//ui/native_theme",
      "//ui/views",
 diff --git a/chrome/browser/ash/dbus/DEPS b/chrome/browser/ash/dbus/DEPS
-index 149488920006..f57ac1da747c 100644
+index 7889d2d71b71..57401e2b2969 100644
 --- a/chrome/browser/ash/dbus/DEPS
 +++ b/chrome/browser/ash/dbus/DEPS
 @@ -34,6 +34,7 @@ include_rules = [
    "+chrome/browser/chromeos/policy/dlp",
    "+chrome/browser/component_updater",
-   "+chrome/browser/enterprise/browser_management",
-+  "+chrome/browser/icon_transcoder",
    "+chrome/browser/policy",
++  "+chrome/browser/icon_transcoder",
    "+chrome/browser/profiles",
    "+chrome/common/chrome_paths.h",
+   "+chrome/common/chrome_switches.h",
 diff --git a/chrome/browser/ash/dbus/status_notifier_host.cc b/chrome/browser/ash/dbus/status_notifier_host.cc
 new file mode 100644
 index 000000000000..06d18dd989da
@@ -2486,10 +2486,10 @@ index 000000000000..f816ae5a49f6
 +
 +#endif  // CHROME_BROWSER_ASH_DBUS_STATUS_NOTIFIER_HOST_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index f9258595c050..61ef76671347 100644
+index f3b2aedf2a7b..225890bb4da8 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -102,6 +102,7 @@
+@@ -108,6 +108,7 @@
  #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
  #include "chrome/browser/ash/dbus/screen_lock_service_provider.h"
  #include "chrome/browser/ash/dbus/smb_fs_service_provider.h"
@@ -2497,7 +2497,7 @@ index f9258595c050..61ef76671347 100644
  #include "chrome/browser/ash/dbus/virtual_file_request_service_provider.h"
  #include "chrome/browser/ash/dbus/vm/vm_applications_service_provider.h"
  #include "chrome/browser/ash/dbus/vm/vm_launch_service_provider.h"
-@@ -1712,6 +1713,8 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1715,6 +1716,8 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
      mpris_media_bridge_ = MprisMediaBridge::Create(
          &content::GetMediaSessionService(),
          g_browser_process->shared_url_loader_factory());
@@ -2506,7 +2506,7 @@ index f9258595c050..61ef76671347 100644
    }
  
    ChromeBrowserMainPartsLinux::PostBrowserStart();
-@@ -1723,6 +1726,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1726,6 +1729,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
  // shutdown calls and test |pre_profile_init_called_| if necessary. See
  // crbug.com/40511182 for details.
  void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
@@ -2515,10 +2515,10 @@ index f9258595c050..61ef76671347 100644
    video_conference_manager_client_.reset();
  
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-index 1ab7cd0e7750..e137190f4d5e 100644
+index 49d2452e74f0..675244ecb792 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-@@ -103,6 +103,7 @@ class SessionTerminationManager;
+@@ -109,6 +109,7 @@ class SessionTerminationManager;
  class ShortcutMappingPrefService;
  class ShutdownPolicyForwarder;
  class SigninProfileHandler;
@@ -2526,7 +2526,7 @@ index 1ab7cd0e7750..e137190f4d5e 100644
  class SuspendPerfReporter;
  class SystemTokenCertDBInitializer;
  class TokenHandleStoreFactory;
-@@ -291,6 +292,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+@@ -305,6 +306,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
    // AuraDE compatibility: Linux media players in Ash's media controls.
    std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
  

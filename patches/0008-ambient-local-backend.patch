@@ -393,83 +393,61 @@ index d0fea22d14cf..91adbf22244f 100644
  }
  
 diff --git a/chrome/browser/ash/ambient/ambient_client_impl.cc b/chrome/browser/ash/ambient/ambient_client_impl.cc
-index 5fd199cae1f5..2038552059bc 100644
+index 35ac4555966a..5aa6eb065784 100644
 --- a/chrome/browser/ash/ambient/ambient_client_impl.cc
 +++ b/chrome/browser/ash/ambient/ambient_client_impl.cc
-@@ -12,6 +12,7 @@
- #include "ash/public/cpp/image_downloader.h"
+@@ -13,6 +13,7 @@
  #include "base/check.h"
+ #include "base/check_deref.h"
  #include "base/functional/callback.h"
 +#include "base/strings/string_util.h"
- #include "chrome/browser/ash/profiles/profile_helper.h"
  #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/signin/identity_manager_factory.h"
-@@ -90,6 +91,20 @@ bool HasPrimaryAccount(const Profile* profile) {
+ #include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
+ #include "chromeos/ash/components/channel/channel_info.h"
+@@ -78,6 +79,16 @@ bool HasPrimaryAccount(const AccountId& account_id) {
    return identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
  }
  
 +constexpr char kAuraLocalAccountDomain[] = "@local.aurade";
 +constexpr char kAuraLocalGaiaIdPrefix[] = "aurade-local-";
 +
-+bool IsAuraLocalAccount(const user_manager::User* user) {
-+  if (!user)
-+    return false;
-+
-+  const AccountId& account_id = user->GetAccountId();
++bool IsAuraLocalAccount(const AccountId& account_id) {
 +  return base::EndsWith(account_id.GetUserEmail(), kAuraLocalAccountDomain,
 +                        base::CompareCase::SENSITIVE) ||
 +         base::StartsWith(account_id.GetGaiaId().ToString(),
 +                          kAuraLocalGaiaIdPrefix, base::CompareCase::SENSITIVE);
 +}
 +
- bool IsEmailDomainSupported(const user_manager::User* user) {
-   const std::string email = user->GetAccountId().GetUserEmail();
-   DCHECK(!email.empty());
-@@ -123,23 +138,26 @@ bool AmbientClientImpl::IsAmbientModeAllowed() {
-   if (!IsPrimaryUser())
+ bool IsEmailDomainSupported(const AccountId& account_id) {
+   const std::string email = account_id.GetUserEmail();
+   CHECK(!email.empty(), base::NotFatalUntil::M160);
+@@ -122,6 +133,15 @@ bool AmbientClientImpl::IsAmbientModeAllowed() {
      return false;
+   }
  
-+  auto* profile = GetProfileForActiveUser();
-+  if (!profile)
-+    return false;
-+
-+  if (profile->IsOffTheRecord())
-+    return false;
-+
-+  if (IsAuraLocalAccount(active_user))
-+    return true;
++  // AuraDE: a local Linux account has no Google account behind it, so the
++  // domain and primary account checks below can never pass for it.
++  if (IsAuraLocalAccount(account_id)) {
++    auto* local_profile = Profile::FromBrowserContext(
++        ash::BrowserContextHelper::Get()->GetBrowserContextByAccountId(
++            account_id));
++    return local_profile && !local_profile->IsOffTheRecord();
++  }
 +
    // When this check is removed to start supporting enterprise users,
    // please update kAmbientClientNetworkTag and network annotation tags
    // in ash/ambient package to reflect that this is an enterprise feature.
-   if (!IsEmailDomainSupported(active_user))
-     return false;
+@@ -157,6 +177,13 @@ void AmbientClientImpl::RequestAccessToken(GetAccessTokenCallback callback) {
+       session_manager::SessionManager::Get()->GetActiveSession();
+   CHECK(active_session, base::NotFatalUntil::M160);
  
--  auto* profile = GetProfileForActiveUser();
--  if (!profile)
--    return false;
--
-   // Primary account might be missing during unittests.
-   if (!HasPrimaryAccount(profile))
-     return false;
- 
--  if (profile->IsOffTheRecord())
--    return false;
--
-   return true;
- }
- 
-@@ -148,6 +166,13 @@ void AmbientClientImpl::SetAmbientModeAllowedForTesting(bool allowed) {
- }
- 
- void AmbientClientImpl::RequestAccessToken(GetAccessTokenCallback callback) {
-+  if (IsAuraLocalAccount(GetActiveUser())) {
++  if (IsAuraLocalAccount(active_session->account_id())) {
 +    std::move(callback).Run(/*gaia_id=*/GaiaId(),
 +                            /*access_token=*/std::string(),
 +                            /*expiration_time=*/base::Time::Now());
 +    return;
 +  }
 +
-   auto* profile = GetProfileForActiveUser();
-   DCHECK(profile);
- 
+   signin::IdentityManager* identity_manager =
+       ash::IdentityManagerProvider::Get().Find(active_session->account_id());
+   CHECK(identity_manager, base::NotFatalUntil::M160);

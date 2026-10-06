@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
-index bca5565e08c6..06029558e437 100644
+index dc740e598785..d94dd8d5909b 100644
 --- a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
 +++ b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
-@@ -125,6 +125,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+@@ -129,6 +129,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
    if (!browser_context || disable_built_in_tts_engine_for_testing_)
      return true;
  
@@ -20,7 +20,7 @@ index bca5565e08c6..06029558e437 100644
    std::vector<content::VoiceData> voices;
    GetVoices(browser_context, GURL(), &voices);
    bool saw_google_tts = false;
-@@ -136,11 +147,8 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+@@ -140,11 +151,8 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
          voice.engine_id == extension_misc::kEspeakSpeechSynthesisExtensionId;
    }
  
@@ -35,10 +35,10 @@ index bca5565e08c6..06029558e437 100644
  
  void TtsExtensionEngineChromeOS::OnStart() {
 diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
-index 2d52286614d5..d5bec7087756 100644
+index 70614431823c..2270be509dc8 100644
 --- a/content/browser/BUILD.gn
 +++ b/content/browser/BUILD.gn
-@@ -2558,7 +2558,10 @@ source_set("browser") {
+@@ -2555,7 +2555,10 @@ source_set("browser") {
      ]
    }
  

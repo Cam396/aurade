@@ -85,36 +85,6 @@ index 0506df0570e3..cdb588db9da7 100644
    base::FilePath icon_path;
    base::FilePath desktop_path;
    std::vector<std::string> categories;
-diff --git a/ui/webui/resources/cr_components/app_management/app_management.mojom b/ui/webui/resources/cr_components/app_management/app_management.mojom
-index fa8df8eac978..17d3710e3f9a 100644
---- a/ui/webui/resources/cr_components/app_management/app_management.mojom
-+++ b/ui/webui/resources/cr_components/app_management/app_management.mojom
-@@ -160,6 +160,8 @@ struct App {
-   string? app_size;
-   string? data_size;
-   string publisher_id;
-+  // AuraDE: the pacman package a Linux app was installed by, if any.
-+  string? linux_package;
-   // A string of the formatted origin URL where it is no longer a valid URL,
-   // such as "foo.com".
-   string? formatted_origin;
-diff --git a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
-index b26a6a0ee975..77da301daa1a 100644
---- a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
-+++ b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
-@@ -341,6 +341,12 @@ AppManagementPageHandlerBase::CreateAppFromAppUpdate(
-   app->data_size = MaybeFormatBytes(update.DataSizeInBytes());
- 
-   app->publisher_id = update.PublisherId();
-+  if (std::optional<base::DictValue> extra = update.Extra()) {
-+    if (const std::string* package = extra->FindString("package_name");
-+        package && !package->empty()) {
-+      app->linux_package = *package;
-+    }
-+  }
- 
-   bool is_browser_tab_app = (update.AppType() == apps::AppType::kWeb) &&
-                             (update.WindowMode() == apps::WindowMode::kBrowser);
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
 index d1b6855509a9..fd7f9a936575 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.html
@@ -138,10 +108,10 @@ index d1b6855509a9..fd7f9a936575 100644
      <div class="indented-app-details" id="auradeLinuxPackage">
        Package: [[getAuraDeLinuxPackage_(app)]]
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
-index 50d0c01f4c18..5776aefd91d7 100644
+index 12d9e87c9a9a..7f461941ab02 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/app_management_page/app_details_item.ts
-@@ -135,7 +135,8 @@ export class AppManagementAppDetailsItem extends
+@@ -137,7 +137,8 @@ export class AppManagementAppDetailsItem extends
    }
  
    private shouldShowAuraDeLinuxPackage_(app: App): boolean {
@@ -151,7 +121,7 @@ index 50d0c01f4c18..5776aefd91d7 100644
    }
  
    private isIsolatedWebApp_(app: App): boolean {
-@@ -274,12 +275,8 @@ export class AppManagementAppDetailsItem extends
+@@ -305,12 +306,8 @@ export class AppManagementAppDetailsItem extends
      return app.publisherId.startsWith('aurade-host:');
    }
  
@@ -165,7 +135,7 @@ index 50d0c01f4c18..5776aefd91d7 100644
    }
  
    private shouldShowInfoIcon_(app: App): boolean {
-@@ -334,7 +331,8 @@ export class AppManagementAppDetailsItem extends
+@@ -365,7 +362,8 @@ export class AppManagementAppDetailsItem extends
  
    private getTypeAndSourceString_(app: App): string {
      if (this.isAuraDeLinuxApp_(app)) {
@@ -239,3 +209,33 @@ index 9f3bb54b7ed9..fbd4a30e75f3 100644
  }
  
  declare global {
+diff --git a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+index b26a6a0ee975..77da301daa1a 100644
+--- a/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
++++ b/chrome/browser/ui/webui/app_management/app_management_page_handler_base.cc
+@@ -341,6 +341,12 @@ AppManagementPageHandlerBase::CreateAppFromAppUpdate(
+   app->data_size = MaybeFormatBytes(update.DataSizeInBytes());
+ 
+   app->publisher_id = update.PublisherId();
++  if (std::optional<base::DictValue> extra = update.Extra()) {
++    if (const std::string* package = extra->FindString("package_name");
++        package && !package->empty()) {
++      app->linux_package = *package;
++    }
++  }
+ 
+   bool is_browser_tab_app = (update.AppType() == apps::AppType::kWeb) &&
+                             (update.WindowMode() == apps::WindowMode::kBrowser);
+diff --git a/ui/webui/resources/cr_components/app_management/app_management.mojom b/ui/webui/resources/cr_components/app_management/app_management.mojom
+index fa8df8eac978..17d3710e3f9a 100644
+--- a/ui/webui/resources/cr_components/app_management/app_management.mojom
++++ b/ui/webui/resources/cr_components/app_management/app_management.mojom
+@@ -160,6 +160,8 @@ struct App {
+   string? app_size;
+   string? data_size;
+   string publisher_id;
++  // AuraDE: the pacman package a Linux app was installed by, if any.
++  string? linux_package;
+   // A string of the formatted origin URL where it is no longer a valid URL,
+   // such as "foo.com".
+   string? formatted_origin;
