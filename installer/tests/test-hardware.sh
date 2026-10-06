@@ -69,6 +69,8 @@ grep -q '^note=.*T2' <<<"$out" || fail 'T2 Mac: the person is not told the keybo
 out=$(detect chromebook)
 has "$out" 'packages=' || fail "Chromebook: $out"
 has "$out" 'summary=Chromebook (Drawcia)' || fail "Chromebook: not recognised: $out"
+grep -q '^note=.*speakers and microphone.*chrultrabook' <<<"$out" ||
+  fail "Chromebook: nobody is told the sound may need a per-model fix: $out"
 
 out=$(detect dell)
 has "$out" 'packages=broadcom-wl-dkms linux-headers' || fail "a PC with a BCM4352 needs the driver too: $out"
