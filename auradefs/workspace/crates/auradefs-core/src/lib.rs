@@ -34,5 +34,40 @@ pub mod cover;
 pub mod system;
 pub mod ops;
 
+/// One lock for every test that changes the process environment, or reads
+/// something the environment decides. Cargo runs tests as threads of one
+/// process, so a lock per module only kept a module's tests apart from each
+/// other: the registry test read the XDG directories while a tags test had
+/// pointed XDG_DATA_HOME somewhere else, and failed now and then.
+#[cfg(test)]
+pub(crate) fn test_env() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Puts an environment variable back the way a test found it, so one test's
+/// scratch directories do not become every later test's.
+#[cfg(test)]
+pub(crate) struct RestoreVar(&'static str, Option<std::ffi::OsString>);
+
+#[cfg(test)]
+impl RestoreVar {
+    pub(crate) fn new(name: &'static str) -> Self {
+        RestoreVar(name, std::env::var_os(name))
+    }
+}
+
+#[cfg(test)]
+impl Drop for RestoreVar {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.1 {
+                Some(v) => std::env::set_var(self.0, v),
+                None => std::env::remove_var(self.0),
+            }
+        }
+    }
+}
+
 pub use error::{Error, Result};
 pub use root::Root;

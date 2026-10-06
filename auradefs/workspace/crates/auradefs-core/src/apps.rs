@@ -653,6 +653,8 @@ pub struct Launch {
     /// Keep the terminal open after the program exits, so its output can be
     /// read. Only meaningful with `in_terminal`.
     pub hold: bool,
+    /// Variables for this program only, over the desktop's own.
+    pub env: Vec<(String, String)>,
 }
 
 impl Launch {
@@ -706,6 +708,18 @@ pub fn desktop_environment() -> Vec<(String, String)> {
     std::fs::read_to_string(Path::new(&dir).join("aurade/app-environment"))
         .map(|text| parse_environment(&text))
         .unwrap_or_default()
+}
+
+/// What a started program gets: the desktop's variables, with the program's
+/// own settings in place of any of the same name. They go to the child alone;
+/// this process's environment is not touched.
+pub fn child_environment(
+    mut desktop: Vec<(String, String)>,
+    own: &[(String, String)],
+) -> Vec<(String, String)> {
+    desktop.retain(|(name, _)| !own.iter().any(|(mine, _)| mine == name));
+    desktop.extend(own.iter().cloned());
+    desktop
 }
 
 /// `NAME=value` lines; a comment, a blank line or a name no shell would take
@@ -808,7 +822,7 @@ pub fn spawn(launch: &Launch) -> Result<()> {
         argv = with;
     }
 
-    let env = desktop_environment();
+    let env = child_environment(desktop_environment(), &launch.env);
     let runner = scope_runner();
     let mut argv = scoped_argv(runner.as_deref(), &env, &argv);
     let program = argv.remove(0);
@@ -1437,7 +1451,24 @@ Exec=gedit --new-window
     }
 
     #[test]
+    fn a_programs_own_variables_win_and_the_desktops_stay() {
+        let pair = |n: &str, v: &str| (n.to_string(), v.to_string());
+        let got = child_environment(
+            vec![pair("WAYLAND_DISPLAY", "wayland-0"), pair("LANG", "en_US.UTF-8")],
+            &[pair("LANG", "de_DE.UTF-8"), pair("GDK_SCALE", "2")],
+        );
+        assert_eq!(got, vec![
+            pair("WAYLAND_DISPLAY", "wayland-0"),
+            pair("LANG", "de_DE.UTF-8"),
+            pair("GDK_SCALE", "2"),
+        ]);
+        //: Nothing of its own: the desktop's, unchanged.
+        assert_eq!(child_environment(vec![pair("A", "1")], &[]), vec![pair("A", "1")]);
+    }
+
+    #[test]
     fn a_registry_knows_when_what_it_read_has_changed() {
+        let _guard = crate::test_env();
         let reg = Registry::load();
         assert!(!reg.is_stale(), "a registry just read is already stale");
     }

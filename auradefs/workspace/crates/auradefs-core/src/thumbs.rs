@@ -867,8 +867,7 @@ mod tests {
     /// Point the cache at a scratch directory for one test. These run one at a
     /// time because the variable is process wide.
     fn with_cache<T>(base: &Path, body: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env();
         let before = std::env::var("XDG_CACHE_HOME").ok();
         unsafe { std::env::set_var("XDG_CACHE_HOME", base.join("cache")) };
         let out = body();
