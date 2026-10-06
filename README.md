@@ -139,6 +139,24 @@ Already running Arch? AuraDE installs next to your current desktop as one more
 session at your login screen, and comes back out with one command. See
 [AuraDE on an Arch system you already use](docs/existing-arch.md).
 
+### Surfaces, Macs and Chromebooks
+
+The installer looks at the machine and sets up what it needs, on the standard
+Arch kernel:
+
+- Microsoft Surface: Wi-Fi, keyboard, touchpad and battery work, and on an
+  encrypted install the built-in keyboard works at the disk unlock prompt.
+  The touchscreen and pen need the linux-surface kernel, which AuraDE does not
+  install.
+- Intel Macs: Broadcom Wi-Fi gets Broadcom's own driver, in the installer and
+  on the installed system, the fans are controlled, and the keyboards of 2015
+  to 2017 models work at the disk unlock prompt. Macs with Apple's T2 chip
+  (2018 to 2020) need a kernel AuraDE does not install yet for their keyboard,
+  trackpad and Wi-Fi; use a USB keyboard, mouse and network.
+- Chromebooks: Wi-Fi works. Speakers and microphones often need settings
+  made for the model; the installer points to them, and warns that on some
+  models the wrong ones can damage the speakers.
+
 ### Updates
 
 `sudo pacman -Syu` updates AuraDE along with Arch. Installs from 1.1.1 on
