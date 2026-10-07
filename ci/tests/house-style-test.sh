@@ -14,6 +14,11 @@
 # Patch files are checked on their added lines only. A context line is
 # upstream Chromium's text and has to match the source byte for byte, so
 # rewriting one would break the patch rather than fix the style.
+#
+# An added line that is a whole .xtb translation is not checked either. Those
+# are upstream's translators' sentences with the product's name changed in
+# them, written in their language's own punctuation, which can include these
+# dashes; AuraDE's own words are the English beside them, and that is checked.
 set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
@@ -70,6 +75,8 @@ for path in paths:
             # Only what AuraDE adds. Context and removed lines belong to
             # upstream and must stay byte identical.
             if not line.startswith("+") or line.startswith("+++"):
+                continue
+            if line.startswith('+<translation id="'):
                 continue
         probe = DETECTOR.sub("", line)
         for char, name in BANNED.items():
