@@ -1,0 +1,33 @@
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc b/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
+index 52112d73ce18..f0590395cb4a 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
+@@ -569,13 +569,24 @@ void PeopleSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
+   user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile());
+   DCHECK(user);
+ 
++  // AuraDE: a local account has no Google profile, so often no given name.
++  // Without one the title read "'s accounts"; it falls back to the display
++  // name, and then to "My accounts" and the account's email.
++  std::u16string name = user->GetGivenName();
++  if (name.empty()) {
++    name = user->GetDisplayName();
++  }
+   html_source->AddString(
+-      "osProfileName", l10n_util::GetStringFUTF16(IDS_OS_SETTINGS_PROFILE_NAME,
+-                                                  user->GetGivenName()));
++      "osProfileName",
++      l10n_util::GetStringFUTF16(
++          IDS_OS_SETTINGS_PROFILE_NAME,
++          name.empty() ? base::UTF8ToUTF16(user->GetDisplayEmail()) : name));
+   html_source->AddString(
+       "accountManagerPageTitle",
+-      l10n_util::GetStringFUTF16(IDS_SETTINGS_ACCOUNT_MANAGER_PAGE_TITLE_V2,
+-                                 user->GetGivenName()));
++      name.empty() ? l10n_util::GetStringUTF16(
++                         IDS_SETTINGS_ACCOUNT_MANAGER_PAGE_TITLE)
++                   : l10n_util::GetStringFUTF16(
++                         IDS_SETTINGS_ACCOUNT_MANAGER_PAGE_TITLE_V2, name));
+ 
+   // Toggles the ChromeOS Account Manager submenu in the People section.
+   html_source->AddBoolean("isAccountManagerEnabled",
