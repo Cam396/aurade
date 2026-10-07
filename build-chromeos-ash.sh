@@ -182,7 +182,6 @@ build_chrome() {
         ozone_platform_wayland = true
         use_system_minigbm = true
         enable_rust = true
-        use_chromium_rust_toolchain = true
         use_real_dbus_clients = true
         use_official_google_api_keys = false
     " 2>&1 | tee -a "${BUILD_LOG}"
