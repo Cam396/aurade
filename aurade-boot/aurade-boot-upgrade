@@ -64,9 +64,29 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-# The new initramfs, built to one side and looked at, before anything changes.
+# plymouth's own hook puts in whichever theme plymouthd.conf names, so the
+# theme is set first, and put back if the trial fails. On its own it changes
+# nothing about how the machine boots: the initramfs is what does.
+had_plymouth_conf=0
+if [[ -e $PLYMOUTH_CONF ]]; then
+  had_plymouth_conf=1
+  cp -p -- "$PLYMOUTH_CONF" "$work/plymouthd.conf"
+fi
+put_back_theme() {
+  if (( had_plymouth_conf )); then
+    cp -p -- "$work/plymouthd.conf" "$PLYMOUTH_CONF"
+  else
+    rm -f -- "$PLYMOUTH_CONF"
+  fi
+}
+install -d -m 0755 "${PLYMOUTH_CONF%/*}"
+printf '[Daemon]\nTheme=aurade-boot\nDeviceScale=1\n' >"$PLYMOUTH_CONF"
+
+# The new initramfs, built to one side and looked at, before anything else
+# changes.
 sed "s|^HOOKS=.*|${NEW_HOOKS}|" "$CONF" >"$work/mkinitcpio.conf"
 if ! "${legacy[@]}" "$MKINITCPIO" -c "$work/mkinitcpio.conf" -k "$KERNEL" -g "$work/test.img" >"$work/build.log" 2>&1; then
+  put_back_theme
   say 'a trial initramfs with the unlock screen could not be built, so nothing was changed. What mkinitcpio said:'
   tail -n 15 "$work/build.log" >&2
   exit 0
@@ -74,6 +94,7 @@ fi
 "$LSINITCPIO" "$work/test.img" >"$work/contents" 2>/dev/null || true
 for need in usr/share/plymouth/themes/aurade-boot/aurade-boot.script usr/bin/plymouthd usr/lib/systemd/systemd-cryptsetup; do
   if ! grep -qxF "$need" "$work/contents"; then
+    put_back_theme
     say "the trial initramfs has no $need, so nothing was changed."
     exit 0
   fi
@@ -81,19 +102,19 @@ done
 
 restore() {
   local file
-  for file in "$CONF" "$ENTRY" "$PLYMOUTH_CONF"; do
-    if [[ -e $file$BACKUP ]]; then
-      cp -p -- "$file$BACKUP" "$file"
-    elif [[ $file == "$PLYMOUTH_CONF" ]]; then
-      rm -f -- "$file"
-    fi
+  for file in "$CONF" "$ENTRY"; do
+    [[ ! -e $file$BACKUP ]] || cp -p -- "$file$BACKUP" "$file"
   done
+  put_back_theme
   rm -f -- "$TEXT_ENTRY"
 }
 
-for file in "$CONF" "$ENTRY" "$PLYMOUTH_CONF"; do
+for file in "$CONF" "$ENTRY"; do
   [[ ! -e $file || -e $file$BACKUP ]] || cp -p -- "$file" "$file$BACKUP"
 done
+if (( had_plymouth_conf )) && [[ ! -e $PLYMOUTH_CONF$BACKUP ]]; then
+  cp -p -- "$work/plymouthd.conf" "$PLYMOUTH_CONF$BACKUP"
+fi
 
 # The way back: this entry boots the same initramfs with plymouth turned off,
 # so the passphrase is asked on the console exactly as before.
@@ -101,8 +122,6 @@ sed -e 's/^title .*/title AuraDE, text disk unlock/' \
     -e '/^options[[:space:]]/ s/$/ plymouth.enable=0/' "$ENTRY" >"$TEXT_ENTRY"
 sed -i "s|^HOOKS=.*|${NEW_HOOKS}|" "$CONF"
 sed -i "/^options[[:space:]]/ s/\$/ splash${extra}/" "$ENTRY"
-install -d -m 0755 "${PLYMOUTH_CONF%/*}"
-printf '[Daemon]\nTheme=aurade-boot\nDeviceScale=1\n' >"$PLYMOUTH_CONF"
 
 if ! "${legacy[@]}" "$MKINITCPIO" -P >"$work/real.log" 2>&1; then
   say 'building the initramfs with the unlock screen failed, so the earlier setup was put back. What mkinitcpio said:'

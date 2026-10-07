@@ -24,15 +24,22 @@ cat >"$TMP/mkinitcpio" <<'FAKE'
 printf '%s legacy=%s\n' "$*" "${AURADE_BOOT_LEGACY_INPUT:-0}" >>"$FAKE_LOG"
 if [[ $* == *-g* ]]; then
   [[ -z ${FAKE_TRIAL_FAIL:-} ]] || exit 1
-  out=${*##*-g }; : >"$out"; exit 0
+  # As plymouth's hook does: the theme in the image is the one plymouthd.conf
+  # names when the image is built.
+  out=${*: -1}
+  grep -qx 'Theme=aurade-boot' "$AURADE_BOOT_ROOT/etc/plymouth/plymouthd.conf" 2>/dev/null &&
+    echo theme >"$out" || : >"$out"
+  exit 0
 fi
 [[ -z ${FAKE_REAL_FAIL:-} || -e $FAKE_LOG.failed ]] || { : >"$FAKE_LOG.failed"; exit 1; }
 exit 0
 FAKE
 cat >"$TMP/lsinitcpio" <<'FAKE'
 #!/usr/bin/env bash
-printf '%s\n' usr/bin/plymouthd usr/lib/systemd/systemd-cryptsetup \
-  ${FAKE_NO_THEME:-usr/share/plymouth/themes/aurade-boot/aurade-boot.script}
+printf '%s\n' usr/bin/plymouthd usr/lib/systemd/systemd-cryptsetup
+if [[ -z ${FAKE_NO_THEME:-} ]] && grep -qx theme "$1"; then
+  echo usr/share/plymouth/themes/aurade-boot/aurade-boot.script
+fi
 FAKE
 chmod 755 "$TMP/mkinitcpio" "$TMP/lsinitcpio"
 
@@ -103,6 +110,15 @@ grep -q 'changed by hand' "$TMP/out" || fail 'hand edited hooks were not explain
 machine "$OLD" 'options root=/dev/sda2 quiet'
 upgrade
 untouched "$OLD" 'options root=/dev/sda2 quiet' 'unknown boot entry'
+
+# Arch's own plymouthd.conf is kept, and comes back if the trial fails.
+machine "$OLD" "$OPTIONS"
+install -d "$R/etc/plymouth"; printf '[Daemon]\n#Theme=bgrt\n' >"$R/etc/plymouth/plymouthd.conf"
+FAKE_TRIAL_FAIL=1 upgrade
+grep -qx '#Theme=bgrt' "$R/etc/plymouth/plymouthd.conf" || fail 'a failed trial did not put plymouthd.conf back'
+upgrade
+grep -qx 'Theme=aurade-boot' "$R/etc/plymouth/plymouthd.conf" || fail 'plymouthd.conf was not set'
+grep -qx '#Theme=bgrt' "$R/etc/plymouth/plymouthd.conf.before-aurade-boot" || fail 'no copy of the old plymouthd.conf'
 
 # Failures: nothing changes, or everything is put back.
 machine "$OLD" "$OPTIONS"
