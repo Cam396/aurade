@@ -2,7 +2,7 @@
 
 pkgname=aurade-boot
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="The AuraDE boot screen, and the disk unlock in it, for plymouth"
 arch=('any')
 url="https://github.com/Cam396/aurade"
@@ -15,6 +15,7 @@ depends=(
   'plymouth'
   'aurade-wallpapers'
   'adwaita-fonts'
+  'mkinitcpio'
 )
 # Basenames, because makepkg resolves every local source to its basename and
 # refuses a path. The repository keeps the real tree; the top level entries
@@ -26,6 +27,9 @@ source=(
   'aurade-boot-drawn.tar'
   'aurade-boot.initcpio'
   'README.md'
+  'aurade-boot-upgrade'
+  '80-aurade-boot-upgrade.hook'
+  'upgrade-test.sh'
   'LICENSE'
 )
 noextract=('aurade-boot-drawn.tar')
@@ -35,7 +39,14 @@ sha256sums=('323907da924b51d5be63fcb5d733d41d972837baa29048ed40b9e423be9ed555'
             '8f0d256971b8be36f1a7c5b2709b9609c79827a7730fb5a56abe7a2105531b81'
             '86f65742a4e636ddc82a0502118a854af5b2e8bffb3bc4683007417bbd02a3c2'
             '8377cb597be3f5f8211c084042316faf1bcdf91216078c85211ca7a06c50500f'
+            '03967edb1b63cafbbe6776f3221a6401510c55509cbc59cc800b6a3d6e52b93a'
+            'de92241c4fe6050029cb2fcf70aea52c59ba3d883d589b0526f60e5e59eefeba'
+            '0b41eac2b62aa50dcb8dd8c8e20fae9d4f755325b5c688942b6232476e490078'
             '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f')
+
+check() {
+  bash "${srcdir}/upgrade-test.sh" "${srcdir}/aurade-boot-upgrade"
+}
 
 package() {
   local theme="${pkgdir}/usr/share/plymouth/themes/aurade-boot"
@@ -59,6 +70,11 @@ package() {
 
   install -Dm644 "${srcdir}/aurade-boot.initcpio" \
     "${pkgdir}/usr/lib/initcpio/install/aurade-boot"
+  # An encrypted install from before the unlock screen gets it on upgrade.
+  install -Dm755 "${srcdir}/aurade-boot-upgrade" \
+    "${pkgdir}/usr/lib/aurade-boot/aurade-boot-upgrade"
+  install -Dm644 "${srcdir}/80-aurade-boot-upgrade.hook" \
+    "${pkgdir}/usr/share/libalpm/hooks/80-aurade-boot-upgrade.hook"
   install -Dm644 "${srcdir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
   install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

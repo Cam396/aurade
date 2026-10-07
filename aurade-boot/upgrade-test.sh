@@ -1,0 +1,1 @@
+tests/upgrade-test.sh

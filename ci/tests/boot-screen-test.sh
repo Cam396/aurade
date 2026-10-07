@@ -17,3 +17,4 @@ ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
 PYTHONDONTWRITEBYTECODE=1 python3 -I "$ROOT/aurade-boot/tools/record-sums.py" --check
 PYTHONDONTWRITEBYTECODE=1 python3 -I "$ROOT/aurade-boot/tests/assets_test.py"
 bash "$ROOT/aurade-boot/tests/hook-test.sh"
+bash "$ROOT/aurade-boot/tests/upgrade-test.sh"

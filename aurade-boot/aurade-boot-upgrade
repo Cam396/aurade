@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Turns the unlock screen on for an encrypted install made before it existed.
+#
+# A 1.2 installer puts plymouth and this package's hook in the initramfs of
+# every encrypted install, and `splash` on its boot entry. An install made by
+# 1.0 or 1.1 has neither, and asks for the passphrase on a text console. This
+# runs from 80-aurade-boot-upgrade.hook after pacman installs or updates
+# aurade-boot, and does what that installer would have done.
+#
+# It changes only an install that is exactly as the installer left it: the
+# installer's own HOOKS line, and its boot entry. Anything edited by hand is
+# left alone and told so. Before it changes a file, it builds an initramfs
+# with the new hooks to one side and looks inside it; if that fails, nothing
+# changes. It keeps a copy of each file it changes, and adds a boot entry that
+# unlocks on the text console, the way the machine booted before.
+set -Eeuo pipefail
+
+ROOT=${AURADE_BOOT_ROOT:-}
+MKINITCPIO=${AURADE_BOOT_MKINITCPIO:-mkinitcpio}
+LSINITCPIO=${AURADE_BOOT_LSINITCPIO:-lsinitcpio}
+CONF=$ROOT/etc/mkinitcpio.conf
+ENTRIES=$ROOT/boot/loader/entries
+ENTRY=$ENTRIES/aurade.conf
+TEXT_ENTRY=$ENTRIES/aurade-text-unlock.conf
+PLYMOUTH_CONF=$ROOT/etc/plymouth/plymouthd.conf
+VCONSOLE=$ROOT/etc/vconsole.conf
+KERNEL=$ROOT/boot/vmlinuz-linux
+BACKUP=.before-aurade-boot
+
+OLD_HOOKS='HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)'
+NEW_HOOKS='HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole plymouth aurade-boot block sd-encrypt filesystems fsck)'
+
+say() { printf 'aurade-boot: %s\n' "$*"; }
+
+[[ -r $CONF && -r $ENTRY ]] || exit 0
+mapfile -t hooks < <(grep -E '^HOOKS=' "$CONF" || true)
+(( ${#hooks[@]} == 1 )) || exit 0
+mapfile -t options < <(grep -E '^options[[:space:]]' "$ENTRY" || true)
+
+if [[ ${hooks[0]} != "$OLD_HOOKS" ]]; then
+  # Already on, or not encrypted: nothing to say. Encrypted and edited by
+  # hand: say why the screen did not change.
+  if [[ ${hooks[0]} == *sd-encrypt* && ${hooks[0]} != *plymouth* ]]; then
+    say 'the initramfs hooks in /etc/mkinitcpio.conf have been changed by hand, so the disk is still unlocked on the text console. To use the unlock screen, add "plymouth aurade-boot" before "block" in HOOKS and "splash" to the boot entry, then run mkinitcpio -P.'
+  fi
+  exit 0
+fi
+if (( ${#options[@]} != 1 )) || [[ ${options[0]} != *rd.luks* ]] || [[ " ${options[0]} " == *' splash '* ]]; then
+  say "the boot entry $ENTRY is not the one the installer wrote, so the disk is still unlocked on the text console."
+  exit 0
+fi
+[[ -e $KERNEL ]] || { say "no kernel at $KERNEL, so the unlock screen was not turned on."; exit 0; }
+
+# A keyboard layout with no XKB name is read through the console, as the
+# installer arranges it for a new install.
+extra=''
+legacy=()
+keymap=$(sed -n 's/^KEYMAP=//p' "$VCONSOLE" 2>/dev/null | tr -d '"' | head -n1 || true)
+if [[ -n $keymap && $keymap != us ]] && ! grep -q '^XKBLAYOUT=' "$VCONSOLE" 2>/dev/null; then
+  extra=' plymouth.use-legacy-input'
+  legacy=(env AURADE_BOOT_LEGACY_INPUT=1)
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# The new initramfs, built to one side and looked at, before anything changes.
+sed "s|^HOOKS=.*|${NEW_HOOKS}|" "$CONF" >"$work/mkinitcpio.conf"
+if ! "${legacy[@]}" "$MKINITCPIO" -c "$work/mkinitcpio.conf" -k "$KERNEL" -g "$work/test.img" >"$work/build.log" 2>&1; then
+  say 'a trial initramfs with the unlock screen could not be built, so nothing was changed. What mkinitcpio said:'
+  tail -n 15 "$work/build.log" >&2
+  exit 0
+fi
+"$LSINITCPIO" "$work/test.img" >"$work/contents" 2>/dev/null || true
+for need in usr/share/plymouth/themes/aurade-boot/aurade-boot.script usr/bin/plymouthd usr/lib/systemd/systemd-cryptsetup; do
+  if ! grep -qxF "$need" "$work/contents"; then
+    say "the trial initramfs has no $need, so nothing was changed."
+    exit 0
+  fi
+done
+
+restore() {
+  local file
+  for file in "$CONF" "$ENTRY" "$PLYMOUTH_CONF"; do
+    if [[ -e $file$BACKUP ]]; then
+      cp -p -- "$file$BACKUP" "$file"
+    elif [[ $file == "$PLYMOUTH_CONF" ]]; then
+      rm -f -- "$file"
+    fi
+  done
+  rm -f -- "$TEXT_ENTRY"
+}
+
+for file in "$CONF" "$ENTRY" "$PLYMOUTH_CONF"; do
+  [[ ! -e $file || -e $file$BACKUP ]] || cp -p -- "$file" "$file$BACKUP"
+done
+
+# The way back: this entry boots the same initramfs with plymouth turned off,
+# so the passphrase is asked on the console exactly as before.
+sed -e 's/^title .*/title AuraDE, text disk unlock/' \
+    -e '/^options[[:space:]]/ s/$/ plymouth.enable=0/' "$ENTRY" >"$TEXT_ENTRY"
+sed -i "s|^HOOKS=.*|${NEW_HOOKS}|" "$CONF"
+sed -i "/^options[[:space:]]/ s/\$/ splash${extra}/" "$ENTRY"
+install -d -m 0755 "${PLYMOUTH_CONF%/*}"
+printf '[Daemon]\nTheme=aurade-boot\nDeviceScale=1\n' >"$PLYMOUTH_CONF"
+
+if ! "${legacy[@]}" "$MKINITCPIO" -P >"$work/real.log" 2>&1; then
+  say 'building the initramfs with the unlock screen failed, so the earlier setup was put back. What mkinitcpio said:'
+  tail -n 15 "$work/real.log" >&2
+  restore
+  "$MKINITCPIO" -P >/dev/null 2>&1 || say 'rebuilding the earlier initramfs failed too. Run mkinitcpio -P before restarting.'
+  exit 0
+fi
+say 'the disk is now unlocked on the AuraDE unlock screen. The boot menu also has "AuraDE, text disk unlock", which asks on the text console as before.'
