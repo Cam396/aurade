@@ -1,0 +1,8 @@
+#!/bin/sh
+# NetworkManager runs this after every connection change. Once Wi-Fi is up,
+# the Wi-Fi country is checked against the time zone again, so a time zone
+# changed since the card appeared reaches Wi-Fi by the next connection.
+# The script changes nothing when the country is already right.
+[ "$2" = up ] || exit 0
+[ -d "/sys/class/net/$1/wireless" ] || exit 0
+exec /usr/lib/aurade/aurade-wifi-country

@@ -1,0 +1,2 @@
+# A Wi-Fi card appearing sets the Wi-Fi country, see aurade-wifi-country.
+ACTION=="add", SUBSYSTEM=="ieee80211", TAG+="systemd", ENV{SYSTEMD_WANTS}+="aurade-wifi-country.service"
