@@ -121,7 +121,12 @@ fi
 sed -e 's/^title .*/title AuraDE, text disk unlock/' \
     -e '/^options[[:space:]]/ s/$/ plymouth.enable=0/' "$ENTRY" >"$TEXT_ENTRY"
 sed -i "s|^HOOKS=.*|${NEW_HOOKS}|" "$CONF"
-sed -i "/^options[[:space:]]/ s/\$/ splash${extra}/" "$ENTRY"
+# As a new install has it: ask again after a wrong passphrase for as long as
+# it takes. systemd stops at three and drops to an emergency shell behind the
+# unlock screen, with the disk still locked.
+luks_tries=' rd.luks.options=tries=0'
+[[ ${options[0]} != *rd.luks.options=* ]] || luks_tries=
+sed -i "/^options[[:space:]]/ s/\$/ splash${extra}${luks_tries}/" "$ENTRY"
 
 if ! "${legacy[@]}" "$MKINITCPIO" -P >"$work/real.log" 2>&1; then
   say 'building the initramfs with the unlock screen failed, so the earlier setup was put back. What mkinitcpio said:'

@@ -72,7 +72,7 @@ untouched() {
 machine "$OLD" "$OPTIONS"
 upgrade
 hooks_are "$NEW" 'old encrypted install'
-options_are "$OPTIONS splash" 'old encrypted install'
+options_are "$OPTIONS splash rd.luks.options=tries=0" 'old encrypted install'
 T=$R/boot/loader/entries/aurade-text-unlock.conf
 grep -qx 'title AuraDE, text disk unlock' "$T" || fail 'the text unlock entry has the wrong title'
 grep -qx "$OPTIONS plymouth.enable=0" "$T" || fail 'the text unlock entry does not turn plymouth off'
@@ -91,11 +91,16 @@ cmp -s "$TMP/entry-once" "$R/boot/loader/entries/aurade.conf" || fail 'a second 
 # A German keyboard with no XKB layout reads keys through the console.
 machine "$OLD" "$OPTIONS" 'KEYMAP=de-latin1'
 upgrade
-options_are "$OPTIONS splash plymouth.use-legacy-input" 'German console keymap'
+options_are "$OPTIONS splash plymouth.use-legacy-input rd.luks.options=tries=0" 'German console keymap'
 grep -q -- '^-P legacy=1' "$TMP/log" || fail 'the German rebuild did not name the layout'
 machine "$OLD" "$OPTIONS" $'KEYMAP=de-latin1\nXKBLAYOUT=de'
 upgrade
-options_are "$OPTIONS splash" 'German keymap with an XKB layout'
+options_are "$OPTIONS splash rd.luks.options=tries=0" 'German keymap with an XKB layout'
+
+# Unlock options of its own are kept, not given a second set.
+machine "$OLD" "$OPTIONS rd.luks.options=discard"
+upgrade
+options_are "$OPTIONS rd.luks.options=discard splash" 'own unlock options'
 
 # Not encrypted, edited by hand, or an unknown boot entry: left alone.
 machine "$PLAIN" 'options root=UUID=1234 rw quiet'
