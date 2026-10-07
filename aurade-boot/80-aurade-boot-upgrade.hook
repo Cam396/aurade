@@ -1,0 +1,13 @@
+# An encrypted install made before the unlock screen existed gets it when
+# aurade-boot arrives, see /usr/lib/aurade-boot/aurade-boot-upgrade. Named to
+# run before mkinitcpio's own hook, which then has nothing left to change.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = aurade-boot
+
+[Action]
+Description = Checking the AuraDE unlock screen for an encrypted install...
+When = PostTransaction
+Exec = /usr/lib/aurade-boot/aurade-boot-upgrade

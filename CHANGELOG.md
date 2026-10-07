@@ -8,6 +8,9 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - Encrypted installs ask for the disk passphrase on a graphical unlock
   screen, in the keyboard layout chosen in the installer. It stays sharp on a
   4K screen, even one connected after installing.
+  Encrypted installs made with 1.0 or 1.1 switch to it when they update,
+  and their boot menu keeps an entry that asks on the text console as
+  before. An install whose boot setup was changed by hand is left as it is.
 - Linux applications fit in:
   - KDE, GTK and Qt apps take the desktop's light or dark mode, accent colour,
     fonts and icons, and follow them when they change.
