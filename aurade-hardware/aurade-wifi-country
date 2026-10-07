@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Tells Wi-Fi which country it is in, taken from the system time zone.
+#
+# Until it is told, Linux uses the worldwide profile: the lowest transmit
+# power and the fewest channels any country allows, so that it is legal
+# everywhere. Named, the country lifts that to its own limits. The drivers
+# already transmit at the highest power the country allows, so naming the
+# country is the whole of the tuning.
+#
+# A zone that is no one country's, like UTC, leaves the worldwide profile.
+# Cards that keep their own regulatory settings, as Intel's do, ignore this.
+# It runs when a Wi-Fi card appears, see 90-aurade-wifi-country.rules, and
+# after each Wi-Fi connection, see 90-aurade-wifi-country.dispatcher, which
+# is how a changed time zone arrives. A path unit on /etc/localtime cannot
+# do that: timedatectl renames a new link into place, and systemd watches
+# the zone file the old link pointed to.
+set -Eeuo pipefail
+
+ROOT=${AURADE_WIFI_ROOT:-}
+IW=${AURADE_WIFI_IW:-iw}
+ZONEINFO=$ROOT/usr/share/zoneinfo
+
+target=$(readlink -- "$ROOT/etc/localtime" 2>/dev/null) || exit 0
+[[ $target == */zoneinfo/* ]] || exit 0
+zone=${target##*/zoneinfo/}
+zone=${zone#posix/}
+zone=${zone#right/}
+
+country_of() {
+  awk -F'\t' -v z="$1" '$3 == z { print $1; exit }' \
+    "$ZONEINFO/zone.tab" 2>/dev/null || true
+}
+
+country=$(country_of "$zone")
+if [[ -z $country ]]; then
+  # An old name, like US/Central, is a link to a current one.
+  canonical=$(awk -v z="$zone" '$1 == "L" && $3 == z { print $2; exit }' \
+    "$ZONEINFO/tzdata.zi" 2>/dev/null || true)
+  [[ -z $canonical ]] || country=$(country_of "$canonical")
+fi
+[[ $country =~ ^[A-Z]{2}$ ]] || exit 0
+
+# Already set: a second request would make some drivers rescan.
+current=$("$IW" reg get 2>/dev/null | awk '$1 == "country" { sub(":", "", $2); print $2; exit }' || true)
+[[ $current != "$country" ]] || exit 0
+
+if "$IW" reg set "$country" 2>/dev/null; then
+  echo "Wi-Fi country set to $country, from the time zone $zone"
+else
+  echo "Wi-Fi country $country could not be set, so Wi-Fi keeps the worldwide profile"
+fi
