@@ -123,7 +123,6 @@ arch-chroot "${ARCHROOT}" /usr/bin/runuser -u aurabuild -- \
         ozone_platform_wayland = true
         use_system_minigbm = true
         enable_rust = true
-        use_chromium_rust_toolchain = true
         use_official_google_api_keys = false
       "
     fi
