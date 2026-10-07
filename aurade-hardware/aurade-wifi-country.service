@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Fi country from the time zone
+Documentation=https://wireless.docs.kernel.org/en/latest/en/developers/regulatory.html
+# The country decides how strong a signal the card may send and on which
+# channels. A Wi-Fi card appearing starts it, see the udev rule beside it.
+ConditionPathExists=/etc/localtime
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/aurade/aurade-wifi-country

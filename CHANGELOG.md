@@ -33,6 +33,14 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
     Before, nobody could type the passphrase on them.
   - Intel Macs get fan control. Without it their fans stayed at their
     slowest while the machine heated up.
+  - On every machine, Wi-Fi power saving is off. On a Surface it made Wi-Fi
+    crawl or stall, enough to stop the installer while it checked the
+    package list, and on most cards it slows every answer.
+  - Wi-Fi uses the limits of the country you are in, taken from the time
+    zone, instead of the worldwide ones every computer starts with. Those
+    are the strictest of any country, so on many cards the 5 GHz band gets
+    more channels to use and, on some of them, a stronger signal. It follows
+    the time zone when you change it.
 - Broadcom Wi-Fi that only works with Broadcom's own driver, as in most Intel
   Macs, gets that driver, built for the installed kernel. Other Broadcom chips
   keep the open one.
