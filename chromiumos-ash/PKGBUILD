@@ -11,7 +11,7 @@ pkgname=chromiumos-ash
 # Version mirrors the upstream ChromeOS milestone + build revision.
 # Run the update-patches script to refresh before bumping.
 pkgver=157.0.8090.0
-pkgrel=1
+pkgrel=2
 pkgdesc="ChromeOS Ash desktop environment for Linux (Ozone X11/Wayland/DRM build)"
 arch=('x86_64')
 url="https://www.chromium.org/chromium-os/"
@@ -152,7 +152,7 @@ source=(
     'LICENSE'
 )
 noextract=()
-sha256sums=('246693d41ced0aac68f1a07459566b409dc18bbfb78907962c25434a2a50c74c'
+sha256sums=('cf7077cf7cea85ed834e62c2014c01ff037be8eddc4fc1971b370ba64ad0a20d'
             '6f3499ccdd983bf4ec84e21cfb2519d1ec0ab7114c73ea4b686b50c66f898c53'
             '3e6f4dbeaf2591d26a23e2554ab5370438550d39d159e2b1725c413e9bdbe9cc'
             'c067de2ae32f0e0b453eca3f71610ed4b9af2877a7baf93b5050eaff574711f6'

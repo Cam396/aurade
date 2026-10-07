@@ -58,6 +58,15 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The desktop and browser are built on Chromium 157 (157.0.8090.0), three
   weeks newer than the Chromium 156 snapshot before it, with the upstream
   fixes in between.
+- The desktop and browser call themselves AuraDE where they said Chromium,
+  ChromiumOS or ChromeOS, in Settings, About, menus, dialogs and
+  notifications, and your machine is "your computer" where it was "your
+  Chromebook". The AuraDE logo replaces Chromium's. Translations follow; a
+  few hundred messages whose translation wrote the name in another script
+  show in English until they are translated again. Google's own terms,
+  programs and products keep their names. The credits stay: About still
+  says AuraDE is made possible by the Chromium open source project, and the
+  copyright is the Chromium Authors'.
 - Text on standard resolution monitors is drawn with subpixels, so it is
   sharper, unless your font settings say otherwise.
 - Linux app windows have the same frame as the desktop's own.
@@ -79,6 +88,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The installer shows how much of the package download has arrived.
 
 ### Fixed
+- Settings titled the accounts page "'s accounts" for an account with no
+  name to show. It says "My accounts".
 - The graphical installer typed in a US layout whatever keyboard was picked.
   On an encrypted install that set a passphrase nobody could type again at
   the unlock prompt. The layout chosen is now the one used, in the installer,
