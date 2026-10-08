@@ -313,6 +313,16 @@ PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
 grep -q -- '--plan-only' "$TMP/launch.log" ||
   fail 'plan-only was dropped on the way to the graphical installer'
 
+# An answer file is something only the text installer reads, so asking for one
+# on a machine that could show the graphical installer still gets the text one,
+# with the file passed through.
+launch
+PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" --answers "$TMP/some-answers" >/dev/null 2>&1 ||
+  fail 'the launcher failed with an answer file'
+logged "tui --answers $TMP/some-answers" || fail 'the answer file did not reach the text installer'
+! logged 'cage -- ' || fail 'an answer file started the graphical installer'
+
 # --- the boot menu choice reaches a front end --------------------------------
 #
 # Four boot entries, one per front end, and a kernel command line is the only
@@ -337,6 +347,8 @@ autostart() {
   printf '%s\n' "$1" >"$TMP/cmdline"
   AURADE_CMDLINE_FILE="$TMP/cmdline" AURADE_INSTALLER_START="$TMP/bin/start-recorder" \
     AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
+    AURADE_ANSWERS_DEVICE="${ANSWERS_DEVICE:-$TMP/no-answers-disk}" \
+    AURADE_ANSWERS_FILE="$TMP/answers-copy" \
     "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
 }
 
@@ -346,6 +358,8 @@ autostart_again() {
   launch
   AURADE_CMDLINE_FILE="$TMP/cmdline" AURADE_INSTALLER_START="$TMP/bin/start-recorder" \
     AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
+    AURADE_ANSWERS_DEVICE="${ANSWERS_DEVICE:-$TMP/no-answers-disk}" \
+    AURADE_ANSWERS_FILE="$TMP/answers-copy" \
     "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
 }
 
@@ -489,5 +503,32 @@ grep -q 'already run on this console' "$TMP/launch.log" ||
 # The kernel takes the last occurrence of a repeated parameter; so does this.
 autostart 'aurade.installer=gui aurade.installer=text' || fail 'a repeated request failed'
 logged 'start --text' || fail 'a repeated request did not resolve the way the kernel resolves it'
+
+# --- answers prepared by aurade-vm -------------------------------------------
+#
+# The VM tool attaches a small disk holding the answers its user gave. The
+# graphical entry turns into the text installer with them, because only the
+# text installer reads them; the copy is private; a disk with no answers on it
+# changes nothing.
+mkdir -p "$TMP/answers-disk" "$TMP/empty-disk"
+printf 'hostname=vmtest\n' >"$TMP/answers-disk/answers.txt"
+ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=gui' ||
+  fail 'the graphical entry failed with an answers disk'
+logged "start --text --answers $TMP/answers-copy" ||
+  fail 'an answers disk did not start the text installer with the answers'
+cmp -s "$TMP/answers-disk/answers.txt" "$TMP/answers-copy" ||
+  fail 'the answers were not copied off the disk'
+[[ $(stat -c %a "$TMP/answers-copy") == 600 ]] || fail 'the copied answers are readable by others'
+ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=speech' ||
+  fail 'the speech entry failed with an answers disk'
+logged 'start --text --answers' || fail 'the speech entry dropped the answers'
+rm -f "$TMP/answers-copy"
+ANSWERS_DEVICE="$TMP/empty-disk" autostart 'aurade.installer=gui' ||
+  fail 'the graphical entry failed with an empty answers disk'
+logged 'start --graphical' || fail 'an answers disk with no answers changed the front end'
+! logged '--answers' || fail 'an empty answers disk passed answers'
+ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=none' ||
+  fail 'no installer requested, with an answers disk'
+! started || fail 'an answers disk started an installer nobody asked for'
 
 echo 'installer GUI launch test: PASS'
