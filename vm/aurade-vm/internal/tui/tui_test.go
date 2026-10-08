@@ -84,7 +84,7 @@ func TestGuidedWalkThrough(t *testing.T) {
 	}
 	// Move to the computer name and make it bad.
 	m = press(m, "down", "down", "down", "ctrl+u", "localhost", "enter")
-	if !strings.Contains(m.View(), "localhost is the one name") {
+	if !strings.Contains(m.View(), "cannot call itself localhost") {
 		t.Fatalf("a bad hostname was not explained:\n%s", m.View())
 	}
 	m = press(m, "ctrl+u", "box", "enter")

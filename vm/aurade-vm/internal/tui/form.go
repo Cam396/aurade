@@ -68,7 +68,13 @@ func (f *field) check() bool {
 	f.err = ""
 	if f.validate != nil {
 		if err := f.validate(f.value()); err != nil {
-			f.err = err.Error()
+			// The shared checks name their field ("time zone: ..."); here the
+			// label is right above, so only the reason is shown.
+			msg := err.Error()
+			if i := strings.Index(msg, ": "); i >= 0 && i < 20 {
+				msg = msg[i+2:]
+			}
+			f.err = msg
 			return false
 		}
 	}

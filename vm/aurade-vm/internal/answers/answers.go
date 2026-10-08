@@ -39,10 +39,10 @@ var (
 // ValidHostname follows the installer's rule: RFC 1123 label, not localhost.
 func ValidHostname(s string) error {
 	if s == "" || len(s) > 63 || !hostnameRe.MatchString(s) {
-		return fmt.Errorf("use 1-63 letters, digits or inner hyphens, for example aurade-vm")
+		return fmt.Errorf("Use 1-63 letters, digits or inner hyphens, for example aurade-vm")
 	}
 	if strings.EqualFold(s, "localhost") {
-		return fmt.Errorf("localhost is the one name a computer cannot use for itself")
+		return fmt.Errorf("A computer cannot call itself localhost; that name always means this computer")
 	}
 	return nil
 }
@@ -51,12 +51,12 @@ func ValidHostname(s string) error {
 // system already owns.
 func ValidUsername(s string) error {
 	if !usernameRe.MatchString(s) {
-		return fmt.Errorf("start with a lowercase letter, then lowercase letters, digits, _ or -")
+		return fmt.Errorf("Start with a lowercase letter, then lowercase letters, digits, _ or -")
 	}
 	switch {
 	case s == "root", s == "bin", s == "daemon", s == "mail", s == "ftp", s == "http",
 		s == "nobody", s == "dbus", s == "polkitd", s == "greeter", strings.HasPrefix(s, "systemd-"):
-		return fmt.Errorf("%s is already taken by the system", s)
+		return fmt.Errorf("The system already uses %s", s)
 	}
 	return nil
 }
