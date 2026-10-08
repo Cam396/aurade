@@ -28,6 +28,9 @@ type Detection struct {
 	Why       string // when not available: what to install or change, in a sentence
 }
 
+// AnswersFile is the answers disk's name inside a VM's folder.
+const AnswersFile = "aurade-answers.iso"
+
 // Backend is one hypervisor.
 type Backend interface {
 	ID() string   // vmware, qemu, ...
@@ -38,6 +41,8 @@ type Backend interface {
 	GuestDisk() string
 	// Exists reports whether a VM made from spec is already there.
 	Exists(spec Spec) bool
+	// Running reports whether that VM is powered on.
+	Running(ctx context.Context, spec Spec) bool
 	// Create makes the VM and its disk. It refuses to overwrite one.
 	Create(ctx context.Context, spec Spec, log func(string)) error
 	// Start powers the VM on, with its window shown.

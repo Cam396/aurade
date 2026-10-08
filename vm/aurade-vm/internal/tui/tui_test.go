@@ -22,6 +22,7 @@ func (s stubHV) Detect(context.Context) hv.Detection {
 	return hv.Detection{Why: "Stub is not installed."}
 }
 func (s stubHV) GuestDisk() string                                   { return "/dev/vda" }
+func (s stubHV) Running(context.Context, hv.Spec) bool               { return false }
 func (s stubHV) Exists(hv.Spec) bool                                 { return false }
 func (s stubHV) Create(context.Context, hv.Spec, func(string)) error { return nil }
 func (s stubHV) Start(context.Context, hv.Spec) error                { return nil }

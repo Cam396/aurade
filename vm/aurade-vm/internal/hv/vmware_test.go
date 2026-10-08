@@ -16,7 +16,7 @@ func TestVMXHasWhatAuraDENeeds(t *testing.T) {
 	}
 	for _, want := range []string{
 		`firmware = "efi"`, `nvme0:0.fileName = "aurade.vmdk"`, `memsize = "6144"`, `numvcpus = "4"`,
-		`mks.enable3d = "TRUE"`, `sata0:0.fileName = "C:\\AuraDE\\aurade.iso"`, `sata0:1.fileName = "answers.iso"`,
+		`mks.enable3d = "TRUE"`, `sata0:0.fileName = "C:\AuraDE\aurade.iso"`, `sata0:1.fileName = "answers.iso"`,
 		`uefi.secureBoot.enabled = "FALSE"`,
 	} {
 		if !strings.Contains(vmx, want+"\n") {
@@ -81,5 +81,44 @@ func TestProductVersion(t *testing.T) {
 	}
 	if _, ok := productVersion("nothing"); ok {
 		t.Error("parsed a version out of nothing")
+	}
+}
+
+func TestListed(t *testing.T) {
+	list := "Total running VMs: 2\r\nD:\\VMs\\aurade\\aurade.vmx\r\n/home/a/AuraDE/x/x.vmx\n"
+	if !listed(list, `d:\vms\aurade\aurade.vmx`) || !listed(list, "/home/a/AuraDE/x/x.vmx") {
+		t.Fatal("a running VM was not found")
+	}
+	if listed(list, "/home/a/AuraDE/X/X.vmx") || listed(list, `D:\VMs\other\other.vmx`) {
+		t.Fatal("a VM that is not running was found")
+	}
+}
+
+// What VMware leaves behind on Windows: CRLF, literal backslashes.
+func TestFinishReadsAFileVMwareRewrote(t *testing.T) {
+	dir := t.TempDir()
+	spec := Spec{Name: "aurade", Dir: dir}
+	answers := filepath.Join(dir, AnswersFile)
+	os.WriteFile(answers, []byte("x"), 0o600)
+	v := &VMware{goos: "windows"}
+	vmx := ".encoding = \"UTF-8\"\r\nsata0:1.present = \"TRUE\"\r\nsata0:1.fileName = \"" + answers + "\"\r\nnvme0:0.present = \"TRUE\"\r\n"
+	os.WriteFile(v.vmx(spec), []byte(vmx), 0o644)
+	if err := v.Finish(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(v.vmx(spec))
+	if strings.Contains(string(b), "sata0:1") || !strings.Contains(string(b), "nvme0:0.present") {
+		t.Fatalf("finish left:\n%s", b)
+	}
+	if _, err := os.Stat(answers); !os.IsNotExist(err) {
+		t.Fatal("the answers disk was not deleted")
+	}
+}
+
+func TestVMXEscaping(t *testing.T) {
+	in := `D:\Virtual Machines\a|b "q" #1\x.iso`
+	line := "k = \"" + vmxEscape(in) + "\""
+	if strings.Contains(line, `\\`) || vmxValue(line) != in {
+		t.Fatalf("%s -> %q", line, vmxValue(line))
 	}
 }
