@@ -24,6 +24,12 @@ START=${AURADE_INSTALLER_START:-/usr/local/sbin/aurade-installer-start}
 # protects against a manual second invocation on the same live session. The
 # stamp lives on a tmpfs, so a restart of the machine is a clean slate.
 STAMP=${AURADE_AUTOSTART_STAMP:-/run/aurade-installer-autostarted}
+# A small read-only disk that aurade-vm attaches next to the ISO, holding the
+# answers its user already gave. The label is the whole contract. Tests point
+# the device at a plain directory, which is read without mounting.
+ANSWERS_DEVICE=${AURADE_ANSWERS_DEVICE:-/dev/disk/by-label/AURADE_ANS}
+ANSWERS_MOUNT=${AURADE_ANSWERS_MOUNT:-/run/aurade-answers}
+ANSWERS_FILE=${AURADE_ANSWERS_FILE:-/run/aurade-answers.txt}
 
 # The last occurrence wins, the way the kernel treats a repeated parameter.
 aurade_requested_front_end() {
@@ -80,8 +86,32 @@ quit_boot_screen() {
   plymouth --wait >/dev/null 2>&1 || true
 }
 
+# Copy the answers off the disk and let go of it.
+#
+# A copy, so that nothing the installer does later can be holding the disk,
+# and so that the file the installer reads is private to root on a tmpfs. The
+# file is still read exactly as a typed answer would be: the text installer
+# validates every line and drops anything that does not pass, refuses secrets,
+# and never skips the screen that confirms which disk is erased.
+fetch_answers() {
+  local src=$ANSWERS_DEVICE mounted=0 status=1
+  [[ -e $ANSWERS_DEVICE ]] || return 1
+  if [[ ! -d $ANSWERS_DEVICE ]]; then
+    install -d -m 700 -- "$ANSWERS_MOUNT" 2>/dev/null || return 1
+    mount -o ro -- "$ANSWERS_DEVICE" "$ANSWERS_MOUNT" >/dev/null 2>&1 || return 1
+    src=$ANSWERS_MOUNT
+    mounted=1
+  fi
+  if [[ -f $src/answers.txt ]]; then
+    install -m 600 -- "$src/answers.txt" "$ANSWERS_FILE" 2>/dev/null && status=0
+  fi
+  (( ! mounted )) || umount -- "$ANSWERS_MOUNT" >/dev/null 2>&1 || true
+  return $status
+}
+
 main() {
   local choice status=0
+  local -a answers=()
   choice=$(aurade_requested_front_end)
   case $choice in
     none) return 0 ;;
@@ -127,17 +157,26 @@ main() {
   fi
   : >"$STAMP" 2>/dev/null || true
 
+  # Answers prepared ahead of time are only read by the text installer, so a
+  # graphical entry becomes a text one when they are there. Somebody who filled
+  # the questions in before the machine booted wants to see them filled in.
+  if fetch_answers; then
+    answers=(--answers "$ANSWERS_FILE")
+    printf 'Found answers prepared for this install. Starting the text installer with them filled in.\n' >&2
+    case $choice in gui|safe) choice=text ;; esac
+  fi
+
   # The system service owns tty1 while this runs. The recovery-console entry
   # gets the ordinary login shell only after the selected installer exits.
   case $choice in
     gui)    "$START" --graphical || status=$? ;;
     safe)   "$START" --graphical --safe-graphics || status=$? ;;
-    text)   "$START" --text || status=$? ;;
+    text)   "$START" --text ${answers[@]+"${answers[@]}"} || status=$? ;;
     # A serial line cannot show a graphical installer and there is no point
     # probing for one. Everything else about it is ordinary: the text
     # installer measures the terminal at the far end and centres itself in
     # whatever it finds.
-    serial) "$START" --text || status=$? ;;
+    serial) "$START" --text ${answers[@]+"${answers[@]}"} || status=$? ;;
     speech)
       start_speech
       # The boot menu made this choice, so the installer records it as one.
@@ -146,7 +185,7 @@ main() {
       # wrong: the reader was started by this script and never became an
       # answer that travelled to the engine.
       AURADE_TUI_PLAIN=1 AURADE_ACCESS_SCREEN_READER=yes \
-        "$START" --text || status=$? ;;
+        "$START" --text ${answers[@]+"${answers[@]}"} || status=$? ;;
   esac
 
   printf '\nThe installer closed.\n' >&2

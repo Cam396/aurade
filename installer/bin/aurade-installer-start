@@ -49,6 +49,7 @@ Options:
   --graphical        Try the graphical installer even if the probe advises text
   --safe-graphics    Graphical, with every acceleration path skipped
   --plan-only        Ask the questions and check the plan; never offer to erase
+  --answers FILE     Start the text installer with the answers in FILE filled in
   -h, --help         This message
 
 Environment:
@@ -120,6 +121,12 @@ while (($#)); do
     --safe-graphics)
       MODE=graphical; GUI_EXTRA+=(--force); export AURADE_SAFE_GRAPHICS=1; shift ;;
     --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
+    # Only the text installer reads an answer file, so asking for one asks for
+    # it. The graphical installer would open with every question blank, which
+    # is the opposite of what whoever wrote the file wanted.
+    --answers)
+      [[ -n ${2:-} ]] || { echo 'aurade-installer-start: --answers needs a file' >&2; exit 2; }
+      MODE=text; PASSTHROUGH+=(--answers "$2"); shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
