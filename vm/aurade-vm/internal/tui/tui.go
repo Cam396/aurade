@@ -199,7 +199,7 @@ func machineForm(h host.Info, name string) form {
 	f := form{fields: []*field{
 		newText("name", "VM name", "Shown in the hypervisor, and the name of its folder.", name, func(s string) error {
 			if s == "" || strings.ContainsAny(s, `/\:*?"<>|`) {
-				return fmt.Errorf("use letters, digits, spaces, - or _")
+				return fmt.Errorf("Use letters, digits, spaces, - or _")
 			}
 			return nil
 		}),
@@ -467,6 +467,18 @@ func (m Model) View() string {
 
 func keys(s string) string { return "\n" + keysStyle.Render(s) }
 
+// wrap fits text to the terminal, indented under the line it explains.
+func (m Model) wrap(st lipgloss.Style, indent int, s string) string {
+	w := m.width - 4 - indent
+	if m.width == 0 || w > 96 {
+		w = 96
+	}
+	if w < 30 {
+		w = 30
+	}
+	return lipgloss.NewStyle().MarginLeft(indent).Render(st.Width(w).Render(s))
+}
+
 func (m Model) viewWelcome() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Welcome") + "\n")
@@ -509,7 +521,7 @@ func (m Model) viewHypervisor() string {
 			b.WriteString(cursor + name + "  " + goodStyle.Render("ready") + dimStyle.Render("  "+d.det.Version) + "\n")
 		} else {
 			b.WriteString(cursor + dimStyle.Render(d.backend.Name()) + "  " + warnStyle.Render("not available") + "\n")
-			b.WriteString("    " + helpStyle.Render(d.det.Why) + "\n")
+			b.WriteString(m.wrap(helpStyle, 4, d.det.Why) + "\n")
 		}
 	}
 	if len(m.available()) == 0 {
@@ -532,7 +544,7 @@ func (m Model) viewMode() string {
 			title = dimStyle.Render(md.title + " (coming soon)")
 		}
 		b.WriteString(cursor + title + "\n")
-		b.WriteString("    " + helpStyle.Render(md.desc) + "\n\n")
+		b.WriteString(m.wrap(helpStyle, 4, md.desc) + "\n\n")
 	}
 	return b.String() + keys("↑/↓ choose · enter continue · esc back")
 }
@@ -540,7 +552,7 @@ func (m Model) viewMode() string {
 func (m Model) viewForm(title, sub string, f *form) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(title) + "\n")
-	b.WriteString(subtitleStyle.Render(sub) + "\n\n")
+	b.WriteString(m.wrap(subtitleStyle, 0, sub) + "\n\n")
 	for i, fl := range f.fields {
 		label := labelStyle.Render(fl.label)
 		if i == f.focus {
@@ -558,9 +570,9 @@ func (m Model) viewForm(title, sub string, f *form) string {
 		}
 		b.WriteString(fmt.Sprintf("%-28s %s\n", label, val))
 		if fl.err != "" {
-			b.WriteString("    " + errStyle.Render(fl.err) + "\n")
+			b.WriteString(m.wrap(errStyle, 4, fl.err) + "\n")
 		} else if i == f.focus {
-			b.WriteString("    " + helpStyle.Render(fl.help) + "\n")
+			b.WriteString(m.wrap(helpStyle, 4, fl.help) + "\n")
 		}
 	}
 	return b.String() + keys("↑/↓ move · ←/→ change a choice · enter next · esc back")
