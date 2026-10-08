@@ -1,0 +1,68 @@
+package host
+
+// WindowsZoneToIANA maps the Windows time zone names people are most likely to
+// have to the zone the installer understands, following the CLDR table's
+// primary mapping for each. A name not listed gives "", and the question then
+// starts at UTC, which is obviously a placeholder rather than a wrong guess.
+func WindowsZoneToIANA(name string) string {
+	return windowsZones[name]
+}
+
+var windowsZones = map[string]string{
+	"UTC":                             "UTC",
+	"Dateline Standard Time":          "Etc/GMT+12",
+	"Hawaiian Standard Time":          "Pacific/Honolulu",
+	"Alaskan Standard Time":           "America/Anchorage",
+	"Pacific Standard Time":           "America/Los_Angeles",
+	"US Mountain Standard Time":       "America/Phoenix",
+	"Mountain Standard Time":          "America/Denver",
+	"Central Standard Time":           "America/Chicago",
+	"Canada Central Standard Time":    "America/Regina",
+	"Central America Standard Time":   "America/Guatemala",
+	"Central Standard Time (Mexico)":  "America/Mexico_City",
+	"Eastern Standard Time":           "America/New_York",
+	"US Eastern Standard Time":        "America/Indiana/Indianapolis",
+	"SA Pacific Standard Time":        "America/Bogota",
+	"Atlantic Standard Time":          "America/Halifax",
+	"Venezuela Standard Time":         "America/Caracas",
+	"Newfoundland Standard Time":      "America/St_Johns",
+	"E. South America Standard Time":  "America/Sao_Paulo",
+	"Argentina Standard Time":         "America/Argentina/Buenos_Aires",
+	"Pacific SA Standard Time":        "America/Santiago",
+	"GMT Standard Time":               "Europe/London",
+	"Greenwich Standard Time":         "Atlantic/Reykjavik",
+	"W. Europe Standard Time":         "Europe/Berlin",
+	"Central Europe Standard Time":    "Europe/Budapest",
+	"Romance Standard Time":           "Europe/Paris",
+	"Central European Standard Time":  "Europe/Warsaw",
+	"W. Central Africa Standard Time": "Africa/Lagos",
+	"GTB Standard Time":               "Europe/Bucharest",
+	"FLE Standard Time":               "Europe/Kiev",
+	"E. Europe Standard Time":         "Europe/Chisinau",
+	"Israel Standard Time":            "Asia/Jerusalem",
+	"Egypt Standard Time":             "Africa/Cairo",
+	"South Africa Standard Time":      "Africa/Johannesburg",
+	"Turkey Standard Time":            "Europe/Istanbul",
+	"Russian Standard Time":           "Europe/Moscow",
+	"Arab Standard Time":              "Asia/Riyadh",
+	"E. Africa Standard Time":         "Africa/Nairobi",
+	"Iran Standard Time":              "Asia/Tehran",
+	"Arabian Standard Time":           "Asia/Dubai",
+	"Pakistan Standard Time":          "Asia/Karachi",
+	"India Standard Time":             "Asia/Kolkata",
+	"Nepal Standard Time":             "Asia/Kathmandu",
+	"Bangladesh Standard Time":        "Asia/Dhaka",
+	"SE Asia Standard Time":           "Asia/Bangkok",
+	"China Standard Time":             "Asia/Shanghai",
+	"Singapore Standard Time":         "Asia/Singapore",
+	"Taipei Standard Time":            "Asia/Taipei",
+	"W. Australia Standard Time":      "Australia/Perth",
+	"Korea Standard Time":             "Asia/Seoul",
+	"Tokyo Standard Time":             "Asia/Tokyo",
+	"Cen. Australia Standard Time":    "Australia/Adelaide",
+	"AUS Central Standard Time":       "Australia/Darwin",
+	"E. Australia Standard Time":      "Australia/Brisbane",
+	"AUS Eastern Standard Time":       "Australia/Sydney",
+	"Tasmania Standard Time":          "Australia/Hobart",
+	"New Zealand Standard Time":       "Pacific/Auckland",
+}

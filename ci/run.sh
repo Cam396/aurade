@@ -193,6 +193,7 @@ job_fixtures() {
   group 'ci/tests'; ci/tests/run.sh; endgroup
   group 'host bridge'; aurade-host-bridge/run-tests.sh; endgroup
   group 'NetworkManager adapter'; python3 -B shill-nm-adapter/test_shill_nm_adapter.py; endgroup
+  group 'aurade-vm'; vm/aurade-vm/test.sh; endgroup
   group 'launcher'
   bash chromiumos-ash/test-session-error.sh chromiumos-ash/aurade-session-error
   bash chromiumos-ash/test-local-account-flags.sh
