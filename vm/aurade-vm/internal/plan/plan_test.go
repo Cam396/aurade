@@ -13,15 +13,17 @@ import (
 
 type fakeHV struct {
 	created, started, finished int
+	running                    bool
 	spec                       hv.Spec
 }
 
-func (f *fakeHV) ID() string                           { return "fake" }
-func (f *fakeHV) Name() string                         { return "Fake" }
-func (f *fakeHV) Detect(context.Context) hv.Detection  { return hv.Detection{Available: true} }
-func (f *fakeHV) GuestDisk() string                    { return "/dev/vda" }
-func (f *fakeHV) Exists(s hv.Spec) bool                { return f.created > 0 }
-func (f *fakeHV) Start(context.Context, hv.Spec) error { f.started++; return nil }
+func (f *fakeHV) ID() string                            { return "fake" }
+func (f *fakeHV) Name() string                          { return "Fake" }
+func (f *fakeHV) Detect(context.Context) hv.Detection   { return hv.Detection{Available: true} }
+func (f *fakeHV) GuestDisk() string                     { return "/dev/vda" }
+func (f *fakeHV) Exists(s hv.Spec) bool                 { return f.created > 0 }
+func (f *fakeHV) Running(context.Context, hv.Spec) bool { return f.running }
+func (f *fakeHV) Start(context.Context, hv.Spec) error  { f.started++; return nil }
 func (f *fakeHV) Finish(context.Context, hv.Spec) error {
 	f.finished++
 	return nil
@@ -67,6 +69,14 @@ func TestGuidedWritesAnswersNamingTheGuestDisk(t *testing.T) {
 	}
 	if len(steps) == 0 {
 		t.Fatal("no steps reported")
+	}
+	// While it runs, its settings are left alone.
+	f.running = true
+	if err := p.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.finished != 1 || f.started != 3 {
+		t.Fatalf("running VM: started %d finished %d", f.started, f.finished)
 	}
 }
 

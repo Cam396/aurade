@@ -137,6 +137,33 @@ func (v *VMware) Exists(spec Spec) bool {
 	return err == nil
 }
 
+func (v *VMware) Running(ctx context.Context, spec Spec) bool {
+	vmrun := v.lookup("vmrun")
+	if vmrun == "" {
+		return false
+	}
+	out, err := run(ctx, vmrun, "-T", v.hostType(), "list")
+	if err != nil {
+		return false
+	}
+	return listed(out, v.vmx(spec))
+}
+
+// listed finds a .vmx in vmrun's list. Windows paths compare without case.
+func listed(list, vmx string) bool {
+	want := filepath.Clean(vmx)
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Total running VMs") {
+			continue
+		}
+		if line == want || strings.EqualFold(line, want) && strings.Contains(want, `\`) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *VMware) Create(ctx context.Context, spec Spec, log func(string)) error {
 	if log == nil {
 		log = func(string) {}
@@ -253,9 +280,37 @@ func VMX(spec Spec) string {
 	})
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s = %q\n", k, kv[k])
+		fmt.Fprintf(&b, "%s = \"%s\"\n", k, vmxEscape(kv[k]))
 	}
 	return b.String()
+}
+
+// .vmx values are taken literally, backslashes included, except that VMware
+// writes a few characters as | and two hex digits.
+func vmxEscape(s string) string {
+	r := strings.NewReplacer("|", "|7C", `"`, "|22", "#", "|23")
+	return r.Replace(s)
+}
+
+var vmxHexRe = regexp.MustCompile(`\|([0-9A-Fa-f]{2})`)
+
+func vmxUnescape(s string) string {
+	return vmxHexRe.ReplaceAllStringFunc(s, func(m string) string {
+		n, _ := strconv.ParseUint(m[1:], 16, 8)
+		return string(rune(n))
+	})
+}
+
+// vmxValue reads the value out of a `key = "value"` line.
+func vmxValue(line string) string {
+	_, v, ok := strings.Cut(line, "=")
+	if !ok {
+		return ""
+	}
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, `"`)
+	v = strings.TrimSuffix(v, `"`)
+	return vmxUnescape(v)
 }
 
 func (v *VMware) Start(ctx context.Context, spec Spec) error {
@@ -275,30 +330,33 @@ func (v *VMware) Finish(ctx context.Context, spec Spec) error {
 	if err != nil {
 		return err
 	}
+	// VMware rewrites the file with Windows line endings on Windows.
+	lines := strings.Split(strings.ReplaceAll(strings.TrimRight(string(b), "\r\n"), "\r\n", "\n"), "\n")
 	var kept []string
-	var answers string
-	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+	answers := []string{filepath.Join(spec.Dir, AnswersFile)}
+	for _, line := range lines {
 		if strings.HasPrefix(line, "sata0:1.") {
 			if strings.HasPrefix(line, "sata0:1.fileName") {
-				if i := strings.Index(line, `"`); i >= 0 {
-					answers = strings.Trim(line[i:], `"`)
+				if a := vmxValue(line); a != "" {
+					if !filepath.IsAbs(a) && !strings.Contains(a, `:\`) {
+						a = filepath.Join(spec.Dir, a)
+					}
+					answers = append(answers, a)
 				}
 			}
 			continue
 		}
 		kept = append(kept, line)
 	}
-	if answers == "" {
-		return nil
+	if len(kept) != len(lines) {
+		if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+			return err
+		}
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
-		return err
-	}
-	if !filepath.IsAbs(answers) {
-		answers = filepath.Join(spec.Dir, answers)
-	}
-	if err := os.Remove(answers); err != nil && !os.IsNotExist(err) {
-		return err
+	for _, a := range answers {
+		if err := os.Remove(a); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }

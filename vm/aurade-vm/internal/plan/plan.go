@@ -54,6 +54,10 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 	}
 	p.Spec.Dir = VMDir(p.BaseDir, p.Spec.Name)
 	if p.Backend.Exists(p.Spec) {
+		if p.Backend.Running(ctx, p.Spec) {
+			emit(Event{Step: "Your AuraDE VM is already running"})
+			return p.Backend.Start(ctx, p.Spec)
+		}
 		emit(Event{Step: "Starting the AuraDE VM you already have"})
 		if err := p.Backend.Finish(ctx, p.Spec); err != nil {
 			return fmt.Errorf("tidying up after the install: %w", err)
@@ -106,7 +110,7 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 	if p.Mode == Guided {
 		emit(Event{Step: "Writing your answers for the installer"})
 		p.Answers.Target = p.Backend.GuestDisk()
-		path := filepath.Join(p.Spec.Dir, "aurade-answers.iso")
+		path := filepath.Join(p.Spec.Dir, hv.AnswersFile)
 		if err := answers.WriteISO(path, p.Answers.File()); err != nil {
 			return err
 		}
