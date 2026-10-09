@@ -249,6 +249,54 @@ _q repo_url \
   flag --repo-url \
   secret no
 
+_q profile \
+  label 'Which features should the desktop have?' \
+  short 'Features' \
+  help 'Automatic picks Plus on a computer with 8 GB of memory or more, and Standard below that. Advanced Plus AI also downloads a language model that runs on this computer.' \
+  type enum \
+  default auto \
+  validator aurade_valid_feature_profile \
+  error 'Choose auto, standard, plus, advanced_plus or advanced_plus_ai.' \
+  advanced yes \
+  flag --feature-profile \
+  secret no
+
+_q display_scale \
+  label 'Display size' \
+  short 'Display size' \
+  help 'How large everything on the screen is drawn. Automatic works it out for each monitor, and Settings can change it later.' \
+  type enum \
+  default auto \
+  validator aurade_valid_display_scale \
+  error 'Choose auto, 100, 125, 150, 175 or 200.' \
+  advanced yes \
+  flag --display-scale \
+  secret no
+
+_q apps \
+  label 'Extra apps' \
+  short 'Extra apps' \
+  help 'Installed with everything else, from the same packages. Any of firefox, vscode, flatpak (with Flathub), waydroid (Android apps) and devtools (compilers and git), separated by commas, or none.' \
+  type text \
+  default none \
+  validator aurade_valid_apps \
+  error 'Use none, or names from firefox, vscode, flatpak, waydroid and devtools, separated by commas.' \
+  advanced yes \
+  flag --apps \
+  secret no
+
+_q auto_snapshots \
+  label 'Take a snapshot before every update?' \
+  short 'Update snapshots' \
+  help 'Btrfs only. A copy of the system is kept from just before each change to its packages, the last three of them, and the startup menu can go back to the newest.' \
+  type bool \
+  default no \
+  validator aurade_valid_yes_no \
+  error 'Answer yes or no.' \
+  advanced yes \
+  flag --auto-snapshots \
+  secret no
+
 # The order questions are asked in on the default path. Advanced questions are
 # not listed: they are reachable only through the advanced toggle, and they all
 # have working defaults, which is what makes them skippable.

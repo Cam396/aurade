@@ -122,6 +122,10 @@ done
 # A changed bucket is not automatically a bug. It is a thing somebody has to
 # look at, which is the entire point of writing it down.
 FIXTURE="$ROOT/installer/tests/fixtures/die-causes.tsv"
+# The diff goes in a temporary file, not the tree, which a test run as an
+# unprivileged user cannot write to.
+DIFF=$(mktemp)
+trap 'rm -f "$DIFF"' EXIT
 current=$(
   for message in "${messages[@]}"; do
     printf '%s\t%s\n' "$(classify "$message")" "$message"
@@ -132,7 +136,7 @@ current=$(
 )
 if [[ ! -r $FIXTURE ]]; then
   fail "there is no classification fixture at $FIXTURE"
-elif ! diff -u <(LC_ALL=C sort "$FIXTURE") <(printf '%s\n' "$current") >"$ROOT/.die-cause.diff" 2>&1; then
+elif ! diff -u <(LC_ALL=C sort "$FIXTURE") <(printf '%s\n' "$current") >"$DIFF" 2>&1; then
   echo 'test-die-cause: a die message changed which explanation it gives a user.' >&2
   echo 'Lines starting - are what the fixture expects, + is what the engine does now.' >&2
   echo 'If the new bucket is right, update the fixture. If it is not, the words in' >&2
@@ -141,11 +145,11 @@ elif ! diff -u <(LC_ALL=C sort "$FIXTURE") <(printf '%s\n' "$current") >"$ROOT/.
   echo '' >&2
   echo 'To regenerate the fixture once you are sure:' >&2
   echo '  installer/tests/regenerate-die-causes.sh' >&2
-  cat "$ROOT/.die-cause.diff" >&2
-  rm -f "$ROOT/.die-cause.diff"
+  cat "$DIFF" >&2
+  rm -f "$DIFF"
   failures=$(( failures + 1 ))
 else
-  rm -f "$ROOT/.die-cause.diff"
+  rm -f "$DIFF"
 fi
 
 (( failures == 0 )) || exit 1

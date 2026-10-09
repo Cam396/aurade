@@ -1,11 +1,15 @@
 capacity_error	installer staging capacity is too small for the pinned package set. Set AURADE_INSTALL_WORK_DIR to a disk with more free space.
+installer_error	--apps must be none or a list of firefox, vscode, flatpak, waydroid and devtools
 installer_error	--arch-snapshot is not a real calendar date
 installer_error	--arch-snapshot must be YYYY/MM/DD
+installer_error	--auto-snapshots must be yes or no
 installer_error	--braille must be yes or no
 installer_error	--contrast must be normal or high
 installer_error	--cursor-size must be 24, 32 or 48
+installer_error	--display-scale must be auto, 100, 125, 150, 175 or 200
 installer_error	--encrypt requires a readable --luks-passphrase-file
 installer_error	--execute requires root
+installer_error	--feature-profile must be auto, standard, plus, advanced_plus or advanced_plus_ai
 installer_error	--hardware-support must be auto or off
 installer_error	--layout must be wipe or alongside
 installer_error	--reduce-motion must be yes or no
@@ -103,6 +107,7 @@ secure_boot_error	openssl is required to generate Secure Boot keys
 secure_boot_error	this image is too old to enroll Secure Boot keys automatically
 storage_error	--filesystem must be btrfs, ext4 or xfs
 storage_error	--mountpoint must be an absolute non-root path
+storage_error	automatic snapshots need btrfs, the only filesystem here that takes them
 storage_error	post-install verification failed: a rollback entry exists on a filesystem with no factory snapshot
 storage_error	required btrfs-progs does not support filesystem mkswapfile
 target_error	--target is required

@@ -89,7 +89,8 @@ PAGES: tuple[Page, ...] = (
         name="advanced",
         title="Advanced options",
         subtitle="These already have answers that work.",
-        questions=("snapshot", "repo_url"),
+        questions=("profile", "display_scale", "apps", "auto_snapshots",
+                   "snapshot", "repo_url"),
         optional=True,
     ),
 )

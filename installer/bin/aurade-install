@@ -112,6 +112,15 @@ CURSOR_SIZE=24
 SPACING=normal
 TYPEFACE=system
 HARDWARE_SUPPORT=${AURADE_HARDWARE_SUPPORT:-auto}
+# The desktop as it should look and what it should carry on its first start.
+# Each default is again what an install did before these existed: the feature
+# set worked out from memory at every start, the scale worked out from each
+# monitor, nothing beyond the base set of programs, and no snapshot taken by
+# anything but the person at the keyboard.
+FEATURE_PROFILE=auto
+DISPLAY_SCALE=auto
+APPS=none
+AUTO_SNAPSHOTS=no
 SWAP_SIZE=auto
 LAYOUT=wipe
 SECURE_BOOT_KEY_FILE=${AURADE_SECURE_BOOT_KEY:-}
@@ -180,7 +189,17 @@ Storage and identity:
   --staging MODE               auto (default), workspace or target
   --layout MODE                wipe (default) or alongside
   --hardware-support MODE      auto (default): drivers this machine needs, such as
-                               broadcom-wl-dkms; off: stock packages only
+                               broadcom-wl-dkms, and a virtual machine's guest
+                               tools; off: stock packages only
+  --auto-snapshots yes|no      Btrfs only: a recovery snapshot before every
+                               package change (default no)
+
+The desktop:
+  --feature-profile NAME       auto (default), standard, plus, advanced_plus or
+                               advanced_plus_ai
+  --display-scale PERCENT      auto (default), 100, 125, 150, 175 or 200
+  --apps LIST                  none (default), or a comma list of firefox,
+                               vscode, flatpak, waydroid and devtools
   --secure-boot-key FILE       PEM private key for an already-enrolled Secure Boot db key
   --secure-boot-cert FILE      PEM certificate matching --secure-boot-key
   --secure-boot-enroll MODE    manual (default) or if-safe for setup-mode enrollment
@@ -1017,6 +1036,10 @@ while (($#)); do
     --spacing) SPACING=${2:?}; shift 2 ;;
     --typeface) TYPEFACE=${2:?}; shift 2 ;;
     --hardware-support) HARDWARE_SUPPORT=${2:?}; shift 2 ;;
+    --feature-profile) FEATURE_PROFILE=${2:?}; shift 2 ;;
+    --display-scale) DISPLAY_SCALE=${2:?}; shift 2 ;;
+    --apps) APPS=${2:?}; shift 2 ;;
+    --auto-snapshots) AUTO_SNAPSHOTS=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
     --secure-boot-cert) SECURE_BOOT_CERT_FILE=${2:?}; shift 2 ;;
     --secure-boot-enroll) SECURE_BOOT_ENROLL=${2:?}; shift 2 ;;
@@ -1064,6 +1087,34 @@ case $CURSOR_SIZE in 24|32|48) ;; *) die '--cursor-size must be 24, 32 or 48' ;;
 case $SPACING in normal|roomy|roomier) ;; *) die '--spacing must be normal, roomy or roomier' ;; esac
 case $TYPEFACE in system|atkinson|opendyslexic) ;; *) die '--typeface must be system, atkinson or opendyslexic' ;; esac
 case $HARDWARE_SUPPORT in auto|off) ;; *) die '--hardware-support must be auto or off' ;; esac
+case $FEATURE_PROFILE in
+  auto|standard|plus|advanced_plus|advanced_plus_ai) ;;
+  *) die '--feature-profile must be auto, standard, plus, advanced_plus or advanced_plus_ai' ;;
+esac
+case $DISPLAY_SCALE in auto|100|125|150|175|200) ;; *) die '--display-scale must be auto, 100, 125, 150, 175 or 200' ;; esac
+case $AUTO_SNAPSHOTS in yes|no) ;; *) die '--auto-snapshots must be yes or no' ;; esac
+# Each app by the name somebody would recognise, and the packages it is. A
+# closed list, so the answers file can never name a package: what it can ask
+# for is exactly what is written here, from the same pinned snapshot as
+# everything else.
+declare -A APP_PACKAGES=(
+  [firefox]='firefox'
+  [vscode]='code'
+  [flatpak]='flatpak'
+  [waydroid]='waydroid'
+  [devtools]='base-devel git'
+)
+APP_LIST=()
+if [[ $APPS != none ]]; then
+  IFS=, read -r -a _apps <<<"$APPS"
+  (( ${#_apps[@]} > 0 )) || die '--apps must be none or a list of firefox, vscode, flatpak, waydroid and devtools'
+  for _app in "${_apps[@]}"; do
+    # An empty name, from `,` or `a,,b`, is checked first: as a subscript it
+    # is not a missing app, it is a fatal error.
+    [[ -n $_app && -n ${APP_PACKAGES[$_app]:-} ]] || die '--apps must be none or a list of firefox, vscode, flatpak, waydroid and devtools'
+    [[ " ${APP_LIST[*]} " == *" $_app "* ]] || APP_LIST+=("$_app")
+  done
+fi
 
 case $SWAP in
   none|file|zram) ;;
@@ -1097,6 +1148,8 @@ esac
   die 'zram swap lives in memory, so it cannot be used for hibernation'
 [[ $FILESYSTEM != xfs || $SWAP_SIZE != hibernate ]] || \
   die 'hibernation needs a swap file with a stable physical offset, which xfs does not provide'
+[[ $AUTO_SNAPSHOTS != yes || $FILESYSTEM == btrfs ]] || \
+  die 'automatic snapshots need btrfs, the only filesystem here that takes them'
 [[ $ARCH_SNAPSHOT =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || \
   die '--arch-snapshot must be YYYY/MM/DD'
 normalized_snapshot=$(date -u -d "${ARCH_SNAPSHOT//\//-}" +%Y/%m/%d 2>/dev/null || true)
@@ -1233,13 +1286,18 @@ esac
 if [[ $HARDWARE_SUPPORT == auto ]]; then
   aurade_hw_detect
 else
-  HW_PACKAGES=() HW_NOTES=() HW_SUMMARY=generic
+  HW_PACKAGES=() HW_NOTES=() HW_SERVICES=() HW_SUMMARY=generic
 fi
 log "hardware: ${HW_SUMMARY}"
 for note in "${HW_NOTES[@]}"; do
   log "hardware: $note"
 done
 BASE_PACKAGES+=("${HW_PACKAGES[@]}")
+for _app in "${APP_LIST[@]}"; do
+  # shellcheck disable=SC2206  # the table holds plain package names
+  BASE_PACKAGES+=(${APP_PACKAGES[$_app]})
+done
+(( ${#APP_LIST[@]} == 0 )) || log "apps: ${APP_LIST[*]}"
 
 # The tools this shape needs, checked in both modes.
 #
@@ -1775,7 +1833,7 @@ if [[ -n $BADGE_CODE ]]; then
 fi
 
 write_target_file /etc/aurade-install/summary 0644 \
-  "installed=${INSTALLED_AT}\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\nfingerprint=${BADGE_CODE:-none}\n"
+  "installed=${INSTALLED_AT}\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\nfingerprint=${BADGE_CODE:-none}\nfeature_profile=$FEATURE_PROFILE\ndisplay_scale=$DISPLAY_SCALE\napps=${APPS}\nauto_snapshots=$AUTO_SNAPSHOTS\n"
 
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
       $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||
@@ -1875,6 +1933,69 @@ else
     "$MOUNTPOINT" "$USERNAME"
 fi
 write_target_file /etc/sudoers.d/10-aurade-wheel 0440 '%wheel ALL=(ALL:ALL) ALL\n'
+
+# --- the desktop as it was asked for --------------------------------------
+#
+# The feature set goes in the system file the session sources at every start,
+# which already carries the line for it. pacman keeps a changed copy of that
+# file over an update, so this choice outlives the package that shipped it.
+if [[ $FEATURE_PROFILE != auto ]]; then
+  if [[ $MODE == execute ]]; then
+    _features=$MOUNTPOINT/etc/aurade/features.conf
+    if grep -q '^AURADE_FEATURE_PROFILE=' "$_features" 2>/dev/null; then
+      sed -i "s/^AURADE_FEATURE_PROFILE=.*/AURADE_FEATURE_PROFILE=$FEATURE_PROFILE/" "$_features"
+    else
+      install -d -m 0755 "$(dirname "$_features")"
+      printf 'AURADE_FEATURE_PROFILE=%s\n' "$FEATURE_PROFILE" >>"$_features"
+    fi
+  else
+    printf ' + set AURADE_FEATURE_PROFILE=%s in %q\n' "$FEATURE_PROFILE" "$MOUNTPOINT/etc/aurade/features.conf"
+  fi
+  log "feature profile: $FEATURE_PROFILE"
+fi
+# The display size is the account's own, in the file the desktop's Settings
+# writes when it is changed there. The one `scale=` line counts for every
+# monitor that has no size of its own yet, which on a first start is all of
+# them.
+if [[ $DISPLAY_SCALE != auto ]]; then
+  _scale=$(printf '%s.%02d' "$(( DISPLAY_SCALE / 100 ))" "$(( DISPLAY_SCALE % 100 ))")
+  _scale=${_scale%0}
+  _scale=${_scale%.0}
+  write_target_file "/home/$USERNAME/.config/aurade/display.conf" 0644 \
+    "# AuraDE display settings\nscale=$_scale\n"
+  run arch-chroot "$MOUNTPOINT" chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.config"
+  log "display size: ${DISPLAY_SCALE}%"
+fi
+# Flathub, for somebody who asked for Flatpak: Flatpak with no remote is a
+# program with nothing to install. It needs the network, and the install goes
+# on without it, because the remote can be added later and an install that
+# stops over it cannot be.
+if [[ " ${APP_LIST[*]} " == *' flatpak '* ]]; then
+  if [[ $MODE == execute ]]; then
+    arch-chroot "$MOUNTPOINT" flatpak remote-add --system --if-not-exists flathub \
+      https://dl.flathub.org/repo/flathub.flatpakrepo ||
+      log 'flatpak: Flathub could not be added now. Add it later with flatpak remote-add flathub https://dl.flathub.org/repo/flathub.flatpakrepo'
+  else
+    print_command arch-chroot "$MOUNTPOINT" flatpak remote-add --system --if-not-exists flathub \
+      https://dl.flathub.org/repo/flathub.flatpakrepo
+  fi
+fi
+if [[ " ${APP_LIST[*]} " == *' waydroid '* ]]; then
+  run arch-chroot "$MOUNTPOINT" systemctl enable waydroid-container.service
+fi
+# Guest tools and anything else the machine itself asked for.
+if (( ${#HW_SERVICES[@]} > 0 )); then
+  run arch-chroot "$MOUNTPOINT" systemctl enable "${HW_SERVICES[@]}"
+fi
+# A snapshot before every package change, through the same tool and the same
+# retention as one taken by hand, with the rollback entry moved to it. Not
+# AbortOnFail: an update that cannot be snapshotted is still an update somebody
+# asked for, and the snapshot's own error says why there is none.
+if [[ $AUTO_SNAPSHOTS == yes ]]; then
+  write_target_file /etc/pacman.d/hooks/00-aurade-snapshot.hook 0644 \
+    "[Trigger]\nOperation = Install\nOperation = Upgrade\nOperation = Remove\nType = Package\nTarget = *\n\n[Action]\nDescription = Taking a recovery snapshot before the package change...\nWhen = PreTransaction\nExec = /usr/local/sbin/aurade-recovery snapshot --label before-update --set-rollback\n"
+  log 'snapshots: one before every package change, the last three kept'
+fi
 run arch-chroot "$MOUNTPOINT" passwd --lock root
 
 run arch-chroot "$MOUNTPOINT" systemctl enable \

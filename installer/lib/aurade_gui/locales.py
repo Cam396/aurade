@@ -195,6 +195,21 @@ STORAGE_NAMES: dict[str, dict[str, tuple[str, str]]] = {
         "auto": ("Automatic", "Matches memory, up to 8 GB"),
         "hibernate": ("Enough to hibernate", "As large as memory, plus headroom"),
     },
+    "profile": {
+        "auto": ("Automatic", "Plus with 8 GB of memory or more, Standard below"),
+        "standard": ("Standard", "The everyday desktop"),
+        "plus": ("Plus", "More of the desktop's features turned on"),
+        "advanced_plus": ("Advanced Plus", "Everything, without the local AI"),
+        "advanced_plus_ai": ("Advanced Plus AI", "Everything, and a model that runs here"),
+    },
+    "display_scale": {
+        "auto": ("Automatic", "Worked out for each monitor"),
+        "100": ("100%", "Actual pixels"),
+        "125": ("125%", "A little larger"),
+        "150": ("150%", "Larger"),
+        "175": ("175%", "Much larger"),
+        "200": ("200%", "Twice the size"),
+    },
 }
 
 
