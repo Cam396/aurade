@@ -61,11 +61,11 @@ type Backend interface {
 func All() []Backend {
 	switch runtime.GOOS {
 	case "windows":
-		return []Backend{NewVMware(), NewHyperV(), NewVirtualBox(), NewQEMU(), NewLibvirt(), NewParallels()}
+		return []Backend{NewVMware(), NewHyperV(), NewVirtualBox(), NewQEMU(), NewLibvirt(), NewParallels(), NewUTM()}
 	case "darwin":
-		return []Backend{NewVMware(), NewParallels(), NewQEMU(), NewVirtualBox(), NewLibvirt(), NewHyperV()}
+		return []Backend{NewVMware(), NewParallels(), NewUTM(), NewQEMU(), NewVirtualBox(), NewLibvirt(), NewHyperV()}
 	}
-	return []Backend{NewLibvirt(), NewQEMU(), NewVMware(), NewVirtualBox(), NewHyperV(), NewParallels()}
+	return []Backend{NewLibvirt(), NewQEMU(), NewVMware(), NewVirtualBox(), NewHyperV(), NewParallels(), NewUTM()}
 }
 
 // Find returns the backend with this id.

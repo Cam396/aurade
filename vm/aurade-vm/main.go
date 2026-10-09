@@ -13,10 +13,12 @@ import (
 	"strings"
 
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/answers"
+	"github.com/Cam396/aurade/vm/aurade-vm/internal/archhost"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/host"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/hv"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/plan"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/tui"
+	"github.com/Cam396/aurade/vm/aurade-vm/internal/update"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -43,27 +45,34 @@ func defaultDir() string {
 func run() error {
 	h := host.Detect()
 	var (
-		dir        = flag.String("dir", defaultDir(), "folder for the ISO and the VMs")
-		tag        = flag.String("release", os.Getenv("AURADE_VM_VERSION"), "a release tag such as v1.1.2 (default: the latest)")
-		iso        = flag.String("iso", "", "use this AuraDE ISO instead of downloading one (it is not checked)")
-		yes        = flag.Bool("yes", false, "do not ask; make and start the VM from the flags and defaults")
-		hypervisor = flag.String("hypervisor", "vmware", "with --yes: which hypervisor: vmware, qemu, libvirt, virtualbox, hyperv or parallels")
-		mode       = flag.String("mode", "guided", "with --yes: guided (answers filled in), express (installs itself) or plain")
-		pwStdin    = flag.Bool("password-stdin", false, "with --yes and express: read the account password from the first line of standard input")
-		name       = flag.String("name", "aurade", "with --yes: the VM's name")
-		memory     = flag.Int("memory", 6144, "with --yes: MiB of memory, 4096 at least")
-		cpus       = flag.Int("cpus", 4, "with --yes: virtual processors")
-		disk       = flag.Int("disk", 40, "with --yes: disk size in GB, 30 at least")
-		accel      = flag.Bool("3d", true, "with --yes: 3D graphics")
-		hostname   = flag.String("hostname", "aurade-vm", "with --yes, guided: the computer name")
-		username   = flag.String("username", "", "with --yes, guided: your username")
-		locale     = flag.String("locale", h.Locale, "with --yes, guided: language and region")
-		keymap     = flag.String("keymap", answers.KeymapForLocale(h.Locale), "with --yes, guided: keyboard layout")
-		timezone   = flag.String("timezone", h.Timezone, "with --yes, guided: time zone")
-		encrypt    = flag.String("encrypt", "no", "with --yes, guided: encrypt the disk (yes or no)")
-		filesystem = flag.String("filesystem", "btrfs", "with --yes, guided: btrfs, ext4 or xfs")
-		showVer    = flag.Bool("version", false, "print the version and exit")
-		listHV     = flag.Bool("hypervisors", false, "list the hypervisors on this computer and exit")
+		dir          = flag.String("dir", defaultDir(), "folder for the ISO and the VMs")
+		tag          = flag.String("release", os.Getenv("AURADE_VM_VERSION"), "a release tag such as v1.1.2 (default: the latest)")
+		iso          = flag.String("iso", "", "use this AuraDE ISO instead of downloading one (it is not checked)")
+		yes          = flag.Bool("yes", false, "do not ask; make and start the VM from the flags and defaults")
+		hypervisor   = flag.String("hypervisor", "vmware", "with --yes: which hypervisor: vmware, qemu, libvirt, virtualbox, hyperv, parallels or utm")
+		mode         = flag.String("mode", "guided", "with --yes: guided (answers filled in), express (installs itself) or plain")
+		pwStdin      = flag.Bool("password-stdin", false, "with --yes and express: read the account password from the first line of standard input")
+		name         = flag.String("name", "aurade", "with --yes: the VM's name")
+		memory       = flag.Int("memory", 6144, "with --yes: MiB of memory, 4096 at least")
+		cpus         = flag.Int("cpus", 4, "with --yes: virtual processors")
+		disk         = flag.Int("disk", 40, "with --yes: disk size in GB, 30 at least")
+		accel        = flag.Bool("3d", true, "with --yes: 3D graphics")
+		hostname     = flag.String("hostname", "aurade-vm", "with --yes, guided: the computer name")
+		username     = flag.String("username", "", "with --yes, guided: your username")
+		locale       = flag.String("locale", h.Locale, "with --yes, guided: language and region")
+		keymap       = flag.String("keymap", answers.KeymapForLocale(h.Locale), "with --yes, guided: keyboard layout")
+		timezone     = flag.String("timezone", h.Timezone, "with --yes, guided: time zone")
+		encrypt      = flag.String("encrypt", "no", "with --yes, guided: encrypt the disk (yes or no)")
+		filesystem   = flag.String("filesystem", "btrfs", "with --yes, guided: btrfs, ext4 or xfs")
+		scale        = flag.String("display-scale", "auto", "with --yes, guided: display size, auto, 100, 125, 150, 175 or 200")
+		profile      = flag.String("features", "auto", "with --yes, guided: auto, standard, plus, advanced_plus or advanced_plus_ai")
+		apps         = flag.String("apps", "", "with --yes, guided: extra apps, a comma list of firefox, vscode, flatpak, waydroid and devtools")
+		snapshots    = flag.String("update-snapshots", "", "with --yes, guided: a snapshot before every update, yes or no (default yes on btrfs)")
+		showVer      = flag.Bool("version", false, "print the version and exit")
+		doUpdate     = flag.Bool("update", false, "replace this program with the newest published aurade-vm, checked as the installers check it, and exit")
+		listHV       = flag.Bool("hypervisors", false, "list the hypervisors on this computer and exit")
+		existingArch = flag.Bool("existing-arch", false, "install AuraDE on this Arch Linux computer, beside its desktop, instead of in a VM")
+		dryRun       = flag.Bool("dry-run", false, "with --existing-arch: print the commands and change nothing")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "aurade-vm %s: try AuraDE in a virtual machine.\n\n", version)
@@ -73,6 +82,39 @@ func run() error {
 	flag.Parse()
 	if *showVer {
 		fmt.Println("aurade-vm", version)
+		return nil
+	}
+	exe, exeErr := os.Executable()
+	if exeErr == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		update.Cleanup(exe)
+	}
+	if *doUpdate {
+		if exeErr != nil {
+			return fmt.Errorf("could not find this program's file: %w", exeErr)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		src := update.Default()
+		pin, err := src.Latest(ctx)
+		if err != nil {
+			return err
+		}
+		if !update.Newer(pin.Version, version) {
+			fmt.Printf("aurade-vm %s is the newest (published: %s)\n", version, pin.Version)
+			return nil
+		}
+		r, err := src.Apply(ctx, version, pin, exe)
+		if err != nil {
+			return err
+		}
+		how := "its published SHA-256"
+		if r.Signed {
+			how += " and the release key's signature"
+		}
+		fmt.Printf("aurade-vm %s -> %s, checked against %s\n", r.From, r.To, how)
 		return nil
 	}
 	if *listHV {
@@ -100,8 +142,28 @@ func run() error {
 		return err
 	}
 
-	if !*yes {
-		return tui.Run(tui.Options{BaseDir: baseDir, Tag: *tag, LocalISO: *iso, Version: version})
+	if !*yes && !*existingArch {
+		res, err := tui.Run(tui.Options{BaseDir: baseDir, Tag: *tag, LocalISO: *iso, Version: version,
+			Arch: archhost.Detect(),
+			Newest: func(ctx context.Context) string {
+				if pin, err := update.Default().Latest(ctx); err == nil && update.Newer(pin.Version, version) && pin.SHA256 != "" {
+					return pin.Version
+				}
+				return ""
+			}})
+		if err != nil || !res.ExistingArch {
+			return err
+		}
+		*existingArch = true
+	}
+
+	if *existingArch {
+		if !archhost.Detect() {
+			return fmt.Errorf("--existing-arch is for a computer running Arch Linux itself")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return archhost.Run(ctx, archhost.Options{DryRun: *dryRun, NoConfirm: *yes})
 	}
 
 	if *memory < 4096 {
@@ -154,6 +216,16 @@ func run() error {
 	case plan.Plain:
 	default:
 		return fmt.Errorf("--mode is guided, express or plain, not %q", *mode)
+	}
+	if p.Mode != plan.Plain {
+		p.Answers.DisplayScale, p.Answers.Profile, p.Answers.Apps = *scale, *profile, *apps
+		p.Answers.AutoSnapshots = *snapshots
+		if p.Answers.AutoSnapshots == "" {
+			p.Answers.AutoSnapshots = "no"
+			if p.Answers.Filesystem == "btrfs" {
+				p.Answers.AutoSnapshots = "yes"
+			}
+		}
 	}
 	lastPct := -1
 	return p.Run(ctx, func(e plan.Event) {

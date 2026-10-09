@@ -26,6 +26,40 @@ type Answers struct {
 	Encrypt    string // yes or no
 	Filesystem string // btrfs, ext4 or xfs
 	Swap       string // none, file or zram
+
+	// The desktop, asked in the installer's advanced questions.
+	Profile       string // auto, standard, plus, advanced_plus or advanced_plus_ai
+	DisplayScale  string // auto, 100, 125, 150, 175 or 200
+	Apps          string // none, or a comma list of AppNames
+	AutoSnapshots string // yes or no; btrfs only
+}
+
+// AppNames are the extra apps the installer knows, in the order they are
+// offered, with what each is called on screen.
+var AppNames = []struct{ ID, Label, Help string }{
+	{"firefox", "Firefox", "Mozilla's web browser, beside the one AuraDE has built in."},
+	{"vscode", "Visual Studio Code", "The code editor, in its open source build (code)."},
+	{"flatpak", "Flatpak and Flathub", "Flatpak, with Flathub already added, so thousands more apps are one command away."},
+	{"waydroid", "Waydroid", "Runs Android apps. It downloads Android itself the first time it is set up."},
+	{"devtools", "Developer tools", "Compilers, make and git (base-devel and git)."},
+}
+
+// ValidApps follows the installer's rule: none, or known names joined by
+// commas with none left empty.
+func ValidApps(s string) error {
+	if s == "" || s == "none" {
+		return nil
+	}
+	for _, a := range strings.Split(s, ",") {
+		known := false
+		for _, n := range AppNames {
+			known = known || a == n.ID
+		}
+		if !known {
+			return fmt.Errorf("%q is not one of the apps the installer offers", a)
+		}
+	}
+	return nil
 }
 
 var (
@@ -88,9 +122,12 @@ func (a Answers) Validate() error {
 		return fmt.Errorf("disk: %q is not a device path", a.Target)
 	}
 	for name, v := range map[string][]string{
-		"encryption": {a.Encrypt, "", "yes", "no"},
-		"filesystem": {a.Filesystem, "", "btrfs", "ext4", "xfs"},
-		"swap":       {a.Swap, "", "none", "file", "zram"},
+		"encryption":       {a.Encrypt, "", "yes", "no"},
+		"filesystem":       {a.Filesystem, "", "btrfs", "ext4", "xfs"},
+		"swap":             {a.Swap, "", "none", "file", "zram"},
+		"features":         {a.Profile, "", "auto", "standard", "plus", "advanced_plus", "advanced_plus_ai"},
+		"display size":     {a.DisplayScale, "", "auto", "100", "125", "150", "175", "200"},
+		"update snapshots": {a.AutoSnapshots, "", "yes", "no"},
 	} {
 		ok := false
 		for _, allowed := range v[1:] {
@@ -99,6 +136,12 @@ func (a Answers) Validate() error {
 		if !ok {
 			return fmt.Errorf("%s: %q is not one of %s", name, v[0], strings.Join(v[2:], ", "))
 		}
+	}
+	if err := ValidApps(a.Apps); err != nil {
+		return fmt.Errorf("apps: %w", err)
+	}
+	if a.AutoSnapshots == "yes" && a.Filesystem != "" && a.Filesystem != "btrfs" {
+		return fmt.Errorf("update snapshots: only Btrfs takes snapshots, and the filesystem is %s", a.Filesystem)
 	}
 	return nil
 }
@@ -110,6 +153,8 @@ func (a Answers) File() []byte {
 		"locale": a.Locale, "keymap": a.Keymap, "timezone": a.Timezone,
 		"target": a.Target, "hostname": a.Hostname, "username": a.Username,
 		"encrypt": a.Encrypt, "filesystem": a.Filesystem, "swap": a.Swap,
+		"profile": a.Profile, "display_scale": a.DisplayScale, "apps": a.Apps,
+		"auto_snapshots": a.AutoSnapshots,
 	}
 	keys := make([]string, 0, len(fields))
 	for k, v := range fields {

@@ -41,6 +41,72 @@ func TestFileHasNoEmptyLinesOrSecrets(t *testing.T) {
 	}
 }
 
+func TestDesktopAnswers(t *testing.T) {
+	good := Answers{Filesystem: "btrfs", Profile: "plus", DisplayScale: "125",
+		Apps: "firefox,flatpak", AutoSnapshots: "yes"}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("good answers refused: %v", err)
+	}
+	f := string(good.File())
+	for _, line := range []string{"profile=plus\n", "display_scale=125\n", "apps=firefox,flatpak\n", "auto_snapshots=yes\n"} {
+		if !strings.Contains(f, line) {
+			t.Errorf("missing %q in:\n%s", line, f)
+		}
+	}
+	bad := []Answers{
+		{Profile: "everything"}, {DisplayScale: "130"}, {Apps: "steam"}, {Apps: "firefox,"},
+		{Apps: ",firefox"}, {Apps: "firefox,,vscode"}, {AutoSnapshots: "maybe"},
+		{Filesystem: "ext4", AutoSnapshots: "yes"},
+	}
+	for _, a := range bad {
+		if a.Validate() == nil {
+			t.Errorf("accepted %+v", a)
+		}
+	}
+}
+
+// The installer checks the answers again, and anything it refuses is asked in
+// the VM as if it had never been answered. So the two sets of rules have to
+// agree, and the installer's are run here to make sure they do.
+func TestDesktopRulesAgreeWithTheInstaller(t *testing.T) {
+	lib, err := filepath.Abs("../../../../installer/lib/aurade-validate.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lib); err != nil {
+		t.Skip("the installer is not beside this checkout")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash")
+	}
+	installer := func(fn, v string) bool {
+		return exec.Command("bash", "-c", `. "$1"; "$2" "$3"`, "_", lib, fn, v).Run() == nil
+	}
+	for _, v := range []string{"none", "firefox", "firefox,vscode,flatpak,waydroid,devtools", "steam", "firefox,", ",firefox", "a,,b", "firefox,firefox"} {
+		mine := ValidApps(v) == nil
+		if theirs := installer("aurade_valid_apps", v); mine != theirs {
+			t.Errorf("apps %q: aurade-vm says %v, the installer says %v", v, mine, theirs)
+		}
+	}
+	for _, v := range []string{"auto", "standard", "plus", "advanced_plus", "advanced_plus_ai", "max"} {
+		mine := Answers{Profile: v}.Validate() == nil
+		if theirs := installer("aurade_valid_feature_profile", v); mine != theirs {
+			t.Errorf("profile %q: aurade-vm says %v, the installer says %v", v, mine, theirs)
+		}
+	}
+	for _, v := range []string{"auto", "100", "125", "150", "175", "200", "300", "1.5"} {
+		mine := Answers{DisplayScale: v}.Validate() == nil
+		if theirs := installer("aurade_valid_display_scale", v); mine != theirs {
+			t.Errorf("display size %q: aurade-vm says %v, the installer says %v", v, mine, theirs)
+		}
+	}
+	for _, n := range AppNames {
+		if !installer("aurade_valid_apps", n.ID) {
+			t.Errorf("the installer does not know the app %s", n.ID)
+		}
+	}
+}
+
 func TestKeymapForLocale(t *testing.T) {
 	for in, want := range map[string]string{"de_DE.UTF-8": "de", "en_US.UTF-8": "us", "fr_CA.UTF-8": "us", "C.UTF-8": "us"} {
 		if got := KeymapForLocale(in); got != want {
