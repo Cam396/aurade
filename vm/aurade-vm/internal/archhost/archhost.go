@@ -191,7 +191,7 @@ func Run(ctx context.Context, o Options) error {
 			cmd.Stdin = os.Stdin
 		}
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s did not finish: %w", st.Args[len(st.Args)-1], err)
+			return fmt.Errorf("%s did not finish (%w). Nothing after it was run", strings.Join(st.Args, " "), err)
 		}
 	}
 	if o.DryRun {
