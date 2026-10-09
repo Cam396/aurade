@@ -105,3 +105,21 @@ func TestOtherKeyIsRefused(t *testing.T) {
 }
 
 var fixedTime = mustTime()
+
+func TestSupersededListsOnlyCheckedDownloads(t *testing.T) {
+	dir := t.TempDir()
+	for name, stamp := range map[string]bool{
+		"aurade-v1.1.2-x86_64.iso": true, "aurade-v1.2.0-x86_64.iso": true,
+		"aurade-v1.0.0-x86_64.iso": false, "other.iso": true,
+	} {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte("x"), 0o644)
+		if stamp {
+			os.WriteFile(p+".checked", []byte("sha256\n"), 0o644)
+		}
+	}
+	got := Superseded(dir, filepath.Join(dir, "aurade-v1.2.0-x86_64.iso"))
+	if len(got) != 1 || filepath.Base(got[0]) != "aurade-v1.1.2-x86_64.iso" {
+		t.Fatalf("got %q", got)
+	}
+}

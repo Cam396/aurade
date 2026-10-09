@@ -162,3 +162,59 @@ func TestExpressCarriesTheHashAndNeverEncrypts(t *testing.T) {
 		}
 	}
 }
+
+// Older releases downloaded here are removed once a newer one is checked,
+// unless a VM still starts from one. An ISO this tool did not download, which
+// has no stamp, is never touched.
+func TestOldISOsGoUnlessAVMUsesThem(t *testing.T) {
+	base := t.TempDir()
+	put := func(name string, stamp bool) string {
+		p := filepath.Join(base, name)
+		os.WriteFile(p, []byte("iso"), 0o644)
+		if stamp {
+			os.WriteFile(p+".checked", []byte("sha256+signature\n"), 0o644)
+		}
+		return p
+	}
+	current := put("aurade-v1.2.0-x86_64.iso", true)
+	unused := put("aurade-v1.1.1-x86_64.iso", true)
+	os.WriteFile(unused+".part", []byte("half"), 0o644)
+	used := put("aurade-v1.1.2-x86_64.iso", true)
+	legacy := put("aurade-v1.0.0-x86_64.iso", true)
+	handPlaced := put("aurade-v0.9.0-x86_64.iso", false)
+
+	// A VM with a record that starts from v1.1.2, and an early VMware VM with
+	// no record whose .vmx names v1.0.0 in other case.
+	os.MkdirAll(filepath.Join(base, "a"), 0o755)
+	if err := hv.WriteRecord(hv.Record{Backend: "qemu", Spec: hv.Spec{Name: "a", Dir: filepath.Join(base, "a"), ISO: used, MemoryMB: 4096}}); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(base, "old"), 0o755)
+	os.WriteFile(filepath.Join(base, "old", "old.vmx"), []byte(`ide1:0.fileName = "D:\VMs\AURADE-V1.0.0-X86_64.ISO"`+"\n"), 0o644)
+
+	var logs []string
+	p := &Plan{BaseDir: base}
+	p.tidyOldISOs(current, func(e Event) { logs = append(logs, e.Log) })
+
+	gone := func(p string) bool { _, err := os.Stat(p); return os.IsNotExist(err) }
+	if !gone(unused) || !gone(unused+".checked") || !gone(unused+".part") {
+		t.Error("an older release no VM uses was kept")
+	}
+	for _, keep := range []string{current, current + ".checked", used, legacy, handPlaced} {
+		if gone(keep) {
+			t.Errorf("%s was removed", filepath.Base(keep))
+		}
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "aurade-v1.1.1-x86_64.iso") {
+		t.Errorf("the removal was not reported once: %q", logs)
+	}
+
+	// A VM folder whose .vmx cannot be read keeps everything. A folder by
+	// that name cannot be read as a file, even by root.
+	again := put("aurade-v1.1.1-x86_64.iso", true)
+	os.MkdirAll(filepath.Join(base, "broken", "broken.vmx"), 0o755)
+	p.tidyOldISOs(current, func(Event) {})
+	if gone(again) {
+		t.Error("an ISO was removed while a VM's settings could not be read")
+	}
+}
