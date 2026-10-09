@@ -47,6 +47,25 @@ optical drive. When the live system starts, `aurade-installer-autostart` copies
 holds no password or passphrase, and the installer checks every line exactly
 as if it had been typed.
 
+## Getting it
+
+```powershell
+irm https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.ps1 | iex
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.sh | bash
+```
+
+Each script downloads the program for this computer, checks it against the
+SHA-256 written into the script for that version (and, on Linux and macOS,
+the release key's signature over the checksums when gpg is installed), and
+starts it. A download that does not match is deleted and never run. Because
+the file is fetched by PowerShell or curl rather than a browser, Windows and
+macOS do not stop to ask about an unknown download.
+
+`build.sh` with `PIN=1` writes the version and hashes into both scripts.
+
 ## Without the screens
 
 ```sh

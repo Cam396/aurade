@@ -16,6 +16,7 @@ unformatted=$(gofmt -l .)
   echo "aurade-vm test: not gofmt-formatted: $unformatted" >&2
   exit 1
 }
+bash -n get.sh
 go vet ./...
 go test ./...
 for target in windows/amd64 linux/amd64 darwin/amd64 darwin/arm64; do
