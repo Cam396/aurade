@@ -93,6 +93,12 @@ RATE_FILE=${_RATE_PATH_SET:+$AURADE_RATE_PATH}
 RATE_FILE=${RATE_FILE:-${JOURNAL_FILE%/*}/acquire-rate}
 EXPORT_DIR=${AURADE_FAILURE_EXPORT_DIR:-/run/aurade-install}
 PLAN_ONLY=0
+# Express: install from the answers alone, with no questions and no erase
+# gate, when every check in `express_preflight` passes. Only aurade-vm asks
+# for it, from a disk it attached to a virtual machine.
+EXPRESS=0
+EXPRESS_HASH=
+EXPRESS_REASON=
 EXIT_STATUS=0
 ANSWERS_IN=
 ANSWERS_OUT=
@@ -128,6 +134,9 @@ Options:
   --plan-only        Ask the questions and show the plan; never offer to erase
   --answers FILE     Start with the answers in FILE, already filled in
   --save-answers FILE  Write the answers to FILE at the review screen
+  --express          With --answers and --password-hash-file: install without
+                     asking, on a virtual machine with a blank disk only
+  --password-hash-file FILE  The account's crypt(3) hash, for --express
   --list-screens     Print the renderable screen names
   -h, --help         This message
 
@@ -5345,6 +5354,102 @@ run_failure() {
   done
 }
 
+# --------------------------------------------------------------------------
+# Express
+# --------------------------------------------------------------------------
+
+# Every reason an express install would be the wrong thing to do, checked
+# before anything is drawn. The first one that applies is kept in
+# EXPRESS_REASON and shown, and the install continues the ordinary way with
+# the answers filled in, so a failed check costs a few key presses and never
+# a disk.
+#
+# The checks are about consent. Nobody is at the erase gate to read the disk's
+# name back, so the disk has to be one that cannot hold anything worth
+# keeping: a virtual machine's, with no partition table and no filesystem.
+express_preflight() {
+  local virt id target name entry signature
+  EXPRESS_REASON=
+  virt=$(${AURADE_DETECT_VIRT:-systemd-detect-virt} --vm 2>/dev/null) || virt=none
+  if [[ -z $virt || $virt == none ]]; then
+    EXPRESS_REASON='This is not a virtual machine. An express install only ever runs inside one.'
+    return 1
+  fi
+  for id in target username hostname locale keymap timezone; do
+    if [[ -z ${ANSWERS[$id]:-} ]]; then
+      EXPRESS_REASON="The prepared answers have no usable $(aurade_question_field "$id" short | tr '[:upper:]' '[:lower:]')."
+      return 1
+    fi
+  done
+  if [[ ${ANSWERS[encrypt]:-no} == yes ]]; then
+    EXPRESS_REASON='Encryption needs a passphrase typed here, so it cannot be express.'
+    return 1
+  fi
+  if [[ ${ANSWERS[layout]:-wipe} != wipe ]]; then
+    EXPRESS_REASON='Only a whole blank disk can be installed to without asking.'
+    return 1
+  fi
+  target=${ANSWERS[target]}
+  name=${target#/dev/}
+  for entry in "$AURADE_BLOCK_DIR/$name"/"$name"*; do
+    if [[ -e $entry/partition ]]; then
+      EXPRESS_REASON="$target already has partitions on it, so it is not erased without asking."
+      return 1
+    fi
+  done
+  signature=$(${AURADE_BLKID:-blkid} -p -o value -s TYPE -s PTTYPE "$target" 2>/dev/null) || true
+  if [[ -n $signature ]]; then
+    EXPRESS_REASON="$target is not blank (it holds $signature), so it is not erased without asking."
+    return 1
+  fi
+  if [[ -z $EXPRESS_HASH || ! -f $EXPRESS_HASH || ! -r $EXPRESS_HASH ]]; then
+    EXPRESS_REASON='No password came with the answers.'
+    return 1
+  fi
+  if ! grep -qE '^\$(y|6|5|2b|gy)\$[^:[:space:]]+$' "$EXPRESS_HASH"; then
+    EXPRESS_REASON='The password that came with the answers is not a password hash.'
+    return 1
+  fi
+  return 0
+}
+
+screen_express_stopped() {
+  tui_clear
+  tui_header 'Express install'
+  tui_blank
+  tui_wrap 'The express install stopped before doing anything.' warn
+  tui_blank
+  tui_wrap "$EXPRESS_REASON" ink
+  tui_blank
+  tui_wrap 'Your answers are filled in. Check them, and confirm the disk yourself.' dim
+  tui_footer 'enter  continue' 'nothing was written to any disk'
+}
+
+# The hash goes where the typed password's hash would have gone, so the
+# engine call is built exactly as for an ordinary install.
+express_take_hash() {
+  (
+    umask 077
+    tr -d '\r\n' <"$EXPRESS_HASH" >"$SECRET_DIR/password.hash"
+  )
+  ANSWERS[password]='set'
+}
+
+# The done screen, then a restart without waiting for a key: nobody is
+# watching an express install finish.
+run_express_done() {
+  local i
+  tui_bell 1
+  screen_done
+  for (( i = ${AURADE_EXPRESS_RESTART_DELAY:-15}; i > 0; i-- )); do
+    screen_done
+    tui_wrap "Restarting into AuraDE in $i seconds." accent
+    sleep 1
+  done
+  tui_clear
+  installer_reboot
+}
+
 main_flow() {
   # Ask the terminal to bracket pastes, so that pasted text is text and not a
   # run of keystrokes that can include a return, and to report the wheel, so
@@ -5368,7 +5473,16 @@ main_flow() {
   aurade_probe_renderer
   local key status=0 rc=0 state=welcome entry=0
 
-  if [[ $AURADE_PROBE_RENDERER == tui && $AURADE_PROBE_REASON != forced ]]; then
+  if (( EXPRESS )); then
+    if express_preflight; then
+      state=express
+    else
+      screen_express_stopped
+      key=$(read_key) || true
+    fi
+  fi
+
+  if [[ $state != express && $AURADE_PROBE_RENDERER == tui && $AURADE_PROBE_REASON != forced ]]; then
     screen_fallback
     key=$(read_key) || true
     [[ $key != esc ]] || { screen_cancelled; return 0; }
@@ -5380,6 +5494,27 @@ main_flow() {
   # where Escape quits before the erase gate.
   while true; do
     case $state in
+      express)
+        express_take_hash
+        build_engine_args
+        status=0
+        "$ENGINE" "${ENGINE_ARGS[@]}" --dry-run >>"$RAW_LOG" 2>&1 || status=$?
+        if (( status != 0 )); then
+          run_failure "$status" || status=$?
+          return "$status"
+        fi
+        GATE_PASSED=1
+        status=0
+        run_engine_with_progress "${ENGINE_ARGS[@]}" --execute \
+          --confirm "$(aurade_confirmation_token "${ANSWERS[target]}" wipe)" || status=$?
+        if (( status != 0 )); then
+          run_failure "$status" || status=$?
+          return "$status"
+        fi
+        run_express_done
+        return 0
+        ;;
+
       welcome)
         welcome_draw
         key=$(read_key) || key=esc
@@ -5540,6 +5675,8 @@ while (($#)); do
     --plan-only) PLAN_ONLY=1; shift ;;
     --answers) ANSWERS_IN=${2:?}; shift 2 ;;
     --save-answers) ANSWERS_OUT=${2:?}; shift 2 ;;
+    --express) EXPRESS=1; shift ;;
+    --password-hash-file) EXPRESS_HASH=${2:?}; shift 2 ;;
     # Detected from TERM=dumb and from brltty running, and available by hand
     # for the cases detection cannot see: a braille display on a serial line,
     # or somebody who simply wants the screens without the drawing.
