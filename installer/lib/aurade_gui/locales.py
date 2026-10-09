@@ -244,6 +244,22 @@ def describe_storage(question: str, value: str) -> tuple[str, str]:
     return (value, "")
 
 
+def describe_answer(question: str, value: str) -> str:
+    """An answer in the words its own picker showed, for the review.
+
+    The review read `wipe`, `btrfs`, `none` and `auto` under choices that had
+    been made from `Erase the whole disk`, `Btrfs`, `None` and `Automatic` one
+    page earlier, and later `place-fuji` under a wallpaper picked by its name.
+    Language and keyboard are not here: their names depend on what this live
+    system has installed, which the window looks up.
+    """
+    if question in STORAGE_NAMES or question in ("swap_size", "wallpaper"):
+        return describe_storage(question, value)[0] or value
+    if value in ("yes", "no", "set"):
+        return value[:1].upper() + value[1:]
+    return value
+
+
 def timezone_regions(zones: list[str]) -> list[str]:
     seen: list[str] = []
     for zone in zones:
