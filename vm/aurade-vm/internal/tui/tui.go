@@ -67,8 +67,9 @@ type Model struct {
 
 	modeIdx int
 
-	questions form
-	machine   form
+	questions        form
+	questionsExpress bool
+	machine          form
 
 	plan     *plan.Plan
 	events   chan tea.Msg
@@ -90,7 +91,7 @@ var modes = []struct {
 	ready bool
 }{
 	{plan.Guided, "Guided", "Answer the installer's questions here. The installer opens with them filled in, and you confirm the install.", true},
-	{"express", "Express", "Answer once, and AuraDE installs itself and restarts at the sign-in screen. Coming in a later version.", false},
+	{plan.Express, "Express", "Answer once here, including your password, and AuraDE installs itself and restarts at the sign-in screen. Nothing is asked in the VM.", true},
 	{plan.Plain, "Just the VM", "Make the VM and start the installer. It asks everything itself.", true},
 }
 
@@ -108,7 +109,7 @@ func New(opt Options) Model {
 		detecting: true,
 		existing:  hv.Existing(opt.BaseDir),
 	}
-	m.questions = questionForm(h)
+	m.questions = questionForm(h, false)
 	m.machine = machineForm(h, uniqueName(opt.BaseDir))
 	return m
 }
@@ -123,7 +124,7 @@ func uniqueName(base string) string {
 	}
 }
 
-func questionForm(h host.Info) form {
+func questionForm(h host.Info, express bool) form {
 	user := h.User
 	if answers.ValidUsername(user) != nil {
 		user = ""
@@ -137,13 +138,34 @@ func questionForm(h host.Info) form {
 			func(s string) error { return answers.Answers{Timezone: s}.Validate() }),
 		newText("hostname", "Computer name", "What the VM calls itself on the network.", "aurade-vm", answers.ValidHostname),
 		newText("username", "Username", "Your account in AuraDE. The installer asks for its password.", user, answers.ValidUsername),
-		newChoice("encrypt", "Encrypt the virtual disk",
-			"Encryption asks for a passphrase at every start. Most people trying AuraDE in a VM leave it off.",
-			[]string{"no", "yes"}, []string{"No", "Yes, ask for a passphrase at startup"}, "no"),
 		newChoice("filesystem", "Filesystem",
 			"Btrfs can take snapshots to roll back to. ext4 and xfs cannot.",
 			[]string{"btrfs", "ext4", "xfs"}, []string{"Btrfs, with snapshots", "ext4", "xfs"}, "btrfs"),
 	}}
+	if express {
+		// Express needs the password now, since nothing is asked in the
+		// VM. Encryption is not offered: its passphrase would have to be
+		// typed there.
+		pw := newText("password", "Password", "For signing in to AuraDE. Only a scrambled form of it (a hash) goes to the VM.", "", func(v string) error {
+			if v == "" {
+				return fmt.Errorf("Choose a password")
+			}
+			return nil
+		})
+		pw.secret()
+		again := newText("password2", "Password again", "The same password, to be sure it was typed as meant.", "", func(v string) error {
+			if v != pw.value() {
+				return fmt.Errorf("The two passwords are not the same")
+			}
+			return nil
+		})
+		again.secret()
+		f.fields = append(f.fields[:5], append([]*field{pw, again}, f.fields[5:]...)...)
+	} else {
+		f.fields = append(f.fields, newChoice("encrypt", "Encrypt the virtual disk",
+			"Encryption asks for a passphrase at every start. Most people trying AuraDE in a VM leave it off.",
+			[]string{"no", "yes"}, []string{"No", "Yes, ask for a passphrase at startup"}, "no"))
+	}
 	f.setFocus(0)
 	return f
 }
@@ -332,9 +354,15 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !modes[m.modeIdx].ready {
 				return m, nil
 			}
-			if modes[m.modeIdx].id == plan.Guided {
+			switch modes[m.modeIdx].id {
+			case plan.Guided, plan.Express:
+				express := modes[m.modeIdx].id == plan.Express
+				if express != m.questionsExpress {
+					m.questions = questionForm(m.host, express)
+					m.questionsExpress = express
+				}
 				m.screen = sQuestions
-			} else {
+			default:
 				m.screen = sMachine
 			}
 		}
@@ -349,7 +377,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case sMachine:
 		if k.String() == "esc" {
-			if modes[m.modeIdx].id == plan.Guided {
+			if id := modes[m.modeIdx].id; id == plan.Guided || id == plan.Express {
 				return back(sQuestions)
 			}
 			return back(sMode)
@@ -364,7 +392,17 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			return back(sMachine)
 		case "enter":
-			return m.start(m.buildPlan())
+			p := m.buildPlan()
+			if p.Mode == plan.Express {
+				h, err := answers.HashPassword(m.questions.get("password"))
+				if err != nil {
+					m.err = err
+					m.screen = sDone
+					return m, nil
+				}
+				p.PasswordHash = h
+			}
+			return m.start(p)
 		}
 	case sDone:
 		switch k.String() {
@@ -391,12 +429,15 @@ func (m Model) buildPlan() *plan.Plan {
 			Accel3D: m.machine.get("accel") == "yes",
 		},
 	}
-	if p.Mode == plan.Guided {
+	if p.Mode == plan.Guided || p.Mode == plan.Express {
 		p.Answers = answers.Answers{
 			Locale: m.questions.get("locale"), Keymap: m.questions.get("keymap"),
 			Timezone: m.questions.get("timezone"), Hostname: m.questions.get("hostname"),
 			Username: m.questions.get("username"), Encrypt: m.questions.get("encrypt"),
 			Filesystem: m.questions.get("filesystem"),
+		}
+		if p.Mode == plan.Express {
+			p.Answers.Encrypt = "no"
 		}
 	}
 	return p
@@ -602,7 +643,7 @@ func (m Model) viewReview() string {
 		row("AuraDE", "the latest release")
 	}
 	row("Setup", modes[m.modeIdx].title)
-	if p.Mode == plan.Guided {
+	if p.Mode == plan.Guided || p.Mode == plan.Express {
 		a := p.Answers
 		row("Account", a.Username+" on "+a.Hostname)
 		row("Region", a.Locale+" · "+a.Keymap+" keyboard · "+a.Timezone)
@@ -654,6 +695,12 @@ func (m Model) viewDone() string {
 	p := m.plan
 	if p != nil && p.Spec.ISO != "" {
 		switch p.Mode {
+		case plan.Express:
+			b.WriteString(panelStyle.Render(
+				"AuraDE is installing itself in the VM's window. It needs\n" +
+					"the internet for about ten minutes, then restarts at the\n" +
+					"sign-in screen. Sign in as " + p.Answers.Username + " with the password you chose.\n" +
+					"Next time, run aurade-vm and choose Start " + p.Spec.Name + "."))
 		case plan.Guided:
 			b.WriteString(panelStyle.Render(
 				"The installer opens with your answers filled in.\n" +

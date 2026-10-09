@@ -3,12 +3,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/answers"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/host"
@@ -46,7 +48,8 @@ func run() error {
 		iso        = flag.String("iso", "", "use this AuraDE ISO instead of downloading one (it is not checked)")
 		yes        = flag.Bool("yes", false, "do not ask; make and start the VM from the flags and defaults")
 		hypervisor = flag.String("hypervisor", "vmware", "with --yes: which hypervisor: vmware, qemu, libvirt, virtualbox, hyperv or parallels")
-		mode       = flag.String("mode", "guided", "with --yes: guided (answers filled in) or plain")
+		mode       = flag.String("mode", "guided", "with --yes: guided (answers filled in), express (installs itself) or plain")
+		pwStdin    = flag.Bool("password-stdin", false, "with --yes and express: read the account password from the first line of standard input")
 		name       = flag.String("name", "aurade", "with --yes: the VM's name")
 		memory     = flag.Int("memory", 6144, "with --yes: MiB of memory, 4096 at least")
 		cpus       = flag.Int("cpus", 4, "with --yes: virtual processors")
@@ -134,9 +137,23 @@ func run() error {
 	case plan.Guided:
 		p.Answers = answers.Answers{Locale: *locale, Keymap: *keymap, Timezone: *timezone,
 			Hostname: *hostname, Username: *username, Encrypt: *encrypt, Filesystem: *filesystem}
+	case plan.Express:
+		p.Answers = answers.Answers{Locale: *locale, Keymap: *keymap, Timezone: *timezone,
+			Hostname: *hostname, Username: *username, Encrypt: "no", Filesystem: *filesystem}
+		if !*pwStdin {
+			return fmt.Errorf("an express install needs the password: pass it on standard input with --password-stdin")
+		}
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			return fmt.Errorf("no password on standard input")
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if p.PasswordHash, err = answers.HashPassword(line); err != nil {
+			return err
+		}
 	case plan.Plain:
 	default:
-		return fmt.Errorf("--mode is guided or plain, not %q", *mode)
+		return fmt.Errorf("--mode is guided, express or plain, not %q", *mode)
 	}
 	lastPct := -1
 	return p.Run(ctx, func(e plan.Event) {
