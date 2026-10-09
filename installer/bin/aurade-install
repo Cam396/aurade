@@ -118,6 +118,7 @@ HARDWARE_SUPPORT=${AURADE_HARDWARE_SUPPORT:-auto}
 # monitor, nothing beyond the base set of programs, and no snapshot taken by
 # anything but the person at the keyboard.
 FEATURE_PROFILE=auto
+WALLPAPER=auto
 DISPLAY_SCALE=auto
 APPS=none
 AUTO_SNAPSHOTS=no
@@ -198,6 +199,8 @@ The desktop:
   --feature-profile NAME       auto (default), standard, plus, advanced_plus or
                                advanced_plus_ai
   --display-scale PERCENT      auto (default), 100, 125, 150, 175 or 200
+  --wallpaper NAME             auto (default), or a wallpaper the installed
+                               system has, such as quiet-rainleaves
   --apps LIST                  none (default), or a comma list of firefox,
                                vscode, flatpak, waydroid and devtools
   --secure-boot-key FILE       PEM private key for an already-enrolled Secure Boot db key
@@ -1038,6 +1041,7 @@ while (($#)); do
     --hardware-support) HARDWARE_SUPPORT=${2:?}; shift 2 ;;
     --feature-profile) FEATURE_PROFILE=${2:?}; shift 2 ;;
     --display-scale) DISPLAY_SCALE=${2:?}; shift 2 ;;
+    --wallpaper) WALLPAPER=${2:?}; shift 2 ;;
     --apps) APPS=${2:?}; shift 2 ;;
     --auto-snapshots) AUTO_SNAPSHOTS=${2:?}; shift 2 ;;
     --secure-boot-key) SECURE_BOOT_KEY_FILE=${2:?}; shift 2 ;;
@@ -1093,6 +1097,10 @@ case $FEATURE_PROFILE in
 esac
 case $DISPLAY_SCALE in auto|100|125|150|175|200) ;; *) die '--display-scale must be auto, 100, 125, 150, 175 or 200' ;; esac
 case $AUTO_SNAPSHOTS in yes|no) ;; *) die '--auto-snapshots must be yes or no' ;; esac
+# A name and nothing more: it becomes part of a path below, so no slash, no
+# dot and nothing a shell would read. Whether the installed system has it is
+# checked once that system exists.
+[[ $WALLPAPER =~ ^[a-z][a-z0-9-]{0,63}$ ]] || die '--wallpaper must be auto or the name of a wallpaper, such as quiet-rainleaves'
 # Each app by the name somebody would recognise, and the packages it is. A
 # closed list, so the answers file can never name a package: what it can ask
 # for is exactly what is written here, from the same pinned snapshot as
@@ -1833,7 +1841,7 @@ if [[ -n $BADGE_CODE ]]; then
 fi
 
 write_target_file /etc/aurade-install/summary 0644 \
-  "installed=${INSTALLED_AT}\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\nfingerprint=${BADGE_CODE:-none}\nfeature_profile=$FEATURE_PROFILE\ndisplay_scale=$DISPLAY_SCALE\napps=${APPS}\nauto_snapshots=$AUTO_SNAPSHOTS\n"
+  "installed=${INSTALLED_AT}\ntarget=$TARGET\nlayout=$LAYOUT\nfilesystem=$FILESYSTEM\nencrypted=$LUKS\nswap=$SWAP\nhostname=$HOSTNAME\nusername=$USERNAME\nlocale=$LOCALE\nkeymap=$KEYMAP\ntimezone=$TIMEZONE\nsnapshot=$ARCH_SNAPSHOT\nfingerprint=${BADGE_CODE:-none}\nfeature_profile=$FEATURE_PROFILE\nwallpaper=$WALLPAPER\ndisplay_scale=$DISPLAY_SCALE\napps=${APPS}\nauto_snapshots=$AUTO_SNAPSHOTS\n"
 
 if [[ $SCREEN_READER == yes || $BRAILLE == yes || $CONTRAST == high ||
       $TEXT_SCALE != 100 || $REDUCE_MOTION == yes || $CURSOR_SIZE != 24 ||
@@ -1952,6 +1960,31 @@ if [[ $FEATURE_PROFILE != auto ]]; then
     printf ' + set AURADE_FEATURE_PROFILE=%s in %q\n' "$FEATURE_PROFILE" "$MOUNTPOINT/etc/aurade/features.conf"
   fi
   log "feature profile: $FEATURE_PROFILE"
+fi
+# The wallpaper is Ash's default, which the session hands it from
+# AURADE_DEFAULT_WALLPAPER in the same file. Ash shows it until somebody picks
+# another in Personalization, and the desktop's colours are taken from it.
+# One the installed set does not have, or a session too old to read the
+# setting, is left alone rather than half applied.
+if [[ $WALLPAPER != auto ]]; then
+  _wallpaper=/usr/share/aurade/wallpapers/$WALLPAPER.png
+  _features=$MOUNTPOINT/etc/aurade/features.conf
+  if [[ $MODE == execute && ! -r $MOUNTPOINT$_wallpaper ]]; then
+    log "wallpaper: this AuraDE has no $WALLPAPER, so the desktop keeps its own"
+  elif [[ $MODE == execute ]] && ! grep -q AURADE_DEFAULT_WALLPAPER "$MOUNTPOINT/usr/bin/chromiumos-ash" 2>/dev/null; then
+    log 'wallpaper: this AuraDE session cannot be given a wallpaper, so the desktop keeps its own'
+  else
+    if [[ $MODE == execute ]]; then
+      if grep -q '^AURADE_DEFAULT_WALLPAPER=' "$_features"; then
+        sed -i "s|^AURADE_DEFAULT_WALLPAPER=.*|AURADE_DEFAULT_WALLPAPER=$_wallpaper|" "$_features"
+      else
+        printf 'AURADE_DEFAULT_WALLPAPER=%s\n' "$_wallpaper" >>"$_features"
+      fi
+    else
+      printf ' + set the default wallpaper to %q in %q\n' "$_wallpaper" "$_features"
+    fi
+    log "wallpaper: $WALLPAPER"
+  fi
 fi
 # The display size is the account's own, in the file the desktop's Settings
 # writes when it is changed there. The one `scale=` line counts for every

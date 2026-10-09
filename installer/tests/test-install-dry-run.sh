@@ -494,6 +494,18 @@ plan twice --apps firefox,firefox
 grep -Fq -- 'apps: firefox' "$TMP/twice.out"
 refute grep -Fq -- 'apps: firefox firefox' "$TMP/twice.out"
 
+plan wallpaper --wallpaper quiet-rainleaves
+grep -Fq -- 'set the default wallpaper to /usr/share/aurade/wallpapers/quiet-rainleaves.png' "$TMP/wallpaper.out"
+grep -Fq -- 'wallpaper: quiet-rainleaves' "$TMP/wallpaper.out"
+refute grep -Fq -- 'default wallpaper' "$TMP/plain.out"
+# The session turns this setting into Ash's default wallpaper.
+grep -Fq -- 'AURADE_DEFAULT_WALLPAPER=%s' "$ROOT/installer/bin/aurade-install"
+grep -Fq -- '--default-wallpaper-large="${AURADE_DEFAULT_WALLPAPER}"' "$ROOT/chromiumos-ash/chromiumos-ash.sh"
+grep -Fq -- 'AURADE_DEFAULT_WALLPAPER=' "$ROOT/chromiumos-ash/aurade.features.conf"
+refuses '--wallpaper must be auto or the name' --wallpaper ../../etc/shadow
+refuses '--wallpaper must be auto or the name' --wallpaper 'quiet rainleaves'
+refuses '--wallpaper must be auto or the name' --wallpaper 'x;reboot'
+
 refuses '--feature-profile must be' --feature-profile everything
 refuses '--display-scale must be' --display-scale 130
 refuses '--apps must be none or a list' --apps firefox,steam

@@ -1873,6 +1873,7 @@ enum_candidates() {
     swap_size)  printf '%s\n' auto hibernate 2G 4G 8G 16G 32G ;;
     profile)    printf '%s\n' auto standard plus advanced_plus advanced_plus_ai ;;
     display_scale) printf '%s\n' auto 100 125 150 175 200 ;;
+    wallpaper)  printf '%s\n' auto "${AURADE_DESKTOP_WALLPAPERS[@]}" ;;
   esac
   # An empty list is an answer, not a failure. Both callers run under
   # `set -e` with `pipefail`, so a `grep` that matched nothing or a `command

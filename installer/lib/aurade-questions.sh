@@ -249,6 +249,18 @@ _q repo_url \
   flag --repo-url \
   secret no
 
+_q wallpaper \
+  label 'Wallpaper' \
+  short 'Wallpaper' \
+  help 'What the desktop shows until you pick another. The colours of the desktop follow it. Automatic is one that changes with the time of day.' \
+  type enum \
+  default auto \
+  validator aurade_valid_wallpaper \
+  error 'Choose auto or one of the wallpapers listed.' \
+  advanced yes \
+  flag --wallpaper \
+  secret no
+
 _q profile \
   label 'Which features should the desktop have?' \
   short 'Features' \

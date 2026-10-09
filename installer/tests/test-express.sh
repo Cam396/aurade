@@ -140,7 +140,8 @@ openssl passwd -6 -salt testsalt 'a password' >"$TMP/hash"
 chmod 600 "$TMP/hash"
 printf '%s\n' locale=en_US.UTF-8 keymap=us timezone=UTC target=/dev/sda \
   hostname=express-box username=alex encrypt=no \
-  profile=plus display_scale=125 apps=firefox,flatpak auto_snapshots=yes >"$TMP/answers"
+  profile=plus display_scale=125 apps=firefox,flatpak auto_snapshots=yes \
+  wallpaper=quiet-rainleaves >"$TMP/answers"
 
 run_express() {
   local name=$1 answers=${2:-$TMP/answers} hash=${3:-$TMP/hash}
@@ -173,7 +174,8 @@ tail -1 "$calls" | grep -Fq -- '--hostname express-box' || fail 'the express ins
 ! tail -1 "$calls" | grep -Fq -- '--encrypt' || fail 'the express install encrypted the disk'
 tail -1 "$calls" | grep -Fq -- '--password-hash-file ' || fail 'the express install passed no password hash'
 # The desktop answers ride along like any other.
-for arg in '--feature-profile plus' '--display-scale 125' '--apps firefox,flatpak' '--auto-snapshots yes'; do
+for arg in '--feature-profile plus' '--display-scale 125' '--apps firefox,flatpak' '--auto-snapshots yes' \
+    '--wallpaper quiet-rainleaves'; do
   tail -1 "$calls" | grep -Fq -- "$arg" || fail "the express install lost $arg"
 done
 ! grep -Fq "$(cat "$TMP/hash")" "$TMP/out.happy" || fail 'the password hash was drawn on screen'
