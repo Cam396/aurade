@@ -165,25 +165,27 @@ main() {
   fi
   : >"$STAMP" 2>/dev/null || true
 
-  # Answers prepared ahead of time are only read by the text installer, so a
-  # graphical entry becomes a text one when they are there. Somebody who filled
-  # the questions in before the machine booted wants to see them filled in.
+  # Answers prepared ahead of time start whichever installer the entry asked
+  # for with them filled in. Somebody who answered the questions before the
+  # machine booted wants to see them there. Express is the text installer's
+  # alone: it runs with nobody watching, so a graphical entry becomes a text
+  # one for it.
   if fetch_answers; then
     answers=(--answers "$ANSWERS_FILE")
     if (( EXPRESS )); then
       answers+=(--express --password-hash-file "$EXPRESS_HASH")
       printf 'Found an express install prepared for this virtual machine.\n' >&2
+      case $choice in gui|safe) choice=text ;; esac
     else
-      printf 'Found answers prepared for this install. Starting the text installer with them filled in.\n' >&2
+      printf 'Found answers prepared for this install. Starting the installer with them filled in.\n' >&2
     fi
-    case $choice in gui|safe) choice=text ;; esac
   fi
 
   # The system service owns tty1 while this runs. The recovery-console entry
   # gets the ordinary login shell only after the selected installer exits.
   case $choice in
-    gui)    "$START" --graphical || status=$? ;;
-    safe)   "$START" --graphical --safe-graphics || status=$? ;;
+    gui)    "$START" --graphical ${answers[@]+"${answers[@]}"} || status=$? ;;
+    safe)   "$START" --graphical --safe-graphics ${answers[@]+"${answers[@]}"} || status=$? ;;
     text)   "$START" --text ${answers[@]+"${answers[@]}"} || status=$? ;;
     # A serial line cannot show a graphical installer and there is no point
     # probing for one. Everything else about it is ordinary: the text

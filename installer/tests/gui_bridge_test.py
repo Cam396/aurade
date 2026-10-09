@@ -389,6 +389,55 @@ with session(PATH=f"{TMP}/stub:{os.environ['PATH']}", AURADE_LIVE_XKB=None) as m
     equal(layout_file(), US_FILE, "with no live layout, the layout file was written")
 
 # ---------------------------------------------------------------------------
+# Answers prepared ahead of time
+# ---------------------------------------------------------------------------
+#
+# aurade-vm's answers reach this model in AURADE_INSTALLER_ANSWERS. Each one
+# the text installer would take becomes where its question starts, and the
+# keymap goes on the screen as well as the console. A secret, a refused value
+# and a file that cannot be read all leave a question where it always started.
+
+PREPARED = os.path.join(TMP, "prepared-answers")
+with open(PREPARED, "w") as handle:
+    handle.write("# AuraDE answers, prepared by aurade-vm\n"
+                 "hostname=vmtest\ntimezone=America/Chicago\nkeymap=de\n"
+                 "password=hunter2\nlocale=xx_XX.UTF-8\n")
+reset_live()
+with session(**LIVE_ENV, AURADE_INSTALLER_ANSWERS=PREPARED) as model:
+    questions = model.manifest()["questions"]
+    equal(questions["hostname"]["default"], "vmtest", "a prepared hostname does not start filled in")
+    equal(questions["timezone"]["default"], "America/Chicago",
+          "a prepared time zone does not start filled in")
+    equal(questions["keymap"]["default"], "de", "a prepared keymap does not start selected")
+    equal(model.get("hostname"), "vmtest", "a prepared hostname is not the answer")
+    equal(questions["password"]["default"], "", "a password in the file reached the screen")
+    equal(model.get("password"), "", "a password in the file was taken as set")
+    equal(questions["locale"]["default"], "en_US.UTF-8",
+          "a refused locale replaced the default instead of being dropped")
+    check('include "pc+de+inet(evdev)"' in layout_file(),
+          "the prepared keymap is on the console but not on the screen, so the typing test types US")
+    equal(len(logged("udevadm.log")), 2, "the keyboards were not plugged in on the prepared layout")
+
+# A keymap this screen cannot type starts on US, console and screen alike.
+with open(PREPARED, "w") as handle:
+    handle.write("hostname=vmtest\nkeymap=xx\n")
+reset_live()
+with session(**LIVE_ENV, AURADE_INSTALLER_ANSWERS=PREPARED) as model:
+    questions = model.manifest()["questions"]
+    equal(questions["keymap"]["default"], "us",
+          "a keymap this screen cannot type started selected, over a screen typing US")
+    equal(model.get("keymap"), "", "a keymap this screen cannot type was kept as the answer")
+    equal(questions["hostname"]["default"], "vmtest", "a dropped keymap took the other answers with it")
+    equal(layout_file(), US_FILE, "a keymap this screen cannot type changed the layout file")
+    equal(logged("loadkeys.log")[-1:], ["us"], "the console was left on a keymap the screen cannot type")
+
+# Missing: every question starts where it always did.
+with session(AURADE_INSTALLER_ANSWERS=os.path.join(TMP, "no-such-answers")) as model:
+    questions = model.manifest()["questions"]
+    equal(questions["hostname"]["default"], "aurade", "a missing answer file changed a default")
+    check(model.ping(), "a missing answer file stopped the model")
+
+# ---------------------------------------------------------------------------
 # Which questions apply
 # ---------------------------------------------------------------------------
 

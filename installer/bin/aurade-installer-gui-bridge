@@ -164,6 +164,18 @@ gb_visible() {
   _gb_emit "$out"
 }
 
+# Where a question starts: the answer it already has, which before anybody
+# has pressed anything can only have come from a prepared file (see
+# `gb_preload_answers`), and otherwise its default. A secret never starts with
+# anything, and is never in a file to begin with.
+gb_starting_value() {
+  if ! aurade_question_is_secret "$1" && [[ -n ${ANSWERS[$1]:-} ]]; then
+    printf '%s' "${ANSWERS[$1]}"
+  else
+    aurade_question_default "$1"
+  fi
+}
+
 gb_manifest() {
   local id out sep=''
   out='{"order":['
@@ -184,7 +196,7 @@ gb_manifest() {
     out+="\"short\":$(_gb_str "$(aurade_question_field "$id" short)"),"
     out+="\"help\":$(_gb_str "$(aurade_question_field "$id" help)"),"
     out+="\"type\":$(_gb_str "$(aurade_question_field "$id" type)"),"
-    out+="\"default\":$(_gb_str "$(aurade_question_default "$id")"),"
+    out+="\"default\":$(_gb_str "$(gb_starting_value "$id")"),"
     out+="\"error\":$(_gb_str "$(aurade_question_field "$id" error)"),"
     out+="\"advanced\":$(_gb_bool aurade_question_is_advanced "$id"),"
     out+="\"secret\":$(_gb_bool aurade_question_is_secret "$id")}"
@@ -1116,6 +1128,42 @@ _gb_dispatch_full() {
   _gb_common "$command" "$argument" && return 0
   _gb_err "unknown command: $command"
 }
+
+# --------------------------------------------------------------------------
+# Answers prepared ahead of time
+# --------------------------------------------------------------------------
+#
+# aurade-vm writes the answers its user already gave, and the start script
+# hands the file to the text installer as --answers and to this one in
+# AURADE_INSTALLER_ANSWERS, because the front end starts this process and
+# passes its own environment on. It is read by the text installer's own loader,
+# so an answer refused there is refused here and a secret in the file is
+# dropped in both. Each answer becomes the starting value of its question, and
+# every page and the erase gate are still there to go through.
+gb_preload_answers() {
+  local file=${AURADE_INSTALLER_ANSWERS:-}
+  [[ -n $file ]] || return 0
+  if ! answers_load "$file"; then
+    printf 'aurade-installer-gui-bridge: the answers in %s could not be read, so every question starts empty\n' "$file" >&2
+    return 0
+  fi
+  if (( ${#ANSWERS_REJECTED[@]} )); then
+    printf 'aurade-installer-gui-bridge: not taken from %s: %s\n' "$file" "${ANSWERS_REJECTED[*]}" >&2
+  fi
+  # The console is on the file's keymap now (apply_answer). The screen has to
+  # be as well, or the typing test on the first page types one layout under a
+  # picker that names another. A layout this screen cannot type is dropped, the
+  # same as one chosen on the page, and the console goes back with it.
+  [[ -n ${ANSWERS[keymap]:-} && -n ${AURADE_LIVE_XKB:-} ]] || return 0
+  if ! gb_layout_symbols "${ANSWERS[keymap]}" || ! gb_apply_layout "$GB_LAYOUT_SYMBOLS"; then
+    printf 'aurade-installer-gui-bridge: this screen cannot type the keymap %s from %s, so it starts on US\n' \
+      "${ANSWERS[keymap]}" "$file" >&2
+    unset 'ANSWERS[keymap]'
+    apply_answer keymap us || true
+  fi
+}
+
+gb_preload_answers
 
 GB_DISPATCH=_gb_dispatch_full
 (( ! PLAN_ONLY )) || GB_DISPATCH=_gb_dispatch_plan_only
