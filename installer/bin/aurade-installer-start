@@ -49,7 +49,7 @@ Options:
   --graphical        Try the graphical installer even if the probe advises text
   --safe-graphics    Graphical, with every acceleration path skipped
   --plan-only        Ask the questions and check the plan; never offer to erase
-  --answers FILE     Start the text installer with the answers in FILE filled in
+  --answers FILE     Start the installer with the answers in FILE filled in
   --express          With --answers and --password-hash-file: install without asking
                      (a virtual machine with a blank disk only)
   --password-hash-file FILE  The account's password hash, for --express
@@ -84,6 +84,7 @@ note() { printf 'aurade-installer-start: %s\n' "$*" >&2; }
 
 MODE=auto
 PASSTHROUGH=()
+ANSWERS_IN=
 # Arguments for the graphical front end only. The text installer never sees
 # these, and `run_text` passes only what both understand.
 GUI_EXTRA=()
@@ -124,12 +125,16 @@ while (($#)); do
     --safe-graphics)
       MODE=graphical; GUI_EXTRA+=(--force); export AURADE_SAFE_GRAPHICS=1; shift ;;
     --plan-only) PASSTHROUGH+=(--plan-only); shift ;;
-    # Only the text installer reads an answer file, so asking for one asks for
-    # it. The graphical installer would open with every question blank, which
-    # is the opposite of what whoever wrote the file wanted.
+    # Either installer starts from an answer file. The text one is handed it
+    # as --answers (see `run_text`). The graphical one never sees it as an
+    # argument: its model process reads it from the environment, which the
+    # front end passes on, and the path is made absolute because nothing says
+    # that process starts in this directory.
     --answers)
       [[ -n ${2:-} ]] || { echo 'aurade-installer-start: --answers needs a file' >&2; exit 2; }
-      MODE=text; PASSTHROUGH+=(--answers "$2"); shift 2 ;;
+      ANSWERS_IN=$2
+      [[ $ANSWERS_IN == /* ]] || ANSWERS_IN=$PWD/$ANSWERS_IN
+      shift 2 ;;
     --express) MODE=text; PASSTHROUGH+=(--express); shift ;;
     --password-hash-file)
       [[ -n ${2:-} ]] || { echo 'aurade-installer-start: --password-hash-file needs a file' >&2; exit 2; }
@@ -139,6 +144,8 @@ while (($#)); do
   esac
 done
 
+[[ -z $ANSWERS_IN ]] || export AURADE_INSTALLER_ANSWERS=$ANSWERS_IN
+
 TUI=$(_find aurade-installer-tui) || {
   echo 'aurade-installer-start: the text installer is missing from this image' >&2
   exit 1
@@ -146,7 +153,7 @@ TUI=$(_find aurade-installer-tui) || {
 
 run_text() {
   cleanup
-  exec "$TUI" ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
+  exec "$TUI" ${ANSWERS_IN:+--answers "$ANSWERS_IN"} ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
 }
 
 [[ $MODE != text && ${AURADE_FORCE_TUI:-0} != 1 ]] || run_text

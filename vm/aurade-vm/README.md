@@ -79,9 +79,10 @@ and AuraDE becomes one more session at the login screen.
 
 The answers go on a small ISO labelled `AURADE_ANS`, attached as a second
 optical drive. When the live system starts, `aurade-installer-autostart` copies
-`answers.txt` off it and starts the text installer with `--answers`. The file
-holds no password or passphrase, and the installer checks every line exactly
-as if it had been typed.
+`answers.txt` off it and starts the installer the boot menu picked with them
+filled in: the graphical one by default, the text one from its own entry. The
+file holds no password or passphrase, and either installer checks every line
+exactly as if it had been typed. Express always uses the text installer.
 
 For Express the disk also carries `express` and `password.hash`. The password
 is hashed here with SHA-512 crypt, the same kind the installer makes itself, so

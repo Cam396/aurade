@@ -1,5 +1,5 @@
-// Package answers writes the answer file the AuraDE text installer reads with
-// --answers, and the small disk that carries it into a virtual machine.
+// Package answers writes the answer file the AuraDE installer starts from,
+// graphical or text, and the small disk that carries it into a virtual machine.
 //
 // The installer checks every line again as though it had been typed, drops
 // anything that does not pass, and never accepts a password from the file. The

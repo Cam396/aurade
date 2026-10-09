@@ -62,6 +62,7 @@ STUB
 cat >"$TMP/stub/cage" <<'STUB'
 #!/usr/bin/env bash
 printf 'cage %s\n' "$*" >>"$AURADE_LAUNCH_LOG"
+printf 'answers=%s\n' "${AURADE_INSTALLER_ANSWERS:-unset}" >>"$AURADE_LAUNCH_LOG"
 printf 'runtime=%s mode=%s\n' "${XDG_RUNTIME_DIR:-unset}" \
   "$(stat -c '%a' -- "${XDG_RUNTIME_DIR:-/missing}" 2>/dev/null || printf 'missing')" \
   >>"$AURADE_LAUNCH_LOG"
@@ -313,15 +314,39 @@ PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
 grep -q -- '--plan-only' "$TMP/launch.log" ||
   fail 'plan-only was dropped on the way to the graphical installer'
 
-# An answer file is something only the text installer reads, so asking for one
-# on a machine that could show the graphical installer still gets the text one,
-# with the file passed through.
+# An answer file starts the graphical installer on a machine that can show it.
+# The file is not an argument the front end knows: its model process finds it
+# in the environment, by a path that does not depend on where it starts.
 launch
 PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
   "$TMP/bin/aurade-installer-start" --answers "$TMP/some-answers" >/dev/null 2>&1 ||
   fail 'the launcher failed with an answer file'
+logged 'cage -- ' || fail 'an answer file kept a usable machine from the graphical installer'
+logged "answers=$TMP/some-answers" || fail 'the graphical installer was not given the answer file'
+! logged '--answers' || fail 'the answer file was passed to the graphical front end as an argument it does not take'
+! logged 'tui' || fail 'an answer file started the text installer as well'
+# Relative, it reaches the model as the same file.
+launch
+(cd "$TMP" && PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" --answers some-answers >/dev/null 2>&1) ||
+  fail 'the launcher failed with a relative answer file'
+logged "answers=$TMP/some-answers" || fail 'a relative answer file did not become an absolute one'
+# The text installer still gets it as an argument.
+launch
+PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" --text --answers "$TMP/some-answers" >/dev/null 2>&1 ||
+  fail 'the launcher failed with an answer file and --text'
 logged "tui --answers $TMP/some-answers" || fail 'the answer file did not reach the text installer'
-! logged 'cage -- ' || fail 'an answer file started the graphical installer'
+! logged 'cage -- ' || fail '--text started the graphical installer'
+# Express is the text installer's alone, whatever the machine could show.
+launch
+PATH="$TMP/stub:$PATH" AURADE_PROBE_DRI_DIR="$TMP/dri" \
+  "$TMP/bin/aurade-installer-start" --answers "$TMP/some-answers" --express \
+  --password-hash-file "$TMP/some-hash" >/dev/null 2>&1 ||
+  fail 'the launcher failed with an express install'
+logged "tui --answers $TMP/some-answers --express --password-hash-file $TMP/some-hash" ||
+  fail 'an express install did not reach the text installer whole'
+! logged 'cage -- ' || fail 'an express install started the graphical installer'
 
 # --- the boot menu choice reaches a front end --------------------------------
 #
@@ -508,6 +533,9 @@ logged 'start --text' || fail 'a repeated request did not resolve the way the ke
 
 # --- answers prepared by aurade-vm -------------------------------------------
 #
+# Whichever installer the entry asked for starts with them filled in, apart
+# from express, which nobody is watching and which only the text one does.
+#
 # The VM tool attaches a small disk holding the answers its user gave. The
 # graphical entry turns into the text installer with them, because only the
 # text installer reads them; the copy is private; a disk with no answers on it
@@ -516,14 +544,21 @@ mkdir -p "$TMP/answers-disk" "$TMP/empty-disk"
 printf 'hostname=vmtest\n' >"$TMP/answers-disk/answers.txt"
 ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=gui' ||
   fail 'the graphical entry failed with an answers disk'
-logged "start --text --answers $TMP/answers-copy" ||
-  fail 'an answers disk did not start the text installer with the answers'
+logged "start --graphical --answers $TMP/answers-copy" ||
+  fail 'an answers disk did not start the graphical installer with the answers'
 cmp -s "$TMP/answers-disk/answers.txt" "$TMP/answers-copy" ||
   fail 'the answers were not copied off the disk'
 [[ $(stat -c %a "$TMP/answers-copy") == 600 ]] || fail 'the copied answers are readable by others'
 ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=speech' ||
   fail 'the speech entry failed with an answers disk'
 logged 'start --text --answers' || fail 'the speech entry dropped the answers'
+ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=safe' ||
+  fail 'the safe graphics entry failed with an answers disk'
+logged "start --graphical --safe-graphics --answers $TMP/answers-copy" ||
+  fail 'the safe graphics entry dropped the answers'
+ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=text' ||
+  fail 'the text entry failed with an answers disk'
+logged "start --text --answers $TMP/answers-copy" || fail 'the text entry dropped the answers'
 rm -f "$TMP/answers-copy"
 ANSWERS_DEVICE="$TMP/empty-disk" autostart 'aurade.installer=gui' ||
   fail 'the graphical entry failed with an empty answers disk'
@@ -545,7 +580,7 @@ rm -f "$TMP/express-disk/password.hash" "$TMP/express-hash"
 ANSWERS_DEVICE="$TMP/express-disk" AURADE_EXPRESS_HASH_FILE="$TMP/express-hash" autostart 'aurade.installer=gui' ||
   fail 'the graphical entry failed with an express disk that has no hash'
 ! logged '--express' || fail 'an express disk with no password hash started an express install'
-logged 'start --text --answers' || fail 'an express disk with no hash lost the answers'
+logged 'start --graphical --answers' || fail 'an express disk with no hash lost the answers'
 ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=none' ||
   fail 'no installer requested, with an answers disk'
 ! started || fail 'an answers disk started an installer nobody asked for'
