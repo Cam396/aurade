@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -58,7 +57,7 @@ type Model struct {
 	screen   screen
 	width    int
 	height   int
-	existing []string // VM names already in BaseDir
+	existing []hv.Record // VMs already in BaseDir
 
 	welcomeIdx int // 0 = make a new VM, 1.. = start an existing one
 
@@ -107,29 +106,11 @@ func New(opt Options) Model {
 		spin:      sp,
 		bar:       progress.New(progress.WithGradient("#A78BFA", "#5EEAD4")),
 		detecting: true,
-		existing:  existingVMs(opt.BaseDir),
+		existing:  hv.Existing(opt.BaseDir),
 	}
 	m.questions = questionForm(h)
 	m.machine = machineForm(h, uniqueName(opt.BaseDir))
 	return m
-}
-
-func existingVMs(base string) []string {
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(base, e.Name(), e.Name()+".vmx")); err == nil {
-			names = append(names, e.Name())
-		}
-	}
-	sort.Strings(names)
-	return names
 }
 
 func uniqueName(base string) string {
@@ -254,7 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 	case detectMsg:
-		m.backends = msg
+		m.backends = nil
+		for _, d := range msg {
+			if !d.det.Foreign {
+				m.backends = append(m.backends, d)
+			}
+		}
 		m.detecting = false
 		if av := m.available(); len(av) > 0 {
 			m.backendIdx = av[0]
@@ -306,7 +292,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			if m.welcomeIdx > 0 {
-				if len(m.available()) == 0 {
+				if m.detecting {
 					return m, nil
 				}
 				return m.startExisting(m.existing[m.welcomeIdx-1])
@@ -416,9 +402,21 @@ func (m Model) buildPlan() *plan.Plan {
 	return p
 }
 
-func (m Model) startExisting(name string) (tea.Model, tea.Cmd) {
-	b := m.backends[m.available()[0]].backend
-	return m.start(&plan.Plan{Backend: b, BaseDir: m.opt.BaseDir, Spec: hv.Spec{Name: name}})
+func (m Model) startExisting(r hv.Record) (tea.Model, tea.Cmd) {
+	for _, d := range m.backends {
+		if d.backend.ID() != r.Backend {
+			continue
+		}
+		if !d.det.Available {
+			m.err = fmt.Errorf("%s made %s, and it is not ready on this computer: %s", d.backend.Name(), r.Spec.Name, d.det.Why)
+			m.screen = sDone
+			return m, nil
+		}
+		return m.start(&plan.Plan{Backend: d.backend, BaseDir: m.opt.BaseDir, Spec: hv.Spec{Name: r.Spec.Name}})
+	}
+	m.err = fmt.Errorf("%s was made with %s, which this version does not know", r.Spec.Name, r.Backend)
+	m.screen = sDone
+	return m, nil
 }
 
 func (m Model) start(p *plan.Plan) (tea.Model, tea.Cmd) {
@@ -465,6 +463,15 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(banner() + "\n\n" + body)
 }
 
+func backendName(ds []detected, id string) string {
+	for _, d := range ds {
+		if d.backend.ID() == id {
+			return d.backend.Name()
+		}
+	}
+	return id
+}
+
 func keys(s string) string { return "\n" + keysStyle.Render(s) }
 
 // wrap fits text to the terminal, indented under the line it explains.
@@ -490,8 +497,8 @@ func (m Model) viewWelcome() string {
 		b.WriteString(warnStyle.Render("Hypervisors here cannot run it at a usable speed.") + "\n\n")
 	}
 	opts := []string{"Make a new AuraDE VM"}
-	for _, n := range m.existing {
-		opts = append(opts, "Start "+n)
+	for _, r := range m.existing {
+		opts = append(opts, "Start "+r.Spec.Name+dimStyle.Render("  ("+backendName(m.backends, r.Backend)+")"))
 	}
 	for i, o := range opts {
 		if i == m.welcomeIdx {

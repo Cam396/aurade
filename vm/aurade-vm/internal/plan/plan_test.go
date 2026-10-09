@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 type fakeHV struct {
 	created, started, finished int
-	running                    bool
+	running, failStart         bool
 	spec                       hv.Spec
 }
 
@@ -23,7 +24,13 @@ func (f *fakeHV) Detect(context.Context) hv.Detection   { return hv.Detection{Av
 func (f *fakeHV) GuestDisk() string                     { return "/dev/vda" }
 func (f *fakeHV) Exists(s hv.Spec) bool                 { return f.created > 0 }
 func (f *fakeHV) Running(context.Context, hv.Spec) bool { return f.running }
-func (f *fakeHV) Start(context.Context, hv.Spec) error  { f.started++; return nil }
+func (f *fakeHV) Start(context.Context, hv.Spec) error {
+	f.started++
+	if f.failStart {
+		return fmt.Errorf("would not start")
+	}
+	return nil
+}
 func (f *fakeHV) Finish(context.Context, hv.Spec) error {
 	f.finished++
 	return nil
@@ -101,5 +108,30 @@ func TestPlainWritesNoAnswers(t *testing.T) {
 	}
 	if f.spec.AnswersISO != "" {
 		t.Fatal("plain mode attached answers")
+	}
+}
+
+// A first start that fails leaves the answers for the next try.
+func TestFailedFirstStartKeepsTheAnswers(t *testing.T) {
+	base := t.TempDir()
+	iso := filepath.Join(base, "local.iso")
+	os.WriteFile(iso, []byte("x"), 0o600)
+	f := &fakeHV{failStart: true}
+	p := &Plan{Backend: f, Mode: Guided, BaseDir: base, LocalISO: iso,
+		Spec: hv.Spec{Name: "aurade", MemoryMB: 4096, CPUs: 2, DiskGB: 30}, Answers: answers.Answers{Hostname: "box"}}
+	if err := p.Run(context.Background(), nil); err == nil {
+		t.Fatal("a failed start was not reported")
+	}
+	f.failStart = false
+	p2 := &Plan{Backend: f, BaseDir: base, Spec: hv.Spec{Name: "aurade"}}
+	if err := p2.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.finished != 0 {
+		t.Fatal("the answers were tidied away before the VM had ever started")
+	}
+	p3 := &Plan{Backend: f, BaseDir: base, Spec: hv.Spec{Name: "aurade"}}
+	if err := p3.Run(context.Background(), nil); err != nil || f.finished != 1 {
+		t.Fatalf("after a start, the next run should tidy up: %v %d", err, f.finished)
 	}
 }

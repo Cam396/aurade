@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -26,6 +27,9 @@ type Detection struct {
 	Available bool
 	Version   string // as the hypervisor reports it
 	Why       string // when not available: what to install or change, in a sentence
+	// Foreign is set when this hypervisor does not exist for this kind of
+	// computer at all, so it is not worth listing.
+	Foreign bool
 }
 
 // AnswersFile is the answers disk's name inside a VM's folder.
@@ -52,9 +56,16 @@ type Backend interface {
 	Finish(ctx context.Context, spec Spec) error
 }
 
-// All lists every backend this build knows, in the order they are offered.
+// All lists every backend this build knows, best first for this kind of
+// computer: the first one that is ready is the one offered.
 func All() []Backend {
-	return []Backend{NewVMware()}
+	switch runtime.GOOS {
+	case "windows":
+		return []Backend{NewVMware(), NewHyperV(), NewVirtualBox(), NewQEMU(), NewLibvirt(), NewParallels()}
+	case "darwin":
+		return []Backend{NewVMware(), NewParallels(), NewQEMU(), NewVirtualBox(), NewLibvirt(), NewHyperV()}
+	}
+	return []Backend{NewLibvirt(), NewQEMU(), NewVMware(), NewVirtualBox(), NewHyperV(), NewParallels()}
 }
 
 // Find returns the backend with this id.

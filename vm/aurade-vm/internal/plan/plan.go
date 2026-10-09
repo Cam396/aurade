@@ -53,16 +53,30 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 		emit = func(Event) {}
 	}
 	p.Spec.Dir = VMDir(p.BaseDir, p.Spec.Name)
+	// A VM made earlier keeps its own settings; only the name was asked for.
+	// One with no record is from an early build that recorded nothing, and
+	// had always been started.
+	rec := hv.Record{Backend: p.Backend.ID(), Started: true}
+	for _, r := range hv.Existing(p.BaseDir) {
+		if r.Spec.Name == p.Spec.Name && r.Backend == p.Backend.ID() && r.Spec.MemoryMB > 0 {
+			p.Spec, rec = r.Spec, r
+		}
+	}
 	if p.Backend.Exists(p.Spec) {
 		if p.Backend.Running(ctx, p.Spec) {
 			emit(Event{Step: "Your AuraDE VM is already running"})
 			return p.Backend.Start(ctx, p.Spec)
 		}
 		emit(Event{Step: "Starting the AuraDE VM you already have"})
-		if err := p.Backend.Finish(ctx, p.Spec); err != nil {
-			return fmt.Errorf("tidying up after the install: %w", err)
+		if rec.Started {
+			if err := p.Backend.Finish(ctx, p.Spec); err != nil {
+				return fmt.Errorf("tidying up after the install: %w", err)
+			}
 		}
-		return p.Backend.Start(ctx, p.Spec)
+		if err := p.Backend.Start(ctx, p.Spec); err != nil {
+			return err
+		}
+		return p.markStarted(rec)
 	}
 	if p.Mode == Guided {
 		if err := p.Answers.Validate(); err != nil {
@@ -120,6 +134,20 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 	if err := p.Backend.Create(ctx, p.Spec, func(s string) { emit(Event{Log: s}) }); err != nil {
 		return err
 	}
+	if err := hv.WriteRecord(hv.Record{Backend: p.Backend.ID(), Spec: p.Spec}); err != nil {
+		return err
+	}
 	emit(Event{Step: "Starting the VM"})
-	return p.Backend.Start(ctx, p.Spec)
+	if err := p.Backend.Start(ctx, p.Spec); err != nil {
+		return err
+	}
+	return p.markStarted(hv.Record{Backend: p.Backend.ID(), Spec: p.Spec})
+}
+
+func (p *Plan) markStarted(r hv.Record) error {
+	if r.Started || r.Spec.Dir == "" {
+		return nil
+	}
+	r.Started = true
+	return hv.WriteRecord(r)
 }
