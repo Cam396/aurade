@@ -30,6 +30,7 @@ AURADE_LOCAL_AI_BOOTSTRAP="${AURADE_LOCAL_AI_BOOTSTRAP:-1}"
 AURADE_LOCAL_AI_AUTO_DOWNLOAD="${AURADE_LOCAL_AI_AUTO_DOWNLOAD:-}"
 AURADE_DISABLE_CHROMEVOX_HINT_TIMER="${AURADE_DISABLE_CHROMEVOX_HINT_TIMER:-1}"
 AURADE_CHROME_EXTRA_FLAGS="${AURADE_CHROME_EXTRA_FLAGS:-}"
+AURADE_DEFAULT_WALLPAPER="${AURADE_DEFAULT_WALLPAPER:-}"
 AURADE_GOOGLE_API_CONF="${AURADE_GOOGLE_API_CONF:-${GOOGLE_API_CONF}}"
 AURADE_SKIP_SHILL_CHECK="${AURADE_SKIP_SHILL_CHECK:-0}"
 AURADE_USE_HOST_POWER_STATUS="${AURADE_USE_HOST_POWER_STATUS:-1}"
@@ -97,6 +98,7 @@ if [ "$(id -u)" -eq 0 ]; then
         AURADE_LOCAL_AI_AUTO_DOWNLOAD="${AURADE_LOCAL_AI_AUTO_DOWNLOAD}" \
         AURADE_DISABLE_CHROMEVOX_HINT_TIMER="${AURADE_DISABLE_CHROMEVOX_HINT_TIMER}" \
         AURADE_CHROME_EXTRA_FLAGS="${AURADE_CHROME_EXTRA_FLAGS}" \
+        AURADE_DEFAULT_WALLPAPER="${AURADE_DEFAULT_WALLPAPER}" \
         AURADE_SKIP_SHILL_CHECK="${AURADE_SKIP_SHILL_CHECK}" \
         AURADE_USE_HOST_POWER_STATUS="${AURADE_USE_HOST_POWER_STATUS}" \
         AURADE_ENABLE_PIPEWIRE_AUDIO="${AURADE_ENABLE_PIPEWIRE_AUDIO}" \
@@ -438,6 +440,11 @@ FLAGS=(
 # trial testing config that AuraDE builds read turns it off on ChromeOS.
 AURADE_ENABLED_FEATURES=(AudioFocusEnforcement)
 
+# Chrome keeps only the last --disable-features it is given, so every block
+# adds to this list and it is passed once, just before Chrome starts. A
+# feature named here stays off whatever the field trial testing config says.
+AURADE_DISABLED_FEATURES=()
+
 if [ "${AURADE_FEATURE_PROFILE}" = "plus" ] || \
     [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus" ] || \
     [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus_ai" ]; then
@@ -492,13 +499,34 @@ if [ "${AURADE_FEATURE_PROFILE}" = "plus" ] || \
     AURADE_ENABLED_FEATURES+=("${AURADE_PLUS_FEATURES[@]}")
 fi
 
+# The wallpaper picked during the install, or set in features.conf. Ash shows
+# its default until somebody picks another, and takes the desktop's colours
+# from it. ChromeOS's time of day wallpaper replaces the default on a new
+# account's first sign-in, and the field trial testing config turns it on in
+# every profile, so with a wallpaper named it is turned off, and its screen
+# saver with it, which needs it. One that cannot be read is ignored and the
+# desktop keeps its own.
+if [ -n "${AURADE_DEFAULT_WALLPAPER}" ]; then
+    if [ -r "${AURADE_DEFAULT_WALLPAPER}" ]; then
+        FLAGS+=(--default-wallpaper-large="${AURADE_DEFAULT_WALLPAPER}"
+            --default-wallpaper-small="${AURADE_DEFAULT_WALLPAPER}")
+        AURADE_KEPT_FEATURES=()
+        for feature in "${AURADE_ENABLED_FEATURES[@]}"; do
+            case "${feature}" in
+                FeatureManagementTimeOfDayWallpaper|FeatureManagementTimeOfDayScreenSaver) ;;
+                *) AURADE_KEPT_FEATURES+=("${feature}") ;;
+            esac
+        done
+        AURADE_ENABLED_FEATURES=("${AURADE_KEPT_FEATURES[@]}")
+        AURADE_DISABLED_FEATURES+=(FeatureManagementTimeOfDayWallpaper FeatureManagementTimeOfDayScreenSaver)
+    else
+        echo "WARNING: AURADE_DEFAULT_WALLPAPER=${AURADE_DEFAULT_WALLPAPER} cannot be read; keeping the default wallpaper." >&2
+    fi
+fi
+
 if [ -n "${AURADE_ASH_HOST_WINDOW_BOUNDS}" ]; then
     FLAGS+=(--ash-host-window-bounds="${AURADE_ASH_HOST_WINDOW_BOUNDS}")
 fi
-
-# Chrome keeps only the last --disable-features it is given, so every block
-# adds to this list and it is passed once, just before Chrome starts.
-AURADE_DISABLED_FEATURES=()
 
 if [ "${AURADE_ENABLE_LOCAL_ACCOUNTS}" = "1" ]; then
     FLAGS+=(--aurade-enable-local-accounts)
