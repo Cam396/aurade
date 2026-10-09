@@ -50,6 +50,9 @@ Options:
   --safe-graphics    Graphical, with every acceleration path skipped
   --plan-only        Ask the questions and check the plan; never offer to erase
   --answers FILE     Start the text installer with the answers in FILE filled in
+  --express          With --answers and --password-hash-file: install without asking
+                     (a virtual machine with a blank disk only)
+  --password-hash-file FILE  The account's password hash, for --express
   -h, --help         This message
 
 Environment:
@@ -127,6 +130,10 @@ while (($#)); do
     --answers)
       [[ -n ${2:-} ]] || { echo 'aurade-installer-start: --answers needs a file' >&2; exit 2; }
       MODE=text; PASSTHROUGH+=(--answers "$2"); shift 2 ;;
+    --express) MODE=text; PASSTHROUGH+=(--express); shift ;;
+    --password-hash-file)
+      [[ -n ${2:-} ]] || { echo 'aurade-installer-start: --password-hash-file needs a file' >&2; exit 2; }
+      MODE=text; PASSTHROUGH+=(--password-hash-file "$2"); shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "aurade-installer-start: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac

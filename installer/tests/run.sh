@@ -31,6 +31,7 @@ TESTS=(
   test-probe.sh
   test-renderer-chain.sh
   test-tui-engine.sh
+  test-express.sh
   test-gui-theme.sh
   test-wallpapers.sh
   test-arcade.sh

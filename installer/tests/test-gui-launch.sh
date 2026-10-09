@@ -349,6 +349,7 @@ autostart() {
     AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
     AURADE_ANSWERS_DEVICE="${ANSWERS_DEVICE:-$TMP/no-answers-disk}" \
     AURADE_ANSWERS_FILE="$TMP/answers-copy" \
+    AURADE_EXPRESS_HASH_FILE="${AURADE_EXPRESS_HASH_FILE:-$TMP/express-hash-unused}" \
     "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
 }
 
@@ -360,6 +361,7 @@ autostart_again() {
     AURADE_AUTOSTART_STAMP="$TMP/autostart-stamp" \
     AURADE_ANSWERS_DEVICE="${ANSWERS_DEVICE:-$TMP/no-answers-disk}" \
     AURADE_ANSWERS_FILE="$TMP/answers-copy" \
+    AURADE_EXPRESS_HASH_FILE="${AURADE_EXPRESS_HASH_FILE:-$TMP/express-hash-unused}" \
     "$AUTOSTART" >>"$TMP/launch.log" 2>&1 || return $?
 }
 
@@ -527,6 +529,23 @@ ANSWERS_DEVICE="$TMP/empty-disk" autostart 'aurade.installer=gui' ||
   fail 'the graphical entry failed with an empty answers disk'
 logged 'start --graphical' || fail 'an answers disk with no answers changed the front end'
 ! logged '--answers' || fail 'an empty answers disk passed answers'
+# An express disk: the answers, the word, and a password hash. The hash is
+# copied off privately, and both reach the text installer.
+mkdir -p "$TMP/express-disk"
+cp "$TMP/answers-disk/answers.txt" "$TMP/express-disk/"
+: >"$TMP/express-disk/express"
+printf '%s\n' '$6$salt$hash' >"$TMP/express-disk/password.hash"
+ANSWERS_DEVICE="$TMP/express-disk" AURADE_EXPRESS_HASH_FILE="$TMP/express-hash" autostart 'aurade.installer=gui' ||
+  fail 'the graphical entry failed with an express disk'
+logged "start --text --answers $TMP/answers-copy --express --password-hash-file $TMP/express-hash" ||
+  fail 'an express disk did not start an express install'
+[[ $(stat -c %a "$TMP/express-hash") == 600 ]] || fail 'the copied password hash is readable by others'
+# The word with no hash is not express.
+rm -f "$TMP/express-disk/password.hash" "$TMP/express-hash"
+ANSWERS_DEVICE="$TMP/express-disk" AURADE_EXPRESS_HASH_FILE="$TMP/express-hash" autostart 'aurade.installer=gui' ||
+  fail 'the graphical entry failed with an express disk that has no hash'
+! logged '--express' || fail 'an express disk with no password hash started an express install'
+logged 'start --text --answers' || fail 'an express disk with no hash lost the answers'
 ANSWERS_DEVICE="$TMP/answers-disk" autostart 'aurade.installer=none' ||
   fail 'no installer requested, with an answers disk'
 ! started || fail 'an answers disk started an installer nobody asked for'

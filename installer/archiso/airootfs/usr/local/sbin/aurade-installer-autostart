@@ -30,6 +30,10 @@ STAMP=${AURADE_AUTOSTART_STAMP:-/run/aurade-installer-autostarted}
 ANSWERS_DEVICE=${AURADE_ANSWERS_DEVICE:-/dev/disk/by-label/AURADE_ANS}
 ANSWERS_MOUNT=${AURADE_ANSWERS_MOUNT:-/run/aurade-answers}
 ANSWERS_FILE=${AURADE_ANSWERS_FILE:-/run/aurade-answers.txt}
+# Express asks for no questions at all. The disk says so with a file named
+# `express` next to the answers, and carries the account's password as a hash.
+EXPRESS_HASH=${AURADE_EXPRESS_HASH_FILE:-/run/aurade-express.hash}
+EXPRESS=0
 
 # The last occurrence wins, the way the kernel treats a repeated parameter.
 aurade_requested_front_end() {
@@ -105,6 +109,10 @@ fetch_answers() {
   if [[ -f $src/answers.txt ]]; then
     install -m 600 -- "$src/answers.txt" "$ANSWERS_FILE" 2>/dev/null && status=0
   fi
+  if (( status == 0 )) && [[ -f $src/express && -f $src/password.hash ]] &&
+    install -m 600 -- "$src/password.hash" "$EXPRESS_HASH" 2>/dev/null; then
+    EXPRESS=1
+  fi
   (( ! mounted )) || umount -- "$ANSWERS_MOUNT" >/dev/null 2>&1 || true
   return $status
 }
@@ -162,7 +170,12 @@ main() {
   # the questions in before the machine booted wants to see them filled in.
   if fetch_answers; then
     answers=(--answers "$ANSWERS_FILE")
-    printf 'Found answers prepared for this install. Starting the text installer with them filled in.\n' >&2
+    if (( EXPRESS )); then
+      answers+=(--express --password-hash-file "$EXPRESS_HASH")
+      printf 'Found an express install prepared for this virtual machine.\n' >&2
+    else
+      printf 'Found answers prepared for this install. Starting the text installer with them filled in.\n' >&2
+    fi
     case $choice in gui|safe) choice=text ;; esac
   fi
 
