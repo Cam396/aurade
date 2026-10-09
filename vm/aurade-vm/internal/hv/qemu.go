@@ -171,8 +171,19 @@ func (q *QEMU) Args(s Spec, code string) []string {
 		"-audiodev", "none,id=snd0",
 		"-display", display,
 		"-pidfile", q.pidfile(s))
+	// The channel the QEMU guest agent, which the installer adds, talks
+	// over: without it the agent never starts. A socket path has to fit in
+	// 108 bytes, so a VM in a very deep folder goes without.
+	if sock := q.agentSocket(s); len(sock) < 100 {
+		args = append(args, "-device", "virtio-serial-pci",
+			"-chardev", "socket,id=qga0,path="+sock+",server=on,wait=off",
+			"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0")
+	}
 	return args
 }
+
+// agentSocket is where the guest agent's channel comes out on this computer.
+func (q *QEMU) agentSocket(s Spec) string { return filepath.Join(s.Dir, "qga.sock") }
 
 func (q *QEMU) Start(ctx context.Context, s Spec) error {
 	if q.Running(ctx, s) {
