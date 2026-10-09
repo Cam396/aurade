@@ -90,6 +90,9 @@ func (v *VMware) findTool(name string) string {
 var vmrunVersionRe = regexp.MustCompile(`vmrun version (\d+)\.(\d+)`)
 
 func (v *VMware) Detect(ctx context.Context) Detection {
+	if v.goos != "windows" && v.goos != "linux" && v.goos != "darwin" {
+		return Detection{Foreign: true, Why: "VMware runs on Windows, Linux and Macs."}
+	}
 	if v.goos == "darwin" && v.goarch == "arm64" {
 		return Detection{Why: "VMware Fusion on an Apple Silicon Mac can only run Arm systems, and AuraDE is built for x86_64 PCs."}
 	}

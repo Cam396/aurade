@@ -29,12 +29,19 @@ need it.
 
 ## Hypervisors
 
-| Hypervisor | Hosts | Status |
+| Hypervisor | Hosts | Tested end to end |
 | --- | --- | --- |
-| VMware Workstation | Windows, Linux | Ready |
-| VMware Fusion | Intel Macs | Ready |
-| QEMU, libvirt, VirtualBox, Hyper-V | | Planned (the scripts beside this folder cover them today) |
-| UTM, GNOME Boxes, Parallels | | Planned |
+| VMware Workstation | Windows, Linux | Yes, through a full install |
+| VMware Fusion | Intel Macs | No |
+| QEMU (KVM, or HVF on a Mac) | Linux, Intel Macs | Yes, to the pre-filled installer |
+| libvirt, which GNOME Boxes and virt-manager use | Linux | Yes, to the pre-filled installer |
+| VirtualBox | Windows, Linux, Intel Macs | No |
+| Hyper-V | Windows Pro and Enterprise, as administrator | No |
+| Parallels Desktop (Pro or Business) | Intel Macs | No |
+
+`aurade-vm --hypervisors` lists what it finds on this computer and what is
+missing from the rest. A VM is always started again with the hypervisor that
+made it; `aurade-vm.json` in its folder records which.
 
 AuraDE is built for x86_64 PCs. On an Apple Silicon Mac no hypervisor can run
 it at a usable speed, and `aurade-vm` says so instead of trying.

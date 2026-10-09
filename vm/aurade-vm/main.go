@@ -45,7 +45,7 @@ func run() error {
 		tag        = flag.String("release", os.Getenv("AURADE_VM_VERSION"), "a release tag such as v1.1.2 (default: the latest)")
 		iso        = flag.String("iso", "", "use this AuraDE ISO instead of downloading one (it is not checked)")
 		yes        = flag.Bool("yes", false, "do not ask; make and start the VM from the flags and defaults")
-		hypervisor = flag.String("hypervisor", "vmware", "with --yes: which hypervisor")
+		hypervisor = flag.String("hypervisor", "vmware", "with --yes: which hypervisor: vmware, qemu, libvirt, virtualbox, hyperv or parallels")
 		mode       = flag.String("mode", "guided", "with --yes: guided (answers filled in) or plain")
 		name       = flag.String("name", "aurade", "with --yes: the VM's name")
 		memory     = flag.Int("memory", 6144, "with --yes: MiB of memory, 4096 at least")
@@ -60,6 +60,7 @@ func run() error {
 		encrypt    = flag.String("encrypt", "no", "with --yes, guided: encrypt the disk (yes or no)")
 		filesystem = flag.String("filesystem", "btrfs", "with --yes, guided: btrfs, ext4 or xfs")
 		showVer    = flag.Bool("version", false, "print the version and exit")
+		listHV     = flag.Bool("hypervisors", false, "list the hypervisors on this computer and exit")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "aurade-vm %s: try AuraDE in a virtual machine.\n\n", version)
@@ -69,6 +70,19 @@ func run() error {
 	flag.Parse()
 	if *showVer {
 		fmt.Println("aurade-vm", version)
+		return nil
+	}
+	if *listHV {
+		for _, b := range hv.All() {
+			d := b.Detect(context.Background())
+			switch {
+			case d.Foreign:
+			case d.Available:
+				fmt.Printf("%-12s ready      %s %s\n", b.ID(), b.Name(), d.Version)
+			default:
+				fmt.Printf("%-12s not ready  %s: %s\n", b.ID(), b.Name(), d.Why)
+			}
+		}
 		return nil
 	}
 	if *iso != "" {
@@ -92,6 +106,12 @@ func run() error {
 	}
 	if *disk < 30 {
 		return fmt.Errorf("AuraDE needs a disk of at least 30 GB")
+	}
+	// A VM that already exists is started with whatever made it.
+	for _, r := range hv.Existing(baseDir) {
+		if r.Spec.Name == *name {
+			*hypervisor = r.Backend
+		}
 	}
 	b, err := hv.Find(*hypervisor)
 	if err != nil {
