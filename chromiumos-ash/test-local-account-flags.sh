@@ -92,4 +92,45 @@ grep -Fxq -- '--remote-debugging-port=9222' "${TMP_DIR}/output" || fail 'a test 
 grep -Fxq -- '--remote-debugging-address=127.0.0.1' "${TMP_DIR}/output" || fail 'the DevTools port is not limited to this machine'
 EXTRA_ENV=()
 
+# A wallpaper named in features.conf is Ash's default, and the time of day
+# wallpaper, which would replace it at the first sign-in, is turned off along
+# with its screen saver. The field trial testing config turns both on in every
+# profile, so leaving them out of the Plus features is not enough: they have
+# to be disabled, in every profile. Nothing else changes.
+printf 'x' >"${TMP_DIR}/wall.png"
+EXTRA_ENV=(AURADE_DEFAULT_WALLPAPER="${TMP_DIR}/wall.png")
+run_launcher 1 plus 1
+grep -Fxq -- "--default-wallpaper-large=${TMP_DIR}/wall.png" "${TMP_DIR}/output" || fail 'the wallpaper is not the default'
+grep -Fxq -- "--default-wallpaper-small=${TMP_DIR}/wall.png" "${TMP_DIR}/output" || fail 'the small wallpaper is not the default'
+if enabled_list | grep -Eq '^FeatureManagementTimeOfDay'; then
+    fail 'the time of day wallpaper would replace the one chosen'
+fi
+enabled_list | grep -Fxq FeatureManagementRoundedWindows || fail 'a wallpaper took other Plus features with it'
+[[ $(enabled_flags) == 1 ]] || fail "wallpaper: expected one --enable-features, found $(enabled_flags)"
+for profile in plus standard; do
+    run_launcher 1 "${profile}" 1
+    disabled_list | grep -Fxq FeatureManagementTimeOfDayWallpaper || \
+        fail "${profile}: the field trial config would still put the time of day wallpaper over the one chosen"
+    disabled_list | grep -Fxq FeatureManagementTimeOfDayScreenSaver || \
+        fail "${profile}: the time of day screen saver is left on without its wallpaper"
+    disabled_list | grep -Fxq PhoneHub || fail "${profile}: a wallpaper replaced the other disabled features"
+    [[ $(disabled_flags) == 1 ]] || fail "${profile}: expected one --disable-features, found $(disabled_flags)"
+done
+# Unreadable: ignored, and the Plus features stay whole.
+EXTRA_ENV=(AURADE_DEFAULT_WALLPAPER="${TMP_DIR}/missing.png")
+run_launcher 1 plus 1
+if grep -Fq -- '--default-wallpaper' "${TMP_DIR}/output"; then
+    fail 'a wallpaper that cannot be read was handed to Ash'
+fi
+enabled_list | grep -Fxq FeatureManagementTimeOfDayWallpaper || fail 'an unreadable wallpaper switched time of day off'
+if disabled_list | grep -Eq '^FeatureManagementTimeOfDay'; then
+    fail 'an unreadable wallpaper disabled time of day'
+fi
+# Without one, time of day stays in Plus.
+EXTRA_ENV=()
+run_launcher 1 plus 1
+enabled_list | grep -Fxq FeatureManagementTimeOfDayWallpaper || fail 'Plus lost the time of day wallpaper'
+if disabled_list | grep -Eq '^FeatureManagementTimeOfDay'; then
+    fail 'time of day is disabled with no wallpaper chosen'
+fi
 echo "local account flags test: PASS"
