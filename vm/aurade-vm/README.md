@@ -40,9 +40,9 @@ need it.
 
 | Hypervisor | Hosts | Tested end to end |
 | --- | --- | --- |
-| VMware Workstation | Windows, Linux | Yes, through a full install |
+| VMware Workstation | Windows, Linux | Yes: Guided and Express installs, with guest tools |
 | VMware Fusion | Intel Macs | No |
-| QEMU (KVM, or HVF on a Mac) | Linux, Intel Macs | Yes, to the pre-filled installer |
+| QEMU (KVM, or HVF on a Mac) | Linux, Intel Macs | Yes: an Express install with every desktop choice, and the guest agent |
 | libvirt, which GNOME Boxes and virt-manager use | Linux | Yes, to the pre-filled installer |
 | VirtualBox | Windows, Linux, Intel Macs | No |
 | Hyper-V | Windows Pro and Enterprise, as administrator | No |
