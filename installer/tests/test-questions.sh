@@ -239,4 +239,12 @@ ANSWERS=()
 [[ $(aurade_question_default timezone) == UTC ]] ||
   fail 'the time zone default changed with no locale answered'
 
+# The wallpapers a person can pick are the ones the installed system will
+# have: exactly the photographs the aurade-wallpapers package ships.
+packaged=$(bash -c 'source <(sed -n "/^source=(/,/^)/p" "$1"); for s in "${source[@]}"; do [[ $s == *.png ]] && printf "%s\n" "${s%.png}"; done' _ "$ROOT/aurade-wallpapers/PKGBUILD" | LC_ALL=C sort)
+offered=$(printf '%s\n' "${AURADE_DESKTOP_WALLPAPERS[@]}" | LC_ALL=C sort)
+[[ -n $packaged && $packaged == "$offered" ]] ||
+  fail "the wallpapers offered are not the ones aurade-wallpapers ships: $(diff <(printf '%s\n' "$packaged") <(printf '%s\n' "$offered") | tr '\n' ' ')"
+aurade_valid_wallpaper auto || fail 'auto is not a wallpaper answer'
+! aurade_valid_wallpaper ../../etc/shadow || fail 'a path was accepted as a wallpaper'
 echo 'installer question schema test: PASS'

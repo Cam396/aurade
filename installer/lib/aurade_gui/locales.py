@@ -213,12 +213,34 @@ STORAGE_NAMES: dict[str, dict[str, tuple[str, str]]] = {
 }
 
 
+#: The wallpaper manifest on the live image, which names each photograph.
+WALLPAPER_MANIFEST = os.environ.get(
+    "AURADE_WALLPAPER_MANIFEST", "/usr/local/share/aurade/wallpapers/manifest.tsv")
+
+
+def wallpaper_title(name: str) -> str:
+    """The title a wallpaper has in the manifest, or its name made readable."""
+    try:
+        with open(WALLPAPER_MANIFEST, encoding="utf-8") as manifest:
+            for line in manifest:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) > 1 and fields[0] == name + ".png":
+                    return fields[1]
+    except OSError:
+        pass
+    return name.partition("-")[2].replace("-", " ").capitalize() or name
+
+
 def describe_storage(question: str, value: str) -> tuple[str, str]:
     known = STORAGE_NAMES.get(question, {})
     if value in known:
         return known[value]
     if question == "swap_size":
         return (value.replace("G", " GB").replace("M", " MB"), "")
+    if question == "wallpaper":
+        if value == "auto":
+            return ("Automatic", "Changes with the time of day")
+        return (wallpaper_title(value), "The desktop's colours follow it")
     return (value, "")
 
 

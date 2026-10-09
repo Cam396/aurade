@@ -145,6 +145,28 @@ aurade_valid_apps() {
   done
 }
 
+# The photographs an installed desktop has, which are the ones the
+# aurade-wallpapers package ships, by file name without .png. The live image
+# carries more for the installer's own screens, so this is a list rather than
+# a look at a folder. test-questions.sh holds it to the package.
+AURADE_DESKTOP_WALLPAPERS=(
+  place-antelope place-bagan place-deadvlei place-fuji place-lofoten
+  place-milford place-moraine place-plitvice place-skye place-torres
+  place-trecime place-vestrahorn place-zhangjiajie quiet-beach
+  quiet-forestpath quiet-frost quiet-lonetree quiet-meadow quiet-rainleaves
+  quiet-reeds quiet-river quiet-snowpine quiet-stream wild-bioluminescence
+  wild-duststorm wild-icecave wild-lava wild-storm
+)
+
+aurade_valid_wallpaper() {
+  local name
+  [[ $1 != auto ]] || return 0
+  for name in "${AURADE_DESKTOP_WALLPAPERS[@]}"; do
+    [[ $1 != "$name" ]] || return 0
+  done
+  return 1
+}
+
 aurade_valid_yes_no() {
   case $1 in yes|no) return 0 ;; *) return 1 ;; esac
 }
