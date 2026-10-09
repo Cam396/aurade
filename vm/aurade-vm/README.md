@@ -121,8 +121,10 @@ For Express without the screens, the password comes in on standard input:
 printf '%s\n' "$PASSWORD" | aurade-vm --yes --mode express --password-stdin --username alex
 ```
 
-The desktop choices have options too: `--display-scale 125`,
-`--features plus`, `--apps firefox,flatpak` and `--update-snapshots no`.
+The desktop choices have options too: `--wallpaper quiet-rainleaves`,
+`--display-scale 125`, `--features plus`, `--apps firefox,flatpak` and
+`--update-snapshots no`. The desktop's colours follow the wallpaper. Left on
+auto, a new account gets one that changes with the time of day.
 
 `aurade-vm --help` lists every option.
 

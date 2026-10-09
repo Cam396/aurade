@@ -65,6 +65,7 @@ func run() error {
 		encrypt      = flag.String("encrypt", "no", "with --yes, guided: encrypt the disk (yes or no)")
 		filesystem   = flag.String("filesystem", "btrfs", "with --yes, guided: btrfs, ext4 or xfs")
 		scale        = flag.String("display-scale", "auto", "with --yes, guided: display size, auto, 100, 125, 150, 175 or 200")
+		wallpaper    = flag.String("wallpaper", "auto", "with --yes, guided: auto, or a wallpaper such as quiet-rainleaves")
 		profile      = flag.String("features", "auto", "with --yes, guided: auto, standard, plus, advanced_plus or advanced_plus_ai")
 		apps         = flag.String("apps", "", "with --yes, guided: extra apps, a comma list of firefox, vscode, flatpak, waydroid and devtools")
 		snapshots    = flag.String("update-snapshots", "", "with --yes, guided: a snapshot before every update, yes or no (default yes on btrfs)")
@@ -219,6 +220,7 @@ func run() error {
 	}
 	if p.Mode != plan.Plain {
 		p.Answers.DisplayScale, p.Answers.Profile, p.Answers.Apps = *scale, *profile, *apps
+		p.Answers.Wallpaper = *wallpaper
 		p.Answers.AutoSnapshots = *snapshots
 		if p.Answers.AutoSnapshots == "" {
 			p.Answers.AutoSnapshots = "no"
