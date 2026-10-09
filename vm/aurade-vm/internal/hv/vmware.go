@@ -321,7 +321,7 @@ func (v *VMware) Start(ctx context.Context, spec Spec) error {
 	if vmrun == "" {
 		return errors.New("vmrun was not found")
 	}
-	_, err := run(ctx, vmrun, "-T", v.hostType(), "start", v.vmx(spec), "gui")
+	_, err := runLogged(ctx, filepath.Join(spec.Dir, "vmrun.log"), vmrun, "-T", v.hostType(), "start", v.vmx(spec), "gui")
 	return err
 }
 

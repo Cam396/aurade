@@ -5,6 +5,7 @@ package hv
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -81,6 +82,30 @@ func Find(id string) (Backend, error) {
 func run(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	s := strings.TrimSpace(string(out))
+	if err != nil {
+		if s == "" {
+			s = err.Error()
+		}
+		return s, fmt.Errorf("%s %s: %s", baseName(name), strings.Join(args, " "), s)
+	}
+	return s, nil
+}
+
+// runLogged is run for a command that may leave a program behind it, such as
+// vmrun starting VMware's window. That program inherits the command's output,
+// and with pipes the wait would last until the window closed. A file has no
+// such wait, so the output goes to logPath and is read back from there.
+func runLogged(ctx context.Context, logPath, name string, args ...string) (string, error) {
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return run(ctx, name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = f, f
+	err = cmd.Run()
+	f.Close()
+	b, _ := os.ReadFile(logPath)
+	s := strings.TrimSpace(string(b))
 	if err != nil {
 		if s == "" {
 			s = err.Error()
