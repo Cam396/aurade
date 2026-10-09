@@ -247,4 +247,19 @@ offered=$(printf '%s\n' "${AURADE_DESKTOP_WALLPAPERS[@]}" | LC_ALL=C sort)
   fail "the wallpapers offered are not the ones aurade-wallpapers ships: $(diff <(printf '%s\n' "$packaged") <(printf '%s\n' "$offered") | tr '\n' ' ')"
 aurade_valid_wallpaper auto || fail 'auto is not a wallpaper answer'
 ! aurade_valid_wallpaper ../../etc/shadow || fail 'a path was accepted as a wallpaper'
+
+# The graphical review says each answer the way its picker did: a wallpaper by
+# the name in the live image's manifest, never by its file name.
+if command -v python3 >/dev/null 2>&1; then
+  review=$(AURADE_WALLPAPER_MANIFEST="$ROOT/installer/wallpapers/manifest.tsv" python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from aurade_gui import locales as L
+for q, v in (("wallpaper", "place-fuji"), ("wallpaper", "auto"), ("swap_size", "4G"),
+             ("filesystem", "btrfs"), ("auto_snapshots", "yes"), ("hostname", "vmtest")):
+    print(L.describe_answer(q, v))
+' "$ROOT/installer/lib")
+  [[ $review == $'Mount Fuji, Japan\nAutomatic\n4 GB\nBtrfs\nYes\nvmtest' ]] ||
+    fail "the review does not describe answers the way their pickers do: $(tr '\n' '|' <<<"$review")"
+fi
 echo 'installer question schema test: PASS'

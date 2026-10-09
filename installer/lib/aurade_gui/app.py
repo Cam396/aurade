@@ -2870,21 +2870,12 @@ class InstallerWindow(Adw.ApplicationWindow):
             self._add_row("review", group, item)
 
     def _review_value(self, question: str, value: str) -> str:
-        """An answer in the words its own picker showed, not the engine's.
-
-        The review read `wipe`, `btrfs`, `none` and `auto` under choices that
-        had been made from `Erase the whole disk`, `Btrfs`, `None` and
-        `Automatic` one page earlier.
-        """
+        """An answer in the words its own picker showed, not the engine's."""
         if question == "locale":
             return self.names.describe_locale(value)[0] or value
         if question == "keymap":
             return locales.describe_keymap(value)[0] or value
-        if question in locales.STORAGE_NAMES:
-            return locales.describe_storage(question, value)[0] or value
-        if value in ("yes", "no", "set"):
-            return value[:1].upper() + value[1:]
-        return value
+        return locales.describe_answer(question, value)
 
     def _on_review_row(self, _row, page_name: str) -> None:
         self.flow.jump_to_page(page_name)
