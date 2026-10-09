@@ -122,6 +122,33 @@ aurade_valid_layout() {
   case $1 in wipe|alongside) return 0 ;; *) return 1 ;; esac
 }
 
+# The desktop. Closed sets again, the same ones aurade-install accepts.
+aurade_valid_feature_profile() {
+  case $1 in auto|standard|plus|advanced_plus|advanced_plus_ai) return 0 ;; *) return 1 ;; esac
+}
+
+aurade_valid_display_scale() {
+  case $1 in auto|100|125|150|175|200) return 0 ;; *) return 1 ;; esac
+}
+
+# `none`, or a comma list of the apps aurade-install knows by name, each once
+# or more. Never a package name: the list is the engine's, and this is a copy
+# of its keys so a typed answer is refused here instead of at the engine.
+aurade_valid_apps() {
+  local list=$1 app
+  local -a apps
+  [[ $list != none ]] || return 0
+  [[ -n $list && $list != *, && $list != ,* && $list != *,,* ]] || return 1
+  IFS=, read -r -a apps <<<"$list"
+  for app in "${apps[@]}"; do
+    case $app in firefox|vscode|flatpak|waydroid|devtools) ;; *) return 1 ;; esac
+  done
+}
+
+aurade_valid_yes_no() {
+  case $1 in yes|no) return 0 ;; *) return 1 ;; esac
+}
+
 aurade_valid_arch_snapshot() {
   local snapshot=$1 normalized
   [[ $snapshot =~ ^20[0-9]{2}/(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])$ ]] || return 1

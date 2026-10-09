@@ -453,6 +453,55 @@ refute grep -Fq -- 'broadcom-wl' "$TMP/macbook-off.out"
 refute grep -Fq -- 'broadcom-wl' "$TMP/plain.out"
 grep -Fq -- 'hardware: generic' "$TMP/plain.out"
 
+# A VMware virtual machine: its guest tools join the package set and their
+# service is enabled. Real hardware, the plain plan above, gets neither.
+mkdir -p "$TMP/vmware/sys/class/dmi/id"
+printf '%s\n' 'VMware, Inc.' >"$TMP/vmware/sys/class/dmi/id/sys_vendor"
+printf '%s\n' 'VMware20,1' >"$TMP/vmware/sys/class/dmi/id/product_name"
+AURADE_HW_ROOT="$TMP/vmware" plan vmware
+grep -Fq -- 'hardware: VMware virtual machine' "$TMP/vmware.out"
+grep -Eq -- '--needed --noconfirm .* open-vm-tools' "$TMP/vmware.out"
+grep -Fq -- 'systemctl enable vmtoolsd.service' "$TMP/vmware.out"
+refute grep -Fq -- 'open-vm-tools' "$TMP/plain.out"
+refute grep -Fq -- 'vmtoolsd' "$TMP/plain.out"
+
+# The desktop as it was asked for: the feature set, the display size, the
+# extra apps from the same snapshot, and a snapshot before every update.
+plan desktop --feature-profile plus --display-scale 125 \
+  --apps firefox,vscode,flatpak,waydroid,devtools --auto-snapshots yes
+grep -Eq -- '--needed --noconfirm .* firefox code flatpak waydroid base-devel git' "$TMP/desktop.out"
+grep -Fq -- 'apps: firefox vscode flatpak waydroid devtools' "$TMP/desktop.out"
+grep -Fq -- 'set AURADE_FEATURE_PROFILE=plus' "$TMP/desktop.out"
+grep -Fq -- '/home/audit/.config/aurade/display.conf' "$TMP/desktop.out"
+grep -Fq -- 'display size: 125%' "$TMP/desktop.out"
+grep -Fq -- 'flatpak remote-add --system --if-not-exists flathub' "$TMP/desktop.out"
+grep -Fq -- 'systemctl enable waydroid-container.service' "$TMP/desktop.out"
+grep -Fq -- '/etc/pacman.d/hooks/00-aurade-snapshot.hook' "$TMP/desktop.out"
+for absent in AURADE_FEATURE_PROFILE= display.conf flathub waydroid 00-aurade-snapshot.hook 'apps:'; do
+  refute grep -Fq -- "$absent" "$TMP/plain.out"
+done
+# The scale is written the way the desktop's Settings writes it.
+grep -Fq -- 'scale=$_scale' "$ROOT/installer/bin/aurade-install"
+for percent in 100:1 125:1.25 150:1.5 175:1.75 200:2; do
+  DISPLAY_SCALE=${percent%%:*}
+  _scale=$(printf '%s.%02d' "$(( DISPLAY_SCALE / 100 ))" "$(( DISPLAY_SCALE % 100 ))")
+  _scale=${_scale%0}
+  _scale=${_scale%.0}
+  [[ $_scale == "${percent#*:}" ]] || { echo "display size $DISPLAY_SCALE was written as $_scale" >&2; exit 1; }
+done
+# A duplicated app is installed once.
+plan twice --apps firefox,firefox
+grep -Fq -- 'apps: firefox' "$TMP/twice.out"
+refute grep -Fq -- 'apps: firefox firefox' "$TMP/twice.out"
+
+refuses '--feature-profile must be' --feature-profile everything
+refuses '--display-scale must be' --display-scale 130
+refuses '--apps must be none or a list' --apps firefox,steam
+refuses '--apps must be none or a list' --apps 'firefox;reboot'
+refuses '--apps must be none or a list' --apps ,
+refuses '--auto-snapshots must be yes or no' --auto-snapshots maybe
+refuses 'automatic snapshots need btrfs' --filesystem ext4 --auto-snapshots yes
+
 refuses '--filesystem must be btrfs, ext4 or xfs' --filesystem zfs
 refuses '--swap must be none, file or zram' --swap partition
 refuses '--swap-size must be auto, hibernate, or a size like 8G' --swap-size huge

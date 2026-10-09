@@ -36,6 +36,7 @@ detect() {
   AURADE_HW_ROOT=$TMP/$1 bash -c '. "$1"; aurade_hw_detect
     printf "packages=%s\n" "${HW_PACKAGES[*]}"
     printf "summary=%s\n" "$HW_SUMMARY"
+    printf "services=%s\n" "${HW_SERVICES[*]}"
     printf "note=%s\n" "${HW_NOTES[@]}"' _ "$LIB"
 }
 
@@ -49,6 +50,11 @@ machine chromebook 'Google' 'Drawcia' 8086:4df0
 machine dell 'Dell Inc.' 'XPS 13 9310' 14e4:43b1
 machine plain 'LENOVO' '20XW' 8086:a0f0 168c:003e
 machine brcmfmac 'Dell Inc.' 'Inspiron' 14e4:43ba
+machine vmware 'VMware, Inc.' 'VMware20,1' 15ad:0405
+machine qemu 'QEMU' 'Standard PC (Q35 + ICH9, 2009)' 1af4:1050
+machine vbox 'innotek GmbH' 'VirtualBox' 80ee:beef
+machine hyperv 'Microsoft Corporation' 'Virtual Machine'
+machine parallels 'Parallels International GmbH.' 'Parallels ARM Virtual Machine'
 
 for surface in laptop1 go; do
   out=$(detect "$surface")
@@ -83,4 +89,23 @@ out=$(detect brcmfmac)
 has "$out" 'packages=' ||
   fail "broadcom-wl went on a chip the open driver handles, and would switch that driver off: $out"
 
-echo 'hardware test: PASS (Surface Laptop and Go, Broadcom Mac and PC, T2 Mac, Chromebook, plain PCs)'
+# A virtual machine gets its hypervisor's guest tools and the services that
+# run them, and real hardware gets neither.
+guest() {
+  local name=$1 packages=$2 services=$3 summary=$4 out
+  out=$(detect "$name")
+  has "$out" "packages=$packages" || fail "$name: wrong guest tools: $out"
+  has "$out" "services=$services" || fail "$name: wrong guest services: $out"
+  has "$out" "summary=$summary" || fail "$name: not recognised: $out"
+}
+guest vmware open-vm-tools vmtoolsd.service 'VMware virtual machine'
+guest qemu qemu-guest-agent '' 'QEMU virtual machine'
+guest vbox virtualbox-guest-utils-nox vboxservice.service 'VirtualBox virtual machine'
+guest hyperv hyperv 'hv_kvp_daemon.service hv_vss_daemon.service' 'Hyper-V virtual machine'
+guest parallels '' '' 'Parallels virtual machine'
+grep -q '^note=.*Parallels Tools' <<<"$(detect parallels)" || fail 'Parallels: nobody is told where its tools come from'
+# A Surface is a Microsoft machine too, and must not be taken for Hyper-V.
+has "$(detect laptop1)" 'services=' || fail 'a Surface was given Hyper-V services'
+has "$(detect plain)" 'services=' || fail 'a plain laptop was given guest services'
+
+echo 'hardware test: PASS (Surface Laptop and Go, Broadcom Mac and PC, T2 Mac, Chromebook, plain PCs, five hypervisors)'

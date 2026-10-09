@@ -27,6 +27,12 @@
 #                    that Arch does not carry, and on some models the wrong
 #                    ones can damage the speakers. Said, with where the fix
 #                    for each model is, rather than guessed at.
+#   Virtual machines The hypervisor's guest tools, so the VM shuts down when
+#                    asked, keeps its clock and reports its address: VMware's
+#                    open-vm-tools, the QEMU guest agent (which its own udev
+#                    rule starts), VirtualBox's service without its X11 half,
+#                    and Hyper-V's daemons. Parallels Tools are not in Arch,
+#                    so that one is said instead.
 #
 # Everything reads under AURADE_HW_ROOT (default /), so tests can describe a
 # machine with a directory of files.
@@ -40,6 +46,7 @@ AURADE_HW_WL_DEVICES=(4331 4358 4359 4365 43a0 43b1)
 # Filled by aurade_hw_detect.
 HW_PACKAGES=()
 HW_NOTES=()
+HW_SERVICES=()
 HW_SUMMARY=generic
 
 _aurade_hw_dmi() {
@@ -85,9 +92,27 @@ aurade_hw_is_chromebook() {
   [[ $(_aurade_hw_dmi sys_vendor) == "Google" ]]
 }
 
+# Which hypervisor this is, by the name its firmware gives the machine: vmware,
+# qemu, virtualbox, hyperv, parallels, or nothing on real hardware. The same
+# fields systemd-detect-virt reads first, and readable from a test directory.
+aurade_hw_hypervisor() {
+  local vendor product
+  vendor=$(_aurade_hw_dmi sys_vendor)
+  product=$(_aurade_hw_dmi product_name)
+  case $vendor in
+    'VMware, Inc.') printf vmware ;;
+    QEMU) printf qemu ;;
+    'innotek GmbH') printf virtualbox ;;
+    'Parallels Software International Inc.'|'Parallels International GmbH.') printf parallels ;;
+    'Microsoft Corporation')
+      [[ $product != 'Virtual Machine' ]] || printf hyperv ;;
+  esac
+}
+
 aurade_hw_detect() {
   HW_PACKAGES=()
   HW_NOTES=()
+  HW_SERVICES=()
   HW_SUMMARY=generic
 
   if aurade_hw_is_surface; then
@@ -108,4 +133,29 @@ aurade_hw_detect() {
   if aurade_hw_is_t2_mac; then
     HW_NOTES+=("this Mac has Apple's T2 chip: its built-in keyboard, trackpad and Wi-Fi need the t2linux kernel, which AuraDE does not install yet; use a USB keyboard, mouse and network")
   fi
+
+  case $(aurade_hw_hypervisor) in
+    vmware)
+      HW_SUMMARY='VMware virtual machine'
+      HW_PACKAGES+=(open-vm-tools)
+      HW_SERVICES+=(vmtoolsd.service)
+      HW_NOTES+=('this is a VMware virtual machine: installing open-vm-tools') ;;
+    qemu)
+      HW_SUMMARY='QEMU virtual machine'
+      HW_PACKAGES+=(qemu-guest-agent)
+      HW_NOTES+=('this is a QEMU virtual machine: installing the QEMU guest agent') ;;
+    virtualbox)
+      HW_SUMMARY='VirtualBox virtual machine'
+      HW_PACKAGES+=(virtualbox-guest-utils-nox)
+      HW_SERVICES+=(vboxservice.service)
+      HW_NOTES+=("this is a VirtualBox virtual machine: installing VirtualBox's guest service") ;;
+    hyperv)
+      HW_SUMMARY='Hyper-V virtual machine'
+      HW_PACKAGES+=(hyperv)
+      HW_SERVICES+=(hv_kvp_daemon.service hv_vss_daemon.service)
+      HW_NOTES+=("this is a Hyper-V virtual machine: installing Hyper-V's guest daemons") ;;
+    parallels)
+      HW_SUMMARY='Parallels virtual machine'
+      HW_NOTES+=('this is a Parallels virtual machine: Parallels Tools are not packaged for Arch. Install them from the Parallels Actions menu') ;;
+  esac
 }
