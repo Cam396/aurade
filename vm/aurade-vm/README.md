@@ -21,9 +21,14 @@ It is one program for Windows, Linux and macOS, with the same screens on each.
      AuraDE. Encryption is off in Express, because there is no one at the VM to
      type a passphrase on every start.
    - **Just the VM:** the installer asks everything.
-3. **The VM.** Memory, processors, disk and 3D graphics, with sizes suited to
+3. **Your desktop**, for Guided and Express: the display size, the feature
+   set, extra apps (Firefox, Visual Studio Code, Flatpak with Flathub,
+   Waydroid, developer tools) and, on Btrfs, a snapshot before every update.
+   They go to the installer as its advanced questions, so the apps come from
+   the same pinned packages as the rest of the system.
+4. **The VM.** Memory, processors, disk and 3D graphics, with sizes suited to
    this computer already picked.
-4. **The download.** It resumes if it stops, and is checked against the
+5. **The download.** It resumes if it stops, and is checked against the
    published SHA-256 and the AuraDE release key's signature. An ISO that fails
    either check is deleted.
 
@@ -42,13 +47,33 @@ need it.
 | VirtualBox | Windows, Linux, Intel Macs | No |
 | Hyper-V | Windows Pro and Enterprise, as administrator | No |
 | Parallels Desktop (Pro or Business) | Intel Macs | No |
+| UTM 4.2 or later | Intel Macs | No |
 
 `aurade-vm --hypervisors` lists what it finds on this computer and what is
 missing from the rest. A VM is always started again with the hypervisor that
 made it; `aurade-vm.json` in its folder records which.
 
+UTM is driven through its AppleScript dictionary, since its `utmctl` command
+cannot make a VM. macOS asks once whether your terminal may control UTM.
+
+The installer adds the hypervisor's guest tools on its own when it finds it
+is in a VM: open-vm-tools for VMware, the QEMU guest agent for QEMU and
+libvirt, VirtualBox's guest service and Hyper-V's daemons. Parallels Tools
+are not packaged for Arch, so they come from the Parallels menu.
+
 AuraDE is built for x86_64 PCs. On an Apple Silicon Mac no hypervisor can run
 it at a usable speed, and `aurade-vm` says so instead of trying.
+
+## On an Arch computer, without a VM
+
+On a computer that runs Arch Linux, the list of hypervisors ends with **This
+Arch computer, beside its desktop**, and `aurade-vm --existing-arch` does the
+same without the screens. It follows `docs/existing-arch.md`: it downloads the
+release key and refuses it unless it is the pinned one, has pacman trust it,
+adds the `[aurade]` repository if it is missing, and runs
+`sudo pacman -Syu aurade`, which asks before installing. Nothing is erased,
+and AuraDE becomes one more session at the login screen.
+`--existing-arch --dry-run` prints the commands and changes nothing.
 
 ## How answers reach the installer
 
@@ -96,7 +121,20 @@ For Express without the screens, the password comes in on standard input:
 printf '%s\n' "$PASSWORD" | aurade-vm --yes --mode express --password-stdin --username alex
 ```
 
-`aurade-vm --help` lists every option. `--iso FILE` uses an ISO you already
+The desktop choices have options too: `--display-scale 125`,
+`--features plus`, `--apps firefox,flatpak` and `--update-snapshots no`.
+
+`aurade-vm --help` lists every option.
+
+## Updating
+
+`aurade-vm --update` replaces the program with the newest published one. It
+reads the version and SHA-256 that `get.sh` and `get.ps1` carry on the main
+branch, so an update trusts exactly what a first install does. When the
+release has a signed `SHA256SUMS`, the release key's signature is checked
+too. A build that fails either check is never used. The welcome screen says
+when a newer one is out. New VMs always get the newest AuraDE release unless
+`--release` names another. `--iso FILE` uses an ISO you already
 have instead of downloading one; that file is not checked.
 
 ## Building

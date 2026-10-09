@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"github.com/Cam396/aurade/vm/aurade-vm/internal/answers"
 	"strings"
 	"testing"
 
@@ -86,15 +87,20 @@ func TestGuidedWalkThrough(t *testing.T) {
 	m = press(m, "ctrl+u", "box", "enter")
 	// Username: fill it in, then go through the two choices.
 	m = press(m, "ctrl+u", "me", "enter", "enter", "right", "enter")
-	if m.(Model).screen != sMachine {
+	if m.(Model).screen != sDesktop {
 		t.Fatalf("questions did not finish, at screen %d:\n%s", m.(Model).screen, m.View())
+	}
+	// The desktop: 150%, Firefox, and the rest as they are.
+	m = press(m, "right", "right", "right", "enter", "enter", "right", "enter", "enter", "enter", "enter", "enter", "enter")
+	if m.(Model).screen != sMachine {
+		t.Fatalf("desktop did not finish, at screen %d:\n%s", m.(Model).screen, m.View())
 	}
 	m = press(m, "enter", "enter", "enter", "enter", "enter")
 	if m.(Model).screen != sReview {
 		t.Fatalf("machine form did not finish:\n%s", m.View())
 	}
 	v = m.View()
-	for _, want := range []string{"me on box", "encrypted", "your own ISO, not checked", "Stub Hypervisor"} {
+	for _, want := range []string{"me on box", "encrypted", "your own ISO, not checked", "Stub Hypervisor", "150% size", "firefox", "a snapshot before every update"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("review is missing %q:\n%s", want, v)
 		}
@@ -102,6 +108,36 @@ func TestGuidedWalkThrough(t *testing.T) {
 	p := m.(Model).buildPlan()
 	if p.Mode != plan.Guided || p.Answers.Encrypt != "yes" || p.Answers.Hostname != "box" || p.Spec.MemoryMB < 4096 {
 		t.Fatalf("plan %+v", p)
+	}
+	if a := p.Answers; a.DisplayScale != "150" || a.Apps != "firefox" || a.Profile != "auto" || a.AutoSnapshots != "yes" {
+		t.Fatalf("desktop answers %+v", a)
+	}
+	if err := p.Answers.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// Back from the machine reaches the desktop, with the choices kept.
+	m = press(m, "esc", "esc")
+	back := m.(Model)
+	if back.screen != sDesktop || back.desktop.get("app:firefox") != "yes" {
+		t.Fatalf("esc from the machine did not keep the desktop:\n%s", m.View())
+	}
+}
+
+// Without Btrfs there is nothing to snapshot, so the question is not asked
+// and the answer is no.
+func TestNoSnapshotsWithoutBtrfs(t *testing.T) {
+	f := desktopForm(false)
+	if f.get("auto_snapshots") != "" {
+		t.Fatal("the snapshot question was asked without Btrfs")
+	}
+	m := Model{desktop: f, desktopReady: true}
+	a := answers.Answers{Filesystem: "ext4"}
+	m.desktopAnswers(&a)
+	if a.AutoSnapshots != "no" || a.Apps != "" || a.DisplayScale != "auto" {
+		t.Fatalf("%+v", a)
+	}
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -131,6 +167,10 @@ func TestExpressAsksForAPasswordAndNoEncryption(t *testing.T) {
 		t.Fatal("the password was shown")
 	}
 	m = press(m, "ctrl+u", " pw ", "enter", "enter")
+	if m.(Model).screen != sDesktop {
+		t.Fatalf("express questions did not finish:\n%s", m.View())
+	}
+	m = press(m, "enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter")
 	if m.(Model).screen != sMachine {
 		t.Fatalf("express questions did not finish:\n%s", m.View())
 	}
@@ -141,5 +181,44 @@ func TestExpressAsksForAPasswordAndNoEncryption(t *testing.T) {
 	p := m.(Model).buildPlan()
 	if p.Mode != plan.Express || p.Answers.Encrypt != "no" || p.Answers.Username != "me" {
 		t.Fatalf("plan %+v", p)
+	}
+}
+
+// A newer aurade-vm is mentioned on the welcome screen, and nothing is said
+// when there is none.
+func TestWelcomeMentionsANewerVersion(t *testing.T) {
+	m := newTest(t, false)
+	if strings.Contains(m.View(), "--update") {
+		t.Fatal("an update was mentioned with none published")
+	}
+	next, _ := m.Update(updateMsg("9.9.9"))
+	if !strings.Contains(next.View(), "aurade-vm 9.9.9 is out") {
+		t.Fatalf("the newer version is not mentioned:\n%s", next.View())
+	}
+}
+
+// On Arch the list ends with this computer itself, which explains the steps
+// and hands over to the terminal; elsewhere it is not offered.
+func TestExistingArchIsOfferedOnArch(t *testing.T) {
+	if strings.Contains(press(newTest(t, true), "enter").View(), "This Arch computer") {
+		t.Fatal("offered on a computer that is not Arch")
+	}
+	var m tea.Model = New(Options{BaseDir: t.TempDir(), LocalISO: "/x.iso", Arch: true})
+	m, _ = m.Update(detectMsg{{stubHV{true}, stubHV{true}.Detect(nil)}})
+	m = press(m, "enter")
+	if !strings.Contains(m.View(), "This Arch computer, beside its desktop") {
+		t.Fatalf("not offered on Arch:\n%s", m.View())
+	}
+	m = press(m, "down", "down", "enter")
+	if m.(Model).screen != sArch || !strings.Contains(m.View(), "Nothing is erased") {
+		t.Fatalf("arch screen:\n%s", m.View())
+	}
+	m = press(m, "esc")
+	if m.(Model).screen != sHypervisor {
+		t.Fatal("esc did not go back")
+	}
+	next, cmd := press(m, "enter").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !next.(Model).result.ExistingArch || cmd == nil {
+		t.Fatal("going ahead did not hand over to the terminal")
 	}
 }

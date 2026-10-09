@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -27,10 +28,12 @@ const (
 	sHypervisor
 	sMode
 	sQuestions
+	sDesktop
 	sMachine
 	sReview
 	sRun
 	sDone
+	sArch
 )
 
 // Options are what the command line already decided.
@@ -39,6 +42,17 @@ type Options struct {
 	Tag      string
 	LocalISO string
 	Version  string // this tool's version
+	// Newest reports the newest published aurade-vm, or "" when there is
+	// none newer than this one. Nil skips the check.
+	Newest func(context.Context) string
+	// Arch offers installing on this Arch computer itself, beside its
+	// desktop, as well as in a VM.
+	Arch bool
+}
+
+// Result is what the person chose that has to happen after the screens close.
+type Result struct {
+	ExistingArch bool // install on this Arch computer, in the terminal
 }
 
 type detected struct {
@@ -47,6 +61,7 @@ type detected struct {
 }
 
 type detectMsg []detected
+type updateMsg string // the newest published aurade-vm, when newer than this one
 type eventMsg plan.Event
 type finishedMsg struct{ err error }
 
@@ -63,12 +78,16 @@ type Model struct {
 
 	backends   []detected
 	detecting  bool
+	newer      string // a newer aurade-vm, if one is published
+	result     Result
 	backendIdx int
 
 	modeIdx int
 
 	questions        form
 	questionsExpress bool
+	desktop          form
+	desktopReady     bool
 	machine          form
 
 	plan     *plan.Plan
@@ -170,6 +189,50 @@ func questionForm(h host.Info, express bool) form {
 	return f
 }
 
+// desktopForm asks how AuraDE should look and what it should carry, which the
+// installer takes as its advanced questions.
+func desktopForm(btrfs bool) form {
+	f := form{fields: []*field{
+		newChoice("display_scale", "Display size",
+			"How large everything is drawn. Automatic suits most VM windows; pick a size if text looks tiny on a high-resolution screen. Settings can change it later.",
+			[]string{"auto", "100", "125", "150", "175", "200"},
+			[]string{"Automatic", "100%", "125%", "150%", "175%", "200%"}, "auto"),
+		newChoice("profile", "Features",
+			"Automatic picks Plus when the VM has 8 GB of memory or more. Advanced Plus AI also downloads a language model that runs inside the VM.",
+			[]string{"auto", "standard", "plus", "advanced_plus", "advanced_plus_ai"},
+			[]string{"Automatic", "Standard", "Plus", "Advanced Plus", "Advanced Plus AI"}, "auto"),
+	}}
+	for _, app := range answers.AppNames {
+		f.fields = append(f.fields, newChoice("app:"+app.ID, app.Label,
+			app.Help+" Installed with everything else, so it is there at the first sign-in.",
+			[]string{"no", "yes"}, []string{"No", "Yes"}, "no"))
+	}
+	if btrfs {
+		f.fields = append(f.fields, newChoice("auto_snapshots", "Snapshot before updates",
+			"Keeps a copy of the system from just before each update, the last three of them, and the startup menu can go back to the newest.",
+			[]string{"yes", "no"}, []string{"Yes", "No"}, "yes"))
+	}
+	f.setFocus(0)
+	return f
+}
+
+// desktopAnswers reads the desktop form into the answers.
+func (m Model) desktopAnswers(a *answers.Answers) {
+	a.DisplayScale = m.desktop.get("display_scale")
+	a.Profile = m.desktop.get("profile")
+	var apps []string
+	for _, app := range answers.AppNames {
+		if m.desktop.get("app:"+app.ID) == "yes" {
+			apps = append(apps, app.ID)
+		}
+	}
+	a.Apps = strings.Join(apps, ",")
+	a.AutoSnapshots = "no"
+	if a.Filesystem == "btrfs" && m.desktop.get("auto_snapshots") == "yes" {
+		a.AutoSnapshots = "yes"
+	}
+}
+
 func machineForm(h host.Info, name string) form {
 	memChoices, memLabels := []string{}, []string{}
 	recommended := "6144"
@@ -226,13 +289,23 @@ func gbString(mb int) string {
 
 // Init starts hypervisor detection in the background.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, func() tea.Msg {
+	cmds := []tea.Cmd{m.spin.Tick, func() tea.Msg {
 		var out []detected
 		for _, b := range hv.All() {
 			out = append(out, detected{b, b.Detect(context.Background())})
 		}
 		return detectMsg(out)
-	})
+	}}
+	if newest := m.opt.Newest; newest != nil {
+		// In the background and short: being offline must not slow the
+		// tool down or stop it.
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			return updateMsg(newest(ctx))
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) available() []int {
@@ -256,6 +329,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+	case updateMsg:
+		m.newer = string(msg)
+		return m, nil
 	case detectMsg:
 		m.backends = nil
 		for _, d := range msg {
@@ -330,13 +406,32 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.backendIdx--
 			}
 		case "down", "j", "tab":
-			if m.backendIdx < len(m.backends)-1 {
+			last := len(m.backends) - 1
+			if m.opt.Arch {
+				last++
+			}
+			if m.backendIdx < last {
 				m.backendIdx++
 			}
 		case "enter":
-			if !m.detecting && m.backendIdx < len(m.backends) && m.backends[m.backendIdx].det.Available {
+			if m.detecting {
+				return m, nil
+			}
+			if m.opt.Arch && m.backendIdx == len(m.backends) {
+				m.screen = sArch
+				return m, nil
+			}
+			if m.backendIdx < len(m.backends) && m.backends[m.backendIdx].det.Available {
 				m.screen = sMode
 			}
+		}
+	case sArch:
+		switch k.String() {
+		case "esc":
+			return back(sHypervisor)
+		case "enter":
+			m.result.ExistingArch = true
+			return m, tea.Quit
 		}
 	case sMode:
 		switch k.String() {
@@ -372,13 +467,29 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		cmd, finished := m.questions.update(k)
 		if finished && m.questions.valid() {
+			// Kept between visits, except that the snapshot question comes
+			// and goes with Btrfs.
+			btrfs := m.questions.get("filesystem") == "btrfs"
+			if !m.desktopReady || btrfs != (m.desktop.get("auto_snapshots") != "") {
+				m.desktop = desktopForm(btrfs)
+				m.desktopReady = true
+			}
+			m.screen = sDesktop
+		}
+		return m, cmd
+	case sDesktop:
+		if k.String() == "esc" {
+			return back(sQuestions)
+		}
+		cmd, finished := m.desktop.update(k)
+		if finished && m.desktop.valid() {
 			m.screen = sMachine
 		}
 		return m, cmd
 	case sMachine:
 		if k.String() == "esc" {
 			if id := modes[m.modeIdx].id; id == plan.Guided || id == plan.Express {
-				return back(sQuestions)
+				return back(sDesktop)
 			}
 			return back(sMode)
 		}
@@ -439,6 +550,9 @@ func (m Model) buildPlan() *plan.Plan {
 		if p.Mode == plan.Express {
 			p.Answers.Encrypt = "no"
 		}
+		if m.desktopReady {
+			m.desktopAnswers(&p.Answers)
+		}
 	}
 	return p
 }
@@ -492,6 +606,8 @@ func (m Model) View() string {
 	case sQuestions:
 		body = m.viewForm("About you and this computer",
 			"The installer opens with these filled in. It asks for your password itself; nothing secret is written down here.", &m.questions)
+	case sDesktop:
+		body = m.viewForm("Your desktop", "How AuraDE looks, and what it has on it at the first sign-in.", &m.desktop)
 	case sMachine:
 		body = m.viewForm("The virtual machine", "Recommended sizes for this computer are already picked.", &m.machine)
 	case sReview:
@@ -500,6 +616,8 @@ func (m Model) View() string {
 		body = m.viewRun()
 	case sDone:
 		body = m.viewDone()
+	case sArch:
+		body = m.viewArch()
 	}
 	return lipgloss.NewStyle().Padding(1, 2).Render(banner() + "\n\n" + body)
 }
@@ -548,6 +666,9 @@ func (m Model) viewWelcome() string {
 			b.WriteString("  " + o + "\n")
 		}
 	}
+	if m.newer != "" {
+		b.WriteString("\n" + warnStyle.Render("aurade-vm "+m.newer+" is out. Quit and run aurade-vm --update to get it.") + "\n")
+	}
 	return b.String() + keys("↑/↓ choose · enter continue · q quit")
 }
 
@@ -572,10 +693,33 @@ func (m Model) viewHypervisor() string {
 			b.WriteString(m.wrap(helpStyle, 4, d.det.Why) + "\n")
 		}
 	}
+	if m.opt.Arch {
+		cursor, name := "  ", "This Arch computer, beside its desktop"
+		if m.backendIdx == len(m.backends) {
+			cursor, name = focusStyle.Render("› "), focusStyle.Render(name)
+		}
+		b.WriteString("\n" + cursor + name + "  " + goodStyle.Render("no VM") + "\n")
+	}
 	if len(m.available()) == 0 {
 		b.WriteString("\n" + warnStyle.Render("None of the supported hypervisors is ready on this computer yet.") + "\n")
 	}
 	return b.String() + keys("↑/↓ choose · enter continue · esc back")
+}
+
+func (m Model) viewArch() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("AuraDE beside your desktop") + "\n")
+	b.WriteString(m.wrap(subtitleStyle, 0, "Nothing is erased. AuraDE becomes one more session at your login screen, and your old desktop is still there to pick.") + "\n\n")
+	for i, line := range []string{
+		"Download the AuraDE release key and check it is the real one.",
+		"Ask pacman to trust it (pacman-key, with sudo).",
+		"Add the AuraDE repository to /etc/pacman.conf, unless it is there.",
+		"Run sudo pacman -Syu aurade. pacman shows what it will install and asks first.",
+	} {
+		b.WriteString(fmt.Sprintf("  %d. %s\n", i+1, line))
+	}
+	b.WriteString("\n" + m.wrap(helpStyle, 0, "These screens close and the commands run in this terminal, where sudo asks for your password. Afterwards, sign out and choose the AuraDE session.") + "\n")
+	return b.String() + keys("enter go ahead · esc back")
 }
 
 func (m Model) viewMode() string {
@@ -651,7 +795,26 @@ func (m Model) viewReview() string {
 		if a.Encrypt == "yes" {
 			enc = "encrypted"
 		}
+		if a.AutoSnapshots == "yes" {
+			enc += ", a snapshot before every update"
+		}
 		row("Disk", a.Filesystem+", "+enc)
+		look := "automatic size"
+		if a.DisplayScale != "" && a.DisplayScale != "auto" {
+			look = a.DisplayScale + "% size"
+		}
+		features := "automatic features"
+		for i, id := range m.desktop.fields[1].choices {
+			if id == a.Profile && id != "auto" {
+				features = m.desktop.fields[1].labels[i]
+			}
+		}
+		row("Desktop", look+" · "+features)
+		apps := "none extra"
+		if a.Apps != "" {
+			apps = strings.ReplaceAll(a.Apps, ",", ", ")
+		}
+		row("Apps", apps)
 	}
 	b.WriteString("\n" + helpStyle.Render("Nothing is erased on this computer. The installer only ever sees the VM's own empty disk.") + "\n")
 	return b.String() + keys("enter start · esc back")
@@ -717,7 +880,10 @@ func (m Model) viewDone() string {
 }
 
 // Run starts the TUI.
-func Run(opt Options) error {
-	_, err := tea.NewProgram(New(opt), tea.WithAltScreen()).Run()
-	return err
+func Run(opt Options) (Result, error) {
+	final, err := tea.NewProgram(New(opt), tea.WithAltScreen()).Run()
+	if m, ok := final.(Model); ok {
+		return m.result, err
+	}
+	return Result{}, err
 }
