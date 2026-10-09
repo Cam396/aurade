@@ -4,10 +4,12 @@
 package plan
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/answers"
 	"github.com/Cam396/aurade/vm/aurade-vm/internal/hv"
@@ -134,6 +136,7 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 		}
 		emit(Event{Log: "Checked: the published SHA-256 and the AuraDE release key's signature", Verified: v})
 		p.Spec.ISO = iso
+		p.tidyOldISOs(iso, emit)
 	}
 
 	if err := os.MkdirAll(p.Spec.Dir, 0o755); err != nil {
@@ -165,6 +168,50 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 		return err
 	}
 	return p.markStarted(hv.Record{Backend: p.Backend.ID(), Spec: p.Spec})
+}
+
+// tidyOldISOs removes the releases downloaded here before this one, nearly
+// 2 GB each, once this one has been checked. One that a VM here still starts
+// from is kept, and so is any ISO this tool did not download itself.
+func (p *Plan) tidyOldISOs(current string, emit func(Event)) {
+	vms := hv.Existing(p.BaseDir)
+	for _, old := range release.Superseded(p.BaseDir, current) {
+		if isoInUse(vms, old) {
+			continue
+		}
+		var size int64
+		if fi, err := os.Stat(old); err == nil {
+			size = fi.Size()
+		}
+		if err := os.Remove(old); err != nil {
+			continue
+		}
+		os.Remove(old + ".checked")
+		os.Remove(old + ".part")
+		emit(Event{Log: fmt.Sprintf("Removed %s (%.1f GB), an older AuraDE that no VM here starts from",
+			filepath.Base(old), float64(size)/1e9)})
+	}
+}
+
+// isoInUse reports whether any of the VMs starts from iso. The name is what
+// is compared, ignoring case, so a doubt keeps the file. A VM from an early
+// build recorded nothing, so its .vmx is read, and one that cannot be read
+// keeps every ISO.
+func isoInUse(vms []hv.Record, iso string) bool {
+	name := filepath.Base(iso)
+	for _, r := range vms {
+		if r.Spec.ISO != "" {
+			if strings.EqualFold(filepath.Base(r.Spec.ISO), name) {
+				return true
+			}
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(r.Spec.Dir, r.Spec.Name+".vmx"))
+		if err != nil || bytes.Contains(bytes.ToLower(b), []byte(strings.ToLower(name))) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Plan) markStarted(r hv.Record) error {

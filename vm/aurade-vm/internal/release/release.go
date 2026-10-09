@@ -139,6 +139,32 @@ func (c *Client) Fetch(ctx context.Context, tag, dir string, progress Progress) 
 	return iso, v, nil
 }
 
+// Superseded lists the release ISOs in dir other than keep that Fetch
+// downloaded and checked, which is what its stamp beside each one says. An
+// ISO put there any other way has no stamp and is never listed.
+func Superseded(dir, keep string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "aurade-") || !strings.HasSuffix(name, "-x86_64.iso") {
+			continue
+		}
+		iso := filepath.Join(dir, name)
+		if iso == keep {
+			continue
+		}
+		if _, err := os.Stat(iso + ".checked"); err != nil {
+			continue
+		}
+		out = append(out, iso)
+	}
+	return out
+}
+
 // Verified says how much was checked.
 type Verified string
 

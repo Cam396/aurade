@@ -30,7 +30,8 @@ It is one program for Windows, Linux and macOS, with the same screens on each.
    this computer already picked.
 5. **The download.** It resumes if it stops, and is checked against the
    published SHA-256 and the AuraDE release key's signature. An ISO that fails
-   either check is deleted.
+   either check is deleted. Once a newer release has been checked, the older
+   ones it downloaded are deleted too, unless a VM still starts from one.
 
 Run it again after installing and choose **Start**. On that first start it
 removes the answers disk from the VM, because the installed system does not
