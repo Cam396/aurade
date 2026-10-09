@@ -27,6 +27,7 @@ type field struct {
 	idx      int
 	validate func(string) error
 	err      string
+	hidden   bool
 }
 
 func newText(key, label, help, value string, validate func(string) error) *field {
@@ -35,6 +36,14 @@ func newText(key, label, help, value string, validate func(string) error) *field
 	in.CharLimit = 64
 	in.Prompt = ""
 	return &field{key: key, label: label, help: help, kind: textField, input: in, validate: validate}
+}
+
+// secret hides what is typed.
+func (f *field) secret() {
+	f.input.EchoMode = textinput.EchoPassword
+	f.input.EchoCharacter = '•'
+	f.input.CharLimit = 256
+	f.hidden = true
 }
 
 func newChoice(key, label, help string, choices, labels []string, current string) *field {
@@ -51,6 +60,10 @@ func (f *field) value() string {
 	if f.kind == choiceField {
 		return f.choices[f.idx]
 	}
+	if f.hidden {
+		// A password is exactly what was typed, spaces and all.
+		return f.input.Value()
+	}
 	return strings.TrimSpace(f.input.Value())
 }
 
@@ -60,6 +73,9 @@ func (f *field) shown() string {
 			return f.labels[f.idx]
 		}
 		return f.choices[f.idx]
+	}
+	if f.hidden {
+		return strings.Repeat("•", len([]rune(f.input.Value())))
 	}
 	return f.input.Value()
 }

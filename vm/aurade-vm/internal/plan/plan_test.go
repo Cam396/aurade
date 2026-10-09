@@ -135,3 +135,30 @@ func TestFailedFirstStartKeepsTheAnswers(t *testing.T) {
 		t.Fatalf("after a start, the next run should tidy up: %v %d", err, f.finished)
 	}
 }
+
+func TestExpressCarriesTheHashAndNeverEncrypts(t *testing.T) {
+	base := t.TempDir()
+	iso := filepath.Join(base, "local.iso")
+	os.WriteFile(iso, []byte("x"), 0o600)
+	f := &fakeHV{}
+	p := &Plan{Backend: f, Mode: Express, BaseDir: base, LocalISO: iso, PasswordHash: "$6$salt$hash",
+		Spec:    hv.Spec{Name: "aurade", MemoryMB: 4096, CPUs: 2, DiskGB: 30},
+		Answers: answers.Answers{Hostname: "box", Username: "me", Encrypt: "yes"}}
+	if err := p.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	img, _ := os.ReadFile(f.spec.AnswersISO)
+	for _, want := range []string{"PASSWORD.HASH;1", "EXPRESS.;1", "$6$salt$hash\n", "encrypt=no\n"} {
+		if !strings.Contains(string(img), want) {
+			t.Errorf("the express disk lacks %q", want)
+		}
+	}
+	for _, bad := range []*Plan{
+		{Backend: &fakeHV{}, Mode: Express, BaseDir: t.TempDir(), LocalISO: iso, PasswordHash: "$6$x$y", Spec: hv.Spec{Name: "a"}},
+		{Backend: &fakeHV{}, Mode: Express, BaseDir: t.TempDir(), LocalISO: iso, Answers: answers.Answers{Username: "me"}, Spec: hv.Spec{Name: "a"}},
+	} {
+		if err := bad.Run(context.Background(), nil); err == nil {
+			t.Error("an express install with no username or no password was made")
+		}
+	}
+}

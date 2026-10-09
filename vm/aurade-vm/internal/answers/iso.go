@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -13,11 +15,18 @@ const Label = "AURADE_ANS"
 
 const sector = 2048
 
-// WriteISO writes a minimal ISO 9660 image holding one file, ANSWERS.TXT,
-// which Linux shows as answers.txt. Every hypervisor can attach an ISO as a
-// second optical drive, so this one format covers all of them.
-func WriteISO(path string, content []byte) error {
-	img := BuildISO(content, time.Now().UTC())
+// File is one file on the answers disk. Name is how Linux shows it: lower
+// case, at most 30 characters, letters, digits, dots and underscores.
+type File struct {
+	Name    string
+	Content []byte
+}
+
+// WriteISO writes a minimal ISO 9660 image holding the files. Every
+// hypervisor can attach an ISO as a second optical drive, so this one format
+// covers all of them.
+func WriteISO(path string, files ...File) error {
+	img := BuildISO(time.Now().UTC(), files...)
 	if err := os.WriteFile(path, img, 0o600); err != nil {
 		return fmt.Errorf("writing the answers disk: %w", err)
 	}
@@ -26,16 +35,27 @@ func WriteISO(path string, content []byte) error {
 
 // BuildISO lays the image out as: system area (0-15), primary volume
 // descriptor (16), terminator (17), the two path tables (18, 19), the root
-// directory (20) and the file (21 on).
-func BuildISO(content []byte, now time.Time) []byte {
+// directory (20) and the files, each from a sector of its own, after it.
+//
+// Names are stored upper case with the ";1" version, which Linux shows in
+// lower case without it; a name with no dot is stored with a trailing one,
+// which Linux drops again.
+func BuildISO(now time.Time, files ...File) []byte {
 	const (
 		pvdAt, termAt, lPathAt, mPathAt, rootAt, fileAt = 16, 17, 18, 19, 20, 21
 	)
-	fileSectors := (len(content) + sector - 1) / sector
-	if fileSectors == 0 {
-		fileSectors = 1
+	sort.Slice(files, func(i, j int) bool { return isoName(files[i].Name) < isoName(files[j].Name) })
+	extents := make([]int, len(files))
+	next := fileAt
+	for i, f := range files {
+		extents[i] = next
+		n := (len(f.Content) + sector - 1) / sector
+		if n == 0 {
+			n = 1
+		}
+		next += n
 	}
-	total := fileAt + fileSectors
+	total := next
 	img := make([]byte, total*sector)
 
 	both32 := func(b []byte, v uint32) {
@@ -120,17 +140,27 @@ func BuildISO(content []byte, now time.Time) []byte {
 	binary.BigEndian.PutUint32(m[2:6], rootAt)
 	binary.BigEndian.PutUint16(m[6:8], 1)
 
-	// Root directory: itself, its parent (itself again), and the file.
+	// Root directory: itself, its parent (itself again), and the files, in
+	// name order as the standard asks.
+	records := [][]byte{dirRecord([]byte{0}, rootAt, sector, true), dirRecord([]byte{1}, rootAt, sector, true)}
+	for i, f := range files {
+		records = append(records, dirRecord([]byte(isoName(f.Name)), uint32(extents[i]), uint32(len(f.Content)), false))
+	}
 	off := rootAt * sector
-	for _, r := range [][]byte{
-		dirRecord([]byte{0}, rootAt, sector, true),
-		dirRecord([]byte{1}, rootAt, sector, true),
-		dirRecord([]byte("ANSWERS.TXT;1"), fileAt, uint32(len(content)), false),
-	} {
+	for _, r := range records {
 		copy(img[off:], r)
 		off += len(r)
 	}
-
-	copy(img[fileAt*sector:], content)
+	for i, f := range files {
+		copy(img[extents[i]*sector:], f.Content)
+	}
 	return img
+}
+
+func isoName(name string) string {
+	n := strings.ToUpper(name)
+	if !strings.Contains(n, ".") {
+		n += "."
+	}
+	return n + ";1"
 }

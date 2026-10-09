@@ -16,6 +16,10 @@ It is one program for Windows, Linux and macOS, with the same screens on each.
      time zone, computer name, username, encryption, filesystem). The installer
      opens with them filled in, asks for your password itself, and still
      confirms the disk before writing anything.
+   - **Express:** the same questions plus a password, and nothing more. The
+     installer runs by itself, wipes the VM's disk, installs and restarts into
+     AuraDE. Encryption is off in Express, because there is no one at the VM to
+     type a passphrase on every start.
    - **Just the VM:** the installer asks everything.
 3. **The VM.** Memory, processors, disk and 3D graphics, with sizes suited to
    this computer already picked.
@@ -54,6 +58,13 @@ optical drive. When the live system starts, `aurade-installer-autostart` copies
 holds no password or passphrase, and the installer checks every line exactly
 as if it had been typed.
 
+For Express the disk also carries `express` and `password.hash`. The password
+is hashed here with SHA-512 crypt, the same kind the installer makes itself, so
+only the hash ever reaches the VM. The installer then checks before touching
+anything that it is running in a VM, that every answer is there, and that the
+disk has no partitions or filesystem on it. If any check fails it says why and
+goes on as a Guided install instead.
+
 ## Getting it
 
 ```powershell
@@ -77,6 +88,12 @@ macOS do not stop to ask about an unknown download.
 
 ```sh
 aurade-vm --yes --username alex --hostname alex-vm --memory 8192
+```
+
+For Express without the screens, the password comes in on standard input:
+
+```sh
+printf '%s\n' "$PASSWORD" | aurade-vm --yes --mode express --password-stdin --username alex
 ```
 
 `aurade-vm --help` lists every option. `--iso FILE` uses an ISO you already

@@ -22,6 +22,10 @@ const (
 	Guided Mode = "guided"
 	// Plain only makes the VM; the installer asks everything.
 	Plain Mode = "plain"
+	// Express installs from the answers with nothing asked in the VM, then
+	// restarts into AuraDE. The installer only does this in a VM, on a blank
+	// disk, and falls back to Guided if anything is missing.
+	Express Mode = "express"
 )
 
 // Plan is everything needed to make and start one VM.
@@ -33,6 +37,9 @@ type Plan struct {
 	BaseDir  string // where ISOs are kept; VMs go in BaseDir/<name>
 	Tag      string // a release such as v1.1.2, or "" for the latest
 	LocalISO string // use this ISO instead of downloading one
+	// PasswordHash is the account's crypt(3) hash, for Express. The
+	// password itself never reaches the plan.
+	PasswordHash string
 }
 
 // Event reports progress to whoever is watching.
@@ -78,10 +85,21 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 		}
 		return p.markStarted(rec)
 	}
-	if p.Mode == Guided {
+	switch p.Mode {
+	case Guided, Express:
 		if err := p.Answers.Validate(); err != nil {
 			return err
 		}
+	}
+	if p.Mode == Express {
+		switch {
+		case p.Answers.Username == "":
+			return fmt.Errorf("an express install needs a username")
+		case p.PasswordHash == "":
+			return fmt.Errorf("an express install needs a password")
+		}
+		// A passphrase cannot be typed into an install nobody watches.
+		p.Answers.Encrypt = "no"
 	}
 	if err := os.MkdirAll(p.BaseDir, 0o755); err != nil {
 		return err
@@ -121,11 +139,16 @@ func (p *Plan) Run(ctx context.Context, emit func(Event)) error {
 	if err := os.MkdirAll(p.Spec.Dir, 0o755); err != nil {
 		return err
 	}
-	if p.Mode == Guided {
+	if p.Mode == Guided || p.Mode == Express {
 		emit(Event{Step: "Writing your answers for the installer"})
 		p.Answers.Target = p.Backend.GuestDisk()
 		path := filepath.Join(p.Spec.Dir, hv.AnswersFile)
-		if err := answers.WriteISO(path, p.Answers.File()); err != nil {
+		files := []answers.File{{Name: "answers.txt", Content: p.Answers.File()}}
+		if p.Mode == Express {
+			files = append(files, answers.File{Name: "express"},
+				answers.File{Name: "password.hash", Content: []byte(p.PasswordHash + "\n")})
+		}
+		if err := answers.WriteISO(path, files...); err != nil {
 			return err
 		}
 		p.Spec.AnswersISO = path

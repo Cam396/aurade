@@ -71,15 +71,10 @@ func TestGuidedWalkThrough(t *testing.T) {
 		t.Fatalf("hypervisor screen:\n%s", v)
 	}
 	m = press(m, "enter")
-	if !strings.Contains(m.View(), "Guided") || !strings.Contains(m.View(), "coming soon") {
+	if !strings.Contains(m.View(), "Guided") || !strings.Contains(m.View(), "Express") {
 		t.Fatal("mode screen")
 	}
-	// Express is not ready: Enter on it stays put.
-	m = press(m, "down", "enter")
-	if m.(Model).screen != sMode {
-		t.Fatal("an unready mode was accepted")
-	}
-	m = press(m, "up", "enter")
+	m = press(m, "enter")
 	if m.(Model).screen != sQuestions {
 		t.Fatal("guided did not lead to the questions")
 	}
@@ -90,7 +85,7 @@ func TestGuidedWalkThrough(t *testing.T) {
 	}
 	m = press(m, "ctrl+u", "box", "enter")
 	// Username: fill it in, then go through the two choices.
-	m = press(m, "ctrl+u", "me", "enter", "right", "enter", "enter")
+	m = press(m, "ctrl+u", "me", "enter", "enter", "right", "enter")
 	if m.(Model).screen != sMachine {
 		t.Fatalf("questions did not finish, at screen %d:\n%s", m.(Model).screen, m.View())
 	}
@@ -114,5 +109,37 @@ func TestEscGoesBack(t *testing.T) {
 	m := press(newTest(t, true), "enter", "enter", "enter", "esc")
 	if m.(Model).screen != sMode {
 		t.Fatal("esc from the questions did not go back to the mode")
+	}
+}
+
+func TestExpressAsksForAPasswordAndNoEncryption(t *testing.T) {
+	m := press(newTest(t, true), "enter", "enter", "down", "enter")
+	if m.(Model).screen != sQuestions {
+		t.Fatal("express did not lead to the questions")
+	}
+	v := m.View()
+	if !strings.Contains(v, "Password again") || strings.Contains(v, "Encrypt") {
+		t.Fatalf("express questions:\n%s", v)
+	}
+	// locale, keymap, timezone, hostname: keep; username, then two passwords
+	// that differ, which must be refused.
+	m = press(m, "enter", "enter", "enter", "enter", "ctrl+u", "me", "enter", " pw ", "enter", "other", "enter")
+	if !strings.Contains(m.View(), "not the same") {
+		t.Fatalf("different passwords were accepted:\n%s", m.View())
+	}
+	if strings.Contains(m.View(), " pw ") {
+		t.Fatal("the password was shown")
+	}
+	m = press(m, "ctrl+u", " pw ", "enter", "enter")
+	if m.(Model).screen != sMachine {
+		t.Fatalf("express questions did not finish:\n%s", m.View())
+	}
+	mm := m.(Model)
+	if got := mm.questions.get("password"); got != " pw " {
+		t.Fatalf("the password was changed on the way: %q", got)
+	}
+	p := m.(Model).buildPlan()
+	if p.Mode != plan.Express || p.Answers.Encrypt != "no" || p.Answers.Username != "me" {
+		t.Fatalf("plan %+v", p)
 	}
 }

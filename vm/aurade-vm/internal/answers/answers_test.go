@@ -54,7 +54,7 @@ func TestKeymapForLocale(t *testing.T) {
 // this code.
 func TestISOReadsBack(t *testing.T) {
 	content := Answers{Hostname: "isotest", Username: "me"}.File()
-	img := BuildISO(content, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
+	img := BuildISO(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC), File{"answers.txt", content})
 	if len(img)%sector != 0 || !bytes.Equal(img[16*sector+1:16*sector+6], []byte("CD001")) {
 		t.Fatal("not an ISO 9660 image")
 	}
@@ -82,5 +82,27 @@ func TestISOReadsBack(t *testing.T) {
 	b, _ := exec.Command(xorriso, "-indev", iso, "-pvd_info").CombinedOutput()
 	if !bytes.Contains(b, []byte("Volume Id    : "+Label)) {
 		t.Fatalf("volume id not %s:\n%s", Label, b)
+	}
+}
+
+// Vectors made with `openssl passwd -6 -salt SALT PASSWORD`, which is what
+// the installer hashes a typed password with.
+func TestSHA512CryptMatchesOpenSSL(t *testing.T) {
+	b, err := os.ReadFile("testdata/crypt.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.SplitN(line, "|", 3)
+		if got := sha512Crypt([]byte(f[0]), []byte(f[1])); got != f[2] {
+			t.Errorf("%q %q: got %s want %s", f[0], f[1], got, f[2])
+		}
+	}
+	h, err := HashPassword("pw")
+	if err != nil || !strings.HasPrefix(h, "$6$") || len(h) != 3+16+1+86 {
+		t.Fatalf("%q %v", h, err)
+	}
+	if h2, _ := HashPassword("pw"); h2 == h {
+		t.Fatal("two hashes of one password share a salt")
 	}
 }
