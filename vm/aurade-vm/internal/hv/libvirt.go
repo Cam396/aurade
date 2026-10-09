@@ -102,6 +102,9 @@ func (l *Libvirt) InstallArgs(s Spec) []string {
 	}
 	args = append(args, "--network", "user,model=virtio", "--video", video, "--graphics", graphics,
 		"--input", "tablet,bus=usb", "--sound", "none",
+		// The guest agent's channel, named rather than left to virt-install's
+		// guess for this OS, so the agent the installer adds always starts.
+		"--channel", "unix,target.type=virtio,name=org.qemu.guest_agent.0",
 		"--import", "--noautoconsole", "--noreboot")
 	return args
 }

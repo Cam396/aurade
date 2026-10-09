@@ -25,6 +25,8 @@ func TestQEMUArgs(t *testing.T) {
 		{"-device", "virtio-vga-gl,edid=on,xres=1920,yres=1080"},
 		{"-display", "gtk,zoom-to-fit=on,gl=on"},
 		{"-drive", "file=/iso/aurade.iso,media=cdrom,if=none,id=cd0,readonly=on"},
+		{"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"},
+		{"-chardev", "socket,id=qga0,path=" + filepath.Join(dir, "qga.sock") + ",server=on,wait=off"},
 	} {
 		if !has(args, want...) {
 			t.Errorf("missing %v in %v", want, args)
@@ -71,6 +73,7 @@ func TestLibvirtInstallArgs(t *testing.T) {
 		{"--disk", "path=/vms/a/a.qcow2,size=40,format=qcow2,bus=virtio,boot.order=1"},
 		{"--disk", "path=/iso/x.iso,device=cdrom,bus=sata,readonly=on,boot.order=2"},
 		{"--disk", "path=/vms/a/" + AnswersFile + ",device=cdrom,bus=sata,readonly=on"},
+		{"--channel", "unix,target.type=virtio,name=org.qemu.guest_agent.0"},
 	} {
 		if !has(args, want...) {
 			t.Errorf("missing %v", want)
