@@ -107,6 +107,36 @@ func TestDesktopRulesAgreeWithTheInstaller(t *testing.T) {
 	}
 }
 
+// The wallpapers offered are the installer's list, which test-questions.sh
+// holds to the package, and their titles are the manifest's.
+func TestWallpapersAgreeWithTheInstaller(t *testing.T) {
+	lib, _ := filepath.Abs("../../../../installer/lib/aurade-validate.sh")
+	manifest, err := os.ReadFile("../../../../aurade-wallpapers/manifest.tsv")
+	if _, serr := os.Stat(lib); serr != nil || err != nil {
+		t.Skip("the installer is not beside this checkout")
+	}
+	out, err := exec.Command("bash", "-c", `. "$1"; printf '%s\n' "${AURADE_DESKTOP_WALLPAPERS[@]}"`, "_", lib).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []string
+	for _, w := range Wallpapers {
+		mine = append(mine, w.ID)
+		if !strings.Contains(string(manifest), w.ID+".png\t"+w.Title+"\t") {
+			t.Errorf("%s is not titled %q in the manifest", w.ID, w.Title)
+		}
+	}
+	if got := strings.Fields(string(out)); strings.Join(got, " ") != strings.Join(mine, " ") {
+		t.Errorf("installer offers %v\naurade-vm offers %v", got, mine)
+	}
+	if (Answers{Wallpaper: "quiet-rainleaves"}).Validate() != nil || (Answers{Wallpaper: "../x"}).Validate() == nil {
+		t.Error("wallpaper validation")
+	}
+	if !strings.Contains(string(Answers{Wallpaper: "wild-lava"}.File()), "wallpaper=wild-lava\n") {
+		t.Error("the wallpaper is not in the answers file")
+	}
+}
+
 func TestKeymapForLocale(t *testing.T) {
 	for in, want := range map[string]string{"de_DE.UTF-8": "de", "en_US.UTF-8": "us", "fr_CA.UTF-8": "us", "C.UTF-8": "us"} {
 		if got := KeymapForLocale(in); got != want {

@@ -30,6 +30,7 @@ type Answers struct {
 	// The desktop, asked in the installer's advanced questions.
 	Profile       string // auto, standard, plus, advanced_plus or advanced_plus_ai
 	DisplayScale  string // auto, 100, 125, 150, 175 or 200
+	Wallpaper     string // auto, or one of Wallpapers
 	Apps          string // none, or a comma list of AppNames
 	AutoSnapshots string // yes or no; btrfs only
 }
@@ -42,6 +43,52 @@ var AppNames = []struct{ ID, Label, Help string }{
 	{"flatpak", "Flatpak and Flathub", "Flatpak, with Flathub already added, so thousands more apps are one command away."},
 	{"waydroid", "Waydroid", "Runs Android apps. It downloads Android itself the first time it is set up."},
 	{"devtools", "Developer tools", "Compilers, make and git (base-devel and git)."},
+}
+
+// Wallpapers are the photographs an installed AuraDE has, in the order the
+// aurade-wallpapers package lists them, with their titles from its manifest.
+var Wallpapers = []struct{ ID, Title string }{
+	{"place-antelope", "Antelope Canyon, Arizona"},
+	{"place-bagan", "Bagan, Myanmar"},
+	{"place-deadvlei", "Deadvlei, Namibia"},
+	{"place-fuji", "Mount Fuji, Japan"},
+	{"place-lofoten", "Lofoten, Norway"},
+	{"place-milford", "Milford Sound, New Zealand"},
+	{"place-moraine", "Moraine Lake, Canada"},
+	{"place-plitvice", "Plitvice Lakes, Croatia"},
+	{"place-skye", "Isle of Skye, Scotland"},
+	{"place-torres", "Torres del Paine, Chile"},
+	{"place-trecime", "Tre Cime di Lavaredo, Italy"},
+	{"place-vestrahorn", "Vestrahorn, Iceland"},
+	{"place-zhangjiajie", "Zhangjiajie, China"},
+	{"quiet-beach", "An empty shore"},
+	{"quiet-forestpath", "A path through the trees"},
+	{"quiet-frost", "Frost on the grass"},
+	{"quiet-lonetree", "One tree in an open field"},
+	{"quiet-meadow", "A meadow in summer"},
+	{"quiet-rainleaves", "Rain on leaves"},
+	{"quiet-reeds", "Reeds at the water's edge"},
+	{"quiet-river", "A river between hills"},
+	{"quiet-snowpine", "Snow on the pines"},
+	{"quiet-stream", "A stream over stones"},
+	{"wild-bioluminescence", "Vaadhoo, Maldives"},
+	{"wild-duststorm", "A dust storm crossing the dunes"},
+	{"wild-icecave", "Vatnajokull, Iceland"},
+	{"wild-lava", "Kilauea, Hawaii"},
+	{"wild-storm", "A storm over open grassland"},
+}
+
+// ValidWallpaper follows the installer's rule: auto, or one of Wallpapers.
+func ValidWallpaper(s string) error {
+	if s == "" || s == "auto" {
+		return nil
+	}
+	for _, w := range Wallpapers {
+		if s == w.ID {
+			return nil
+		}
+	}
+	return fmt.Errorf("%q is not one of the wallpapers AuraDE has", s)
 }
 
 // ValidApps follows the installer's rule: none, or known names joined by
@@ -137,6 +184,9 @@ func (a Answers) Validate() error {
 			return fmt.Errorf("%s: %q is not one of %s", name, v[0], strings.Join(v[2:], ", "))
 		}
 	}
+	if err := ValidWallpaper(a.Wallpaper); err != nil {
+		return fmt.Errorf("wallpaper: %w", err)
+	}
 	if err := ValidApps(a.Apps); err != nil {
 		return fmt.Errorf("apps: %w", err)
 	}
@@ -154,7 +204,7 @@ func (a Answers) File() []byte {
 		"target": a.Target, "hostname": a.Hostname, "username": a.Username,
 		"encrypt": a.Encrypt, "filesystem": a.Filesystem, "swap": a.Swap,
 		"profile": a.Profile, "display_scale": a.DisplayScale, "apps": a.Apps,
-		"auto_snapshots": a.AutoSnapshots,
+		"auto_snapshots": a.AutoSnapshots, "wallpaper": a.Wallpaper,
 	}
 	keys := make([]string, 0, len(fields))
 	for k, v := range fields {

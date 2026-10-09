@@ -192,7 +192,14 @@ func questionForm(h host.Info, express bool) form {
 // desktopForm asks how AuraDE should look and what it should carry, which the
 // installer takes as its advanced questions.
 func desktopForm(btrfs bool) form {
+	wpIDs, wpTitles := []string{"auto"}, []string{"Time of day"}
+	for _, w := range answers.Wallpapers {
+		wpIDs, wpTitles = append(wpIDs, w.ID), append(wpTitles, w.Title)
+	}
 	f := form{fields: []*field{
+		newChoice("wallpaper", "Wallpaper",
+			"What the desktop shows until you pick another. Its colours follow the wallpaper, so this also picks the accent. ←/→ go through all 28.",
+			wpIDs, wpTitles, "auto"),
 		newChoice("display_scale", "Display size",
 			"How large everything is drawn. Automatic suits most VM windows; pick a size if text looks tiny on a high-resolution screen. Settings can change it later.",
 			[]string{"auto", "100", "125", "150", "175", "200"},
@@ -219,6 +226,7 @@ func desktopForm(btrfs bool) form {
 // desktopAnswers reads the desktop form into the answers.
 func (m Model) desktopAnswers(a *answers.Answers) {
 	a.DisplayScale = m.desktop.get("display_scale")
+	a.Wallpaper = m.desktop.get("wallpaper")
 	a.Profile = m.desktop.get("profile")
 	var apps []string
 	for _, app := range answers.AppNames {
@@ -804,12 +812,18 @@ func (m Model) viewReview() string {
 			look = a.DisplayScale + "% size"
 		}
 		features := "automatic features"
-		for i, id := range m.desktop.fields[1].choices {
-			if id == a.Profile && id != "auto" {
-				features = m.desktop.fields[1].labels[i]
+		wallpaper := "time of day wallpaper"
+		for _, f := range m.desktop.fields {
+			for i, id := range f.choices {
+				switch {
+				case f.key == "profile" && id == a.Profile && id != "auto":
+					features = f.labels[i]
+				case f.key == "wallpaper" && id == a.Wallpaper && id != "auto":
+					wallpaper = f.labels[i]
+				}
 			}
 		}
-		row("Desktop", look+" · "+features)
+		row("Desktop", wallpaper+" · "+look+" · "+features)
 		apps := "none extra"
 		if a.Apps != "" {
 			apps = strings.ReplaceAll(a.Apps, ",", ", ")

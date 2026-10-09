@@ -90,8 +90,8 @@ func TestGuidedWalkThrough(t *testing.T) {
 	if m.(Model).screen != sDesktop {
 		t.Fatalf("questions did not finish, at screen %d:\n%s", m.(Model).screen, m.View())
 	}
-	// The desktop: 150%, Firefox, and the rest as they are.
-	m = press(m, "right", "right", "right", "enter", "enter", "right", "enter", "enter", "enter", "enter", "enter", "enter")
+	// The desktop: the third wallpaper, 150%, Firefox, and the rest as they are.
+	m = press(m, "right", "right", "right", "enter", "right", "right", "right", "enter", "enter", "right", "enter", "enter", "enter", "enter", "enter", "enter")
 	if m.(Model).screen != sMachine {
 		t.Fatalf("desktop did not finish, at screen %d:\n%s", m.(Model).screen, m.View())
 	}
@@ -100,7 +100,7 @@ func TestGuidedWalkThrough(t *testing.T) {
 		t.Fatalf("machine form did not finish:\n%s", m.View())
 	}
 	v = m.View()
-	for _, want := range []string{"me on box", "encrypted", "your own ISO, not checked", "Stub Hypervisor", "150% size", "firefox", "a snapshot before every update"} {
+	for _, want := range []string{"me on box", "encrypted", "your own ISO, not checked", "Stub Hypervisor", "150% size", "firefox", "a snapshot before every update", "Deadvlei"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("review is missing %q:\n%s", want, v)
 		}
@@ -109,7 +109,7 @@ func TestGuidedWalkThrough(t *testing.T) {
 	if p.Mode != plan.Guided || p.Answers.Encrypt != "yes" || p.Answers.Hostname != "box" || p.Spec.MemoryMB < 4096 {
 		t.Fatalf("plan %+v", p)
 	}
-	if a := p.Answers; a.DisplayScale != "150" || a.Apps != "firefox" || a.Profile != "auto" || a.AutoSnapshots != "yes" {
+	if a := p.Answers; a.DisplayScale != "150" || a.Apps != "firefox" || a.Profile != "auto" || a.AutoSnapshots != "yes" || a.Wallpaper != "place-deadvlei" {
 		t.Fatalf("desktop answers %+v", a)
 	}
 	if err := p.Answers.Validate(); err != nil {
@@ -133,7 +133,7 @@ func TestNoSnapshotsWithoutBtrfs(t *testing.T) {
 	m := Model{desktop: f, desktopReady: true}
 	a := answers.Answers{Filesystem: "ext4"}
 	m.desktopAnswers(&a)
-	if a.AutoSnapshots != "no" || a.Apps != "" || a.DisplayScale != "auto" {
+	if a.AutoSnapshots != "no" || a.Apps != "" || a.DisplayScale != "auto" || a.Wallpaper != "auto" {
 		t.Fatalf("%+v", a)
 	}
 	if err := a.Validate(); err != nil {
@@ -170,7 +170,7 @@ func TestExpressAsksForAPasswordAndNoEncryption(t *testing.T) {
 	if m.(Model).screen != sDesktop {
 		t.Fatalf("express questions did not finish:\n%s", m.View())
 	}
-	m = press(m, "enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter")
+	m = press(m, "enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter")
 	if m.(Model).screen != sMachine {
 		t.Fatalf("express questions did not finish:\n%s", m.View())
 	}
