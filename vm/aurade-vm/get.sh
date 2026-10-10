@@ -19,11 +19,11 @@
 set -euo pipefail
 
 # >>> pins (written by build.sh; do not edit by hand)
-VERSION=0.0.0
-PIN_linux_amd64=
-PIN_linux_arm64=
-PIN_darwin_amd64=
-PIN_darwin_arm64=
+VERSION=1.0.0
+PIN_linux_amd64=2610a43bcab223bd6507b7e42ffdb7143abccdf8a131b1a85213a02806d2ca35
+PIN_linux_arm64=0c9e4c709f4b8f728326adbd1a641b5def13329c9db231bde0b0ad45ba5b456f
+PIN_darwin_amd64=32b3f3bea0aaa0cee887e4980514f5bad28dacda0f7b1cb95c04da9b5f039650
+PIN_darwin_arm64=f5498ad1a14f1e2574a445f33ad47ff1e212998819613d90b6b486a6df2ec469
 # <<< pins
 
 FINGERPRINT=BC390DCF360B2184DBBF008B8B2AB2EFE667CB69
