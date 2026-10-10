@@ -18,10 +18,10 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 # >>> pins (written by build.sh; do not edit by hand)
-$Version = '0.0.0'
+$Version = '1.0.0'
 $Pins = @{
-  'windows-amd64' = ''
-  'windows-arm64' = ''
+  'windows-amd64' = '23894da5d04371caec35d9ab240fe4e610d86ed6c3a7cfb4bb15c1f4e0ae697a'
+  'windows-arm64' = '3491c257db5cf2e61758560b6d3fdd6ec159366f784af39ad0d40c0148afa371'
 }
 # <<< pins
 
