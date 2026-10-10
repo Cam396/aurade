@@ -5,6 +5,36 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 ## 1.2.0, unreleased
 
 ### Added
+- aurade-vm, one program for Windows, Linux and macOS that puts AuraDE in a
+  virtual machine. It finds the hypervisors on the computer (VMware
+  Workstation and Fusion, QEMU, libvirt and GNOME Boxes, VirtualBox, Hyper-V,
+  Parallels and UTM), downloads the ISO and checks it against the release
+  key, makes the VM and starts the installer:
+  - Guided: answer the installer's questions in aurade-vm, and the installer
+    opens with them filled in. You set the password and confirm the disk in
+    the installer as usual.
+  - Express: the same questions and a password, and nothing more. The
+    installer runs by itself on the VM's blank disk and restarts into
+    AuraDE. Only the password's hash reaches the VM.
+  - On an Arch Linux computer, it can instead add AuraDE beside the desktop
+    already there, as one more session at the login screen.
+  It updates itself, checked against the SHA-256 published for each version,
+  and removes the older ISOs it downloaded once no VM starts from them.
+- The installer can start from answers prepared ahead of time, on a small
+  disk labelled AURADE_ANS. Both the graphical and the text installer open
+  with them filled in, and check each one as if it had been typed.
+- New choices among the installer's advanced questions:
+  - the wallpaper, from the photographs AuraDE ships, which the desktop's
+    colours then follow;
+  - the feature set and the display size;
+  - extra apps: Firefox, Visual Studio Code, Flatpak with Flathub, Waydroid
+    and developer tools, from the same pinned packages as the rest of the
+    system;
+  - on Btrfs, a snapshot before every update, to roll back to if one goes
+    wrong.
+- In a virtual machine, the installer adds the hypervisor's guest tools:
+  open-vm-tools on VMware, the guest agent on QEMU, the guest utilities on
+  VirtualBox and the integration daemons on Hyper-V.
 - Encrypted installs ask for the disk passphrase on a graphical unlock
   screen, in the keyboard layout chosen in the installer. It stays sharp on a
   4K screen, even one connected after installing.
@@ -86,6 +116,11 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - The display size preview in setup shows Files, Chromium and Settings, apps
   that are on the machine, instead of Photos, Camera and A4.
 - The installer shows how much of the package download has arrived.
+- A wallpaper set as the default is the one a new account starts with.
+  Before, ChromeOS's time of day wallpaper replaced it during setup. With
+  none set, new accounts still get the time of day wallpaper.
+- The one-line commands for trying AuraDE in a virtual machine download
+  aurade-vm. The scripts they ran before are still in `vm/`.
 
 ### Fixed
 - Settings titled the accounts page "'s accounts" for an account with no

@@ -1,7 +1,7 @@
 # AuraDE
 
 <p align="center">
-  <img src="assets/aurade-banner-1.1.2.png" alt="AuraDE 1.1.2" width="820">
+  <img src="assets/aurade-banner-1.2.0.png" alt="AuraDE 1.2.0" width="820">
 </p>
 
 AuraDE is a ChromeOS-inspired desktop for ordinary Arch Linux hardware. It
@@ -10,7 +10,7 @@ NetworkManager, PipeWire, and systemd that already work on the machine.
 Underneath it is plain Arch: pacman, the Arch kernel, and your own local
 account, with no Google account needed.
 
-AuraDE 1.1.2 is the current release. The ISO, the signed package
+AuraDE 1.2.0 is the current release. The ISO, the signed package
 repository, and the release key are on the
 [releases page](https://github.com/Cam396/aurade/releases/latest). AuraDE is
 not an official Google or ChromeOS distribution. Back up anything you cannot
@@ -18,20 +18,23 @@ restore before you install it.
 
 ## Try it in a virtual machine
 
-One command downloads the latest ISO, checks it against its published
-SHA-256 (and the release signature when gpg is installed), makes a virtual
-disk, and boots the installer. Run it again after installing to start AuraDE.
+One command gets [aurade-vm](vm/aurade-vm/README.md), which finds the
+hypervisors on your computer, downloads the latest ISO and checks it against
+the release key, makes the VM and starts the installer. It can fill the
+installer's questions in for you, or install AuraDE by itself. Run it again
+after installing to start AuraDE.
 
-**Linux or an Intel Mac** (QEMU by default; libvirt and VirtualBox too):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm.sh | bash
-```
-
-**Windows** (Hyper-V from an administrator PowerShell, or VirtualBox):
+**Windows** (VMware Workstation, Hyper-V or VirtualBox):
 
 ```powershell
-irm https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm.ps1 | iex
+irm https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.ps1 | iex
+```
+
+**Linux or an Intel Mac** (QEMU, libvirt and GNOME Boxes, VirtualBox, VMware,
+Parallels or UTM):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.sh | bash
 ```
 
 Everything stays in one folder (`~/AuraDE`). The VM needs 4 GB of memory and a

@@ -33,7 +33,7 @@ archive, and `chromiumos-ash-bin` repackages the released Chromium build with
 its dependencies read from `chromiumos-ash/PKGBUILD`.
 
 ~~~bash
-AURADE_AUR_OUTPUT=$HOME/aur-export AURADE_AUR_REF=v1.1.2 \
+AURADE_AUR_OUTPUT=$HOME/aur-export AURADE_AUR_REF=v1.2.0 \
   AURADE_AUR_CHROMIUM_PACKAGE=/path/to/chromiumos-ash-<ver>-<rel>-x86_64.pkg.tar.zst \
   ci/export-aur-bundles.sh
 ci/aur-package-smoke.sh            # .SRCINFO, namcap, verifysource, as a normal user
