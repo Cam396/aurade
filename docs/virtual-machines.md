@@ -1,24 +1,41 @@
 # Virtual machines
 
 AuraDE installs into a virtual machine the same way it installs onto a PC.
-The scripts in `vm/` set one up for you; the rest of this page is for doing it
-by hand or in another hypervisor.
+[aurade-vm](../vm/aurade-vm/README.md) sets one up for you in any of the
+hypervisors below. The rest of this page is for doing it by hand.
 
 ## The one command
 
+Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.ps1 | iex
+```
+
 Linux or an Intel Mac:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm/get.sh | bash
+```
+
+Its own page says what it asks and what it checks.
+
+## The earlier scripts
+
+The scripts aurade-vm replaced are still in `vm/`, for a computer that cannot
+run it. They know QEMU, libvirt and VirtualBox on Linux and Intel Macs, and
+Hyper-V and VirtualBox on Windows, and they do not fill the installer's
+questions in.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm.sh | bash
 ```
 
-Windows, in PowerShell:
-
 ```powershell
 irm https://raw.githubusercontent.com/Cam396/aurade/main/vm/aurade-vm.ps1 | iex
 ```
 
-The first run:
+Their first run:
 
 1. finds the latest release and downloads its ISO into `~/AuraDE`;
 2. checks the ISO against its published SHA-256, and against the release
