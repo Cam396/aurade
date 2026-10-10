@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## 1.2.0, unreleased
+## 1.2.0, 2026-10-09
 
 ### Added
 - aurade-vm, one program for Windows, Linux and macOS that puts AuraDE in a
