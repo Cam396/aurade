@@ -310,6 +310,13 @@ done
 ssh "${ssh_opts[@]}" root@127.0.0.1 true 2>/dev/null || fail 'the installed system never answered on ssh'
 sremote() { ssh "${ssh_opts[@]}" root@127.0.0.1 "$@"; }
 
+# The programs that dumped core since this boot began. A crash in an earlier
+# boot, such as an upgraded machine's update, is ci/iso-upgrade-smoke.sh's to
+# report; counting it here blamed it on the first login.
+boot_cores() {
+  sremote 'journalctl -b -q --no-pager -o cat --output-fields=COREDUMP_EXE MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1' | paste -sd' '
+}
+
 # Wait for a line in this boot's journal, and print it.
 wait_journal() {
   local pattern=$1 seconds=$2
@@ -317,6 +324,10 @@ wait_journal() {
 }
 
 echo "==> the installed system is healthy"
+# An update whose initramfs hook never ran boots the kernel from before it,
+# and the update removed that kernel's modules.
+sremote 'test -d "/usr/lib/modules/$(uname -r)"' ||
+  fail "the running kernel $(sremote 'uname -r') has no modules installed"
 state=$(sremote 'timeout 300 systemctl is-system-running --wait' || true)
 case $state in
   running|degraded) echo "   is-system-running: $state" ;;
@@ -428,8 +439,8 @@ sremote "for i in \$(seq 1 60); do curl -fsS http://127.0.0.1:9222/json/list 2>/
   fail 'the desktop never opened a browser page'
 sleep 5
 shot 5-desktop
-cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
-[[ $cores == 0 ]] || fail "the first login left ${cores} core dump(s)"
+cores=$(boot_cores)
+[[ -z $cores ]] || fail "the first login left a core dump: $cores"
 
 echo "==> the file service answers for the signed in user"
 uid=$(sremote "id -u $USERNAME")
@@ -452,8 +463,8 @@ sremote 'for i in $(seq 1 60); do pgrep -f /usr/bin/aurade-greeter >/dev/null &&
   fail 'the login screen did not come back after signing out'
 sleep 10
 shot 6-signed-out
-cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
-[[ $cores == 0 ]] || fail "signing out left ${cores} core dump(s)"
+cores=$(boot_cores)
+[[ -z $cores ]] || fail "signing out left a core dump: $cores"
 keys ret; sleep 2
 keys ret; sleep 2
 type_text "$USERNAME"
@@ -466,8 +477,8 @@ sremote "for i in \$(seq 1 60); do curl -fsS http://127.0.0.1:9222/json/list 2>/
   fail 'the second sign in ran first-run setup again'
 sleep 5
 shot 7-desktop-again
-cores=$(sremote 'ls /var/lib/systemd/coredump 2>/dev/null | wc -l')
-[[ $cores == 0 ]] || fail "the second sign in left ${cores} core dump(s)"
+cores=$(boot_cores)
+[[ -z $cores ]] || fail "the second sign in left a core dump: $cores"
 echo "   signed out to the login screen and back in, with no crash and no second setup"
 
 echo "iso install smoke: PASS (install, graphical sign in, local first run, desktop, file service, sign out and in)"

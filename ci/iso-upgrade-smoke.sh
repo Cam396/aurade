@@ -101,6 +101,21 @@ if [[ -n $NEW_REPO ]]; then
 fi
 sremote 'pacman -Dk' >/dev/null || fail 'the updated system has broken dependencies'
 echo "   $(sremote 'pacman -Q chromiumos-ash aurade-greeter | tr "\n" " "')"
+# Arch's pacman 7.1.0.r9 can corrupt its own heap in a large transaction.
+# glibc notices when the child that runs a hook frees it just before exec, so
+# that hook is skipped and pacman carries on (CachyOS/pacman#12, open). It is
+# reported here, not failed on: the boot that follows checks what a skipped
+# hook could break. Anything else that crashed during the update fails.
+crashes=$(sremote 'journalctl -b -q --no-pager -o cat --output-fields=COREDUMP_EXE MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1')
+others=$(grep -v -x -F /usr/bin/pacman <<<"$crashes" | paste -sd' ' || true)
+[[ -z $others ]] || fail "the update crashed: $others"
+if [[ -n $crashes ]]; then
+  logs=("$WORK/enable-updates.log")
+  [[ -z $NEW_REPO ]] || logs+=("$WORK/update.log")
+  skipped=$(awk '/^\( *[0-9]+\/[0-9]+\) / { hook = $0 } /^error: command terminated by signal/ { print hook }' "${logs[@]}" | paste -sd' ')
+  [[ -n $skipped ]] || fail 'pacman crashed outside a hook'
+  echo "   warning: pacman's own heap fault skipped a hook: $skipped"
+fi
 sremote 'sync; systemctl poweroff' || true
 for _ in $(seq 1 60); do kill -0 "$(cat "$WORK/upgrade.pid" 2>/dev/null)" 2>/dev/null || break; sleep 2; done
 
