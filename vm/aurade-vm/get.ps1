@@ -20,8 +20,8 @@ $ProgressPreference = 'SilentlyContinue'
 # >>> pins (written by build.sh; do not edit by hand)
 $Version = '1.0.0'
 $Pins = @{
-  'windows-amd64' = '23894da5d04371caec35d9ab240fe4e610d86ed6c3a7cfb4bb15c1f4e0ae697a'
-  'windows-arm64' = '3491c257db5cf2e61758560b6d3fdd6ec159366f784af39ad0d40c0148afa371'
+  'windows-amd64' = 'd06b7fa01b63078e3dcaedf4fbcbf254e4a30f69f9d26d5c09d1e1fa5c0a8b8b'
+  'windows-arm64' = 'bfac517c70a09cb226fd74dbbbae65827da3e58afd4b65342b647027801d6c37'
 }
 # <<< pins
 
