@@ -55,6 +55,42 @@ def log(msg):
     print(f"aurade-android: {msg}", file=sys.stderr, flush=True)
 
 
+class Adopted:
+    """A waydroid session this service did not start itself (it survived a
+    service restart). Looks enough like a Popen for the rest of the code."""
+
+    def __init__(self, pid):
+        self.pid = pid
+
+    def poll(self):
+        try:
+            with open(f"/proc/{self.pid}/stat") as f:
+                return 0 if f.read().rsplit(")", 1)[1].split()[0] == "Z" else None
+        except OSError:
+            return 0
+
+    def send_signal(self, sig):
+        try:
+            os.kill(self.pid, sig)
+        except OSError:
+            pass
+
+
+def find_session():
+    """(uid, pid) of a running 'waydroid session start', or None."""
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+            if b"waydroid" in b" ".join(argv[:3]) and argv[-3:-1] == [b"session", b"start"]:
+                return os.stat(f"/proc/{d}").st_uid, int(d)
+        except OSError:
+            continue
+    return None
+
+
 class Android(dbus.service.Object):
     def __init__(self, bus, loop):
         super().__init__(bus, PATH)
@@ -63,6 +99,22 @@ class Android(dbus.service.Object):
         self.session = None  # (uid, Popen)
         self.waiting = []  # Start calls waiting for a download already running
         self.logcat = None
+
+    def adopt_session(self):
+        found = find_session()
+        if not found or found[0] < 1000:
+            return
+        uid, pid = found
+        log(f"adopting running session {pid}")
+        self.session = (uid, Adopted(pid))
+        self.start_watchers(uid)
+
+        def watch():
+            if self.session and self.session[1].poll() is None:
+                return True
+            self.on_exit(pid, 0)
+            return False
+        GLib.timeout_add_seconds(2, watch)
 
     def caller_uid(self, sender):
         proxy = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
@@ -129,7 +181,12 @@ class Android(dbus.service.Object):
             else:
                 tail = ["dbus-run-session", "--", "waydroid", "session", "start"]
             cmd = ["runuser", "-u", user, "--", "env"] + [f"{k}={v}" for k, v in env.items()] + tail
-            proc = subprocess.Popen(cmd)
+            # The session outlives this service (KillMode=process), so its
+            # output goes to a file rather than the journal pipe.
+            os.makedirs("/run/aurade-android", exist_ok=True)
+            with open("/run/aurade-android/session.log", "ab") as out:
+                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                        start_new_session=True)
         except Exception as e:  # noqa: BLE001
             log(f"start failed: {e}")
             fail(dbus.exceptions.DBusException("org.aurade.Android1.Failed", str(e)))
@@ -1168,7 +1225,9 @@ def main():
     bus = dbus.SystemBus()
     bus_name = dbus.service.BusName(NAME, bus)  # kept alive: dropping it releases the name
     loop = GLib.MainLoop()
-    Android(bus, loop).bus_name = bus_name
+    svc = Android(bus, loop)
+    svc.bus_name = bus_name
+    svc.adopt_session()
     GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, lambda *_: loop.quit())
     log("ready")
     loop.run()
