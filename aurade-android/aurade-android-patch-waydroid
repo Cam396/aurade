@@ -95,6 +95,38 @@ FIXES = [
     bus_signals.append(dbus_proxy.connect_to_signal("NotificationClosed", onNotificationClosed))
 ''',
     ),
+    # Waydroid shares the clipboard through the pyclip module, which Arch does
+    # not ship. wl-clipboard is already a dependency and does the same job.
+    (
+        "/usr/lib/waydroid/tools/services/clipboard_manager.py",
+        "AuraDE: wl-clipboard",
+        "try:\n    import pyclip\n    canClip = True\n",
+        '''# AuraDE: wl-clipboard
+import subprocess
+
+
+class _WlClip:
+    def copy(self, value):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "replace")
+        subprocess.run(["wl-copy", "--", str(value)], timeout=5, check=False,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+
+    def paste(self):
+        res = subprocess.run(["wl-paste", "--no-newline"], timeout=5, check=False,
+                             stdin=subprocess.DEVNULL, capture_output=True)
+        return res.stdout.decode("utf-8", "replace")
+
+
+try:
+    try:
+        import pyclip
+    except ImportError:
+        pyclip = _WlClip()
+    canClip = True
+''',
+    ),
 ]
 
 for path, marker, anchor, replacement in FIXES:
