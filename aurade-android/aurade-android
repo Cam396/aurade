@@ -8,6 +8,13 @@ is the part that has root, so Ash does not need it:
     Start(s locale)   brings up the container and the user's Android session
     Stop()            stops them
     signal Stopped()  the session ended, whoever ended it
+    ListApps()        a(sss) of (label, package, activity) for launchable apps
+    GetIcon(s pkg)    ay, the app's PNG icon ("" bytes when unknown)
+    Launch(s pkg, s activity)   opens the app in its own window
+    Uninstall(s pkg)  removes an app
+    CloseTask(i id)   closes one window
+    signal AppsChanged()                the app list changed
+    signal TaskCreated(i id, s pkg, s activity) and TaskDestroyed(i id)
 
 It runs on the same machine as Ash and trusts only a caller that is a real
 user with a running login session. The Android session itself runs as that
@@ -16,6 +23,7 @@ to each other and Ash's private bus is not shared.
 """
 import os
 import pwd
+import re
 import signal
 import subprocess
 import sys
@@ -28,6 +36,8 @@ from gi.repository import GLib
 NAME = "org.aurade.Android1"
 PATH = "/org/aurade/Android1"
 CONTAINER_UNIT = "waydroid-container.service"
+LXC = ["lxc-attach", "-P", "/var/lib/waydroid/lxc", "-n", "waydroid", "--clear-env", "--"]
+LXC_PATH = ["/var/lib/waydroid/lxc"]
 
 
 def log(msg):
@@ -40,6 +50,7 @@ class Android(dbus.service.Object):
         self.bus = bus
         self.loop = loop
         self.session = None  # (uid, Popen)
+        self.logcat = None
 
     def caller_uid(self, sender):
         proxy = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
@@ -75,8 +86,13 @@ class Android(dbus.service.Object):
             }
             if locale:
                 env["LANG"] = locale
-            cmd = ["runuser", "-u", user, "--", "env"] + [f"{k}={v}" for k, v in env.items()] + [
-                "dbus-run-session", "--", "waydroid", "session", "start"]
+            bus = f"/run/user/{uid}/bus"
+            if os.path.exists(bus):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+                tail = ["waydroid", "session", "start"]
+            else:
+                tail = ["dbus-run-session", "--", "waydroid", "session", "start"]
+            cmd = ["runuser", "-u", user, "--", "env"] + [f"{k}={v}" for k, v in env.items()] + tail
             proc = subprocess.Popen(cmd)
         except Exception as e:  # noqa: BLE001
             log(f"start failed: {e}")
@@ -84,11 +100,13 @@ class Android(dbus.service.Object):
             return
         self.session = (uid, proc)
         GLib.child_watch_add(proc.pid, self.on_exit)
+        self.start_watchers(uid)
         ok()
 
     def on_exit(self, pid, status):
         log(f"session {pid} ended with status {status}")
         self.session = None
+        self.stop_watchers()
         self.Stopped()
 
     @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
@@ -102,13 +120,230 @@ class Android(dbus.service.Object):
     def Stopped(self):
         pass
 
+    # ---- apps -----------------------------------------------------------
+
+    def guest(self, *args, timeout=20):
+        """Runs a command inside the container; the container freezes when no
+        window is open, so it is thawed first."""
+        subprocess.run(["lxc-unfreeze", "-P", LXC_PATH[0], "-n", "waydroid"],
+                       capture_output=True, timeout=10, check=False)
+        return subprocess.run(LXC + list(args), capture_output=True, text=True,
+                              timeout=timeout, check=False)
+
+    @staticmethod
+    def full_activity(pkg, act):
+        if act.startswith("."):
+            return pkg + act
+        if "." not in act:
+            return pkg + "." + act
+        return act
+
+    def read_apps(self, uid):
+        home = pwd.getpwuid(uid).pw_dir
+        labels = {}
+        appdir = os.path.join(home, ".local/share/applications")
+        try:
+            names = os.listdir(appdir)
+        except OSError:
+            names = []
+        for n in names:
+            if not (n.startswith("waydroid.") and n.endswith(".desktop")):
+                continue
+            pkg = n[len("waydroid."):-len(".desktop")]
+            try:
+                for line in open(os.path.join(appdir, n), encoding="utf-8"):
+                    if line.startswith("Name="):
+                        labels[pkg] = line[5:].strip()
+                        break
+            except OSError:
+                pass
+        out = []
+        res = self.guest("/system/bin/pm", "query-activities", "--components",
+                         "-a", "android.intent.action.MAIN",
+                         "-c", "android.intent.category.LAUNCHER")
+        seen = set()
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if "/" not in line:
+                continue
+            pkg, act = line.split("/", 1)
+            if pkg in seen:
+                continue
+            seen.add(pkg)
+            out.append((labels.get(pkg, pkg), pkg, self.full_activity(pkg, act)))
+        return out
+
+    @dbus.service.method(NAME, in_signature="", out_signature="a(sss)", sender_keyword="sender")
+    def ListApps(self, sender=None):
+        uid = self.check_caller(sender)
+        return dbus.Array([dbus.Struct(a, signature="sss") for a in self.read_apps(uid)],
+                          signature="(sss)")
+
+    @dbus.service.method(NAME, in_signature="s", out_signature="ay", sender_keyword="sender")
+    def GetIcon(self, pkg, sender=None):
+        uid = self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+            return dbus.Array([], signature="y")
+        path = os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/icons", pkg + ".png")
+        try:
+            with open(path, "rb") as f:
+                return dbus.Array(f.read(), signature="y")
+        except OSError:
+            return dbus.Array([], signature="y")
+
+    @dbus.service.method(NAME, in_signature="ss", out_signature="", sender_keyword="sender")
+    def Launch(self, pkg, activity, sender=None):
+        uid = self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg) or not re.fullmatch(r"[A-Za-z0-9_.$]*", activity):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad name")
+        # waydroid's own launch sets the active-app property the window layer
+        # keys on, so it is preferred when the user's session bus is there.
+        bus = f"/run/user/{uid}/bus"
+        if os.path.exists(bus):
+            user = pwd.getpwuid(uid).pw_name
+            env = ["XDG_RUNTIME_DIR=" + f"/run/user/{uid}", "WAYLAND_DISPLAY=wayland-0",
+                   "DBUS_SESSION_BUS_ADDRESS=unix:path=" + bus, "HOME=" + pwd.getpwuid(uid).pw_dir,
+                   "PATH=/usr/local/bin:/usr/bin"]
+            subprocess.run(["lxc-unfreeze", "-P", LXC_PATH[0], "-n", "waydroid"],
+                           capture_output=True, timeout=10, check=False)
+            subprocess.run(["runuser", "-u", user, "--", "env"] + env + ["waydroid", "app", "launch", pkg],
+                           capture_output=True, timeout=30, check=False)
+            return
+        if not activity:
+            res = self.guest("/system/bin/cmd", "package", "resolve-activity", "--brief",
+                             "-c", "android.intent.category.LAUNCHER", pkg)
+            lines = [l for l in res.stdout.splitlines() if "/" in l]
+            if not lines:
+                raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "no launcher activity")
+            comp = lines[-1].strip()
+        else:
+            comp = f"{pkg}/{activity}"
+        self.guest("/system/bin/am", "start", "-n", comp)
+
+    @dbus.service.method(NAME, in_signature="s", out_signature="", sender_keyword="sender")
+    def Uninstall(self, pkg, sender=None):
+        self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad name")
+        self.guest("/system/bin/pm", "uninstall", pkg, timeout=60)
+
+    @dbus.service.method(NAME, in_signature="i", out_signature="", sender_keyword="sender")
+    def CloseTask(self, task_id, sender=None):
+        self.check_caller(sender)
+        self.guest("/system/bin/am", "stack", "remove", str(int(task_id)))
+
+    @dbus.service.signal(NAME, signature="")
+    def AppsChanged(self):
+        pass
+
+    @dbus.service.signal(NAME, signature="iss")
+    def TaskCreated(self, task_id, pkg, activity):
+        pass
+
+    @dbus.service.signal(NAME, signature="i")
+    def TaskDestroyed(self, task_id):
+        pass
+
+    # ---- watchers: tasks from the guest log, app list by polling ----------
+
+    def start_watchers(self, uid):
+        self.stop_watchers()
+        self.watch_uid = uid
+        self.apps_seen = None
+        self.log_buf = ""
+        self.start_logcat()
+        self.poll_src = GLib.timeout_add_seconds(5, self.poll_apps)
+
+    def start_logcat(self):
+        """The guest log carries the window layer's task events. The container
+        may not be up yet right after Start, so this is retried from the poll."""
+        self.drop_logcat()
+        try:
+            self.logcat = subprocess.Popen(
+                LXC + ["/system/bin/logcat", "-v", "brief", "-T", "1", "WayDroidService:I", "*:S"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        except OSError as e:
+            log(f"logcat failed: {e}")
+            self.logcat = None
+            return
+        os.set_blocking(self.logcat.stdout.fileno(), False)
+        self.log_src = GLib.io_add_watch(self.logcat.stdout.fileno(), GLib.IO_IN | GLib.IO_HUP,
+                                         self.on_log)
+
+    def drop_logcat(self):
+        src = getattr(self, "log_src", None)
+        if src:
+            GLib.source_remove(src)
+            self.log_src = None
+        lc = getattr(self, "logcat", None)
+        if lc:
+            if lc.poll() is None:
+                lc.terminate()
+            lc.wait()
+        self.logcat = None
+
+    def stop_watchers(self):
+        src = getattr(self, "poll_src", None)
+        if src:
+            GLib.source_remove(src)
+            self.poll_src = None
+        self.drop_logcat()
+
+    def on_log(self, fd, cond):
+        try:
+            data = os.read(fd, 65536).decode("utf-8", "replace")
+        except (BlockingIOError, OSError):
+            data = ""
+        if not data:
+            if cond & GLib.IO_HUP or not (self.logcat and self.logcat.poll() is None):
+                self.log_src = None
+                return False
+            return True
+        self.log_buf += data
+        *lines, self.log_buf = self.log_buf.split("\n")
+        for line in lines:
+            m = re.search(r"taskCreated (\d+) (\S+)/(\S+)", line)
+            if m:
+                tid, pkg, act = int(m.group(1)), m.group(2), m.group(3)
+                self.TaskCreated(tid, pkg, self.full_activity(pkg, act))
+                continue
+            m = re.search(r"taskRemoved (\d+)", line)
+            if m:
+                self.TaskDestroyed(int(m.group(1)))
+        return True
+
+    def poll_apps(self):
+        if not (self.session and self.session[1].poll() is None):
+            return True
+        if self.logcat is None or self.logcat.poll() is not None or not getattr(self, "log_src", None):
+            self.start_logcat()
+        try:
+            apps = sorted(self.read_apps(self.watch_uid))
+        except Exception as e:  # noqa: BLE001
+            log(f"app poll failed: {e}")
+            return True
+        if self.apps_seen is not None and apps != self.apps_seen:
+            self.AppsChanged()
+        self.apps_seen = apps
+        return True
+
+
+def write_host_generated():
+    """Ash reads the board name from here when it builds the default app list."""
+    d = "/run/arc/host_generated"
+    os.makedirs(d, mode=0o755, exist_ok=True)
+    with open(os.path.join(d, "build.prop"), "w", encoding="utf-8") as f:
+        f.write("ro.product.board=aurade\nro.product.device=aurade\n")
+    os.chmod(os.path.join(d, "build.prop"), 0o644)
+
 
 def main():
+    write_host_generated()
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    dbus.service.BusName(NAME, bus)
+    bus_name = dbus.service.BusName(NAME, bus)  # kept alive: dropping it releases the name
     loop = GLib.MainLoop()
-    Android(bus, loop)
+    Android(bus, loop).bus_name = bus_name
     GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, lambda *_: loop.quit())
     log("ready")
     loop.run()

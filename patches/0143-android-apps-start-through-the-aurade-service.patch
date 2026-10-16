@@ -17,42 +17,24 @@ index 44cf3cd5f0fd..6a8407a71c7b 100644
    CHECK(extensions::util::IsAppLaunchable(arc::kPlayStoreAppId, profile));
    ::OpenApplication(profile,
                      CreateAppLaunchParamsUserContainer(
-diff --git a/chromeos/ash/experiences/arc/session/arc_client_adapter.cc b/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
-index a31dd3a2e95a..563952cd683a 100644
---- a/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
-+++ b/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
-@@ -6,6 +6,7 @@
- 
- #include "chromeos/ash/components/dbus/arc/arc.pb.h"
- #include "chromeos/ash/experiences/arc/arc_util.h"
-+#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
- #include "chromeos/ash/experiences/arc/session/arc_container_client_adapter.h"
- #include "chromeos/ash/experiences/arc/session/arc_start_params.h"
- #include "chromeos/ash/experiences/arc/session/arc_vm_client_adapter.h"
-@@ -72,6 +73,9 @@ void ArcClientAdapter::RemoveObserver(Observer* observer) {
- 
- // static
- std::unique_ptr<ArcClientAdapter> ArcClientAdapter::Create() {
-+  if (IsAuraDEAndroidEnabled()) {
-+    return CreateArcAuraDEClientAdapter();
-+  }
-   return IsArcVmEnabled() ? CreateArcVmClientAdapter()
-                           : CreateArcContainerClientAdapter();
- }
 diff --git a/chromeos/ash/experiences/arc/session/BUILD.gn b/chromeos/ash/experiences/arc/session/BUILD.gn
-index ba1beac9e4bc..5d1663769c9f 100644
+index ba1beac9e4bc..d7540fae4147 100644
 --- a/chromeos/ash/experiences/arc/session/BUILD.gn
 +++ b/chromeos/ash/experiences/arc/session/BUILD.gn
-@@ -11,6 +11,8 @@ static_library("session") {
+@@ -11,6 +11,12 @@ static_library("session") {
      "arc_bridge_host_impl.h",
      "arc_bridge_service.cc",
      "arc_bridge_service.h",
++    "arc_aurade_bridge.cc",
++    "arc_aurade_bus.cc",
++    "arc_aurade_bus.h",
++    "arc_aurade_bridge.h",
 +    "arc_aurade_client_adapter.cc",
 +    "arc_aurade_client_adapter.h",
      "arc_client_adapter.cc",
      "arc_client_adapter.h",
      "arc_container_client_adapter.cc",
-@@ -49,6 +51,7 @@ static_library("session") {
+@@ -49,6 +55,7 @@ static_library("session") {
      "//ash/public/cpp",
      "//chromeos/ash/components/cryptohome",
      "//chromeos/ash/components/dbus",
@@ -60,9 +42,468 @@ index ba1beac9e4bc..5d1663769c9f 100644
      "//chromeos/ash/components/dbus/concierge",
      "//chromeos/ash/components/dbus/concierge:concierge_proto",
      "//chromeos/ash/components/dbus/debug_daemon",
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+new file mode 100644
+index 000000000000..d1f84bc791ee
+--- /dev/null
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+@@ -0,0 +1,336 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bridge.h"
++
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/containers/span.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bus.h"
++#include "chromeos/ash/experiences/arc/mojom/app.mojom.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_proxy.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++
++namespace arc {
++
++namespace {
++
++constexpr char kService[] = "org.aurade.Android1";
++constexpr char kPath[] = "/org/aurade/Android1";
++constexpr char kInterface[] = "org.aurade.Android1";
++
++struct AppRow {
++  std::string label;
++  std::string package;
++  std::string activity;
++};
++
++class Bridge : public ArcAuraDEBridge, public mojom::AppInstance {
++ public:
++  explicit Bridge(mojo::PendingRemote<mojom::ArcBridgeHost> host)
++      : host_(std::move(host)) {
++    dbus::Bus* bus = GetAuraDEAndroidBus();
++    if (bus) {
++      proxy_ = bus->GetObjectProxy(kService, dbus::ObjectPath(kPath));
++      Watch("AppsChanged", base::BindRepeating(&Bridge::OnAppsChanged,
++                                               weak_factory_.GetWeakPtr()));
++      Watch("TaskCreated", base::BindRepeating(&Bridge::OnTaskCreatedSignal,
++                                               weak_factory_.GetWeakPtr()));
++      Watch("TaskDestroyed", base::BindRepeating(&Bridge::OnTaskDestroyedSignal,
++                                                 weak_factory_.GetWeakPtr()));
++    } else {
++      LOG(ERROR) << "AuraDE Android: no system bus";
++    }
++    host_->OnAppInstanceReady(receiver_.BindNewPipeAndPassRemote());
++  }
++
++  // mojom::AppInstance:
++  void Init(mojo::PendingRemote<mojom::AppHost> host_remote,
++            InitCallback callback) override {
++    app_host_.reset();
++    app_host_.Bind(std::move(host_remote));
++    std::move(callback).Run();
++    RefreshApps();
++  }
++
++  void CloseTask(int32_t task_id) override {
++    CallService("CloseTask", [&](dbus::MessageWriter& w) {
++      w.AppendInt32(task_id);
++    });
++  }
++  void InstallPackage(mojom::ArcPackageInfoPtr info) override {}
++  void LaunchAppWithWindowInfo(const std::string& package_name,
++                               const std::string& activity,
++                               mojom::WindowInfoPtr window_info) override {
++    CallService("Launch", [&](dbus::MessageWriter& w) {
++      w.AppendString(package_name);
++      w.AppendString(activity);
++    });
++  }
++  void LaunchAppShortcutItem(const std::string& package_name,
++                             const std::string& shortcut_id,
++                             int64_t display_id) override {}
++  void LaunchIntentWithWindowInfo(const std::string& intent_uri,
++                                  mojom::WindowInfoPtr window_info) override {}
++  void UpdateWindowInfo(mojom::WindowInfoPtr window_info) override {}
++
++  void RequestAppIcon(const std::string& package_name,
++                      const std::string& activity,
++                      int32_t pixel_size,
++                      RequestAppIconCallback callback) override {
++    FetchIcon(package_name, std::move(callback));
++  }
++  void GetAppIcon(const std::string& package_name,
++                  const std::string& activity,
++                  int32_t pixel_size,
++                  GetAppIconCallback callback) override {
++    FetchIcon(package_name,
++              base::BindOnce(&Bridge::ReplyRaw, std::move(callback)));
++  }
++  void RequestShortcutIcon(const std::string& icon_resource_id,
++                           int32_t pixel_size,
++                           RequestShortcutIconCallback callback) override {
++    std::move(callback).Run({});
++  }
++  void GetAppShortcutIcon(const std::string& icon_resource_id,
++                          int32_t pixel_size,
++                          GetAppShortcutIconCallback callback) override {
++    std::move(callback).Run(mojom::RawIconPngData::New());
++  }
++  void RequestPackageIcon(const std::string& package_name,
++                          int32_t pixel_size,
++                          bool normalize,
++                          RequestPackageIconCallback callback) override {
++    FetchIcon(package_name, std::move(callback));
++  }
++  void GetPackageIcon(const std::string& package_name,
++                      int32_t pixel_size,
++                      bool normalize,
++                      GetPackageIconCallback callback) override {
++    FetchIcon(package_name,
++              base::BindOnce(&Bridge::ReplyRaw, std::move(callback)));
++  }
++  void RemoveCachedIcon(const std::string& icon_resource_id) override {}
++  void SetTaskActive(int32_t task_id) override {}
++  void ShowPackageInfoDeprecated(const std::string& package_name,
++                                 const gfx::Rect& dimension_on_screen) override {
++  }
++  void ShowPackageInfoOnPageDeprecated(
++      const std::string& package_name,
++      mojom::ShowPackageInfoPage page,
++      const gfx::Rect& dimension_on_screen) override {}
++  void ShowPackageInfoOnPage(const std::string& package_name,
++                             mojom::ShowPackageInfoPage page,
++                             int64_t display_id) override {}
++  void SetNotificationsEnabled(const std::string& package_name,
++                               bool enabled) override {}
++  void StartPaiFlow(StartPaiFlowCallback callback) override {
++    std::move(callback).Run(mojom::PaiFlowState::UNKNOWN);
++  }
++  void StartFastAppReinstallFlow(
++      const std::vector<std::string>& arc_package_names) override {}
++  void UninstallPackage(const std::string& package_name) override {
++    CallService("Uninstall", [&](dbus::MessageWriter& w) {
++      w.AppendString(package_name);
++    });
++  }
++  void UpdateAppDetails(const std::string& package_name) override {}
++  void GetAndroidId(GetAndroidIdCallback callback) override {
++    std::move(callback).Run(0);
++  }
++  void GetAppShortcutGlobalQueryItems(
++      const std::string& query,
++      int32_t max_results,
++      GetAppShortcutGlobalQueryItemsCallback callback) override {
++    std::move(callback).Run({});
++  }
++  void GetAppShortcutItems(const std::string& package_name,
++                           GetAppShortcutItemsCallback callback) override {
++    std::move(callback).Run({});
++  }
++  void GetRecentAndSuggestedAppsFromPlayStore(
++      const std::string& query,
++      int32_t max_results,
++      GetRecentAndSuggestedAppsFromPlayStoreCallback callback) override {
++    std::move(callback).Run(
++        ::arc::ArcPlayStoreSearchRequestState::PLAY_STORE_PROXY_NOT_AVAILABLE,
++        {});
++  }
++  void IsInstallable(const std::string& package_name,
++                     IsInstallableCallback callback) override {
++    std::move(callback).Run(false);
++  }
++  void GetAppCategory(const std::string& package_name,
++                      GetAppCategoryCallback callback) override {
++    std::move(callback).Run(mojom::AppCategory::kUndefined);
++  }
++  void SetAppLocale(const std::string& package_name,
++                    const std::string& locale_tag) override {}
++
++ private:
++  using SignalHandler = base::RepeatingCallback<void(dbus::Signal*)>;
++
++  void Watch(const char* signal, SignalHandler handler) {
++    proxy_->ConnectToSignal(
++        kInterface, signal, std::move(handler),
++        base::BindOnce(
++            [](const std::string&, const std::string& name, bool ok) {
++              LOG_IF(ERROR, !ok) << "AuraDE Android: cannot watch " << name;
++            }));
++  }
++
++  template <typename Fn>
++  void CallService(const char* method, Fn&& fill) {
++    if (!proxy_) {
++      return;
++    }
++    dbus::MethodCall call(kInterface, method);
++    dbus::MessageWriter writer(&call);
++    fill(writer);
++    proxy_->CallMethodWithErrorResponse(
++        &call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(
++            [](std::string name, dbus::Response* r, dbus::ErrorResponse* e) {
++              LOG_IF(ERROR, !r) << "AuraDE Android: " << name << " failed: "
++                                << (e ? e->GetErrorName() : "no reply");
++            },
++            std::string(method)));
++  }
++
++  void RefreshApps() {
++    if (!proxy_) {
++      return;
++    }
++    dbus::MethodCall call(kInterface, "ListApps");
++    proxy_->CallMethodWithErrorResponse(
++        &call, dbus::ObjectProxy::TIMEOUT_MAX,
++        base::BindOnce(&Bridge::OnListApps, weak_factory_.GetWeakPtr()));
++  }
++
++  void OnListApps(dbus::Response* response, dbus::ErrorResponse* error) {
++    if (!response) {
++      LOG(ERROR) << "AuraDE Android: ListApps failed: "
++                 << (error ? error->GetErrorName() : "no reply");
++      return;
++    }
++    std::vector<AppRow> rows;
++    dbus::MessageReader reader(response);
++    dbus::MessageReader array(nullptr);
++    if (reader.PopArray(&array)) {
++      while (array.HasMoreData()) {
++        dbus::MessageReader st(nullptr);
++        AppRow row;
++        if (!array.PopStruct(&st) || !st.PopString(&row.label) ||
++            !st.PopString(&row.package) || !st.PopString(&row.activity)) {
++          break;
++        }
++        rows.push_back(std::move(row));
++      }
++    }
++    if (!app_host_.is_bound()) {
++      return;
++    }
++    std::vector<mojom::AppInfoPtr> apps;
++    std::vector<mojom::ArcPackageInfoPtr> packages;
++    for (const AppRow& row : rows) {
++      auto app = mojom::AppInfo::New();
++      app->name = row.label;
++      app->package_name = row.package;
++      app->activity = row.activity;
++      app->sticky = false;
++      app->notifications_enabled = true;
++      apps.push_back(std::move(app));
++
++      auto pkg = mojom::ArcPackageInfo::New();
++      pkg->package_name = row.package;
++      pkg->package_version = 1;
++      pkg->last_backup_android_id = 0;
++      pkg->last_backup_time = 0;
++      pkg->sync = false;
++      packages.push_back(std::move(pkg));
++    }
++    app_host_->OnPackageListRefreshed(std::move(packages));
++    app_host_->OnAppListRefreshed(std::move(apps));
++  }
++
++  void FetchIcon(const std::string& package_name,
++                 base::OnceCallback<void(const std::vector<uint8_t>&)> done) {
++    if (!proxy_) {
++      std::move(done).Run({});
++      return;
++    }
++    dbus::MethodCall call(kInterface, "GetIcon");
++    dbus::MessageWriter writer(&call);
++    writer.AppendString(package_name);
++    proxy_->CallMethodWithErrorResponse(
++        &call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(
++            [](base::OnceCallback<void(const std::vector<uint8_t>&)> done,
++               dbus::Response* r, dbus::ErrorResponse*) {
++              std::vector<uint8_t> png;
++              if (r) {
++                dbus::MessageReader reader(r);
++                base::span<const uint8_t> bytes;
++                if (reader.PopArrayOfBytes(&bytes)) {
++                  png.assign(bytes.begin(), bytes.end());
++                }
++              }
++              std::move(done).Run(png);
++            },
++            std::move(done)));
++  }
++
++  static void ReplyRaw(base::OnceCallback<void(mojom::RawIconPngDataPtr)> cb,
++                       const std::vector<uint8_t>& png) {
++    auto icon = mojom::RawIconPngData::New();
++    icon->is_adaptive_icon = false;
++    icon->icon_png_data = png;
++    std::move(cb).Run(std::move(icon));
++  }
++
++  void OnAppsChanged(dbus::Signal*) { RefreshApps(); }
++
++  void OnTaskCreatedSignal(dbus::Signal* signal) {
++    dbus::MessageReader reader(signal);
++    int32_t id = 0;
++    std::string pkg, activity;
++    if (!reader.PopInt32(&id) || !reader.PopString(&pkg) ||
++        !reader.PopString(&activity) || !app_host_.is_bound()) {
++      return;
++    }
++    app_host_->OnTaskCreated(id, pkg, activity, std::nullopt, std::nullopt, 0);
++  }
++
++  void OnTaskDestroyedSignal(dbus::Signal* signal) {
++    dbus::MessageReader reader(signal);
++    int32_t id = 0;
++    if (reader.PopInt32(&id) && app_host_.is_bound()) {
++      app_host_->OnTaskDestroyed(id);
++    }
++  }
++
++  mojo::Remote<mojom::ArcBridgeHost> host_;
++  mojo::Remote<mojom::AppHost> app_host_;
++  mojo::Receiver<mojom::AppInstance> receiver_{this};
++  raw_ptr<dbus::ObjectProxy> proxy_ = nullptr;
++  base::WeakPtrFactory<Bridge> weak_factory_{this};
++};
++
++}  // namespace
++
++std::unique_ptr<ArcAuraDEBridge> CreateArcAuraDEBridge(
++    mojo::PendingRemote<mojom::ArcBridgeHost> host) {
++  return std::make_unique<Bridge>(std::move(host));
++}
++
++}  // namespace arc
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.h b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.h
+new file mode 100644
+index 000000000000..85d1d19e8ad5
+--- /dev/null
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.h
+@@ -0,0 +1,30 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BRIDGE_H_
++#define CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BRIDGE_H_
++
++#include <memory>
++
++#include "chromeos/ash/experiences/arc/mojom/arc_bridge.mojom.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++
++namespace arc {
++
++// The Android side of the ARC bridge, run inside Ash. On AuraDE there is no
++// guest that speaks Mojo, so this object plays the guest: it takes the remote
++// end of ArcBridgeHost, publishes an AppInstance, and answers it from the
++// org.aurade.Android1 system service. Everything above it (the launcher, the
++// shelf, App Management) is the unchanged ARC code.
++class ArcAuraDEBridge {
++ public:
++  virtual ~ArcAuraDEBridge() = default;
++};
++
++std::unique_ptr<ArcAuraDEBridge> CreateArcAuraDEBridge(
++    mojo::PendingRemote<mojom::ArcBridgeHost> host);
++
++}  // namespace arc
++
++#endif  // CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BRIDGE_H_
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bus.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bus.cc
+new file mode 100644
+index 000000000000..096d452fa930
+--- /dev/null
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bus.cc
+@@ -0,0 +1,47 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bus.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/logging.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/no_destructor.h"
++#include "base/threading/thread.h"
++#include "dbus/bus.h"
++
++namespace arc {
++
++namespace {
++
++struct Connection {
++  std::unique_ptr<base::Thread> thread;
++  scoped_refptr<dbus::Bus> bus;
++};
++
++}  // namespace
++
++dbus::Bus* GetAuraDEAndroidBus() {
++  static base::NoDestructor<Connection> connection;
++  if (connection->bus) {
++    return connection->bus.get();
++  }
++  connection->thread = std::make_unique<base::Thread>("AuraDE Android D-Bus");
++  base::Thread::Options thread_options(base::MessagePumpType::IO, 0);
++  if (!connection->thread->StartWithOptions(std::move(thread_options))) {
++    LOG(ERROR) << "AuraDE Android: could not start the D-Bus thread";
++    connection->thread.reset();
++    return nullptr;
++  }
++  dbus::Bus::Options options;
++  options.bus_type = dbus::Bus::SYSTEM;
++  options.connection_type = dbus::Bus::PRIVATE;
++  options.dbus_task_runner = connection->thread->task_runner();
++  connection->bus = base::MakeRefCounted<dbus::Bus>(std::move(options));
++  return connection->bus.get();
++}
++
++}  // namespace arc
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bus.h b/chromeos/ash/experiences/arc/session/arc_aurade_bus.h
+new file mode 100644
+index 000000000000..1e93d9e775d6
+--- /dev/null
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bus.h
+@@ -0,0 +1,22 @@
++// Copyright 2026 The AuraDE Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BUS_H_
++#define CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BUS_H_
++
++namespace dbus {
++class Bus;
++}
++
++namespace arc {
++
++// A connection to the real system bus for talking to org.aurade.Android1.
++// Ash on AuraDE has no shared system bus in DBusThreadManager, so this opens
++// its own, with its own D-Bus thread, once and for the life of the process.
++// Returns null when the system bus cannot be reached. UI thread only.
++dbus::Bus* GetAuraDEAndroidBus();
++
++}  // namespace arc
++
++#endif  // CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_BUS_H_
 diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
 new file mode 100644
-index 000000000000..eacd643c174c
+index 000000000000..26be11629bd9
 --- /dev/null
 +++ b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
 @@ -0,0 +1,142 @@
@@ -82,7 +523,7 @@ index 000000000000..eacd643c174c
 +#include "base/memory/raw_ptr.h"
 +#include "base/memory/weak_ptr.h"
 +#include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
-+#include "chromeos/ash/components/dbus/dbus_thread_manager.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bus.h"
 +#include "chromeos/ash/experiences/arc/session/arc_client_adapter.h"
 +#include "chromeos/ash/experiences/arc/session/arc_start_params.h"
 +#include "chromeos/ash/experiences/arc/session/arc_upgrade_params.h"
@@ -157,7 +598,7 @@ index 000000000000..eacd643c174c
 +    if (proxy_) {
 +      return;
 +    }
-+    dbus::Bus* bus = ash::DBusThreadManager::Get()->GetSystemBus();
++    dbus::Bus* bus = GetAuraDEAndroidBus();
 +    if (!bus) {
 +      LOG(ERROR) << "AuraDE Android: no system bus";
 +      return;
@@ -239,3 +680,109 @@ index 000000000000..25ba179191f8
 +}  // namespace arc
 +
 +#endif  // CHROMEOS_ASH_EXPERIENCES_ARC_SESSION_ARC_AURADE_CLIENT_ADAPTER_H_
+diff --git a/chromeos/ash/experiences/arc/session/arc_client_adapter.cc b/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
+index a31dd3a2e95a..563952cd683a 100644
+--- a/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
++++ b/chromeos/ash/experiences/arc/session/arc_client_adapter.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "chromeos/ash/components/dbus/arc/arc.pb.h"
+ #include "chromeos/ash/experiences/arc/arc_util.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
+ #include "chromeos/ash/experiences/arc/session/arc_container_client_adapter.h"
+ #include "chromeos/ash/experiences/arc/session/arc_start_params.h"
+ #include "chromeos/ash/experiences/arc/session/arc_vm_client_adapter.h"
+@@ -72,6 +73,9 @@ void ArcClientAdapter::RemoveObserver(Observer* observer) {
+ 
+ // static
+ std::unique_ptr<ArcClientAdapter> ArcClientAdapter::Create() {
++  if (IsAuraDEAndroidEnabled()) {
++    return CreateArcAuraDEClientAdapter();
++  }
+   return IsArcVmEnabled() ? CreateArcVmClientAdapter()
+                           : CreateArcContainerClientAdapter();
+ }
+diff --git a/chromeos/ash/experiences/arc/session/arc_session_impl.cc b/chromeos/ash/experiences/arc/session/arc_session_impl.cc
+index 99658e4ad7aa..ce94f24d5188 100644
+--- a/chromeos/ash/experiences/arc/session/arc_session_impl.cc
++++ b/chromeos/ash/experiences/arc/session/arc_session_impl.cc
+@@ -25,6 +25,7 @@
+ #include "base/process/process_metrics.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/task_traits.h"
++#include "base/task/sequenced_task_runner.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
+@@ -32,6 +33,8 @@
+ #include "chromeos/ash/components/system/scheduler_configuration_manager_base.h"
+ #include "chromeos/ash/experiences/arc/arc_features.h"
+ #include "chromeos/ash/experiences/arc/arc_util.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bridge.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
+ #include "chromeos/ash/experiences/arc/session/arc_bridge_host_impl.h"
+ #include "chromeos/ash/experiences/arc/session/arc_service_manager.h"
+ #include "chromeos/ash/experiences/arc/session/mojo_init_data.h"
+@@ -194,6 +197,9 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
+ 
+   const version_info::Channel channel_;
+ 
++  // The in-process Android side, used when Ash runs with --aurade-android.
++  std::unique_ptr<ArcAuraDEBridge> aurade_bridge_;
++
+   // WeakPtrFactory to use callbacks.
+   base::WeakPtrFactory<ArcSessionDelegateImpl> weak_factory_{this};
+ };
+@@ -204,6 +210,13 @@ ArcSessionDelegateImpl::ArcSessionDelegateImpl(
+     : arc_bridge_service_(arc_bridge_service), channel_(channel) {}
+ 
+ void ArcSessionDelegateImpl::CreateSocket(CreateSocketCallback callback) {
++  if (IsAuraDEAndroidEnabled()) {
++    // No guest connects to a socket on AuraDE; the bridge lives in this
++    // process. The session only needs a valid descriptor to hand on.
++    std::move(callback).Run(
++        base::ScopedFD(HANDLE_EINTR(open("/dev/null", O_RDONLY | O_CLOEXEC))));
++    return;
++  }
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, {base::MayBlock()},
+       base::BindOnce(&ArcSessionDelegateImpl::CreateSocketInternal),
+@@ -222,6 +235,21 @@ base::ScopedFD ArcSessionDelegateImpl::ConnectMojo(
+     return base::ScopedFD();
+   }
+ 
++  if (IsAuraDEAndroidEnabled()) {
++    // The Android side is in this process: join the two ends of one pipe.
++    mojo::MessagePipe pipe;
++    auto host = std::make_unique<ArcBridgeHostImpl>(arc_bridge_service_);
++    host->AddReceiver(
++        mojo::PendingReceiver<mojom::ArcBridgeHost>(std::move(pipe.handle0)));
++    aurade_bridge_ = CreateArcAuraDEBridge(
++        mojo::PendingRemote<mojom::ArcBridgeHost>(std::move(pipe.handle1), 0));
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(std::move(callback), std::move(host),
++                       std::make_unique<MojoInvitationManager>()));
++    return return_fd;
++  }
++
+   // For production, `socket_fd` passed from session_manager is either a valid
+   // socket or a valid file descriptor (/dev/null). For testing, `socket_fd`
+   // might be invalid.
+@@ -237,6 +265,16 @@ base::ScopedFD ArcSessionDelegateImpl::ConnectMojo(
+ 
+ void ArcSessionDelegateImpl::GetFreeDiskSpace(
+     GetFreeDiskSpaceCallback callback) {
++  if (IsAuraDEAndroidEnabled()) {
++    // There is no spaced daemon on AuraDE; ask the file system directly.
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {base::MayBlock()},
++        base::BindOnce([]() -> std::optional<int64_t> {
++          return base::SysInfo::AmountOfFreeDiskSpace(base::GetHomeDir());
++        }),
++        std::move(callback));
++    return;
++  }
+   ash::SpacedClient::Get()->GetFreeDiskSpace("/home/chronos/user",
+                                              std::move(callback));
+ }
