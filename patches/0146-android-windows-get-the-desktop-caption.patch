@@ -1,0 +1,26 @@
+diff --git a/components/exo/wayland/xdg_shell.cc b/components/exo/wayland/xdg_shell.cc
+index bee066afee35..33070fa59c2f 100644
+--- a/components/exo/wayland/xdg_shell.cc
++++ b/components/exo/wayland/xdg_shell.cc
+@@ -13,6 +13,7 @@
+ 
+ #include "ash/public/cpp/shell_window_ids.h"
+ #include "ash/public/cpp/window_properties.h"
++#include "base/strings/string_util.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/notimplemented.h"
+@@ -232,6 +233,13 @@ class WaylandToplevel : public aura::WindowObserver {
+   void SetApplicationId(const char* application_id) {
+     if (shell_surface_data_)
+       shell_surface_data_->shell_surface->SetApplicationId(application_id);
++    // AuraDE: Android windows come from Waydroid with an ARC style id and no
++    // frame of their own. Give them the desktop's caption so they can be
++    // moved, snapped, maximized and resized like any other window.
++    if (shell_surface_data_ && application_id &&
++        base::StartsWith(application_id, "org.chromium.arc.")) {
++      shell_surface_data_->shell_surface->OnSetFrame(SurfaceFrameType::NORMAL);
++    }
+   }
+ 
+   void Move() {

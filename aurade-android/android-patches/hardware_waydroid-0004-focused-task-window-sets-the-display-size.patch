@@ -1,0 +1,22 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 55f4b56..6819329 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -537,9 +537,14 @@ window_owns_display_geometry(struct window *window)
+ {
+     struct display *display = window->conn->dpy;
+ 
+-    /* Per-task connections: geometry belongs to ctl, as before. */
+-    if (!window->conn->is_ctl)
+-        return false;
++    /* Per-task connections: geometry belongs to ctl, as before, except for
++     * the task window the user has focused. Resizing that window resizes the
++     * Android display, so the app lays itself out at the size it is shown at
++     * (AuraDE). Windows that are not focused never write the geometry. */
++    if (!window->conn->is_ctl) {
++        return window->activated && window->taskID != "none" &&
++               window->taskID != "0" && display->per_task_windows.load();
++    }
+     if (window->taskID == "none")
+         return false;
+     if (window->taskID == "0")
