@@ -1,0 +1,13 @@
+diff --git a/init/uevent_listener.cpp b/init/uevent_listener.cpp
+index 2deec53..7b3ed4d 100644
+--- a/init/uevent_listener.cpp
++++ b/init/uevent_listener.cpp
+@@ -216,6 +216,8 @@ void UeventListener::RegenerateUevents(const ListenerCallback& callback) const {
+ 
+     for (const auto path : kRegenerationPaths) {
+         std::unique_ptr<DIR, decltype(&closedir)> d(fdopendir(openat(mntfd, path, O_DIRECTORY | O_CLOEXEC)), closedir);
++        // A kernel without this class (no V4L devices, for one) has no such directory.
++        if (!d) continue;
+         if (RegenerateUeventsForDir(d.get(), true, callback) == ListenerAction::kStop) break;
+     }
+ 

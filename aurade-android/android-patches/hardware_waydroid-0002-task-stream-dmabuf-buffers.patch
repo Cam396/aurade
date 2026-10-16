@@ -1,0 +1,94 @@
+diff --git a/hwcomposer/gralloc_handler.cpp b/hwcomposer/gralloc_handler.cpp
+index 4fd087b..0c23977 100644
+--- a/hwcomposer/gralloc_handler.cpp
++++ b/hwcomposer/gralloc_handler.cpp
+@@ -170,7 +170,9 @@ namespace {
+ }
+ std::unique_ptr<buffer> create_dmabuf_wl_buffer(wl_conn *conn, const buffer_metadata& metadata,
+                                                                 int prime_fd, int drm_format, int byte_stride,
+-                                                                int offset, uint64_t modifier, buffer_handle_t handle)
++                                                                int offset, uint64_t modifier, buffer_handle_t handle,
++                                                                const wl_buffer_listener *listener,
++                                                                void *listener_data)
+ {
+     assert(prime_fd >= 0);
+ 
+@@ -191,7 +193,10 @@ std::unique_ptr<buffer> create_dmabuf_wl_buffer(wl_conn *conn, const buffer_meta
+ 
+     buf->wl_buffer = zwp_linux_buffer_params_v1_create_immed(params, buf->metadata.width, buf->metadata.height, drm_format, 0);
+     zwp_linux_buffer_params_v1_destroy(params);
+-    wl_buffer_add_listener(buf->wl_buffer, &buffer_listener, nullptr);
++    if (listener)
++        wl_buffer_add_listener(buf->wl_buffer, listener, listener_data);
++    else
++        wl_buffer_add_listener(buf->wl_buffer, &buffer_listener, nullptr);
+ 
+     return buf;
+ }
+@@ -468,3 +473,24 @@ gralloc_handler::gralloc_handler(display *display)
+     : get_buffer_metadata_impl(select_get_buffer_metadata_impl(display->gtype))
+     , create_buffer_impl(select_create_buffer_impl(display->ctl.get(), display->gtype))
+     , update_shm_buffer_impl(select_update_shm_buffer_impl(display->gtype)) { }
++
++std::unique_ptr<buffer> create_dmabuf_task_stream_buffer(wl_conn *conn, const buffer_metadata& metadata,
++                                                         buffer_handle_t handle, GrallocType gtype,
++                                                         const wl_buffer_listener *listener, void *listener_data) {
++    if (!conn->dmabuf) {
++        ALOGE("task stream buffer: the compositor has neither android_wlegl nor zwp_linux_dmabuf_v1");
++        return nullptr;
++    }
++    if (gtype == GrallocType::GRALLOC_GBM) {
++        auto *drm_handle = reinterpret_cast<const gralloc_handle_t *>(handle);
++        return create_dmabuf_wl_buffer(conn, metadata, drm_handle->prime_fd, -1, drm_handle->stride, 0,
++                                       drm_handle->modifier, handle, listener, listener_data);
++    }
++    if (gtype == GrallocType::GRALLOC_CROS) {
++        auto *cros_handle = reinterpret_cast<const cros_gralloc_handle *>(handle);
++        return create_dmabuf_wl_buffer(conn, metadata, cros_handle->fds[0], cros_handle->format,
++                                       cros_handle->strides[0], cros_handle->offsets[0],
++                                       cros_handle->format_modifier, handle, listener, listener_data);
++    }
++    return nullptr;
++}
+diff --git a/hwcomposer/gralloc_handler.h b/hwcomposer/gralloc_handler.h
+index e84c423..b472658 100644
+--- a/hwcomposer/gralloc_handler.h
++++ b/hwcomposer/gralloc_handler.h
+@@ -33,9 +33,18 @@
+ std::unique_ptr<buffer> create_shm_wl_buffer(wl_conn *conn, const buffer_metadata& metadata, buffer_handle_t handle);
+ std::unique_ptr<buffer> create_dmabuf_wl_buffer(wl_conn *conn, const buffer_metadata& metadata,
+                                                                 int prime_fd, int format, int byte_stride,
+-                                                                int offset, uint64_t modifier, buffer_handle_t handle);
++                                                                int offset, uint64_t modifier, buffer_handle_t handle,
++                                                                const wl_buffer_listener *listener = nullptr,
++                                                                void *listener_data = nullptr);
+ std::unique_ptr<buffer> create_android_wl_buffer(wl_conn *conn, const buffer_metadata& metadata, buffer_handle_t target,
+                                                  const wl_buffer_listener *listener = nullptr, void *listener_data = nullptr);
++/* AuraDE: task-stream buffers on a compositor that has dmabuf but no
++ * android_wlegl (Ash's exo). Same handles the plain gbm and cros paths take,
++ * with the stream's own release listener. Null when the gralloc type has no
++ * dmabuf form. */
++std::unique_ptr<buffer> create_dmabuf_task_stream_buffer(wl_conn *conn, const buffer_metadata& metadata,
++                                                         buffer_handle_t handle, GrallocType gtype,
++                                                         const wl_buffer_listener *listener, void *listener_data);
+ bool cpu_render_to_pixels(buffer *buffer);
+ 
+ 
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+index 55f4b56..259e6ab 100644
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -1763,8 +1770,11 @@ int post_task_buffer(struct waydroid_hwc_composer_device_1 *pdev, uint32_t taskI
+     if (sb.busy)
+         return -EBUSY;
+     if (!sb.buf) {
+-        auto buf = create_android_wl_buffer(conn, md, handle,
+-                                            &task_stream_buffer_listener, conn);
++        /* AuraDE: android_wlegl is not universal; Ash has dmabuf only. */
++        auto buf = (display->gtype == GrallocType::GRALLOC_ANDROID || conn->android_wlegl)
++            ? create_android_wl_buffer(conn, md, handle, &task_stream_buffer_listener, conn)
++            : create_dmabuf_task_stream_buffer(conn, md, handle, display->gtype,
++                                               &task_stream_buffer_listener, conn);
+         if (!buf)
+             return -EINVAL;
+         /* The handle belongs to the transport; libwayland already dup'ed the
