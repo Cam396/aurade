@@ -1998,6 +1998,17 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
                     .handlers_for(&mime_type, &ancestry[1..])
                     .into_iter()
                     .map(entry_json)
+                    .chain(crate::android::handlers_for(&mime_type).into_iter().map(|(pkg, label)| {
+                        json!({
+                            "id": format!("{}{}", crate::android::PREFIX, pkg),
+                            "name": label,
+                            "comment": "Android app",
+                            "icon": Value::Null,
+                            "iconUri": Value::Null,
+                            "terminal": false,
+                            "actions": Vec::<Value>::new(),
+                        })
+                    }))
                     .collect::<Vec<_>>(),
             })
         }
@@ -2047,8 +2058,14 @@ fn handle(service: &Arc<Service>, req: &Request, body: &Value) -> Result<Answer>
         ("POST", "/api/open-with") => {
             let paths = body_paths(body, "paths")?;
             let id = body_str(body, "app")?;
-            let registry = service.registry();
-            apps::open_with(&registry, &id, &paths)?;
+            if let Some(package) = id.strip_prefix(crate::android::PREFIX) {
+                for path in &paths {
+                    crate::android::open(package, path)?;
+                }
+            } else {
+                let registry = service.registry();
+                apps::open_with(&registry, &id, &paths)?;
+            }
             json!({"ok": true})
         }
         ("POST", "/api/set-default") => {

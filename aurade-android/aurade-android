@@ -26,6 +26,8 @@ to each other and Ash's private bus is not shared.
 """
 import hashlib
 import json
+import uuid
+import mimetypes
 import os
 import pwd
 import re
@@ -450,6 +452,80 @@ class Android(dbus.service.Object):
     def Installed(self, path, ok, message):
         pass
 
+    # ---- opening desktop files in Android apps ------------------------------
+
+    ACTIVITY_RE = re.compile(r"^\s*([A-Za-z0-9_.]+)/(\S+)\s*$")
+
+    def handlers(self, mime):
+        """(package, label, activity) of the apps that can view this type."""
+        found, seen = [], set()
+        res = self.guest("/system/bin/pm", "query-activities", "--brief", "-a",
+                         "android.intent.action.VIEW", "-t", mime, "-d",
+                         "content://org.aurade.bridge.inbox/x/file", timeout=30)
+        labels = getattr(self, "labels", None)
+        if not labels and getattr(self, "watch_uid", None) is not None:
+            self.read_apps(self.watch_uid)
+            labels = getattr(self, "labels", {})
+        labels = labels or {}
+        for line in res.stdout.splitlines():
+            m = self.ACTIVITY_RE.match(line)
+            if not m or m.group(1) in seen or m.group(1) in (BRIDGE_PKG, "android"):
+                continue
+            seen.add(m.group(1))
+            found.append((m.group(1), labels.get(m.group(1)) or m.group(1).split(".")[-1].capitalize(), m.group(2)))
+        return found
+
+    @dbus.service.method(NAME, in_signature="s", out_signature="a(ss)", sender_keyword="sender")
+    def HandlersFor(self, mime, sender=None):
+        """Android apps that can open a file of this type, as (package, label)."""
+        self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9.+-]+/[A-Za-z0-9.+*-]+", mime):
+            return []
+        if not (self.session and self.session[1].poll() is None):
+            return []
+        return [(p, l) for p, l, _ in self.handlers(mime)]
+
+    @dbus.service.method(NAME, in_signature="ss", out_signature="", sender_keyword="sender")
+    def OpenFile(self, pkg, path, sender=None):
+        """Opens a desktop file in an Android app. The file is copied into the
+        bridge app's inbox, which the app reads through a content address."""
+        uid = self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg) or not os.path.isabs(path):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad request")
+        pw = pwd.getpwuid(uid)
+        if subprocess.run(["runuser", "-u", pw.pw_name, "--", "test", "-f", path, "-a", "-r", path],
+                          check=False).returncode != 0:
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "cannot read that file")
+        if not (self.session and self.session[1].poll() is None):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "Android is off")
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        match = [h for h in self.handlers(mime) if h[0] == pkg]
+        if not match:
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "that app cannot open this file")
+        activity = match[0][2]
+        token = uuid.uuid4().hex
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(path)) or "file"
+        inbox = os.path.join(self.outbox_dir(uid), "..", "inbox")
+        inbox = os.path.normpath(inbox)
+        box = os.path.join(inbox, token)
+        os.makedirs(box, exist_ok=True)
+        ref = os.path.dirname(inbox)
+        for d in (inbox, box):
+            os.chmod(d, 0o777)
+            st = os.stat(ref)
+            os.chown(d, st.st_uid, st.st_gid)
+        dest = os.path.join(box, name)
+        shutil.copyfile(path, dest)
+        os.chmod(dest, 0o666)
+        st = os.stat(ref)
+        os.chown(dest, st.st_uid, st.st_gid)
+        self.Launch(pkg, "", sender=sender)
+        time.sleep(1.5)
+        self.guest("/system/bin/am", "start", "-a", "android.intent.action.VIEW", "-d",
+                   f"content://org.aurade.bridge.inbox/{token}/{name}", "-t", mime,
+                   "-n", f"{pkg}/{activity}", "--grant-read-uri-permission", timeout=30)
+        GLib.timeout_add_seconds(1800, lambda: (shutil.rmtree(box, ignore_errors=True), False)[1])
+
     # ---- the AuraDE bridge app: links and sharing -----------------------------
     #
     # Android has no way to open a link in the computer's browser, so a small
@@ -636,6 +712,7 @@ class Android(dbus.service.Object):
                         name = None
             except (OSError, subprocess.TimeoutExpired) as e:
                 log(f"waydroid app list failed: {e}")
+        self.labels = dict(labels)
         out = []
         res = self.guest("/system/bin/pm", "query-activities", "--components",
                          "-a", "android.intent.action.MAIN",
@@ -881,7 +958,7 @@ WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 IMAGE_DIR = "/etc/waydroid-extra/images"
 BRIDGE_APK = "/usr/share/aurade-android/aurade-bridge.apk"
 BRIDGE_PKG = "org.aurade.bridge"
-BRIDGE_VERSION = 1
+BRIDGE_VERSION = 2
 INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 

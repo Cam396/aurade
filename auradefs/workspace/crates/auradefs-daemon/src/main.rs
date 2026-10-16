@@ -9,6 +9,7 @@
 //! bound to a real interface is a way to read someone's home directory from the
 //! next desk, and no option is offered to do it.
 
+mod android;
 mod api;
 mod b64;
 mod http;
