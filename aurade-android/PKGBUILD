@@ -7,7 +7,7 @@ pkgdesc="Android apps for AuraDE: the system service behind Ash's own ARC code"
 arch=('any')
 url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause')
-depends=('python' 'python-dbus' 'python-gobject' 'waydroid' 'lxc' 'acl')
+depends=('python' 'python-dbus' 'python-gobject' 'waydroid' 'lxc' 'acl' 'wl-clipboard')
 source=(
   'aurade-android'
   'aurade-android.service'
@@ -19,11 +19,12 @@ source=(
   'aurade-apk-check'
   'aurade-android-install'
   'aurade-android-install.desktop'
+  'bridge/aurade-bridge.apk'
   'org.aurade.Android1.conf'
   'org.aurade.Android1.service'
   'LICENSE'
 )
-sha256sums=('f4793dcfa2783c5fb6396c96d3b3c887728f7e7b94465a7a58617ef6f573aa0e'
+sha256sums=('e29301a836208ab5d5bf66c2567932d7cee1de5ff7c87563c5d30a337022daef'
             'f68e34e0785c06b84d63cca792bfefef2d586980c2148b8f130a9a87050093b5'
             '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
             '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
@@ -33,6 +34,7 @@ sha256sums=('f4793dcfa2783c5fb6396c96d3b3c887728f7e7b94465a7a58617ef6f573aa0e'
             '9eb0e91f2e6c8bf7d6e8d8672a197b3854f29b73aafffa39de3dfca1292020b5'
             'a561e542e5996588f903fb072864f23650d6541263370ddd569b93b0e8d5916a'
             '1babb1317966bc1260b558bdf6bdb8694f627cce78f7939860a1a3eb5a7420e2'
+            'a97396f66bad873fa1df8182a19a751b13bb3e87a7251bbdda702a382213d48a'
             'a890f6356cb37c6f32ada6d0c856677b90e50956e692eb51fd6695b5a947bd63'
             '9aaf9b3010b2efeaa6738f67229ab7415bf8440dbcfd9aefbc52e4169db24124'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
@@ -57,5 +59,6 @@ package() {
     "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Android1.conf"
   install -Dm644 org.aurade.Android1.service \
     "${pkgdir}/usr/share/dbus-1/system-services/org.aurade.Android1.service"
+  install -Dm644 aurade-bridge.apk "${pkgdir}/usr/share/aurade-android/aurade-bridge.apk"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

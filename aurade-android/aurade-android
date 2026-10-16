@@ -450,6 +450,136 @@ class Android(dbus.service.Object):
     def Installed(self, path, ok, message):
         pass
 
+    # ---- the AuraDE bridge app: links and sharing -----------------------------
+    #
+    # Android has no way to open a link in the computer's browser, so a small
+    # app (bridge/) is the default browser and a share target inside Android.
+    # It drops a JSON file into its own folder of shared storage; the code here
+    # reads and removes it and does the thing on the desktop.
+
+    def ensure_bridge(self, uid):
+        """Installs the bridge app and makes it the default browser. Waits for
+        Android to finish booting; runs once per start."""
+        apk = BRIDGE_APK
+        if not os.path.exists(apk):
+            return
+        for _ in range(90):
+            res = self.guest("/system/bin/getprop", "sys.boot_completed", timeout=10)
+            if res.stdout.strip() == "1":
+                break
+            time.sleep(2)
+        else:
+            return
+        want = str(BRIDGE_VERSION)
+        res = self.guest("/system/bin/pm", "list", "packages", "--show-versioncode", BRIDGE_PKG)
+        if f"versionCode:{want}" not in res.stdout:
+            home = pwd.getpwuid(uid).pw_dir
+            tmpdir = os.path.join(home, ".local/share/waydroid/data/local/tmp")
+            os.makedirs(tmpdir, exist_ok=True)
+            tmp = os.path.join(tmpdir, "aurade-bridge.apk")
+            try:
+                shutil.copyfile(apk, tmp)
+                os.chmod(tmp, 0o644)
+                res = self.guest("/system/bin/pm", "install", "-r", "/data/local/tmp/aurade-bridge.apk",
+                                 timeout=120)
+            finally:
+                self.unlink_quiet(tmp)
+            log(f"bridge install: {(res.stdout + res.stderr).strip()[-120:]}")
+        self.guest("/system/bin/cmd", "role", "add-role-holder", "--user", "0",
+                   "android.app.role.BROWSER", BRIDGE_PKG, timeout=20)
+
+    def outbox_dir(self, uid):
+        return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media/0",
+                            "Android/data", BRIDGE_PKG, "files/outbox")
+
+    def user_env(self, uid):
+        pw = pwd.getpwuid(uid)
+        env = {"HOME": pw.pw_dir, "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+               "WAYLAND_DISPLAY": "wayland-0", "PATH": "/usr/local/bin:/usr/bin"}
+        addr = session_bus(uid)
+        if addr:
+            env["DBUS_SESSION_BUS_ADDRESS"] = addr
+        return env
+
+    def run_as_user(self, uid, argv, stdin=None):
+        pw = pwd.getpwuid(uid)
+        cmd = ["runuser", "-u", pw.pw_name, "--", "env"] + \
+              [f"{k}={v}" for k, v in self.user_env(uid).items()] + argv
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def poll_outbox(self):
+        uid = getattr(self, "watch_uid", None)
+        if uid is None:
+            return False
+        box = self.outbox_dir(uid)
+        try:
+            names = sorted(n for n in os.listdir(box) if n.endswith(".json"))
+        except OSError:
+            return True
+        for n in names[:20]:
+            path = os.path.join(box, n)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    req = json.load(f)
+            except (OSError, ValueError):
+                req = {}
+            self.unlink_quiet(path)
+            try:
+                self.handle_request(uid, box, req)
+            except Exception as e:  # noqa: BLE001
+                log(f"outbox request failed: {e}")
+        return True
+
+    URL_RE = re.compile(r"(?:https?://|mailto:)[^\s<>\"]+\Z")
+
+    def handle_request(self, uid, box, req):
+        kind = req.get("type")
+        if kind == "view":
+            url = str(req.get("url", ""))
+            if self.URL_RE.match(url):
+                self.run_as_user(uid, ["xdg-open", url])
+            return
+        if kind != "send":
+            return
+        pw = pwd.getpwuid(uid)
+        text = str(req.get("text", "")).strip()
+        saved = []
+        for name in req.get("files", []) or []:
+            if not re.fullmatch(r"[A-Za-z0-9._ -]+", str(name)):
+                continue
+            src = os.path.join(box, "files", name)
+            if not os.path.isfile(src):
+                continue
+            downloads = os.path.join(pw.pw_dir, "Downloads")
+            os.makedirs(downloads, exist_ok=True)
+            os.chown(downloads, uid, pw.pw_gid) if os.stat(downloads).st_uid == 0 else None
+            # strip the timestamp prefix the app added
+            clean = re.sub(r"^\d+-\d+-", "", name)
+            dest = os.path.join(downloads, clean)
+            base, ext = os.path.splitext(dest)
+            i = 1
+            while os.path.exists(dest):
+                dest = f"{base} ({i}){ext}"
+                i += 1
+            shutil.move(src, dest)
+            os.chown(dest, uid, pw.pw_gid)
+            saved.append(os.path.basename(dest))
+        if saved:
+            self.notify(uid, "Received from Android",
+                        ", ".join(saved) + " saved to Downloads.")
+        if text:
+            if self.URL_RE.match(text) and not saved:
+                self.run_as_user(uid, ["xdg-open", text])
+            else:
+                proc = self.run_as_user(uid, ["wl-copy"], stdin=True)
+                try:
+                    proc.communicate(text.encode("utf-8"), timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                if not saved:
+                    self.notify(uid, "Copied from Android", "The shared text is on the clipboard.")
+
     # ---- apps -----------------------------------------------------------
 
     def guest(self, *args, timeout=20):
@@ -655,6 +785,8 @@ class Android(dbus.service.Object):
         self.log_buf = ""
         self.start_logcat()
         self.poll_src = GLib.timeout_add_seconds(5, self.poll_apps)
+        self.outbox_src = GLib.timeout_add_seconds(1, self.poll_outbox)
+        threading.Thread(target=self.ensure_bridge, args=(uid,), daemon=True).start()
 
     def start_logcat(self):
         """The guest log carries the window layer's task events. The container
@@ -689,6 +821,10 @@ class Android(dbus.service.Object):
         if src:
             GLib.source_remove(src)
             self.poll_src = None
+        src = getattr(self, "outbox_src", None)
+        if src:
+            GLib.source_remove(src)
+            self.outbox_src = None
         self.drop_logcat()
 
     def on_log(self, fd, cond):
@@ -743,6 +879,9 @@ WAYDROID_PROPS = {
 }
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 IMAGE_DIR = "/etc/waydroid-extra/images"
+BRIDGE_APK = "/usr/share/aurade-android/aurade-bridge.apk"
+BRIDGE_PKG = "org.aurade.bridge"
+BRIDGE_VERSION = 1
 INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 
