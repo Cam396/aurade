@@ -76,6 +76,7 @@ class Android(dbus.service.Object):
             ok()
             return
         try:
+            ensure_props()
             subprocess.run(["systemctl", "start", CONTAINER_UNIT], check=True, timeout=60)
             user = pwd.getpwuid(uid).pw_name
             env = {
@@ -251,7 +252,17 @@ class Android(dbus.service.Object):
     @dbus.service.method(NAME, in_signature="i", out_signature="", sender_keyword="sender")
     def CloseTask(self, task_id, sender=None):
         self.check_caller(sender)
-        self.guest("/system/bin/am", "stack", "remove", str(int(task_id)))
+        # `am` removes whole root tasks, so find the one holding this task.
+        res = self.guest("/system/bin/am", "stack", "list")
+        root = None
+        for line in res.stdout.splitlines():
+            m = re.match(r"RootTask id=(\d+)", line)
+            if m:
+                root = m.group(1)
+                continue
+            if root and re.match(rf"\s+taskId={int(task_id)}:", line):
+                self.guest("/system/bin/am", "stack", "remove", root)
+                return
 
     @dbus.service.signal(NAME, signature="")
     def AppsChanged(self):
@@ -347,6 +358,37 @@ class Android(dbus.service.Object):
             self.AppsChanged()
         self.apps_seen = apps
         return True
+
+
+# Properties the window layer needs: per-app windows, one stream per task, and
+# the window ids Ash's ARC code expects (org.chromium.arc.<task id>).
+WAYDROID_PROPS = {
+    "persist.waydroid.multi_windows": "true",
+    "persist.waydroid.task_streams": "true",
+    "persist.aurade.arc_app_ids": "1",
+}
+WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
+
+
+def ensure_props():
+    import configparser
+    cfg = configparser.ConfigParser(interpolation=None)
+    cfg.optionxform = str
+    try:
+        cfg.read(WAYDROID_CFG)
+    except configparser.Error as e:
+        log(f"cannot read {WAYDROID_CFG}: {e}")
+        return
+    if not cfg.has_section("properties"):
+        cfg.add_section("properties")
+    changed = False
+    for k, v in WAYDROID_PROPS.items():
+        if cfg.get("properties", k, fallback=None) != v:
+            cfg.set("properties", k, v)
+            changed = True
+    if changed:
+        with open(WAYDROID_CFG, "w", encoding="utf-8") as f:
+            cfg.write(f)
 
 
 def write_host_generated():

@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/waydroid/tools/helpers/lxc.py
+
+[Action]
+Description = Giving the Android container its loop devices (AuraDE)
+When = PostTransaction
+Exec = /usr/lib/aurade-android/aurade-android-patch-waydroid
+NeedsTargets

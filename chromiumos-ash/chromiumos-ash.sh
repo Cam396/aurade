@@ -45,6 +45,7 @@ AURADE_DISABLE_CHROMEOS_CONNECTED_DEVICE_FEATURES="${AURADE_DISABLE_CHROMEOS_CON
 AURADE_DISABLE_ARC_FEATURES="${AURADE_DISABLE_ARC_FEATURES:-1}"
 AURADE_USE_FLOSS_STUBS="${AURADE_USE_FLOSS_STUBS:-1}"
 AURADE_ALLOW_GPU_COMPOSITING_FALLBACK="${AURADE_ALLOW_GPU_COMPOSITING_FALLBACK:-1}"
+AURADE_ANDROID="${AURADE_ANDROID:-0}"
 AURADE_ENABLE_DEVTOOLS_PORT="${AURADE_ENABLE_DEVTOOLS_PORT:-0}"
 AURADE_DEVTOOLS_PORT="${AURADE_DEVTOOLS_PORT:-9222}"
 AURADE_ENABLE_SPEECH_DISPATCHER="${AURADE_ENABLE_SPEECH_DISPATCHER:-1}"
@@ -113,6 +114,7 @@ if [ "$(id -u)" -eq 0 ]; then
         AURADE_USE_FLOSS_STUBS="${AURADE_USE_FLOSS_STUBS}" \
         AURADE_ALLOW_GPU_COMPOSITING_FALLBACK="${AURADE_ALLOW_GPU_COMPOSITING_FALLBACK}" \
         AURADE_SOFTWARE_RENDERING="${AURADE_SOFTWARE_RENDERING:-0}" \
+        AURADE_ANDROID="${AURADE_ANDROID}" \
         AURADE_ENABLE_DEVTOOLS_PORT="${AURADE_ENABLE_DEVTOOLS_PORT}" \
         AURADE_DEVTOOLS_PORT="${AURADE_DEVTOOLS_PORT}" \
         AURADE_ENABLE_SPEECH_DISPATCHER="${AURADE_ENABLE_SPEECH_DISPATCHER}" \
@@ -633,6 +635,16 @@ fi
 
 if [ "${AURADE_ENABLE_SPEECH_DISPATCHER}" = "1" ]; then
     FLAGS+=(--enable-speech-dispatcher)
+fi
+
+# Android apps: Ash's own ARC code, started through the aurade-android system
+# service instead of session_manager. Needs the aurade-android package.
+if [ "${AURADE_ANDROID}" = "1" ]; then
+    FLAGS+=(
+        --aurade-android
+        --arc-availability=officially-supported
+        --arc-start-mode=always-start-with-no-play-store
+    )
 fi
 
 # AuraDE compatibility: the session found no GPU it can use and said so, and

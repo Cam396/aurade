@@ -1,0 +1,54 @@
+# Maintainer: AuraDE Contributors
+
+pkgname=aurade-android
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Android apps for AuraDE: the system service behind Ash's own ARC code"
+arch=('any')
+url="https://github.com/Cam396/aurade"
+license=('BSD-3-Clause')
+depends=('python' 'python-dbus' 'python-gobject' 'waydroid' 'lxc')
+source=(
+  'aurade-android'
+  'aurade-android.service'
+  'aurade-android.sysusers'
+  'aurade-android-loop'
+  'aurade-android-loop.conf'
+  'aurade-android-patch-waydroid'
+  'aurade-android-waydroid.hook'
+  'aurade-apk-check'
+  'org.aurade.Android1.conf'
+  'org.aurade.Android1.service'
+  'LICENSE'
+)
+sha256sums=('614f693bd05223fad3420983c724af7c5c1fbae42b60311898fde54ca46636db'
+            'f68e34e0785c06b84d63cca792bfefef2d586980c2148b8f130a9a87050093b5'
+            '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
+            '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
+            '2684c0bb17871b458c839c66bc40f5a8c6c35c2560d46a7d1d80825c1cbe3822'
+            'fca5961e7a42b5663f33237c2f139374006046c0048ca24efac39e7c36b18354'
+            'f35bd1f265b53309b28a8a19fcf1c4ebbb26085b44cd0ce77189f559484399fc'
+            '9eb0e91f2e6c8bf7d6e8d8672a197b3854f29b73aafffa39de3dfca1292020b5'
+            'a890f6356cb37c6f32ada6d0c856677b90e50956e692eb51fd6695b5a947bd63'
+            '9aaf9b3010b2efeaa6738f67229ab7415bf8440dbcfd9aefbc52e4169db24124'
+            'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
+
+package() {
+  install -Dm755 aurade-android "${pkgdir}/usr/lib/aurade-android/aurade-android"
+  install -Dm755 aurade-android-loop "${pkgdir}/usr/lib/aurade-android/aurade-android-loop"
+  install -Dm755 aurade-android-patch-waydroid \
+    "${pkgdir}/usr/lib/aurade-android/aurade-android-patch-waydroid"
+  install -Dm755 aurade-apk-check "${pkgdir}/usr/bin/aurade-apk-check"
+  install -Dm644 aurade-android.service \
+    "${pkgdir}/usr/lib/systemd/system/aurade-android.service"
+  install -Dm644 aurade-android-loop.conf \
+    "${pkgdir}/usr/lib/systemd/system/waydroid-container.service.d/aurade-android-loop.conf"
+  install -Dm644 aurade-android.sysusers "${pkgdir}/usr/lib/sysusers.d/aurade-android.conf"
+  install -Dm644 aurade-android-waydroid.hook \
+    "${pkgdir}/usr/share/libalpm/hooks/aurade-android-waydroid.hook"
+  install -Dm644 org.aurade.Android1.conf \
+    "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Android1.conf"
+  install -Dm644 org.aurade.Android1.service \
+    "${pkgdir}/usr/share/dbus-1/system-services/org.aurade.Android1.service"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Android 17 mounts its APEX files through loop devices, and the container
+# can only see the nodes that exist on the host when it starts.
+set -e
+modprobe loop max_loop=128 2>/dev/null || true
+[ -e /dev/loop-control ] || mknod -m 0660 /dev/loop-control c 10 237
+i=0
+while [ "$i" -lt 128 ]; do
+  [ -e "/dev/loop$i" ] || mknod -m 0660 "/dev/loop$i" b 7 "$i"
+  i=$((i + 1))
+done

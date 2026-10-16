@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+"""Gives the Android container the host's loop devices.
+
+Android 17 mounts its APEX files through loop devices, and Waydroid's
+container config generator does not list them. This adds them once; a Waydroid
+upgrade puts the stock file back and the pacman hook runs this again.
+"""
+import os
+import sys
+
+PATH = "/usr/lib/waydroid/tools/helpers/lxc.py"
+ANCHOR = '    make_entry("/dev/char", options="bind,create=dir,optional 0 0")\n'
+ADDED = '''
+    # AuraDE: Android 17 mounts its APEX files through loop devices
+    make_entry("/dev/loop-control")
+    for i in range(128):
+        make_entry("/dev/loop%d" % i, "dev/block/loop%d" % i)
+'''
+
+if not os.path.exists(PATH):
+    sys.exit(0)
+with open(PATH, encoding="utf-8") as f:
+    src = f.read()
+if "loop-control" in src:
+    sys.exit(0)
+if ANCHOR not in src:
+    print(f"aurade-android: {PATH} has changed, the loop device entries were not added",
+          file=sys.stderr)
+    sys.exit(0)
+with open(PATH, "w", encoding="utf-8") as f:
+    f.write(src.replace(ANCHOR, ANCHOR + ADDED, 1))
