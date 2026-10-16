@@ -29,6 +29,7 @@ import json
 import os
 import pwd
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -159,6 +160,19 @@ class Android(dbus.service.Object):
         self.provisioning = True
         threading.Thread(target=self.provision_worker, daemon=True).start()
 
+    @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
+    def Update(self, sender=None):
+        """Fetches the images the manifest names when they differ from the
+        installed ones. Android is stopped first; the user's apps and data stay."""
+        self.check_caller(sender)
+        if getattr(self, "provisioning", False):
+            return
+        if self.session and self.session[1].poll() is None:
+            self.session[1].send_signal(signal.SIGTERM)
+        subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)
+        self.provisioning = True
+        threading.Thread(target=self.provision_worker, daemon=True).start()
+
     def emit(self, stage, percent):
         GLib.idle_add(lambda: (self.Progress(stage, percent), False)[1])
 
@@ -203,6 +217,9 @@ class Android(dbus.service.Object):
                 os.replace(part, final)
                 done_before += size
             self.emit("setup", 95)
+            with open(INSTALLED, "w", encoding="utf-8") as f:
+                json.dump({"version": man.get("version", ""),
+                           "files": {x["name"]: x["sha256"] for x in files}}, f)
             subprocess.run(["waydroid", "init", "-f"], check=True, timeout=300,
                            capture_output=True)
             ensure_props()
@@ -220,6 +237,98 @@ class Android(dbus.service.Object):
             for block in iter(lambda: f.read(1 << 20), b""):
                 h.update(block)
         return h.hexdigest()
+
+    # ---- what the Settings page shows ----------------------------------------
+
+    @staticmethod
+    def tree_bytes(path):
+        total = 0
+        for base, dirs, names in os.walk(path, followlinks=False):
+            for n in names:
+                try:
+                    total += os.lstat(os.path.join(base, n)).st_size
+                except OSError:
+                    pass
+        return total
+
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def Info(self, sender=None):
+        """One JSON object: whether Android is installed, running, how much disk
+        it uses, which image is installed and whether the manifest has a newer
+        one. The Settings page reads this and nothing else."""
+        uid = self.check_caller(sender)
+        home = pwd.getpwuid(uid).pw_dir
+        installed, wanted = {}, {}
+        version = ""
+        try:
+            with open(INSTALLED, encoding="utf-8") as f:
+                rec = json.load(f)
+            installed, version = rec.get("files", {}), rec.get("version", "")
+        except (OSError, ValueError):
+            pass
+        have_manifest = False
+        try:
+            with open(MANIFEST, encoding="utf-8") as f:
+                man = json.load(f)
+            have_manifest = True
+            wanted = {x["name"]: x["sha256"] for x in man["files"]}
+            new_version = man.get("version", "")
+        except (OSError, ValueError, KeyError):
+            new_version = ""
+        ready = self.image_ready()
+        image_bytes = sum(os.path.getsize(os.path.join(IMAGE_DIR, n))
+                          for n in ("system.img", "vendor.img")
+                          if os.path.exists(os.path.join(IMAGE_DIR, n)))
+        data_bytes = self.tree_bytes(os.path.join(home, ".local/share/waydroid/data"))
+        data_bytes += self.tree_bytes("/var/lib/waydroid/overlay_rw")
+        st = os.statvfs(os.path.dirname(IMAGE_DIR))
+        running = subprocess.run(["systemctl", "is-active", "--quiet", CONTAINER_UNIT],
+                                 check=False).returncode == 0
+        return json.dumps({
+            "state": "provisioning" if getattr(self, "provisioning", False)
+                     else ("ready" if ready else "absent"),
+            "running": running and bool(self.session and self.session[1].poll() is None),
+            "imageBytes": image_bytes,
+            "dataBytes": data_bytes,
+            "freeBytes": st.f_bavail * st.f_frsize,
+            "version": version,
+            "newVersion": new_version,
+            "updateAvailable": bool(ready and installed and wanted and wanted != installed),
+            "canDownload": have_manifest,
+        })
+
+    @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
+    def Remove(self, sender=None):
+        """Takes Android off the computer: stops it, deletes the image, the
+        system's overlay and this user's Android data. Apps and their data are
+        gone; nothing outside Android's own folders is touched."""
+        uid = self.check_caller(sender)
+        home = pwd.getpwuid(uid).pw_dir
+        if self.session and self.session[1].poll() is None:
+            self.session[1].send_signal(signal.SIGTERM)
+        subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)
+        for name in ("system.img", "vendor.img", "installed.json"):
+            self.unlink_quiet(os.path.join(IMAGE_DIR, name))
+        for d in ("overlay_rw", "overlay_work", "cache_http"):
+            shutil.rmtree(os.path.join("/var/lib/waydroid", d), ignore_errors=True)
+        for f in (WAYDROID_CFG, "/var/lib/waydroid/waydroid.prop"):
+            self.unlink_quiet(f)
+        shutil.rmtree(os.path.join(home, ".local/share/waydroid/data"), ignore_errors=True)
+        appdir = os.path.join(home, ".local/share/applications")
+        try:
+            for n in os.listdir(appdir):
+                if n.startswith("waydroid."):
+                    self.unlink_quiet(os.path.join(appdir, n))
+        except OSError:
+            pass
+        self.AppsChanged()
+
+    @staticmethod
+    def unlink_quiet(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
     # ---- apps -----------------------------------------------------------
 
@@ -514,6 +623,7 @@ WAYDROID_PROPS = {
 }
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 IMAGE_DIR = "/etc/waydroid-extra/images"
+INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 
 
