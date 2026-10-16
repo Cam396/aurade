@@ -1,0 +1,665 @@
+diff --git a/chrome/browser/ash/arc/session/arc_play_store_enabled_preference_handler.cc b/chrome/browser/ash/arc/session/arc_play_store_enabled_preference_handler.cc
+index c5d6eb3f0d48..168340c80234 100644
+--- a/chrome/browser/ash/arc/session/arc_play_store_enabled_preference_handler.cc
++++ b/chrome/browser/ash/arc/session/arc_play_store_enabled_preference_handler.cc
+@@ -189,6 +189,9 @@ void ArcPlayStoreEnabledPreferenceHandler::UpdateArcSessionManager() {
+     } else {
+       VLOG(1) << "ARC is not started automatically";
+     }
++  } else if (ShouldArcAlwaysStartWithNoPlayStore()) {
++    // AuraDE: turning Android off stops it and keeps the apps and their data.
++    arc_session_manager_->RequestDisable();
+   } else {
+     arc_session_manager_->RequestDisableWithArcDataRemoval();
+   }
+diff --git a/chrome/browser/ash/arc/session/arc_session_manager.cc b/chrome/browser/ash/arc/session/arc_session_manager.cc
+index 81b28856229c..920f9a03d9a2 100644
+--- a/chrome/browser/ash/arc/session/arc_session_manager.cc
++++ b/chrome/browser/ash/arc/session/arc_session_manager.cc
+@@ -1288,7 +1288,8 @@ void ArcSessionManager::RequestEnableImpl() {
+   // interaction. If opt-in verification is disabled, skip negotiation, too.
+   // This is for testing purpose.
+   const bool should_start_arc_without_user_interaction =
+-      ShouldArcAlwaysStart() || IsRobotOrOfflineDemoAccountMode() ||
++      ShouldArcAlwaysStart() || ShouldArcAlwaysStartWithNoPlayStore() ||
++      IsRobotOrOfflineDemoAccountMode() ||
+       IsArcOptInVerificationDisabled();
+   const bool skip_terms_of_service_negotiation =
+       signed_in || should_start_arc_without_user_interaction;
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
+index 1e93f79f1103..d34ae8f602a0 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
+@@ -18,9 +18,31 @@ export interface AndroidAppsInfo {
+   settingsAppAvailable: boolean;
+ }
+ 
++/**
++ * What the AuraDE Android service reports about the installed system.
++ * @see chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
++ */
++export interface AuradeAndroidInfo {
++  state: 'absent'|'provisioning'|'ready';
++  running: boolean;
++  imageBytes: number;
++  dataBytes: number;
++  freeBytes: number;
++  version: string;
++  newVersion: string;
++  updateAvailable: boolean;
++  canDownload: boolean;
++}
++
+ export interface AndroidAppsBrowserProxy {
+   requestAndroidAppsInfo(): void;
+ 
++  /** Asks the AuraDE Android service for its state. */
++  requestAuradeAndroidInfo(): void;
++
++  /** `update` fetches a newer image; `remove` deletes Android and its data. */
++  auradeAndroidCall(what: 'update'|'remove'): void;
++
+   /**
+    * @param keyboardAction True if the app was opened using a keyboard action.
+    */
+@@ -44,6 +66,14 @@ export class AndroidAppsBrowserProxyImpl implements AndroidAppsBrowserProxy {
+     chrome.send('requestAndroidAppsInfo');
+   }
+ 
++  requestAuradeAndroidInfo(): void {
++    chrome.send('requestAuradeAndroidInfo');
++  }
++
++  auradeAndroidCall(what: 'update'|'remove'): void {
++    chrome.send('auradeAndroidCall', [what]);
++  }
++
+   showAndroidAppsSettings(keyboardAction: boolean): void {
+     chrome.send('showAndroidAppsSettings', [keyboardAction]);
+   }
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
+index 8f2eb92a1a32..45aed1e45bbd 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
++++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
+@@ -1,9 +1,78 @@
+ <style include="settings-shared"></style>
+ 
+-<cr-link-row id="openGooglePlayRow" label="$i18n{androidOpenGooglePlay}"
+-    on-click="onOpenGooglePlayClick_"
+-    external>
+-</cr-link-row>
++<template is="dom-if" if="[[auradeAndroid_]]">
++  <div class="settings-box first">
++    <div class="start">
++      <div id="auradeStatus">[[auradeStatus_]]</div>
++      <template is="dom-if" if="[[auradeProgress_]]">
++        <progress id="auradeProgress" max="100"
++            value="[[auradeProgress_.percent]]"></progress>
++        <div class="secondary">[[progressText_(auradeProgress_)]]</div>
++      </template>
++    </div>
++  </div>
++  <template is="dom-if" if="[[auradeInfo_]]">
++    <div class="settings-box">
++      <div class="start">$i18n{auradeAndroidImageLabel}</div>
++      <div class="secondary">
++        [[formatBytes_(auradeInfo_.imageBytes)]]
++        <span hidden$="[[!auradeInfo_.version]]">
++          ([[auradeInfo_.version]])
++        </span>
++      </div>
++    </div>
++    <div class="settings-box">
++      <div class="start">$i18n{auradeAndroidDataLabel}</div>
++      <div class="secondary">[[formatBytes_(auradeInfo_.dataBytes)]]</div>
++    </div>
++    <div class="settings-box">
++      <div class="start">$i18n{auradeAndroidFreeLabel}</div>
++      <div class="secondary">[[formatBytes_(auradeInfo_.freeBytes)]]</div>
++    </div>
++    <template is="dom-if" if="[[auradeInfo_.updateAvailable]]">
++      <div class="settings-box">
++        <div class="start">
++          $i18n{auradeAndroidUpdateLabel}
++          <div class="secondary" hidden$="[[!auradeInfo_.newVersion]]">
++            [[auradeInfo_.newVersion]]
++          </div>
++        </div>
++        <cr-button id="auradeUpdate" on-click="onAuradeUpdateClick_"
++            disabled="[[auradeProgress_]]">
++          $i18n{auradeAndroidUpdateButton}
++        </cr-button>
++      </div>
++    </template>
++    <div class="settings-box">
++      <div class="start">
++        $i18n{auradeAndroidRemoveLabel}
++        <div class="secondary">$i18n{auradeAndroidRemoveSub}</div>
++      </div>
++      <cr-button id="auradeRemove" on-click="onAuradeRemoveClick_">
++        $i18n{auradeAndroidRemoveButton}
++      </cr-button>
++    </div>
++  </template>
++  <cr-dialog id="confirmRemoveDialog" close-text="$i18n{close}">
++    <div slot="title">$i18n{auradeAndroidRemoveTitle}</div>
++    <div slot="body">$i18n{auradeAndroidRemoveBody}</div>
++    <div slot="button-container">
++      <cr-button class="cancel-button" on-click="onAuradeRemoveCancel_">
++        $i18n{auradeAndroidCancel}
++      </cr-button>
++      <cr-button class="action-button" on-click="onAuradeRemoveConfirm_">
++        $i18n{auradeAndroidRemoveButton}
++      </cr-button>
++    </div>
++  </cr-dialog>
++</template>
++
++<template is="dom-if" if="[[!auradeAndroid_]]">
++  <cr-link-row id="openGooglePlayRow" label="$i18n{androidOpenGooglePlay}"
++      on-click="onOpenGooglePlayClick_"
++      external>
++  </cr-link-row>
++</template>
+ 
+ <template is="dom-if" if="[[androidAppsInfo.settingsAppAvailable]]" restamp>
+   <cr-link-row id="manageApps" class="hr" label="$i18n{androidAppsManageApps}"
+@@ -28,7 +97,10 @@
+ <template is="dom-if" if="[[allowRemove_(prefs.arc.enabled.*)]]" restamp>
+   <div id="remove" class="settings-box">
+     <div id="androidRemoveLabel" class="start">
+-      $i18n{androidAppsRemove}
++      [[removeLabel_(auradeAndroid_)]]
++      <div class="secondary" hidden$="[[!auradeAndroid_]]">
++        $i18n{auradeAndroidTurnOffSub}
++      </div>
+     </div>
+     <cr-button on-click="onRemoveClick_"
+         aria-labelledby="androidRemoveLabel"
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
+index 85f79f1f0d96..c6882994dba6 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
+@@ -15,6 +15,8 @@ import '../settings_shared.css.js';
+ import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
+ import type {CrDialogElement} from 'chrome://resources/ash/common/cr_elements/cr_dialog/cr_dialog.js';
+ import {I18nMixin} from 'chrome://resources/ash/common/cr_elements/i18n_mixin.js';
++import {WebUiListenerMixin} from 'chrome://resources/ash/common/cr_elements/web_ui_listener_mixin.js';
++import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+ import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
+ import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+ 
+@@ -25,7 +27,7 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+ import type {Route} from '../router.js';
+ import {Router, routes} from '../router.js';
+ 
+-import type {AndroidAppsInfo} from './android_apps_browser_proxy.js';
++import type {AndroidAppsInfo, AuradeAndroidInfo} from './android_apps_browser_proxy.js';
+ import {AndroidAppsBrowserProxyImpl} from './android_apps_browser_proxy.js';
+ import {getTemplate} from './android_apps_subpage.html.js';
+ 
+@@ -38,7 +40,8 @@ export interface SettingsAndroidAppsSubpageElement {
+ const GOOGLE_PLAY_STORE_URL = 'https://play.google.com/store/';
+ 
+ const SettingsAndroidAppsSubpageElementBase =
+-    DeepLinkingMixin(RouteOriginMixin(PrefsMixin(I18nMixin(PolymerElement))));
++    DeepLinkingMixin(RouteOriginMixin(
++        PrefsMixin(WebUiListenerMixin(I18nMixin(PolymerElement)))));
+ 
+ export class SettingsAndroidAppsSubpageElement extends
+     SettingsAndroidAppsSubpageElementBase {
+@@ -71,6 +74,22 @@ export class SettingsAndroidAppsSubpageElement extends
+         },
+       },
+ 
++      /** AuraDE: Android runs from the AuraDE service, without Google Play. */
++      auradeAndroid_: {
++        type: Boolean,
++        value: () => loadTimeData.getBoolean('auradeAndroid'),
++      },
++
++      auradeInfo_: Object,
++
++      /** Download progress, or null when nothing is downloading. */
++      auradeProgress_: Object,
++
++      auradeStatus_: {
++        type: String,
++        computed: 'computeAuradeStatus_(auradeInfo_, auradeProgress_)',
++      },
++
+       /** Whether Arc VM manage usb subpage should be shown. */
+       isArcVmManageUsbAvailable: Boolean,
+     };
+@@ -85,6 +104,10 @@ export class SettingsAndroidAppsSubpageElement extends
+     Setting.kRemovePlayStore,
+   ]);
+ 
++  declare private auradeAndroid_: boolean;
++  declare private auradeInfo_: AuradeAndroidInfo|null;
++  declare private auradeProgress_: {stage: string, percent: number}|null;
++  declare private auradeStatus_: string;
+   declare private dialogBody_: string;
+   declare private playStoreEnabled_: boolean;
+ 
+@@ -98,6 +121,20 @@ export class SettingsAndroidAppsSubpageElement extends
+   override ready(): void {
+     super.ready();
+ 
++    if (this.auradeAndroid_) {
++      this.addWebUiListener(
++          'aurade-android-info', (info: AuradeAndroidInfo) => {
++            this.auradeInfo_ = info;
++          });
++      this.addWebUiListener(
++          'aurade-android-progress', (stage: string, percent: number) => {
++            this.auradeProgress_ =
++                stage === 'done' || stage === 'failed' ? null :
++                                                         {stage, percent};
++          });
++      AndroidAppsBrowserProxyImpl.getInstance().requestAuradeAndroidInfo();
++    }
++
+     this.addFocusConfig(
+         routes.ANDROID_APPS_DETAILS_ARC_VM_SHARED_USB_DEVICES,
+         '#manageArcvmShareUsbDevices');
+@@ -125,6 +162,63 @@ export class SettingsAndroidAppsSubpageElement extends
+     return this.androidAppsInfo.playStoreEnabled;
+   }
+ 
++  private computeAuradeStatus_(): string {
++    if (this.auradeProgress_) {
++      return this.i18n('auradeAndroidStatusDownloading');
++    }
++    const info = this.auradeInfo_;
++    if (!info) {
++      return '';
++    }
++    if (info.state === 'absent') {
++      return this.i18n('auradeAndroidStatusAbsent');
++    }
++    return this.i18n(
++        info.running ? 'auradeAndroidStatusRunning' :
++                       'auradeAndroidStatusReady');
++  }
++
++  private removeLabel_(): string {
++    return this.i18n(
++        this.auradeAndroid_ ? 'auradeAndroidTurnOffLabel' : 'androidAppsRemove');
++  }
++
++  private formatBytes_(bytes: number): string {
++    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
++    let n = bytes;
++    let i = 0;
++    while (n >= 1024 && i < units.length - 1) {
++      n /= 1024;
++      i++;
++    }
++    return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
++  }
++
++  private progressText_(): string {
++    return this.auradeProgress_ ? this.auradeProgress_.percent + '%' : '';
++  }
++
++  private onAuradeUpdateClick_(): void {
++    AndroidAppsBrowserProxyImpl.getInstance().auradeAndroidCall('update');
++  }
++
++  private onAuradeRemoveClick_(): void {
++    this.shadowRoot!.querySelector<CrDialogElement>(
++                       '#confirmRemoveDialog')!.showModal();
++  }
++
++  private onAuradeRemoveCancel_(): void {
++    this.shadowRoot!.querySelector<CrDialogElement>(
++                       '#confirmRemoveDialog')!.close();
++  }
++
++  private onAuradeRemoveConfirm_(): void {
++    // Turn Android off first so Ash stops using it, then delete it.
++    this.setPrefValue('arc.enabled', false);
++    AndroidAppsBrowserProxyImpl.getInstance().auradeAndroidCall('remove');
++    this.onAuradeRemoveCancel_();
++  }
++
+   private allowRemove_(): boolean {
+     return this.getPref<boolean>('arc.enabled').enforcement !==
+         chrome.settingsPrivate.Enforcement.ENFORCED;
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.html b/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.html
+index 821894e626e1..eed40647444c 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.html
++++ b/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.html
+@@ -105,7 +105,7 @@
+               actionable$="[[androidAppsInfo.playStoreEnabled]]"
+               on-click="onAndroidAppsSubpageClick_">
+             <iron-icon id="androidAppsRowIcon"
+-                icon="os-settings:google-play">
++                icon="[[androidRowIcon_()]]">
+             </iron-icon>
+             <div class="start settings-box-text">
+               $i18n{androidAppsPageLabel}
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.ts b/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.ts
+index 84080c665fc1..3ed26d96fa83 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/os_apps_page.ts
+@@ -103,7 +103,10 @@ export class OsSettingsAppsPageElement extends OsSettingsAppsPageElementBase {
+       isPlayStoreAvailable_: {
+         type: Boolean,
+         value: () => {
+-          return isPlayStoreAvailable();
++          // AuraDE runs Android without Google Play but wants the same
++          // subpage, so the row is shown either way.
++          return isPlayStoreAvailable() ||
++              loadTimeData.getBoolean('auradeAndroid');
+         },
+       },
+ 
+@@ -476,6 +479,12 @@ export class OsSettingsAppsPageElement extends OsSettingsAppsPageElementBase {
+     return pref.enforcement === chrome.settingsPrivate.Enforcement.ENFORCED;
+   }
+ 
++  private androidRowIcon_(): string {
++    return loadTimeData.getBoolean('auradeAndroid') ?
++        'os-settings:apps-android-settings' :
++        'os-settings:google-play';
++  }
++
+   private onAndroidAppsSubpageClick_(): void {
+     if (this.androidAppsInfo.playStoreEnabled) {
+       Router.getInstance().navigateTo(routes.ANDROID_APPS_DETAILS);
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
+index 151929ef5cc0..1ddba8ea75f3 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
+@@ -4,13 +4,23 @@
+ 
+ #include "chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h"
+ 
++#include <optional>
++#include <string>
++
+ #include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/logging.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+ #include "chrome/browser/apps/app_service/launch_utils.h"
+ #include "chrome/browser/ash/arc/arc_util.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chromeos/ash/experiences/arc/app/arc_app_constants.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_bus.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
++#include "dbus/bus.h"
++#include "dbus/message.h"
++#include "dbus/object_proxy.h"
+ #include "components/services/app_service/public/cpp/app_launch_util.h"
+ #include "components/services/app_service/public/cpp/intent_util.h"
+ #include "content/public/browser/web_contents.h"
+@@ -20,6 +30,14 @@
+ 
+ namespace ash::settings {
+ 
++namespace {
++
++constexpr char kAuradeService[] = "org.aurade.Android1";
++constexpr char kAuradePath[] = "/org/aurade/Android1";
++constexpr char kAuradeInterface[] = "org.aurade.Android1";
++
++}  // namespace
++
+ AndroidAppsHandler::AndroidAppsHandler(Profile* profile,
+                                        apps::AppServiceProxy* app_service_proxy)
+     : profile_(profile), app_service_proxy_(app_service_proxy) {}
+@@ -32,6 +50,14 @@ void AndroidAppsHandler::RegisterMessages() {
+       "requestAndroidAppsInfo",
+       base::BindRepeating(&AndroidAppsHandler::HandleRequestAndroidAppsInfo,
+                           weak_ptr_factory_.GetWeakPtr()));
++  web_ui()->RegisterMessageCallback(
++      "requestAuradeAndroidInfo",
++      base::BindRepeating(&AndroidAppsHandler::HandleRequestAuradeAndroidInfo,
++                          weak_ptr_factory_.GetWeakPtr()));
++  web_ui()->RegisterMessageCallback(
++      "auradeAndroidCall",
++      base::BindRepeating(&AndroidAppsHandler::HandleAuradeAndroidCall,
++                          weak_ptr_factory_.GetWeakPtr()));
+   web_ui()->RegisterMessageCallback(
+       "showAndroidAppsSettings",
+       base::BindRepeating(&AndroidAppsHandler::ShowAndroidAppsSettings,
+@@ -113,6 +139,104 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
+       std::make_unique<apps::WindowInfo>(GetDisplayIdForCurrentProfile()));
+ }
+ 
++void AndroidAppsHandler::ConnectAuradeProgress() {
++  if (aurade_proxy_) {
++    return;
++  }
++  dbus::Bus* bus = arc::GetAuraDEAndroidBus();
++  if (!bus) {
++    return;
++  }
++  aurade_proxy_ =
++      bus->GetObjectProxy(kAuradeService, dbus::ObjectPath(kAuradePath));
++  aurade_proxy_->ConnectToSignal(
++      kAuradeInterface, "Progress",
++      base::BindRepeating(&AndroidAppsHandler::OnAuradeProgress,
++                          weak_ptr_factory_.GetWeakPtr()),
++      base::BindOnce([](const std::string&, const std::string&, bool ok) {
++        LOG_IF(ERROR, !ok) << "AuraDE Android: could not watch Progress";
++      }));
++}
++
++void AndroidAppsHandler::HandleRequestAuradeAndroidInfo(
++    const base::ListValue& args) {
++  AllowJavascript();
++  if (!arc::IsAuraDEAndroidEnabled()) {
++    return;
++  }
++  ConnectAuradeProgress();
++  if (!aurade_proxy_) {
++    return;
++  }
++  dbus::MethodCall call(kAuradeInterface, "Info");
++  aurade_proxy_->CallMethodWithErrorResponse(
++      &call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++      base::BindOnce(&AndroidAppsHandler::OnAuradeInfoReply,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void AndroidAppsHandler::OnAuradeInfoReply(dbus::Response* response,
++                                           dbus::ErrorResponse* error) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  std::string json;
++  if (!reader.PopString(&json)) {
++    return;
++  }
++  std::optional<base::Value> parsed = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (parsed && parsed->is_dict()) {
++    FireWebUIListener("aurade-android-info", *parsed);
++  }
++}
++
++void AndroidAppsHandler::HandleAuradeAndroidCall(const base::ListValue& args) {
++  AllowJavascript();
++  if (!arc::IsAuraDEAndroidEnabled() || args.size() != 1 ||
++      !args[0].is_string()) {
++    return;
++  }
++  const std::string& what = args[0].GetString();
++  // Only these three exist; the page cannot ask for anything else.
++  const char* method = what == "update"   ? "Update"
++                       : what == "remove" ? "Remove"
++                                          : nullptr;
++  if (!method) {
++    return;
++  }
++  ConnectAuradeProgress();
++  if (!aurade_proxy_) {
++    return;
++  }
++  dbus::MethodCall call(kAuradeInterface, method);
++  aurade_proxy_->CallMethodWithErrorResponse(
++      &call, dbus::ObjectProxy::TIMEOUT_MAX,
++      base::BindOnce(&AndroidAppsHandler::OnAuradeCallReply,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void AndroidAppsHandler::OnAuradeCallReply(dbus::Response* response,
++                                           dbus::ErrorResponse* error) {
++  LOG_IF(ERROR, !response) << "AuraDE Android: call failed: "
++                           << (error ? error->GetErrorName() : "no reply");
++  HandleRequestAuradeAndroidInfo(base::ListValue());
++}
++
++void AndroidAppsHandler::OnAuradeProgress(dbus::Signal* signal) {
++  dbus::MessageReader reader(signal);
++  std::string stage;
++  int32_t percent = 0;
++  if (!reader.PopString(&stage) || !reader.PopInt32(&percent)) {
++    return;
++  }
++  FireWebUIListener("aurade-android-progress", base::Value(stage),
++                    base::Value(percent));
++  if (stage == "done" || stage == "failed") {
++    HandleRequestAuradeAndroidInfo(base::ListValue());
++  }
++}
++
+ int64_t AndroidAppsHandler::GetDisplayIdForCurrentProfile() {
+   // Settings in secondary profile cannot access ARC.
+   DCHECK(arc::IsArcAllowedForProfile(profile_));
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
+index 7d203b8be5bb..17d31de93372 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
++++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
+@@ -18,6 +18,13 @@
+ #include "chrome/browser/ash/arc/session/arc_session_manager_observer.h"
+ #include "content/public/browser/web_ui_message_handler.h"
+ 
++namespace dbus {
++class ErrorResponse;
++class ObjectProxy;
++class Response;
++class Signal;
++}  // namespace dbus
++
+ class Profile;
+ 
+ namespace ash::settings {
+@@ -55,6 +62,16 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
+   void HandleAppChanged(const std::string& app_id);
+   void SendAndroidAppsInfo();
+   void ShowAndroidAppsSettings(const base::ListValue& args);
++
++  // AuraDE: the Android image and container are managed by the
++  // org.aurade.Android1 system service; these relay its Info, Update and
++  // Remove calls and its download progress to the page.
++  void HandleRequestAuradeAndroidInfo(const base::ListValue& args);
++  void HandleAuradeAndroidCall(const base::ListValue& args);
++  void ConnectAuradeProgress();
++  void OnAuradeInfoReply(dbus::Response* response, dbus::ErrorResponse* error);
++  void OnAuradeCallReply(dbus::Response* response, dbus::ErrorResponse* error);
++  void OnAuradeProgress(dbus::Signal* signal);
+   int64_t GetDisplayIdForCurrentProfile();
+ 
+   base::ScopedObservation<ArcAppListPrefs, ArcAppListPrefs::Observer>
+@@ -64,6 +81,7 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
+       arc_session_manager_observation_{this};
+   raw_ptr<Profile> profile_;  // unowned
+   raw_ptr<apps::AppServiceProxy> app_service_proxy_;
++  raw_ptr<dbus::ObjectProxy> aurade_proxy_ = nullptr;
+   base::WeakPtrFactory<AndroidAppsHandler> weak_ptr_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
+index fac36ab87ab7..17d6a13b433f 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
+@@ -16,6 +16,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/apps/app_service/app_service_proxy.h"
+ #include "chrome/browser/ash/arc/arc_util.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
+ #include "chrome/browser/ash/child_accounts/on_device_controls/app_controls_service_factory.h"
+ #include "chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h"
+ #include "chrome/browser/ui/webui/ash/settings/pages/crostini/guest_os_handler.h"
+@@ -818,6 +819,58 @@ void AppsSection::AddAndroidAppStrings(content::WebUIDataSource* html_source) {
+   html_source->AddLocalizedString(
+       "androidAppsSubtextDescription",
+       IDS_OS_SETTINGS_ANDROID_APPS_SUBTEXT_DESCRIPTION);
++  html_source->AddBoolean("auradeAndroid", arc::IsAuraDEAndroidEnabled());
++  if (arc::IsAuraDEAndroidEnabled()) {
++    // AuraDE runs Android apps without Google Play, so the page says so and
++    // the strings about the Play Store and a Google account are replaced.
++    html_source->AddString("appsMenuItemDescription",
++                           "Notifications, Android apps");
++    html_source->AddString("androidAppsPageLabel", "Android apps");
++    html_source->AddString("androidAppsPageTitle", "Android apps");
++    html_source->AddString(
++        "androidAppsSubtext",
++        "Run Android apps on this computer. No Google account needed.");
++    html_source->AddString("androidAppsSubtextDescription",
++                           "Run Android apps on this computer.");
++    html_source->AddString("androidAppsRemoveButton", "Turn off");
++    html_source->AddString("androidAppsDisableDialogRemove", "Turn off");
++    html_source->AddString("androidAppsDisableDialogTitle",
++                           "Turn off Android?");
++    html_source->AddString(
++        "androidAppsDisableDialogMessage",
++        "Android stops and its memory is freed. Your Android apps and their "
++        "data stay, and come back when you turn Android on again.");
++    html_source->AddString("auradeAndroidStatusOff", "Android is off");
++    html_source->AddString("auradeAndroidStatusRunning", "Android is running");
++    html_source->AddString("auradeAndroidStatusReady",
++                           "Android is installed and starts when you open an app");
++    html_source->AddString("auradeAndroidStatusAbsent",
++                           "Android is not installed yet");
++    html_source->AddString("auradeAndroidStatusDownloading",
++                           "Downloading Android");
++    html_source->AddString("auradeAndroidImageLabel", "Android image");
++    html_source->AddString("auradeAndroidDataLabel", "Apps and their data");
++    html_source->AddString("auradeAndroidFreeLabel", "Free space");
++    html_source->AddString("auradeAndroidUpdateLabel", "An update is available");
++    html_source->AddString("auradeAndroidUpdateButton", "Update");
++    html_source->AddString("auradeAndroidTurnOffLabel", "Turn off Android");
++    html_source->AddString(
++        "auradeAndroidTurnOffSub",
++        "Stops Android and frees its memory. Your apps and data stay.");
++    html_source->AddString("auradeAndroidTurnOffButton", "Turn off");
++    html_source->AddString("auradeAndroidRemoveLabel",
++                           "Remove Android and its data");
++    html_source->AddString(
++        "auradeAndroidRemoveSub",
++        "Deletes the Android image, every Android app and all their data.");
++    html_source->AddString("auradeAndroidRemoveButton", "Remove");
++    html_source->AddString("auradeAndroidRemoveTitle", "Remove Android?");
++    html_source->AddString(
++        "auradeAndroidRemoveBody",
++        "This deletes every Android app and all of their data. You can turn "
++        "Android on again later.");
++    html_source->AddString("auradeAndroidCancel", "Cancel");
++  }
+ }
+ 
+ void AppsSection::UpdateAndroidSearchTags() {
+diff --git a/chromeos/ash/experiences/arc/arc_util.cc b/chromeos/ash/experiences/arc/arc_util.cc
+index 92160fe6476e..0483488a51d9 100644
+--- a/chromeos/ash/experiences/arc/arc_util.cc
++++ b/chromeos/ash/experiences/arc/arc_util.cc
+@@ -276,6 +276,12 @@ ArcUreadaheadMode GetArcUreadaheadMode(
+ }
+ 
+ bool ShouldArcAlwaysStart() {
++  // On AuraDE the start mode only means "no Play Store, no terms of service".
++  // Whether Android runs is the user's choice in Settings (the arc.enabled
++  // preference), so it is not started unconditionally there.
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("aurade-android")) {
++    return false;
++  }
+   return base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+              ash::switches::kArcStartMode) == kAlwaysStartWithNoPlayStore;
+ }
