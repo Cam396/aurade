@@ -13,6 +13,9 @@ is the part that has root, so Ash does not need it:
     Launch(s pkg, s activity)   opens the app in its own window
     Uninstall(s pkg)  removes an app
     CloseTask(i id)   closes one window
+    Provision()       downloads and checks the Android image, then sets Waydroid up
+    Status()          s: "absent", "provisioning" or "ready"
+    signal Progress(s stage, i percent)   while Provision runs
     signal AppsChanged()                the app list changed
     signal TaskCreated(i id, s pkg, s activity) and TaskDestroyed(i id)
 
@@ -21,12 +24,16 @@ user with a running login session. The Android session itself runs as that
 user, under its own session bus, because Waydroid's tools speak D-Bus
 to each other and Ash's private bus is not shared.
 """
+import hashlib
+import json
 import os
 import pwd
 import re
 import signal
 import subprocess
 import sys
+import threading
+import urllib.request
 
 import dbus
 import dbus.mainloop.glib
@@ -120,6 +127,97 @@ class Android(dbus.service.Object):
     @dbus.service.signal(NAME, signature="")
     def Stopped(self):
         pass
+
+    # ---- the Android image ------------------------------------------------
+    #
+    # The image is about 1 GB, so it is not in the package: it is fetched and
+    # checked when the user turns Android on. The manifest names where from and
+    # the sha256 each file must have; a file that does not match is discarded.
+
+    def image_ready(self):
+        return all(os.path.exists(os.path.join(IMAGE_DIR, n)) for n in ("system.img", "vendor.img")) \
+            and os.path.exists(WAYDROID_CFG)
+
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def Status(self, sender=None):
+        self.check_caller(sender)
+        if getattr(self, "provisioning", False):
+            return "provisioning"
+        return "ready" if self.image_ready() else "absent"
+
+    @dbus.service.signal(NAME, signature="si")
+    def Progress(self, stage, percent):
+        pass
+
+    @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
+    def Provision(self, sender=None):
+        self.check_caller(sender)
+        if getattr(self, "provisioning", False) or self.image_ready():
+            return
+        self.provisioning = True
+        threading.Thread(target=self.provision_worker, daemon=True).start()
+
+    def emit(self, stage, percent):
+        GLib.idle_add(lambda: (self.Progress(stage, percent), False)[1])
+
+    def provision_worker(self):
+        try:
+            with open(MANIFEST, encoding="utf-8") as f:
+                man = json.load(f)
+            base = man["base_url"].rstrip("/") + "/"
+            files = man["files"]
+            os.makedirs(IMAGE_DIR, exist_ok=True)
+            total = sum(int(x["size"]) for x in files)
+            done_before = 0
+            for item in files:
+                name, want, size = item["name"], item["sha256"], int(item["size"])
+                if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+                    raise ValueError(f"bad file name {name!r}")
+                final = os.path.join(IMAGE_DIR, name)
+                part = final + ".part"
+                if os.path.exists(final) and self.sha256_of(final) == want:
+                    done_before += size
+                    continue
+                have = os.path.getsize(part) if os.path.exists(part) else 0
+                req = urllib.request.Request(base + name)
+                if have:
+                    req.add_header("Range", f"bytes={have}-")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    if have and resp.status != 206:
+                        have = 0
+                    with open(part, "ab" if have else "wb") as out:
+                        got = have
+                        while True:
+                            chunk = resp.read(1 << 20)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            got += len(chunk)
+                            self.emit("download", int((done_before + got) * 90 / max(total, 1)))
+                self.emit("verify", 90)
+                if self.sha256_of(part) != want:
+                    os.unlink(part)
+                    raise ValueError(f"{name} does not match its checksum")
+                os.replace(part, final)
+                done_before += size
+            self.emit("setup", 95)
+            subprocess.run(["waydroid", "init", "-f"], check=True, timeout=300,
+                           capture_output=True)
+            ensure_props()
+            self.emit("done", 100)
+        except Exception as e:  # noqa: BLE001
+            log(f"provisioning failed: {e}")
+            self.emit("failed", 0)
+        finally:
+            self.provisioning = False
+
+    @staticmethod
+    def sha256_of(path):
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        return h.hexdigest()
 
     # ---- apps -----------------------------------------------------------
 
@@ -368,6 +466,8 @@ WAYDROID_PROPS = {
     "persist.aurade.arc_app_ids": "1",
 }
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
+IMAGE_DIR = "/etc/waydroid-extra/images"
+MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 
 
 def ensure_props():
