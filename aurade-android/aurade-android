@@ -59,6 +59,7 @@ class Android(dbus.service.Object):
         self.bus = bus
         self.loop = loop
         self.session = None  # (uid, Popen)
+        self.waiting = []  # Start calls waiting for a download already running
         self.logcat = None
 
     def caller_uid(self, sender):
@@ -84,6 +85,29 @@ class Android(dbus.service.Object):
         if self.session and self.session[1].poll() is None:
             ok()
             return
+        if self.image_ready():
+            self.do_start(uid, locale, ok, fail)
+            return
+        # Turning Android on for the first time: fetch the image, then start.
+        if not os.path.exists(MANIFEST):
+            fail(dbus.exceptions.DBusException(
+                "org.aurade.Android1.NoImage", "no Android image is available"))
+            return
+
+        def after(good):
+            if good:
+                self.do_start(uid, locale, ok, fail)
+            else:
+                fail(dbus.exceptions.DBusException(
+                    "org.aurade.Android1.Failed", "the Android image could not be downloaded"))
+
+        if not getattr(self, "provisioning", False):
+            self.provisioning = True
+            threading.Thread(target=self.provision_worker, args=(after,), daemon=True).start()
+        else:
+            self.waiting.append(after)
+
+    def do_start(self, uid, locale, ok, fail):
         try:
             ensure_props()
             subprocess.run(["systemctl", "start", CONTAINER_UNIT], check=True, timeout=60)
@@ -176,7 +200,8 @@ class Android(dbus.service.Object):
     def emit(self, stage, percent):
         GLib.idle_add(lambda: (self.Progress(stage, percent), False)[1])
 
-    def provision_worker(self):
+    def provision_worker(self, after=None):
+        good = False
         try:
             with open(MANIFEST, encoding="utf-8") as f:
                 man = json.load(f)
@@ -224,11 +249,15 @@ class Android(dbus.service.Object):
                            capture_output=True)
             ensure_props()
             self.emit("done", 100)
+            good = True
         except Exception as e:  # noqa: BLE001
             log(f"provisioning failed: {e}")
             self.emit("failed", 0)
         finally:
             self.provisioning = False
+            waiting, self.waiting = self.waiting, []
+            for cb in ([after] if after else []) + waiting:
+                GLib.idle_add(lambda cb=cb: (cb(good), False)[1])
 
     @staticmethod
     def sha256_of(path):
