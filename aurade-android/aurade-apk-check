@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Says whether an Android app can run on AuraDE, and if not, why.
+
+  aurade-apk-check [--json] app.apk [more.apk ...]
+
+It reads only the APK's file list and strings, so it is a quick check and not
+a promise. It answers three questions:
+
+  cpu     which native libraries the app brings: x86_64 / x86 / arm64 / arm /
+          none (Java or Kotlin only, which runs everywhere)
+  google  whether the app talks to Google Play services (needs microG or the
+          user's own Play services), and whether it asks Play Integrity
+  verdict runs, runs-with-microg, needs-arm-translation, or blocked
+
+Exit status is 0 when the verdict is runs or runs-with-microg, 1 otherwise.
+"""
+import json
+import re
+import sys
+import zipfile
+
+NATIVE_ABIS = ("x86_64", "x86")
+ARM_ABIS = ("arm64-v8a", "armeabi-v7a", "armeabi")
+GMS = re.compile(rb"com\.google\.android\.gms")
+INTEGRITY = re.compile(rb"com\.google\.android\.play\.core\.integrity|"
+                       rb"com\.google\.android\.gms\.tasks.*IntegrityManager|"
+                       rb"IntegrityManagerFactory|SafetyNetApi|"
+                       rb"com\.google\.android\.gms\.safetynet")
+
+
+def abis(names):
+    found = set()
+    for n in names:
+        m = re.match(r"lib/([^/]+)/[^/]+\.so$", n)
+        if m:
+            found.add(m.group(1))
+    return found
+
+
+def check(path):
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        libs = abis(names)
+        text = b""
+        for n in names:
+            if n == "AndroidManifest.xml" or re.fullmatch(r"classes\d*\.dex", n):
+                text += z.read(n)
+    native = sorted(libs & set(NATIVE_ABIS))
+    arm = sorted(libs & set(ARM_ABIS))
+    if native:
+        cpu = "x86_64" if "x86_64" in native else "x86"
+    elif arm:
+        cpu = "arm64" if "arm64-v8a" in arm else "arm"
+    elif libs:
+        cpu = "other"
+    else:
+        cpu = "none"
+    uses_gms = bool(GMS.search(text))
+    integrity = bool(INTEGRITY.search(text))
+    reasons = []
+    if cpu in ("arm64", "arm"):
+        verdict = "needs-arm-translation"
+        reasons.append("only has ARM native code, and AuraDE does not translate ARM yet")
+    elif cpu == "other":
+        verdict = "blocked"
+        reasons.append("native code for a CPU AuraDE cannot run")
+    elif integrity:
+        verdict = "blocked"
+        reasons.append("asks Google to vouch for the device (Play Integrity or SafetyNet), "
+                       "which only a certified Google device can do")
+    elif uses_gms:
+        verdict = "runs-with-microg"
+        reasons.append("uses Google Play services; works if microG is installed, "
+                       "and without it the Google parts are missing")
+    else:
+        verdict = "runs"
+    return {"file": path, "cpu": cpu, "libs": sorted(libs), "uses_google_services": uses_gms,
+            "asks_play_integrity": integrity, "verdict": verdict, "reasons": reasons}
+
+
+def main(argv):
+    as_json = "--json" in argv
+    files = [a for a in argv if not a.startswith("--")]
+    if not files:
+        print(__doc__.strip().splitlines()[0], file=sys.stderr)
+        return 2
+    ok = True
+    results = []
+    for f in files:
+        try:
+            r = check(f)
+        except (OSError, zipfile.BadZipFile) as e:
+            r = {"file": f, "verdict": "blocked", "reasons": [f"not an APK: {e}"]}
+        ok = ok and r["verdict"] in ("runs", "runs-with-microg")
+        results.append(r)
+    if as_json:
+        print(json.dumps(results, indent=2))
+    else:
+        for r in results:
+            print(f"{r['file']}: {r['verdict']}")
+            for why in r["reasons"]:
+                print(f"  {why}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

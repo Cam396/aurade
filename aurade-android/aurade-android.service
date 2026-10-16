@@ -1,0 +1,9 @@
+[Unit]
+Description=AuraDE Android service
+Documentation=https://github.com/Cam396/aurade
+
+[Service]
+Type=dbus
+BusName=org.aurade.Android1
+ExecStart=/usr/lib/aurade-android/aurade-android
+Restart=on-failure

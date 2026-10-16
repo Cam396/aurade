@@ -1,0 +1,18 @@
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -929,7 +929,14 @@
+ void window::set_app_id(std::string appID) {
+     this->appID = std::move(appID);
+     if (xdg_toplevel) {
+-        const std::string &wayland_app_id = [&](){
++        const std::string wayland_app_id = [&]() -> std::string {
++            // AuraDE: Ash treats a window named org.chromium.arc.<task id> as
++            // an Android task and ties it to the app the bridge reports for
++            // that task. The bootstrap windows have no task id of their own.
++            if (property_get_bool("persist.aurade.arc_app_ids", false) &&
++                taskID != "0" && taskID != "none" && !taskID.empty()) {
++                return "org.chromium.arc." + taskID;
++            }
+             if (this->appID != "Waydroid") {
+                 return "waydroid." + this->appID;
+             } else {

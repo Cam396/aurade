@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""The AuraDE Android service: starts and stops the Android container for Ash.
+
+Ash (the AuraDE desktop) asks for Android over the system bus. This service
+is the part that has root, so Ash does not need it:
+
+  org.aurade.Android1 at /org/aurade/Android1
+    Start(s locale)   brings up the container and the user's Android session
+    Stop()            stops them
+    signal Stopped()  the session ended, whoever ended it
+
+It runs on the same machine as Ash and trusts only a caller that is a real
+user with a running login session. The Android session itself runs as that
+user, under its own session bus, because Waydroid's tools speak D-Bus
+to each other and Ash's private bus is not shared.
+"""
+import os
+import pwd
+import signal
+import subprocess
+import sys
+
+import dbus
+import dbus.mainloop.glib
+import dbus.service
+from gi.repository import GLib
+
+NAME = "org.aurade.Android1"
+PATH = "/org/aurade/Android1"
+CONTAINER_UNIT = "waydroid-container.service"
+
+
+def log(msg):
+    print(f"aurade-android: {msg}", file=sys.stderr, flush=True)
+
+
+class Android(dbus.service.Object):
+    def __init__(self, bus, loop):
+        super().__init__(bus, PATH)
+        self.bus = bus
+        self.loop = loop
+        self.session = None  # (uid, Popen)
+
+    def caller_uid(self, sender):
+        proxy = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        return int(proxy.GetConnectionUnixUser(sender, dbus_interface="org.freedesktop.DBus"))
+
+    def check_caller(self, sender):
+        uid = self.caller_uid(sender)
+        if uid < 1000 or not os.path.isdir(f"/run/user/{uid}"):
+            raise dbus.exceptions.DBusException(
+                "org.aurade.Android1.NotAllowed",
+                "only a logged-in user can start Android")
+        return uid
+
+    @dbus.service.method(NAME, in_signature="s", out_signature="", sender_keyword="sender",
+                         async_callbacks=("ok", "fail"))
+    def Start(self, locale, ok, fail, sender=None):
+        try:
+            uid = self.check_caller(sender)
+        except dbus.exceptions.DBusException as e:
+            fail(e)
+            return
+        if self.session and self.session[1].poll() is None:
+            ok()
+            return
+        try:
+            subprocess.run(["systemctl", "start", CONTAINER_UNIT], check=True, timeout=60)
+            user = pwd.getpwuid(uid).pw_name
+            env = {
+                "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+                "WAYLAND_DISPLAY": "wayland-0",
+                "HOME": pwd.getpwuid(uid).pw_dir,
+                "PATH": "/usr/local/bin:/usr/bin",
+            }
+            if locale:
+                env["LANG"] = locale
+            cmd = ["runuser", "-u", user, "--", "env"] + [f"{k}={v}" for k, v in env.items()] + [
+                "dbus-run-session", "--", "waydroid", "session", "start"]
+            proc = subprocess.Popen(cmd)
+        except Exception as e:  # noqa: BLE001
+            log(f"start failed: {e}")
+            fail(dbus.exceptions.DBusException("org.aurade.Android1.Failed", str(e)))
+            return
+        self.session = (uid, proc)
+        GLib.child_watch_add(proc.pid, self.on_exit)
+        ok()
+
+    def on_exit(self, pid, status):
+        log(f"session {pid} ended with status {status}")
+        self.session = None
+        self.Stopped()
+
+    @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
+    def Stop(self, sender=None):
+        self.check_caller(sender)
+        if self.session and self.session[1].poll() is None:
+            self.session[1].send_signal(signal.SIGTERM)
+        subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)
+
+    @dbus.service.signal(NAME, signature="")
+    def Stopped(self):
+        pass
+
+
+def main():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    dbus.service.BusName(NAME, bus)
+    loop = GLib.MainLoop()
+    Android(bus, loop)
+    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, lambda *_: loop.quit())
+    log("ready")
+    loop.run()
+
+
+if __name__ == "__main__":
+    main()
