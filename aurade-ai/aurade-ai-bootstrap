@@ -86,6 +86,63 @@ if [ "${AURADE_FEATURE_PROFILE}" != "advanced_plus_ai" ] && \
     exit 0
 fi
 
+# The browser's built-in AI (Prompt, Summarizer, Writer, Rewriter and
+# Proofreader APIs) runs Gemma 4 E2B in Chrome's own on-device model service,
+# through the llama.cpp in /usr/lib/aurade-ai. It reads one GGUF file, which
+# is fetched here at a pinned revision and checked before it is used. The
+# launcher points Chrome at it from the next session on.
+AURADE_BUILTIN_AI="${AURADE_BUILTIN_AI:-1}"
+AURADE_BUILTIN_AI_FILE="${AURADE_BUILTIN_AI_FILE:-gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf}"
+AURADE_BUILTIN_AI_URL="${AURADE_BUILTIN_AI_URL:-https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/66a399f68ddd113b06dff02fca9523e55465d11d/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf}"
+AURADE_BUILTIN_AI_SHA256="${AURADE_BUILTIN_AI_SHA256:-e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889}"
+AURADE_BUILTIN_AI_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/aurade/local-ai/gemma-4-e2b"
+
+aurade_builtin_model() {
+    local model="${AURADE_BUILTIN_AI_DIR}/${AURADE_BUILTIN_AI_FILE}"
+    local part="${model}.part"
+    local sum
+
+    [ "${AURADE_BUILTIN_AI}" = "1" ] || return 0
+
+    if [ -f "${model}" ]; then
+        if [ "${AURADE_AI_STATUS}" = "1" ]; then
+            aurade_log "built-in AI model present: ${model}"
+        fi
+        return 0
+    fi
+    if [ "${AURADE_AI_STATUS}" = "1" ]; then
+        aurade_log "built-in AI model missing: ${model}"
+        return 0
+    fi
+    if [ "${AURADE_LOCAL_AI_AUTO_DOWNLOAD}" != "1" ]; then
+        aurade_log "built-in AI model missing and auto-download disabled"
+        return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        aurade_log "curl is not installed; cannot fetch the built-in AI model"
+        return 0
+    fi
+
+    mkdir -p "${AURADE_BUILTIN_AI_DIR}"
+    aurade_log "fetching built-in AI model: ${AURADE_BUILTIN_AI_URL}"
+    # -C - resumes a fetch an earlier session did not finish.
+    if ! curl -fsSL --retry 3 --retry-delay 5 -C - -o "${part}" \
+        "${AURADE_BUILTIN_AI_URL}"; then
+        aurade_log "built-in AI model fetch failed; it resumes next session"
+        return 0
+    fi
+    sum="$(sha256sum "${part}" | awk '{ print $1 }')"
+    if [ "${sum}" != "${AURADE_BUILTIN_AI_SHA256}" ]; then
+        aurade_log "built-in AI model checksum mismatch (${sum}); discarded"
+        rm -f -- "${part}"
+        return 0
+    fi
+    mv -f -- "${part}" "${model}"
+    aurade_log "built-in AI model ready: ${model}"
+}
+
+aurade_builtin_model
+
 if [ "${AURADE_LOCAL_AI_BACKEND}" != "ollama" ]; then
     aurade_log "local AI bootstrap skipped for backend=${AURADE_LOCAL_AI_BACKEND}"
     exit 0

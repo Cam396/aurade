@@ -2,15 +2,26 @@
 
 pkgname=aurade-ai
 pkgver=157.0.8090.0
-pkgrel=1
-pkgdesc="Optional AuraDE Advanced Plus AI local model bootstrap"
-arch=('any')
+pkgrel=2
+# The llama.cpp revision whose headers AuraDE's Chromium carries in
+# services/on_device_model/aurade/llama_include. They must match: Chrome
+# passes llama.cpp structures by value.
+_llama_commit=62df1815bc053066761f4eac58e288f23778e164
+pkgdesc="Optional AuraDE Advanced Plus AI: local Gemma 4 for the browser's built-in AI, and the Ollama bootstrap"
+arch=('x86_64')
 url="https://github.com/Cam396/aurade"
-license=('BSD-3-Clause')
+license=('BSD-3-Clause' 'MIT')
 depends=(
     'bash'
+    'curl'
+    'gcc-libs'
+    'glibc'
     'ollama'
     'util-linux'
+)
+makedepends=(
+    'cmake'
+    'ninja'
 )
 optdepends=(
     'ollama-cuda: NVIDIA CUDA acceleration for Ollama'
@@ -21,13 +32,58 @@ source=(
     'aurade-ai-bootstrap'
     'aurade-ai.conf'
     'LICENSE'
+    'llama-sandbox.patch'
+    "llama.cpp-${_llama_commit}.tar.gz::https://github.com/ggml-org/llama.cpp/archive/${_llama_commit}.tar.gz"
 )
-sha256sums=('994672edd78fbed5d665b55cd75ae9cc595bc4f29a3d650dbe4183f43251b3aa'
-            'f3b4c75a76be179485ffd10893aa08192749675314bc3e4f8d162a3a7965fc07'
-            '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f')
+sha256sums=('f0ae1ff6493c5a4ac93fd397bd52bef537ef489d93e3a0c6d929e271744592c9'
+            '50791f566f13159dd9ccc755a3ec1dc5296e08fc7dffdca5e72f83b282f446a8'
+            '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f'
+            '50a8329a22eb8de02cc1fee7aecf43fbda4f95401b4590c9e87811c901437119'
+            '8187e35cc38086bbc9b14e5e7a1aa24a38308ca3d73d49e7ee937f21f93cfa89')
 backup=('etc/aurade/ai.conf')
 
+prepare() {
+    # Chrome's on-device model service runs llama.cpp inside a seccomp
+    # sandbox that kills the process on posix_fadvise.
+    patch -d "${srcdir}/llama.cpp-${_llama_commit}" -Np1 \
+        -i "${srcdir}/llama-sandbox.patch"
+}
+
+build() {
+    # Libraries only, with every x86-64 CPU variant as a loadable backend so
+    # one package runs well on any processor. Chrome's on-device model service
+    # opens libllama.so from here before its sandbox closes. ggml's own thread
+    # pool, not OpenMP, whose runtime aborts under that sandbox.
+    cmake -S "${srcdir}/llama.cpp-${_llama_commit}" -B "${srcdir}/build" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/lib/aurade-ai \
+        -DCMAKE_INSTALL_LIBDIR=. \
+        -DCMAKE_INSTALL_BINDIR=ggml \
+        -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+        -DBUILD_SHARED_LIBS=ON \
+        -DGGML_NATIVE=OFF \
+        -DGGML_BACKEND_DL=ON \
+        -DGGML_CPU_ALL_VARIANTS=ON \
+        -DGGML_OPENMP=OFF \
+        -DLLAMA_BUILD_TOOLS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_SERVER=OFF \
+        -DLLAMA_BUILD_APP=OFF \
+        -DLLAMA_BUILD_COMMON=OFF \
+        -DLLAMA_OPENSSL=OFF
+    cmake --build "${srcdir}/build"
+}
+
 package() {
+    DESTDIR="${pkgdir}" cmake --install "${srcdir}/build"
+    # Nothing builds against this copy: Chrome carries matching headers.
+    rm -rf "${pkgdir}/usr/lib/aurade-ai/include" \
+        "${pkgdir}/usr/lib/aurade-ai/cmake" \
+        "${pkgdir}/usr/lib/aurade-ai/pkgconfig"
+    install -Dm644 "${srcdir}/llama.cpp-${_llama_commit}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.llama.cpp"
+
     install -Dm755 "${srcdir}/aurade-ai-bootstrap" \
         "${pkgdir}/usr/bin/aurade-ai-bootstrap"
     install -Dm644 "${srcdir}/aurade-ai.conf" \

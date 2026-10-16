@@ -499,6 +499,56 @@ if [ "${AURADE_FEATURE_PROFILE}" = "plus" ] || \
     AURADE_ENABLED_FEATURES+=("${AURADE_PLUS_FEATURES[@]}")
 fi
 
+# The browser's built-in AI (the Prompt, Summarizer, Writer, Rewriter and
+# Proofreader web APIs) on Gemma 4 E2B. Chrome's on-device model service runs
+# it through the llama.cpp that aurade-ai installs, with the prompt configs
+# that ship beside the browser; aurade-ai-bootstrap fetches the model file.
+# Until all three are in place the browser behaves as it always has.
+aurade_json_string() {
+    local text="$1"
+    text="${text//\\/\\\\}"
+    text="${text//\"/\\\"}"
+    printf '"%s"' "${text}"
+}
+
+if [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus_ai" ]; then
+    if [ -z "${AURADE_BUILTIN_AI:-}" ]; then
+        for config in /etc/aurade/ai.conf \
+            "${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/ai.conf"; do
+            value="$(aurade_read_config_value "${config}" AURADE_BUILTIN_AI)"
+            [ -z "${value}" ] || AURADE_BUILTIN_AI="${value}"
+        done
+    fi
+    AURADE_BUILTIN_AI_CONFIGS="${AURADE_BUILTIN_AI_CONFIGS:-$(dirname -- "${CHROME}")/aurade_local_model}"
+    AURADE_BUILTIN_AI_DIR="${AURADE_DATA_HOME}/local-ai/gemma-4-e2b"
+    model_key="$(aurade_read_config_value "${AURADE_BUILTIN_AI_CONFIGS}/model.conf" key)"
+    model_version="$(aurade_read_config_value "${AURADE_BUILTIN_AI_CONFIGS}/model.conf" version)"
+    model_file="$(aurade_read_config_value "${AURADE_BUILTIN_AI_CONFIGS}/model.conf" file)"
+    if [ "${AURADE_BUILTIN_AI:-1}" = "1" ] && [ -n "${model_key}" ] && \
+        [ -n "${model_version}" ] && [ -n "${model_file}" ] && \
+        [ -f "${AURADE_BUILTIN_AI_DIR}/${model_file}" ] && \
+        [ -e /usr/lib/aurade-ai/libllama.so ]; then
+        override="${AURADE_DATA_HOME}/local-ai/manifest-override.json"
+        mkdir -p "${AURADE_DATA_HOME}/local-ai"
+        printf '{"manifest_path": %s, "components": {%s: {%s: %s}}}\n' \
+            "$(aurade_json_string "${AURADE_BUILTIN_AI_CONFIGS}")" \
+            "$(aurade_json_string "${model_key}")" \
+            "$(aurade_json_string "${model_version}")" \
+            "$(aurade_json_string "${AURADE_BUILTIN_AI_DIR}")" >"${override}"
+        FLAGS+=(--optimization-guide-manifest-override="${override}")
+        # Writer, Rewriter and Proofreader are still behind flags upstream.
+        # Chrome wants 15 GB of memory before it runs a model on the
+        # processor; E2B needs about 4 GB, so an 8 GB machine qualifies.
+        AURADE_ENABLED_FEATURES+=(
+            AIWriterAPI
+            AIRewriterAPI
+            AIProofreadingAPI
+            "OnDeviceModelCpuBackend:on_device_cpu_ram_threshold_mb/7000"
+        )
+    fi
+    unset model_key model_version model_file override value config
+fi
+
 # The wallpaper picked during the install, or set in features.conf. Ash shows
 # its default until somebody picks another, and takes the desktop's colours
 # from it. ChromeOS's time of day wallpaper replaces the default on a new

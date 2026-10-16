@@ -12,6 +12,13 @@ respective upstream projects.
   Do not remove those files when repackaging.
 - Vendored web assets and generated resources retain the notice and checksum
   recorded next to their source or in the package/CI documentation.
+- The optional aurade-ai package builds llama.cpp (MIT, Copyright the ggml
+  authors) from a pinned revision and installs its license as
+  `LICENSE.llama.cpp`. Patch 0142 carries llama.cpp's public headers from
+  the same revision, with that license beside them.
+- aurade-ai fetches Google's Gemma 4 E2B model, in unsloth's 4-bit GGUF
+  conversion, from Hugging Face on the user's machine. The model is under the
+  Apache License 2.0. AuraDE does not redistribute it.
 - Google, ChromeOS, Chromium, and related marks remain the property of their
   respective owners. AuraDE is an independent project and is not endorsed by
   Google.

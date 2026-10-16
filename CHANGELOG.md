@@ -2,6 +2,16 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## Unreleased
+
+### Added
+- The browser's built-in AI runs on Gemma 4 E2B on the computer itself, in
+  place of Gemini Nano: the Prompt, Summarizer, Writer, Rewriter and
+  Proofreader web APIs, with no server and no account. It comes with the
+  optional aurade-ai package and the Advanced Plus AI profile, which fetches
+  the model (2.6 GB) once and checks it; the next session uses it. It runs
+  on the processor, in the browser's sandboxed model service.
+
 ## 1.2.0, 2026-10-09
 
 ### Added

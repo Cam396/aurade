@@ -1,0 +1,18 @@
+diff --git a/src/llama-mmap.cpp b/src/llama-mmap.cpp
+index 80a719670..f0eef4d9c 100644
+--- a/src/llama-mmap.cpp
++++ b/src/llama-mmap.cpp
+@@ -485,10 +485,9 @@ struct llama_mmap::impl {
+         int flags = MAP_SHARED;
+         if (numa) { prefetch = 0; }
+ #ifdef __linux__
+-        if (posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL)) {
+-            LLAMA_LOG_WARN("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n",
+-                    strerror(errno));
+-        }
++        // AuraDE: no posix_fadvise. Chrome's on-device model service runs
++        // this inside a seccomp sandbox that kills the process on fadvise64,
++        // and the hint only matters for a cold read.
+         // MAP_POPULATE would fault in the lazy ranges too
+         if (prefetch && lazy_ranges.empty()) { flags |= MAP_POPULATE; }
+ #endif
