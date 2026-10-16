@@ -56,6 +56,45 @@ FIXES = [
         "actions_flat, hints, expire_timeout)",
         'actions_flat, dbus.Dictionary(hints, signature="sv"), expire_timeout)',
     ),
+    # Swiping a notification away on the desktop dismisses it in Android too:
+    # remember what each desktop notification was, and when the user closes
+    # one leave a note for the bridge app's notification listener.
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        "AuraDE: sent notifications",
+        '            return dbus_proxy.Notify(app_name, replaces_id, app_icon, summary, body, actions_flat, dbus.Dictionary(hints, signature="sv"), expire_timeout)\n',
+        '''            # AuraDE: sent notifications
+            nid = dbus_proxy.Notify(app_name, replaces_id, app_icon, summary, body, actions_flat, dbus.Dictionary(hints, signature="sv"), expire_timeout)
+            sent[int(nid)] = (package_name, summary, body)
+            return nid
+''',
+    ),
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        "AuraDE: closed on the desktop",
+        '    bus_signals.append(dbus_proxy.connect_to_signal("ActionInvoked", onActionInvoked))\n',
+        '''    bus_signals.append(dbus_proxy.connect_to_signal("ActionInvoked", onActionInvoked))
+
+    # AuraDE: closed on the desktop
+    sent = dict()
+
+    def onNotificationClosed(notification_id, reason):
+        info = sent.pop(int(notification_id), None)
+        if info is None or int(reason) != 2:
+            return
+        import json, time
+        base = os.path.expanduser("~/.local/share/waydroid/data/media/0/Android/data/org.aurade.bridge/files/cmd")
+        try:
+            os.makedirs(base, exist_ok=True)
+            tmp = os.path.join(base, "%d.tmp" % time.time_ns())
+            with open(tmp, "w") as f:
+                json.dump({"type": "dismiss", "pkg": info[0], "title": info[1], "text": info[2]}, f)
+            os.rename(tmp, tmp[:-4] + ".json")
+        except OSError as e:
+            logging.warning("could not tell Android about a dismissed notification: %s", e)
+    bus_signals.append(dbus_proxy.connect_to_signal("NotificationClosed", onNotificationClosed))
+''',
+    ),
 ]
 
 for path, marker, anchor, replacement in FIXES:

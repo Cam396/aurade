@@ -760,6 +760,8 @@ class Android(dbus.service.Object):
             log(f"bridge install: {(res.stdout + res.stderr).strip()[-120:]}")
         self.guest("/system/bin/cmd", "role", "add-role-holder", "--user", "0",
                    "android.app.role.BROWSER", BRIDGE_PKG, timeout=20)
+        self.guest("/system/bin/cmd", "notification", "allow_listener",
+                   f"{BRIDGE_PKG}/{BRIDGE_PKG}.DismissService", timeout=20)
         self.apply_network()
 
     def outbox_dir(self, uid):
@@ -1192,7 +1194,7 @@ WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 IMAGE_DIR = "/etc/waydroid-extra/images"
 BRIDGE_APK = "/usr/share/aurade-android/aurade-bridge.apk"
 BRIDGE_PKG = "org.aurade.bridge"
-BRIDGE_VERSION = 2
+BRIDGE_VERSION = 3
 INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 
