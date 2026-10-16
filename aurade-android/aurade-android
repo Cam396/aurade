@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 
 import dbus
@@ -109,6 +110,7 @@ class Android(dbus.service.Object):
         self.session = (uid, proc)
         GLib.child_watch_add(proc.pid, self.on_exit)
         self.start_watchers(uid)
+        threading.Thread(target=self.grant_when_ready, args=(uid,), daemon=True).start()
         ok()
 
     def on_exit(self, pid, status):
@@ -361,6 +363,14 @@ class Android(dbus.service.Object):
         subprocess.run(["setfacl", "-m", f"u:{uid}:rx", media], timeout=20, check=False)
         subprocess.run(["setfacl", "-R", "-m", acl, root], timeout=600, check=False)
         subprocess.run(["setfacl", "-R", "-d", "-m", acl, root], timeout=600, check=False)
+
+    def grant_when_ready(self, uid):
+        # Android makes its storage a little after the container starts.
+        for _ in range(120):
+            if os.path.isdir(os.path.join(self.media_dir(uid), "0")):
+                self.grant_storage(uid)
+                return
+            time.sleep(2)
 
     @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
     def StorageDir(self, sender=None):
