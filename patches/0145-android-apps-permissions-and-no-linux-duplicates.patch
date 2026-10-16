@@ -227,12 +227,13 @@ diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeo
 diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 --- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
 +++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
-@@ -964,4 +964,9 @@
+@@ -964,4 +964,10 @@
      for (base::FilePath path = enumerator.Next(); !path.empty();
           path = enumerator.Next()) {
 +      // The Android service writes waydroid.<package>.desktop for each
 +      // Android app; those apps already appear as Android apps.
-+      if (base::StartsWith(path.BaseName().value(), "waydroid.")) {
++      if (base::StartsWith(path.BaseName().value(), "waydroid.",
++                           base::CompareCase::INSENSITIVE_ASCII)) {
 +        continue;
 +      }
        AuraDeHostDesktopApp app;

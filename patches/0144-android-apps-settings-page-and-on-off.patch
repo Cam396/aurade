@@ -13,10 +13,26 @@ index c5d6eb3f0d48..168340c80234 100644
      arc_session_manager_->RequestDisableWithArcDataRemoval();
    }
 diff --git a/chrome/browser/ash/arc/session/arc_session_manager.cc b/chrome/browser/ash/arc/session/arc_session_manager.cc
-index 81b28856229c..920f9a03d9a2 100644
+index 81b28856229c..367c19f135e8 100644
 --- a/chrome/browser/ash/arc/session/arc_session_manager.cc
 +++ b/chrome/browser/ash/arc/session/arc_session_manager.cc
-@@ -1288,7 +1288,8 @@ void ArcSessionManager::RequestEnableImpl() {
+@@ -20,6 +20,7 @@
+ #include "base/run_loop.h"
+ #include "base/strings/string_split.h"
+ #include "base/system/sys_info.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "base/task/task_runner.h"
+ #include "base/task/task_traits.h"
+ #include "base/task/thread_pool.h"
+@@ -64,6 +65,7 @@
+ #include "chromeos/ash/experiences/arc/arc_features.h"
+ #include "chromeos/ash/experiences/arc/arc_prefs.h"
+ #include "chromeos/ash/experiences/arc/arc_util.h"
++#include "chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.h"
+ #include "chromeos/ash/experiences/arc/dlc_installer/arc_dlc_installer.h"
+ #include "chromeos/ash/experiences/arc/metrics/arc_metrics_constants.h"
+ #include "chromeos/ash/experiences/arc/metrics/arc_metrics_service.h"
+@@ -1288,7 +1290,8 @@ void ArcSessionManager::RequestEnableImpl() {
    // interaction. If opt-in verification is disabled, skip negotiation, too.
    // This is for testing purpose.
    const bool should_start_arc_without_user_interaction =
@@ -26,6 +42,31 @@ index 81b28856229c..920f9a03d9a2 100644
        IsArcOptInVerificationDisabled();
    const bool skip_terms_of_service_negotiation =
        signed_in || should_start_arc_without_user_interaction;
+@@ -1834,6 +1837,24 @@ void ArcSessionManager::MaybeStartTimer() {
+     return;
+   }
+ 
++  // AuraDE: Android runs from the AuraDE service and has no account to sign
++  // in to, so there is nothing to wait for. Without this the timer expires
++  // after five minutes, reports a provisioning failure and wipes the data.
++  if (arc::IsAuraDEAndroidEnabled()) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](base::WeakPtr<ArcSessionManager> self) {
++              if (self) {
++                self->OnProvisioningFinished(ArcProvisioningResult(
++                    mojom::ArcSignInResult::NewSuccess(
++                        mojom::ArcSignInSuccess::SUCCESS)));
++              }
++            },
++            weak_ptr_factory_.GetWeakPtr()));
++    return;
++  }
++
+   if (!arc::IsArcVmDlcRequired()) {
+     VLOG(1) << "Setup provisioning timer (DLC gating disabled)";
+     StartProvisioningTimerWithTimeout(kArcSignInTimeout);
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
 index 1e93f79f1103..51e1a766ff60 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
