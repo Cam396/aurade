@@ -39,7 +39,7 @@ ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3
 CI_PACKAGES=(
   aurade-account-helper aurade-system-helper shill-nm-adapter aurade-power
   aurade-hardware aurade-host-bridge aurade-login aurade-greeter aurade-ai
-  aurade-webapp-shortcuts aurade aurade-full
+  aurade-android aurade-webapp-shortcuts aurade aurade-full
 )
 # The subset that installs without chromiumos-ash in a repository. The
 # login and greeter packages depend on it, so their check() is what covers them.
