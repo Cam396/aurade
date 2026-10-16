@@ -27,10 +27,10 @@ index 81b28856229c..920f9a03d9a2 100644
    const bool skip_terms_of_service_negotiation =
        signed_in || should_start_arc_without_user_interaction;
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
-index 1e93f79f1103..d34ae8f602a0 100644
+index 1e93f79f1103..e973e5c57f25 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
-@@ -18,9 +18,31 @@ export interface AndroidAppsInfo {
+@@ -18,9 +18,42 @@ export interface AndroidAppsInfo {
    settingsAppAvailable: boolean;
  }
  
@@ -50,11 +50,22 @@ index 1e93f79f1103..d34ae8f602a0 100644
 +  canDownload: boolean;
 +}
 +
++/** One installed Android app and whether it may use the network. */
++export interface AuradeNetworkApp {
++  pkg: string;
++  label: string;
++  allowed: boolean;
++}
++
  export interface AndroidAppsBrowserProxy {
    requestAndroidAppsInfo(): void;
  
 +  /** Asks the AuraDE Android service for its state. */
 +  requestAuradeAndroidInfo(): void;
++
++  requestAuradeNetworkApps(): void;
++
++  setAuradeNetworkAllowed(pkg: string, allowed: boolean): void;
 +
 +  /** `update` fetches a newer image; `remove` deletes Android and its data. */
 +  auradeAndroidCall(what: 'update'|'remove'): void;
@@ -62,12 +73,20 @@ index 1e93f79f1103..d34ae8f602a0 100644
    /**
     * @param keyboardAction True if the app was opened using a keyboard action.
     */
-@@ -44,6 +66,14 @@ export class AndroidAppsBrowserProxyImpl implements AndroidAppsBrowserProxy {
+@@ -44,6 +77,22 @@ export class AndroidAppsBrowserProxyImpl implements AndroidAppsBrowserProxy {
      chrome.send('requestAndroidAppsInfo');
    }
  
 +  requestAuradeAndroidInfo(): void {
 +    chrome.send('requestAuradeAndroidInfo');
++  }
++
++  requestAuradeNetworkApps(): void {
++    chrome.send('requestAuradeNetworkApps');
++  }
++
++  setAuradeNetworkAllowed(pkg: string, allowed: boolean): void {
++    chrome.send('setAuradeNetworkAllowed', [pkg, allowed]);
 +  }
 +
 +  auradeAndroidCall(what: 'update'|'remove'): void {
@@ -78,10 +97,10 @@ index 1e93f79f1103..d34ae8f602a0 100644
      chrome.send('showAndroidAppsSettings', [keyboardAction]);
    }
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
-index 8f2eb92a1a32..45aed1e45bbd 100644
+index 8f2eb92a1a32..c542daf9dea1 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
-@@ -1,9 +1,78 @@
+@@ -1,9 +1,92 @@
  <style include="settings-shared"></style>
  
 -<cr-link-row id="openGooglePlayRow" label="$i18n{androidOpenGooglePlay}"
@@ -131,6 +150,20 @@ index 8f2eb92a1a32..45aed1e45bbd 100644
 +        </cr-button>
 +      </div>
 +    </template>
++    <div class="settings-box" hidden$="[[!auradeNetworkApps_.length]]">
++      <div class="start">
++        $i18n{auradeAndroidNetworkLabel}
++        <div class="secondary">$i18n{auradeAndroidNetworkSub}</div>
++      </div>
++    </div>
++    <template is="dom-repeat" items="[[auradeNetworkApps_]]">
++      <div class="settings-box">
++        <div class="start">[[item.label]]</div>
++        <cr-toggle checked="[[item.allowed]]"
++            aria-label$="[[item.label]]"
++            on-change="onAuradeNetworkToggle_"></cr-toggle>
++      </div>
++    </template>
 +    <div class="settings-box">
 +      <div class="start">
 +        $i18n{auradeAndroidRemoveLabel}
@@ -164,7 +197,7 @@ index 8f2eb92a1a32..45aed1e45bbd 100644
  
  <template is="dom-if" if="[[androidAppsInfo.settingsAppAvailable]]" restamp>
    <cr-link-row id="manageApps" class="hr" label="$i18n{androidAppsManageApps}"
-@@ -28,7 +97,10 @@
+@@ -28,7 +111,10 @@
  <template is="dom-if" if="[[allowRemove_(prefs.arc.enabled.*)]]" restamp>
    <div id="remove" class="settings-box">
      <div id="androidRemoveLabel" class="start">
@@ -177,10 +210,16 @@ index 8f2eb92a1a32..45aed1e45bbd 100644
      <cr-button on-click="onRemoveClick_"
          aria-labelledby="androidRemoveLabel"
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
-index 85f79f1f0d96..c6882994dba6 100644
+index 85f79f1f0d96..66d893ff792c 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
-@@ -15,6 +15,8 @@ import '../settings_shared.css.js';
+@@ -10,11 +10,14 @@
+ import 'chrome://resources/ash/common/cr_elements/cr_button/cr_button.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_dialog/cr_dialog.js';
+ import 'chrome://resources/ash/common/cr_elements/cr_link_row/cr_link_row.js';
++import 'chrome://resources/ash/common/cr_elements/cr_toggle/cr_toggle.js';
+ import '../settings_shared.css.js';
+ 
  import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
  import type {CrDialogElement} from 'chrome://resources/ash/common/cr_elements/cr_dialog/cr_dialog.js';
  import {I18nMixin} from 'chrome://resources/ash/common/cr_elements/i18n_mixin.js';
@@ -189,16 +228,16 @@ index 85f79f1f0d96..c6882994dba6 100644
  import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
  import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
  
-@@ -25,7 +27,7 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
+@@ -25,7 +28,7 @@ import {Setting} from '../mojom-webui/setting.mojom-webui.js';
  import type {Route} from '../router.js';
  import {Router, routes} from '../router.js';
  
 -import type {AndroidAppsInfo} from './android_apps_browser_proxy.js';
-+import type {AndroidAppsInfo, AuradeAndroidInfo} from './android_apps_browser_proxy.js';
++import type {AndroidAppsInfo, AuradeAndroidInfo, AuradeNetworkApp} from './android_apps_browser_proxy.js';
  import {AndroidAppsBrowserProxyImpl} from './android_apps_browser_proxy.js';
  import {getTemplate} from './android_apps_subpage.html.js';
  
-@@ -38,7 +40,8 @@ export interface SettingsAndroidAppsSubpageElement {
+@@ -38,7 +41,8 @@ export interface SettingsAndroidAppsSubpageElement {
  const GOOGLE_PLAY_STORE_URL = 'https://play.google.com/store/';
  
  const SettingsAndroidAppsSubpageElementBase =
@@ -208,7 +247,7 @@ index 85f79f1f0d96..c6882994dba6 100644
  
  export class SettingsAndroidAppsSubpageElement extends
      SettingsAndroidAppsSubpageElementBase {
-@@ -71,6 +74,22 @@ export class SettingsAndroidAppsSubpageElement extends
+@@ -71,6 +75,28 @@ export class SettingsAndroidAppsSubpageElement extends
          },
        },
  
@@ -219,6 +258,12 @@ index 85f79f1f0d96..c6882994dba6 100644
 +      },
 +
 +      auradeInfo_: Object,
++
++      /** Installed apps with their network switch. */
++      auradeNetworkApps_: {
++        type: Array,
++        value: () => [],
++      },
 +
 +      /** Download progress, or null when nothing is downloading. */
 +      auradeProgress_: Object,
@@ -231,18 +276,19 @@ index 85f79f1f0d96..c6882994dba6 100644
        /** Whether Arc VM manage usb subpage should be shown. */
        isArcVmManageUsbAvailable: Boolean,
      };
-@@ -85,6 +104,10 @@ export class SettingsAndroidAppsSubpageElement extends
+@@ -85,6 +111,11 @@ export class SettingsAndroidAppsSubpageElement extends
      Setting.kRemovePlayStore,
    ]);
  
 +  declare private auradeAndroid_: boolean;
 +  declare private auradeInfo_: AuradeAndroidInfo|null;
++  declare private auradeNetworkApps_: AuradeNetworkApp[];
 +  declare private auradeProgress_: {stage: string, percent: number}|null;
 +  declare private auradeStatus_: string;
    declare private dialogBody_: string;
    declare private playStoreEnabled_: boolean;
  
-@@ -98,6 +121,20 @@ export class SettingsAndroidAppsSubpageElement extends
+@@ -98,6 +129,25 @@ export class SettingsAndroidAppsSubpageElement extends
    override ready(): void {
      super.ready();
  
@@ -257,13 +303,18 @@ index 85f79f1f0d96..c6882994dba6 100644
 +                stage === 'done' || stage === 'failed' ? null :
 +                                                         {stage, percent};
 +          });
++      this.addWebUiListener(
++          'aurade-android-network-apps', (apps: AuradeNetworkApp[]) => {
++            this.auradeNetworkApps_ = apps;
++          });
 +      AndroidAppsBrowserProxyImpl.getInstance().requestAuradeAndroidInfo();
++      AndroidAppsBrowserProxyImpl.getInstance().requestAuradeNetworkApps();
 +    }
 +
      this.addFocusConfig(
          routes.ANDROID_APPS_DETAILS_ARC_VM_SHARED_USB_DEVICES,
          '#manageArcvmShareUsbDevices');
-@@ -125,6 +162,63 @@ export class SettingsAndroidAppsSubpageElement extends
+@@ -125,6 +175,70 @@ export class SettingsAndroidAppsSubpageElement extends
      return this.androidAppsInfo.playStoreEnabled;
    }
  
@@ -301,6 +352,13 @@ index 85f79f1f0d96..c6882994dba6 100644
 +
 +  private progressText_(): string {
 +    return this.auradeProgress_ ? this.auradeProgress_.percent + '%' : '';
++  }
++
++  private onAuradeNetworkToggle_(e: Event&{model: {item: AuradeNetworkApp}}):
++      void {
++    const target = e.target as HTMLInputElement&{checked: boolean};
++    AndroidAppsBrowserProxyImpl.getInstance().setAuradeNetworkAllowed(
++        e.model.item.pkg, target.checked);
 +  }
 +
 +  private onAuradeUpdateClick_(): void {
@@ -370,7 +428,7 @@ index 84080c665fc1..3ed26d96fa83 100644
      if (this.androidAppsInfo.playStoreEnabled) {
        Router.getInstance().navigateTo(routes.ANDROID_APPS_DETAILS);
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
-index 151929ef5cc0..1ddba8ea75f3 100644
+index 151929ef5cc0..6bd53d9560b3 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
 @@ -4,13 +4,23 @@
@@ -412,7 +470,7 @@ index 151929ef5cc0..1ddba8ea75f3 100644
  AndroidAppsHandler::AndroidAppsHandler(Profile* profile,
                                         apps::AppServiceProxy* app_service_proxy)
      : profile_(profile), app_service_proxy_(app_service_proxy) {}
-@@ -32,6 +50,14 @@ void AndroidAppsHandler::RegisterMessages() {
+@@ -32,6 +50,22 @@ void AndroidAppsHandler::RegisterMessages() {
        "requestAndroidAppsInfo",
        base::BindRepeating(&AndroidAppsHandler::HandleRequestAndroidAppsInfo,
                            weak_ptr_factory_.GetWeakPtr()));
@@ -424,10 +482,18 @@ index 151929ef5cc0..1ddba8ea75f3 100644
 +      "auradeAndroidCall",
 +      base::BindRepeating(&AndroidAppsHandler::HandleAuradeAndroidCall,
 +                          weak_ptr_factory_.GetWeakPtr()));
++  web_ui()->RegisterMessageCallback(
++      "requestAuradeNetworkApps",
++      base::BindRepeating(&AndroidAppsHandler::HandleRequestAuradeNetworkApps,
++                          weak_ptr_factory_.GetWeakPtr()));
++  web_ui()->RegisterMessageCallback(
++      "setAuradeNetworkAllowed",
++      base::BindRepeating(&AndroidAppsHandler::HandleSetAuradeNetworkAllowed,
++                          weak_ptr_factory_.GetWeakPtr()));
    web_ui()->RegisterMessageCallback(
        "showAndroidAppsSettings",
        base::BindRepeating(&AndroidAppsHandler::ShowAndroidAppsSettings,
-@@ -113,6 +139,104 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
+@@ -113,6 +147,169 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
        std::make_unique<apps::WindowInfo>(GetDisplayIdForCurrentProfile()));
  }
  
@@ -515,6 +581,71 @@ index 151929ef5cc0..1ddba8ea75f3 100644
 +  HandleRequestAuradeAndroidInfo(base::ListValue());
 +}
 +
++void AndroidAppsHandler::HandleRequestAuradeNetworkApps(
++    const base::ListValue& args) {
++  AllowJavascript();
++  if (!arc::IsAuraDEAndroidEnabled()) {
++    return;
++  }
++  ConnectAuradeProgress();
++  if (!aurade_proxy_) {
++    return;
++  }
++  dbus::MethodCall call(kAuradeInterface, "NetworkApps");
++  aurade_proxy_->CallMethodWithErrorResponse(
++      &call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++      base::BindOnce(&AndroidAppsHandler::OnAuradeNetworkAppsReply,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void AndroidAppsHandler::OnAuradeNetworkAppsReply(
++    dbus::Response* response,
++    dbus::ErrorResponse* error) {
++  if (!response) {
++    return;
++  }
++  dbus::MessageReader reader(response);
++  std::string json;
++  if (!reader.PopString(&json)) {
++    return;
++  }
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++  if (parsed && parsed->is_list()) {
++    FireWebUIListener("aurade-android-network-apps", *parsed);
++  }
++}
++
++void AndroidAppsHandler::HandleSetAuradeNetworkAllowed(
++    const base::ListValue& args) {
++  AllowJavascript();
++  if (!arc::IsAuraDEAndroidEnabled() || args.size() != 2 ||
++      !args[0].is_string() || !args[1].is_bool()) {
++    return;
++  }
++  ConnectAuradeProgress();
++  if (!aurade_proxy_) {
++    return;
++  }
++  dbus::MethodCall call(kAuradeInterface, "SetNetworkAllowed");
++  dbus::MessageWriter writer(&call);
++  writer.AppendString(args[0].GetString());
++  writer.AppendBool(args[1].GetBool());
++  aurade_proxy_->CallMethodWithErrorResponse(
++      &call, dbus::ObjectProxy::TIMEOUT_MAX,
++      base::BindOnce(
++          [](base::WeakPtr<AndroidAppsHandler> self, dbus::Response* response,
++             dbus::ErrorResponse* error) {
++            LOG_IF(ERROR, !response)
++                << "AuraDE Android: network switch failed: "
++                << (error ? error->GetErrorName() : "no reply");
++            if (self) {
++              self->HandleRequestAuradeNetworkApps(base::ListValue());
++            }
++          },
++          weak_ptr_factory_.GetWeakPtr()));
++}
++
 +void AndroidAppsHandler::OnAuradeProgress(dbus::Signal* signal) {
 +  dbus::MessageReader reader(signal);
 +  std::string stage;
@@ -533,7 +664,7 @@ index 151929ef5cc0..1ddba8ea75f3 100644
    // Settings in secondary profile cannot access ARC.
    DCHECK(arc::IsArcAllowedForProfile(profile_));
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
-index 7d203b8be5bb..17d31de93372 100644
+index 7d203b8be5bb..e9c840e0de52 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
 @@ -18,6 +18,13 @@
@@ -550,7 +681,7 @@ index 7d203b8be5bb..17d31de93372 100644
  class Profile;
  
  namespace ash::settings {
-@@ -55,6 +62,16 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
+@@ -55,6 +62,20 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
    void HandleAppChanged(const std::string& app_id);
    void SendAndroidAppsInfo();
    void ShowAndroidAppsSettings(const base::ListValue& args);
@@ -560,6 +691,10 @@ index 7d203b8be5bb..17d31de93372 100644
 +  // Remove calls and its download progress to the page.
 +  void HandleRequestAuradeAndroidInfo(const base::ListValue& args);
 +  void HandleAuradeAndroidCall(const base::ListValue& args);
++  void HandleRequestAuradeNetworkApps(const base::ListValue& args);
++  void OnAuradeNetworkAppsReply(dbus::Response* response,
++                                dbus::ErrorResponse* error);
++  void HandleSetAuradeNetworkAllowed(const base::ListValue& args);
 +  void ConnectAuradeProgress();
 +  void OnAuradeInfoReply(dbus::Response* response, dbus::ErrorResponse* error);
 +  void OnAuradeCallReply(dbus::Response* response, dbus::ErrorResponse* error);
@@ -567,7 +702,7 @@ index 7d203b8be5bb..17d31de93372 100644
    int64_t GetDisplayIdForCurrentProfile();
  
    base::ScopedObservation<ArcAppListPrefs, ArcAppListPrefs::Observer>
-@@ -64,6 +81,7 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
+@@ -64,6 +85,7 @@ class AndroidAppsHandler : public content::WebUIMessageHandler,
        arc_session_manager_observation_{this};
    raw_ptr<Profile> profile_;  // unowned
    raw_ptr<apps::AppServiceProxy> app_service_proxy_;
@@ -576,7 +711,7 @@ index 7d203b8be5bb..17d31de93372 100644
  };
  
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
-index fac36ab87ab7..17d6a13b433f 100644
+index fac36ab87ab7..688f92aa454c 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
 @@ -16,6 +16,7 @@
@@ -587,7 +722,7 @@ index fac36ab87ab7..17d6a13b433f 100644
  #include "chrome/browser/ash/child_accounts/on_device_controls/app_controls_service_factory.h"
  #include "chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h"
  #include "chrome/browser/ui/webui/ash/settings/pages/crostini/guest_os_handler.h"
-@@ -818,6 +819,58 @@ void AppsSection::AddAndroidAppStrings(content::WebUIDataSource* html_source) {
+@@ -818,6 +819,62 @@ void AppsSection::AddAndroidAppStrings(content::WebUIDataSource* html_source) {
    html_source->AddLocalizedString(
        "androidAppsSubtextDescription",
        IDS_OS_SETTINGS_ANDROID_APPS_SUBTEXT_DESCRIPTION);
@@ -630,6 +765,10 @@ index fac36ab87ab7..17d6a13b433f 100644
 +        "auradeAndroidTurnOffSub",
 +        "Stops Android and frees its memory. Your apps and data stay.");
 +    html_source->AddString("auradeAndroidTurnOffButton", "Turn off");
++    html_source->AddString("auradeAndroidNetworkLabel", "Network access");
++    html_source->AddString(
++        "auradeAndroidNetworkSub",
++        "Turn off an app's internet access. It takes effect right away.");
 +    html_source->AddString("auradeAndroidRemoveLabel",
 +                           "Remove Android and its data");
 +    html_source->AddString(

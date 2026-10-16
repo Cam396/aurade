@@ -716,6 +716,16 @@ class Android(dbus.service.Object):
         self.check_caller(sender)
         return self.denied_packages()
 
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def NetworkApps(self, sender=None):
+        """JSON list of installed apps (not system ones) with whether each may
+        use the network, for the Settings page."""
+        uid = self.check_caller(sender)
+        denied = set(self.denied_packages())
+        out = [{"pkg": pkg, "label": label, "allowed": pkg not in denied}
+               for label, pkg, _act, system in self.read_apps(uid) if not system]
+        return json.dumps(out)
+
     @dbus.service.method(NAME, in_signature="sb", out_signature="", sender_keyword="sender")
     def SetNetworkAllowed(self, pkg, allowed, sender=None):
         self.check_caller(sender)
