@@ -8,7 +8,7 @@ is the part that has root, so Ash does not need it:
     Start(s locale)   brings up the container and the user's Android session
     Stop()            stops them
     signal Stopped()  the session ended, whoever ended it
-    ListApps()        a(sss) of (label, package, activity) for launchable apps
+    ListApps()        a(sssb) of (label, package, activity, is_system) for launchable apps
     GetIcon(s pkg)    ay, the app's PNG icon ("" bytes when unknown)
     Launch(s pkg, s activity)   opens the app in its own window
     Uninstall(s pkg)  removes an app
@@ -279,6 +279,8 @@ class Android(dbus.service.Object):
         res = self.guest("/system/bin/pm", "query-activities", "--components",
                          "-a", "android.intent.action.MAIN",
                          "-c", "android.intent.category.LAUNCHER")
+        sysres = self.guest("/system/bin/pm", "list", "packages", "-s")
+        system = {l.split(":", 1)[1].strip() for l in sysres.stdout.splitlines() if l.startswith("package:")}
         seen = set()
         # A stable order, so a package with several launcher entries (an
         # icon alias, for one) is always listed under the same activity.
@@ -290,14 +292,14 @@ class Android(dbus.service.Object):
             if pkg in seen:
                 continue
             seen.add(pkg)
-            out.append((labels.get(pkg, pkg), pkg, self.full_activity(pkg, act)))
+            out.append((labels.get(pkg, pkg), pkg, self.full_activity(pkg, act), pkg in system))
         return out
 
-    @dbus.service.method(NAME, in_signature="", out_signature="a(sss)", sender_keyword="sender")
+    @dbus.service.method(NAME, in_signature="", out_signature="a(sssb)", sender_keyword="sender")
     def ListApps(self, sender=None):
         uid = self.check_caller(sender)
-        return dbus.Array([dbus.Struct(a, signature="sss") for a in self.read_apps(uid)],
-                          signature="(sss)")
+        return dbus.Array([dbus.Struct((a[0], a[1], a[2], dbus.Boolean(a[3])), signature="sssb")
+                           for a in self.read_apps(uid)], signature="(sssb)")
 
     @dbus.service.method(NAME, in_signature="s", out_signature="ay", sender_keyword="sender")
     def GetIcon(self, pkg, sender=None):
