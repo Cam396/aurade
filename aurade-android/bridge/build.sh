@@ -21,5 +21,5 @@ javac -source 17 -target 17 -cp "$jar" -d "$work/classes" "$here"/src/org/aurade
 (cd "$work" && cp base.apk unaligned.apk && zip -q -j unaligned.apk classes.dex)
 "$host/bin/zipalign" -f 4 "$work/unaligned.apk" "$work/aligned.apk"
 java -Djava.library.path="$host/lib64" -jar "$host/framework/signapk.jar" \
-  "$KEY/bridge.x509.pem" "$KEY/bridge.pk8" "$work/aligned.apk" "$here/aurade-bridge.apk"
-echo "built $here/aurade-bridge.apk"
+  "$KEY/bridge.x509.pem" "$KEY/bridge.pk8" "$work/aligned.apk" "$here/../aurade-bridge.apk"
+echo "built $here/../aurade-bridge.apk"
