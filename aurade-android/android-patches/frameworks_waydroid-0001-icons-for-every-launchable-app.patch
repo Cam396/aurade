@@ -1,0 +1,35 @@
+diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java/id/waydro/server/WayDroidService.java
+index 23338bd..98bc621 100644
+--- a/services/java/id/waydro/server/WayDroidService.java
++++ b/services/java/id/waydro/server/WayDroidService.java
+@@ -362,6 +362,14 @@ public class WayDroidService extends SystemService {
+         return true;
+     }
+ 
++    /* Packages that arrive while the monitor is not looking (pm install from a
++     * shell, an update that raced the boot) have no icon file; listing them
++     * makes one, so the host never shows a blank icon. */
++    private void ensureApplicationIcon(String packageName) {
++        if (!new File(ICONS_DIR, packageName + ".png").exists())
++            saveApplicationIcon(packageName);
++    }
++
+     private void saveApplicationIcon(String packageName) {
+         Drawable icon = null;
+         try {
+@@ -1124,6 +1132,7 @@ public class WayDroidService extends SystemService {
+                 if (launchIntent == null) {
+                     continue;
+                 }
++                ensureApplicationIcon(appInfo.packageName);
+ 
+                 String name = appInfo.name;
+                 CharSequence label = appInfo.loadLabel(mPm);
+@@ -1162,6 +1171,7 @@ public class WayDroidService extends SystemService {
+             if (launchIntent == null) {
+                 return null;
+             }
++            ensureApplicationIcon(appInfo.packageName);
+ 
+             String name = appInfo.name;
+             CharSequence label = appInfo.loadLabel(mPm);

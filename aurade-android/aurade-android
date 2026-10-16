@@ -157,12 +157,33 @@ class Android(dbus.service.Object):
                         break
             except OSError:
                 pass
+        # waydroid's own list knows every app's label, and asking for it also
+        # makes the guest write any icon that is missing.
+        bus = f"/run/user/{uid}/bus"
+        if os.path.exists(bus):
+            try:
+                res = subprocess.run(
+                    ["runuser", "-u", pwd.getpwuid(uid).pw_name, "--", "env",
+                     f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path={bus}",
+                     f"HOME={home}", "PATH=/usr/local/bin:/usr/bin", "waydroid", "app", "list"],
+                    capture_output=True, text=True, timeout=20, check=False)
+                name = None
+                for line in res.stdout.splitlines():
+                    if line.startswith("Name: "):
+                        name = line[6:].strip()
+                    elif line.startswith("packageName: ") and name is not None:
+                        labels[line[13:].strip()] = name
+                        name = None
+            except (OSError, subprocess.TimeoutExpired) as e:
+                log(f"waydroid app list failed: {e}")
         out = []
         res = self.guest("/system/bin/pm", "query-activities", "--components",
                          "-a", "android.intent.action.MAIN",
                          "-c", "android.intent.category.LAUNCHER")
         seen = set()
-        for line in res.stdout.splitlines():
+        # A stable order, so a package with several launcher entries (an
+        # icon alias, for one) is always listed under the same activity.
+        for line in sorted(l.strip() for l in res.stdout.splitlines()):
             line = line.strip()
             if "/" not in line:
                 continue

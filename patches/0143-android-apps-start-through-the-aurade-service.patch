@@ -44,16 +44,17 @@ index ba1beac9e4bc..d7540fae4147 100644
      "//chromeos/ash/components/dbus/debug_daemon",
 diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
 new file mode 100644
-index 000000000000..d1f84bc791ee
+index 000000000000..663161b9e2da
 --- /dev/null
 +++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,350 @@
 +// Copyright 2026 The AuraDE Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +#include "chromeos/ash/experiences/arc/session/arc_aurade_bridge.h"
 +
++#include <set>
 +#include <string>
 +#include <utility>
 +#include <vector>
@@ -290,6 +291,18 @@ index 000000000000..d1f84bc791ee
 +    if (!app_host_.is_bound()) {
 +      return;
 +    }
++    // A package that disappeared has to be reported as removed; a refreshed
++    // list alone leaves its launcher entry behind.
++    std::set<std::string> current;
++    for (const AppRow& row : rows) {
++      current.insert(row.package);
++    }
++    for (const std::string& gone : known_packages_) {
++      if (!current.count(gone)) {
++        app_host_->OnPackageRemoved(gone);
++      }
++    }
++    known_packages_ = std::move(current);
 +    std::vector<mojom::AppInfoPtr> apps;
 +    std::vector<mojom::ArcPackageInfoPtr> packages;
 +    for (const AppRow& row : rows) {
@@ -369,6 +382,7 @@ index 000000000000..d1f84bc791ee
 +    }
 +  }
 +
++  std::set<std::string> known_packages_;
 +  mojo::Remote<mojom::ArcBridgeHost> host_;
 +  mojo::Remote<mojom::AppHost> app_host_;
 +  mojo::Receiver<mojom::AppInstance> receiver_{this};
