@@ -22,9 +22,10 @@ source=(
   'aurade-bridge.apk'
   'org.aurade.Android1.conf'
   'org.aurade.Android1.service'
+  'images.json'
   'LICENSE'
 )
-sha256sums=('0ce4df03d7785d3d1dd0a3a9fbe29ec0abcaa7f30bf4a70d27ee4b500c08d46c'
+sha256sums=('677ed8bf0cad74924bc4cdca80f483a84ecc14d870012b875bbe1327e16e6aa2'
             'c95208c4b964cd9014c855b7903a3de6262adb62c9ff7e5355423b8deb80ed6b'
             '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
             '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
@@ -37,6 +38,7 @@ sha256sums=('0ce4df03d7785d3d1dd0a3a9fbe29ec0abcaa7f30bf4a70d27ee4b500c08d46c'
             '35eb64fab527b6debc75d3de80f9338b1829c991e9c1433b4a6e467dbb25230a'
             'a890f6356cb37c6f32ada6d0c856677b90e50956e692eb51fd6695b5a947bd63'
             '9aaf9b3010b2efeaa6738f67229ab7415bf8440dbcfd9aefbc52e4169db24124'
+            'e89a8377349e235e7062d477e977339fe2cf9685af404e2c8e3390e7cc15c318'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
 
 package() {
@@ -55,6 +57,7 @@ package() {
   install -Dm644 aurade-android.sysusers "${pkgdir}/usr/lib/sysusers.d/aurade-android.conf"
   install -Dm644 aurade-android-waydroid.hook \
     "${pkgdir}/usr/share/libalpm/hooks/aurade-android-waydroid.hook"
+  install -Dm644 images.json "${pkgdir}/etc/aurade-android/images.json"
   install -Dm644 org.aurade.Android1.conf \
     "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Android1.conf"
   install -Dm644 org.aurade.Android1.service \

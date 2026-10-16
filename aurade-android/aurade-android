@@ -143,7 +143,7 @@ class Android(dbus.service.Object):
             self.do_start(uid, locale, ok, fail)
             return
         # Turning Android on for the first time: fetch the image, then start.
-        if not os.path.exists(MANIFEST):
+        if not os.path.exists(self.manifest_file()):
             fail(dbus.exceptions.DBusException(
                 "org.aurade.Android1.NoImage", "no Android image is available"))
             return
@@ -269,10 +269,49 @@ class Android(dbus.service.Object):
     def emit(self, stage, percent):
         GLib.idle_add(lambda: (self.Progress(stage, percent), False)[1])
 
+    def manifest_file(self):
+        """The manifest to use: a fetched one when there is one, else the one
+        the package shipped."""
+        if "AURADE_ANDROID_MANIFEST" not in os.environ and os.path.exists(MANIFEST_CACHE):
+            return MANIFEST_CACHE
+        return MANIFEST
+
+    @staticmethod
+    def valid_manifest(man):
+        try:
+            base = man["base_url"]
+            files = man["files"]
+            return (isinstance(base, str) and base.startswith("https://") and files
+                    and all(re.fullmatch(r"[A-Za-z0-9_.-]+", x["name"])
+                            and re.fullmatch(r"[0-9a-f]{64}", x["sha256"])
+                            and int(x["size"]) > 0 for x in files))
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def refresh_manifest(self):
+        """Fetches the latest image manifest. Quiet when offline."""
+        if "AURADE_ANDROID_MANIFEST" in os.environ:
+            return
+        try:
+            with urllib.request.urlopen(MANIFEST_URL, timeout=15) as resp:
+                raw = resp.read(1 << 20)
+            man = json.loads(raw)
+            if not self.valid_manifest(man):
+                log("fetched manifest is not valid, ignored")
+                return
+            os.makedirs(os.path.dirname(MANIFEST_CACHE), exist_ok=True)
+            tmp = MANIFEST_CACHE + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(raw)
+            os.replace(tmp, MANIFEST_CACHE)
+        except Exception as e:  # noqa: BLE001
+            log(f"manifest refresh skipped: {e}")
+
     def provision_worker(self, after=None):
         good = False
         try:
-            with open(MANIFEST, encoding="utf-8") as f:
+            self.refresh_manifest()
+            with open(self.manifest_file(), encoding="utf-8") as f:
                 man = json.load(f)
             base = man["base_url"].rstrip("/") + "/"
             files = man["files"]
@@ -399,7 +438,7 @@ class Android(dbus.service.Object):
             pass
         have_manifest = False
         try:
-            with open(MANIFEST, encoding="utf-8") as f:
+            with open(self.manifest_file(), encoding="utf-8") as f:
                 man = json.load(f)
             have_manifest = True
             wanted = {x["name"]: x["sha256"] for x in man["files"]}
@@ -1255,6 +1294,13 @@ BRIDGE_PKG = "org.aurade.bridge"
 BRIDGE_VERSION = 3
 INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
+# The manifest that ships with the package is the floor. A newer one is fetched
+# from here (Android images update on their own, not with the OS package) and
+# kept in /var/lib; when there is one it wins.
+MANIFEST_URL = os.environ.get(
+    "AURADE_ANDROID_MANIFEST_URL",
+    "https://github.com/Cam396/aurade/releases/download/android-images/images.json")
+MANIFEST_CACHE = "/var/lib/aurade-android/images.json"
 
 
 def ensure_props():
@@ -1324,6 +1370,11 @@ def main():
     svc = Android(bus, loop)
     svc.bus_name = bus_name
     svc.adopt_session()
+    def refresh_later():
+        threading.Thread(target=svc.refresh_manifest, daemon=True).start()
+        return True
+    GLib.timeout_add_seconds(30, lambda: (refresh_later(), False)[1])
+    GLib.timeout_add_seconds(6 * 3600, refresh_later)
     GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, lambda *_: loop.quit())
     log("ready")
     loop.run()
