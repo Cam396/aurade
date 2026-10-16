@@ -1,31 +1,72 @@
 #!/usr/bin/python3
-"""Gives the Android container the host's loop devices.
+"""Small fixes to Waydroid's host tools, applied once.
 
-Android 17 mounts its APEX files through loop devices, and Waydroid's
-container config generator does not list them. This adds them once; a Waydroid
-upgrade puts the stock file back and the pacman hook runs this again.
+A Waydroid upgrade puts its stock files back and the pacman hook runs this
+again. Each fix is skipped when it is already in, and says so on stderr when
+the file it expects has changed so far that the fix no longer fits.
 """
 import os
 import sys
 
-PATH = "/usr/lib/waydroid/tools/helpers/lxc.py"
-ANCHOR = '    make_entry("/dev/char", options="bind,create=dir,optional 0 0")\n'
-ADDED = '''
+FIXES = [
+    # Android 17 mounts its APEX files through loop devices.
+    (
+        "/usr/lib/waydroid/tools/helpers/lxc.py",
+        "loop-control",
+        '    make_entry("/dev/char", options="bind,create=dir,optional 0 0")\n',
+        '''    make_entry("/dev/char", options="bind,create=dir,optional 0 0")
+
     # AuraDE: Android 17 mounts its APEX files through loop devices
     make_entry("/dev/loop-control")
     for i in range(128):
         make_entry("/dev/loop%d" % i, "dev/block/loop%d" % i)
-'''
+''',
+    ),
+    # dbus-python cannot guess the type of an empty action list, so a
+    # notification with no buttons was never shown.
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        'signature="s")',
+        '        actions_flat = [s for action in actions for s in (action.id, action.label)]\n',
+        '        actions_flat = dbus.Array([s for action in actions for s in (action.id, action.label)], signature="s")\n',
+    ),
+    # gbinder hands back None or bytes for empty or odd strings, which
+    # dbus-python refuses ("Expected a string or unicode object").
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        "AuraDE: plain strings",
+        '        app_icon = ""\n',
+        '''        app_icon = ""
+        # AuraDE: plain strings for D-Bus
+        def _s(v):
+            if isinstance(v, (bytes, bytearray)):
+                return bytes(v).decode("utf-8", "replace")
+            return "" if v is None else str(v)
+        app_name, summary, body = _s(app_name), _s(summary), _s(body)
+        package_name, category = _s(package_name), _s(category)
+        replaces_id = dbus.UInt32(replaces_id or 0)
+        expire_timeout = dbus.Int32(expire_timeout)
+''',
+    ),
+    # With mixed value types dbus-python cannot guess the hints dictionary's
+    # type and raises, so no Android notification ever reached the desktop.
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        'dbus.Dictionary(hints, signature="sv")',
+        "actions_flat, hints, expire_timeout)",
+        'actions_flat, dbus.Dictionary(hints, signature="sv"), expire_timeout)',
+    ),
+]
 
-if not os.path.exists(PATH):
-    sys.exit(0)
-with open(PATH, encoding="utf-8") as f:
-    src = f.read()
-if "loop-control" in src:
-    sys.exit(0)
-if ANCHOR not in src:
-    print(f"aurade-android: {PATH} has changed, the loop device entries were not added",
-          file=sys.stderr)
-    sys.exit(0)
-with open(PATH, "w", encoding="utf-8") as f:
-    f.write(src.replace(ANCHOR, ANCHOR + ADDED, 1))
+for path, marker, anchor, replacement in FIXES:
+    if not os.path.exists(path):
+        continue
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    if marker in src:
+        continue
+    if anchor not in src:
+        print(f"aurade-android: {path} has changed, a fix was not applied", file=sys.stderr)
+        continue
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(src.replace(anchor, replacement, 1))

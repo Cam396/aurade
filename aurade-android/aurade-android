@@ -94,9 +94,9 @@ class Android(dbus.service.Object):
             }
             if locale:
                 env["LANG"] = locale
-            bus = f"/run/user/{uid}/bus"
-            if os.path.exists(bus):
-                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+            bus = session_bus(uid)
+            if bus:
+                env["DBUS_SESSION_BUS_ADDRESS"] = bus
                 tail = ["waydroid", "session", "start"]
             else:
                 tail = ["dbus-run-session", "--", "waydroid", "session", "start"]
@@ -258,12 +258,12 @@ class Android(dbus.service.Object):
                 pass
         # waydroid's own list knows every app's label, and asking for it also
         # makes the guest write any icon that is missing.
-        bus = f"/run/user/{uid}/bus"
-        if os.path.exists(bus):
+        bus = session_bus(uid)
+        if bus:
             try:
                 res = subprocess.run(
                     ["runuser", "-u", pwd.getpwuid(uid).pw_name, "--", "env",
-                     f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path={bus}",
+                     f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS={bus}",
                      f"HOME={home}", "PATH=/usr/local/bin:/usr/bin", "waydroid", "app", "list"],
                     capture_output=True, text=True, timeout=20, check=False)
                 name = None
@@ -320,11 +320,11 @@ class Android(dbus.service.Object):
             raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad name")
         # waydroid's own launch sets the active-app property the window layer
         # keys on, so it is preferred when the user's session bus is there.
-        bus = f"/run/user/{uid}/bus"
-        if os.path.exists(bus):
+        bus = session_bus(uid)
+        if bus:
             user = pwd.getpwuid(uid).pw_name
             env = ["XDG_RUNTIME_DIR=" + f"/run/user/{uid}", "WAYLAND_DISPLAY=wayland-0",
-                   "DBUS_SESSION_BUS_ADDRESS=unix:path=" + bus, "HOME=" + pwd.getpwuid(uid).pw_dir,
+                   "DBUS_SESSION_BUS_ADDRESS=" + bus, "HOME=" + pwd.getpwuid(uid).pw_dir,
                    "PATH=/usr/local/bin:/usr/bin"]
             subprocess.run(["lxc-unfreeze", "-P", LXC_PATH[0], "-n", "waydroid"],
                            capture_output=True, timeout=10, check=False)
@@ -449,14 +449,17 @@ class Android(dbus.service.Object):
             return True
         if self.logcat is None or self.logcat.poll() is not None or not getattr(self, "log_src", None):
             self.start_logcat()
+        # One cheap guest command decides whether the real list is worth asking
+        # for; the list itself starts several processes.
         try:
-            apps = sorted(self.read_apps(self.watch_uid))
+            res = self.guest("/system/bin/pm", "list", "packages", "--show-versioncode")
         except Exception as e:  # noqa: BLE001
             log(f"app poll failed: {e}")
             return True
-        if self.apps_seen is not None and apps != self.apps_seen:
+        key = hash(res.stdout)
+        if self.apps_seen is not None and key != self.apps_seen:
             self.AppsChanged()
-        self.apps_seen = apps
+        self.apps_seen = key
         return True
 
 
@@ -466,6 +469,7 @@ WAYDROID_PROPS = {
     "persist.waydroid.multi_windows": "true",
     "persist.waydroid.task_streams": "true",
     "persist.aurade.arc_app_ids": "1",
+    "persist.waydroid.forward_notifications": "true",
 }
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 IMAGE_DIR = "/etc/waydroid-extra/images"
@@ -491,6 +495,34 @@ def ensure_props():
     if changed:
         with open(WAYDROID_CFG, "w", encoding="utf-8") as f:
             cfg.write(f)
+        # Waydroid only folds the config into the Android property files when
+        # it upgrades itself, so do that now, without touching the network.
+        subprocess.run(["waydroid", "upgrade", "-o"], capture_output=True, timeout=120,
+                       check=False)
+
+
+def session_bus(uid):
+    """The bus the user's desktop lives on. Ash and its notification server,
+    portals and file manager are on the bus that dbus-run-session made for the
+    compositor, not on the user's systemd bus, so Android's session talks
+    there when it can; the systemd bus is the fallback."""
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            with open(f"/proc/{pid}/status", encoding="utf-8") as f:
+                if f"Uid:\t{uid}\t" not in f.read():
+                    continue
+            with open(f"/proc/{pid}/comm", encoding="utf-8") as f:
+                comm = f.read().strip()
+            if comm != "weston":
+                continue
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                for kv in f.read().split(b"\0"):
+                    if kv.startswith(b"DBUS_SESSION_BUS_ADDRESS="):
+                        return kv.split(b"=", 1)[1].decode()
+        except OSError:
+            continue
+    path = f"/run/user/{uid}/bus"
+    return f"unix:path={path}" if os.path.exists(path) else None
 
 
 def write_host_generated():
