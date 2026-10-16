@@ -342,6 +342,37 @@ class Android(dbus.service.Object):
             comp = f"{pkg}/{activity}"
         self.guest("/system/bin/am", "start", "-n", comp)
 
+    def media_dir(self, uid):
+        return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media")
+
+    def grant_storage(self, uid):
+        """Let the user read and write Android's shared storage.
+
+        The files belong to Android's own ids and the directory is closed to
+        everyone else, so the host user could not see their own phone files.
+        An ACL for that one user opens it without changing the owner Android
+        sees, and the default ACL carries it to files Android makes later.
+        """
+        media = self.media_dir(uid)
+        root = os.path.join(media, "0")
+        if not os.path.isdir(root):
+            return
+        acl = f"u:{uid}:rwX"
+        subprocess.run(["setfacl", "-m", f"u:{uid}:rx", media], timeout=20, check=False)
+        subprocess.run(["setfacl", "-R", "-m", acl, root], timeout=600, check=False)
+        subprocess.run(["setfacl", "-R", "-d", "-m", acl, root], timeout=600, check=False)
+
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def StorageDir(self, sender=None):
+        """Path of Android's shared storage, readable by the caller. Empty when
+        Android has not made it yet."""
+        uid = self.check_caller(sender)
+        root = os.path.join(self.media_dir(uid), "0")
+        if not os.path.isdir(root):
+            return ""
+        threading.Thread(target=self.grant_storage, args=(uid,), daemon=True).start()
+        return root
+
     @dbus.service.method(NAME, in_signature="s", out_signature="", sender_keyword="sender")
     def Uninstall(self, pkg, sender=None):
         self.check_caller(sender)

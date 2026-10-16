@@ -9,7 +9,7 @@
   const GLYPH_BY_PURPOSE = {
     home: 'home', desktop: 'desktop', documents: 'documents',
     downloads: 'downloads', music: 'music', pictures: 'pictures',
-    videos: 'videos'
+    videos: 'videos', android: 'usb'
   };
   const GLYPH_BY_KIND = {
     removable: 'usb', system: 'drive', trash: 'trash', drive: 'cloud',

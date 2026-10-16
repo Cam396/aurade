@@ -2352,6 +2352,13 @@ fn image_size(path: &Path) -> Option<(u32, u32)> {
     thumbs::dimensions(path)
 }
 
+/// Android's shared storage, when the Android container has made it and the
+/// user has been granted access to it (the aurade-android service does that).
+fn android_files() -> Option<PathBuf> {
+    let dir = places::home().ok()?.join(".local/share/waydroid/data/media/0");
+    std::fs::read_dir(&dir).ok().map(|_| dir)
+}
+
 /// The places the sidebar shows: home, the special folders that exist, the
 /// trash, and every real mount. Not the block devices, which are a different
 /// question answered at `/api/drives`.
@@ -2411,6 +2418,16 @@ fn sidebar_volumes() -> Result<Vec<Value>> {
             label.clone(),
             "system",
             Some(&label.to_lowercase()),
+            false,
+        ));
+    }
+    if let Some(dir) = android_files() {
+        out.push(record(
+            "local_root:Android files".into(),
+            &dir,
+            "Android files".into(),
+            "system",
+            Some("android"),
             false,
         ));
     }
