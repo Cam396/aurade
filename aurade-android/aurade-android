@@ -216,6 +216,7 @@ class Android(dbus.service.Object):
     @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
     def Stop(self, sender=None):
         self.check_caller(sender)
+        log(f"Stop requested by {sender}")
         if self.session and self.session[1].poll() is None:
             self.session[1].send_signal(signal.SIGTERM)
         subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)

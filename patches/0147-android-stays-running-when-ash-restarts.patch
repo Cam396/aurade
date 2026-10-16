@@ -1,0 +1,16 @@
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
+--- a/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
+@@ -65,6 +65,12 @@
+   }
+ 
+   void StopArcInstance(bool on_shutdown, bool should_backup_log) override {
++    // AuraDE: when Ash itself is shutting down, leave Android running so the
++    // apps are still there when Ash comes back. Turning Android off in
++    // Settings is not a shutdown and still stops it.
++    if (on_shutdown) {
++      return;
++    }
+     EnsureProxy();
+     if (!proxy_) {
+       return;
