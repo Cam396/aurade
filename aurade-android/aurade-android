@@ -164,6 +164,16 @@ class Android(dbus.service.Object):
     def do_start(self, uid, locale, ok, fail):
         try:
             ensure_props()
+            # Android restores its recent tasks at boot, and each becomes a
+            # shelf item and window on the desktop with nothing behind it.
+            recents = os.path.join(pwd.getpwuid(uid).pw_dir,
+                                   ".local/share/waydroid/data/system_ce/0/recent_tasks")
+            try:
+                for n in os.listdir(recents):
+                    if n.endswith("_task.xml"):
+                        self.unlink_quiet(os.path.join(recents, n))
+            except OSError:
+                pass
             subprocess.run(["systemctl", "start", CONTAINER_UNIT], check=True, timeout=60)
             user = pwd.getpwuid(uid).pw_name
             env = {
