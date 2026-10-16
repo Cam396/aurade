@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Installs Android apps: aurade-android-install app.apk [more.apk ...]
+
+Hands each file to the AuraDE Android service, which checks that the app can
+run here and installs it. The result appears in the message center."""
+import os
+import sys
+
+import dbus
+
+
+def main(argv):
+    files = [a for a in argv if not a.startswith("-")]
+    if not files:
+        print(__doc__.strip().splitlines()[0], file=sys.stderr)
+        return 2
+    try:
+        bus = dbus.SystemBus()
+        svc = dbus.Interface(bus.get_object("org.aurade.Android1", "/org/aurade/Android1"),
+                             "org.aurade.Android1")
+    except dbus.DBusException as e:
+        print(f"aurade-android-install: the Android service is not available: {e}", file=sys.stderr)
+        return 1
+    status = 0
+    for f in files:
+        try:
+            svc.Install(os.path.abspath(f))
+        except dbus.DBusException as e:
+            print(f"aurade-android-install: {f}: {e.get_dbus_message()}", file=sys.stderr)
+            status = 1
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

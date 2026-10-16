@@ -17,11 +17,13 @@ source=(
   'aurade-android-patch-waydroid'
   'aurade-android-waydroid.hook'
   'aurade-apk-check'
+  'aurade-android-install'
+  'aurade-android-install.desktop'
   'org.aurade.Android1.conf'
   'org.aurade.Android1.service'
   'LICENSE'
 )
-sha256sums=('ceaec1fed62368f7233dd984fb8cc84c22be16877376efff3afa6cb2c6a14a44'
+sha256sums=('f4793dcfa2783c5fb6396c96d3b3c887728f7e7b94465a7a58617ef6f573aa0e'
             'f68e34e0785c06b84d63cca792bfefef2d586980c2148b8f130a9a87050093b5'
             '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
             '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
@@ -29,6 +31,8 @@ sha256sums=('ceaec1fed62368f7233dd984fb8cc84c22be16877376efff3afa6cb2c6a14a44'
             '5b23537000d8952223b22c05a60dacdc47d3b6f7e11075d5e4209a66b5a73bf0'
             '4ef7e638e844a2944e1f27af87c59565ba6c9287dd1e70617405ecc02935b9e9'
             '9eb0e91f2e6c8bf7d6e8d8672a197b3854f29b73aafffa39de3dfca1292020b5'
+            'a561e542e5996588f903fb072864f23650d6541263370ddd569b93b0e8d5916a'
+            '1babb1317966bc1260b558bdf6bdb8694f627cce78f7939860a1a3eb5a7420e2'
             'a890f6356cb37c6f32ada6d0c856677b90e50956e692eb51fd6695b5a947bd63'
             '9aaf9b3010b2efeaa6738f67229ab7415bf8440dbcfd9aefbc52e4169db24124'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
@@ -39,6 +43,9 @@ package() {
   install -Dm755 aurade-android-patch-waydroid \
     "${pkgdir}/usr/lib/aurade-android/aurade-android-patch-waydroid"
   install -Dm755 aurade-apk-check "${pkgdir}/usr/bin/aurade-apk-check"
+  install -Dm755 aurade-android-install "${pkgdir}/usr/bin/aurade-android-install"
+  install -Dm644 aurade-android-install.desktop \
+    "${pkgdir}/usr/share/applications/aurade-android-install.desktop"
   install -Dm644 aurade-android.service \
     "${pkgdir}/usr/lib/systemd/system/aurade-android.service"
   install -Dm644 aurade-android-loop.conf \

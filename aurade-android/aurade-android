@@ -359,6 +359,97 @@ class Android(dbus.service.Object):
         except OSError:
             pass
 
+    # ---- installing an APK ------------------------------------------------
+
+    NOTIFY_SNIPPET = (
+        "import sys, dbus\n"
+        "bus = dbus.bus.BusConnection(sys.argv[1])\n"
+        "o = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')\n"
+        "o.Notify('AuraDE Android', dbus.UInt32(0), '', sys.argv[2], sys.argv[3], dbus.Array([], signature='s'),\n"
+        "         dbus.Dictionary({}, signature='sv'), dbus.Int32(6000),\n"
+        "         dbus_interface='org.freedesktop.Notifications')\n"
+    )
+
+    def notify(self, uid, title, body):
+        """Shows a message in Ash's message center. It is sent as the user,
+        because the user's bus only accepts that user. Best effort: a missing
+        notification server must not fail an install."""
+        addr = session_bus(uid)
+        if not addr:
+            return
+        try:
+            subprocess.run(["runuser", "-u", pwd.getpwuid(uid).pw_name, "--", "python3", "-c",
+                            self.NOTIFY_SNIPPET, addr, title, body],
+                           capture_output=True, timeout=15, check=False)
+        except Exception as e:  # noqa: BLE001
+            log(f"notify failed: {e}")
+
+    @dbus.service.method(NAME, in_signature="s", out_signature="", sender_keyword="sender")
+    def Install(self, path, sender=None):
+        """Installs an APK the caller can read. Returns at once; Installed says
+        how it went and the message center shows the same."""
+        uid = self.check_caller(sender)
+        if not os.path.isabs(path) or not path.lower().endswith(".apk"):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "not an APK path")
+        user = pwd.getpwuid(uid).pw_name
+        if subprocess.run(["runuser", "-u", user, "--", "test", "-r", path],
+                          check=False).returncode != 0:
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "cannot read that file")
+        threading.Thread(target=self.install_worker, args=(uid, path), daemon=True).start()
+
+    def install_worker(self, uid, path):
+        name = os.path.basename(path)
+        ok, msg = False, ""
+        try:
+            checker = "/usr/bin/aurade-apk-check"
+            note = ""
+            if os.path.exists(checker):
+                res = subprocess.run([checker, "--json", path], capture_output=True,
+                                     text=True, timeout=60, check=False)
+                try:
+                    info = json.loads(res.stdout)[0]
+                except (ValueError, IndexError, TypeError):
+                    info = {}
+                reasons = "; ".join(info.get("reasons", []))
+                if info.get("cpu") in ("arm64", "arm", "other") or "not an APK" in reasons:
+                    msg = "This app " + reasons + "." if reasons else "This app cannot run here."
+                    return
+                if info.get("asks_play_integrity"):
+                    note = " Note: it " + reasons + "."
+                elif info.get("uses_google_services"):
+                    note = " Some Google features may be missing."
+            if not (self.session and self.session[1].poll() is None):
+                msg = "Turn on Android in Settings, then try again."
+                return
+            self.notify(uid, "Installing " + name, "Android is installing the app.")
+            home = pwd.getpwuid(uid).pw_dir
+            tmpdir = os.path.join(home, ".local/share/waydroid/data/local/tmp")
+            os.makedirs(tmpdir, exist_ok=True)
+            tmp = os.path.join(tmpdir, f"aurade-install-{os.getpid()}-{int(time.time())}.apk")
+            try:
+                shutil.copyfile(path, tmp)
+                os.chmod(tmp, 0o644)
+                res = self.guest("/system/bin/pm", "install", "-r",
+                                 "/data/local/tmp/" + os.path.basename(tmp), timeout=300)
+            finally:
+                self.unlink_quiet(tmp)
+            out = (res.stdout + res.stderr).strip()
+            if "Success" in out:
+                ok, msg = True, name + " is installed." + note
+            else:
+                m = re.search(r"Failure \[([^\]]+)\]", out)
+                msg = "Android could not install it: " + (m.group(1) if m else out[-200:] or "unknown error")
+        except Exception as e:  # noqa: BLE001
+            msg = f"Install failed: {e}"
+        finally:
+            log(f"install {name}: ok={ok} {msg}")
+            self.notify(uid, ("Installed " if ok else "Could not install ") + name, msg)
+            GLib.idle_add(lambda: (self.Installed(path, ok, msg), False)[1])
+
+    @dbus.service.signal(NAME, signature="sbs")
+    def Installed(self, path, ok, message):
+        pass
+
     # ---- apps -----------------------------------------------------------
 
     def guest(self, *args, timeout=20):
