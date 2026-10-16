@@ -310,6 +310,13 @@ build() {
         # where a development build asserts, so the assert comes off here and
         # the bring up tree keeps it.
         dcheck_always_on = false
+
+        # The browser's built-in AI (the Prompt, Summarizer, Writer, Rewriter
+        # and Proofreader web APIs) on Gemma 4 through AuraDE's llama.cpp
+        # backend, patch 0142, in place of Gemini Nano. It stays idle until
+        # the optional aurade-ai package and its model are installed.
+        use_on_device_model_service = true
+        aurade_local_model = true
     "
 
     if grep -Eq '^[[:space:]]*google_(api_key|default_client_id|default_client_secret)[[:space:]]*=[[:space:]]*\"[^\"]+\"' "${out_dir}/args.gn"; then
@@ -415,6 +422,8 @@ libEGL.so
 libGLESv2.so
 libvk_swiftshader.so
 libvulkan.so.1
+liboptimization_guide_internal.so
+aurade_local_model
 vk_swiftshader_icd.json
 IwaKeyDistribution
 MEIPreload
