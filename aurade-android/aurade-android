@@ -931,6 +931,42 @@ class Android(dbus.service.Object):
             out.append((labels.get(pkg, pkg), pkg, self.full_activity(pkg, act), pkg in system))
         return out
 
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def Diagnostics(self, sender=None):
+        """Writes a report (service state, container, guest log tail, image
+        record) to the user's Downloads and returns its path."""
+        uid = self.check_caller(sender)
+        home = pwd.getpwuid(uid).pw_dir
+        parts = []
+
+        def run(title, cmd, timeout=20):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+                out = (r.stdout + r.stderr).strip()
+            except (OSError, subprocess.TimeoutExpired) as e:
+                out = f"failed: {e}"
+            parts.append(f"=== {title} ===\n{out}\n")
+
+        run("service", ["systemctl", "status", "aurade-android", "--no-pager", "-n", "30"])
+        run("container", ["systemctl", "is-active", CONTAINER_UNIT])
+        run("lxc", ["lxc-info", "-P", LXC_PATH[0], "-n", "waydroid"])
+        run("processes", ["ps", "-eo", "pid,stat,etime,args", "--sort=pid"])
+        run("session log", ["tail", "-n", "60", "/run/aurade-android/session.log"])
+        try:
+            parts.append("=== installed ===\n" + open(os.path.join(IMAGE_DIR, "installed.json")).read() + "\n")
+        except OSError:
+            parts.append("=== installed ===\nnone\n")
+        g = self.guest("/system/bin/logcat", "-d", "-t", "300", timeout=30)
+        parts.append("=== logcat (last 300) ===\n" + (g.stdout or g.stderr) + "\n")
+        run("disk", ["df", "-h", "/var/lib/waydroid", home])
+        d = os.path.join(home, "Downloads")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "aurade-android-diagnostics.txt")
+        with open(path, "w") as f:
+            f.write("\n".join(parts))
+        os.chown(path, uid, os.stat(home).st_gid)
+        return path
+
     @dbus.service.method(NAME, in_signature="", out_signature="a(sssb)", sender_keyword="sender")
     def ListApps(self, sender=None):
         uid = self.check_caller(sender)
