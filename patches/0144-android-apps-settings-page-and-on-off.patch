@@ -27,10 +27,10 @@ index 81b28856229c..920f9a03d9a2 100644
    const bool skip_terms_of_service_negotiation =
        signed_in || should_start_arc_without_user_interaction;
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
-index 1e93f79f1103..e973e5c57f25 100644
+index 1e93f79f1103..51e1a766ff60 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_browser_proxy.ts
-@@ -18,9 +18,42 @@ export interface AndroidAppsInfo {
+@@ -18,9 +18,43 @@ export interface AndroidAppsInfo {
    settingsAppAvailable: boolean;
  }
  
@@ -47,6 +47,7 @@ index 1e93f79f1103..e973e5c57f25 100644
 +  version: string;
 +  newVersion: string;
 +  updateAvailable: boolean;
++  canRollback: boolean;
 +  canDownload: boolean;
 +}
 +
@@ -68,12 +69,12 @@ index 1e93f79f1103..e973e5c57f25 100644
 +  setAuradeNetworkAllowed(pkg: string, allowed: boolean): void;
 +
 +  /** `update` fetches a newer image; `remove` deletes Android and its data. */
-+  auradeAndroidCall(what: 'update'|'remove'): void;
++  auradeAndroidCall(what: 'update'|'remove'|'rollback'|'diagnostics'): void;
 +
    /**
     * @param keyboardAction True if the app was opened using a keyboard action.
     */
-@@ -44,6 +77,22 @@ export class AndroidAppsBrowserProxyImpl implements AndroidAppsBrowserProxy {
+@@ -44,6 +78,22 @@ export class AndroidAppsBrowserProxyImpl implements AndroidAppsBrowserProxy {
      chrome.send('requestAndroidAppsInfo');
    }
  
@@ -89,7 +90,7 @@ index 1e93f79f1103..e973e5c57f25 100644
 +    chrome.send('setAuradeNetworkAllowed', [pkg, allowed]);
 +  }
 +
-+  auradeAndroidCall(what: 'update'|'remove'): void {
++  auradeAndroidCall(what: 'update'|'remove'|'rollback'|'diagnostics'): void {
 +    chrome.send('auradeAndroidCall', [what]);
 +  }
 +
@@ -97,10 +98,10 @@ index 1e93f79f1103..e973e5c57f25 100644
      chrome.send('showAndroidAppsSettings', [keyboardAction]);
    }
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
-index 8f2eb92a1a32..c542daf9dea1 100644
+index 8f2eb92a1a32..01db04b5ecb9 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.html
-@@ -1,9 +1,92 @@
+@@ -1,9 +1,113 @@
  <style include="settings-shared"></style>
  
 -<cr-link-row id="openGooglePlayRow" label="$i18n{androidOpenGooglePlay}"
@@ -164,6 +165,27 @@ index 8f2eb92a1a32..c542daf9dea1 100644
 +            on-change="onAuradeNetworkToggle_"></cr-toggle>
 +      </div>
 +    </template>
++    <template is="dom-if" if="[[auradeInfo_.canRollback]]">
++      <div class="settings-box">
++        <div class="start">
++          $i18n{auradeAndroidRollbackLabel}
++          <div class="secondary">$i18n{auradeAndroidRollbackSub}</div>
++        </div>
++        <cr-button id="auradeRollback" on-click="onAuradeRollbackClick_"
++            disabled="[[auradeProgress_]]">
++          $i18n{auradeAndroidRollbackButton}
++        </cr-button>
++      </div>
++    </template>
++    <div class="settings-box">
++      <div class="start">
++        $i18n{auradeAndroidDiagnosticsLabel}
++        <div class="secondary">$i18n{auradeAndroidDiagnosticsSub}</div>
++      </div>
++      <cr-button id="auradeDiagnostics" on-click="onAuradeDiagnosticsClick_">
++        $i18n{auradeAndroidDiagnosticsButton}
++      </cr-button>
++    </div>
 +    <div class="settings-box">
 +      <div class="start">
 +        $i18n{auradeAndroidRemoveLabel}
@@ -197,7 +219,7 @@ index 8f2eb92a1a32..c542daf9dea1 100644
  
  <template is="dom-if" if="[[androidAppsInfo.settingsAppAvailable]]" restamp>
    <cr-link-row id="manageApps" class="hr" label="$i18n{androidAppsManageApps}"
-@@ -28,7 +111,10 @@
+@@ -28,7 +132,10 @@
  <template is="dom-if" if="[[allowRemove_(prefs.arc.enabled.*)]]" restamp>
    <div id="remove" class="settings-box">
      <div id="androidRemoveLabel" class="start">
@@ -210,7 +232,7 @@ index 8f2eb92a1a32..c542daf9dea1 100644
      <cr-button on-click="onRemoveClick_"
          aria-labelledby="androidRemoveLabel"
 diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
-index 85f79f1f0d96..66d893ff792c 100644
+index 85f79f1f0d96..af5bd8b95006 100644
 --- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
 +++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
 @@ -10,11 +10,14 @@
@@ -314,7 +336,7 @@ index 85f79f1f0d96..66d893ff792c 100644
      this.addFocusConfig(
          routes.ANDROID_APPS_DETAILS_ARC_VM_SHARED_USB_DEVICES,
          '#manageArcvmShareUsbDevices');
-@@ -125,6 +175,70 @@ export class SettingsAndroidAppsSubpageElement extends
+@@ -125,6 +175,78 @@ export class SettingsAndroidAppsSubpageElement extends
      return this.androidAppsInfo.playStoreEnabled;
    }
  
@@ -359,6 +381,14 @@ index 85f79f1f0d96..66d893ff792c 100644
 +    const target = e.target as HTMLInputElement&{checked: boolean};
 +    AndroidAppsBrowserProxyImpl.getInstance().setAuradeNetworkAllowed(
 +        e.model.item.pkg, target.checked);
++  }
++
++  private onAuradeRollbackClick_(): void {
++    AndroidAppsBrowserProxyImpl.getInstance().auradeAndroidCall('rollback');
++  }
++
++  private onAuradeDiagnosticsClick_(): void {
++    AndroidAppsBrowserProxyImpl.getInstance().auradeAndroidCall('diagnostics');
 +  }
 +
 +  private onAuradeUpdateClick_(): void {
@@ -428,7 +458,7 @@ index 84080c665fc1..3ed26d96fa83 100644
      if (this.androidAppsInfo.playStoreEnabled) {
        Router.getInstance().navigateTo(routes.ANDROID_APPS_DETAILS);
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
-index 151929ef5cc0..6bd53d9560b3 100644
+index 151929ef5cc0..7f72975b0ec2 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
 @@ -4,13 +4,23 @@
@@ -493,7 +523,7 @@ index 151929ef5cc0..6bd53d9560b3 100644
    web_ui()->RegisterMessageCallback(
        "showAndroidAppsSettings",
        base::BindRepeating(&AndroidAppsHandler::ShowAndroidAppsSettings,
-@@ -113,6 +147,169 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
+@@ -113,6 +147,171 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
        std::make_unique<apps::WindowInfo>(GetDisplayIdForCurrentProfile()));
  }
  
@@ -556,10 +586,12 @@ index 151929ef5cc0..6bd53d9560b3 100644
 +    return;
 +  }
 +  const std::string& what = args[0].GetString();
-+  // Only these three exist; the page cannot ask for anything else.
-+  const char* method = what == "update"   ? "Update"
-+                       : what == "remove" ? "Remove"
-+                                          : nullptr;
++  // Only these four exist; the page cannot ask for anything else.
++  const char* method = what == "update"        ? "Update"
++                       : what == "remove"      ? "Remove"
++                       : what == "rollback"    ? "Rollback"
++                       : what == "diagnostics" ? "Diagnostics"
++                                               : nullptr;
 +  if (!method) {
 +    return;
 +  }
@@ -711,7 +743,7 @@ index 7d203b8be5bb..e9c840e0de52 100644
  };
  
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
-index fac36ab87ab7..688f92aa454c 100644
+index fac36ab87ab7..04e1aeec007c 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/apps_section.cc
 @@ -16,6 +16,7 @@
@@ -722,7 +754,7 @@ index fac36ab87ab7..688f92aa454c 100644
  #include "chrome/browser/ash/child_accounts/on_device_controls/app_controls_service_factory.h"
  #include "chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h"
  #include "chrome/browser/ui/webui/ash/settings/pages/crostini/guest_os_handler.h"
-@@ -818,6 +819,62 @@ void AppsSection::AddAndroidAppStrings(content::WebUIDataSource* html_source) {
+@@ -818,6 +819,73 @@ void AppsSection::AddAndroidAppStrings(content::WebUIDataSource* html_source) {
    html_source->AddLocalizedString(
        "androidAppsSubtextDescription",
        IDS_OS_SETTINGS_ANDROID_APPS_SUBTEXT_DESCRIPTION);
@@ -765,6 +797,17 @@ index fac36ab87ab7..688f92aa454c 100644
 +        "auradeAndroidTurnOffSub",
 +        "Stops Android and frees its memory. Your apps and data stay.");
 +    html_source->AddString("auradeAndroidTurnOffButton", "Turn off");
++    html_source->AddString("auradeAndroidRollbackLabel",
++                           "Go back to the previous Android version");
++    html_source->AddString(
++        "auradeAndroidRollbackSub",
++        "Uses the image that the last update replaced. Your apps and data stay.");
++    html_source->AddString("auradeAndroidRollbackButton", "Go back");
++    html_source->AddString("auradeAndroidDiagnosticsLabel", "Android report");
++    html_source->AddString(
++        "auradeAndroidDiagnosticsSub",
++        "Saves the state of Android and its log to your Downloads folder.");
++    html_source->AddString("auradeAndroidDiagnosticsButton", "Save report");
 +    html_source->AddString("auradeAndroidNetworkLabel", "Network access");
 +    html_source->AddString(
 +        "auradeAndroidNetworkSub",

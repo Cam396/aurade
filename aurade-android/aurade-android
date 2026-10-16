@@ -308,9 +308,16 @@ class Android(dbus.service.Object):
                 if self.sha256_of(part) != want:
                     os.unlink(part)
                     raise ValueError(f"{name} does not match its checksum")
+                if os.path.exists(final):
+                    # Keep the image this one replaces, so Rollback can go back.
+                    os.replace(final, final + ".prev")
+                    self.keep_prev_record = True
                 os.replace(part, final)
                 done_before += size
             self.emit("setup", 95)
+            if getattr(self, "keep_prev_record", False) and os.path.exists(INSTALLED):
+                shutil.copyfile(INSTALLED, INSTALLED + ".prev")
+            self.keep_prev_record = False
             with open(INSTALLED, "w", encoding="utf-8") as f:
                 json.dump({"version": man.get("version", ""),
                            "files": {x["name"]: x["sha256"] for x in files}}, f)
@@ -348,6 +355,32 @@ class Android(dbus.service.Object):
                 except OSError:
                     pass
         return total
+
+    @dbus.service.method(NAME, in_signature="", out_signature="", sender_keyword="sender")
+    def Rollback(self, sender=None):
+        """Goes back to the image the last update replaced. Apps and their data
+        stay. Android stops; the next start uses the older image."""
+        self.check_caller(sender)
+        names = [n for n in ("system.img", "vendor.img")
+                 if os.path.exists(os.path.join(IMAGE_DIR, n + ".prev"))]
+        if not names or not os.path.exists(INSTALLED + ".prev"):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed",
+                                                "there is no earlier image to go back to")
+        if self.session and self.session[1].poll() is None:
+            self.session[1].send_signal(signal.SIGTERM)
+        subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)
+        for n in names:
+            cur = os.path.join(IMAGE_DIR, n)
+            tmp = cur + ".swap"
+            os.replace(cur, tmp)
+            os.replace(cur + ".prev", cur)
+            os.replace(tmp, cur + ".prev")
+        tmp = INSTALLED + ".swap"
+        os.replace(INSTALLED, tmp)
+        os.replace(INSTALLED + ".prev", INSTALLED)
+        os.replace(tmp, INSTALLED + ".prev")
+        subprocess.run(["waydroid", "init", "-f"], check=True, timeout=300, capture_output=True)
+        ensure_props()
 
     @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
     def Info(self, sender=None):
@@ -391,6 +424,9 @@ class Android(dbus.service.Object):
             "freeBytes": st.f_bavail * st.f_frsize,
             "version": version,
             "newVersion": new_version,
+            "canRollback": any(os.path.exists(os.path.join(IMAGE_DIR, n + ".prev"))
+                               for n in ("system.img", "vendor.img"))
+                           and os.path.exists(INSTALLED + ".prev"),
             "updateAvailable": bool(ready and installed and wanted and wanted != installed),
             "canDownload": have_manifest,
         })
@@ -405,7 +441,8 @@ class Android(dbus.service.Object):
         if self.session and self.session[1].poll() is None:
             self.session[1].send_signal(signal.SIGTERM)
         subprocess.run(["systemctl", "stop", CONTAINER_UNIT], timeout=60, check=False)
-        for name in ("system.img", "vendor.img", "installed.json"):
+        for name in ("system.img", "vendor.img", "installed.json", "system.img.prev",
+                     "vendor.img.prev", "installed.json.prev"):
             self.unlink_quiet(os.path.join(IMAGE_DIR, name))
         for d in ("overlay_rw", "overlay_work", "cache_http"):
             shutil.rmtree(os.path.join("/var/lib/waydroid", d), ignore_errors=True)
@@ -987,6 +1024,7 @@ class Android(dbus.service.Object):
         with open(path, "w") as f:
             f.write("\n".join(parts))
         os.chown(path, uid, os.stat(home).st_gid)
+        self.notify(uid, "Android report saved", "The report is in Downloads: aurade-android-diagnostics.txt")
         return path
 
     @dbus.service.method(NAME, in_signature="", out_signature="a(sssb)", sender_keyword="sender")
