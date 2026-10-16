@@ -526,6 +526,146 @@ class Android(dbus.service.Object):
                    "-n", f"{pkg}/{activity}", "--grant-read-uri-permission", timeout=30)
         GLib.timeout_add_seconds(1800, lambda: (shutil.rmtree(box, ignore_errors=True), False)[1])
 
+    # ---- permissions and the network switch --------------------------------
+
+    CATEGORIES = {
+        "CAMERA": ("android.permission.CAMERA",),
+        "MICROPHONE": ("android.permission.RECORD_AUDIO",),
+        "LOCATION": ("android.permission.ACCESS_FINE_LOCATION",
+                     "android.permission.ACCESS_COARSE_LOCATION",
+                     "android.permission.ACCESS_BACKGROUND_LOCATION"),
+        "CONTACTS": ("android.permission.READ_CONTACTS", "android.permission.WRITE_CONTACTS"),
+        "STORAGE": ("android.permission.READ_EXTERNAL_STORAGE",
+                    "android.permission.WRITE_EXTERNAL_STORAGE",
+                    "android.permission.READ_MEDIA_AUDIO",
+                    "android.permission.READ_MEDIA_IMAGES",
+                    "android.permission.READ_MEDIA_VIDEO"),
+        "NOTIFICATIONS": ("android.permission.POST_NOTIFICATIONS",),
+    }
+
+    def scan_permissions(self):
+        """{package: {category: granted}} for the permissions a user can decide.
+        A category is listed only for apps that ask for something in it."""
+        res = self.guest("/system/bin/dumpsys", "package", timeout=60)
+        out, cur, section = {}, None, None
+        asked, granted = set(), {}
+
+        def flush():
+            if cur is None:
+                return
+            cats = {}
+            for cat, perms in self.CATEGORIES.items():
+                mine = [p for p in perms if p in asked]
+                if mine:
+                    cats[cat] = any(granted.get(p) for p in mine)
+            if cats:
+                out[cur] = cats
+
+        in_packages = False
+        for line in res.stdout.splitlines():
+            if line == "Packages:":
+                in_packages = True
+                continue
+            if not in_packages:
+                continue
+            m = re.match(r"^  Package \[([^\]]+)\]", line)
+            if m:
+                flush()
+                cur, section = m.group(1), None
+                asked, granted = set(), {}
+                continue
+            if line and not line.startswith(" "):
+                flush()
+                cur = None
+                in_packages = line == "Packages:"
+                continue
+            if cur is None:
+                continue
+            stripped = line.strip()
+            if stripped == "requested permissions:":
+                section = "asked"
+            elif stripped == "runtime permissions:":
+                section = "runtime"
+            elif stripped.endswith(":") and not stripped.startswith("android.") and line.startswith("    ") \
+                    and not line.startswith("      "):
+                section = None
+            elif section == "asked" and line.startswith("      android."):
+                asked.add(stripped)
+            elif section == "runtime":
+                m2 = re.match(r"^(\S+): granted=(true|false)", stripped)
+                if m2:
+                    # The full dump lists only the permissions an app asked
+                    # for, with their state, so this is also the "asked" set.
+                    asked.add(m2.group(1))
+                    granted[m2.group(1)] = m2.group(2) == "true"
+        flush()
+        return out
+
+    @dbus.service.method(NAME, in_signature="", out_signature="s", sender_keyword="sender")
+    def Permissions(self, sender=None):
+        """JSON {package: {CAMERA|MICROPHONE|LOCATION|CONTACTS|STORAGE|NOTIFICATIONS: granted}}."""
+        self.check_caller(sender)
+        if not (self.session and self.session[1].poll() is None):
+            return "{}"
+        now = time.monotonic()
+        cached = getattr(self, "perm_cache", None)
+        if cached and now - cached[0] < 20:
+            return cached[1]
+        data = json.dumps(self.scan_permissions())
+        self.perm_cache = (now, data)
+        return data
+
+    @dbus.service.method(NAME, in_signature="ssb", out_signature="", sender_keyword="sender")
+    def SetPermission(self, pkg, category, granted, sender=None):
+        self.check_caller(sender)
+        perms = self.CATEGORIES.get(category)
+        if not perms or not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad request")
+        verb = "grant" if granted else "revoke"
+        for perm in perms:
+            self.guest("/system/bin/pm", verb, pkg, perm, timeout=20)
+        self.perm_cache = None
+
+    NETWORK_STATE = "/var/lib/aurade-android/network-deny.json"
+
+    def denied_packages(self):
+        try:
+            with open(self.NETWORK_STATE, encoding="utf-8") as f:
+                return sorted(set(json.load(f)))
+        except (OSError, ValueError):
+            return []
+
+    def apply_network(self):
+        denied = self.denied_packages()
+        self.guest("/system/bin/cmd", "connectivity", "set-chain3-enabled",
+                   "true" if denied else "false", timeout=20)
+        for pkg in denied:
+            self.guest("/system/bin/cmd", "connectivity", "set-package-networking-enabled",
+                       "false", pkg, timeout=20)
+
+    @dbus.service.method(NAME, in_signature="", out_signature="as", sender_keyword="sender")
+    def NetworkDenied(self, sender=None):
+        """Packages that are not allowed to use the network."""
+        self.check_caller(sender)
+        return self.denied_packages()
+
+    @dbus.service.method(NAME, in_signature="sb", out_signature="", sender_keyword="sender")
+    def SetNetworkAllowed(self, pkg, allowed, sender=None):
+        self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad package")
+        denied = set(self.denied_packages())
+        if allowed:
+            denied.discard(pkg)
+            self.guest("/system/bin/cmd", "connectivity", "set-package-networking-enabled",
+                       "true", pkg, timeout=20)
+        else:
+            denied.add(pkg)
+        os.makedirs(os.path.dirname(self.NETWORK_STATE), exist_ok=True)
+        with open(self.NETWORK_STATE, "w", encoding="utf-8") as f:
+            json.dump(sorted(denied), f)
+        self.apply_network()
+
     # ---- the AuraDE bridge app: links and sharing -----------------------------
     #
     # Android has no way to open a link in the computer's browser, so a small
@@ -563,6 +703,7 @@ class Android(dbus.service.Object):
             log(f"bridge install: {(res.stdout + res.stderr).strip()[-120:]}")
         self.guest("/system/bin/cmd", "role", "add-role-holder", "--user", "0",
                    "android.app.role.BROWSER", BRIDGE_PKG, timeout=20)
+        self.apply_network()
 
     def outbox_dir(self, uid):
         return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media/0",
@@ -727,7 +868,7 @@ class Android(dbus.service.Object):
             if "/" not in line:
                 continue
             pkg, act = line.split("/", 1)
-            if pkg in seen:
+            if pkg in seen or pkg == BRIDGE_PKG:
                 continue
             seen.add(pkg)
             out.append((labels.get(pkg, pkg), pkg, self.full_activity(pkg, act), pkg in system))

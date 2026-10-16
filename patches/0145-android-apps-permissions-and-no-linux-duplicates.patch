@@ -1,0 +1,239 @@
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+--- a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+@@ -4,18 +4,23 @@
+ 
+ #include "chromeos/ash/experiences/arc/session/arc_aurade_bridge.h"
+ 
++#include <map>
+ #include <set>
++#include <optional>
+ #include <string>
+ #include <utility>
+ #include <vector>
+ 
++#include "base/containers/flat_map.h"
+ #include "base/functional/bind.h"
++#include "base/json/json_reader.h"
+ #include "base/logging.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/containers/span.h"
+ #include "chromeos/ash/experiences/arc/session/arc_aurade_bus.h"
+ #include "chromeos/ash/experiences/arc/mojom/app.mojom.h"
++#include "chromeos/ash/experiences/arc/mojom/app_permissions.mojom.h"
+ #include "dbus/bus.h"
+ #include "dbus/message.h"
+ #include "dbus/object_proxy.h"
+@@ -34,9 +39,50 @@
+   std::string label;
+   std::string package;
+   std::string activity;
++  bool is_system = false;
+ };
+ 
+-class Bridge : public ArcAuraDEBridge, public mojom::AppInstance {
++using Permissions = std::map<std::string, std::map<std::string, bool>>;
++
++const char* CategoryName(mojom::AppPermission permission) {
++  switch (permission) {
++    case mojom::AppPermission::CAMERA:
++      return "CAMERA";
++    case mojom::AppPermission::LOCATION:
++      return "LOCATION";
++    case mojom::AppPermission::MICROPHONE:
++      return "MICROPHONE";
++    case mojom::AppPermission::NOTIFICATIONS:
++      return "NOTIFICATIONS";
++    case mojom::AppPermission::CONTACTS:
++      return "CONTACTS";
++    case mojom::AppPermission::STORAGE:
++      return "STORAGE";
++    default:
++      return nullptr;
++  }
++}
++
++std::optional<mojom::AppPermission> CategoryFromName(const std::string& name) {
++  static const std::pair<const char*, mojom::AppPermission> kAll[] = {
++      {"CAMERA", mojom::AppPermission::CAMERA},
++      {"LOCATION", mojom::AppPermission::LOCATION},
++      {"MICROPHONE", mojom::AppPermission::MICROPHONE},
++      {"NOTIFICATIONS", mojom::AppPermission::NOTIFICATIONS},
++      {"CONTACTS", mojom::AppPermission::CONTACTS},
++      {"STORAGE", mojom::AppPermission::STORAGE},
++  };
++  for (const auto& entry : kAll) {
++    if (name == entry.first) {
++      return entry.second;
++    }
++  }
++  return std::nullopt;
++}
++
++class Bridge : public ArcAuraDEBridge,
++               public mojom::AppInstance,
++               public mojom::AppPermissionsInstance {
+  public:
+   explicit Bridge(mojo::PendingRemote<mojom::ArcBridgeHost> host)
+       : host_(std::move(host)) {
+@@ -53,6 +99,18 @@
+       LOG(ERROR) << "AuraDE Android: no system bus";
+     }
+     host_->OnAppInstanceReady(receiver_.BindNewPipeAndPassRemote());
++    host_->OnAppPermissionsInstanceReady(
++        permissions_receiver_.BindNewPipeAndPassRemote());
++  }
++
++  // mojom::AppPermissionsInstance:
++  void GrantPermission(const std::string& package_name,
++                       mojom::AppPermission permission) override {
++    SetPermission(package_name, permission, true);
++  }
++  void RevokePermission(const std::string& package_name,
++                        mojom::AppPermission permission) override {
++    SetPermission(package_name, permission, false);
+   }
+ 
+   // mojom::AppInstance:
+@@ -208,6 +266,29 @@
+             std::string(method)));
+   }
+ 
++  void SetPermission(const std::string& package_name,
++                     mojom::AppPermission permission,
++                     bool granted) {
++    const char* name = CategoryName(permission);
++    if (!proxy_ || !name) {
++      return;
++    }
++    dbus::MethodCall call(kInterface, "SetPermission");
++    dbus::MessageWriter writer(&call);
++    writer.AppendString(package_name);
++    writer.AppendString(name);
++    writer.AppendBool(granted);
++    proxy_->CallMethodWithErrorResponse(
++        &call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
++        base::BindOnce(&Bridge::OnPermissionSet, weak_factory_.GetWeakPtr()));
++  }
++
++  void OnPermissionSet(dbus::Response* response, dbus::ErrorResponse* error) {
++    LOG_IF(ERROR, !response) << "AuraDE Android: SetPermission failed: "
++                             << (error ? error->GetErrorName() : "no reply");
++    RefreshApps();
++  }
++
+   void RefreshApps() {
+     if (!proxy_) {
+       return;
+@@ -232,12 +313,49 @@
+         dbus::MessageReader st(nullptr);
+         AppRow row;
+         if (!array.PopStruct(&st) || !st.PopString(&row.label) ||
+-            !st.PopString(&row.package) || !st.PopString(&row.activity)) {
++            !st.PopString(&row.package) || !st.PopString(&row.activity) ||
++            !st.PopBool(&row.is_system)) {
+           break;
+         }
+         rows.push_back(std::move(row));
+       }
+     }
++    pending_rows_ = std::move(rows);
++    dbus::MethodCall call(kInterface, "Permissions");
++    proxy_->CallMethodWithErrorResponse(
++        &call, dbus::ObjectProxy::TIMEOUT_MAX,
++        base::BindOnce(&Bridge::OnPermissions, weak_factory_.GetWeakPtr()));
++  }
++
++  // The apps are published once their permissions are known, so each package
++  // carries them from its first appearance.
++  void OnPermissions(dbus::Response* response, dbus::ErrorResponse*) {
++    Permissions permissions;
++    if (response) {
++      dbus::MessageReader reader(response);
++      std::string json;
++      if (reader.PopString(&json)) {
++        std::optional<base::Value> parsed =
++            base::JSONReader::Read(json, base::JSON_PARSE_RFC);
++        if (parsed && parsed->is_dict()) {
++          for (const auto [package, categories] : parsed->GetDict()) {
++            if (!categories.is_dict()) {
++              continue;
++            }
++            for (const auto [category, granted] : categories.GetDict()) {
++              if (granted.is_bool()) {
++                permissions[package][category] = granted.GetBool();
++              }
++            }
++          }
++        }
++      }
++    }
++    Publish(std::move(pending_rows_), permissions);
++    pending_rows_.clear();
++  }
++
++  void Publish(std::vector<AppRow> rows, const Permissions& permissions) {
+     if (!app_host_.is_bound()) {
+       return;
+     }
+@@ -260,7 +378,8 @@
+       app->name = row.label;
+       app->package_name = row.package;
+       app->activity = row.activity;
+-      app->sticky = false;
++      // A system app cannot be uninstalled, as on ChromeOS.
++      app->sticky = row.is_system;
+       app->notifications_enabled = true;
+       apps.push_back(std::move(app));
+ 
+@@ -270,6 +389,23 @@
+       pkg->last_backup_android_id = 0;
+       pkg->last_backup_time = 0;
+       pkg->sync = false;
++      auto found = permissions.find(row.package);
++      if (found != permissions.end()) {
++        base::flat_map<mojom::AppPermission, mojom::PermissionStatePtr> states;
++        for (const auto& [category, granted] : found->second) {
++          std::optional<mojom::AppPermission> permission =
++              CategoryFromName(category);
++          if (!permission) {
++            continue;
++          }
++          auto state = mojom::PermissionState::New();
++          state->granted = granted;
++          state->managed = false;
++          state->one_time = false;
++          states.emplace(*permission, std::move(state));
++        }
++        pkg->permission_states = std::move(states);
++      }
+       packages.push_back(std::move(pkg));
+     }
+     app_host_->OnPackageListRefreshed(std::move(packages));
+@@ -332,10 +468,12 @@
+     }
+   }
+ 
++  std::vector<AppRow> pending_rows_;
+   std::set<std::string> known_packages_;
+   mojo::Remote<mojom::ArcBridgeHost> host_;
+   mojo::Remote<mojom::AppHost> app_host_;
+   mojo::Receiver<mojom::AppInstance> receiver_{this};
++  mojo::Receiver<mojom::AppPermissionsInstance> permissions_receiver_{this};
+   raw_ptr<dbus::ObjectProxy> proxy_ = nullptr;
+   base::WeakPtrFactory<Bridge> weak_factory_{this};
+ };
+diff --git a/chrome/browser/apps/app_service/publishers/crostini_apps.cc b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+--- a/chrome/browser/apps/app_service/publishers/crostini_apps.cc
++++ b/chrome/browser/apps/app_service/publishers/crostini_apps.cc
+@@ -964,4 +964,9 @@
+     for (base::FilePath path = enumerator.Next(); !path.empty();
+          path = enumerator.Next()) {
++      // The Android service writes waydroid.<package>.desktop for each
++      // Android app; those apps already appear as Android apps.
++      if (base::StartsWith(path.BaseName().value(), "waydroid.")) {
++        continue;
++      }
+       AuraDeHostDesktopApp app;
+       if (!ParseDesktopFile(path, *environment, &app) ||
