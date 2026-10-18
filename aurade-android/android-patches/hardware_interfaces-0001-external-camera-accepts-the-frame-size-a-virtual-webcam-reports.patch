@@ -1,0 +1,14 @@
+diff --git a/camera/device/3.4/default/include/ext_device_v3_4_impl/ExternalCameraDeviceSession.h b/camera/device/3.4/default/include/ext_device_v3_4_impl/ExternalCameraDeviceSession.h
+--- a/camera/device/3.4/default/include/ext_device_v3_4_impl/ExternalCameraDeviceSession.h
++++ b/camera/device/3.4/default/include/ext_device_v3_4_impl/ExternalCameraDeviceSession.h
+@@ -109,7 +109,9 @@
+ 
+     static const int kMaxProcessedStream = 2;
+     static const int kMaxStallStream = 1;
+-    static const uint32_t kMaxBytesPerPixel = 3;
++    // v4l2loopback reports four bytes a pixel for the MJPEG frames of a virtual
++    // webcam, and the check on that size rejected it (AuraDE).
++    static const uint32_t kMaxBytesPerPixel = 4;
+ 
+     class OutputThread : public android::Thread {
+     public:

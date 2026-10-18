@@ -25,6 +25,7 @@ user, under its own session bus, because Waydroid's tools speak D-Bus
 to each other and Ash's private bus is not shared.
 """
 import ctypes
+import fcntl
 import hashlib
 import json
 import uuid
@@ -35,6 +36,7 @@ import pwd
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -1471,40 +1473,66 @@ class Android(dbus.service.Object):
                 continue
         return pads
 
+    def host_cameras(self):
+        """Capture nodes of cameras on the host that are producing pictures:
+        name -> major:minor. Only a device's first node is the picture, the
+        others carry metadata. Android's camera provider reads a node's
+        formats once, as it appears, so a node with none yet (a virtual camera
+        nobody is feeding) is left out until it has some."""
+        cams = {}
+        for dev in glob.glob("/sys/class/video4linux/video*"):
+            name = os.path.basename(dev)
+            try:
+                if int(open(f"{dev}/index").read()) != 0:
+                    continue
+                majmin = open(f"{dev}/dev").read().strip()
+                fd = os.open(f"/dev/{name}", os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    # VIDIOC_ENUM_FMT of the first capture format.
+                    fcntl.ioctl(fd, 0xC0405602, struct.pack("<II56x", 0, 1))
+                finally:
+                    os.close(fd)
+                cams[name] = majmin
+            except (OSError, ValueError):
+                continue
+        return cams
+
     def sync_gamepads(self):
-        """Gamepads plugged into the host show up in Android. The container
-        has no view of the host's input devices, so each pad's node is made
-        inside it as the pad appears and removed as it goes."""
+        """Gamepads and cameras plugged into the host show up in Android. The
+        container has no view of the host's devices, so each node is made
+        inside it as the device appears and removed as it goes."""
         try:
             res = subprocess.run(["lxc-info", "-P", LXC_PATH[0], "-n", "waydroid", "-p", "-H"],
                                  capture_output=True, text=True, timeout=10, check=False)
             pid = int(res.stdout.strip())
         except (OSError, ValueError, subprocess.SubprocessError):
             return
-        want = self.host_gamepads()
         # A container that restarted has a fresh /dev with none of the nodes.
         if getattr(self, "pads_pid", None) != pid:
             self.pads_in_container = {}
             self.pads_pid = pid
         have = self.pads_in_container
+        want = {f"input/{n}": m for n, m in self.host_gamepads().items()}
+        want.update({n: m for n, m in self.host_cameras().items()})
         toybox = ["nsenter", "-t", str(pid), "-m", "--", "/system/bin/toybox"]
         try:
             for name, majmin in want.items():
                 if have.get(name) == majmin:
                     continue
                 major, minor = majmin.split(":")
-                # World readable: Android's input reader is not in the pad's group.
-                subprocess.run(toybox + ["rm", "-f", f"/dev/input/{name}"], timeout=10, check=False)
-                subprocess.run(toybox + ["mknod", "-m", "666", f"/dev/input/{name}", "c", major, minor],
+                # World readable: neither Android's input reader nor its camera
+                # service is in the device's group.
+                subprocess.run(toybox + ["rm", "-f", f"/dev/{name}"], timeout=10, check=False)
+                subprocess.run(toybox + ["mknod", "-m", "666", f"/dev/{name}", "c", major, minor],
                                timeout=10, check=True, capture_output=True)
                 have[name] = majmin
-                log(f"gamepad {name} is now in Android")
+                log(f"{name} is now in Android")
             for name in [n for n in have if n not in want]:
-                subprocess.run(toybox + ["rm", "-f", f"/dev/input/{name}"], timeout=10, check=False)
+                subprocess.run(toybox + ["rm", "-f", f"/dev/{name}"], timeout=10, check=False)
                 del have[name]
-                log(f"gamepad {name} left Android")
+                log(f"{name} left Android")
         except (OSError, subprocess.SubprocessError) as e:
-            log(f"gamepad sync failed: {e}")
+            log(f"device sync failed: {e}")
         self.pads_in_container = have
 
     def poll_apps(self):
