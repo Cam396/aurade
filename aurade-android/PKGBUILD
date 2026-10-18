@@ -23,9 +23,10 @@ source=(
   'org.aurade.Android1.conf'
   'org.aurade.Android1.service'
   'images.json'
+  'release.gpg'
   'LICENSE'
 )
-sha256sums=('232bd7ac8b886c5ceeeedb80fc6c99bc413a57a95a57ff3c24924712b6e6ed61'
+sha256sums=('4ab251dc6c8109d746da53867a25284c266c4f45bfcf4902391dd4164f441983'
             'c95208c4b964cd9014c855b7903a3de6262adb62c9ff7e5355423b8deb80ed6b'
             '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
             '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
@@ -39,6 +40,7 @@ sha256sums=('232bd7ac8b886c5ceeeedb80fc6c99bc413a57a95a57ff3c24924712b6e6ed61'
             'a890f6356cb37c6f32ada6d0c856677b90e50956e692eb51fd6695b5a947bd63'
             '9aaf9b3010b2efeaa6738f67229ab7415bf8440dbcfd9aefbc52e4169db24124'
             'e89a8377349e235e7062d477e977339fe2cf9685af404e2c8e3390e7cc15c318'
+            'c75d031002727369daf6ac43ba0d3abdeb96e3b6f91a9fae856a69ec3ac6b4e9'
             'add5bd0656d73c9f620c35d0c2f978f3607f0621f4052b6a4aabfacb5db271a2')
 
 package() {
@@ -62,6 +64,8 @@ package() {
     "${pkgdir}/usr/share/dbus-1/system.d/org.aurade.Android1.conf"
   install -Dm644 org.aurade.Android1.service \
     "${pkgdir}/usr/share/dbus-1/system-services/org.aurade.Android1.service"
+  install -Dm644 release.gpg "${pkgdir}/usr/share/aurade-android/release.gpg"
+  install -dm755 "${pkgdir}/etc/aurade-android/trusted.d"
   install -Dm644 aurade-bridge.apk "${pkgdir}/usr/share/aurade-android/aurade-bridge.apk"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

@@ -289,22 +289,80 @@ class Android(dbus.service.Object):
         except (KeyError, TypeError, ValueError):
             return False
 
+    @staticmethod
+    def keyrings():
+        rings = [RELEASE_KEYRING] if os.path.exists(RELEASE_KEYRING) else []
+        if os.path.isdir(TRUSTED_DIR):
+            rings += sorted(os.path.join(TRUSTED_DIR, f) for f in os.listdir(TRUSTED_DIR)
+                            if f.endswith(".gpg"))
+        return rings
+
+    @staticmethod
+    def signature_ok(raw, sig, rings):
+        """True when sig is a good detached signature over raw by a key in rings."""
+        if not rings or not sig:
+            return False
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            mp, sp = os.path.join(d, "images.json"), os.path.join(d, "images.json.sig")
+            with open(mp, "wb") as f:
+                f.write(raw)
+            with open(sp, "wb") as f:
+                f.write(sig)
+            cmd = ["gpgv", "--quiet"]
+            for r in rings:
+                cmd += ["--keyring", r]
+            try:
+                return subprocess.run(cmd + [sp, mp], capture_output=True, timeout=30,
+                                      check=False).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                return False
+
+    @classmethod
+    def accept_manifest(cls, raw, sig, rings, current_version=""):
+        """The parsed manifest when raw is signed, well formed and not older
+        than current_version (versions are date stamps, so they sort as text);
+        None otherwise."""
+        if not cls.signature_ok(raw, sig, rings):
+            log("fetched manifest is not signed by a trusted key, ignored")
+            return None
+        try:
+            man = json.loads(raw)
+        except ValueError:
+            return None
+        if not cls.valid_manifest(man):
+            log("fetched manifest is not valid, ignored")
+            return None
+        if str(man.get("version", "")) < current_version:
+            log("fetched manifest is older than the one in use, ignored")
+            return None
+        return man
+
+    def manifest_version(self):
+        try:
+            with open(self.manifest_file(), encoding="utf-8") as f:
+                return str(json.load(f).get("version", ""))
+        except (OSError, ValueError):
+            return ""
+
     def refresh_manifest(self):
-        """Fetches the latest image manifest. Quiet when offline."""
+        """Fetches the latest image manifest and its signature. Quiet when offline."""
         if "AURADE_ANDROID_MANIFEST" in os.environ:
             return
         try:
             with urllib.request.urlopen(MANIFEST_URL, timeout=15) as resp:
                 raw = resp.read(1 << 20)
-            man = json.loads(raw)
-            if not self.valid_manifest(man):
-                log("fetched manifest is not valid, ignored")
+            with urllib.request.urlopen(MANIFEST_URL + ".sig", timeout=15) as resp:
+                sig = resp.read(1 << 14)
+            if self.accept_manifest(raw, sig, self.keyrings(), self.manifest_version()) is None:
                 return
             os.makedirs(os.path.dirname(MANIFEST_CACHE), exist_ok=True)
             tmp = MANIFEST_CACHE + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(raw)
             os.replace(tmp, MANIFEST_CACHE)
+            with open(MANIFEST_CACHE + ".sig", "wb") as f:
+                f.write(sig)
         except Exception as e:  # noqa: BLE001
             log(f"manifest refresh skipped: {e}")
 
@@ -1302,6 +1360,11 @@ MANIFEST_URL = os.environ.get(
     "AURADE_ANDROID_MANIFEST_URL",
     "https://github.com/Cam396/aurade/releases/download/android-images/images.json")
 MANIFEST_CACHE = "/var/lib/aurade-android/images.json"
+# A fetched manifest is only used when it carries a detached OpenPGP signature
+# (images.json.sig next to it) made by a key in one of these keyrings: the
+# release key the package ships, plus any a machine's owner drops in trusted.d.
+RELEASE_KEYRING = "/usr/share/aurade-android/release.gpg"
+TRUSTED_DIR = "/etc/aurade-android/trusted.d"
 
 
 def ensure_props():
