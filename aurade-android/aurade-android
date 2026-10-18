@@ -228,10 +228,23 @@ class Android(dbus.service.Object):
                                  capture_output=True, text=True, timeout=20, check=False)
             if res.returncode == 0:
                 log("bound this Ash's window socket into the running container")
+                self.clear_stale_tasks()
             else:
                 log(f"could not bind the window socket: {res.stderr.strip()[-200:]}")
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             log(f"window socket check skipped: {e}")
+
+    def clear_stale_tasks(self):
+        """Apps that were open under the previous Ash have no window any more
+        and cannot get one back; stopping them lets the next launch start a
+        task with a window on the current Ash."""
+        res = self.guest("/system/bin/cmd", "package", "query-activities", "--brief",
+                         "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER")
+        pkgs = {line.split("/")[0] for line in res.stdout.splitlines() if "/" in line}
+        pkgs.add("com.android.settings")
+        for pkg in sorted(pkgs):
+            if re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+                self.guest("/system/bin/am", "force-stop", pkg, timeout=10)
 
     def on_exit(self, pid, status):
         log(f"session {pid} ended with status {status}")
@@ -1228,6 +1241,7 @@ class Android(dbus.service.Object):
         env = ["XDG_RUNTIME_DIR=" + f"/run/user/{uid}", "WAYLAND_DISPLAY=wayland-0",
                "DBUS_SESSION_BUS_ADDRESS=" + bus, "HOME=" + pwd.getpwuid(uid).pw_dir,
                "PATH=/usr/local/bin:/usr/bin"]
+        self.guest("/system/bin/am", "force-stop", "com.android.settings")  # open on this app, not the last page
         subprocess.run(["runuser", "-u", user, "--", "env"] + env +
                        ["waydroid", "app", "intent", "android.settings.APPLICATION_DETAILS_SETTINGS",
                         "package:" + pkg], capture_output=True, timeout=30, check=False)

@@ -1,0 +1,28 @@
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+--- a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+@@ -183,6 +183,7 @@ class Bridge : public ArcAuraDEBridge,
+   void SetTaskActive(int32_t task_id) override {}
+   void ShowPackageInfoDeprecated(const std::string& package_name,
+                                  const gfx::Rect& dimension_on_screen) override {
++    ShowAppInfo(package_name, "main");
+   }
+   void ShowPackageInfoOnPageDeprecated(
+       const std::string& package_name,
+@@ -190,7 +191,15 @@ class Bridge : public ArcAuraDEBridge,
+       const gfx::Rect& dimension_on_screen) override {}
+   void ShowPackageInfoOnPage(const std::string& package_name,
+                              mojom::ShowPackageInfoPage page,
+-                             int64_t display_id) override {}
++                             int64_t display_id) override {
++    ShowAppInfo(package_name, "main");
++  }
++  void ShowAppInfo(const std::string& package_name, const std::string& page) {
++    CallService("ShowAppInfo", [&](dbus::MessageWriter& w) {
++      w.AppendString(package_name);
++      w.AppendString(page);
++    });
++  }
+   void SetNotificationsEnabled(const std::string& package_name,
+                                bool enabled) override {}
+   void StartPaiFlow(StartPaiFlowCallback callback) override {
