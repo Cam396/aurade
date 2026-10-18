@@ -449,6 +449,17 @@ class Android(dbus.service.Object):
             files = man["files"]
             os.makedirs(IMAGE_DIR, exist_ok=True)
             total = sum(int(x["size"]) for x in files)
+            # Say so up front instead of failing on a write halfway through: a
+            # file that is already here (and so not downloaded again) counts
+            # for nothing, and the old image is kept until the new one is whole.
+            need = sum(int(x["size"]) for x in files
+                       if not (os.path.exists(os.path.join(IMAGE_DIR, x["name"]))
+                               and self.sha256_of(os.path.join(IMAGE_DIR, x["name"])) == x["sha256"]))
+            st = os.statvfs(IMAGE_DIR)
+            free = st.f_bavail * st.f_frsize
+            if need + (256 << 20) > free:
+                raise ValueError(f"not enough free disk space: Android needs {need >> 20} MB "
+                                 f"and {free >> 20} MB is free")
             done_before = 0
             for item in files:
                 name, want, size = item["name"], item["sha256"], int(item["size"])

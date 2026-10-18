@@ -1,0 +1,24 @@
+# Taking the package off takes Android with it: the container stops, and its
+# images, overlay and every user's Android data go, so nothing is left using
+# the disk. An upgrade leaves all of it alone.
+
+pre_remove() {
+  systemctl stop aurade-android.service 2>/dev/null || true
+  systemctl stop waydroid-container.service 2>/dev/null || true
+  rm -f /etc/waydroid-extra/images/system.img /etc/waydroid-extra/images/vendor.img \
+        /etc/waydroid-extra/images/installed.json /etc/waydroid-extra/images/system.img.prev \
+        /etc/waydroid-extra/images/vendor.img.prev /etc/waydroid-extra/images/installed.json.prev
+  rm -rf /var/lib/waydroid/overlay_rw /var/lib/waydroid/overlay_work \
+         /var/lib/waydroid/cache_http /var/lib/aurade-android
+  rm -f /var/lib/waydroid/waydroid.cfg /var/lib/waydroid/waydroid.prop
+  local home
+  for home in /home/*; do
+    rm -rf "${home}/.local/share/waydroid/data"
+    rm -f "${home}"/.local/share/applications/waydroid.*.desktop
+  done
+}
+
+post_upgrade() {
+  # The service picks up the new code and re-adopts the running Android.
+  systemctl try-restart aurade-android.service 2>/dev/null || true
+}
