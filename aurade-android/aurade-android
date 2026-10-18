@@ -24,6 +24,7 @@ user with a running login session. The Android session itself runs as that
 user, under its own session bus, because Waydroid's tools speak D-Bus
 to each other and Ash's private bus is not shared.
 """
+import ctypes
 import hashlib
 import json
 import uuid
@@ -137,6 +138,9 @@ class Android(dbus.service.Object):
             fail(e)
             return
         if self.session and self.session[1].poll() is None:
+            # Android outlived the Ash that started it; this Ash has a new
+            # window socket the container does not know about yet.
+            self.ensure_wayland(uid)
             ok()
             return
         if self.image_ready():
@@ -206,6 +210,28 @@ class Android(dbus.service.Object):
         self.start_watchers(uid)
         threading.Thread(target=self.grant_when_ready, args=(uid,), daemon=True).start()
         ok()
+
+    def ensure_wayland(self, uid):
+        """The container binds Ash's window socket into itself when it starts.
+        Ash makes a new socket every time it starts, so a container that
+        outlived an Ash holds a dead one and no Android window can open. Bind
+        the current socket over it, inside the container, without a restart."""
+        host = f"/run/user/{uid}/wayland-0"
+        try:
+            res = subprocess.run(["lxc-info", "-P", LXC_PATH[0], "-n", "waydroid", "-p", "-H"],
+                                 capture_output=True, text=True, timeout=10, check=False)
+            pid = int(res.stdout.strip())
+            if os.stat(host).st_ino == os.stat(f"/proc/{pid}/root{CONTAINER_WAYLAND}").st_ino:
+                return
+            res = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "--rebind",
+                                  str(pid), host, CONTAINER_WAYLAND],
+                                 capture_output=True, text=True, timeout=20, check=False)
+            if res.returncode == 0:
+                log("bound this Ash's window socket into the running container")
+            else:
+                log(f"could not bind the window socket: {res.stderr.strip()[-200:]}")
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            log(f"window socket check skipped: {e}")
 
     def on_exit(self, pid, status):
         log(f"session {pid} ended with status {status}")
@@ -898,6 +924,7 @@ class Android(dbus.service.Object):
             time.sleep(2)
         else:
             return
+        self.skip_setup_wizard()
         want = str(BRIDGE_VERSION)
         res = self.guest("/system/bin/pm", "list", "packages", "--show-versioncode", BRIDGE_PKG)
         if f"versionCode:{want}" not in res.stdout:
@@ -918,6 +945,19 @@ class Android(dbus.service.Object):
         self.guest("/system/bin/cmd", "notification", "allow_listener",
                    f"{BRIDGE_PKG}/{BRIDGE_PKG}.DismissService", timeout=20)
         self.apply_network()
+
+    def skip_setup_wizard(self):
+        """LineageOS starts a setup wizard (account, network, and so on) on a
+        fresh data folder, and while it is up it covers every app. AuraDE needs
+        none of it: mark the device set up and turn the wizard off."""
+        done = self.guest("/system/bin/settings", "get", "secure", "user_setup_complete", timeout=20)
+        if done.stdout.strip() == "1":
+            return
+        self.guest("/system/bin/settings", "put", "global", "device_provisioned", "1", timeout=20)
+        self.guest("/system/bin/settings", "put", "secure", "user_setup_complete", "1", timeout=20)
+        self.guest("/system/bin/pm", "disable-user", "--user", "0", "org.lineageos.setupwizard", timeout=20)
+        self.guest("/system/bin/am", "force-stop", "org.lineageos.setupwizard", timeout=20)
+        log("Android setup wizard turned off")
 
     def outbox_dir(self, uid):
         return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media/0",
@@ -1172,6 +1212,26 @@ class Android(dbus.service.Object):
             comp = f"{pkg}/{activity}"
         self.guest("/system/bin/am", "start", "-n", comp)
 
+    @dbus.service.method(NAME, in_signature="ss", out_signature="", sender_keyword="sender")
+    def ShowAppInfo(self, pkg, page, sender=None):
+        """Opens Android's own screen for an app (its details, which lead on to
+        its permissions) in a window. page is "main" or "permissions"."""
+        uid = self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg) or page not in ("main", "permissions"):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad name")
+        bus = session_bus(uid)
+        if not (self.session and self.session[1].poll() is None) or not bus:
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "Android is not running")
+        subprocess.run(["lxc-unfreeze", "-P", LXC_PATH[0], "-n", "waydroid"],
+                       capture_output=True, timeout=10, check=False)
+        user = pwd.getpwuid(uid).pw_name
+        env = ["XDG_RUNTIME_DIR=" + f"/run/user/{uid}", "WAYLAND_DISPLAY=wayland-0",
+               "DBUS_SESSION_BUS_ADDRESS=" + bus, "HOME=" + pwd.getpwuid(uid).pw_dir,
+               "PATH=/usr/local/bin:/usr/bin"]
+        subprocess.run(["runuser", "-u", user, "--", "env"] + env +
+                       ["waydroid", "app", "intent", "android.settings.APPLICATION_DETAILS_SETTINGS",
+                        "package:" + pkg], capture_output=True, timeout=30, check=False)
+
     def media_dir(self, uid):
         return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media")
 
@@ -1350,6 +1410,7 @@ WAYDROID_PROPS = {
     "persist.waydroid.forward_notifications": "true",
 }
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
+CONTAINER_WAYLAND = "/run/xdg/wayland-0"
 IMAGE_DIR = "/etc/waydroid-extra/images"
 BRIDGE_APK = "/usr/share/aurade-android/aurade-bridge.apk"
 BRIDGE_PKG = "org.aurade.bridge"
@@ -1428,7 +1489,35 @@ def write_host_generated():
     os.chmod(os.path.join(d, "build.prop"), 0o644)
 
 
+def rebind(pid, src, dst):
+    """--rebind PID SRC DST: bind the file SRC over DST in the mount namespace
+    of process PID. open_tree takes a private copy of SRC here, setns moves
+    this (single threaded) process into the container, and move_mount puts the
+    copy at DST, so the container never needs to see the host's paths."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    open_tree, move_mount = 428, 429
+    at_fdcwd, clone, cloexec, empty_path = -100, 0x1, 0x80000, 0x4
+    tree = libc.syscall(open_tree, at_fdcwd, src.encode(), clone | cloexec)
+    if tree < 0:
+        raise OSError(ctypes.get_errno(), "open_tree " + src)
+    root = os.open(f"/proc/{int(pid)}/root", os.O_RDONLY | os.O_DIRECTORY)
+    os.setns(os.open(f"/proc/{int(pid)}/ns/mnt", os.O_RDONLY), os.CLONE_NEWNS)
+    os.fchdir(root)
+    os.chroot(".")
+    libc.umount2(dst.encode(), 2)  # MNT_DETACH: the old socket is gone, its mount is dead weight
+    if libc.syscall(move_mount, tree, b"", at_fdcwd, dst.encode(), empty_path) < 0:
+        raise OSError(ctypes.get_errno(), "move_mount " + dst)
+
+
 def main():
+    if len(sys.argv) == 5 and sys.argv[1] == "--rebind":
+        try:
+            rebind(*sys.argv[2:])
+        except OSError as e:
+            print(e, file=sys.stderr)
+            sys.exit(1)
+        return
     write_host_generated()
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
