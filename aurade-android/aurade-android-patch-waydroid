@@ -95,6 +95,50 @@ FIXES = [
     bus_signals.append(dbus_proxy.connect_to_signal("NotificationClosed", onNotificationClosed))
 ''',
     ),
+    # Messaging notifications get a Reply box on the desktop (an action named
+    # inline-reply); what the user types goes to the bridge app, which fills
+    # in the notification's own reply field in Android.
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        "AuraDE: reply action",
+        '        hints = {\n            "desktop-entry"',
+        '''        # AuraDE: reply action
+        # An action called Reply becomes the desktop's text box. Android's own
+        # button would fire the app's reply with no text in it.
+        replyable = False
+        for i in range(0, len(actions_flat), 2):
+            if str(actions_flat[i + 1]).strip().lower() in ("reply", "respond", "answer"):
+                actions_flat[i] = "inline-reply"
+                replyable = True
+        if category == "msg" and not replyable:
+            actions_flat.extend(["inline-reply", "Reply"])
+        hints = {
+            "desktop-entry"''',
+    ),
+    (
+        "/usr/lib/waydroid/tools/services/notification_manager.py",
+        "AuraDE: replied on the desktop",
+        '    bus_signals.append(dbus_proxy.connect_to_signal("NotificationClosed", onNotificationClosed))\n',
+        '''    bus_signals.append(dbus_proxy.connect_to_signal("NotificationClosed", onNotificationClosed))
+
+    # AuraDE: replied on the desktop
+    def onNotificationReplied(notification_id, text):
+        info = sent.get(int(notification_id))
+        if info is None:
+            return
+        import json, time
+        base = os.path.expanduser("~/.local/share/waydroid/data/media/0/Android/data/org.aurade.bridge/files/cmd")
+        try:
+            os.makedirs(base, exist_ok=True)
+            tmp = os.path.join(base, "%d.tmp" % time.time_ns())
+            with open(tmp, "w") as f:
+                json.dump({"type": "reply", "pkg": info[0], "title": info[1], "text": info[2], "reply": str(text)}, f)
+            os.rename(tmp, tmp[:-4] + ".json")
+        except OSError as e:
+            logging.warning("could not pass a reply to Android: %s", e)
+    bus_signals.append(dbus_proxy.connect_to_signal("NotificationReplied", onNotificationReplied))
+''',
+    ),
     # Waydroid shares the clipboard through the pyclip module, which Arch does
     # not ship. wl-clipboard is already a dependency and does the same job.
     (

@@ -140,7 +140,9 @@ class Android(dbus.service.Object):
         if self.session and self.session[1].poll() is None:
             # Android outlived the Ash that started it; this Ash has a new
             # window socket the container does not know about yet.
-            self.ensure_wayland(uid)
+            if self.ensure_wayland(uid):
+                self.restart_session(uid, locale, ok, fail)
+                return
             ok()
             return
         if self.image_ready():
@@ -222,17 +224,44 @@ class Android(dbus.service.Object):
                                  capture_output=True, text=True, timeout=10, check=False)
             pid = int(res.stdout.strip())
             if os.stat(host).st_ino == os.stat(f"/proc/{pid}/root{CONTAINER_WAYLAND}").st_ino:
-                return
+                return False
             res = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "--rebind",
                                   str(pid), host, CONTAINER_WAYLAND],
                                  capture_output=True, text=True, timeout=20, check=False)
             if res.returncode == 0:
                 log("bound this Ash's window socket into the running container")
                 self.clear_stale_tasks()
-            else:
-                log(f"could not bind the window socket: {res.stderr.strip()[-200:]}")
+                return True
+            log(f"could not bind the window socket: {res.stderr.strip()[-200:]}")
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             log(f"window socket check skipped: {e}")
+        return False
+
+    def restart_session(self, uid, locale, ok, fail):
+        """Starts Android's session again for this Ash. The session holds the
+        address of the previous Ash's notification server, so after an Ash
+        restart it can no longer show a notification or take an action. The
+        container and the apps' processes keep running; only the session,
+        which carries the notifications, clipboard and windows, is new."""
+        log("Android's session belongs to an older Ash, restarting it")
+        self.restarting = True
+        proc = self.session[1]
+        proc.send_signal(signal.SIGTERM)
+
+        def wait():
+            for _ in range(100):
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+            GLib.idle_add(finish)
+
+        def finish():
+            self.restarting = False
+            self.session = None
+            self.stop_watchers()
+            self.do_start(uid, locale, ok, fail)
+            return False
+        threading.Thread(target=wait, daemon=True).start()
 
     def clear_stale_tasks(self):
         """Apps that were open under the previous Ash have no window any more
@@ -248,6 +277,10 @@ class Android(dbus.service.Object):
 
     def on_exit(self, pid, status):
         log(f"session {pid} ended with status {status}")
+        if getattr(self, "restarting", False):
+            return
+        if self.session and self.session[1].pid != pid:
+            return  # the end of an older session this one replaced
         self.session = None
         self.stop_watchers()
         self.Stopped()
@@ -867,6 +900,24 @@ class Android(dbus.service.Object):
             self.guest("/system/bin/pm", verb, pkg, perm, timeout=20)
         self.perm_cache = None
 
+    @dbus.service.method(NAME, in_signature="sb", out_signature="", sender_keyword="sender")
+    def SetNotificationsEnabled(self, pkg, enabled, sender=None):
+        """The per-app switch in Manage your apps: Android's own app-ops
+        switch for posting notifications, which its notification service
+        honours for every app, whatever Android version the app targets."""
+        self.check_caller(sender)
+        if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+            raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "bad request")
+        self.guest("/system/bin/cmd", "appops", "set", pkg, "POST_NOTIFICATION",
+                   "allow" if enabled else "deny", timeout=20)
+        # Apps made for Android 13 and later are held back by the runtime
+        # permission instead; older ones by the switch above.
+        self.guest("/system/bin/pm", "grant" if enabled else "revoke", pkg,
+                   "android.permission.POST_NOTIFICATIONS", timeout=20)
+        if not enabled:
+            self.guest("/system/bin/am", "force-stop", pkg, timeout=20)
+        self.perm_cache = None
+
     NETWORK_STATE = "/var/lib/aurade-android/network-deny.json"
 
     def denied_packages(self):
@@ -1428,7 +1479,7 @@ CONTAINER_WAYLAND = "/run/xdg/wayland-0"
 IMAGE_DIR = "/etc/waydroid-extra/images"
 BRIDGE_APK = "/usr/share/aurade-android/aurade-bridge.apk"
 BRIDGE_PKG = "org.aurade.bridge"
-BRIDGE_VERSION = 3
+BRIDGE_VERSION = 4
 INSTALLED = os.path.join(IMAGE_DIR, "installed.json")
 MANIFEST = os.environ.get("AURADE_ANDROID_MANIFEST", "/etc/aurade-android/images.json")
 # The manifest that ships with the package is the floor. A newer one is fetched

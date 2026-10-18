@@ -1,0 +1,17 @@
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+--- a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+@@ -201,7 +201,12 @@ class Bridge : public ArcAuraDEBridge,
+     });
+   }
+   void SetNotificationsEnabled(const std::string& package_name,
+-                               bool enabled) override {}
++                               bool enabled) override {
++    CallService("SetNotificationsEnabled", [&](dbus::MessageWriter& w) {
++      w.AppendString(package_name);
++      w.AppendBool(enabled);
++    });
++  }
+   void StartPaiFlow(StartPaiFlowCallback callback) override {
+     std::move(callback).Run(mojom::PaiFlowState::UNKNOWN);
+   }

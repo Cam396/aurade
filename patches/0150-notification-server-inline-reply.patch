@@ -1,0 +1,96 @@
+diff --git a/chrome/browser/ash/dbus/desktop_notification_service.cc b/chrome/browser/ash/dbus/desktop_notification_service.cc
+--- a/chrome/browser/ash/dbus/desktop_notification_service.cc
++++ b/chrome/browser/ash/dbus/desktop_notification_service.cc
+@@ -58,6 +58,9 @@ constexpr char kCapabilitiesMethod[] = "GetCapabilities";
+ constexpr char kServerInformationMethod[] = "GetServerInformation";
+ constexpr char kClosedSignal[] = "NotificationClosed";
+ constexpr char kActionSignal[] = "ActionInvoked";
++constexpr char kRepliedSignal[] = "NotificationReplied";
++// The action key the KDE and GNOME notification servers use for a text box.
++constexpr char kInlineReplyAction[] = "inline-reply";
+ constexpr char kInvalidArgumentsError[] =
+     "org.freedesktop.DBus.Error.InvalidArgs";
+ constexpr char kInvalidNotificationError[] =
+@@ -303,7 +306,7 @@ class DesktopNotificationService::NotificationDelegate final
+   void Click(const std::optional<int>& button_index,
+              const std::optional<std::u16string>& reply) override {
+     if (service_) {
+-      service_->OnNotificationClicked(notification_id_, button_index);
++      service_->OnNotificationClicked(notification_id_, button_index, reply);
+     }
+   }
+ 
+@@ -579,7 +582,13 @@ void DesktopNotificationService::HandleNotify(
+   }
+   for (const auto& [action_key, label] : request.actions) {
+     record->button_action_keys.push_back(action_key);
+-    rich_data.buttons.emplace_back(base::UTF8ToUTF16(label));
++    message_center::ButtonInfo button(base::UTF8ToUTF16(label));
++    if (action_key == kInlineReplyAction) {
++      // A text box on the button: what the user types comes back in
++      // NotificationReplied.
++      button.placeholder = base::UTF8ToUTF16(label);
++    }
++    rich_data.buttons.push_back(std::move(button));
+   }
+ 
+   ui::ImageModel icon;
+@@ -740,7 +749,8 @@ void DesktopNotificationService::OnNotificationClosed(uint32_t notification_id,
+ 
+ void DesktopNotificationService::OnNotificationClicked(
+     uint32_t notification_id,
+-    const std::optional<int>& button_index) {
++    const std::optional<int>& button_index,
++    const std::optional<std::u16string>& reply) {
+   auto iterator = notifications_.find(notification_id);
+   if (iterator == notifications_.end()) {
+     return;
+@@ -761,7 +771,11 @@ void DesktopNotificationService::OnNotificationClicked(
+   }
+ 
+   const bool resident = iterator->second->resident;
+-  EmitActionInvoked(notification_id, action_key);
++  if (action_key == kInlineReplyAction && reply) {
++    EmitNotificationReplied(notification_id, base::UTF16ToUTF8(*reply));
++  } else {
++    EmitActionInvoked(notification_id, action_key);
++  }
+   if (!resident) {
+     CloseNotification(notification_id, kClosedByUser);
+   }
+@@ -780,6 +794,19 @@ void DesktopNotificationService::EmitNotificationClosed(
+   exported_object_->SendSignal(&signal);
+ }
+ 
++void DesktopNotificationService::EmitNotificationReplied(
++    uint32_t notification_id,
++    const std::string& text) {
++  if (!exported_object_) {
++    return;
++  }
++  dbus::Signal signal(kInterfaceName, kRepliedSignal);
++  dbus::MessageWriter writer(&signal);
++  writer.AppendUint32(notification_id);
++  writer.AppendString(text);
++  exported_object_->SendSignal(&signal);
++}
++
+ void DesktopNotificationService::EmitActionInvoked(
+     uint32_t notification_id,
+     const std::string& action_key) {
+diff --git a/chrome/browser/ash/dbus/desktop_notification_service.h b/chrome/browser/ash/dbus/desktop_notification_service.h
+--- a/chrome/browser/ash/dbus/desktop_notification_service.h
++++ b/chrome/browser/ash/dbus/desktop_notification_service.h
+@@ -76,8 +76,11 @@ class DesktopNotificationService final
+   void CloseNotification(uint32_t notification_id, uint32_t reason);
+   void OnNotificationClosed(uint32_t notification_id, bool by_user);
+   void OnNotificationClicked(uint32_t notification_id,
+-                             const std::optional<int>& button_index);
++                             const std::optional<int>& button_index,
++                             const std::optional<std::u16string>& reply);
+   void EmitNotificationClosed(uint32_t notification_id, uint32_t reason);
++  void EmitNotificationReplied(uint32_t notification_id,
++                               const std::string& text);
+   void EmitActionInvoked(uint32_t notification_id,
+                          const std::string& action_key);
+   void LoadNamedIcon(uint32_t notification_id,
