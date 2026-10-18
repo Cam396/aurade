@@ -1,0 +1,18 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -696,6 +696,14 @@ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+                 && (display->width != width || display->height != height))
+             xdg_surface_set_window_geometry(window->xdg_surface, 0, 0,
+                                             display->width, display->height);
++        /* The task window the user is resizing is the size it was configured
++         * to, whatever its buffers measure while Android is still laying the
++         * app out. Left to the buffers, the host takes the old size back as
++         * the window's size and configures it to that, so every resize
++         * snaps back (AuraDE). */
++        else if (!window->conn->is_ctl && window->conn->wm_base)
++            xdg_surface_set_window_geometry(window->xdg_surface, 0, 0,
++                                            width, height);
+         /* Only a real size change warrants a hotplug. Every window creation
+          * lands here with the unchanged display size, and hotplugging then is
+          * not just wasted work: hwc1Invalidate takes the adapter mutex, which

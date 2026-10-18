@@ -1,0 +1,496 @@
+diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
+--- a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
++++ b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
+@@ -73,6 +73,7 @@ using arc::mojom::AppCategory;
+ 
+ namespace {
+ 
++constexpr char kAuraDEWindowSizes[] = "aurade.arc_window_sizes";
+ constexpr char kActivity[] = "activity";
+ constexpr char kFrameworkPackageName[] = "android";
+ constexpr char kResizeLockState[] = "resize_lock_state";
+@@ -509,6 +510,7 @@ void ArcAppListPrefs::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterDictionaryPref(arc::prefs::kArcApps);
+   registry->RegisterDictionaryPref(arc::prefs::kArcPackages);
++  registry->RegisterDictionaryPref(kAuraDEWindowSizes);
+   // Defaults to true as there are no in-progress app installations on a
+   // freshly created profile. This prevents ArcActivationNecessityChecker from
+   // unnecessarily activating ARC on post-OOBE user session start on 4GB
+@@ -1519,6 +1521,40 @@ void ArcAppListPrefs::SetResizeLockState(const std::string& app_id,
+     NotifyAppStatesChanged(app_id);
+ }
+ 
++std::optional<gfx::Size> ArcAppListPrefs::GetSavedWindowSize(
++    const std::string& app_id) const {
++  // Kept apart from the app's own entry: a refresh of the app list drops and
++  // re-adds entries, and the size has to outlive that.
++  const base::DictValue* entry =
++      prefs_->GetDict(kAuraDEWindowSizes).FindDict(app_id);
++  if (!entry) {
++    return std::nullopt;
++  }
++  const std::optional<int> width = entry->FindInt("width");
++  const std::optional<int> height = entry->FindInt("height");
++  if (!width || !height || *width <= 0 || *height <= 0) {
++    return std::nullopt;
++  }
++  return gfx::Size(*width, *height);
++}
++
++bool ArcAppListPrefs::GetSavedWindowLocked(const std::string& app_id) const {
++  const base::DictValue* entry =
++      prefs_->GetDict(kAuraDEWindowSizes).FindDict(app_id);
++  return entry && entry->FindBool("locked").value_or(false);
++}
++
++void ArcAppListPrefs::SetSavedWindowSize(const std::string& app_id,
++                                         const gfx::Size& size,
++                                         bool locked) {
++  ScopedDictPrefUpdate update(prefs_, kAuraDEWindowSizes);
++  base::DictValue entry;
++  entry.Set("width", size.width());
++  entry.Set("height", size.height());
++  entry.Set("locked", locked);
++  update->Set(app_id, std::move(entry));
++}
++
+ bool ArcAppListPrefs::GetResizeLockNeedsConfirmation(
+     const std::string& app_id) {
+   std::unique_ptr<AppInfo> app_info = GetApp(app_id);
+@@ -1772,7 +1808,14 @@ void ArcAppListPrefs::AddAppAndShortcut(
+ 
+   // Ensure to query the resize lock state from the prefs as we don't want the
+   // default resize lock value (UNDEFINED) to override the existing value.
+-  const auto resize_lock_state = GetResizeLockState(app_id);
++  // AuraDE: Android here never reports a state, so an app starts with resizing
++  // turned off, which is what shows Phone, Tablet and Resizable in its title
++  // bar.
++  const auto stored_resize_lock_state = GetResizeLockState(app_id);
++  const auto resize_lock_state =
++      stored_resize_lock_state == arc::mojom::ArcResizeLockState::UNDEFINED
++          ? arc::mojom::ArcResizeLockState::OFF
++          : stored_resize_lock_state;
+   const auto resize_lock_needs_confirmation =
+       GetResizeLockNeedsConfirmation(app_id);
+ 
+diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
+--- a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
++++ b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
+@@ -449,6 +449,12 @@ class ArcAppListPrefs : public KeyedService,
+       const std::string& app_id) const override;
+   void SetResizeLockState(const std::string& app_id,
+                           arc::mojom::ArcResizeLockState state) override;
++  std::optional<gfx::Size> GetSavedWindowSize(
++      const std::string& app_id) const override;
++  bool GetSavedWindowLocked(const std::string& app_id) const override;
++  void SetSavedWindowSize(const std::string& app_id,
++                          const gfx::Size& size,
++                          bool locked) override;
+   bool GetResizeLockNeedsConfirmation(const std::string& app_id) override;
+   void SetResizeLockNeedsConfirmation(const std::string& app_id,
+                                       bool is_needed) override;
+diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
+--- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
++++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h"
+ 
++#include <utility>
++
+ #include "ash/game_dashboard/game_dashboard_controller.h"
+ #include "ash/public/cpp/app_types_util.h"
+ #include "ash/public/cpp/arc_resize_lock_type.h"
+@@ -17,6 +19,7 @@
+ #include "base/no_destructor.h"
+ #include "base/notreached.h"
+ #include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
+ #include "chromeos/ash/experiences/arc/arc_browser_context_keyed_service_factory_base.h"
+ #include "chromeos/ash/experiences/arc/arc_features.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_splash_screen_dialog_view.h"
+@@ -26,8 +29,11 @@
+ #include "chromeos/ash/experiences/arc/compat_mode/overlay_dialog.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/touch_mode_mouse_rewriter.h"
+ #include "chromeos/ui/base/window_properties.h"
++#include "ui/aura/client/aura_constants.h"
+ #include "ui/aura/window_observer.h"
+ #include "ui/aura/window_tree_host.h"
++#include "ui/base/mojom/window_show_state.mojom.h"
++#include "ui/views/widget/widget.h"
+ #include "ui/wm/public/activation_client.h"
+ 
+ namespace arc {
+@@ -197,6 +203,11 @@ void ArcResizeLockManager::OnWindowPropertyChanged(aura::Window* window,
+           std::move(callback).Run();
+         }
+       }
++      // AuraDE: windows get their size before their app id, so the title bar
++      // button has to be refreshed once the id is known.
++      if (ash::IsArcWindow(window)) {
++        compat_mode_button_controller_->Update(window);
++      }
+     }
+     return;
+   }
+@@ -252,12 +263,94 @@ void ArcResizeLockManager::OnWindowBoundsChanged(
+     const gfx::Rect& old_bounds,
+     const gfx::Rect& new_bounds,
+     ui::PropertyChangeReason reason) {
++  if (new_bounds.width() == 1536 && old_bounds.width() != 1536 && old_bounds.width() > 0) {
++    }
+   compat_mode_button_controller_->Update(window);
++
++  // Only a size the user chose after the window opened is worth keeping.
++  if (old_bounds.size() == new_bounds.size() ||
++      !size_restored_windows_.contains(window)) {
++    return;
++  }
++  auto& timer = size_save_timers_[window];
++  if (!timer) {
++    timer = std::make_unique<base::OneShotTimer>();
++  }
++  timer->Start(FROM_HERE, base::Seconds(1.5),
++               base::BindOnce(&ArcResizeLockManager::SaveWindowSize,
++                              weak_ptr_factory_.GetWeakPtr(), window));
++}
++
++void ArcResizeLockManager::OnWindowVisibilityChanged(aura::Window* window,
++                                                     bool visible) {
++  if (!visible || size_restored_windows_.contains(window) ||
++      !window_observations_.IsObservingSource(window)) {
++    return;
++  }
++  if (!pref_delegate_) {
++    windows_awaiting_pref_delegate_.insert(window);
++    return;
++  }
++  RunWhenAppIdReady(
++      window, base::BindOnce(&ArcResizeLockManager::RestoreWindowSize,
++                             weak_ptr_factory_.GetWeakPtr(), window));
++}
++
++void ArcResizeLockManager::RestoreWindowSize(aura::Window* window) {
++  if (!pref_delegate_ || !size_restored_windows_.insert(window).second) {
++    return;
++  }
++  const auto app_id = GetAppId(window);
++  if (!app_id) {
++    return;
++  }
++  const std::optional<gfx::Size> saved = pref_delegate_->GetSavedWindowSize(*app_id);
++  views::Widget* const widget = views::Widget::GetWidgetForNativeWindow(window);
++  if (!saved || !widget || widget->GetWindowBoundsInScreen().size() == *saved) {
++    return;
++  }
++  // A saved size means the user had the window in its normal state.
++  window->SetProperty(aura::client::kShowStateKey,
++                      ui::mojom::WindowShowState::kNormal);
++  widget->CenterWindow(*saved);
++  // Phone and Tablet stay chosen too: nothing on the Android side reports the
++  // mode back, so the window is told what the app was left at.
++  if (pref_delegate_->GetSavedWindowLocked(*app_id)) {
++    window->SetProperty(ash::kArcResizeLockTypeKey,
++                        ash::ArcResizeLockType::RESIZE_DISABLED_TOGGLABLE);
++  }
++}
++
++void ArcResizeLockManager::SaveWindowSize(aura::Window* window) {
++  if (!pref_delegate_ || !window->IsVisible()) {
++    return;
++  }
++  const auto app_id = GetAppId(window);
++  if (!app_id) {
++    return;
++  }
++  // A maximized, full screen or snapped window has the screen's size, not one
++  // the user picked for the app.
++  if (window->GetProperty(aura::client::kShowStateKey) !=
++      ui::mojom::WindowShowState::kNormal) {
++    return;
++  }
++  views::Widget* const widget = views::Widget::GetWidgetForNativeWindow(window);
++  if (!widget) {
++    return;
++  }
++  pref_delegate_->SetSavedWindowSize(
++      *app_id, widget->GetWindowBoundsInScreen().size(),
++      window->GetProperty(ash::kArcResizeLockTypeKey) ==
++          ash::ArcResizeLockType::RESIZE_DISABLED_TOGGLABLE);
+ }
+ 
+ void ArcResizeLockManager::OnWindowDestroying(aura::Window* window) {
+   pending_app_id_callbacks_.erase(window);
+   resize_lock_enabled_windows_.erase(window);
++  size_restored_windows_.erase(window);
++  windows_awaiting_pref_delegate_.erase(window);
++  size_save_timers_.erase(window);
+   if (window_observations_.IsObservingSource(window)) {
+     window_observations_.RemoveObservation(window);
+   }
+@@ -268,6 +361,12 @@ void ArcResizeLockManager::SetPrefDelegate(
+   CHECK(!pref_delegate_);
+   pref_delegate_ = delegate;
+   compat_mode_button_controller_->SetPrefDelegate(delegate);
++  for (aura::Window* window :
++       std::exchange(windows_awaiting_pref_delegate_, {})) {
++    RunWhenAppIdReady(
++        window, base::BindOnce(&ArcResizeLockManager::RestoreWindowSize,
++                               weak_ptr_factory_.GetWeakPtr(), window));
++  }
+ }
+ 
+ void ArcResizeLockManager::EnableResizeLock(aura::Window* window) {
+diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
+--- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
++++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
+@@ -6,12 +6,14 @@
+ #define CHROMEOS_ASH_EXPERIENCES_ARC_COMPAT_MODE_ARC_RESIZE_LOCK_MANAGER_H_
+ 
+ #include <map>
++#include <memory>
+ #include <vector>
+ 
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/scoped_multi_source_observation.h"
+ #include "base/scoped_observation.h"
++#include "base/timer/timer.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.h"
+ #include "components/keyed_service/core/keyed_service.h"
+@@ -64,6 +66,7 @@ class ArcResizeLockManager : public KeyedService,
+                              const gfx::Rect& new_bounds,
+                              ui::PropertyChangeReason reason) override;
+   void OnWindowDestroying(aura::Window* window) override;
++  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override;
+ 
+   // Sets `pref_delegate_` to `delegate`, ensuring that it was not already set.
+   // Also, calls `compat_mode_button_controller_->SetPrefDelegate()` with
+@@ -80,6 +83,11 @@ class ArcResizeLockManager : public KeyedService,
+   void UpdateResizeLockState(aura::Window* window);
+   void UpdateShadow(aura::Window* window);
+ 
++  // AuraDE: a window opens at the size the user last gave it and the size is
++  // saved as the user changes it.
++  void RestoreWindowSize(aura::Window* window);
++  void SaveWindowSize(aura::Window* window);
++
+   // Runs `callback` immediately if the `window` has a valid app ID.
+   // Otherwise, queues `callback` to run when the `window` gets a valid app ID.
+   void RunWhenAppIdReady(aura::Window* window, base::OnceClosure callback);
+@@ -101,6 +109,14 @@ class ArcResizeLockManager : public KeyedService,
+   std::map<aura::Window*, std::vector<base::OnceClosure>>
+       pending_app_id_callbacks_;
+ 
++  base::flat_set<raw_ptr<aura::Window, CtnExperimental>> size_restored_windows_;
++  // Windows that were shown before the pref delegate arrived, which happens
++  // when Ash restarts while Android keeps its apps running.
++  base::flat_set<raw_ptr<aura::Window, CtnExperimental>>
++      windows_awaiting_pref_delegate_;
++  std::map<aura::Window*, std::unique_ptr<base::OneShotTimer>>
++      size_save_timers_;
++
+   base::ScopedObservation<aura::Env, aura::EnvObserver> env_observation{this};
+ 
+   base::ScopedMultiSourceObservation<aura::Window, aura::WindowObserver>
+diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
+--- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
++++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
+@@ -5,9 +5,11 @@
+ #ifndef CHROMEOS_ASH_EXPERIENCES_ARC_COMPAT_MODE_ARC_RESIZE_LOCK_PREF_DELEGATE_H_
+ #define CHROMEOS_ASH_EXPERIENCES_ARC_COMPAT_MODE_ARC_RESIZE_LOCK_PREF_DELEGATE_H_
+ 
++#include <optional>
+ #include <string>
+ 
+ #include "chromeos/ash/experiences/arc/mojom/compatibility_mode.mojom.h"
++#include "ui/gfx/geometry/size.h"
+ 
+ namespace arc {
+ 
+@@ -24,6 +26,16 @@ class ArcResizeLockPrefDelegate {
+                                               bool is_needed) = 0;
+   virtual int GetShowSplashScreenDialogCount() const = 0;
+   virtual void SetShowSplashScreenDialogCount(int count) = 0;
++
++  // AuraDE: the size the user last gave this app's window, so the next launch
++  // opens at it. Not set until the user has resized a window once.
++  virtual std::optional<gfx::Size> GetSavedWindowSize(
++      const std::string& app_id) const = 0;
++  // Whether the app was left on Phone or Tablet, not Resizable.
++  virtual bool GetSavedWindowLocked(const std::string& app_id) const = 0;
++  virtual void SetSavedWindowSize(const std::string& app_id,
++                                  const gfx::Size& size,
++                                  bool locked) = 0;
+ };
+ 
+ }  // namespace arc
+diff --git a/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc b/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
+--- a/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
++++ b/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
+@@ -12,18 +12,64 @@
+ #include "ash/public/cpp/window_properties.h"
+ #include "ash/resources/vector_icons/vector_icons.h"
+ #include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_window_property_util.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/compat_mode_button.h"
+ #include "chromeos/constants/chromeos_features.h"
++#include "chromeos/ui/frame/caption_buttons/caption_button_model.h"
+ #include "chromeos/ui/frame/default_frame_header.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/views/accessibility/view_accessibility.h"
++#include "ui/display/screen.h"
+ #include "ui/views/vector_icons.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_delegate.h"
+ 
+ namespace arc {
+ 
++namespace {
++
++// AuraDE: Android windows come in as plain desktop windows, whose default
++// caption buttons leave out the centre button. This keeps the default rules
++// and adds the centre button, which is where Phone, Tablet and Resizable live.
++class CenterButtonCaptionModel : public chromeos::CaptionButtonModel {
++ public:
++  explicit CenterButtonCaptionModel(views::Widget* widget) : widget_(widget) {}
++  CenterButtonCaptionModel(const CenterButtonCaptionModel&) = delete;
++  CenterButtonCaptionModel& operator=(const CenterButtonCaptionModel&) = delete;
++  ~CenterButtonCaptionModel() override = default;
++
++  // chromeos::CaptionButtonModel:
++  bool IsVisible(views::CaptionButtonIcon type) const override {
++    const bool tablet = display::Screen::Get()->InTabletMode();
++    switch (type) {
++      case views::CAPTION_BUTTON_ICON_MINIMIZE:
++        return widget_->widget_delegate()->CanMinimize() && !tablet;
++      case views::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE:
++        return widget_->widget_delegate()->CanMaximize() && !tablet;
++      case views::CAPTION_BUTTON_ICON_LEFT_TOP_SNAPPED:
++      case views::CAPTION_BUTTON_ICON_RIGHT_BOTTOM_SNAPPED:
++        return widget_->widget_delegate()->CanResize();
++      case views::CAPTION_BUTTON_ICON_CLOSE:
++        return widget_->widget_delegate()->ShouldShowCloseButton();
++      case views::CAPTION_BUTTON_ICON_CENTER:
++      case views::CAPTION_BUTTON_ICON_CUSTOM:
++        return true;
++      default:
++        return false;
++    }
++  }
++  bool IsEnabled(views::CaptionButtonIcon type) const override { return true; }
++  bool InZoomMode() const override { return false; }
++
++ private:
++  raw_ptr<views::Widget> widget_;
++};
++
++}  // namespace
++
+ CompatModeButtonController::ButtonState::ButtonState() = default;
+ 
+ CompatModeButtonController::ButtonState::ButtonState(bool enable) {
+@@ -85,6 +131,10 @@ void CompatModeButtonController::Update(aura::Window* window) {
+     // the center button is set to FrameHeader, we need to call this explicitly.
+     // |frame_view| can be null in unittest.
+     if (frame_view) {
++      if (auto* widget = views::Widget::GetWidgetForNativeView(window)) {
++        frame_view->SetCaptionButtonModel(
++            std::make_unique<CenterButtonCaptionModel>(widget));
++      }
+       frame_view->GetHeaderView()->UpdateCaptionButtons();
+     }
+   }
+diff --git a/chromeos/ash/experiences/arc/compat_mode/resize_util.cc b/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
+--- a/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
++++ b/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
+@@ -122,6 +122,12 @@ void ResizeToTablet(views::Widget* widget) {
+ 
+ void TurnOnResizeLock(views::Widget* widget,
+                       ArcResizeLockPrefDelegate* pref_delegate) {
++  // AuraDE: there is no Android client to report the type back, so the window
++  // learns it here.
++  widget->GetNativeWindow()->SetProperty(
++      ash::kArcResizeLockTypeKey,
++      ash::ArcResizeLockType::RESIZE_DISABLED_TOGGLABLE);
++
+   const auto app_id = GetAppId(widget);
+   if (app_id && pref_delegate->GetResizeLockState(*app_id) !=
+                     mojom::ArcResizeLockState::ON) {
+@@ -133,6 +139,10 @@ void TurnOnResizeLock(views::Widget* widget,
+ 
+ void TurnOffResizeLock(views::Widget* target_widget,
+                        ArcResizeLockPrefDelegate* pref_delegate) {
++  target_widget->GetNativeWindow()->SetProperty(
++      ash::kArcResizeLockTypeKey,
++      ash::ArcResizeLockType::RESIZE_ENABLED_TOGGLABLE);
++
+   const auto app_id = GetAppId(target_widget);
+   if (!app_id || pref_delegate->GetResizeLockState(*app_id) ==
+                      mojom::ArcResizeLockState::OFF) {
+diff --git a/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc b/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
+--- a/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
++++ b/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
+@@ -8,6 +8,7 @@
+ 
+ #include "ash/public/cpp/window_properties.h"
+ #include "base/containers/flat_map.h"
++#include "base/containers/flat_set.h"
+ #include "chromeos/ash/experiences/arc/compat_mode/arc_window_property_util.h"
+ #include "chromeos/ui/base/app_types.h"
+ #include "chromeos/ui/base/window_properties.h"
+@@ -61,9 +62,33 @@ class TestArcResizeLockPrefDelegate : public ArcResizeLockPrefDelegate {
+     show_count_ = count;
+   }
+ 
++  std::optional<gfx::Size> GetSavedWindowSize(
++      const std::string& app_id) const override {
++    const auto it = saved_sizes_.find(app_id);
++    if (it == saved_sizes_.end()) {
++      return std::nullopt;
++    }
++    return it->second;
++  }
++  bool GetSavedWindowLocked(const std::string& app_id) const override {
++    return saved_locked_.contains(app_id);
++  }
++  void SetSavedWindowSize(const std::string& app_id,
++                          const gfx::Size& size,
++                          bool locked) override {
++    saved_sizes_[app_id] = size;
++    if (locked) {
++      saved_locked_.insert(app_id);
++    } else {
++      saved_locked_.erase(app_id);
++    }
++  }
++
+  private:
+   std::vector<std::string> confirmation_needed_app_ids_;
+   base::flat_map<std::string, mojom::ArcResizeLockState> resize_lock_states;
++  base::flat_map<std::string, gfx::Size> saved_sizes_;
++  base::flat_set<std::string> saved_locked_;
+   int show_count_{0};
+ };
+ 
+diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+--- a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
++++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+@@ -395,6 +395,12 @@ class Bridge : public ArcAuraDEBridge,
+       // A system app cannot be uninstalled, as on ChromeOS.
+       app->sticky = row.is_system;
+       app->notifications_enabled = true;
++      // Not a game: the zero default would put the Game dashboard on every
++      // window.
++      app->app_category = mojom::AppCategory::kUndefined;
++      // Differs from what an older profile stored, so the app is refreshed
++      // and takes the resize lock default in ArcAppListPrefs.
++      app->resize_lock_state = mojom::ArcResizeLockState::OFF;
+       apps.push_back(std::move(app));
+ 
+       auto pkg = mojom::ArcPackageInfo::New();
