@@ -29,6 +29,7 @@ import hashlib
 import json
 import uuid
 import mimetypes
+import glob
 import os
 import pwd
 import re
@@ -1444,9 +1445,61 @@ class Android(dbus.service.Object):
                 self.TaskDestroyed(int(m.group(1)))
         return True
 
+    def host_gamepads(self):
+        """Event nodes of gamepads and joysticks on the host: name -> major:minor."""
+        pads = {}
+        for dev in glob.glob("/sys/class/input/event*"):
+            try:
+                words = open(f"{dev}/device/capabilities/key").read().split()
+                bits = int("".join(w.zfill(16) for w in words) or "0", 16)
+                # BTN_GAMEPAD (BTN_SOUTH) is key 0x130: a keyboard never has it.
+                if not bits >> 0x130 & 1:
+                    continue
+                pads[os.path.basename(dev)] = open(f"{dev}/dev").read().strip()
+            except (OSError, ValueError):
+                continue
+        return pads
+
+    def sync_gamepads(self):
+        """Gamepads plugged into the host show up in Android. The container
+        has no view of the host's input devices, so each pad's node is made
+        inside it as the pad appears and removed as it goes."""
+        try:
+            res = subprocess.run(["lxc-info", "-P", LXC_PATH[0], "-n", "waydroid", "-p", "-H"],
+                                 capture_output=True, text=True, timeout=10, check=False)
+            pid = int(res.stdout.strip())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return
+        want = self.host_gamepads()
+        # A container that restarted has a fresh /dev with none of the nodes.
+        if getattr(self, "pads_pid", None) != pid:
+            self.pads_in_container = {}
+            self.pads_pid = pid
+        have = self.pads_in_container
+        toybox = ["nsenter", "-t", str(pid), "-m", "--", "/system/bin/toybox"]
+        try:
+            for name, majmin in want.items():
+                if have.get(name) == majmin:
+                    continue
+                major, minor = majmin.split(":")
+                # World readable: Android's input reader is not in the pad's group.
+                subprocess.run(toybox + ["rm", "-f", f"/dev/input/{name}"], timeout=10, check=False)
+                subprocess.run(toybox + ["mknod", "-m", "666", f"/dev/input/{name}", "c", major, minor],
+                               timeout=10, check=True, capture_output=True)
+                have[name] = majmin
+                log(f"gamepad {name} is now in Android")
+            for name in [n for n in have if n not in want]:
+                subprocess.run(toybox + ["rm", "-f", f"/dev/input/{name}"], timeout=10, check=False)
+                del have[name]
+                log(f"gamepad {name} left Android")
+        except (OSError, subprocess.SubprocessError) as e:
+            log(f"gamepad sync failed: {e}")
+        self.pads_in_container = have
+
     def poll_apps(self):
         if not (self.session and self.session[1].poll() is None):
             return True
+        self.sync_gamepads()
         if self.logcat is None or self.logcat.poll() is not None or not getattr(self, "log_src", None):
             self.start_logcat()
         # One cheap guest command decides whether the real list is worth asking
