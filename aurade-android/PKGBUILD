@@ -12,6 +12,7 @@ source=(
   'aurade-android'
   'aurade-android.service'
   'aurade-android.sysusers'
+  'aurade-android.tmpfiles'
   'aurade-android-loop'
   'aurade-android-loop.conf'
   'aurade-android-patch-waydroid'
@@ -26,9 +27,10 @@ source=(
   'release.gpg'
   'LICENSE'
 )
-sha256sums=('4ab251dc6c8109d746da53867a25284c266c4f45bfcf4902391dd4164f441983'
+sha256sums=('f7d271f6245addb4429de3ee1846dcaff47bf608229553375721ae918a7dad67'
             'c95208c4b964cd9014c855b7903a3de6262adb62c9ff7e5355423b8deb80ed6b'
             '2af628842d42d0eb3b7ef30e3634caca35bb1c3bffa0403b17725c02a87dc068'
+            '1f959e731401f5f5ccded6340231be3216f687c9665cf0b8cc804f33f0989b51'
             '7bb4230e664e3a264c9eff003dc78632764037276dc667b57f3649fc9bcb7f38'
             '2684c0bb17871b458c839c66bc40f5a8c6c35c2560d46a7d1d80825c1cbe3822'
             '2cc0fafdbdba36d494d7e3fa459bc4d812b340ea4efd4afdc90661cecf7f7699'
@@ -57,6 +59,7 @@ package() {
   install -Dm644 aurade-android-loop.conf \
     "${pkgdir}/usr/lib/systemd/system/waydroid-container.service.d/aurade-android-loop.conf"
   install -Dm644 aurade-android.sysusers "${pkgdir}/usr/lib/sysusers.d/aurade-android.conf"
+  install -Dm644 aurade-android.tmpfiles "${pkgdir}/usr/lib/tmpfiles.d/aurade-android.conf"
   install -Dm644 aurade-android-waydroid.hook \
     "${pkgdir}/usr/share/libalpm/hooks/aurade-android-waydroid.hook"
   install -Dm644 images.json "${pkgdir}/etc/aurade-android/images.json"

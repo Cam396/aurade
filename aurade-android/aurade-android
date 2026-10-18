@@ -1332,7 +1332,10 @@ class Android(dbus.service.Object):
             log(f"app poll failed: {e}")
             return True
         key = hash(res.stdout)
-        if self.apps_seen is not None and key != self.apps_seen:
+        # The first answer counts as a change too: on a cold boot Ash asks for
+        # the app list while Android is still starting, gets nothing, and
+        # would otherwise never hear that the apps showed up.
+        if key != self.apps_seen:
             self.AppsChanged()
         self.apps_seen = key
         return True
