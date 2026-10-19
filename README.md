@@ -1,7 +1,7 @@
 # AuraDE
 
 <p align="center">
-  <img src="assets/aurade-banner-1.2.0.png" alt="AuraDE 1.2.0" width="820">
+  <img src="assets/aurade-banner-1.3.0.png" alt="AuraDE 1.3.0" width="820">
 </p>
 
 AuraDE is a ChromeOS-inspired desktop for ordinary Arch Linux hardware. It
@@ -10,7 +10,7 @@ NetworkManager, PipeWire, and systemd that already work on the machine.
 Underneath it is plain Arch: pacman, the Arch kernel, and your own local
 account, with no Google account needed.
 
-AuraDE 1.2.0 is the current release. The ISO, the signed package
+AuraDE 1.3.0 is the current release. The ISO, the signed package
 repository, and the release key are on the
 [releases page](https://github.com/Cam396/aurade/releases/latest). AuraDE is
 not an official Google or ChromeOS distribution. Back up anything you cannot
@@ -52,7 +52,7 @@ other hypervisors, and what to expect from graphics in a VM.
 | Software | The browser, web apps, and pacman and the AUR underneath | The browser, web apps, a Linux container |
 | Hardware | What the Arch kernel supports | Google's certified models list |
 | Updates | pacman, when you choose | Automatic, from Google |
-| Android apps | No Play Store; Waydroid can run them as a Linux app | No |
+| Android apps | Yes, in desktop windows, with no Play Store or Google account | No |
 
 Flex is the polished, supported choice if you want ChromeOS on a PC. AuraDE is
 for people who want that interface on a Linux system they own.

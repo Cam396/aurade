@@ -5,6 +5,31 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 ## Unreleased
 
 ### Added
+- Android apps, in the optional aurade-android package. Android 17 (LineageOS
+  24) runs in a container and its apps open as ordinary desktop windows, in
+  the launcher and the shelf, with no Google account and no Play Store.
+  F-Droid comes with it. Settings > Apps > Android turns it on and off; off
+  frees everything but the idle service.
+  - Every app opens in its own window with the desktop caption and its own
+    live size. The title bar has Phone, Tablet and Resizable, and each app
+    remembers its size and mode.
+  - An .apk finished in the browser offers Install with Android, and opening
+    one in Files installs it. Apps built only for ARM are refused, with the
+    reason.
+  - Notifications reach the message center with their buttons and a Reply
+    box, with an on/off switch per app. Dismissing on either side clears both.
+  - Files: an Android files place in Files, Open with into Android apps, and
+    drag and drop of files and text between the desktop and Android windows.
+    The clipboard and links follow you both ways.
+  - The microphone, gamepads and the computer's webcam work in Android apps.
+    The webcam needs v4l2loopback; on a virtual GPU the preview uses RGBA
+    buffers.
+  - Per-app permission and network switches, App info, a diagnostics report,
+    and Remove, which also removes Android's data.
+  - The Android images are separate from the package. Each set is listed in
+    a manifest signed with the release key, which the service checks before
+    it installs anything. The previous set is kept for one-click go back.
+- Files rows can be dragged to other windows.
 - The browser's built-in AI runs on Gemma 4 E2B on the computer itself, in
   place of Gemini Nano: the Prompt, Summarizer, Writer, Rewriter and
   Proofreader web APIs, with no server and no account. It comes with the
