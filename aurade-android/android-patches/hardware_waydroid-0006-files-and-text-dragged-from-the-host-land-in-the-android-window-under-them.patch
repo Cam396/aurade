@@ -1,0 +1,194 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -1369,6 +1369,29 @@
+     return true;
+ }
+ 
++/* The app whose window a host surface belongs to, or empty when that cannot
++ * be told from this thread. */
++std::string hwc_app_for_surface(struct wl_conn *conn, struct wl_surface *surface)
++{
++    struct display *display = conn->dpy;
++    if (!surface || !pthread_equal(pthread_self(), conn->wayland_thread) ||
++            display->windowsMutex.held_by_caller())
++        return "";
++    std::scoped_lock lock(display->windowsMutex);
++    struct window *window = window_for_surface(conn, surface);
++    return window ? window->appID : "";
++}
++
++/* Types Ctrl+V into Android, for the clipboard code to paste a dropped text
++ * with (AuraDE). The paste key on its own is ignored by text fields. */
++bool hwc_inject_paste(struct display *display)
++{
++    bool sent = send_key_event(display, KEY_LEFTCTRL, WL_KEYBOARD_KEY_STATE_PRESSED);
++    sent = send_key_event(display, KEY_V, WL_KEYBOARD_KEY_STATE_PRESSED) && sent;
++    sent = send_key_event(display, KEY_V, WL_KEYBOARD_KEY_STATE_RELEASED) && sent;
++    return send_key_event(display, KEY_LEFTCTRL, WL_KEYBOARD_KEY_STATE_RELEASED) && sent;
++}
++
+ /* How long a freshly-mapped window keeps the Android display awake while it
+  * waits to be shown. Cold starts draw in well under a second once the display
+  * is awake; the bound only guards against a window that never appears. */
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -421,6 +421,12 @@
+  * WaydroidClipboard.cpp. */
+ void clipboard_watch_conn(struct wl_conn *conn);
+ 
++/* Types Ctrl+V into Android. */
++bool hwc_inject_paste(struct display *display);
++
++/* The app a host surface of this connection belongs to, or empty. */
++std::string hwc_app_for_surface(struct wl_conn *conn, struct wl_surface *surface);
++
+ /* Ask the conn worker to open a task's connection. Cheap and idempotent; the
+  * connection appears in display->task_conns once it is up. */
+ void request_task_conn(struct display *display, uint32_t taskId);
+diff --git a/hwcomposer/WaydroidClipboard.cpp b/hwcomposer/WaydroidClipboard.cpp
+--- a/hwcomposer/WaydroidClipboard.cpp
++++ b/hwcomposer/WaydroidClipboard.cpp
+@@ -23,8 +23,10 @@
+ #include <log/log.h>
+ #include <unistd.h>
+ #include <algorithm>
++#include <list>
+ #include <vector>
+ 
++#include <linux/input-event-codes.h>
+ #include <wayland-client.h>
+ 
+ static const std::vector<std::string> MIME_TYPES = {
+@@ -150,10 +152,127 @@
+     wl_data_offer_add_listener(offer, &data_offer_listener, conn);
+ }
+ 
+-static void data_device_handle_enter(void *, struct wl_data_device *, uint32_t, struct wl_surface *, wl_fixed_t, wl_fixed_t, struct wl_data_offer *) {}
+-static void data_device_handle_leave(void *, struct wl_data_device *) {}
++/* Something dragged from the host over an Android window (AuraDE). Text is
++ * pasted into the field that has focus, by putting it on the clipboard and
++ * typing the paste key. A list of files is announced in the log for the host
++ * service, which can reach the files; the container cannot. */
++static struct wl_data_offer *dnd_offer = nullptr;
++static std::string dnd_mime;
++static std::string dnd_app;
++
++static void dnd_forget() {
++    if (dnd_offer)
++        wl_data_offer_destroy(dnd_offer);
++    dnd_offer = nullptr;
++    dnd_mime.clear();
++    dnd_app.clear();
++}
++
++static void data_device_handle_enter(void *data, struct wl_data_device *, uint32_t serial, struct wl_surface *surface, wl_fixed_t, wl_fixed_t, struct wl_data_offer *offer) {
++    struct wl_conn *conn = (struct wl_conn *)data;
++    struct display *display = conn->dpy;
++    dnd_forget();
++    std::list<std::string> offered;
++    offered.swap(display->clipboard_offer_mime_types);
++    if (!offer)
++        return;
++    dnd_offer = offer;
++    dnd_app = hwc_app_for_surface(conn, surface);
++    std::string all;
++    for (auto &m : offered)
++        all += m + " ";
++    ALOGI("dnd: enter offering %s", all.c_str());
++    std::vector<std::string> wanted = {"application/x-arc-uri-list", "text/uri-list"};
++    wanted.insert(wanted.end(), MIME_TYPES.begin(), MIME_TYPES.end());
++    for (auto &w : wanted) {
++        if (std::find(offered.begin(), offered.end(), w) != offered.end()) {
++            dnd_mime = w;
++            break;
++        }
++    }
++    wl_data_offer_accept(offer, serial, dnd_mime.empty() ? nullptr : dnd_mime.c_str());
++    if (!dnd_mime.empty() && wl_data_offer_get_version(offer) >= 3)
++        wl_data_offer_set_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
++}
++
++static void data_device_handle_leave(void *, struct wl_data_device *) {
++    ALOGI("dnd: leave");
++    dnd_forget();
++}
++
+ static void data_device_handle_motion(void *, struct wl_data_device *, uint32_t, wl_fixed_t, wl_fixed_t) {}
+-static void data_device_handle_drop(void *, struct wl_data_device *) {}
++
++static void data_device_handle_drop(void *data, struct wl_data_device *) {
++    struct wl_conn *conn = (struct wl_conn *)data;
++    struct display *display = conn->dpy;
++    /* The host's leave arrives while the data is being read, so the offer is
++     * taken out of the shared state first. */
++    struct wl_data_offer *offer = dnd_offer;
++    std::string mime = dnd_mime;
++    std::string app = dnd_app;
++    dnd_offer = nullptr;
++    dnd_mime.clear();
++    dnd_app.clear();
++    ALOGI("dnd: drop offer=%p mime=%s", (void *)offer, mime.c_str());
++    if (!offer)
++        return;
++    if (mime.empty()) {
++        wl_data_offer_destroy(offer);
++        return;
++    }
++    int fds[2];
++    if (pipe(fds) != 0) {
++        wl_data_offer_destroy(offer);
++        return;
++    }
++    wl_data_offer_receive(offer, mime.c_str(), fds[1]);
++    close(fds[1]);
++    wl_display_roundtrip(conn->display);
++    std::string contents;
++    while (true) {
++        char buf[1024];
++        ssize_t n = read(fds[0], buf, sizeof(buf));
++        if (n <= 0)
++            break;
++        contents.append(buf, n);
++    }
++    close(fds[0]);
++    if (wl_data_offer_get_version(offer) >= 3)
++        wl_data_offer_finish(offer);
++    wl_data_offer_destroy(offer);
++    if (contents.empty())
++        return;
++    bool arc_list = mime == "application/x-arc-uri-list";
++    if (arc_list) {
++        /* The host sends that kind of list as UTF-16. */
++        std::string narrow;
++        for (size_t i = 0; i + 1 < contents.size(); i += 2) {
++            unsigned c = (unsigned char)contents[i] | ((unsigned char)contents[i + 1] << 8);
++            if (c < 0x80) {
++                narrow += (char)c;
++            } else if (c < 0x800) {
++                narrow += (char)(0xC0 | (c >> 6));
++                narrow += (char)(0x80 | (c & 0x3F));
++            } else {
++                narrow += (char)(0xE0 | (c >> 12));
++                narrow += (char)(0x80 | ((c >> 6) & 0x3F));
++                narrow += (char)(0x80 | (c & 0x3F));
++            }
++        }
++        contents = narrow;
++    }
++    if (arc_list || mime == "text/uri-list") {
++        /* One line a service on the host reads out of the log. */
++        std::string line;
++        for (char c : contents)
++            line += (c == '\r' || c == '\n') ? ' ' : c;
++        __android_log_print(ANDROID_LOG_INFO, "AuraDEDnd", "files app=%s %s", app.c_str(), line.c_str());
++    } else {
++        display->clipboard = contents;
++        ALOGI("dnd: pasting %zu bytes of text", contents.size());
++        hwc_inject_paste(display);
++    }
++}
+ 
+ static const struct wl_data_device_listener data_device_listener = {
+     .data_offer = data_device_handle_data_offer,

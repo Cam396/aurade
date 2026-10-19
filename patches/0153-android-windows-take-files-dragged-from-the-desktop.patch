@@ -1,0 +1,82 @@
+diff --git a/chrome/browser/ash/exo/chrome_security_delegate.cc b/chrome/browser/ash/exo/chrome_security_delegate.cc
+--- a/chrome/browser/ash/exo/chrome_security_delegate.cc
++++ b/chrome/browser/ash/exo/chrome_security_delegate.cc
+@@ -50,20 +50,6 @@ constexpr char kUriListSeparator[] = "\r\n";
+ constexpr char kVmFileScheme[] = "vmfile";
+ constexpr char kDefaultVmMount[] = "/mnt/shared";
+ 
+-void SendArcUrls(exo::SecurityDelegate::SendDataCallback callback,
+-                 const std::vector<GURL>& urls) {
+-  std::vector<std::string> lines;
+-  for (const GURL& url : urls) {
+-    if (!url.is_valid()) {
+-      continue;
+-    }
+-    lines.push_back(url.spec());
+-  }
+-  // Arc requires UTF16 for data.
+-  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString16>(
+-      base::UTF8ToUTF16(base::JoinString(lines, kUriListSeparator))));
+-}
+-
+ void SendAfterShare(ui::EndpointType target,
+                     exo::SecurityDelegate::SendDataCallback callback,
+                     std::vector<std::string> file_urls) {
+@@ -114,10 +100,19 @@ base::FilePath GetVmMount(const std::string& vm_name) {
+ // Translate |vm_paths| from |source| VM to host paths.
+ std::vector<FileInfo> TranslateVMToHost(const std::string& vm_name,
+                                         std::vector<ui::FileInfo> vm_paths) {
+-  // Do not expose any paths to unknown VMs or to ArcVm.
++  // An application of the desktop is not a VM: it already works on the user's
++  // files, so what it drags out keeps its paths (AuraDE).
++  if (vm_name.empty()) {
++    std::vector<FileInfo> file_infos;
++    for (ui::FileInfo& info : vm_paths) {
++      file_infos.push_back({std::move(info.path), storage::FileSystemURL()});
++    }
++    return file_infos;
++  }
++  // Do not expose any paths to ArcVm.
+   // Arc doesn't currently support drag-drop or clipboard via exo.
+   // If Arc ever adds support, we must map paths correctly like other VMs.
+-  if (vm_name.empty() ||
++  if (
+       (vm_name == arc::kArcVmName &&
+        base::FeatureList::IsEnabled(kChromeSecurityDelegateIgnoreArcVm))) {
+     return {};
+@@ -192,13 +187,10 @@ void ShareAndTranslateHostToVM(
+     std::string file_url;
+     bool share_required = false;
+     if (vm_name == arc::kArcVmName) {
+-      GURL arc_url;
+-      if (!file_manager::util::ConvertPathToArcUrl(info.path, &arc_url,
+-                                                   &share_required)) {
+-        LOG(WARNING) << "Could not convert arc path " << info.path;
+-        continue;
+-      }
+-      file_url = arc_url.spec();
++      // Android runs in a container with no ARC file system to translate
++      // paths into; the service that owns it reads the file on the desktop
++      // itself (AuraDE).
++      file_url = ui::FilePathToFileURL(info.path);
+     } else if (!vm_name.empty()) {
+       base::FilePath path;
+       // Check if it is a path inside the VM: 'vmfile:<vm_name>:'.
+@@ -359,15 +351,8 @@ void ChromeSecurityDelegate::SendPickle(ui::EndpointType target,
+                                         SendDataCallback callback) {
+   std::vector<storage::FileSystemURL> file_system_urls =
+       GetFileSystemUrlsFromPickle(pickle);
+-  // ARC FileSystemURLs are converted to Content URLs.
+-  if (target == ui::EndpointType::kArc) {
+-    if (file_system_urls.empty()) {
+-      std::move(callback).Run(nullptr);
+-      return;
+-    }
+-    arc::ConvertToContentUrlsAndShare(
+-        ProfileManager::GetPrimaryUserProfile(), file_system_urls,
+-        base::BindOnce(&SendArcUrls, std::move(callback)));
++  if (target == ui::EndpointType::kArc && file_system_urls.empty()) {
++    std::move(callback).Run(nullptr);
+     return;
+   }
+ 

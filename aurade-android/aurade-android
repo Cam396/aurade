@@ -41,6 +41,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 import dbus
@@ -51,6 +52,7 @@ from gi.repository import GLib
 NAME = "org.aurade.Android1"
 PATH = "/org/aurade/Android1"
 CONTAINER_UNIT = "waydroid-container.service"
+DROP_MAX_BYTES = 512 << 20
 LXC = ["lxc-attach", "-P", "/var/lib/waydroid/lxc", "-n", "waydroid", "--clear-env", "--"]
 LXC_PATH = ["/var/lib/waydroid/lxc"]
 
@@ -791,6 +793,17 @@ class Android(dbus.service.Object):
         if not match:
             raise dbus.exceptions.DBusException("org.aurade.Android1.Failed", "that app cannot open this file")
         activity = match[0][2]
+        token, name = self.stage_inbox(uid, path)
+        self.Launch(pkg, "", sender=sender)
+        time.sleep(1.5)
+        self.guest("/system/bin/am", "start", "-a", "android.intent.action.VIEW", "-d",
+                   f"content://org.aurade.bridge.inbox/{token}/{name}", "-t", mime,
+                   "-n", f"{pkg}/{activity}", "--grant-read-uri-permission", timeout=30)
+
+    def stage_inbox(self, uid, path):
+        """Copies a desktop file into the bridge app's inbox, where Android can
+        read it through a content address for half an hour. Returns the folder
+        token and the file name in it."""
         token = uuid.uuid4().hex
         name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(path)) or "file"
         inbox = os.path.join(self.outbox_dir(uid), "..", "inbox")
@@ -807,12 +820,51 @@ class Android(dbus.service.Object):
         os.chmod(dest, 0o666)
         st = os.stat(ref)
         os.chown(dest, st.st_uid, st.st_gid)
-        self.Launch(pkg, "", sender=sender)
-        time.sleep(1.5)
-        self.guest("/system/bin/am", "start", "-a", "android.intent.action.VIEW", "-d",
-                   f"content://org.aurade.bridge.inbox/{token}/{name}", "-t", mime,
-                   "-n", f"{pkg}/{activity}", "--grant-read-uri-permission", timeout=30)
         GLib.timeout_add_seconds(1800, lambda: (shutil.rmtree(box, ignore_errors=True), False)[1])
+        return token, name
+
+    def hwc_pid(self):
+        """Process id of the window layer in the container, which alone can be
+        believed about what the user dropped on a window: any app can write a
+        line to the log, but not under another process's id."""
+        res = self.guest("/system/bin/ps", "-A", "-o", "PID,NAME", timeout=10)
+        for line in res.stdout.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2 and "graphics.composer" in parts[1] and parts[0].isdigit():
+                return int(parts[0])
+        return None
+
+    def dropped_files(self, app, uris):
+        """Files dragged from the desktop onto a window of an Android app are
+        handed to that app, as if shared to it."""
+        if not (self.session and self.session[1].poll() is None) or not app:
+            return
+        uid = self.session[0]
+        pw = pwd.getpwuid(uid)
+        for uri in uris:
+            parts = urllib.parse.urlsplit(uri)
+            path = urllib.parse.unquote(parts.path)
+            if parts.scheme != "file" or parts.netloc not in ("", "localhost") or not os.path.isabs(path):
+                log(f"drop: not a local file: {uri[:80]}")
+                continue
+            # The user's own permissions decide what can be handed over.
+            if subprocess.run(["runuser", "-u", pw.pw_name, "--", "test", "-f", path, "-a", "-r", path],
+                              check=False).returncode != 0:
+                log(f"drop: cannot read {path}")
+                continue
+            if os.path.getsize(path) > DROP_MAX_BYTES:
+                log(f"drop: {path} is too big")
+                continue
+            mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            token, name = self.stage_inbox(uid, path)
+            content = f"content://org.aurade.bridge.inbox/{token}/{name}"
+            res = self.guest("/system/bin/am", "start", "-a", "android.intent.action.SEND", "-t", mime,
+                             "--eu", "android.intent.extra.STREAM", content, "-p", app,
+                             "--grant-read-uri-permission", timeout=30)
+            if "Error" in res.stdout + res.stderr:
+                res = self.guest("/system/bin/am", "start", "-a", "android.intent.action.VIEW", "-d", content,
+                                 "-t", mime, "-p", app, "--grant-read-uri-permission", timeout=30)
+            log(f"drop: {name} to {app}: {(res.stdout + res.stderr).strip()[-80:]}")
 
     # ---- permissions and the network switch --------------------------------
 
@@ -1402,7 +1454,7 @@ class Android(dbus.service.Object):
         self.drop_logcat()
         try:
             self.logcat = subprocess.Popen(
-                LXC + ["/system/bin/logcat", "-v", "brief", "-T", "1", "WayDroidService:I", "*:S"],
+                LXC + ["/system/bin/logcat", "-v", "brief", "-T", "1", "WayDroidService:I", "AuraDEDnd:I", "*:S"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
         except OSError as e:
             log(f"logcat failed: {e}")
@@ -1456,6 +1508,13 @@ class Android(dbus.service.Object):
             m = re.search(r"taskRemoved (\d+)", line)
             if m:
                 self.TaskDestroyed(int(m.group(1)))
+                continue
+            m = re.match(r"I/AuraDEDnd\(\s*(\d+)\): files app=(\S*) (.*)$", line)
+            if m:
+                if int(m.group(1)) == self.hwc_pid():
+                    GLib.idle_add(lambda a=m.group(2), u=m.group(3).split(): (self.dropped_files(a, u), False)[1])
+                else:
+                    log("drop: ignored a log line that did not come from the window layer")
         return True
 
     def host_gamepads(self):
