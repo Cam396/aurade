@@ -41,6 +41,7 @@ SOURCE_PACKAGES=(
   aurade-login
   aurade-greeter
   aurade-ai
+  aurade-android
   aurade-webapp-shortcuts
   aurade-wallpapers
   auradefs

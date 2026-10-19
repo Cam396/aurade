@@ -70,6 +70,7 @@ install -d -m 755 "$(dirname "${OUTPUT}")"
     aurade-login
     aurade-greeter
     aurade-ai
+    aurade-android
     aurade-webapp-shortcuts
     aurade
     aurade-full
