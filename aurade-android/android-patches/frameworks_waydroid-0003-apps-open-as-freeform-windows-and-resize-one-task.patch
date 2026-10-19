@@ -40,7 +40,7 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
          if (taskId > 0) {
              try {
                  ActivityTaskManager.getService().moveTaskToFront(null /* appThread */,
-@@ -358,10 +368,140 @@
+@@ -358,7 +368,146 @@
              }
          }
  
@@ -65,9 +65,9 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +        } else {
 +            mContext.startActivity(launchIntent);
 +        }
-         return true;
-     }
- 
++        return true;
++    }
++
 +    /* AuraDE: every Android window is a freeform task of its own, so each one
 +     * keeps its own size while others are in front (persist.aurade.multiwin). */
 +    private static boolean multiwin() {
@@ -101,6 +101,7 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +     * measured from where the task's stream starts (waydroid.torg.<task>) and
 +     * added. */
 +    private String mLastTaskResizeSeq = "";
++    private boolean mTaskResizePending = false;
 +    private final HashMap<Integer, String> mAppliedTaskResize = new HashMap<>();
 +
 +    private void registerTaskResizeMonitor() {
@@ -131,9 +132,10 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +        if (!multiwin())
 +            return;
 +        String seq = SystemProperties.get("waydroid.trs_seq", "");
-+        if (seq.isEmpty() || seq.equals(mLastTaskResizeSeq))
++        if (seq.isEmpty() || (seq.equals(mLastTaskResizeSeq) && !mTaskResizePending))
 +            return;
 +        mLastTaskResizeSeq = seq;
++        mTaskResizePending = false;
 +        try {
 +            List<android.app.ActivityManager.RunningTaskInfo> tasks =
 +                    ActivityTaskManager.getService().getTasks(MAX_SNAPSHOT_TASKS,
@@ -142,24 +144,30 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +                String req = SystemProperties.get("waydroid.trs." + t.taskId, "");
 +                if (req.isEmpty() || req.equals(mAppliedTaskResize.get(t.taskId)))
 +                    continue;
-+                mAppliedTaskResize.put(t.taskId, req);
-+                resizeOneTask(t.taskId, req);
++                if (resizeOneTask(t.taskId, req))
++                    mAppliedTaskResize.put(t.taskId, req);
++                else
++                    mTaskResizePending = true;
 +            }
 +        } catch (Exception e) {
 +            Log.w(TAG, "task resize failed: " + e);
 +        }
 +    }
 +
-+    private void resizeOneTask(int taskId, String req) {
++    /* False when the task cannot take the size yet (it is still opening and
++     * is not freeform), so the request is kept and tried again. */
++    private boolean resizeOneTask(int taskId, String req) {
 +        try {
++            if (windowingModeOf(taskId) != WindowConfiguration.WINDOWING_MODE_FREEFORM)
++                return false;
 +            String[] f = req.split(",");
 +            int w = Integer.parseInt(f[0]);
 +            int h = Integer.parseInt(f[1]);
 +            if (w < 64 || h < 64)
-+                return;
++                return true;
 +            Rect cur = ActivityTaskManager.getService().getTaskBounds(taskId);
 +            if (cur == null || cur.isEmpty())
-+                return;
++                return true;
 +            int dx = 0, dy = 0;
 +            String org = SystemProperties.get("waydroid.torg." + taskId, "");
 +            if (!org.isEmpty()) {
@@ -171,14 +179,12 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +            }
 +            Rect next = new Rect(cur.left, cur.top, cur.left + w + dx, cur.top + h + dy);
 +            if (next.equals(cur))
-+                return;
++                return true;
 +            ActivityTaskManager.getService().resizeTask(taskId, next,
 +                    ActivityTaskManager.RESIZE_MODE_USER_FORCED);
 +        } catch (Exception e) {
 +            Log.w(TAG, "task " + taskId + " resize failed: " + e);
 +        }
-+    }
-+
-     /* Packages that arrive while the monitor is not looking (pm install from a
-      * shell, an update that raced the boot) have no icon file; listing them
-      * makes one, so the host never shows a blank icon. */
+         return true;
+     }
+ 
