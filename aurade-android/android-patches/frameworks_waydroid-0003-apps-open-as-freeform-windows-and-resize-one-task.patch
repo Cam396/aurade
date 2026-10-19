@@ -1,0 +1,184 @@
+diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java/id/waydro/server/WayDroidService.java
+--- a/services/java/id/waydro/server/WayDroidService.java
++++ b/services/java/id/waydro/server/WayDroidService.java
+@@ -16,7 +16,9 @@
+ 
+ package id.waydro.server;
+ 
++import android.app.ActivityOptions;
+ import android.app.ActivityTaskManager;
++import android.app.WindowConfiguration;
+ import android.app.Notification;
+ import android.app.NotificationChannel;
+ import android.app.NotificationManager;
+@@ -51,6 +53,7 @@
+ import android.graphics.drawable.Drawable;
+ import android.graphics.drawable.Icon;
+ import android.graphics.Bitmap;
++import android.graphics.Rect;
+ import android.graphics.Bitmap.Config;
+ import android.graphics.Canvas;
+ import android.hardware.HardwareBuffer;
+@@ -169,6 +172,7 @@
+             registerTaskStackMonitor();
+             registerWindowHalNotification();
+             registerWindowModeMonitor();
++            registerTaskResizeMonitor();
+         }
+         if (phase == PHASE_BOOT_COMPLETED) {
+             mNotificationManager = mContext.getSystemService(NotificationManager.class);
+@@ -348,6 +352,12 @@
+         wakeUpDevice(reason);
+ 
+         int taskId = findTaskForPackage(packageName);
++        if (taskId > 0 && multiwin() && windowingModeOf(taskId) != WindowConfiguration.WINDOWING_MODE_FREEFORM) {
++            // Launching it into freeform again moves it into the desk.
++            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++            mContext.startActivity(launchIntent, freeformOptions().toBundle());
++            return true;
++        }
+         if (taskId > 0) {
+             try {
+                 ActivityTaskManager.getService().moveTaskToFront(null /* appThread */,
+@@ -358,10 +368,140 @@
+             }
+         }
+ 
+-        mContext.startActivity(launchIntent);
++        if (multiwin()) {
++            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++            mContext.startActivity(launchIntent, freeformOptions().toBundle());
++            // With no desk open a launch can come out fullscreen; once the
++            // task exists, launching it into freeform again moves it in.
++            final String pkg = packageName;
++            final Intent again = launchIntent;
++            BackgroundThread.getHandler().postDelayed(() -> {
++                int t = findTaskForPackage(pkg);
++                if (t > 0 && windowingModeOf(t) != WindowConfiguration.WINDOWING_MODE_FREEFORM) {
++                    try {
++                        mContext.startActivity(again, freeformOptions().toBundle());
++                    } catch (Exception e) {
++                        Log.w(TAG, "freeform relaunch of " + pkg + " failed: " + e);
++                    }
++                }
++            }, 1200);
++        } else {
++            mContext.startActivity(launchIntent);
++        }
+         return true;
+     }
+ 
++    /* AuraDE: every Android window is a freeform task of its own, so each one
++     * keeps its own size while others are in front (persist.aurade.multiwin). */
++    private static boolean multiwin() {
++        return SystemProperties.getBoolean("persist.aurade.multiwin", false);
++    }
++
++    private static ActivityOptions freeformOptions() {
++        ActivityOptions o = ActivityOptions.makeBasic();
++        o.setLaunchWindowingMode(WindowConfiguration.WINDOWING_MODE_FREEFORM);
++        return o;
++    }
++
++    private int windowingModeOf(int taskId) {
++        try {
++            List<android.app.ActivityManager.RunningTaskInfo> tasks =
++                    ActivityTaskManager.getService().getTasks(MAX_SNAPSHOT_TASKS,
++                            false, false, android.view.Display.INVALID_DISPLAY);
++            for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
++                if (t.taskId == taskId)
++                    return t.configuration.windowConfiguration.getWindowingMode();
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "windowingModeOf failed: " + e);
++        }
++        return WindowConfiguration.WINDOWING_MODE_UNDEFINED;
++    }
++
++    /* The host window layer asks for a task size by writing
++     * waydroid.trs.<task> = "<w>,<h>" and then bumping waydroid.trs_seq. The
++     * task's bounds carry any strip Android draws above the app, so it is
++     * measured from where the task's stream starts (waydroid.torg.<task>) and
++     * added. */
++    private String mLastTaskResizeSeq = "";
++    private final HashMap<Integer, String> mAppliedTaskResize = new HashMap<>();
++
++    private void registerTaskResizeMonitor() {
++        // A property set from native code reaches no change callback, so ask.
++        Runnable poll = new Runnable() {
++            @Override
++            public void run() {
++                applyTaskResize();
++                BackgroundThread.getHandler().postDelayed(this, 100);
++            }
++        };
++        BackgroundThread.getHandler().postDelayed(poll, 100);
++        // The big display would otherwise get a density of its own; every
++        // window should look the way it does on the density the host chose.
++        BackgroundThread.getHandler().postDelayed(() -> {
++            try {
++                int dpi = SystemProperties.getInt("ro.sf.lcd_density", 180);
++                android.view.WindowManagerGlobal.getWindowManagerService()
++                        .setForcedDisplayDensityForUser(android.view.Display.DEFAULT_DISPLAY, dpi,
++                                UserHandle.USER_SYSTEM);
++            } catch (Exception e) {
++                Log.w(TAG, "forcing the density failed: " + e);
++            }
++        }, multiwin() ? 4000 : Long.MAX_VALUE / 4);
++    }
++
++    private void applyTaskResize() {
++        if (!multiwin())
++            return;
++        String seq = SystemProperties.get("waydroid.trs_seq", "");
++        if (seq.isEmpty() || seq.equals(mLastTaskResizeSeq))
++            return;
++        mLastTaskResizeSeq = seq;
++        try {
++            List<android.app.ActivityManager.RunningTaskInfo> tasks =
++                    ActivityTaskManager.getService().getTasks(MAX_SNAPSHOT_TASKS,
++                            false, false, android.view.Display.INVALID_DISPLAY);
++            for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
++                String req = SystemProperties.get("waydroid.trs." + t.taskId, "");
++                if (req.isEmpty() || req.equals(mAppliedTaskResize.get(t.taskId)))
++                    continue;
++                mAppliedTaskResize.put(t.taskId, req);
++                resizeOneTask(t.taskId, req);
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "task resize failed: " + e);
++        }
++    }
++
++    private void resizeOneTask(int taskId, String req) {
++        try {
++            String[] f = req.split(",");
++            int w = Integer.parseInt(f[0]);
++            int h = Integer.parseInt(f[1]);
++            if (w < 64 || h < 64)
++                return;
++            Rect cur = ActivityTaskManager.getService().getTaskBounds(taskId);
++            if (cur == null || cur.isEmpty())
++                return;
++            int dx = 0, dy = 0;
++            String org = SystemProperties.get("waydroid.torg." + taskId, "");
++            if (!org.isEmpty()) {
++                String[] o = org.split(",");
++                dx = Integer.parseInt(o[0]) - cur.left;
++                dy = Integer.parseInt(o[1]) - cur.top;
++                if (dx < 0 || dx > 400) dx = 0;
++                if (dy < 0 || dy > 400) dy = 0;
++            }
++            Rect next = new Rect(cur.left, cur.top, cur.left + w + dx, cur.top + h + dy);
++            if (next.equals(cur))
++                return;
++            ActivityTaskManager.getService().resizeTask(taskId, next,
++                    ActivityTaskManager.RESIZE_MODE_USER_FORCED);
++        } catch (Exception e) {
++            Log.w(TAG, "task " + taskId + " resize failed: " + e);
++        }
++    }
++
+     /* Packages that arrive while the monitor is not looking (pm install from a
+      * shell, an update that raced the boot) have no icon file; listing them
+      * makes one, so the host never shows a blank icon. */

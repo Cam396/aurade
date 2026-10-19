@@ -1,0 +1,125 @@
+diff --git a/services/surfaceflinger/WaydroidTaskStreams.cpp b/services/surfaceflinger/WaydroidTaskStreams.cpp
+--- a/services/surfaceflinger/WaydroidTaskStreams.cpp
++++ b/services/surfaceflinger/WaydroidTaskStreams.cpp
+@@ -24,6 +24,8 @@
+ #include <gui/LayerMetadata.h>
+ #include <renderengine/impl/ExternalTexture.h>
+ 
++#include <algorithm>
++#include <cmath>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <inttypes.h>
+@@ -84,7 +86,33 @@
+     return base::GetBoolProperty(std::string("persist.waydroid.task_streams"), false);
+ }
+ 
++namespace {
++bool multiwinEnabled() {
++    return base::GetBoolProperty(std::string("persist.aurade.multiwin"), false);
++}
++
++bool hasNestedTask(const frontend::LayerHierarchy& node) {
++    bool found = false;
++    node.traverse([&](const frontend::LayerHierarchy& child,
++                      const frontend::LayerHierarchy::TraversalPath& path) {
++        if (&child == &node) {
++            return true;
++        }
++        if (found || path.variant == frontend::LayerHierarchy::Variant::Detached) {
++            return false;
++        }
++        if (child.getLayer()->metadata.has(gui::METADATA_TASK_ID)) {
++            found = true;
++            return false;
++        }
++        return true;
++    });
++    return found;
++}
++} // namespace
++
+ void WaydroidTaskStreams::onCompositionPresented(const frontend::LayerHierarchy& hierarchy) {
++    const bool multiwin = multiwinEnabled();
+     std::vector<TaskCapture> tasks;
+     std::unordered_set<int32_t> seenTasks;
+ 
+@@ -99,6 +127,12 @@
+         }
+         const auto& metadata = node.getLayer()->metadata;
+         if (metadata.has(gui::METADATA_TASK_ID)) {
++            // AuraDE: a container task (a Desk) holds the freeform tasks as
++            // windows of their own; each of them gets a stream, the container
++            // none.
++            if (multiwin && hasNestedTask(node)) {
++                return true;
++            }
+             const int32_t taskId = metadata.getInt32(gui::METADATA_TASK_ID, 0);
+             if (seenTasks.insert(taskId).second) {
+                 tasks.push_back({taskId, {}});
+@@ -295,6 +329,52 @@
+         return stream.renderedFrames > 0;
+     }
+ 
++    // AuraDE: with several freeform tasks on one big display, a task's stream
++    // is the rectangle its app windows cover, not the display. The host gets
++    // the rectangle's top left (waydroid.torg.<task>) to place touches.
++    if (multiwinEnabled()) {
++        bool have = false;
++        float left = 0, top = 0, right = 0, bottom = 0;
++        for (const auto& [layer, layerFE] : args.layers) {
++            const auto* snapshot = layerFE->mSnapshot.get();
++            if (!snapshot || !snapshot->hasBufferOrSidebandStream()) continue;
++            const std::string& n = snapshot->name;
++            if (n.rfind("Caption of", 0) == 0 || n.rfind("Decor container", 0) == 0 ||
++                n.find("InputSink") != std::string::npos) {
++                continue;
++            }
++            const FloatRect& b = snapshot->transformedBounds;
++            if (b.getWidth() <= 0 || b.getHeight() <= 0) continue;
++            if (!have) {
++                left = b.left; top = b.top; right = b.right; bottom = b.bottom;
++                have = true;
++            } else {
++                left = std::min(left, b.left); top = std::min(top, b.top);
++                right = std::max(right, b.right); bottom = std::max(bottom, b.bottom);
++            }
++        }
++        const Rect display = args.sourceCrop;
++        Rect crop(static_cast<int32_t>(std::floor(left)), static_cast<int32_t>(std::floor(top)),
++                  static_cast<int32_t>(std::ceil(right)), static_cast<int32_t>(std::ceil(bottom)));
++        if (have) {
++            crop.left = std::max(crop.left, display.left);
++            crop.top = std::max(crop.top, display.top);
++            crop.right = std::min(crop.right, display.right);
++            crop.bottom = std::min(crop.bottom, display.bottom);
++        }
++        if (have && crop.getWidth() > 0 && crop.getHeight() > 0) {
++            args.sourceCrop = crop;
++            args.size = ui::Size(crop.getWidth(), crop.getHeight());
++            if (!stream.haveOrigin || stream.originX != crop.left || stream.originY != crop.top) {
++                stream.haveOrigin = true;
++                stream.originX = crop.left;
++                stream.originY = crop.top;
++                const std::string name = "waydroid.torg." + std::to_string(task.taskId);
++                base::SetProperty(name, std::to_string(crop.left) + "," + std::to_string(crop.top));
++            }
++        }
++    }
++
+     // Geometry signature: layer set + global transforms + alphas. During
+     // window transitions (launch, task switch, spread) these change every
+     // frame; freezing such a frame into the card is what produced gray and
+diff --git a/services/surfaceflinger/WaydroidTaskStreams.h b/services/surfaceflinger/WaydroidTaskStreams.h
+--- a/services/surfaceflinger/WaydroidTaskStreams.h
++++ b/services/surfaceflinger/WaydroidTaskStreams.h
+@@ -87,6 +87,9 @@
+         int starvedFrames = 0;
+         int unstableFrames = 0;
+         int postFailures = 0;
++        bool haveOrigin = false;
++        int32_t originX = 0;
++        int32_t originY = 0;
+     };
+ 
+     // What the HAL answered to updateTaskList: Active means mWanted is

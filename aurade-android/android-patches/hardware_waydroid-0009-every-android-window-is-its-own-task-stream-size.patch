@@ -1,0 +1,172 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -31,6 +31,12 @@
+ #include "hwcomposer.h"
+ #include "egl-tools.h"
+ 
++#include <thread>
++#include <mutex>
++#include <atomic>
++#include <map>
++#include <vector>
++#include <chrono>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -227,6 +233,23 @@
+ /* Attach a task-stream buffer that was stashed while the window could not
+  * take it (initial configure not acked yet, or card deactivated). Runs on the
+  * wayland thread. */
++/* A task stream is the size of its task, not of the display: with several
++ * freeform tasks each card shows its own buffer at that buffer's size. Under
++ * the older single display mode the two are the same. */
++static void
++set_stream_destination(struct display *display, struct wp_viewport *viewport,
++                       const std::shared_ptr<buffer> &buf)
++{
++    if (buf && buf->metadata.width && buf->metadata.height &&
++        property_get_bool("persist.aurade.multiwin", false)) {
++        const double scale = display->scale > 0 ? display->scale : 1.0;
++        wp_viewport_set_destination(viewport, int(buf->metadata.width / scale),
++                                    int(buf->metadata.height / scale));
++        return;
++    }
++    wp_viewport_set_destination(viewport, display->width, display->height);
++}
++
+ static void
+ attach_pending_stream_buffer(struct window *window)
+ {
+@@ -242,7 +265,7 @@
+         layer.attach_buffer(pending);
+         layer.damage_surface(0, 0, INT32_MAX, INT32_MAX);
+         if (layer.viewport)
+-            wp_viewport_set_destination(layer.viewport, display->width, display->height);
++            set_stream_destination(display, layer.viewport, pending);
+         wl_surface_commit(layer.surface);
+         wl_display_flush(window->conn->display);
+     }
+@@ -427,7 +450,23 @@
+ layer_offset(struct wl_conn *conn, struct wl_surface *surface)
+ {
+     auto it = conn->layers.find(surface);
+-    return it == conn->layers.end() ? layerFrame{0, 0} : it->second;
++    struct layerFrame f = it == conn->layers.end() ? layerFrame{0, 0} : it->second;
++    /* AuraDE: with several freeform tasks on one display a task's stream is
++     * the rectangle its app covers; surface-local input lands at that
++     * rectangle's top left (SurfaceFlinger publishes it, see
++     * WaydroidTaskStreams). */
++    if (!conn->is_ctl && conn->task_id &&
++        property_get_bool("persist.aurade.multiwin", false)) {
++        char value[PROPERTY_VALUE_MAX];
++        const std::string name = "waydroid.torg." + std::to_string(conn->task_id);
++        int ox = 0, oy = 0;
++        if (property_get(name.c_str(), value, nullptr) > 0 &&
++            sscanf(value, "%d,%d", &ox, &oy) == 2) {
++            f.x += ox;
++            f.y += oy;
++        }
++    }
++    return f;
+ }
+ 
+ /* Input lands on whichever surface the compositor picked: a toplevel or one of
+@@ -572,6 +611,61 @@
+     display->deactivate_cond.notify_one();
+ }
+ 
++/* A drag configures a window many times a second; Android is asked once the
++ * size has stood still for the settle time. One worker serves every window. */
++namespace {
++struct pending_task_resize { int w, h; std::chrono::steady_clock::time_point at; int asked_w, asked_h; };
++std::mutex g_resize_mutex;
++std::map<std::string, pending_task_resize> g_resize_pending;
++std::atomic<int> g_resize_seq {0};
++bool g_resize_worker_started = false;
++
++void resize_worker_main()
++{
++    for (;;) {
++        std::this_thread::sleep_for(std::chrono::milliseconds(50));
++        std::vector<std::pair<std::string, std::pair<int, int>>> due;
++        {
++            std::scoped_lock lock(g_resize_mutex);
++            const auto now = std::chrono::steady_clock::now();
++            for (auto &[tid, p] : g_resize_pending) {
++                if (now < p.at || (p.w == p.asked_w && p.h == p.asked_h))
++                    continue;
++                p.asked_w = p.w;
++                p.asked_h = p.h;
++                due.push_back({tid, {p.w, p.h}});
++            }
++        }
++        for (auto &d : due) {
++            const std::string value = std::to_string(d.second.first) + "," +
++                                      std::to_string(d.second.second);
++            property_set(("waydroid.trs." + d.first).c_str(), value.c_str());
++            ALOGI("task %s: asked Android for %dx%d", d.first.c_str(), d.second.first, d.second.second);
++        }
++        if (!due.empty())
++            property_set("waydroid.trs_seq", std::to_string(++g_resize_seq).c_str());
++    }
++}
++} // namespace
++
++static void
++request_task_resize(const std::string &taskID, int width, int height)
++{
++    const auto settle = std::chrono::milliseconds(std::max(0, property_get_int32(
++        "persist.waydroid.resize_settle_ms", kResizeSettleDefaultMs)));
++    std::scoped_lock lock(g_resize_mutex);
++    auto &p = g_resize_pending[taskID];
++    if (p.w != width || p.h != height) {
++        p.w = width;
++        p.h = height;
++        p.at = std::chrono::steady_clock::now() + settle;
++    }
++    if (!g_resize_worker_started) {
++        g_resize_worker_started = true;
++        std::thread(resize_worker_main).detach();
++    }
++}
++
+ static void
+ xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
+                               int32_t width, int32_t height,
+@@ -672,6 +766,14 @@
+ 		return;
+ 	}
+ 
++    /* AuraDE: every window is a freeform task, so a resize asks for that
++     * task's size (WayDroidService applies it) and never moves the display. */
++    if (!window->conn->is_ctl && window->taskID != "none" && window->taskID != "0" &&
++        property_get_bool("persist.aurade.multiwin", false)) {
++        request_task_resize(window->taskID, width, height);
++        return;
++    }
++
+     /* A task toplevel's configure describes its card, not the Android
+      * display. Lomiri sizes each card differently in the spread, and a tiling
+      * host resizes every card whenever any window appears, so only the window
+@@ -1849,7 +1951,7 @@
+         layer.attach_buffer(sb.buf);
+         layer.damage_surface(0, 0, INT32_MAX, INT32_MAX);
+         if (layer.viewport)
+-            wp_viewport_set_destination(layer.viewport, display->width, display->height);
++            set_stream_destination(display, layer.viewport, sb.buf);
+         wl_surface_commit(layer.surface);
+         wl_display_flush(conn->display);
+     }
+diff --git a/hwcomposer/hwcomposer.cpp b/hwcomposer/hwcomposer.cpp
+--- a/hwcomposer/hwcomposer.cpp
++++ b/hwcomposer/hwcomposer.cpp
+@@ -1144,6 +1144,8 @@
+ 
+     pdev->blacklisted_apps["com.android.launcher3"] = {};
+     pdev->blacklisted_apps["com.android.settings"] = {"com.android.settings.FallbackHome"};
++    pdev->blacklisted_apps["com.android.systemui"] = {"com.android.wm.shell.desktopmode.DesktopWallpaperActivity",
++        "com.android.systemui/com.android.wm.shell.desktopmode.DesktopWallpaperActivity"};
+     pdev->blacklisted_apps["com.android.tv.settings"] = {"com.android.tv.settings.system.FallbackHome"};
+     pdev->blacklisted_apps["com.google.android.tvlauncher"] = {};
+     if (property_get("waydroid.blacklist_apps", property, nullptr) > 0) {

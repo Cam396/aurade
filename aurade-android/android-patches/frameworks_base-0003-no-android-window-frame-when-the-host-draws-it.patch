@@ -1,0 +1,15 @@
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/windowdecor/DesktopModeWindowDecorViewModel.java
+@@ -1807,6 +1807,11 @@
+     }
+ 
+     private boolean shouldCreateWindowDecor(RunningTaskInfo taskInfo) {
++        // AuraDE: the host draws each window's frame; Android's own header and
++        // the inset it gives apps would show up inside the window.
++        if (android.os.SystemProperties.getBoolean("persist.aurade.multiwin", false)) {
++            return false;
++        }
+         if (DesktopExperienceFlags.ENABLE_WINDOW_DECORATION_REFACTOR.isTrue()
+                 && DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue()) {
+             return true;

@@ -1625,6 +1625,15 @@ WAYDROID_PROPS = {
     "persist.aurade.arc_app_ids": "1",
     "persist.waydroid.forward_notifications": "true",
 }
+# From this image on every Android window is a freeform task of its own on a
+# big fixed display, so each keeps its own size while others are in front. An
+# older image knows nothing of it and must keep following the focused window.
+MULTIWIN_PROPS = {
+    "persist.aurade.multiwin": "true",
+    "persist.waydroid.width": "3840",
+    "persist.waydroid.height": "2160",
+}
+MULTIWIN_MIN_VERSION = "2026-10-20"
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 CONTAINER_WAYLAND = "/run/xdg/wayland-0"
 IMAGE_DIR = "/etc/waydroid-extra/images"
@@ -1659,9 +1668,21 @@ def ensure_props():
     if not cfg.has_section("properties"):
         cfg.add_section("properties")
     changed = False
+    try:
+        with open(INSTALLED, encoding="utf-8") as f:
+            multiwin = str(json.load(f).get("version", "")) >= MULTIWIN_MIN_VERSION
+    except (OSError, ValueError):
+        multiwin = False
     for k, v in WAYDROID_PROPS.items():
         if cfg.get("properties", k, fallback=None) != v:
             cfg.set("properties", k, v)
+            changed = True
+    for k, v in MULTIWIN_PROPS.items():
+        if multiwin and cfg.get("properties", k, fallback=None) != v:
+            cfg.set("properties", k, v)
+            changed = True
+        elif not multiwin and cfg.has_option("properties", k):
+            cfg.remove_option("properties", k)
             changed = True
     if changed:
         with open(WAYDROID_CFG, "w", encoding="utf-8") as f:
