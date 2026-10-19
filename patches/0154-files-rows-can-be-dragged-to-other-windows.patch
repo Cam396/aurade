@@ -1,0 +1,107 @@
+diff --git a/ui/file_manager/file_manager/aurade/ui/file_row.ts b/ui/file_manager/file_manager/aurade/ui/file_row.ts
+index 5ce7fca..f17c129 100644
+--- a/ui/file_manager/file_manager/aurade/ui/file_row.ts
++++ b/ui/file_manager/file_manager/aurade/ui/file_row.ts
+@@ -54,6 +54,8 @@ export function createRow(): HTMLElement {
+   row.className = 'aurade-row';
+   row.setAttribute('role', 'option');
+   row.tabIndex = -1;
++  // A row can be picked up. What it carries is the list's to say.
++  row.draggable = true;
+ 
+   const tile = document.createElement('span');
+   tile.className = 'aurade-tile';
+diff --git a/ui/file_manager/file_manager/aurade/ui/file_list.ts b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+index b6066de..6b6f0ea 100644
+--- a/ui/file_manager/file_manager/aurade/ui/file_list.ts
++++ b/ui/file_manager/file_manager/aurade/ui/file_list.ts
+@@ -93,6 +93,7 @@ export class FileList {
+     this.viewport.addEventListener('keydown', this.onKeyDown);
+     this.viewport.addEventListener('click', this.onClick);
+     this.viewport.addEventListener('dblclick', this.onDoubleClick);
++    this.viewport.addEventListener('dragstart', this.onDragStart);
+   }
+ 
+   /**
+@@ -371,6 +372,30 @@ export class FileList {
+     }
+   };
+ 
++  /**
++   * What leaves the window when a row is dragged away.
++   *
++   * The desktop hands a drag to another window's application as files only
++   * when the data is what ChromeOS's own Files app writes: a tag and the list
++   * of file system URLs in `fs/sources`. A key is exactly such a URL, so the
++   * payload is the selection's keys, one to a line. Picking up a row that is
++   * not selected selects it first, as every file manager does.
++   */
++  private onDragStart = (event: DragEvent): void => {
++    const index = this.indexFromEvent(event);
++    const transfer = event.dataTransfer;
++    if (index < 0 || !transfer) {
++      return;
++    }
++    if (!this.selection.has(index)) {
++      this.selectIndex(index, 'replace');
++    }
++    transfer.effectAllowed = 'copyMove';
++    transfer.setData('fs/tag', 'filemanager-data');
++    transfer.setData('fs/sources', [...this.selectedKeys()].join('\n'));
++    transfer.setData('fs/effectallowed', 'copyMove');
++  };
++
+   destroy(): void {
+     if (this.frame) {
+       cancelAnimationFrame(this.frame);
+diff --git a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+index f0a13d5..d3cb089 100644
+--- a/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
++++ b/ui/file_manager/file_manager/aurade/tests/dom/list_test.ts
+@@ -390,6 +390,46 @@ const CASES: Case[] = [
+       }
+     },
+   },
++  {
++    name: 'a row can be picked up and carries the selection as file system URLs',
++    run() {
++      const h = makeHarness(10);
++      try {
++        const rows = h.rows();
++        assert(rows.every(row => row.draggable), 'every row is draggable');
++        h.list.setSelectedIndices([1, 2]);
++        const data = new Map<string, string>();
++        const event = new Event('dragstart', {bubbles: true, cancelable: true});
++        Object.defineProperty(event, 'dataTransfer', {
++          value: {
++            effectAllowed: 'none',
++            setData: (type: string, value: string) => data.set(type, value),
++          },
++        });
++        rows[1]!.dispatchEvent(event);
++        equal(data.get('fs/tag'), 'filemanager-data', 'tagged for the desktop');
++        equal(data.get('fs/sources'),
++              `${h.entries[1]!.key}\n${h.entries[2]!.key}`,
++              'both selected entries, as their URLs');
++        // Picking up a row that is not selected selects it, and only it.
++        data.clear();
++        const other = new Event('dragstart', {bubbles: true, cancelable: true});
++        Object.defineProperty(other, 'dataTransfer', {
++          value: {
++            effectAllowed: 'none',
++            setData: (type: string, value: string) => data.set(type, value),
++          },
++        });
++        h.rows()[4]!.dispatchEvent(other);
++        equal(data.get('fs/sources'), String(h.entries[4]!.key),
++              'the unselected row alone');
++        equal(h.selectedNames().join(','), h.entries[4]!.name,
++              'and it is now the selection');
++      } finally {
++        h.destroy();
++      }
++    },
++  },
+   {
+     name: 'a selection set programmatically reads back as those entries',
+     run() {
