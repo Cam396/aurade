@@ -377,11 +377,11 @@ if [ ! -e "${USER_DATA_DIR}" ] && [ -d "${LEGACY_USER_DATA_DIR}" ]; then
     mv "${LEGACY_USER_DATA_DIR}" "${USER_DATA_DIR}"
 fi
 mkdir -p "${USER_DATA_DIR}"
-# The app icon cache keeps the browser icon an older release drew, Chromium's,
-# and nothing in an update refreshes it. It is dropped once and drawn again.
-if [ ! -e "${USER_DATA_DIR}/.aurade-browser-icon-1" ]; then
+# The app icon cache keeps the browser icon an older release drew, and nothing
+# in an update refreshes it. It is dropped once per icon change and drawn again.
+if [ ! -e "${USER_DATA_DIR}/.aurade-browser-icon-2" ]; then
     rm -rf "${USER_DATA_DIR}"/*/app_service/icons/mgndgikekgjfcpckkfioiadnlibdjbkf
-    : >"${USER_DATA_DIR}/.aurade-browser-icon-1"
+    : >"${USER_DATA_DIR}/.aurade-browser-icon-2"
 fi
 mkdir -p \
     "${AURADE_STRUCTURED_METRICS_DIR}/chromium/storage/flushed" \
