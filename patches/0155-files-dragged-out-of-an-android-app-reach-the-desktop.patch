@@ -1,0 +1,46 @@
+diff --git a/chrome/browser/ash/exo/chrome_security_delegate.cc b/chrome/browser/ash/exo/chrome_security_delegate.cc
+index 981fdf0..20ae796 100644
+--- a/chrome/browser/ash/exo/chrome_security_delegate.cc
++++ b/chrome/browser/ash/exo/chrome_security_delegate.cc
+@@ -4,11 +4,13 @@
+ 
+ #include "chrome/browser/ash/exo/chrome_security_delegate.h"
+ 
++#include <cstring>
+ #include <memory>
+ #include <string>
+ 
+ #include "ash/public/cpp/app_types_util.h"
+ #include "base/command_line.h"
++#include "base/files/file_util.h"
+ #include "base/feature_list.h"
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/strings/strcat.h"
+@@ -109,6 +111,27 @@ std::vector<FileInfo> TranslateVMToHost(const std::string& vm_name,
+     }
+     return file_infos;
+   }
++  // Files an Android app drags out lie in its shared storage, which the desktop
++  // holds in the user's waydroid data (AuraDE). Nothing outside it is exposed.
++  if (vm_name == arc::kArcVmName) {
++    const base::FilePath media =
++        base::GetHomeDir().Append(".local/share/waydroid/data/media/0");
++    std::vector<FileInfo> file_infos;
++    for (ui::FileInfo& info : vm_paths) {
++      const std::string& path = info.path.value();
++      if (info.path.ReferencesParent()) {
++        continue;
++      }
++      for (const char* prefix : {"/storage/emulated/0/", "/sdcard/"}) {
++        if (base::StartsWith(path, prefix, base::CompareCase::SENSITIVE)) {
++          file_infos.push_back(
++              {media.Append(path.substr(strlen(prefix))), storage::FileSystemURL()});
++          break;
++        }
++      }
++    }
++    return file_infos;
++  }
+   // Do not expose any paths to ArcVm.
+   // Arc doesn't currently support drag-drop or clipboard via exo.
+   // If Arc ever adds support, we must map paths correctly like other VMs.

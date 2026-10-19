@@ -1,0 +1,78 @@
+diff --git a/services/core/java/com/android/server/wm/DragDropController.java b/services/core/java/com/android/server/wm/DragDropController.java
+index aab896e..05a9aeb 100644
+--- a/services/core/java/com/android/server/wm/DragDropController.java
++++ b/services/core/java/com/android/server/wm/DragDropController.java
+@@ -305,12 +305,19 @@ class DragDropController {
+                     Slog.i(TAG_WM, "<<< CLOSE TRANSACTION performDrag");
+                 }
+             }
+-            // Text being dragged can be carried on to the desktop (AuraDE).
++            // Text, or files, being dragged can be carried on to the desktop
++            // (AuraDE).
+             if (data != null && data.getItemCount() > 0) {
+                 final CharSequence text = data.getItemAt(0).getText();
+                 if (text != null && text.length() > 0) {
+                     id.waydro.waydroid.WaydroidClipboard.getInstance(mService.mContext)
+                             .startDrag(text.toString());
++                } else {
++                    final String files = draggedFiles(data);
++                    if (files != null) {
++                        id.waydro.waydroid.WaydroidClipboard.getInstance(mService.mContext)
++                                .startDrag("\u0001files\n" + files);
++                    }
+                 }
+             }
+             return dragToken;    // success!
+@@ -319,6 +326,52 @@ class DragDropController {
+         }
+     }
+ 
++    /**
++     * The files an app is dragging, one shared-storage path to a line, or null
++     * when the drag is not of files the desktop can reach. Only paths in shared
++     * storage qualify, since that is the part of the device the desktop sees
++     * (AuraDE).
++     */
++    private String draggedFiles(ClipData data) {
++        final StringBuilder out = new StringBuilder();
++        for (int i = 0; i < data.getItemCount(); i++) {
++            final android.net.Uri uri = data.getItemAt(i).getUri();
++            if (uri == null) {
++                continue;
++            }
++            String path = null;
++            if ("file".equals(uri.getScheme())) {
++                path = uri.getPath();
++            } else if ("content".equals(uri.getScheme())
++                    && "media".equals(uri.getAuthority())) {
++                try (android.database.Cursor c = mService.mContext.getContentResolver().query(
++                        uri, new String[] {"_data"}, null, null, null)) {
++                    if (c != null && c.moveToFirst()) {
++                        path = c.getString(0);
++                    }
++                } catch (RuntimeException e) {
++                    Slog.w(TAG_WM, "dragged file not resolved: " + uri, e);
++                }
++            } else if ("content".equals(uri.getScheme())
++                    && "com.android.externalstorage.documents".equals(uri.getAuthority())) {
++                // A document of the Files app: .../document/primary:<path>.
++                final java.util.List<String> segments = uri.getPathSegments();
++                if (segments.size() >= 2 && "document".equals(segments.get(0))
++                        && segments.get(1).startsWith("primary:")) {
++                    path = "/storage/emulated/0/" + segments.get(1).substring("primary:".length());
++                }
++            }
++            if (path != null && (path.startsWith("/storage/emulated/")
++                    || path.startsWith("/sdcard/")) && !path.contains("..")) {
++                if (out.length() > 0) {
++                    out.append('\n');
++                }
++                out.append(path);
++            }
++        }
++        return out.length() > 0 ? out.toString() : null;
++    }
++
+     /**
+      * This is called from the drop target window that received ACTION_DROP
+      * (see DragState#reportDropWindowLock()).

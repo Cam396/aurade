@@ -1,0 +1,69 @@
+diff --git a/hwcomposer/WaydroidClipboard.cpp b/hwcomposer/WaydroidClipboard.cpp
+index b9321ac..664fea3 100644
+--- a/hwcomposer/WaydroidClipboard.cpp
++++ b/hwcomposer/WaydroidClipboard.cpp
+@@ -22,6 +22,9 @@
+ 
+ #include <log/log.h>
+ #include <unistd.h>
++#include <cctype>
++#include <cstdio>
++#include <cstring>
+ #include <algorithm>
+ #include <list>
+ #include <vector>
+@@ -40,7 +43,8 @@ static const std::vector<std::string> MIME_TYPES = {
+ static void data_source_handle_send(void *data, struct wl_data_source *, const char *mime_type, int fd) {
+     // An application wants to paste the clipboard contents
+     const char *text = (const char *)data;
+-    if (std::find(MIME_TYPES.begin(), MIME_TYPES.end(), mime_type) != MIME_TYPES.end())
++    if (std::find(MIME_TYPES.begin(), MIME_TYPES.end(), mime_type) != MIME_TYPES.end() ||
++        strcmp(mime_type, "text/uri-list") == 0)
+         write(fd, text, strlen((char *)text));
+     else
+         ALOGE("Destination client requested unsupported MIME type: %s", mime_type);
+@@ -319,9 +323,41 @@ bool clipboard_start_drag(struct wl_conn *conn)
+     if (!conn->data_device || !conn->data_device_manager || !conn->pointer_surface)
+         return false;
+     struct wl_data_source *source = wl_data_device_manager_create_data_source(conn->data_device_manager);
+-    wl_data_source_add_listener(source, &drag_source_listener, strdup(display->drag_text.c_str()));
+-    for (auto mime_type : MIME_TYPES)
+-        wl_data_source_offer(source, mime_type.c_str());
++    /* Files an Android app is dragging arrive as a marker and one path to a
++     * line; the desktop is offered them as a list of file URLs. */
++    static const char kFiles[] = "\x01" "files\n";
++    if (display->drag_text.compare(0, sizeof(kFiles) - 1, kFiles) == 0) {
++        std::string list;
++        std::string paths = display->drag_text.substr(sizeof(kFiles) - 1);
++        size_t pos = 0;
++        while (pos < paths.size()) {
++            size_t end = paths.find('\n', pos);
++            if (end == std::string::npos)
++                end = paths.size();
++            std::string path = paths.substr(pos, end - pos);
++            pos = end + 1;
++            if (path.empty())
++                continue;
++            list += "file://";
++            for (unsigned char c : path) {
++                if (isalnum(c) || c == '/' || c == '-' || c == '_' || c == '.' || c == '~') {
++                    list += (char)c;
++                } else {
++                    char hex[4];
++                    snprintf(hex, sizeof(hex), "%%%02X", c);
++                    list += hex;
++                }
++            }
++            list += "\r\n";
++        }
++        ALOGI("dnd: carrying %zu bytes of file URLs to the host", list.size());
++        wl_data_source_add_listener(source, &drag_source_listener, strdup(list.c_str()));
++        wl_data_source_offer(source, "text/uri-list");
++    } else {
++        wl_data_source_add_listener(source, &drag_source_listener, strdup(display->drag_text.c_str()));
++        for (auto mime_type : MIME_TYPES)
++            wl_data_source_offer(source, mime_type.c_str());
++    }
+     if (wl_data_source_get_version(source) >= 3)
+         wl_data_source_set_actions(source, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+     wl_data_device_start_drag(conn->data_device, source, conn->pointer_surface, nullptr, conn->pointer_button_serial);
