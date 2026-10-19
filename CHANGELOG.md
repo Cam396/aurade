@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## Unreleased
+## 1.3.0, 2026-10-19
 
 ### Added
 - Android apps, in the optional aurade-android package. Android 17 (LineageOS
