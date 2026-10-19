@@ -14,7 +14,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
  #include <stdint.h>
  #include <stdio.h>
  #include <stdlib.h>
-@@ -227,6 +233,33 @@
+@@ -227,6 +233,44 @@
  /* Attach a task-stream buffer that was stashed while the window could not
   * take it (initial configure not acked yet, or card deactivated). Runs on the
   * wayland thread. */
@@ -29,8 +29,19 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
 +    if (buf && buf->metadata.width && buf->metadata.height &&
 +        property_get_bool("persist.aurade.multiwin", false)) {
 +        const double scale = display->scale > 0 ? display->scale : 1.0;
-+        const int w = int(buf->metadata.width / scale);
-+        const int h = int(buf->metadata.height / scale);
++        int w = int(buf->metadata.width / scale);
++        int h = int(buf->metadata.height / scale);
++        /* The host asked for another size and Android has not caught up: keep
++         * the window at what was asked, or the stale buffer sizes it back. */
++        if (window->cfg_w > 0) {
++            if ((w == window->cfg_w && h == window->cfg_h) ||
++                std::chrono::steady_clock::now() > window->cfg_until) {
++                window->cfg_w = window->cfg_h = 0;
++            } else {
++                w = window->cfg_w;
++                h = window->cfg_h;
++            }
++        }
 +        if (window->viewport && (w != window->stream_w || h != window->stream_h)) {
 +            /* The window is as big as its root surface: follow the stream, not
 +             * the display, or every card opens display wide. */
@@ -48,7 +59,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
  static void
  attach_pending_stream_buffer(struct window *window)
  {
-@@ -242,7 +275,7 @@
+@@ -242,7 +286,7 @@
          layer.attach_buffer(pending);
          layer.damage_surface(0, 0, INT32_MAX, INT32_MAX);
          if (layer.viewport)
@@ -57,7 +68,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
          wl_surface_commit(layer.surface);
          wl_display_flush(window->conn->display);
      }
-@@ -427,7 +460,23 @@
+@@ -427,7 +471,23 @@
  layer_offset(struct wl_conn *conn, struct wl_surface *surface)
  {
      auto it = conn->layers.find(surface);
@@ -82,7 +93,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
  }
  
  /* Input lands on whichever surface the compositor picked: a toplevel or one of
-@@ -572,6 +621,61 @@
+@@ -572,6 +632,61 @@
      display->deactivate_cond.notify_one();
  }
  
@@ -144,7 +155,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
  static void
  xdg_toplevel_handle_configure(void *data, struct xdg_toplevel *,
                                int32_t width, int32_t height,
-@@ -672,6 +776,14 @@
+@@ -672,6 +787,23 @@
  		return;
  	}
  
@@ -153,13 +164,22 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
 +    if (!window->conn->is_ctl && window->taskID != "none" && window->taskID != "0" &&
 +        property_get_bool("persist.aurade.multiwin", false)) {
 +        request_task_resize(window->taskID, width, height);
++        if (window->viewport && (width != window->stream_w || height != window->stream_h)) {
++            window->cfg_w = width;
++            window->cfg_h = height;
++            window->cfg_until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
++            window->stream_w = width;
++            window->stream_h = height;
++            wp_viewport_set_destination(window->viewport, width, height);
++            wl_surface_commit(window->surface);
++        }
 +        return;
 +    }
 +
      /* A task toplevel's configure describes its card, not the Android
       * display. Lomiri sizes each card differently in the spread, and a tiling
       * host resizes every card whenever any window appears, so only the window
-@@ -1849,7 +1961,7 @@
+@@ -1849,7 +1981,7 @@
          layer.attach_buffer(sb.buf);
          layer.damage_surface(0, 0, INT32_MAX, INT32_MAX);
          if (layer.viewport)
@@ -168,7 +188,7 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
          wl_surface_commit(layer.surface);
          wl_display_flush(conn->display);
      }
-@@ -2098,7 +2210,18 @@
+@@ -2098,7 +2230,18 @@
      /* An Android app is dragging text and the pointer has left the display:
       * the drag carries on as one of the host (AuraDE). */
      bool hand_over = false;
@@ -191,13 +211,18 @@ diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
 diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
 --- a/hwcomposer/wayland-hwc.h
 +++ b/hwcomposer/wayland-hwc.h
-@@ -356,6 +356,10 @@
+@@ -356,6 +356,15 @@
       * earlier). Guarded by windowsMutex. */
      std::shared_ptr<buffer> pending_stream_buffer;
  
 +    /* Size of the task stream last shown, in surface units (multiwin). */
 +    int stream_w = 0;
 +    int stream_h = 0;
++    /* Size the host last asked this window to take, until Android's stream
++     * has that size (multiwin). */
++    int cfg_w = 0;
++    int cfg_h = 0;
++    std::chrono::steady_clock::time_point cfg_until;
 +
      /* Last XDG_TOPLEVEL_STATE_ACTIVATED state seen from the host compositor.
       * Used to detect the rising edge so a Lomiri-driven focus/raise of this
