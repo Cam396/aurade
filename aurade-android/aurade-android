@@ -1634,6 +1634,9 @@ MULTIWIN_PROPS = {
     "persist.waydroid.height": "2160",
 }
 MULTIWIN_MIN_VERSION = "2026-10-20"
+# PCI vendors of virtual GPUs (VMware, virtio, Bochs/QEMU). Their drivers have no
+# planar YUV buffers, so the camera preview needs RGBA buffers from the camera HAL.
+VIRTUAL_GPU_VENDORS = ("0x15ad", "0x1af4", "0x1234", "0x1b36")
 WAYDROID_CFG = "/var/lib/waydroid/waydroid.cfg"
 CONTAINER_WAYLAND = "/run/xdg/wayland-0"
 IMAGE_DIR = "/etc/waydroid-extra/images"
@@ -1656,6 +1659,17 @@ RELEASE_KEYRING = "/usr/share/aurade-android/release.gpg"
 TRUSTED_DIR = "/etc/aurade-android/trusted.d"
 
 
+def virtual_gpu():
+    for dev in glob.glob("/sys/class/drm/card*/device/vendor"):
+        try:
+            with open(dev, encoding="utf-8") as f:
+                if f.read().strip() in VIRTUAL_GPU_VENDORS:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def ensure_props():
     import configparser
     cfg = configparser.ConfigParser(interpolation=None)
@@ -1673,7 +1687,13 @@ def ensure_props():
             multiwin = str(json.load(f).get("version", "")) >= MULTIWIN_MIN_VERSION
     except (OSError, ValueError):
         multiwin = False
-    for k, v in WAYDROID_PROPS.items():
+    props = dict(WAYDROID_PROPS)
+    if virtual_gpu():
+        props["persist.aurade.camera_rgba"] = "1"
+    elif cfg.has_option("properties", "persist.aurade.camera_rgba"):
+        cfg.remove_option("properties", "persist.aurade.camera_rgba")
+        changed = True
+    for k, v in props.items():
         if cfg.get("properties", k, fallback=None) != v:
             cfg.set("properties", k, v)
             changed = True
