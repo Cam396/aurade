@@ -167,13 +167,13 @@ print(f"{len(paths)} python files compile")
   endgroup
 
   # Patch files carry diff context, where a blank line is a single space, so
-  # they are left out. The rest is checked against the commit before this one
+  # they are left out, the Android ones included. The rest is checked against the commit before this one
   # and against anything not yet committed.
   group 'whitespace'
   if git rev-parse -q --verify HEAD^ >/dev/null; then
-    git diff --check HEAD^ HEAD -- . ':!patches/*.patch'
+    git diff --check HEAD^ HEAD -- . ':!patches/*.patch' ':!aurade-android/android-patches/*.patch'
   fi
-  git diff --check HEAD -- . ':!patches/*.patch'
+  git diff --check HEAD -- . ':!patches/*.patch' ':!aurade-android/android-patches/*.patch'
   endgroup
 }
 
