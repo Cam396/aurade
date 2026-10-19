@@ -1,0 +1,27 @@
+diff --git a/core/java/id/waydro/waydroid/WaydroidClipboard.java b/core/java/id/waydro/waydroid/WaydroidClipboard.java
+--- a/core/java/id/waydro/waydroid/WaydroidClipboard.java
++++ b/core/java/id/waydro/waydroid/WaydroidClipboard.java
+@@ -81,6 +81,23 @@
+         return;
+     }
+ 
++    /**
++     * An app began dragging this text; the host takes the drag over if the
++     * pointer leaves the display.
++     * @hide
++     */
++    public void startDrag(String value) {
++        IWaydroidClipboard service = getService();
++        if (service == null) {
++            return;
++        }
++        try {
++            service.startDrag(value);
++        } catch (RemoteException e) {
++            Log.e(TAG, e.getLocalizedMessage(), e);
++        }
++    }
++
+     public String getClipboardData() {
+         IWaydroidClipboard service = getService();
+         if (service == null) {

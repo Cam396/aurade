@@ -1,0 +1,209 @@
+diff --git a/interfaces/clipboard/1.0/IWaydroidClipboard.hal b/interfaces/clipboard/1.0/IWaydroidClipboard.hal
+--- a/interfaces/clipboard/1.0/IWaydroidClipboard.hal
++++ b/interfaces/clipboard/1.0/IWaydroidClipboard.hal
+@@ -18,4 +18,7 @@
+ interface IWaydroidClipboard {
+     sendClipboardData(string value);
+     getClipboardData() generates (string value);
++    /* An Android app began dragging this text; hand the drag to the host
++     * if the pointer leaves the window. */
++    startDrag(string value);
+ };
+diff --git a/hwcomposer/WaydroidClipboard.h b/hwcomposer/WaydroidClipboard.h
+--- a/hwcomposer/WaydroidClipboard.h
++++ b/hwcomposer/WaydroidClipboard.h
+@@ -38,6 +38,7 @@
+     // Methods from ::vendor::waydroid::clipboard::V1_0::IWaydroidClipboard follow.
+     Return<void> sendClipboardData(const hidl_string& value) override;
+     Return<void> getClipboardData(getClipboardData_cb _hidl_cb) override;
++    Return<void> startDrag(const hidl_string& value) override;
+   private:
+     struct display *mDisplay;
+ };
+diff --git a/hwcomposer/WaydroidClipboard.cpp b/hwcomposer/WaydroidClipboard.cpp
+--- a/hwcomposer/WaydroidClipboard.cpp
++++ b/hwcomposer/WaydroidClipboard.cpp
+@@ -58,6 +58,36 @@
+ static void data_source_handle_dnd_finished(void *, struct wl_data_source *) {}
+ static void data_source_handle_action(void *, struct wl_data_source *, uint32_t) {}
+ 
++/* A drag of the host ends with the drop being finished or the drag being
++ * cancelled, and either way the source is done with. */
++static void drag_source_handle_send(void *data, struct wl_data_source *source, const char *mime_type, int fd) {
++    ALOGI("dnd: the host asked for the dragged text as %s", mime_type);
++    data_source_handle_send(data, source, mime_type, fd);
++}
++
++static void drag_source_handle_cancelled(void *data, struct wl_data_source *source) {
++    ALOGI("dnd: the host cancelled the drag");
++    data_source_handle_cancelled(data, source);
++}
++
++static void drag_source_handle_dnd_drop_performed(void *, struct wl_data_source *) {
++    ALOGI("dnd: the drag was dropped");
++}
++
++static void drag_source_handle_dnd_finished(void *data, struct wl_data_source *source) {
++    ALOGI("dnd: the drop was finished");
++    data_source_handle_cancelled(data, source);
++}
++
++static const struct wl_data_source_listener drag_source_listener = {
++    .target = data_source_handle_target,
++    .send = drag_source_handle_send,
++    .cancelled = drag_source_handle_cancelled,
++    .dnd_drop_performed = drag_source_handle_dnd_drop_performed,
++    .dnd_finished = drag_source_handle_dnd_finished,
++    .action = data_source_handle_action,
++};
++
+ static const struct wl_data_source_listener data_source_listener = {
+     .target = data_source_handle_target,
+     .send = data_source_handle_send,
+@@ -283,6 +313,22 @@
+     .selection = data_device_handle_selection,
+ };
+ 
++bool clipboard_start_drag(struct wl_conn *conn)
++{
++    struct display *display = conn->dpy;
++    if (!conn->data_device || !conn->data_device_manager || !conn->pointer_surface)
++        return false;
++    struct wl_data_source *source = wl_data_device_manager_create_data_source(conn->data_device_manager);
++    wl_data_source_add_listener(source, &drag_source_listener, strdup(display->drag_text.c_str()));
++    for (auto mime_type : MIME_TYPES)
++        wl_data_source_offer(source, mime_type.c_str());
++    if (wl_data_source_get_version(source) >= 3)
++        wl_data_source_set_actions(source, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
++    wl_data_device_start_drag(conn->data_device, source, conn->pointer_surface, nullptr, conn->pointer_button_serial);
++    wl_display_flush(conn->display);
++    return true;
++}
++
+ void clipboard_watch_conn(struct wl_conn *conn)
+ {
+     if (conn->data_device)
+@@ -329,6 +375,16 @@
+     return Void();
+ }
+ 
++/* An Android app began dragging text. If the pointer then leaves the Android
++ * display, the drag carries on as a drag of the host, which is what lets the
++ * text be dropped on a desktop window (AuraDE). */
++Return<void> WaydroidClipboard::startDrag(const hidl_string& in) {
++    std::scoped_lock lock(mDisplay->windowsMutex);
++    mDisplay->drag_text = in;
++    mDisplay->drag_armed = !mDisplay->drag_text.empty();
++    return Void();
++}
++
+ Return<void> WaydroidClipboard::getClipboardData(getClipboardData_cb out_cb) {
+     out_cb(mDisplay->clipboard);
+     return Void();
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -2095,6 +2095,17 @@
+     x += off.x;
+     y += off.y;
+ 
++    /* An Android app is dragging text and the pointer has left the display:
++     * the drag carries on as one of the host (AuraDE). */
++    bool hand_over = false;
++    if (x < 0 || y < 0 || x >= display->width || y >= display->height) {
++        std::scoped_lock lock(display->windowsMutex);
++        if (display->drag_armed) {
++            display->drag_armed = false;
++            hand_over = clipboard_start_drag(conn);
++        }
++    }
++
+     ADD_EVENT(EV_ABS, ABS_X, x);
+     ADD_EVENT(EV_ABS, ABS_Y, y);
+     ADD_EVENT(EV_REL, REL_X, x - conn->ptrPrvX);
+@@ -2106,6 +2117,25 @@
+     res = write(display->input_fd[INPUT_POINTER], &event, sizeof(event));
+     if (res < sizeof(event))
+         ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
++
++    if (hand_over) {
++        /* The host now owns the pointer and will not report the button being
++         * let go, so Android's own drag ends here, at the edge. */
++        struct input_event up[2];
++        up[0] = {}; up[1] = {};
++        up[0].time.tv_sec = rt.tv_sec;
++        up[0].time.tv_usec = rt.tv_nsec / 1000;
++        up[0].type = EV_KEY;
++        up[0].code = BTN_LEFT;
++        up[0].value = 0;
++        up[1].time = up[0].time;
++        up[1].type = EV_SYN;
++        up[1].code = SYN_REPORT;
++        res = write(display->input_fd[INPUT_POINTER], &up, sizeof(up));
++        if (res < sizeof(up))
++            ALOGE("Failed to write event for InputFlinger: %s", strerror(errno));
++        ALOGI("dnd: text drag from Android handed to the host");
++    }
+ }
+ 
+ void
+@@ -2147,7 +2177,7 @@
+ 
+ static void
+ pointer_handle_button(void *data, struct wl_pointer *,
+-                      uint32_t, uint32_t, uint32_t button,
++                      uint32_t serial, uint32_t, uint32_t button,
+                       uint32_t state)
+ {
+     struct wl_conn *conn = (struct wl_conn *)data;
+@@ -2156,6 +2186,14 @@
+     struct timespec rt;
+     unsigned int res, n = 0;
+ 
++    if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
++        conn->pointer_button_serial = serial;
++    } else {
++        /* The drag ended inside Android: nothing is left to hand to the host. */
++        std::scoped_lock lock(display->windowsMutex);
++        display->drag_armed = false;
++    }
++
+     if (ensure_pipe(display, INPUT_POINTER))
+         return;
+ 
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -252,6 +252,9 @@
+     std::map<struct zwp_tablet_tool_v2 *, uint16_t> tablet_tools_evt;
+     uint32_t keyboard_enter_serial;
+     uint32_t pointer_enter_serial;
++    /* Serial of the last press of a pointer button, which a drag of the host
++     * has to quote. */
++    uint32_t pointer_button_serial;
+ 
+     /* Accumulated fractions of this connection's wl_pointer axis events. */
+     double wheelAccumulatorX;
+@@ -421,6 +424,10 @@
+  * WaydroidClipboard.cpp. */
+ void clipboard_watch_conn(struct wl_conn *conn);
+ 
++/* Starts a drag of the host that carries display->drag_text. Defined in
++ * WaydroidClipboard.cpp; the connection is the one holding the pressed pointer. */
++bool clipboard_start_drag(struct wl_conn *conn);
++
+ /* Types Ctrl+V into Android. */
+ bool hwc_inject_paste(struct display *display);
+ 
+@@ -719,6 +726,11 @@
+ 
+     std::string clipboard;
+     std::list<std::string> clipboard_offer_mime_types;
++    /* Text an Android app is dragging, ready to become a drag of the host if
++     * the pointer leaves the display before the button is let go (AuraDE).
++     * Guarded by windowsMutex. */
++    std::string drag_text;
++    bool drag_armed = false;
+     /* Which connection the host gave keyboard focus to; empty means ctl. The
+      * selection and its serial belong to the focused client, so with a
+      * session per task the clipboard has to follow focus. Stored as a task ID

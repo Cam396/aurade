@@ -1,0 +1,18 @@
+diff --git a/services/core/java/com/android/server/wm/DragDropController.java b/services/core/java/com/android/server/wm/DragDropController.java
+--- a/services/core/java/com/android/server/wm/DragDropController.java
++++ b/services/core/java/com/android/server/wm/DragDropController.java
+@@ -305,6 +305,14 @@
+                     Slog.i(TAG_WM, "<<< CLOSE TRANSACTION performDrag");
+                 }
+             }
++            // Text being dragged can be carried on to the desktop (AuraDE).
++            if (data != null && data.getItemCount() > 0) {
++                final CharSequence text = data.getItemAt(0).getText();
++                if (text != null && text.length() > 0) {
++                    id.waydro.waydroid.WaydroidClipboard.getInstance(mService.mContext)
++                            .startDrag(text.toString());
++                }
++            }
+             return dragToken;    // success!
+         } finally {
+             mCallback.get().postPerformDrag();
