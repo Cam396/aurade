@@ -761,20 +761,29 @@ download_arch_packages() {
   install -d -m 0755 "$ARCH_CACHE"
   start_rate_sampler "$ARCH_CACHE"
 
-  for attempt in 1 2 3; do
-    rm -f -- "$ARCH_CACHE"/*
+  # A slow link can need several attempts. Each attempt keeps what earlier ones
+  # downloaded (pacman resumes partial files), so an attempt that grew the cache
+  # is not a failure. The cache is only cleared after a bad signature. The
+  # timeout kills pacman without letting it remove its lock, and the lock is in
+  # this installer's private database, so it is cleared before every attempt.
+  local failures=0 max_attempts=${AURADE_ARCH_ACQUIRE_MAX_ATTEMPTS:-12} before after
+  attempt=0
+  while (( failures < 3 && attempt < max_attempts )); do
+    attempt=$(( attempt + 1 ))
+    rm -f -- "$ARCH_DB_PATH/db.lck"
+    before=$(du -sb "$ARCH_CACHE" 2>/dev/null | cut -f1)
     local attempt_log="$WORK_DIR/arch-acquire-${attempt}.log"
     : >"$attempt_log"
     if (( changed_disk )); then
-      log "downloading the pinned package set to the new disk (attempt ${attempt}/3)"
+      log "downloading the pinned package set to the new disk (attempt ${attempt})"
     else
-      log "downloading the pinned package set before changing $TARGET (attempt ${attempt}/3)"
+      log "downloading the pinned package set before changing $TARGET (attempt ${attempt})"
     fi
     if run_download_logged "$stage" "$attempt_log" timeout --foreground "$acquire_timeout" \
         pacman --config "$ARCH_PACMAN_CONF" --cachedir "$ARCH_CACHE" \
         --disable-sandbox -Sw --needed --noconfirm "${BASE_PACKAGES[@]}"; then
       mapfile -t ARCH_PACKAGE_FILES < <(
-        find "$ARCH_CACHE" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -print | LC_ALL=C sort
+        find "$ARCH_CACHE" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' ! -name '*.part' -print | LC_ALL=C sort
       )
       ((${#ARCH_PACKAGE_FILES[@]} > 0)) || die 'Arch package acquisition produced no package files'
       if verify_arch_package_signatures "$attempt_log"; then
@@ -785,12 +794,21 @@ download_arch_packages() {
         die_keyring_failure
       fi
       signature_failure_seen=1
+      failures=$(( failures + 1 ))
+      rm -f -- "$ARCH_CACHE"/*
       log 'one or more package signatures were invalid. Clearing the cache and retrying.'
+      continue
     fi
     if pacman_keyring_failure "$attempt_log"; then
       die_keyring_failure
     fi
-    (( attempt < 3 )) && log 'package acquisition failed. Trying once more.'
+    after=$(du -sb "$ARCH_CACHE" 2>/dev/null | cut -f1)
+    if [[ $before =~ ^[0-9]+$ && $after =~ ^[0-9]+$ ]] && (( after > before )); then
+      log 'the download is still going. Continuing where it stopped.'
+    else
+      failures=$(( failures + 1 ))
+      (( failures < 3 )) && log 'package acquisition failed. Trying once more.'
+    fi
   done
   stop_rate_sampler
   if (( ! acquired )); then

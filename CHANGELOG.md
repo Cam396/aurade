@@ -2,6 +2,15 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## Unreleased
+
+### Fixed
+- The installer no longer fails on a slow connection. When downloading the
+  packages took longer than 30 minutes, the stopped download left a lock
+  behind, so both retries failed at once, and each retry started over from
+  nothing. Now each attempt continues where the last one stopped, and an
+  attempt that made progress does not count as a failure.
+
 ## 1.3.2, 2026-10-20
 
 ### Fixed

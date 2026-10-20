@@ -50,6 +50,7 @@ TESTS=(
   test-progress-motion.sh
   test-download-rate.sh
   test-package-staging.sh
+  test-acquire-resume.sh
   test-die-cause.sh
   test-gui-runtime.sh
   test-network-diagnostics.sh
