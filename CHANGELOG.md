@@ -2,6 +2,19 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## Unreleased
+
+### Fixed
+- Android apps showed the time in GMT. Android has its own time zone and,
+  with no phone network to detect one from, never left GMT. It now takes the
+  desktop's time zone when it starts and follows a change made in Settings
+  while it runs.
+- When an Android app stopped responding, every Android window stopped
+  taking clicks and keys. Android's dialog that asks what to do about the app
+  never reached the desktop, and while it waited unseen it held all input. It
+  most often happened right after a slow boot. Android now closes the app
+  instead, and the other apps keep working.
+
 ## 1.3.1, 2026-10-19
 
 ### Fixed
@@ -14,7 +27,8 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 ## 1.3.0, 2026-10-19
 
 ### Added
-- Android apps, in the optional aurade-android package. Android 17 (LineageOS
+- Android apps, in the aurade-android package, which the ISO installs (an
+  existing system adds it with pacman). Android 17 (LineageOS
   24) runs in a container and its apps open as ordinary desktop windows, in
   the launcher and the shelf, with no Google account and no Play Store.
   F-Droid comes with it. Settings > Apps > Android turns it on and off; off

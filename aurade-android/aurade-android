@@ -1055,6 +1055,8 @@ class Android(dbus.service.Object):
         else:
             return
         self.skip_setup_wizard()
+        self.hide_error_dialogs()
+        self.sync_time_zone()
         want = str(BRIDGE_VERSION)
         res = self.guest("/system/bin/pm", "list", "packages", "--show-versioncode", BRIDGE_PKG)
         if f"versionCode:{want}" not in res.stdout:
@@ -1088,6 +1090,44 @@ class Android(dbus.service.Object):
         self.guest("/system/bin/pm", "disable-user", "--user", "0", "org.lineageos.setupwizard", timeout=20)
         self.guest("/system/bin/am", "force-stop", "org.lineageos.setupwizard", timeout=20)
         log("Android setup wizard turned off")
+
+    def hide_error_dialogs(self):
+        """Android asks what to do about an app that stopped responding in a
+        dialog of its own, which is not an app window and so never reaches the
+        desktop. Unseen, it still takes every click and key from every Android
+        app until it is answered. With the dialogs off Android closes the app
+        instead, and its window goes away on the desktop."""
+        res = self.guest("/system/bin/settings", "get", "global", "hide_error_dialogs", timeout=20)
+        if res.stdout.strip() != "1":
+            self.guest("/system/bin/settings", "put", "global", "hide_error_dialogs", "1", timeout=20)
+            log("Android error dialogs turned off")
+
+    def sync_time_zone(self, zone=None):
+        """Android keeps its own time zone and, with no phone network or
+        location to detect one from, leaves it at GMT. Give it the desktop's
+        and turn its own detection off so nothing moves it back."""
+        zone = zone or host_time_zone()
+        if not zone:
+            return
+        cur = self.guest("/system/bin/getprop", "persist.sys.timezone", timeout=10)
+        auto = self.guest("/system/bin/settings", "get", "global", "auto_time_zone", timeout=20)
+        if cur.stdout.strip() == zone and auto.stdout.strip() == "0":
+            return
+        self.guest("/system/bin/settings", "put", "global", "auto_time_zone", "0", timeout=20)
+        self.guest("/system/bin/cmd", "alarm", "set-timezone", zone, timeout=20)
+        log(f"Android time zone set to {zone}")
+
+    def on_timedate(self, iface, changed, invalidated):
+        """The desktop's time zone changed (AuraDE's Settings go through
+        timedated); a running Android follows it."""
+        if "Timezone" not in changed and "Timezone" not in invalidated:
+            return
+        if not (self.session and self.session[1].poll() is None):
+            return
+        zone = str(changed.get("Timezone", "")) or None
+        if zone and not TIME_ZONE_RE.fullmatch(zone):
+            return
+        threading.Thread(target=self.sync_time_zone, args=(zone,), daemon=True).start()
 
     def outbox_dir(self, uid):
         return os.path.join(pwd.getpwuid(uid).pw_dir, ".local/share/waydroid/data/media/0",
@@ -1659,6 +1699,22 @@ RELEASE_KEYRING = "/usr/share/aurade-android/release.gpg"
 TRUSTED_DIR = "/etc/aurade-android/trusted.d"
 
 
+TIME_ZONE_RE = re.compile(r"[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*")
+
+
+def host_time_zone():
+    """The desktop's time zone as an Olson id, from where /etc/localtime
+    points; None when it is not a link into the zone database."""
+    try:
+        target = os.readlink("/etc/localtime")
+    except OSError:
+        return None
+    zone = target.split("zoneinfo/", 1)[1] if "zoneinfo/" in target else ""
+    if zone.startswith(("posix/", "right/")):
+        zone = zone.split("/", 1)[1]
+    return zone if TIME_ZONE_RE.fullmatch(zone) else None
+
+
 def virtual_gpu():
     for dev in glob.glob("/sys/class/drm/card*/device/vendor"):
         try:
@@ -1783,6 +1839,9 @@ def main():
     svc = Android(bus, loop)
     svc.bus_name = bus_name
     svc.adopt_session()
+    bus.add_signal_receiver(svc.on_timedate, signal_name="PropertiesChanged",
+                            dbus_interface="org.freedesktop.DBus.Properties",
+                            path="/org/freedesktop/timedate1")
     def refresh_later():
         threading.Thread(target=svc.refresh_manifest, daemon=True).start()
         return True
