@@ -10,6 +10,25 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   behind, so both retries failed at once, and each retry started over from
   nothing. Now each attempt continues where the last one stopped, and an
   attempt that made progress does not count as a failure.
+- The Android page in Settings showed Android as it was when the page first
+  opened, so an image update or a newly installed app did not show until
+  Settings was closed. It now reads Android again each time the page is
+  opened or its window comes back into view.
+- Updating the Android image could show a one-time "Removable device
+  detected" message in Files. The image is a system disk, not a drive that
+  was plugged in, and Files no longer treats it as one.
+- An Android app that opens full screen for a moment, such as the install
+  prompt, could look stretched until it settled. Its window now takes the
+  size the app draws.
+- Opening the first Android app after Android started could add a second,
+  blank app to the shelf that opened nothing when clicked. It was Android's
+  own desktop background, and it no longer shows.
+
+### Added
+- Android has virtual sensors for testing apps: accelerometer, gyroscope,
+  magnetometer, light, proximity, pressure, temperature, humidity and hinge
+  angle. Each holds a resting value and can be changed for a test, for
+  example `setprop aurade.sensor.accel 9.8,0,0` turns the device on its side.
 
 ## 1.3.2, 2026-10-20
 
