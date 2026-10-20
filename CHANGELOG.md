@@ -2,7 +2,7 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
-## Unreleased
+## 1.3.2, 2026-10-20
 
 ### Fixed
 - Android apps showed the time in GMT. Android has its own time zone and,
@@ -18,8 +18,12 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   install, so apps from a store such as Aurora Store never installed. A
   window that opened under a still pointer was pressed where the pointer had
   last moved in another window, and a prompt shown stretched was pressed
-  beside the button aimed at. Clicks now land where the pointer is. The fix
-  is in the next Android image.
+  beside the button aimed at. Clicks now land where the pointer is.
+- An Android window grown from Phone to Resizable could run off the bottom
+  or right of the screen, where it was neither drawn nor clickable. Android
+  now keeps a growing window on the screen.
+- The last two fixes are in Android image 2026-10-23. Settings > Apps >
+  Android offers it as an update; it does not need a new package.
 
 ## 1.3.1, 2026-10-19
 
