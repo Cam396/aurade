@@ -647,6 +647,12 @@ if [ "${AURADE_ANDROID}" = "auto" ]; then
     fi
 fi
 if [ "${AURADE_ANDROID}" = "1" ]; then
+    # Ash reads /run/arc/host_generated/build.prop while it starts, and the
+    # service writes it when it starts. D-Bus only starts the service on its
+    # first call, so make that call now or the first boot after installing
+    # the package never brings Android up.
+    timeout 15 busctl --system call org.aurade.Android1 /org/aurade/Android1 \
+        org.freedesktop.DBus.Peer Ping >/dev/null 2>&1 || true
     FLAGS+=(
         --aurade-android
         --arc-availability=officially-supported

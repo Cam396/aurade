@@ -2,6 +2,15 @@
 
 Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 
+## 1.3.1, 2026-10-19
+
+### Fixed
+- Android did not come up the first time on a computer that had just
+  installed aurade-android, a fresh install from the 1.3.0 ISO included:
+  turning Android on did nothing. The Android service starts only when
+  something calls it, so the desktop began without the file the service
+  writes for it. The desktop now starts the service first.
+
 ## 1.3.0, 2026-10-19
 
 ### Added
