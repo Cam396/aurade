@@ -1,0 +1,33 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -230,6 +230,19 @@
+     window->last_layer_buffer = nullptr;
+ }
+ 
++/* Android says it will not resize this task while it is full screen (the
++ * install prompt always is), so holding the asked size would only show its
++ * buffer stretched until the hold runs out. */
++static bool
++task_keeps_its_size(const struct wl_conn *conn)
++{
++    if (!conn || conn->is_ctl || !conn->task_id)
++        return false;
++    char value[PROPERTY_VALUE_MAX];
++    const std::string name = "waydroid.trs_no." + std::to_string(conn->task_id);
++    return property_get(name.c_str(), value, nullptr) > 0 && value[0] == '1';
++}
++
+ /* Attach a task-stream buffer that was stashed while the window could not
+  * take it (initial configure not acked yet, or card deactivated). Runs on the
+  * wayland thread. */
+@@ -252,7 +265,8 @@
+          * the window at what was asked, or the stale buffer sizes it back. */
+         if (window->cfg_w > 0) {
+             if ((w == window->cfg_w && h == window->cfg_h) ||
+-                std::chrono::steady_clock::now() > window->cfg_until) {
++                std::chrono::steady_clock::now() > window->cfg_until ||
++                task_keeps_its_size(window->conn)) {
+                 window->cfg_w = window->cfg_h = 0;
+             } else {
+                 w = window->cfg_w;

@@ -1,0 +1,31 @@
+diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java/id/waydro/server/WayDroidService.java
+--- a/services/java/id/waydro/server/WayDroidService.java
++++ b/services/java/id/waydro/server/WayDroidService.java
+@@ -478,10 +478,25 @@
+     }
+ 
+     /* False when the task cannot take the size yet (it is still opening and
+-     * is not freeform), so the request is kept and tried again. */
++     * is not freeform), so the request is kept and tried again. While a task
++     * is full screen it takes no size at all (the install prompt never leaves
++     * full screen; an app opened with no desk does after a moment): the window
++     * layer is told, so it shows the task at the size Android draws it instead
++     * of stretching it to the one asked. */
++    private final java.util.HashSet<Integer> mFullscreenTasks = new java.util.HashSet<>();
++
+     private boolean resizeOneTask(int taskId, String req) {
+         try {
+-            if (windowingModeOf(taskId) != WindowConfiguration.WINDOWING_MODE_FREEFORM)
++            int mode = windowingModeOf(taskId);
++            boolean full = mode == WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
++            if (full != mFullscreenTasks.contains(taskId)) {
++                SystemProperties.set("waydroid.trs_no." + taskId, full ? "1" : "0");
++                if (full)
++                    mFullscreenTasks.add(taskId);
++                else
++                    mFullscreenTasks.remove(taskId);
++            }
++            if (mode != WindowConfiguration.WINDOWING_MODE_FREEFORM)
+                 return false;
+             String[] f = req.split(",");
+             int w = Integer.parseInt(f[0]);
