@@ -40,7 +40,7 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
          if (taskId > 0) {
              try {
                  ActivityTaskManager.getService().moveTaskToFront(null /* appThread */,
-@@ -358,7 +368,146 @@
+@@ -358,7 +368,157 @@
              }
          }
  
@@ -178,6 +178,17 @@ diff --git a/services/java/id/waydro/server/WayDroidService.java b/services/java
 +                if (dy < 0 || dy > 400) dy = 0;
 +            }
 +            Rect next = new Rect(cur.left, cur.top, cur.left + w + dx, cur.top + h + dy);
++            /* A window that grows keeps its top left, and a small window
++             * placed near the middle can then grow past the edge of the
++             * display: what lies outside is never drawn and takes no input.
++             * Move it back on, the same as the desktop does with its window. */
++            android.graphics.Point size = new android.graphics.Point();
++            android.view.WindowManagerGlobal.getWindowManagerService()
++                    .getBaseDisplaySize(android.view.Display.DEFAULT_DISPLAY, size);
++            if (size.x > 0 && next.right > size.x)
++                next.offset(Math.max(-next.left, size.x - next.right), 0);
++            if (size.y > 0 && next.bottom > size.y)
++                next.offset(0, Math.max(-next.top, size.y - next.bottom));
 +            if (next.equals(cur))
 +                return true;
 +            ActivityTaskManager.getService().resizeTask(taskId, next,
