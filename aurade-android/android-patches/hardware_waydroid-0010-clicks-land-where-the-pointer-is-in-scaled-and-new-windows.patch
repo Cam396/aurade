@@ -1,0 +1,173 @@
+diff --git a/hwcomposer/wayland-hwc.cpp b/hwcomposer/wayland-hwc.cpp
+--- a/hwcomposer/wayland-hwc.cpp
++++ b/hwcomposer/wayland-hwc.cpp
+@@ -246,6 +246,8 @@
+         const double scale = display->scale > 0 ? display->scale : 1.0;
+         int w = int(buf->metadata.width / scale);
+         int h = int(buf->metadata.height / scale);
++        window->buf_w = w;
++        window->buf_h = h;
+         /* The host asked for another size and Android has not caught up: keep
+          * the window at what was asked, or the stale buffer sizes it back. */
+         if (window->cfg_w > 0) {
+@@ -490,6 +492,20 @@
+     return f;
+ }
+ 
++/* AuraDE: a window can show its stream scaled: the host asked for a size
++ * and Android has not drawn at it yet, or never will, as with a dialog whose
++ * task cannot be resized. Input comes in window units; Android wants stream
++ * units, or a click lands beside what it was aimed at (outside a dialog, which
++ * then closes as if dismissed). */
++static void window_to_stream(struct wl_conn *conn, struct wl_surface *surface,
++                             int *x, int *y);
++
++/* AuraDE: the window keeps the size the host asked for until Android draws
++ * at it, for a few seconds at most, and that is checked when a frame arrives.
++ * A dialog that cannot be resized and does not redraw would stay stretched to
++ * the asked size, so the pointer coming over the window checks too. */
++static void release_expired_hold(struct wl_conn *conn, struct wl_surface *surface);
++
+ /* Input lands on whichever surface the compositor picked: a toplevel or one of
+  * its layer subsurfaces. Both carry their window as user data, but a freed
+  * proxy's memory can be handed back out by another connection's next
+@@ -519,6 +535,41 @@
+     return nullptr;
+ }
+ 
++static void
++window_to_stream(struct wl_conn *conn, struct wl_surface *surface, int *x, int *y)
++{
++    if (conn->is_ctl || !property_get_bool("persist.aurade.multiwin", false))
++        return;
++    std::scoped_lock lock(conn->dpy->windowsMutex);
++    struct window *w = window_for_surface(conn, surface);
++    if (!w || w->stream_w <= 0 || w->stream_h <= 0 || w->buf_w <= 0 || w->buf_h <= 0)
++        return;
++    if (w->stream_w != w->buf_w)
++        *x = int(int64_t(*x) * w->buf_w / w->stream_w);
++    if (w->stream_h != w->buf_h)
++        *y = int(int64_t(*y) * w->buf_h / w->stream_h);
++}
++
++static void
++release_expired_hold(struct wl_conn *conn, struct wl_surface *surface)
++{
++    if (conn->is_ctl || !property_get_bool("persist.aurade.multiwin", false))
++        return;
++    std::scoped_lock lock(conn->dpy->windowsMutex);
++    struct window *w = window_for_surface(conn, surface);
++    if (!w || w->cfg_w <= 0 || w->buf_w <= 0 || w->buf_h <= 0 || !w->viewport ||
++        std::chrono::steady_clock::now() <= w->cfg_until)
++        return;
++    w->cfg_w = w->cfg_h = 0;
++    if (w->stream_w == w->buf_w && w->stream_h == w->buf_h)
++        return;
++    w->stream_w = w->buf_w;
++    w->stream_h = w->buf_h;
++    wp_viewport_set_destination(w->viewport, w->buf_w, w->buf_h);
++    wl_surface_commit(w->surface);
++    wl_display_flush(conn->display);
++}
++
+ /* Android can background a task by itself -- back on the root activity, an
+  * in-app exit -- while the host keeps showing and focusing its card. Focus
+  * edges say nothing then: the host focus never changed, so no ACTIVATED edge
+@@ -2165,9 +2216,13 @@
+ static void gesture_swipe_end(struct wl_conn* conn);
+ 
+ static void
+-pointer_handle_enter(void *data, struct wl_pointer *,
++pointer_handle_motion(void *data, struct wl_pointer *pointer,
++                      uint32_t time, wl_fixed_t sx, wl_fixed_t sy);
++
++static void
++pointer_handle_enter(void *data, struct wl_pointer *pointer,
+                      uint32_t serial, struct wl_surface *surface,
+-                     wl_fixed_t, wl_fixed_t)
++                     wl_fixed_t sx, wl_fixed_t sy)
+ {
+     if (!surface) {
+         // The surface this enter event corresponds to was already destroyed
+@@ -2178,6 +2233,7 @@
+     struct display *display = conn->dpy;
+     conn->pointer_surface = surface;
+     conn->pointer_enter_serial = serial;
++    release_expired_hold(conn, surface);
+     /* The cursor handler is ctl's: it draws on ctl's surfaces and answers with
+      * ctl's serial, so a task connection's enter must not drive it. Android's
+      * own cursor images are therefore not shown over a streamed card; the host
+@@ -2185,6 +2241,11 @@
+      * disconnect and hwc_set recreating it. */
+     if (conn->is_ctl && display->cursor_handler)
+         display->cursor_handler->on_cursor_enter(display);
++    /* AuraDE: Android's pointer is shared by every window and stays where the
++     * last motion left it. A window that opens under a still pointer, or one
++     * clicked right after the pointer enters, would otherwise be pressed at
++     * that old spot, outside a dialog, which closes as if cancelled. */
++    pointer_handle_motion(data, pointer, 0, sx, sy);
+ }
+ 
+ static void
+@@ -2217,8 +2278,10 @@
+         ALOGE("%s:%d error in touch clock_gettime: %s",
+               __FILE__, __LINE__, strerror(errno));
+     }
++    release_expired_hold(conn, conn->pointer_surface);
+     x = wl_fixed_to_int(sx);
+     y = wl_fixed_to_int(sy);
++    window_to_stream(conn, conn->pointer_surface, &x, &y);
+     if (display->scale != 1) {
+         x = int(x * display->scale);
+         y = int(y * display->scale);
+@@ -2563,6 +2626,7 @@
+     }
+     x = wl_fixed_to_int(x_w);
+     y = wl_fixed_to_int(y_w);
++    window_to_stream(conn, surface, &x, &y);
+     if (display->scale != 1) {
+         x = int(x * display->scale);
+         y = int(y * display->scale);
+@@ -2636,15 +2700,16 @@
+             ALOGE("%s:%d error in touch clock_gettime: %s",
+                   __FILE__, __LINE__, strerror(errno));
+         }
++        auto ts = conn->touch_surfaces.find(id);
++        struct wl_surface *tsurf = ts == conn->touch_surfaces.end() ? nullptr : ts->second;
+         x = wl_fixed_to_int(x_w);
+         y = wl_fixed_to_int(y_w);
++        window_to_stream(conn, tsurf, &x, &y);
+         if (display->scale != 1) {
+             x = int(x * display->scale);
+             y = int(y * display->scale);
+         }
+-        auto ts = conn->touch_surfaces.find(id);
+-        const struct layerFrame off =
+-            layer_offset(conn, ts == conn->touch_surfaces.end() ? nullptr : ts->second);
++        const struct layerFrame off = layer_offset(conn, tsurf);
+         x += off.x;
+         y += off.y;
+ 
+@@ -3350,6 +3415,7 @@
+         }
+         x = wl_fixed_to_int(x_w);
+         y = wl_fixed_to_int(y_w);
++        window_to_stream(conn, conn->tablet_surface, &x, &y);
+         if (display->scale != 1) {
+             x = int(x * display->scale);
+             y = int(y * display->scale);
+diff --git a/hwcomposer/wayland-hwc.h b/hwcomposer/wayland-hwc.h
+--- a/hwcomposer/wayland-hwc.h
++++ b/hwcomposer/wayland-hwc.h
+@@ -364,6 +364,11 @@
+     int cfg_w = 0;
+     int cfg_h = 0;
+     std::chrono::steady_clock::time_point cfg_until;
++    /* Size of the last stream buffer, in surface units (multiwin). It differs
++     * from stream_w/h while the window shows the buffer scaled to the asked
++     * size. */
++    int buf_w = 0;
++    int buf_h = 0;
+ 
+     /* Last XDG_TOPLEVEL_STATE_ACTIVATED state seen from the host compositor.
+      * Used to detect the rising edge so a Lomiri-driven focus/raise of this

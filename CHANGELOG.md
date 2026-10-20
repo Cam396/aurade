@@ -14,6 +14,12 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   never reached the desktop, and while it waited unseen it held all input. It
   most often happened right after a slow boot. Android now closes the app
   instead, and the other apps keep working.
+- Pressing Install in Android's "Install this app?" prompt cancelled the
+  install, so apps from a store such as Aurora Store never installed. A
+  window that opened under a still pointer was pressed where the pointer had
+  last moved in another window, and a prompt shown stretched was pressed
+  beside the button aimed at. Clicks now land where the pointer is. The fix
+  is in the next Android image.
 
 ## 1.3.1, 2026-10-19
 
