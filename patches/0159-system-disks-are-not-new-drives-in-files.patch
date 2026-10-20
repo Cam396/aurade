@@ -1,0 +1,16 @@
+diff --git a/chromeos/ash/components/disks/disk_mount_manager.cc b/chromeos/ash/components/disks/disk_mount_manager.cc
+index 469521736fb4..f4b50597d299 100644
+--- a/chromeos/ash/components/disks/disk_mount_manager.cc
++++ b/chromeos/ash/components/disks/disk_mount_manager.cc
+@@ -1035,7 +1035,10 @@ class DiskMountManagerImpl : public DiskMountManager,
+           previous_mounts.contains(disk->device_path())
+               ? previous_mounts[disk->device_path()]
+               : std::string();
+-      if (old_mount == disk->mount_path()) {
++      // A system disk (the root, /boot, the Android images) mounts and
++      // unmounts on its own; Files must not take it for a drive just plugged
++      // in. cros-disks never reported these, so Files has no filter for them.
++      if (old_mount == disk->mount_path() || disk->is_hidden()) {
+         continue;
+       }
+       if (!old_mount.empty()) {

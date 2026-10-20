@@ -1,0 +1,42 @@
+diff --git a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
+index af5bd8b95006..a2a56c2f8cab 100644
+--- a/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
++++ b/chrome/browser/resources/ash/settings/os_apps_page/android_apps_subpage.ts
+@@ -144,8 +144,16 @@ export class SettingsAndroidAppsSubpageElement extends
+           'aurade-android-network-apps', (apps: AuradeNetworkApp[]) => {
+             this.auradeNetworkApps_ = apps;
+           });
+-      AndroidAppsBrowserProxyImpl.getInstance().requestAuradeAndroidInfo();
+-      AndroidAppsBrowserProxyImpl.getInstance().requestAuradeNetworkApps();
++      this.requestAuradeState_();
++      // Settings keeps this page while its window is open, so what the page
++      // first read goes stale: an image update found later, or apps installed
++      // since. Read again whenever the window comes back into view.
++      document.addEventListener('visibilitychange', () => {
++        if (document.visibilityState === 'visible' &&
++            Router.getInstance().currentRoute === this.route) {
++          this.requestAuradeState_();
++        }
++      });
+     }
+ 
+     this.addFocusConfig(
+@@ -161,9 +169,18 @@ export class SettingsAndroidAppsSubpageElement extends
+       return;
+     }
+ 
++    // Each visit shows Android as it is now, not as it was on the first one.
++    if (this.auradeAndroid_ && oldRoute) {
++      this.requestAuradeState_();
++    }
+     this.attemptDeepLink();
+   }
+ 
++  private requestAuradeState_(): void {
++    AndroidAppsBrowserProxyImpl.getInstance().requestAuradeAndroidInfo();
++    AndroidAppsBrowserProxyImpl.getInstance().requestAuradeNetworkApps();
++  }
++
+   private onPlayStoreEnabledChanged_(enabled: boolean): void {
+     if (!enabled &&
+         Router.getInstance().currentRoute === routes.ANDROID_APPS_DETAILS) {
