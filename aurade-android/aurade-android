@@ -1231,6 +1231,22 @@ class Android(dbus.service.Object):
         return subprocess.run(LXC + list(args), capture_output=True, text=True,
                               timeout=timeout, check=False)
 
+    # Android's own screens behind the windows: the window layer never shows
+    # them (hwcomposer.cpp blacklisted_apps), so the shelf must not either, or
+    # it gets an app with no icon and no window. None means every activity.
+    HIDDEN_TASKS = {
+        "com.android.launcher3": None,
+        "com.android.settings": {"com.android.settings.FallbackHome"},
+        "com.android.systemui": {"com.android.wm.shell.desktopmode.DesktopWallpaperActivity"},
+    }
+
+    @classmethod
+    def hidden_task(cls, pkg, activity):
+        if pkg not in cls.HIDDEN_TASKS:
+            return False
+        acts = cls.HIDDEN_TASKS[pkg]
+        return acts is None or activity in acts
+
     @staticmethod
     def full_activity(pkg, act):
         if act.startswith("."):
@@ -1542,8 +1558,9 @@ class Android(dbus.service.Object):
         for line in lines:
             m = re.search(r"taskCreated (\d+) (\S+)/(\S+)", line)
             if m:
-                tid, pkg, act = int(m.group(1)), m.group(2), m.group(3)
-                self.TaskCreated(tid, pkg, self.full_activity(pkg, act))
+                tid, pkg, act = int(m.group(1)), m.group(2), self.full_activity(m.group(2), m.group(3))
+                if not self.hidden_task(pkg, act):
+                    self.TaskCreated(tid, pkg, act)
                 continue
             m = re.search(r"taskRemoved (\d+)", line)
             if m:
