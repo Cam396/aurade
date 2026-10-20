@@ -1,0 +1,160 @@
+diff --git a/sensors/aidl/default/Sensor.cpp b/sensors/aidl/default/Sensor.cpp
+--- a/sensors/aidl/default/Sensor.cpp
++++ b/sensors/aidl/default/Sensor.cpp
+@@ -16,10 +16,15 @@
+ 
+ #include "sensors-impl/Sensor.h"
+ 
++#include <android-base/properties.h>
++#include <android-base/strings.h>
+ #include <log/log.h>
+ #include "utils/SystemClock.h"
+ 
+ #include <cmath>
++#include <cstdlib>
++#include <string>
++#include <vector>
+ #include <sched.h>
+ 
+ using ::ndk::ScopedAStatus;
+@@ -31,6 +36,41 @@
+ 
+ static constexpr int32_t kDefaultMaxDelayUs = 10 * 1000 * 1000;
+ 
++// AuraDE: these sensors are virtual. Each reads its value from the property
++// aurade.sensor.<name> when that is set ("x,y,z" for a vector, one number
++// otherwise), so an app can be tested lying flat, turned, in the dark or with
++// something near; with it unset the sensor keeps the value below.
++static void overrideFrom(const char* name, float* values, size_t count) {
++    std::string raw = ::android::base::GetProperty(std::string("aurade.sensor.") + name, "");
++    if (raw.empty()) return;
++    std::vector<std::string> parts = ::android::base::Split(raw, ",");
++    if (parts.size() != count) return;
++    float parsed[3];
++    for (size_t i = 0; i < count; i++) {
++        char* end = nullptr;
++        parsed[i] = strtof(parts[i].c_str(), &end);
++        if (end == parts[i].c_str() || !std::isfinite(parsed[i])) return;
++    }
++    for (size_t i = 0; i < count; i++) values[i] = parsed[i];
++}
++
++static void setVec3(Event::EventPayload& payload, const char* name, float x, float y, float z) {
++    float v[3] = {x, y, z};
++    overrideFrom(name, v, 3);
++    Event::EventPayload::Vec3 vec3 = {
++            .x = v[0],
++            .y = v[1],
++            .z = v[2],
++            .status = SensorStatus::ACCURACY_HIGH,
++    };
++    payload.set<Event::EventPayload::Tag::vec3>(vec3);
++}
++
++static void setScalar(Event::EventPayload& payload, const char* name, float value) {
++    overrideFrom(name, &value, 1);
++    payload.set<Event::EventPayload::Tag::scalar>(value);
++}
++
+ Sensor::Sensor(ISensorsEventCallback* callback)
+     : mIsEnabled(false),
+       mSamplingPeriodNs(0),
+@@ -228,13 +268,7 @@
+ };
+ 
+ void AccelSensor::readEventPayload(EventPayload& payload) {
+-    EventPayload::Vec3 vec3 = {
+-            .x = 0,
+-            .y = 0,
+-            .z = 9.8,
+-            .status = SensorStatus::ACCURACY_HIGH,
+-    };
+-    payload.set<EventPayload::Tag::vec3>(vec3);
++    setVec3(payload, "accel", 0, 0, 9.8f);
+ }
+ 
+ PressureSensor::PressureSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -257,7 +291,7 @@
+ };
+ 
+ void PressureSensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(1013.25f);
++    setScalar(payload, "pressure", 1013.25f);
+ }
+ 
+ MagnetometerSensor::MagnetometerSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -280,13 +314,7 @@
+ };
+ 
+ void MagnetometerSensor::readEventPayload(EventPayload& payload) {
+-    EventPayload::Vec3 vec3 = {
+-            .x = 100.0,
+-            .y = 0,
+-            .z = 50.0,
+-            .status = SensorStatus::ACCURACY_HIGH,
+-    };
+-    payload.set<EventPayload::Tag::vec3>(vec3);
++    setVec3(payload, "magnetic", 100.0f, 0, 50.0f);
+ }
+ 
+ LightSensor::LightSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -309,7 +337,7 @@
+ };
+ 
+ void LightSensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(80.0f);
++    setScalar(payload, "light", 80.0f);
+ }
+ 
+ ProximitySensor::ProximitySensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -333,7 +361,7 @@
+ };
+ 
+ void ProximitySensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(2.5f);
++    setScalar(payload, "proximity", 2.5f);
+ }
+ 
+ GyroSensor::GyroSensor(int32_t sensorHandle, ISensorsEventCallback* callback) : Sensor(callback) {
+@@ -355,13 +383,7 @@
+ };
+ 
+ void GyroSensor::readEventPayload(EventPayload& payload) {
+-    EventPayload::Vec3 vec3 = {
+-            .x = 0,
+-            .y = 0,
+-            .z = 0,
+-            .status = SensorStatus::ACCURACY_HIGH,
+-    };
+-    payload.set<EventPayload::Tag::vec3>(vec3);
++    setVec3(payload, "gyro", 0, 0, 0);
+ }
+ 
+ AmbientTempSensor::AmbientTempSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -384,7 +406,7 @@
+ };
+ 
+ void AmbientTempSensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(40.0f);
++    setScalar(payload, "temperature", 40.0f);
+ }
+ 
+ RelativeHumiditySensor::RelativeHumiditySensor(int32_t sensorHandle,
+@@ -408,7 +430,7 @@
+ }
+ 
+ void RelativeHumiditySensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(50.0f);
++    setScalar(payload, "humidity", 50.0f);
+ }
+ 
+ HingeAngleSensor::HingeAngleSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+@@ -433,7 +455,7 @@
+ }
+ 
+ void HingeAngleSensor::readEventPayload(EventPayload& payload) {
+-    payload.set<EventPayload::Tag::scalar>(180.0f);
++    setScalar(payload, "hinge", 180.0f);
+ }
+ 
+ LowLatencyOffBodyDetectSensor::LowLatencyOffBodyDetectSensor(
