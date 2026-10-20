@@ -104,10 +104,10 @@ index 35a7a4b8a9cb..f858c39ed52e 100644
    // Menu on Linux and Windows and launcher on Chrome OS. If false, we skip
    // adding a shortcut to desktop as well, regardless of the value of
 diff --git a/chrome/browser/web_applications/preinstalled_web_app_manager.cc b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
-index d896f5e29141..0e1940edb2a5 100644
+index 39496eb23466..4fc6398189e1 100644
 --- a/chrome/browser/web_applications/preinstalled_web_app_manager.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
-@@ -1086,13 +1086,22 @@ void PreinstalledWebAppManager::PostProcessConfigs(
+@@ -1087,13 +1087,22 @@ void PreinstalledWebAppManager::PostProcessConfigs(
    // synchronize runs, so it can install them again.
    std::vector<std::pair<GURL, base::FilePath>> app_dirs;
    const base::FilePath web_apps_root = GetWebAppsRootDirectory(profile_);
@@ -132,7 +132,7 @@ index d896f5e29141..0e1940edb2a5 100644
        app_dirs.emplace_back(options.install_url,
                              GetManifestResourcesDirectoryForApp(
 diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
-index d50b6ca7ef92..9a3044db5cfc 100644
+index 991e3533fa50..dedca066f48f 100644
 --- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 @@ -13,6 +13,7 @@

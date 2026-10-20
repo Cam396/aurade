@@ -1,8 +1,8 @@
 diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
-index 369c6cb0824d..2455dc214505 100644
+index 37b904930532..ba153752c66a 100644
 --- a/ash/app_list/app_list_controller_impl.cc
 +++ b/ash/app_list/app_list_controller_impl.cc
-@@ -89,6 +89,7 @@
+@@ -88,6 +88,7 @@
  #include "components/services/app_service/public/cpp/app_registry_cache.h"
  #include "components/services/app_service/public/cpp/app_registry_cache_wrapper.h"
  #include "ui/base/models/image_model.h"
@@ -10,7 +10,7 @@ index 369c6cb0824d..2455dc214505 100644
  #include "ui/base/mojom/menu_source_type.mojom-forward.h"
  #include "ui/compositor/compositor.h"
  #include "ui/compositor/layer.h"
-@@ -1981,11 +1982,14 @@ void AppListControllerImpl::MaybeShowSunfishLauncherNudge(
+@@ -1953,11 +1954,14 @@ void AppListControllerImpl::MaybeShowSunfishLauncherNudge(
    pref_service->SetTime(prefs::kSunfishLauncherNudgeLastShown, now);
  
    // TODO(hewer): Upload string for translation.

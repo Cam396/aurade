@@ -1988,7 +1988,7 @@ index 000000000000..f2320277c9c6
 +</diagnostics-card>
 diff --git a/ash/webui/diagnostics_ui/resources/gpu_card.ts b/ash/webui/diagnostics_ui/resources/gpu_card.ts
 new file mode 100644
-index 000000000000..e2aaf52df561
+index 000000000000..ff36c7ff7aaa
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/gpu_card.ts
 @@ -0,0 +1,186 @@
@@ -2041,8 +2041,8 @@ index 000000000000..e2aaf52df561
 +    };
 +  }
 +
-+  private gpuInfo: GpuInfo[];
-+  private showNoGpuMessage: boolean;
++  declare private gpuInfo: GpuInfo[];
++  declare private showNoGpuMessage: boolean;
 +  private systemDataProvider: SystemDataProviderInterface =
 +      getSystemDataProvider();
 +  private gpuUsageObserverReceiver: GpuUsageObserverReceiver|null = null;
@@ -2275,7 +2275,7 @@ index 000000000000..406162a7bf77
 +</div>
 diff --git a/ash/webui/diagnostics_ui/resources/sensors_page.ts b/ash/webui/diagnostics_ui/resources/sensors_page.ts
 new file mode 100644
-index 000000000000..1e4f969ff434
+index 000000000000..c7260ff4bf83
 --- /dev/null
 +++ b/ash/webui/diagnostics_ui/resources/sensors_page.ts
 @@ -0,0 +1,168 @@
@@ -2328,8 +2328,8 @@ index 000000000000..1e4f969ff434
 +    };
 +  }
 +
-+  private sensorGroups: SensorGroup[];
-+  private showNoSensorsMessage: boolean;
++  declare private sensorGroups: SensorGroup[];
++  declare private showNoSensorsMessage: boolean;
 +  private systemDataProvider: SystemDataProviderInterface =
 +      getSystemDataProvider();
 +  private browserProxy: DiagnosticsBrowserProxyImpl =

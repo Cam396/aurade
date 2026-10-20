@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
-index 9cbe27a2f20b..6587d7f2e678 100644
+index 3703443b8b7b..c09851ffd64f 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/people/account_manager_ui_handler.cc
 @@ -16,6 +16,7 @@
@@ -58,7 +58,7 @@ index 9cbe27a2f20b..6587d7f2e678 100644
  }
  
 diff --git a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
-index 76a5ab0167b9..d50b6ca7ef92 100644
+index 5b9d014067a8..991e3533fa50 100644
 --- a/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_apps/preinstalled_web_apps.cc
 @@ -11,12 +11,19 @@
@@ -270,7 +270,7 @@ index 76a5ab0167b9..d50b6ca7ef92 100644
      if (options.gate_on_feature &&
          !IsPreinstalledAppInstallFeatureEnabled(*options.gate_on_feature)) {
 diff --git a/components/signin/core/browser/signin_header_helper.cc b/components/signin/core/browser/signin_header_helper.cc
-index 1a352d3b9d47..640cf8576c06 100644
+index 6fa056eb7e79..54c90bbc0392 100644
 --- a/components/signin/core/browser/signin_header_helper.cc
 +++ b/components/signin/core/browser/signin_header_helper.cc
 @@ -14,6 +14,7 @@
@@ -313,6 +313,6 @@ index 1a352d3b9d47..640cf8576c06 100644
 +  }
 +#endif
 +
- #if BUILDFLAG(IS_CHROMEOS)
+ #if BUILDFLAG(ENABLE_MIRROR)
    bool is_secondary_account_addition_disallowed =
        (profile_mode_mask & PROFILE_MODE_ADD_ACCOUNT_DISABLED) != 0 &&

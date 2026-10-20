@@ -1,5 +1,5 @@
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 4816dfd73411..fa6fdc8f1030 100644
+index 15ab57a69db4..ad95efe4b9f0 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -650,10 +650,10 @@ Style notes:
@@ -24,7 +24,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_DIALOG_TITLE_SLOW_BOOT" desc="The title of the Slow Boot Shutdown Confirmation Dialog.">
          Restart may take awhile
-@@ -3562,7 +3562,7 @@ No devices connected.
+@@ -3565,7 +3565,7 @@ No devices connected.
        </message>
  
        <message name="IDS_ASH_STATUS_TRAY_AUDIO_NBS_MESSAGE" desc="label used to warn that NBS is in use">
@@ -33,7 +33,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
  
        <message name="IDS_ASH_STATUS_TRAY_AUDIO_INPUT_AGC_INFO" desc="label used for the information of who is controlling mic input gain. [ICU Syntax]">
-@@ -4964,10 +4964,10 @@ No devices connected.
+@@ -4967,10 +4967,10 @@ No devices connected.
          This device may contain apps that haven't been verified by Google.
        </message>
        <message name="IDS_ASH_LOGIN_POD_TPM_LOCKED_ISSUE_WARNING" desc="Message shown as part of the TPM locked warning bubble when TPM is locked.">
@@ -46,7 +46,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_LOGIN_POD_PIN_LOCKED_WARNING" desc="Message shown when pin is soft locked due to multiple wrong attempts.">
          Too many PIN attempts. Wait <ph name="TIME_LEFT">$1<ex>15 minutes, 10 seconds</ex></ph> and try PIN again, or enter password to sign in immediately.
-@@ -5044,7 +5044,7 @@ No devices connected.
+@@ -5047,7 +5047,7 @@ No devices connected.
          Connect your <ph name="NAME">$1<ex>Pixel Buds</ex></ph>
        </message>
        <message name="IDS_FAST_PAIR_DISCOVERY_NOTIFICATION_MESSAGE" desc="Notification message shown when there is a device discovered with Fast Pair.">
@@ -55,7 +55,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_FAST_PAIR_DISCOVERY_NOTIFICATION_EMAIL_MESSAGE" desc="Notification message shown when there is a device discovered with Fast Pair that includes the user's email address.">
          Your <ph name="NAME">$1<ex>Pixel Buds</ex></ph> will appear on devices linked with <ph name="EMAIL">$2<ex>alisha123@gmail.com</ex></ph>
-@@ -5081,10 +5081,10 @@ No devices connected.
+@@ -5084,10 +5084,10 @@ No devices connected.
          <ph name="ORIGIN_NAME">$1<ex>example.com</ex></ph> would like to confirm it's you
        </message>
        <message name="IDS_ASH_IN_SESSION_AUTH_SETTINGS_PROMPT" desc="Text shown in the settings auth dialog.">
@@ -68,7 +68,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_IN_SESSION_AUTH_PASSWORD_PLACEHOLDER" desc="Text to display as placeholder in the password input field.">
          Password
-@@ -5269,7 +5269,7 @@ No devices connected.
+@@ -5272,7 +5272,7 @@ No devices connected.
          Your devices work even better together
        </message>
        <message name="IDS_ASH_MULTI_DEVICE_SETUP_NOTIFIER_TEXT_WITHOUT_PHONE_HUB" desc="The text does not mention Phone Hub that shows in the notifier of multidevice setup.">
@@ -77,7 +77,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_MULTI_DEVICE_SETUP_NEW_USER_POTENTIAL_HOST_EXISTS_MESSAGE" desc="Message shown as part of the notification shown to a user that has not completed the MultiDevice setup when their Chrome device recognizes that they have a phone on their account that the Chrome device can connect to. Clicking it opens a prompt to guide them through setting up.">
          Connect your <ph name="DEVICE_NAME">$1<ex>Chromebook</ex></ph> with your phone
-@@ -5349,12 +5349,12 @@ No devices connected.
+@@ -5352,12 +5352,12 @@ No devices connected.
        </message>
        <if expr="_google_chrome">
          <message name="IDS_ASH_MESSAGE_CENTER_SYSTEM_APP_NAME" desc="The source of a system-generated notification, as displayed to the user.">
@@ -92,7 +92,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
          </message>
        </if>
        <message name="IDS_ASH_MESSAGE_CENTER_ACCELERATOR_NO_NOTIFICATIONS" desc="The toast message displayed when Alt+Shift+N is pressed but there are no notifications.">
-@@ -5622,7 +5622,7 @@ No devices connected.
+@@ -5625,7 +5625,7 @@ No devices connected.
          Your detachable keyboard needs a critical update
        </message>
        <message name="IDS_ASH_DETACHABLE_BASE_NOTIFICATION_UPDATE_NEEDED_MESSAGE" desc="Body for the notification shown to the user when the detachable base (keyboard) connected to the device has to be updated. This notification is shown if the keyboard is usable without the update.">
@@ -101,7 +101,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
  
        <!-- For privacy indicators notification -->
-@@ -5715,13 +5715,13 @@ No devices connected.
+@@ -5718,13 +5718,13 @@ No devices connected.
          Turn on precise location access?
        </message>
        <message name="IDS_PRIVACY_HUB_GEOLOCATION_OFF_NOTIFICATION_MESSAGE" desc="Message for a notification shown to the users when an app tries to use the geolocation while the geolocation is off.">
@@ -118,7 +118,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_PRIVACY_HUB_TURN_ON_GEOLOCATION_ACTION_BUTTON" desc="Label for an action button that enables the geolocation.">
          Turn on location access
-@@ -6468,7 +6468,7 @@ No devices connected.
+@@ -6471,7 +6471,7 @@ No devices connected.
          Peripheral not supported
        </message>
        <message name="IDS_ASH_PCIE_PERIPHERAL_NOTIFICATION_DEVICE_BLOCKED_BODY" desc="Notification body text that explains to the user that their peripheral is not supported because it is not part of the approved peripherals list.">
@@ -127,7 +127,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_PCIE_PERIPHERAL_NOTIFICATION_BILLBOARD_DEVICE" desc="Notification body text that explains to the user that the connected peripheral type (e.g. Thunderbolt peripheral) is not supported.">
          The connected peripheral type is not supported
-@@ -6618,28 +6618,28 @@ No devices connected.
+@@ -6621,28 +6621,28 @@ No devices connected.
  
        <!-- Smart Lock strings shown on the lock screen -->
        <message name="IDS_SMART_LOCK_LABEL_LOOKING_FOR_PHONE" desc="Label for the Smart Lock spinner icon on user's lock screen while Chromebook is looking for paired phone.">
@@ -162,7 +162,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_AUTH_FACTOR_LABEL_PASSWORD_REQUIRED" desc="Label on user's lock screen prompting user to enter password after other sign in authentication methods fail.">
          Enter password for more security
-@@ -7360,10 +7360,10 @@ New install
+@@ -7363,10 +7363,10 @@ New install
          This network doesn't support streaming apps from your phone. Try using your phone's hotspot. <ph name="LEARN_MORE">$1<ex>Learn more</ex></ph>
        </message>
        <message name="IDS_ASH_ECHE_APP_STREAMING_ERROR_DIALOG_DIFFERENT_NETWORK_TEXT" desc="The main description in the dialog that appears when devices are on different networks">
@@ -175,7 +175,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_ECHE_APP_STREMING_ERROR_DIALOG_TURN_ON_HOTSPOT" desc="The button in the dialog that appears when there is a connection error trying to stream app to turn on hotspot">
          Turn on hotspot
-@@ -8049,10 +8049,10 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8052,10 +8052,10 @@ To shut down the device, press and hold the power button on the device again.
          Open your previous windows and apps
        </message>
        <message name="IDS_ASH_INFORMED_RESTORE_DIALOG_CRASH_DESCRIPTION" desc="Label of the description for the informed restore dialog, if the previous session ended with a crash. Gives a little more information than the title.">
@@ -188,7 +188,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ASH_INFORMED_RESTORE_DIALOG_NO_THANKS_BUTTON" desc="Label of the no thanks button for the informed restore dialog, which users can click if they choose not to restore.">
          No thanks
-@@ -8568,10 +8568,10 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8557,10 +8557,10 @@ To shut down the device, press and hold the power button on the device again.
          Use location. Allow apps and services with location permission to use this device’s location. Google may collect location data periodically and use this data in an anonymous way to improve location accuracy and location-based services. <ph name="BEGIN_LINK1">&lt;a href="#" id="learn-more-link-location-service" aria-label="</ph>Learn more about location<ph name="BEGIN_LINK1_END">"&gt;</ph>Learn More<ph name="END_LINK1">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
        </message>
        <message name="IDS_ARC_CROS_OPT_IN_LOCATION_SETTING" desc="Message in the opt-in dialog for Android apps for the user to turn on Google location services.">
@@ -201,7 +201,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ARC_OPT_IN_PAI" desc="Message in the opt-in dialog for Play auto install.">
          Install updates &#38; apps. By continuing, you agree that this device may also automatically download and install updates and apps from Google, your carrier, and your device's manufacturer, possibly using cellular data. Some of these apps may offer in-app purchases. <ph name="BEGIN_LINK1">&lt;a href="#" id="learn-more-link-pai" aria-label="</ph>Learn more about play auto install<ph name="BEGIN_LINK1_END">"&gt;</ph>Learn More<ph name="END_LINK1">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
-@@ -8657,7 +8657,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8646,7 +8646,7 @@ To shut down the device, press and hold the power button on the device again.
          Couldn't connect to Google Play. Check your network connection and try again. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
        </message>
        <message name="IDS_ARC_SIGN_IN_BAD_AUTHENTICATION_ERROR" desc="Android sign-in error because of bad authentification">
@@ -210,7 +210,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ARC_SIGN_IN_GMS_CHECKIN_ERROR" desc="Android sign-in error because of GMS services are unavailable">
          Couldn't connect with Google services. Check your network connection and try again. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
-@@ -8675,7 +8675,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8664,7 +8664,7 @@ To shut down the device, press and hold the power button on the device again.
          Provisioning flow was interrupted. Please try again or contact your device owner or administrator. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
        </message>
        <message name="IDS_ARC_SIGN_IN_CLOUD_PROVISION_FLOW_NETWORK_ERROR" desc="Android permament sign-in error because of cloud provision flow failed">
@@ -219,7 +219,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ARC_SIGN_IN_CLOUD_PROVISION_FLOW_PERMANENT_ERROR" desc="Android permament sign-in error because of cloud provision flow failed">
          Something went wrong. Please contact your device owner or administrator. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
-@@ -8702,7 +8702,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8691,7 +8691,7 @@ To shut down the device, press and hold the power button on the device again.
          Something went wrong. Error code: <ph name="ERROR_CODE">$1<ex>7</ex></ph>.
        </message>
        <message name="IDS_ARC_SERVER_COMMUNICATION_ERROR" desc="Android sign-in error because of server communication error">
@@ -228,7 +228,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_ARC_ANDROID_MANAGEMENT_REQUIRED_ERROR" desc="Error message shown when Android management is required for an unmanaged ChromeOS user.">
          Your organization has not enabled Google Play Store for your account. Contact your administrator for more information.
-@@ -8867,7 +8867,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -8871,7 +8871,7 @@ To shut down the device, press and hold the power button on the device again.
          Success.
        </message>
        <message name="IDS_BRUSCHETTA_RESULT_DLC_INSTALL_ERROR" desc="Bruschetta (codename) result for error installing DLC.">
@@ -237,7 +237,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_BRUSCHETTA_RESULT_START_VM_FAILED" desc="Bruschetta (codename) result for when VM fails to start.">
          Starting VM failed.
-@@ -9042,10 +9042,10 @@ To shut down the device, press and hold the power button on the device again.
+@@ -9046,10 +9046,10 @@ To shut down the device, press and hold the power button on the device again.
        </if>
        <if expr="not reven">
          <message name="IDS_CROSTINI_INSTALLER_NEED_UPDATE_TITLE" desc="Title shown in the Crostini installer dialog when the VM fails to install because the device must be updated">
@@ -250,7 +250,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
          </message>
        </if>
        <message name="IDS_CROSTINI_INSTALLER_CREATE_DISK_IMAGE_ERROR" desc="Text shown in the Crostini installer dialog when the failing to create the disk image">
-@@ -9928,7 +9928,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -9932,7 +9932,7 @@ To shut down the device, press and hold the power button on the device again.
          If you move away from your device, your screen will lock automatically. When you're in front of your device, your screen will stay awake longer. If lock screen is disabled, your device will sleep instead of lock.
        </message>
        <message name="IDS_SMART_PRIVACY_PROTECTION_CONTENT" desc="Description of the privacy protection features implementation. This message is followed by a 'Learn more' link.">
@@ -259,7 +259,7 @@ index 4816dfd73411..fa6fdc8f1030 100644
        </message>
        <message name="IDS_SMART_PRIVACY_PROTECTION_TURN_ON_BUTTON" desc="Label on a button to turn on the smart privacy protection feature and continue.">
          Turn on
-@@ -10028,7 +10028,7 @@ To shut down the device, press and hold the power button on the device again.
+@@ -10032,7 +10032,7 @@ To shut down the device, press and hold the power button on the device again.
          </then>
          <else>
            <message name="IDS_TERMS_OF_SERVICE_SCREEN_SUBHEADING" desc="Subheading at the top of the Terms of Service screen. MANAGER can be a domain or an email address.">
@@ -394,10 +394,10 @@ index ad268d3f5122..e727ddddd177 100644
    <message name="IDS_CONNECT_TO_ONEDRIVE_SIGNIN_FLOW_BODY_TEXT" desc="Explanation text for a dialog which allows the user to connect Files app and Microsoft OneDrive storage via sign in flow.">
      Microsoft 365 uses OneDrive to open and edit Word, Excel, and PowerPoint files. These files will be found in the Files app side navigation labeled “Microsoft OneDrive.” You'll need to sign in with your Microsoft account. <ph name="LINK_BEGIN">&lt;a href="https://support.google.com/chromebook?p=edit_office_files" target="_blank"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
 diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
-index d8f64732073d..62ccda0d5b84 100644
+index 6cc2e39b2ddb..fc6586514307 100644
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -5681,7 +5681,7 @@ are declared in tools/grit/grit_args.gni.
+@@ -5676,7 +5676,7 @@ are declared in tools/grit/grit_args.gni.
            Read information about your browser, OS, and device
          </message>
          <message name="IDS_EXTENSION_PROMPT_WARNING_ENTERPRISE_REMOTE_APPS" desc="Permission string for access to the Remote Apps Enterprise API.">
@@ -406,7 +406,7 @@ index d8f64732073d..62ccda0d5b84 100644
          </message>
          <if expr="reven">
            <message name="IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_ATTACHED_DEVICE_INFO" desc="Permission string for accessing information of attached devices.">
-@@ -5720,25 +5720,25 @@ are declared in tools/grit/grit_args.gni.
+@@ -5715,25 +5715,25 @@ are declared in tools/grit/grit_args.gni.
              Read Bluetooth peripherals information and data
            </message>
            <message name="IDS_EXTENSION_PROMPT_WARNING_CHROMEOS_DIAGNOSTICS" desc="Permission string for chrome.os.diagnostcs API.">
@@ -438,7 +438,7 @@ index d8f64732073d..62ccda0d5b84 100644
            </message>
            <message name="IDS_EXTENSION_PROMPT_WARNING_OMNIBOX_DIRECT_INPUT" desc="Permission string for omnibox labs.">
              Read and save keyboard input from the address bar
-@@ -19637,7 +19637,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
+@@ -19737,7 +19737,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
        </if>
        <if expr="is_chromeos">
          <message name="IDS_DICTATION_NO_MIC_ERROR_TOAST" translateable="false" desc="Text shown in a toast notification when a voice typing/dictation session fails because no microphone was found.">
@@ -447,7 +447,7 @@ index d8f64732073d..62ccda0d5b84 100644
          </message>
        </if>
        <if expr="is_linux">
-@@ -20133,7 +20133,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
+@@ -20233,7 +20233,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
      <!-- Chrome Apps Deprecation -->
      <if expr="is_chromeos">
        <message name="IDS_USER_INSTALLED_CHROME_APP_DEPRECATION_NOTIFICATION_MESSAGE" desc="Message of the notification displayed while launching a user-installed app.">
@@ -457,7 +457,7 @@ index d8f64732073d..62ccda0d5b84 100644
        <message name="IDS_USER_INSTALLED_CHROME_APP_DEPRECATION_BLOCKED_LAUNCH_DIALOG_TITLE" desc="The title of the dialog displayed when a Crome App launch is blocked.">
          <ph name="APP_NAME">$1<ex>Application</ex></ph> can't be launched
 diff --git a/chrome/app/os_settings_strings.grdp b/chrome/app/os_settings_strings.grdp
-index c36fd7fc0007..5370c7fb8677 100644
+index 39b3b371e889..d5e64d2298ee 100644
 --- a/chrome/app/os_settings_strings.grdp
 +++ b/chrome/app/os_settings_strings.grdp
 @@ -200,7 +200,7 @@
@@ -527,7 +527,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_DOWNLOADS_SHARE_ADDED_NOT_FOUND_MESSAGE" desc="The message shown when mounting a new SMB share fails because the share cannot be found.">
      Error mounting share. The specified share was not found on the network.
-@@ -1268,7 +1268,7 @@
+@@ -1271,7 +1271,7 @@
      Face control
    </message>
    <message name="IDS_OS_SETTINGS_ACCESSIBILITY_FACEGAZE_DESCRIPTION" desc="The description for the checkbox that enables controlling the mouse cursor and keyboard with face movements.">
@@ -536,7 +536,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_OS_SETTINGS_ACCESSIBILITY_FACEGAZE_PREVIOUS" desc="Label for previous button.">
      Previous
-@@ -2512,7 +2512,7 @@ Press an assigned switch or key to remove assignment.
+@@ -2515,7 +2515,7 @@ Press an assigned switch or key to remove assignment.
      Switch Access setup guide
    </message>
    <message name="IDS_SETTINGS_SWITCH_ACCESS_SETUP_INTRO_BODY" desc="The message displayed on the first page of the Switch Access setup guide, instructing the user to confirm that their external switch is appropriately connected to the chromebook. Switch Access is an alternative input method designed for users with limited mobility, where the user has as little as one switch (for example, a button) to control the computer.">
@@ -545,7 +545,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_SWITCH_ACCESS_SETUP_ASSIGN_SELECT_TITLE" desc="The title for the page of the Switch Access setup guide where the user assigns a switch to perform the action select, which selects the element onscreen currently surrounded by the focus ring. Switch Access is an alternative input method designed for users with limited mobility, where the user has as little as one switch (for example, a button) to control the computer.">
      Assign switch for “Select”
-@@ -2843,7 +2843,7 @@ Press an assigned switch or key to remove assignment.
+@@ -2846,7 +2846,7 @@ Press an assigned switch or key to remove assignment.
      Manage USB devices
    </message>
    <message name="IDS_SETTINGS_GUEST_OS_SHARED_USB_DEVICES_DESCRIPTION" desc="Description for managing shared USB devices.">
@@ -554,7 +554,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_GUEST_OS_SHARED_USB_DEVICES_EXTRA_DESCRIPTION" desc="Extra description for managing shared USB devices.">
      Only supported devices are shown. USB devices will no longer be available to native apps until disconnected.
-@@ -3079,7 +3079,7 @@ Press an assigned switch or key to remove assignment.
+@@ -3082,7 +3082,7 @@ Press an assigned switch or key to remove assignment.
      Reserve size
    </message>
    <message name="IDS_SETTINGS_CROSTINI_ARC_ADB_POWERWASH_REQUIRED_SUBLABEL" desc="Sublabel notifying user of powerwash requirement before enabling ARC ADB sideloading.">
@@ -563,7 +563,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_CROSTINI_ARC_ADB_CONFIRMATION_MESSAGE_ENABLE" desc="Describes what will happen if the user enables ADB Sideloading.">
      To enable ADB debugging, a restart of this <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> is required. Disabling it requires a reset to factory settings.
-@@ -3168,7 +3168,7 @@ Press an assigned switch or key to remove assignment.
+@@ -3171,7 +3171,7 @@ Press an assigned switch or key to remove assignment.
      Remove Google Play and Android apps?
    </message>
    <message name="IDS_SETTINGS_APPS_ARC_VM_SHARED_USB_DEVICES_DESCRIPTION" desc="Description for managing shared USB devices. Do not translate 'ARCVM'.">
@@ -572,7 +572,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_OS_SETTINGS_OPEN_GOOGLE_PLAY" desc="Label for launching Google Play Store.">
      Open Google Play
-@@ -3500,7 +3500,7 @@ Press an assigned switch or key to remove assignment.
+@@ -3503,7 +3503,7 @@ Press an assigned switch or key to remove assignment.
      Forget
    </message>
    <message name="IDS_SETTINGS_FORGET_DEVICE_DIALOG_LABEL" desc="Bluetooth device details page > Forget device dialog: Label for dialog that forgets the device.">
@@ -581,7 +581,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_FORGET_DEVICE_DIALOG_TITLE" desc="Bluetooth device details page > Forget device dialog: Title for dialog that forgets the device." meaning="'Forget this device' means the device will be unpaired and removed from the account">
      Forget this device?
-@@ -3650,7 +3650,7 @@ Press an assigned switch or key to remove assignment.
+@@ -3653,7 +3653,7 @@ Press an assigned switch or key to remove assignment.
      Focused voice
    </message>
    <message name="IDS_SETTINGS_AUDIO_INPUT_BEAMFORMING_DESCRIPTION" desc="In Device Settings, the description of the beamforming effect under the input section in audio settings subpage.">
@@ -590,7 +590,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_AUDIO_DEVICE_FRONT_MIC_LABEL" desc="In Device Settings, the label used for the front microphone.">
      Front microphone
-@@ -4098,7 +4098,7 @@ Press an assigned switch or key to remove assignment.
+@@ -4101,7 +4101,7 @@ Press an assigned switch or key to remove assignment.
      Don’t see your printer?
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_HELP_SECTION_DESCRIPTION" desc="In CUPS printing settings subpage, this description helps users when trying to connect to a local printer.">
@@ -599,7 +599,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_SHOW_MORE" desc="Text for the button to show more printers when there are more printers than currently displayed to the user.">
      Show more
-@@ -4230,7 +4230,7 @@ Press an assigned switch or key to remove assignment.
+@@ -4233,7 +4233,7 @@ Press an assigned switch or key to remove assignment.
      Unable to add printer. Please check your printer's configuration and try again.
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_PRINTER_UNREACHABLE_MESSAGE" desc="The message shown when the printer that is to be added is unreachable for configuration.">
@@ -608,7 +608,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_PPD_TOO_LARGE_MESSAGE" desc="The message shown when the PPD provided while trying to add new printer is too large.">
      Can&#x2019;t load large PPD. Maximum size is 250 kB.
-@@ -4239,10 +4239,10 @@ Press an assigned switch or key to remove assignment.
+@@ -4242,10 +4242,10 @@ Press an assigned switch or key to remove assignment.
      File is the wrong format. Check the PPD file and try again.
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_PRINTER_PPD_NOT_FOUND" desc="The message shown when the PPD provided while trying to add a new printer cannot be found.">
@@ -621,7 +621,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_PRINTING_CUPS_PRINTER_ADDED_NATIVE_PRINTERS_NOT_ALLOWED_MESSAGE" desc="The message shown when the user is prevented from configuring printers due to an enterprise policy.">
      Printer configuration is handled by the administrator.
-@@ -4559,7 +4559,7 @@ Press an assigned switch or key to remove assignment.
+@@ -4562,7 +4562,7 @@ Press an assigned switch or key to remove assignment.
      Show notification
    </message>
    <message name="IDS_SETTINGS_INTERNET_TETHER_NOTIFICATION_CONTROL_DESCRIPTION" desc="Description of a control allowing users to disable notifications for Instant Hotspot.">
@@ -630,7 +630,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_INTERNET_NO_NETWORKS" desc="Entry when there are no preferred networks or no networks of a particular type.">
      None
-@@ -5794,7 +5794,7 @@ Press an assigned switch or key to remove assignment.
+@@ -5797,7 +5797,7 @@ Press an assigned switch or key to remove assignment.
      Restart your device
    </message>
    <message name="IDS_OS_SETTINGS_FACTORY_RESET_DESCRIPTION" desc="Description of the factory reset option on the ChromeOS settings page">
@@ -639,7 +639,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_SETTINGS_FACTORY_RESET_WARNING" desc="Warning text in the 'Factory Reset' window">
      A restart is required before your device can be reset with Powerwash. <ph name="LINK_BEGIN">&lt;a&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
-@@ -5833,7 +5833,7 @@ Press an assigned switch or key to remove assignment.
+@@ -5836,7 +5836,7 @@ Press an assigned switch or key to remove assignment.
      Remove unwanted pop-ups, fix network issues, and more by restoring your settings to safe defaults.
    </message>
    <message name="IDS_OS_SETTINGS_SANITIZE_DESCRIPTION" desc="Description of the sanitize feature on the sanitize window.">
@@ -648,7 +648,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_OS_SETTINGS_SANITIZE_WARNING" desc="Warning text in the sanitize window.">
      This will disable extensions and reset your settings to safe defaults. Tabs, files, and cookies will be preserved. <ph name="LINK_BEGIN">&lt;a&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
-@@ -6558,7 +6558,7 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
+@@ -6561,7 +6561,7 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
    <!-- TODO(jamescook): Use device type instead of "Chromebook", which may
          require changing ArcPlayTermsOfServiceConsent resource id handling. -->
    <message name="IDS_OS_SETTINGS_ANDROID_APPS_DISABLE_DIALOG_MESSAGE" desc="Describes what will happen if the user opts out of android apps.">
@@ -657,7 +657,7 @@ index c36fd7fc0007..5370c7fb8677 100644
      <ph name="LINE_BREAKS1">&lt;br&gt;&lt;br&gt;</ph>
      Content you've purchased through Google Play such as movies, TV shows, music, books, as well as purchases from other apps may also be deleted.
      <ph name="LINE_BREAKS2">&lt;br&gt;&lt;br&gt;</ph>
-@@ -7175,7 +7175,7 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
+@@ -7178,7 +7178,7 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
      Web App
    </message>
    <message name="IDS_OS_SETTINGS_APP_DETAILS_TYPE_CROS_SYSTEM" desc="Text to explain that the type of an app is ChromeOS System app">
@@ -666,7 +666,7 @@ index c36fd7fc0007..5370c7fb8677 100644
    </message>
    <message name="IDS_OS_SETTINGS_APP_DETAILS_TYPE_ANDROID_INSTALL_REASON_POLICY" desc="Explanation text for the android app installation reason, describing the type of the app, and that it is installed by the administrator.">
      Android app installed by your device administrator.
-@@ -7200,10 +7200,10 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
+@@ -7203,10 +7203,10 @@ Press &amp; hold keyboard keys to see accent marks and special characters. This
  
    <!-- Safety Hub -->
    <message name="IDS_SETTINGS_SAFETY_HUB_VERSION_CARD_HEADER_RESTART" desc="Safety Hub settings page (chrome://settings/safetyHub) gives users an overview over their safety status. The version card, which this text is a part of, informs the user whether their Chrome is up to date. This title of the card is shown when Chrome is not up to date but there is an update available and the user needs to restart their browser to finish the update. Shown above the subtitle 'Relaunch to finish update. Your tabs will reopen'.">
@@ -778,10 +778,10 @@ index ff4c6e61e0a9..32e08d1b659d 100644
        <message name="IDS_PRINT_PREVIEW_PRINTER_SETUP_INFO_MESSAGE_HEADING_NO_PRINTERS_TEXT" desc="In CrOS destination dialog, heading shown to users when destination list has no printers.">
          No printer available
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index cb56ffa3ea62..92c1c6f5b3bb 100644
+index 6f068f9b51d9..007681c864ca 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -1338,7 +1338,7 @@
+@@ -1357,7 +1357,7 @@
        </if>
        <if expr="not reven">
          <message name="IDS_SETTINGS_LANGUAGES_OPEN_CHROME_OS_SETTINGS_LABEL" desc="Label for the section that allow users to open languages settings in ChromeOS.">
@@ -790,7 +790,7 @@ index cb56ffa3ea62..92c1c6f5b3bb 100644
          </message>
        </if>
        <message name="IDS_SETTINGS_LANGUAGES_KEYBOARD_APPS" desc="Title for the list of keyboard apps installed via Play Store by the user.">
-@@ -1390,7 +1390,7 @@
+@@ -1409,7 +1409,7 @@
        </if>
        <if expr="not reven">
          <message name="IDS_SETTINGS_SECURE_DNS_OPEN_CHROME_OS_SETTINGS_LABEL" desc="Label for the section that allow users to open Secure DNS settings in ChromeOS.">
@@ -799,7 +799,7 @@ index cb56ffa3ea62..92c1c6f5b3bb 100644
          </message>
        </if>
      </if>
-@@ -3692,7 +3692,7 @@
+@@ -3689,7 +3689,7 @@
      </if>
      <if expr="is_chromeos">
        <message name="IDS_SETTINGS_ACCOUNT_BODY_CHROMEOS" desc="Description of the section in the account settings page for managing data types on ChromeOS.">
@@ -937,10 +937,10 @@ index 6cb9281e0ffb..c11042f90530 100644
                           VersionUI::GetAnnotatedVersionStringForUi());
    html_source->AddString(
 diff --git a/chromeos/chromeos_strings.grd b/chromeos/chromeos_strings.grd
-index 88685769db59..9fd97a4b4ca4 100644
+index 556006b0dcb0..7356b56ca405 100644
 --- a/chromeos/chromeos_strings.grd
 +++ b/chromeos/chromeos_strings.grd
-@@ -678,7 +678,7 @@
+@@ -659,7 +659,7 @@
            Change password
          </message>
          <message name="IDS_PASSWORD_CHANGE_NOTIFICATION_TITLE" desc="Message title for a notification that tells the user that the password was updated.">
@@ -949,7 +949,7 @@ index 88685769db59..9fd97a4b4ca4 100644
          </message>
          <message name="IDS_PASSWORD_CHANGE_NOTIFICATION_BODY" desc="Message body on a notification that politely requests the user to start using the new password.">
            Your password change was successful. Please use the new password from now on.
-@@ -725,7 +725,7 @@
+@@ -706,7 +706,7 @@
          </message>
  
          <message name="IDS_IME_SERVICE_DISPLAY_NAME" desc="The display name (in the system task manager, etc) of the service process providing the input methods.">
@@ -958,7 +958,7 @@ index 88685769db59..9fd97a4b4ca4 100644
          </message>
  
          <!-- Content transfer App -->
-@@ -3284,10 +3284,10 @@
+@@ -3265,10 +3265,10 @@
            Safety reset has been completed
          </message>
          <message name="IDS_SANITIZE_DONE_DESCRIPTION" desc="Description of the safety reset done dialog">
@@ -971,7 +971,7 @@ index 88685769db59..9fd97a4b4ca4 100644
          </message>
          <message name="IDS_SANITIZE_DONE" desc="Name of the button that will close the safety reset done dialog">
            Done
-@@ -3302,7 +3302,7 @@
+@@ -3283,7 +3283,7 @@
            Extensions disabled to prevent changes to settings. Only turn on extensions you trust.
          </message>
          <message name="IDS_SANITIZE_DONE_ACCORDION_CHROMEOS_TITLE" desc="Accordion title for ChromeOS resets">
@@ -981,10 +981,10 @@ index 88685769db59..9fd97a4b4ca4 100644
          <message name="IDS_SANITIZE_DONE_ACCORDION_CHROMEOS_INPUT_SUBHEADER" desc="Subheader for instructions to adjust ChromeOS Inputs">
            Input method
 diff --git a/components/autofill_payments_strings.grdp b/components/autofill_payments_strings.grdp
-index 163e281cd54f..1f0b802941e2 100644
+index 23f2a098da6f..d1f2161c4900 100644
 --- a/components/autofill_payments_strings.grdp
 +++ b/components/autofill_payments_strings.grdp
-@@ -284,13 +284,13 @@
+@@ -297,13 +297,13 @@
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_LOCAL" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved locally.">
@@ -1001,7 +1001,7 @@ index 163e281cd54f..1f0b802941e2 100644
        </message>
      </if>
      <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_CARD_NUMBER_LABEL" desc="The label text for the card number textfield.">
-@@ -603,13 +603,13 @@
+@@ -616,13 +616,13 @@
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel, asking the user to authenticate using biometric or device unlock before filling.">
@@ -1019,7 +1019,7 @@ index 163e281cd54f..1f0b802941e2 100644
      </if>
    </if>
 diff --git a/components/autofill_strings.grdp b/components/autofill_strings.grdp
-index 7bc12c49be37..75fa07531e8a 100644
+index 9a1de743f99a..a7d92772d910 100644
 --- a/components/autofill_strings.grdp
 +++ b/components/autofill_strings.grdp
 @@ -62,13 +62,13 @@
@@ -1039,7 +1039,7 @@ index 7bc12c49be37..75fa07531e8a 100644
      </message>
    </if>
    <message name="IDS_AUTOFILL_REMOVE_HOME_PROFILE_SUGGESTION_CONFIRMATION_TITLE" desc="Title in a dialog to confirm that the user wants to delete their Home address from Autofill." formatter_data="android_java">
-@@ -2045,13 +2045,13 @@ You can remove this suggestion from Chrome. Your original source won't be delete
+@@ -2053,13 +2053,13 @@ You can remove this suggestion from Chrome. Your original source won't be delete
    </if>
    <if expr="not _google_chrome">
      <message name="IDS_SETTINGS_AUTOFILL_AI_TOGGLE_SUB_LABEL" desc="The description of the setting. By 'understand forms better', we mean that when a user submits a form on a website, and if they're using smarter form understanding, this feature can offer to save the user's submitted info. When Chromium saves that info, we save the submitted values and consider the page context." formatter_data="android_java">
@@ -1195,10 +1195,10 @@ index 9e6856152682..b211c3a3ce73 100644
      <if expr="use_titlecase">
        <message name="IDS_PASSWORD_MANAGER_RELAUNCH_CHROME_BUBBLE_CANCEL_BUTTON" desc="Text that appears in the cancel button of the relaunch Chrome bubble.">
 diff --git a/components/permissions_strings.grdp b/components/permissions_strings.grdp
-index a9c5c50333e3..8eedfdae9787 100644
+index eb5d4a72a85e..b73818c932ab 100644
 --- a/components/permissions_strings.grdp
 +++ b/components/permissions_strings.grdp
-@@ -610,7 +610,7 @@ This will otherwise be blocked by your privacy settings. This will allow the con
+@@ -613,7 +613,7 @@ This will otherwise be blocked by your privacy settings. This will allow the con
      Windows
    </message>
    <message name="IDS_CHROMEOS_NAME_FRAGMENT" desc="Text fragment identifying the ChromeOS">

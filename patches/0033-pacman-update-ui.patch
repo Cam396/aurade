@@ -1,5 +1,5 @@
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 3c33db0e8723..4816dfd73411 100644
+index 2884e0953931..15ab57a69db4 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -1099,6 +1099,9 @@ Style notes:
@@ -39,7 +39,7 @@ index c96270e59b68..a4c8eafb5740 100644
      return l10n_util::GetStringFUTF16(IDS_UPDATE_NOTIFICATION_MESSAGE_SLOW_BOOT,
                                        update_text);
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index a415069cebba..8fe37da76be3 100644
+index d809ff8016a3..d2125713b4a4 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -13,6 +13,7 @@
@@ -50,7 +50,7 @@ index a415069cebba..8fe37da76be3 100644
  #include "base/path_service.h"
  #include "base/strings/stringprintf.h"
  #include "base/system/sys_info.h"
-@@ -127,41 +128,48 @@ void OverrideStubPathsIfNeeded() {
+@@ -126,41 +127,48 @@ void OverrideStubPathsIfNeeded() {
  
  DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
  
@@ -117,7 +117,7 @@ index a415069cebba..8fe37da76be3 100644
    }
    g_aurade_uses_linux_bluez = false;
  }
-@@ -256,7 +264,11 @@ void InitializeDBus() {
+@@ -255,7 +263,11 @@ void InitializeDBus() {
    InitializeDBusClient<chromeos::TpmManagerClient>(bus);
    InitializeDBusClient<TypecdClient>(bus);
    InitializeDBusClient<chromeos::U2FClient>(bus);
@@ -130,7 +130,7 @@ index a415069cebba..8fe37da76be3 100644
    InitializeDBusClient<UserDataAuthClient>(bus);
    InitializeDBusClient<UpstartClient>(bus);
    InitializeDBusClient<VirtualFileProviderClient>(bus);
-@@ -363,8 +375,6 @@ void ShutdownDBus() {
+@@ -362,8 +374,6 @@ void ShutdownDBus() {
    } else {
      bluez::BluezDBusManager::Shutdown();
    }
@@ -139,7 +139,7 @@ index a415069cebba..8fe37da76be3 100644
    // Depends on `DlcserviceClient`.
    language_packs::LanguagePackManager::Shutdown();
  
-@@ -374,6 +384,7 @@ void ShutdownDBus() {
+@@ -373,6 +383,7 @@ void ShutdownDBus() {
    UpstartClient::Shutdown();
    UserDataAuthClient::Shutdown();
    UpdateEngineClient::Shutdown();

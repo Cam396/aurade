@@ -1,8 +1,8 @@
 diff --git a/ash/webui/settings/public/constants/gen_routes.py b/ash/webui/settings/public/constants/gen_routes.py
-index f5ff2a32b912..621b70c6d249 100755
+index 28cdfc667b20..706375cca437 100755
 --- a/ash/webui/settings/public/constants/gen_routes.py
 +++ b/ash/webui/settings/public/constants/gen_routes.py
-@@ -18,15 +18,8 @@ import sys
+@@ -18,17 +18,8 @@ import sys
  
  # Path of the <chromium>/src directory.
  CHROMIUM_SRC_PATH = pathlib.Path(__file__).parents[5].resolve(strict=True)
@@ -11,22 +11,24 @@ index f5ff2a32b912..621b70c6d249 100755
 -# and the repository root itself is named 'chromium' instead of 'src'.
 -is_cog = (CHROMIUM_SRC_PATH.parent / '.citc').is_dir()
 -if CHROMIUM_SRC_PATH.name != 'src' and not (
--    is_cog and CHROMIUM_SRC_PATH.name == 'chromium'):
+-  is_cog and CHROMIUM_SRC_PATH.name == 'chromium'
+-):
 -  raise AssertionError(
--      f'CHROMIUM_SRC_PATH "{CHROMIUM_SRC_PATH}" should end in "src" (or '
--      f'"chromium" in CoG).')
+-    f'CHROMIUM_SRC_PATH "{CHROMIUM_SRC_PATH}" should end in "src" (or '
+-    f'"chromium" in CoG).'
+-  )
 +# AuraDE compatibility: validation builds may bind the Chromium source root at
 +# a path whose basename is not "src".
  
  # Insert chromium mojom path to beginning to make sure we prefer this one.
  # https://crbug.com/1422422
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index 10598ec0b581..2d014560422c 100644
+index 21bd2cfd22c9..010788ae5e28 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
-@@ -167,6 +167,15 @@ std::vector<LanguageTag> GetCandidates() {
- 
- #endif  // !BUILDFLAG(IS_APPLE)
+@@ -164,6 +164,15 @@ std::vector<LanguageTag> GetCandidates() {
+   return candidates;
+ }
  
 +bool ShouldRelaxPlaceholderDChecksForAuraDE() {
 +  // AuraDE compatibility: standalone Linux sessions can enable ChromeOS
@@ -40,7 +42,7 @@ index 10598ec0b581..2d014560422c 100644
  // Preferred locales are enabled everywhere but Linux systems with GLib. This
  // function parses `preferred_locale` into a `LanguageTag` if they are enabled.
  std::optional<LanguageTag> GetPreferredTag(std::string_view preferred_locale) {
-@@ -376,23 +385,26 @@ std::u16string FormatString(const std::u16string& format_string,
+@@ -339,23 +348,26 @@ std::u16string FormatString(const std::u16string& format_string,
                              const std::vector<std::u16string>& replacements,
                              std::vector<size_t>* offsets) {
  #if DCHECK_IS_ON()
@@ -84,7 +86,7 @@ index 10598ec0b581..2d014560422c 100644
      }
    }
  #endif
-@@ -487,8 +499,12 @@ std::u16string GetStringFUTF16(int message_id,
+@@ -450,8 +462,12 @@ std::u16string GetStringFUTF16(int message_id,
    std::vector<size_t> offsets;
    std::vector<std::u16string> replacements = {a};
    std::u16string result = GetStringFUTF16(message_id, replacements, &offsets);

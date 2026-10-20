@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index 1b5c0114a41f..ba8779e91126 100644
+index 18463267cb9c..d7b5133cff85 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -48,6 +48,8 @@ static_library("dbus") {
@@ -11,7 +11,7 @@ index 1b5c0114a41f..ba8779e91126 100644
      "polkit_agent_service.cc",
      "polkit_agent_service.h",
      "printers_service_provider.cc",
-@@ -204,6 +206,10 @@ static_library("dbus") {
+@@ -201,6 +203,10 @@ static_library("dbus") {
      "//device/bluetooth",
      "//extensions/common",
      "//mojo/public/cpp/bindings",
@@ -1384,10 +1384,10 @@ index 000000000000..a7067392058c
 +
 +#endif  // CHROME_BROWSER_ASH_DBUS_MPRIS_MEDIA_BRIDGE_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 599bb396b878..f3b2aedf2a7b 100644
+index 9ca5d87b13b2..cdce693a4156 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -102,6 +102,7 @@
+@@ -103,6 +103,7 @@
  #include "chrome/browser/ash/dbus/lock_to_single_user_service_provider.h"
  #include "chrome/browser/ash/dbus/machine_learning_decision_service_provider.h"
  #include "chrome/browser/ash/dbus/mojo_connection_service_provider.h"
@@ -1395,7 +1395,7 @@ index 599bb396b878..f3b2aedf2a7b 100644
  #include "chrome/browser/ash/dbus/polkit_agent_service.h"
  #include "chrome/browser/ash/dbus/printers_service_provider.h"
  #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
-@@ -1708,6 +1709,14 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1726,6 +1727,14 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
          std::make_unique<mahi::MahiWebContentsManagerImpl>();
    }
  
@@ -1410,7 +1410,7 @@ index 599bb396b878..f3b2aedf2a7b 100644
    ChromeBrowserMainPartsLinux::PostBrowserStart();
  }
  
-@@ -1717,6 +1726,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1735,6 +1744,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
  // shutdown calls and test |pre_profile_init_called_| if necessary. See
  // crbug.com/40511182 for details.
  void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
@@ -1419,10 +1419,10 @@ index 599bb396b878..f3b2aedf2a7b 100644
  
    arc_container_app_killer_.reset();
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-index 8d58365f92b1..49d2452e74f0 100644
+index 79e29b51ed06..4dd0421f6a1e 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-@@ -96,6 +96,7 @@ class LoginScreenExtensionsStorageCleaner;
+@@ -97,6 +97,7 @@ class LoginScreenExtensionsStorageCleaner;
  class LowDiskNotification;
  class MagicBoostControllerImpl;
  class MisconfiguredUserCleaner;
@@ -1430,7 +1430,7 @@ index 8d58365f92b1..49d2452e74f0 100644
  class NetworkChangeManagerClient;
  class NetworkPrefStateObserver;
  class NetworkThrottlingObserver;
-@@ -301,6 +302,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+@@ -303,6 +304,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
  
    std::unique_ptr<chromeos::MahiWebContentsManager> mahi_web_contents_manager_;
  

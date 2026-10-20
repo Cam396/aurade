@@ -1,4 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/desktop_notification_service.cc b/chrome/browser/ash/dbus/desktop_notification_service.cc
+index f67b42d88717..05580c353c88 100644
 --- a/chrome/browser/ash/dbus/desktop_notification_service.cc
 +++ b/chrome/browser/ash/dbus/desktop_notification_service.cc
 @@ -58,6 +58,9 @@ constexpr char kCapabilitiesMethod[] = "GetCapabilities";
@@ -79,6 +80,7 @@ diff --git a/chrome/browser/ash/dbus/desktop_notification_service.cc b/chrome/br
      uint32_t notification_id,
      const std::string& action_key) {
 diff --git a/chrome/browser/ash/dbus/desktop_notification_service.h b/chrome/browser/ash/dbus/desktop_notification_service.h
+index 97b03d3625a9..3313f5bdbc26 100644
 --- a/chrome/browser/ash/dbus/desktop_notification_service.h
 +++ b/chrome/browser/ash/dbus/desktop_notification_service.h
 @@ -76,8 +76,11 @@ class DesktopNotificationService final

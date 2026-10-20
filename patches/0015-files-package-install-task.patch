@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-index e3981bdba9f2..d513662a9ed6 100644
+index 34b11dc4a25d..8cf393649f51 100644
 --- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 +++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-@@ -12,6 +12,7 @@
+@@ -15,6 +15,7 @@
  #include "chrome/browser/ash/file_manager/file_tasks.h"
  #include "chrome/browser/ash/file_manager/virtual_tasks/drive_upload_virtual_task.h"
  #include "chrome/browser/ash/file_manager/virtual_tasks/install_isolated_web_app_virtual_task.h"
@@ -10,7 +10,7 @@ index e3981bdba9f2..d513662a9ed6 100644
  #include "chrome/browser/ash/file_manager/virtual_tasks/ms365_virtual_task.h"
  #include "chromeos/ash/components/file_manager/app_id.h"
  #include "components/services/app_service/public/cpp/intent_util.h"
-@@ -26,6 +27,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
+@@ -29,6 +30,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
    static const base::NoDestructor<std::vector<VirtualTask*>> virtual_tasks(
        std::initializer_list<VirtualTask*>({
            new InstallIsolatedWebAppVirtualTask(),
@@ -19,7 +19,7 @@ index e3981bdba9f2..d513662a9ed6 100644
            new DocsUploadVirtualTask(),
            new SheetsUploadVirtualTask(),
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-index 9197de05b49e..fd7bf21307f4 100644
+index d77912d77a71..de389c595440 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 @@ -11,6 +11,8 @@ static_library("virtual_tasks") {

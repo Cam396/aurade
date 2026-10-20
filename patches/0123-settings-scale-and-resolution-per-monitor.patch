@@ -159,7 +159,7 @@ index 43867417f652..1fd827490d16 100644
        <div class="start text-area layout vertical" aria-hidden="true">
          <div>$i18n{displayRefreshRateTitle}</div>
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
-index 7a142147cacf..3221b6426b4c 100644
+index 0528eb434af8..a38448d6fd15 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/display.ts
 @@ -159,7 +159,7 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
@@ -173,12 +173,12 @@ index 7a142147cacf..3221b6426b4c 100644
        },
 @@ -437,7 +437,7 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
    declare private unifiedDesktopMode_: boolean;
-   private auraDisplayScaleApplyInProgress_: boolean;
-   private auraDisplayScaleAvailable_: boolean;
+   declare private auraDisplayScaleApplyInProgress_: boolean;
+   declare private auraDisplayScaleAvailable_: boolean;
 -  private auraDisplayScaleOptions_: SliderTick[];
-+  private auraDisplayScaleMenuOptions_: DropdownMenuOptionList;
-   private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
-   private auraDisplayScaleStatus_: string;
++  declare private auraDisplayScaleMenuOptions_: DropdownMenuOptionList;
+   declare private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
+   declare private auraDisplayScaleStatus_: string;
    declare private zoomValues_: SliderTick[];
 @@ -644,28 +644,14 @@ export class SettingsDisplayElement extends SettingsDisplayElementBase {
          (displays: DisplayUnitInfo[]) => this.displayInfoFetched_(displays));
@@ -385,18 +385,19 @@ index 7a142147cacf..3221b6426b4c 100644
  
    /**
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/DEPS b/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
-index e5c60381c2ab..51f6dc507441 100644
+index 50ce2379e0c3..3920032b41e9 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/DEPS
-@@ -30,5 +30,6 @@ include_rules = [
+@@ -29,6 +29,7 @@ include_rules = [
  
    "+ash/shell.h",
    "+ash/shell_observer.h",
 +  "+ash/display/aura_display_source.h",
    "+ash/display/cros_display_config.h",
  ]
+ 
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
-index a304ddd8bca3..408e34ef64e4 100644
+index 19404a2d25a1..42c0730aee0f 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 @@ -11,6 +11,7 @@

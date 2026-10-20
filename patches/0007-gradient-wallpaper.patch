@@ -153,10 +153,10 @@ index 4bef940bd670..0c55fc6dcffe 100644
    } else {
      wallpaper_metrics_manager_->LogWallpaperResult(
 diff --git a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
-index 444f7ff79921..2a25a49db7ff 100644
+index 22527cef56c9..1413f10686a6 100644
 --- a/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
 +++ b/chrome/browser/ui/ash/wallpaper/wallpaper_controller_client_impl.cc
-@@ -354,37 +354,62 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
+@@ -356,37 +356,62 @@ void WallpaperControllerClientImpl::ConfirmPreviewWallpaper(Profile* profile) {
  
  void WallpaperControllerClientImpl::MakeTransparent(
      content::WebContents* web_contents) {

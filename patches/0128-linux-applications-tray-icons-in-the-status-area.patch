@@ -1,8 +1,8 @@
 diff --git a/ash/BUILD.gn b/ash/BUILD.gn
-index b82533249cd1..116fd066fbf6 100644
+index e169cc175105..65dbf6b8f8e2 100644
 --- a/ash/BUILD.gn
 +++ b/ash/BUILD.gn
-@@ -2519,6 +2519,8 @@ component("ash") {
+@@ -2527,6 +2527,8 @@ component("ash") {
      "system/tray/hover_highlight_view.h",
      "system/tray/imaged_tray_icon.cc",
      "system/tray/imaged_tray_icon.h",
@@ -12,10 +12,10 @@ index b82533249cd1..116fd066fbf6 100644
      "system/tray/interacted_by_tap_recorder.h",
      "system/tray/size_range_layout.cc",
 diff --git a/ash/shell.cc b/ash/shell.cc
-index db7f1213570f..98bd9d038eac 100644
+index 37b655c0623c..f6eeb6c9a2a8 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
-@@ -352,6 +352,14 @@ TrayIconConfiguration::TrayIconConfiguration() = default;
+@@ -353,6 +353,14 @@ TrayIconConfiguration::TrayIconConfiguration() = default;
  
  TrayIconConfiguration::~TrayIconConfiguration() = default;
  
@@ -30,7 +30,7 @@ index db7f1213570f..98bd9d038eac 100644
  ////////////////////////////////////////////////////////////////////////////////
  // Shell, static:
  
-@@ -725,6 +733,10 @@ bool Shell::AddStatusTrayIcon(const TrayIconConfiguration& configuration,
+@@ -726,6 +734,10 @@ bool Shell::AddStatusTrayIcon(const TrayIconConfiguration& configuration,
  bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
                                   int64_t display_id) {
    aura::Window* root_window = GetRootWindowForDisplayId(display_id);
@@ -41,7 +41,7 @@ index db7f1213570f..98bd9d038eac 100644
    auto* status_area = StatusAreaWidget::ForWindow(root_window);
    return status_area->UpdateTrayIcon(configuration);
  }
-@@ -732,10 +744,32 @@ bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
+@@ -733,10 +745,32 @@ bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
  bool Shell::RemoveStatusTrayIcon(const TrayIconConfiguration& configuration,
                                   int64_t display_id) {
    aura::Window* root_window = GetRootWindowForDisplayId(display_id);
@@ -75,7 +75,7 @@ index db7f1213570f..98bd9d038eac 100644
    // Destroy the object before instantiating the next one explicitly.
    multi_user_window_manager_.reset();
 diff --git a/ash/shell.h b/ash/shell.h
-index 38357dcf7fb4..887d7714a27c 100644
+index 2766c48c57f3..8b6fc1122b72 100644
 --- a/ash/shell.h
 +++ b/ash/shell.h
 @@ -24,6 +24,7 @@
@@ -94,7 +94,7 @@ index 38357dcf7fb4..887d7714a27c 100644
  class UserActivityPowerManagerNotifier;
  }  // namespace ui
  
-@@ -313,6 +315,28 @@ struct ASH_EXPORT TrayIconConfiguration {
+@@ -314,6 +316,28 @@ struct ASH_EXPORT TrayIconConfiguration {
    std::optional<std::u16string> tool_tip;
  };
  
@@ -123,7 +123,7 @@ index 38357dcf7fb4..887d7714a27c 100644
  // Shell is a singleton object that presents the Shell API and implements the
  // RootWindow's delegate interface.
  //
-@@ -964,6 +988,17 @@ class ASH_EXPORT Shell : public SessionObserver,
+@@ -968,6 +992,17 @@ class ASH_EXPORT Shell : public SessionObserver,
    bool RemoveStatusTrayIcon(const TrayIconConfiguration& configuration,
                              int64_t display_id);
  
@@ -427,7 +427,7 @@ index 000000000000..0fd3679ae06d
 +
 +#endif  // ASH_SYSTEM_TRAY_INTERACTIVE_TRAY_ICON_H_
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index ba8779e91126..6fc7674ea206 100644
+index d7b5133cff85..df5fed558936 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -62,6 +62,8 @@ static_library("dbus") {
@@ -439,7 +439,7 @@ index ba8779e91126..6fc7674ea206 100644
      "virtual_file_request_service_provider.cc",
      "virtual_file_request_service_provider.h",
    ]
-@@ -96,6 +98,7 @@ static_library("dbus") {
+@@ -95,6 +97,7 @@ static_library("dbus") {
      "//build/config/chromebox_for_meetings:buildflags",
      "//build/config/cuttlefish:buildflags",
      "//build/config/squid:buildflags",
@@ -447,15 +447,15 @@ index ba8779e91126..6fc7674ea206 100644
      "//chrome/browser/ash/app_mode",
      "//chrome/browser/ash/arc/fileapi",
      "//chrome/browser/ash/arc/session",
-@@ -115,6 +118,7 @@ static_library("dbus") {
+@@ -114,6 +117,7 @@ static_library("dbus") {
      "//chrome/browser/ash/settings",
      "//chrome/browser/chromeos/policy/dlp",
      "//chrome/browser/component_updater",
 +    "//chrome/browser/icon_transcoder",
      "//chrome/browser/profiles:profile",
      "//chrome/browser/profiles:profile_manager",
-     "//chrome/common:chrome_features",
-@@ -217,9 +221,11 @@ static_library("dbus") {
+     "//chromeos/ash/components/attestation",
+@@ -214,9 +218,11 @@ static_library("dbus") {
      "//ui/base",
      "//ui/chromeos/styles:cros_tokens_color_mappings",
      "//ui/color",
@@ -468,7 +468,7 @@ index ba8779e91126..6fc7674ea206 100644
      "//ui/native_theme",
      "//ui/views",
 diff --git a/chrome/browser/ash/dbus/DEPS b/chrome/browser/ash/dbus/DEPS
-index 7889d2d71b71..57401e2b2969 100644
+index 8aec202b05b1..7094b618031f 100644
 --- a/chrome/browser/ash/dbus/DEPS
 +++ b/chrome/browser/ash/dbus/DEPS
 @@ -34,6 +34,7 @@ include_rules = [
@@ -477,8 +477,8 @@ index 7889d2d71b71..57401e2b2969 100644
    "+chrome/browser/policy",
 +  "+chrome/browser/icon_transcoder",
    "+chrome/browser/profiles",
-   "+chrome/common/chrome_paths.h",
    "+chrome/common/chrome_switches.h",
+   "+chrome/test/base",
 diff --git a/chrome/browser/ash/dbus/status_notifier_host.cc b/chrome/browser/ash/dbus/status_notifier_host.cc
 new file mode 100644
 index 000000000000..06d18dd989da
@@ -2486,10 +2486,10 @@ index 000000000000..f816ae5a49f6
 +
 +#endif  // CHROME_BROWSER_ASH_DBUS_STATUS_NOTIFIER_HOST_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index f3b2aedf2a7b..225890bb4da8 100644
+index cdce693a4156..31398c190ffb 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -108,6 +108,7 @@
+@@ -109,6 +109,7 @@
  #include "chrome/browser/ash/dbus/proxy_resolution_service_provider.h"
  #include "chrome/browser/ash/dbus/screen_lock_service_provider.h"
  #include "chrome/browser/ash/dbus/smb_fs_service_provider.h"
@@ -2497,7 +2497,7 @@ index f3b2aedf2a7b..225890bb4da8 100644
  #include "chrome/browser/ash/dbus/virtual_file_request_service_provider.h"
  #include "chrome/browser/ash/dbus/vm/vm_applications_service_provider.h"
  #include "chrome/browser/ash/dbus/vm/vm_launch_service_provider.h"
-@@ -1715,6 +1716,8 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1733,6 +1734,8 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
      mpris_media_bridge_ = MprisMediaBridge::Create(
          &content::GetMediaSessionService(),
          g_browser_process->shared_url_loader_factory());
@@ -2506,7 +2506,7 @@ index f3b2aedf2a7b..225890bb4da8 100644
    }
  
    ChromeBrowserMainPartsLinux::PostBrowserStart();
-@@ -1726,6 +1729,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
+@@ -1744,6 +1747,7 @@ void ChromeBrowserMainPartsAsh::PostBrowserStart() {
  // shutdown calls and test |pre_profile_init_called_| if necessary. See
  // crbug.com/40511182 for details.
  void ChromeBrowserMainPartsAsh::PostMainMessageLoopRun() {
@@ -2515,10 +2515,10 @@ index f3b2aedf2a7b..225890bb4da8 100644
    video_conference_manager_client_.reset();
  
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-index 49d2452e74f0..675244ecb792 100644
+index 4dd0421f6a1e..68fa9163156a 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.h
-@@ -109,6 +109,7 @@ class SessionTerminationManager;
+@@ -110,6 +110,7 @@ class SessionTerminationManager;
  class ShortcutMappingPrefService;
  class ShutdownPolicyForwarder;
  class SigninProfileHandler;
@@ -2526,7 +2526,7 @@ index 49d2452e74f0..675244ecb792 100644
  class SuspendPerfReporter;
  class SystemTokenCertDBInitializer;
  class TokenHandleStoreFactory;
-@@ -305,6 +306,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
+@@ -307,6 +308,9 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
    // AuraDE compatibility: Linux media players in Ash's media controls.
    std::unique_ptr<MprisMediaBridge> mpris_media_bridge_;
  

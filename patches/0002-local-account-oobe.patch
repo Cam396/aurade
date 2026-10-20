@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/login/screens/BUILD.gn b/chrome/browser/ash/login/screens/BUILD.gn
-index 196720ac1020..18c0956af25f 100644
+index 037e902793a5..0d5876124649 100644
 --- a/chrome/browser/ash/login/screens/BUILD.gn
 +++ b/chrome/browser/ash/login/screens/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("screens") {
@@ -351,7 +351,7 @@ index 6677e6b8517d..ca40b8ff82a8 100644
      SIGNIN_TRIAGE,
      ADD_CHILD,
 diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
-index 4c6222d574b5..9ce01b6905e3 100644
+index df487bfb4b79..0ce340a20abb 100644
 --- a/chrome/browser/ash/login/wizard_controller.cc
 +++ b/chrome/browser/ash/login/wizard_controller.cc
 @@ -25,6 +25,7 @@
@@ -392,7 +392,7 @@ index 4c6222d574b5..9ce01b6905e3 100644
  #include "chrome/browser/ui/webui/ash/login/auto_enrollment_check_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/categories_selection_screen_handler.h"
  #include "chrome/browser/ui/webui/ash/login/choobe_screen_handler.h"
-@@ -254,6 +259,8 @@
+@@ -253,6 +258,8 @@
  #include "chromeos/ash/components/geolocation/system_location_provider.h"
  #include "chromeos/ash/components/install_attributes/install_attributes.h"
  #include "chromeos/ash/components/language_packs/language_pack_manager.h"
@@ -526,7 +526,7 @@ index 4c6222d574b5..9ce01b6905e3 100644
  void WizardController::OnConsumerUpdateScreenExit(
      ConsumerUpdateScreen::Result result) {
    OnScreenExit(ConsumerUpdateScreenView::kScreenId,
-@@ -3739,6 +3829,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
+@@ -3746,6 +3836,7 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
               screen_id == FamilyLinkNoticeView::kScreenId ||
               screen_id == GaiaView::kScreenId ||
               screen_id == UserCreationView::kScreenId ||
@@ -707,7 +707,7 @@ index 000000000000..e1c4394dedfa
 +</oobe-adaptive-dialog>
 diff --git a/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
 new file mode 100644
-index 000000000000..23707a59344f
+index 000000000000..152c98582b4a
 --- /dev/null
 +++ b/chrome/browser/resources/chromeos/login/screens/common/aura_local_account.ts
 @@ -0,0 +1,84 @@
@@ -766,8 +766,8 @@ index 000000000000..23707a59344f
 +    };
 +  }
 +
-+  private displayName_: string;
-+  private passwordHint_: string;
++  declare private displayName_: string;
++  declare private passwordHint_: string;
 +
 +  override ready(): void {
 +    super.ready();
@@ -1008,7 +1008,7 @@ index 6ac20c3e9a38..64adeceeb4af 100644
  
    private cancel(): void {
 diff --git a/chrome/browser/ui/webui/ash/login/BUILD.gn b/chrome/browser/ui/webui/ash/login/BUILD.gn
-index 9c2ace206752..ff489df5b2be 100644
+index 384fdc77a29e..ac972dc5778e 100644
 --- a/chrome/browser/ui/webui/ash/login/BUILD.gn
 +++ b/chrome/browser/ui/webui/ash/login/BUILD.gn
 @@ -19,6 +19,8 @@ static_library("login") {
@@ -1124,7 +1124,7 @@ index 000000000000..5fd1e6bfa3d2
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_AURA_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
 diff --git a/chrome/browser/ui/webui/ash/login/oobe_ui.cc b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
-index b134116155e5..53afc860ea82 100644
+index 6645e1281cfd..0fcccc8ee60b 100644
 --- a/chrome/browser/ui/webui/ash/login/oobe_ui.cc
 +++ b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
 @@ -54,6 +54,7 @@
@@ -1145,7 +1145,7 @@ index b134116155e5..53afc860ea82 100644
  
    source->AddBoolean("isSplitModifierKeyboardInfoEnabled",
                       features::IsOobeSplitModifierKeyboardInfoEnabled());
-@@ -531,6 +535,7 @@ void OobeUI::ConfigureOobeDisplay(
+@@ -532,6 +536,7 @@ void OobeUI::ConfigureOobeDisplay(
    AddWebUIHandler(std::make_unique<SshConfiguredHandler>());
  
    AddScreenHandler(std::make_unique<AppLaunchSplashScreenHandler>());

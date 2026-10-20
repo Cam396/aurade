@@ -181,7 +181,7 @@ index d797ccc4c727..3e1d8a6769a5 100644
      // before OnActiveUserPrefServiceChanged(), so defer notifying the
      // observers until the sign in prefs are received.
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index 875647f2ddfe..f1dd8ff39fd2 100644
+index 6d00b56f698d..65ce1c51a7e1 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
 @@ -4,13 +4,19 @@
@@ -204,7 +204,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
  #include "build/config/chromebox_for_meetings/buildflags.h"  // PLATFORM_CFM
  #include "build/config/cuttlefish/buildflags.h"  // PLATFORM_CUTTLEFISH
  #include "build/config/squid/buildflags.h"       // PLATFORM_SQUID
-@@ -93,6 +99,7 @@
+@@ -92,6 +98,7 @@
  #include "device/bluetooth/floss/floss_dbus_client.h"
  #include "device/bluetooth/floss/floss_dbus_manager.h"
  #include "device/bluetooth/floss/floss_features.h"
@@ -212,7 +212,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
  
  #if BUILDFLAG(PLATFORM_CFM)
  #include "chromeos/ash/components/chromebox_for_meetings/features.h"
-@@ -120,6 +127,45 @@ void OverrideStubPathsIfNeeded() {
+@@ -119,6 +126,45 @@ void OverrideStubPathsIfNeeded() {
  
  DBusHelperObserverForTest* g_dbus_helper_observer = nullptr;
  
@@ -258,7 +258,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
  }  // namespace
  
  DBusHelperObserverForTest::~DBusHelperObserverForTest() = default;  // IN-TEST
-@@ -194,7 +240,10 @@ void InitializeDBus() {
+@@ -193,7 +239,10 @@ void InitializeDBus() {
    InitializeDBusClient<ResourcedClient>(bus);
    InitializeDBusClient<RuntimeProbeClient>(bus);
    InitializeDBusClient<SeneschalClient>(bus);
@@ -270,7 +270,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
    InitializeDBusClient<SmbProviderClient>(bus);
    InitializeDBusClient<SpacedClient>(bus);
    InitializeDBusClient<SwapManagementClient>(bus);
-@@ -233,7 +282,8 @@ void InitializeFeatureListDependentDBus() {
+@@ -232,7 +281,8 @@ void InitializeFeatureListDependentDBus() {
    // feature list is initialized.
    InitializeDBusClient<chromeos::MissiveClient>(bus);
  
@@ -280,7 +280,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
      InitializeDBusClient<floss::FlossDBusManager>(bus);
      if (bus) {
        int active_adapter =
-@@ -248,7 +298,11 @@ void InitializeFeatureListDependentDBus() {
+@@ -247,7 +297,11 @@ void InitializeFeatureListDependentDBus() {
        FlossMediaClient::InitializeFake();
      }
    } else {
@@ -293,7 +293,7 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
    }
  #if BUILDFLAG(PLATFORM_CFM)
    if (base::FeatureList::IsEnabled(cfm::features::kMojoServices)) {
-@@ -299,12 +353,13 @@ void ShutdownDBus() {
+@@ -298,12 +352,13 @@ void ShutdownDBus() {
      CfmHotlineClient::Shutdown();
    }
  #endif
@@ -309,10 +309,10 @@ index 875647f2ddfe..f1dd8ff39fd2 100644
    // Depends on `DlcserviceClient`.
    language_packs::LanguagePackManager::Shutdown();
 diff --git a/chrome/browser/ash/login/session/user_session_manager.cc b/chrome/browser/ash/login/session/user_session_manager.cc
-index d85eef91248f..498d42fbcd8e 100644
+index 5a5b2952ff91..fd92cf322878 100644
 --- a/chrome/browser/ash/login/session/user_session_manager.cc
 +++ b/chrome/browser/ash/login/session/user_session_manager.cc
-@@ -438,6 +438,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
+@@ -439,6 +439,21 @@ bool IsOnlineSignin(const UserContext& user_context) {
           user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML;
  }
  
@@ -334,7 +334,7 @@ index d85eef91248f..498d42fbcd8e 100644
  // Stores the information about the challenge-response keys, that were used for
  // authentication, persistently in the known_user database for future
  // authentication attempts.
-@@ -1207,8 +1222,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
+@@ -1163,8 +1178,10 @@ void UserSessionManager::OnSessionRestoreStateChanged(
    // Otherwise, auth token dependent code would be in an invalid state.
    // Important piece such as policy code might be broken because of this and
    // subject to an exploit. See http://crbug.com/41292933.
@@ -346,7 +346,7 @@ index d85eef91248f..498d42fbcd8e 100644
      SYSLOG(ERROR)
          << "Session restore failed for online sign-in, terminating session.";
      session_manager::SessionManager::Get()->RequestSignOut();
-@@ -1535,7 +1552,8 @@ void UserSessionManager::InitProfilePreferences(
+@@ -1491,7 +1508,8 @@ void UserSessionManager::InitProfilePreferences(
      }
    }
  
@@ -356,7 +356,7 @@ index d85eef91248f..498d42fbcd8e 100644
      // Get the Gaia ID from the user context. This may not be available when
      // unlocking a previously opened profile, or when creating a supervised
      // user. However, in these cases the gaia_id should be already available in
-@@ -1849,7 +1867,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
+@@ -1794,7 +1812,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
    TRACE_EVENT0("login", "UserSessionManager::FinalizePrepareProfile");
    user_manager::UserManager* user_manager = user_manager::UserManager::Get();
    user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
@@ -367,10 +367,10 @@ index d85eef91248f..498d42fbcd8e 100644
      if (auth_flow == UserContext::AUTH_FLOW_GAIA_WITH_SAML ||
          auth_flow == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML) {
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 4e8e43b5c300..6ee56b552556 100644
+index 5522cb45648a..50cd156e84e8 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -346,12 +346,6 @@ void ApplySigninProfileModifications(Profile* profile) {
+@@ -352,12 +352,6 @@ void ApplySigninProfileModifications(Profile* profile) {
  }
  
  #if !defined(USE_REAL_DBUS_CLIENTS)
@@ -383,7 +383,7 @@ index 4e8e43b5c300..6ee56b552556 100644
  chromeos::FakePowerManagerClient* FakePowerManagerClient() {
    chromeos::FakePowerManagerClient* fake_power_manager_client =
        chromeos::FakePowerManagerClient::Get();
-@@ -366,8 +360,12 @@ void FakeShutdownSignal() {
+@@ -372,8 +366,12 @@ void FakeShutdownSignal() {
  }
  
  void InstallFakeShutdownCalls() {

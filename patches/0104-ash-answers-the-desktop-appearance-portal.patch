@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index c9968254a28f..197f1bdb67dd 100644
+index 5b919da94855..f96fa4af9ad6 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -24,6 +24,8 @@ static_library("dbus") {
@@ -11,7 +11,7 @@ index c9968254a28f..197f1bdb67dd 100644
      "desktop_notification_service.cc",
      "desktop_notification_service.h",
      "dlp_files_policy_service_provider.cc",
-@@ -201,9 +203,12 @@ static_library("dbus") {
+@@ -198,9 +200,12 @@ static_library("dbus") {
      "//third_party/boringssl",
      "//ui/aura",
      "//ui/base",
@@ -441,10 +441,10 @@ index 000000000000..af0c1bae6aaa
 +
 +#endif  // CHROME_BROWSER_ASH_DBUS_DESKTOP_APPEARANCE_SERVICE_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index b3a73ea3a84f..1d37bd59f603 100644
+index 716e19fe91d3..e14ab1c7dec7 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -91,6 +91,7 @@
+@@ -92,6 +92,7 @@
  #include "chrome/browser/ash/dbus/chrome_features_service_provider.h"
  #include "chrome/browser/ash/dbus/component_updater_service_provider.h"
  #include "chrome/browser/ash/dbus/cryptohome_key_delegate_service_provider.h"
@@ -452,7 +452,7 @@ index b3a73ea3a84f..1d37bd59f603 100644
  #include "chrome/browser/ash/dbus/desktop_notification_service.h"
  #include "chrome/browser/ash/dbus/dlp_files_policy_service_provider.h"
  #include "chrome/browser/ash/dbus/drive_file_stream_service_provider.h"
-@@ -433,6 +434,10 @@ class DBusServices {
+@@ -439,6 +440,10 @@ class DBusServices {
        // the system services above, then translate requests into Ash state.
        desktop_notification_service_host_ =
            DesktopNotificationServiceHost::Create();
@@ -463,7 +463,7 @@ index b3a73ea3a84f..1d37bd59f603 100644
      }
  
      virtual_file_request_service_ = CrosDBusService::Create(
-@@ -668,6 +673,7 @@ class DBusServices {
+@@ -674,6 +679,7 @@ class DBusServices {
      // Services depending on ash should be released here.
      SetBluetoothConfigServiceBinderForGenericLinux({});
      aurade_bluetooth_service_.reset();
@@ -471,7 +471,7 @@ index b3a73ea3a84f..1d37bd59f603 100644
      desktop_notification_service_host_.reset();
      machine_learning_decision_service_.reset();
    }
-@@ -680,6 +686,8 @@ class DBusServices {
+@@ -686,6 +692,8 @@ class DBusServices {
    std::unique_ptr<AuraDeBluetoothService> aurade_bluetooth_service_;
    std::unique_ptr<DesktopNotificationServiceHost>
        desktop_notification_service_host_;

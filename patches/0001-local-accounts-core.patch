@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ash/drive/file_system_util.cc b/chrome/browser/ash/drive/file_system_util.cc
-index fdaa28a593f2..3e5c9a1dae98 100644
+index bd12e953000e..0178caf64de2 100644
 --- a/chrome/browser/ash/drive/file_system_util.cc
 +++ b/chrome/browser/ash/drive/file_system_util.cc
 @@ -47,6 +47,16 @@ using user_manager::UserManager;
@@ -30,7 +30,7 @@ index fdaa28a593f2..3e5c9a1dae98 100644
    // Disable Drive if the flag has been passed and it is a test image.
    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
 diff --git a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
-index e98a65637701..3279c4cdb501 100644
+index 6203cb7bb52c..b43faef29a37 100644
 --- a/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
 +++ b/chrome/browser/ash/login/users/avatar/user_image_manager_impl.cc
 @@ -69,6 +69,16 @@ static bool g_skip_profile_download = false;

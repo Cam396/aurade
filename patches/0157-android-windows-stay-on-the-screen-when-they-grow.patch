@@ -10,7 +10,7 @@ index 1062e463db19..bda75c6195b4 100644
  #include "ui/views/widget/widget.h"
  #include "ui/wm/public/activation_client.h"
  
-@@ -267,6 +268,21 @@
+@@ -267,6 +268,21 @@ void ArcResizeLockManager::OnWindowBoundsChanged(
      }
    compat_mode_button_controller_->Update(window);
  

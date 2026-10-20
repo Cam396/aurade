@@ -260,7 +260,7 @@ index bbe2492aa357..49acaf78caf0 100644
  
  void SystemWebAppManagerFactory::RegisterProfilePrefs(
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 36b5f14866e4..668a80263225 100644
+index 10eecc453e46..753f2d37e3a7 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -48,6 +48,7 @@
@@ -271,7 +271,7 @@ index 36b5f14866e4..668a80263225 100644
  #include "base/task/sequenced_task_runner.h"
  #include "base/types/expected.h"
  #include "base/types/expected_macros.h"
-@@ -4659,6 +4660,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
+@@ -4700,6 +4701,12 @@ content::TtsPlatform* ChromeContentBrowserClient::GetTtsPlatform() {
        TtsExtensionEngine::GetInstance());
  #endif
  #if BUILDFLAG(IS_CHROMEOS)
@@ -285,10 +285,10 @@ index 36b5f14866e4..668a80263225 100644
  #else
    return nullptr;
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index 95a1d2ca5da9..fa4cdb371479 100644
+index 6a70d9699971..833e4b617bb4 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
-@@ -560,6 +560,16 @@ void ComponentLoader::AddAimEligibilityExtension() {
+@@ -577,6 +577,16 @@ void ComponentLoader::AddNewTabPageExtension() {
  }
  
  void ComponentLoader::AddGlicExtension() {
@@ -305,7 +305,7 @@ index 95a1d2ca5da9..fa4cdb371479 100644
    if (IsApiGlicPrivateEnabled()) {
      Add(IDR_GLIC_EXTENSION_MANIFEST,
          base::FilePath(FILE_PATH_LITERAL("glic_extension")));
-@@ -567,6 +577,16 @@ void ComponentLoader::AddGlicExtension() {
+@@ -584,6 +594,16 @@ void ComponentLoader::AddGlicExtension() {
  }
  
  void ComponentLoader::AddContextualTasksExtension() {
@@ -322,7 +322,7 @@ index 95a1d2ca5da9..fa4cdb371479 100644
    if (base::FeatureList::IsEnabled(
            extensions_features::kApiContextualTasksPrivate)) {
      Add(IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST_JSON,
-@@ -636,6 +656,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
+@@ -653,6 +673,17 @@ void ComponentLoader::AddGuestModeTestExtension(const base::FilePath& path) {
  }
  
  void ComponentLoader::AddKeyboardApp() {
@@ -340,7 +340,7 @@ index 95a1d2ca5da9..fa4cdb371479 100644
    Add(IDR_KEYBOARD_MANIFEST, base::FilePath(FILE_PATH_LITERAL("keyboard")));
  }
  
-@@ -757,14 +788,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -774,14 +805,23 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
  
    if (!skip_session_components) {
  #if BUILDFLAG(IS_CHROMEOS)
@@ -370,7 +370,7 @@ index 95a1d2ca5da9..fa4cdb371479 100644
  #endif  // BUILDFLAG(IS_CHROMEOS)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -783,8 +823,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -800,8 +840,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
      }
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
  
@@ -389,7 +389,7 @@ index 95a1d2ca5da9..fa4cdb371479 100644
  #endif  // BUILDFLAG(IS_CHROMEOS)
    }
  
-@@ -910,14 +958,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
+@@ -928,14 +976,24 @@ void ComponentLoader::AddComponentFromDir(const base::FilePath& root_directory,
  }
  
  void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {

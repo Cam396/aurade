@@ -1,8 +1,8 @@
 diff --git a/ash/BUILD.gn b/ash/BUILD.gn
-index cb229909cd6b..b82533249cd1 100644
+index eaf7f74f4471..e169cc175105 100644
 --- a/ash/BUILD.gn
 +++ b/ash/BUILD.gn
-@@ -583,6 +583,8 @@ component("ash") {
+@@ -585,6 +585,8 @@ component("ash") {
      "detachable_base/detachable_base_notification_controller.h",
      "detachable_base/detachable_base_observer.h",
      "detachable_base/detachable_base_pairing_status.h",
@@ -991,10 +991,10 @@ index f8ae7837fb85..130d3ede8e0f 100644
  
  }  // namespace ash
 diff --git a/ash/shell.cc b/ash/shell.cc
-index a5126ee9204f..db7f1213570f 100644
+index d6309faf241d..37b655c0623c 100644
 --- a/ash/shell.cc
 +++ b/ash/shell.cc
-@@ -58,6 +58,7 @@
+@@ -59,6 +59,7 @@
  #include "ash/dbus/ash_dbus_services.h"
  #include "ash/detachable_base/detachable_base_handler.h"
  #include "ash/detachable_base/detachable_base_notification_controller.h"
@@ -1002,7 +1002,7 @@ index a5126ee9204f..db7f1213570f 100644
  #include "ash/display/cros_display_config.h"
  #include "ash/display/cursor_window_controller.h"
  #include "ash/display/display_alignment_controller.h"
-@@ -825,6 +826,7 @@ Shell::~Shell() {
+@@ -826,6 +827,7 @@ Shell::~Shell() {
    user_metrics_recorder_->OnShellShuttingDown();
  
    cros_display_config_.reset();
@@ -1010,7 +1010,7 @@ index a5126ee9204f..db7f1213570f 100644
    display_configuration_observer_.reset();
    display_prefs_.reset();
    display_alignment_controller_.reset();
-@@ -1941,6 +1943,11 @@ void Shell::InitializeDisplayManager() {
+@@ -1954,6 +1956,11 @@ void Shell::InitializeDisplayManager() {
  
    bool display_initialized = display_manager_->InitFromCommandLine();
  
@@ -1023,10 +1023,10 @@ index a5126ee9204f..db7f1213570f 100644
      if (base::SysInfo::IsRunningOnChromeOS()) {
        display_change_observer_ =
 diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
-index 7571a75d86f4..98ab85919a9d 100644
+index 17ff3c7c5d69..2ef45d8e12a4 100644
 --- a/ui/display/manager/display_manager.cc
 +++ b/ui/display/manager/display_manager.cc
-@@ -884,10 +884,15 @@ void DisplayManager::RegisterDisplayProperty(
+@@ -885,10 +885,15 @@ void DisplayManager::RegisterDisplayProperty(
    ManagedDisplayInfo& info = display_info_[display_id];
    info.SetRotation(rotation, Display::RotationSource::USER);
    info.SetRotation(rotation, Display::RotationSource::ACTIVE);
@@ -1044,7 +1044,7 @@ index 7571a75d86f4..98ab85919a9d 100644
    }
  
    if (overscan_insets) {
-@@ -2453,6 +2458,12 @@ void DisplayManager::ApplyDefaultZoomFactorIfNecessary(
+@@ -2454,6 +2459,12 @@ void DisplayManager::ApplyDefaultZoomFactorIfNecessary(
      return;
    }
  
@@ -1113,7 +1113,7 @@ index 19d66b1f16a7..916e3aeb8de4 100644
      std::vector<SkBitmap> scaled_bitmaps;
      for (const auto& bitmap : bitmaps) {
 diff --git a/ui/ozone/platform/wayland/host/wayland_frame_manager.cc b/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
-index 3c61db968002..6ca6c6113602 100644
+index b0bea4e3bd15..0a620940b376 100644
 --- a/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_frame_manager.cc
 @@ -443,8 +443,13 @@ std::optional<bool> WaylandFrameManager::ApplySurfaceConfigure(
@@ -1254,10 +1254,10 @@ index 10ee3e24cf39..33731eef6ce4 100644
    // DeviceScaleFactorObserver:
    void OnDeviceScaleFactorChanged() override;
 diff --git a/ui/ozone/platform/wayland/host/wayland_window.cc b/ui/ozone/platform/wayland/host/wayland_window.cc
-index 010e823ac144..7c2b18bb7d29 100644
+index 597385809995..7d75e5173adb 100644
 --- a/ui/ozone/platform/wayland/host/wayland_window.cc
 +++ b/ui/ozone/platform/wayland/host/wayland_window.cc
-@@ -989,6 +989,10 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
+@@ -1013,6 +1013,10 @@ bool WaylandWindow::Initialize(PlatformWindowInitProperties properties) {
  
    opacity_ = properties.opacity;
    type_ = properties.type;
@@ -1268,7 +1268,7 @@ index 010e823ac144..7c2b18bb7d29 100644
  
    connection_->window_manager()->AddWindow(GetWidget(), this);
  
-@@ -1287,27 +1291,32 @@ void WaylandWindow::UpdateCursorShape(scoped_refptr<BitmapCursor> cursor) {
+@@ -1327,27 +1331,32 @@ void WaylandWindow::UpdateCursorShape(scoped_refptr<BitmapCursor> cursor) {
    std::optional<uint32_t> shape =
        WaylandCursorShape::ShapeFromType(cursor->type());
  
@@ -1311,10 +1311,10 @@ index 010e823ac144..7c2b18bb7d29 100644
  }
  
 diff --git a/ui/ozone/platform/wayland/host/wayland_window.h b/ui/ozone/platform/wayland/host/wayland_window.h
-index e0e6bb8d525b..24c6262a4afe 100644
+index 2e2774172dea..31f0d804df88 100644
 --- a/ui/ozone/platform/wayland/host/wayland_window.h
 +++ b/ui/ozone/platform/wayland/host/wayland_window.h
-@@ -313,6 +313,10 @@ class WaylandWindow : public PlatformWindow,
+@@ -321,6 +321,10 @@ class WaylandWindow : public PlatformWindow,
      return latched_state_;
    }
  
@@ -1325,7 +1325,7 @@ index e0e6bb8d525b..24c6262a4afe 100644
    // Tells if the surface has already been configured. This will be true after
    // the first set of configure event and ack request, meaning that wl_surface
    // can attach buffers.
-@@ -626,6 +630,9 @@ class WaylandWindow : public PlatformWindow,
+@@ -634,6 +638,9 @@ class WaylandWindow : public PlatformWindow,
  
    bool has_touch_focus_ = false;
  

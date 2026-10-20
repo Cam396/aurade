@@ -15,10 +15,10 @@ index 8c7ab8a0e763..a0ca4d73cc5c 100644
      return false;
    }
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 87499190d761..75b06424c3b1 100644
+index d074af9290c6..131a72cdbc44 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
-@@ -3109,7 +3109,7 @@ Chromium is unable to recover your settings.
+@@ -3155,7 +3155,7 @@ Chromium is unable to recover your settings.
        <!-- Memory Saver IPH strings -->
        <if expr="not is_android">
          <message name="IDS_MEMORY_SAVER_MODE_PROMO_TITLE" desc="The title for the Memory Saver mode in-product promo bubble">
@@ -107,7 +107,7 @@ index 92b67e8bedea..463017ffab94 100644
    const user_manager::UserManager* user_manager =
        user_manager::UserManager::Get();
 diff --git a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
-index 7a999b69a4eb..b38d7f7b8b71 100644
+index f69f10e33615..49d4c99f897a 100644
 --- a/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
 +++ b/chrome/browser/ui/webui/ash/login/welcome_screen_handler.cc
 @@ -110,7 +110,13 @@ void WelcomeScreenHandler::ShowRemoraRequisitionDialog() {

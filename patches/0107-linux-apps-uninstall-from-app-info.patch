@@ -13,10 +13,10 @@ index c69b93cd78af..9923369d3823 100644
        case AppType.kWeb:
          return AppManagementEntryPoint.MAIN_VIEW_WEB_APP;
 diff --git a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc b/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
-index 62749b9e6e59..c1e2291748a0 100644
+index 318cd078922a..3c0e32afae94 100644
 --- a/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
 +++ b/chrome/browser/ui/views/apps/app_dialog/app_uninstall_dialog_view.cc
-@@ -289,8 +289,14 @@ void AppUninstallDialogView::InitializeView(Profile* profile,
+@@ -290,8 +290,14 @@ void AppUninstallDialogView::InitializeView(Profile* profile,
        NOTREACHED();
  #endif
      case apps::AppType::kCrostini:

@@ -97,10 +97,10 @@ index 1f0cfb7fda36..fd127bcf0089 100644
    }
  
 diff --git a/chrome/browser/ui/ash/read_write_cards/BUILD.gn b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
-index f21a7d049c2d..8698104a0762 100644
+index ed656af1caa5..6af662a6fb31 100644
 --- a/chrome/browser/ui/ash/read_write_cards/BUILD.gn
 +++ b/chrome/browser/ui/ash/read_write_cards/BUILD.gn
-@@ -59,6 +59,7 @@ source_set("unit_tests") {
+@@ -60,6 +60,7 @@ source_set("unit_tests") {
      ":read_write_cards",
      ":read_write_cards_manager",
      "//ash:test_support",
@@ -108,7 +108,7 @@ index f21a7d049c2d..8698104a0762 100644
      "//base/test:test_support",
      "//chrome/browser:global_features",
      "//chrome/browser/ash/magic_boost",
-@@ -78,6 +79,7 @@ source_set("unit_tests") {
+@@ -79,6 +80,7 @@ source_set("unit_tests") {
      "//chromeos/constants",
      "//content/public/browser",
      "//ui/base",
@@ -117,7 +117,7 @@ index f21a7d049c2d..8698104a0762 100644
      "//ui/views",
    ]
 diff --git a/chrome/browser/ui/webui/help/version_updater_chromeos.cc b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
-index e64eb19cb598..244979ce6ac0 100644
+index c15259d0a3fe..244979ce6ac0 100644
 --- a/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 +++ b/chrome/browser/ui/webui/help/version_updater_chromeos.cc
 @@ -15,6 +15,7 @@
@@ -128,12 +128,13 @@ index e64eb19cb598..244979ce6ac0 100644
  #include "chrome/browser/ash/login/startup_utils.h"
  #include "chrome/browser/ash/login/wizard_controller.h"
  #include "chrome/browser/ash/ownership/owner_settings_service_ash.h"
-@@ -166,8 +167,13 @@ void VersionUpdaterCros::GetUpdateStatus(StatusCallback callback) {
+@@ -166,9 +167,13 @@ void VersionUpdaterCros::GetUpdateStatus(StatusCallback callback) {
  void VersionUpdaterCros::ApplyDeferredUpdateAdvanced() {
    UpdateEngineClient* update_engine_client = UpdateEngineClient::Get();
  
--  DCHECK(update_engine_client->GetLastStatus().current_operation() ==
--         update_engine::Operation::UPDATED_BUT_DEFERRED);
+-  CHECK(update_engine_client->GetLastStatus().current_operation() ==
+-            update_engine::Operation::UPDATED_BUT_DEFERRED,
+-        base::NotFatalUntil::M162);
 +  // A status notification may replace the deferred state before the WebUI
 +  // processes an already queued click. Treat that stale action as a no-op
 +  // instead of violating the update-engine state contract.
@@ -144,7 +145,7 @@ index e64eb19cb598..244979ce6ac0 100644
  
    update_engine_client->ApplyDeferredUpdateAdvanced(
        /*shutdown_after_update=*/false, base::DoNothing());
-@@ -368,6 +374,10 @@ void VersionUpdaterCros::UpdateStatusChanged(
+@@ -369,6 +374,10 @@ void VersionUpdaterCros::UpdateStatusChanged(
                   static_cast<int32_t>(
                       update_engine::ErrorCode::kDownloadTransferError)) {
          my_status = FAILED_DOWNLOAD;
@@ -251,10 +252,10 @@ index f6483434ca6c..432fbe6e5eb9 100644
 +
  }  // namespace chromeos
 diff --git a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
-index 3b28fd4e9717..fcc4c6da2ff2 100644
+index f77aad12af5d..849a7d78bf46 100644
 --- a/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
 +++ b/chrome/test/data/webui/chromeos/settings/device_page/device_page_test.ts
-@@ -226,6 +226,7 @@ suite('<settings-device-page>', () => {
+@@ -217,6 +217,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -262,7 +263,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const minVolumePercentFakeAudioSystemProperties:
-@@ -241,6 +242,7 @@ suite('<settings-device-page>', () => {
+@@ -232,6 +233,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -270,7 +271,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const mutedByUserFakeAudioSystemProperties:
-@@ -258,6 +260,7 @@ suite('<settings-device-page>', () => {
+@@ -249,6 +251,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -278,7 +279,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const mutedByPolicyFakeAudioSystemProperties:
-@@ -275,6 +278,7 @@ suite('<settings-device-page>', () => {
+@@ -266,6 +269,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -286,7 +287,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const mutedExternallyFakeAudioSystemProperties:
-@@ -292,6 +296,7 @@ suite('<settings-device-page>', () => {
+@@ -283,6 +287,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -294,7 +295,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const emptyOutputDevicesFakeAudioSystemProperties:
-@@ -306,6 +311,7 @@ suite('<settings-device-page>', () => {
+@@ -297,6 +302,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -302,7 +303,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const emptyInputDevicesFakeAudioSystemProperties:
-@@ -321,6 +327,7 @@ suite('<settings-device-page>', () => {
+@@ -312,6 +318,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -310,7 +311,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const activeSpeakerFakeAudioSystemProperties:
-@@ -336,6 +343,7 @@ suite('<settings-device-page>', () => {
+@@ -327,6 +334,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -318,7 +319,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectNoneAudioSystemProperties:
-@@ -350,6 +358,7 @@ suite('<settings-device-page>', () => {
+@@ -341,6 +349,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -326,7 +327,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectNoiseCancellationAudioSystemProperties:
-@@ -364,6 +373,7 @@ suite('<settings-device-page>', () => {
+@@ -355,6 +364,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceNC,
@@ -334,7 +335,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectStyleTransferAudioSystemProperties:
-@@ -378,6 +388,7 @@ suite('<settings-device-page>', () => {
+@@ -369,6 +379,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceST,
@@ -342,7 +343,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectBeamformingAudioSystemProperties:
-@@ -392,6 +403,7 @@ suite('<settings-device-page>', () => {
+@@ -383,6 +394,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceBF,
@@ -350,7 +351,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectModeOptionsAudioSystemProperties:
-@@ -406,6 +418,7 @@ suite('<settings-device-page>', () => {
+@@ -397,6 +409,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceEffectMode,
@@ -358,7 +359,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const effectFallbackMessageAudioSystemProperties:
-@@ -420,6 +433,7 @@ suite('<settings-device-page>', () => {
+@@ -411,6 +424,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearanceFallback,
@@ -366,7 +367,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const hfpMicSrSupportedAudioSystemProperties:
-@@ -435,6 +449,7 @@ suite('<settings-device-page>', () => {
+@@ -426,6 +440,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -374,7 +375,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const muteByHardwareAudioSystemProperties:
-@@ -449,6 +464,7 @@ suite('<settings-device-page>', () => {
+@@ -440,6 +455,7 @@ suite('<settings-device-page>', () => {
        inputGainPercent: 0,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -382,7 +383,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      setup(async () => {
-@@ -1408,6 +1424,7 @@ suite('<settings-device-page>', () => {
+@@ -1399,6 +1415,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,
@@ -390,7 +391,7 @@ index 3b28fd4e9717..fcc4c6da2ff2 100644
      };
  
      const spatialAudioNotSupportedAudioSystemProperties:
-@@ -1422,6 +1439,7 @@ suite('<settings-device-page>', () => {
+@@ -1413,6 +1430,7 @@ suite('<settings-device-page>', () => {
        inputMuteState: crosAudioConfigMojom.MuteState.kNotMuted,
        voiceIsolationUiAppearance:
            fakeCrosAudioConfig.fakeVoiceIsolationUIAppearance,

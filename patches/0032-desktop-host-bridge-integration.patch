@@ -173,10 +173,10 @@ index 75182df1d233..a544a090f315 100644
    std::map<std::string, std::string> aurade_host_execs_;
    std::map<std::string, AuraDeHostDesktopApp> aurade_host_apps_;
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index f1dd8ff39fd2..a415069cebba 100644
+index 65ce1c51a7e1..d809ff8016a3 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-@@ -168,6 +168,10 @@ void ShutdownAuraDeBluezSystemBus() {
+@@ -167,6 +167,10 @@ void ShutdownAuraDeBluezSystemBus() {
  
  }  // namespace
  
@@ -232,10 +232,10 @@ index 985185874ae3..3b0628572d82 100644
        DiskMountManager::GetInstance()->UnmountPath(
            volume->mount_path().value(),
 diff --git a/chrome/browser/ash/file_manager/virtual_file_tasks.cc b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-index d513662a9ed6..0485b9047594 100644
+index 8cf393649f51..a5a7cec803ad 100644
 --- a/chrome/browser/ash/file_manager/virtual_file_tasks.cc
 +++ b/chrome/browser/ash/file_manager/virtual_file_tasks.cc
-@@ -14,6 +14,7 @@
+@@ -17,6 +17,7 @@
  #include "chrome/browser/ash/file_manager/virtual_tasks/install_isolated_web_app_virtual_task.h"
  #include "chrome/browser/ash/file_manager/virtual_tasks/install_package_virtual_task.h"
  #include "chrome/browser/ash/file_manager/virtual_tasks/ms365_virtual_task.h"
@@ -243,7 +243,7 @@ index d513662a9ed6..0485b9047594 100644
  #include "chromeos/ash/components/file_manager/app_id.h"
  #include "components/services/app_service/public/cpp/intent_util.h"
  
-@@ -28,6 +29,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
+@@ -31,6 +32,7 @@ const std::vector<VirtualTask*>& GetVirtualTasks() {
        std::initializer_list<VirtualTask*>({
            new InstallIsolatedWebAppVirtualTask(),
            new InstallPackageVirtualTask(),
@@ -252,7 +252,7 @@ index d513662a9ed6..0485b9047594 100644
            new DocsUploadVirtualTask(),
            new SheetsUploadVirtualTask(),
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
-index fd7bf21307f4..3e385fce06f2 100644
+index de389c595440..ce8f40826270 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 +++ b/chrome/browser/ash/file_manager/virtual_tasks/BUILD.gn
 @@ -15,6 +15,8 @@ static_library("virtual_tasks") {
@@ -263,7 +263,7 @@ index fd7bf21307f4..3e385fce06f2 100644
 +    "open_linux_virtual_task.h",
    ]
  
-   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+   deps = [
 diff --git a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h b/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
 index e4020a50c603..c651152c60aa 100644
 --- a/chrome/browser/ash/file_manager/virtual_tasks/id_constants.h
@@ -420,10 +420,10 @@ index 000000000000..dab99b9f04c0
 +
 +#endif  // CHROME_BROWSER_ASH_FILE_MANAGER_VIRTUAL_TASKS_OPEN_LINUX_VIRTUAL_TASK_H_
 diff --git a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-index 6ee56b552556..ece06b6ec8e8 100644
+index 50cd156e84e8..bc362a1a2599 100644
 --- a/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
 +++ b/chrome/browser/ash/main_parts/chrome_browser_main_parts_ash.cc
-@@ -568,7 +568,14 @@ class DBusServices {
+@@ -574,7 +574,14 @@ class DBusServices {
      TPMTokenLoader::Initialize();
      NetworkCertLoader::Initialize();
  

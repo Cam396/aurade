@@ -192,7 +192,7 @@ index a4963438f3c9..f3e213ba8891 100644
      aurade_host_apps_watcher_ = base::SequenceBound<AuraDeHostAppsWatcher>(
          base::ThreadPool::CreateSequencedTaskRunner(
 diff --git a/chrome/browser/ash/dbus/BUILD.gn b/chrome/browser/ash/dbus/BUILD.gn
-index a2402c14db99..1b5c0114a41f 100644
+index 7ebfe97a9f92..18463267cb9c 100644
 --- a/chrome/browser/ash/dbus/BUILD.gn
 +++ b/chrome/browser/ash/dbus/BUILD.gn
 @@ -28,6 +28,8 @@ static_library("dbus") {

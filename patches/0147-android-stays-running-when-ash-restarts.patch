@@ -1,7 +1,8 @@
 diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
+index 26be11629bd9..a2afe36dd611 100644
 --- a/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
 +++ b/chromeos/ash/experiences/arc/session/arc_aurade_client_adapter.cc
-@@ -65,6 +65,12 @@
+@@ -65,6 +65,12 @@ class ArcAuraDEClientAdapter : public ArcClientAdapter {
    }
  
    void StopArcInstance(bool on_shutdown, bool should_backup_log) override {

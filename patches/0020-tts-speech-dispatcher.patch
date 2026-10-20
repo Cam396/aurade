@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
-index dc740e598785..d94dd8d5909b 100644
+index 56ab59f27edf..997fc59f6c73 100644
 --- a/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
 +++ b/chrome/browser/speech/extension_api/tts_engine_extension_api_chromeos.cc
-@@ -129,6 +129,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+@@ -133,6 +133,17 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
    if (!browser_context || disable_built_in_tts_engine_for_testing_)
      return true;
  
@@ -20,7 +20,7 @@ index dc740e598785..d94dd8d5909b 100644
    std::vector<content::VoiceData> voices;
    GetVoices(browser_context, GURL(), &voices);
    bool saw_google_tts = false;
-@@ -140,11 +151,8 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
+@@ -144,11 +155,8 @@ bool TtsExtensionEngineChromeOS::IsBuiltInTtsEngineInitialized(
          voice.engine_id == extension_misc::kEspeakSpeechSynthesisExtensionId;
    }
  
@@ -35,10 +35,10 @@ index dc740e598785..d94dd8d5909b 100644
  
  void TtsExtensionEngineChromeOS::OnStart() {
 diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
-index 70614431823c..2270be509dc8 100644
+index cda5d70ca84a..138cb3586ffa 100644
 --- a/content/browser/BUILD.gn
 +++ b/content/browser/BUILD.gn
-@@ -2555,7 +2555,10 @@ source_set("browser") {
+@@ -2573,7 +2573,10 @@ source_set("browser") {
      ]
    }
  
@@ -51,7 +51,7 @@ index 70614431823c..2270be509dc8 100644
      deps += [
        "//third_party/speech-dispatcher",
 diff --git a/content/browser/speech/tts_linux.cc b/content/browser/speech/tts_linux.cc
-index f613b03e8917..52afa4d32eff 100644
+index 2249cdd5fbc9..610d2680f0e5 100644
 --- a/content/browser/speech/tts_linux.cc
 +++ b/content/browser/speech/tts_linux.cc
 @@ -8,6 +8,7 @@
@@ -70,9 +70,9 @@ index f613b03e8917..52afa4d32eff 100644
  #include "library_loaders/libspeechd.h"
  
  namespace content {
-@@ -43,6 +43,11 @@ using PlatformVoices = std::map<std::string, SPDChromeVoice>;
- constexpr int kInvalidUtteranceId = -1;
- constexpr int kInvalidMessageUid = -1;
+@@ -48,6 +48,11 @@ std::string& SpeechDispatcherLibraryPath() {
+   return *library_path;
+ }
  
 +// AuraDE compatibility: ChromeOS target builds do not expose the Linux-only
 +// content switch declaration, but AuraDE still launches with this switch to
@@ -81,8 +81,8 @@ index f613b03e8917..52afa4d32eff 100644
 +
  }  // namespace
  
- class TtsPlatformImplBackgroundWorker {
-@@ -169,9 +174,20 @@ class TtsPlatformImplLinux : public TtsPlatformImpl {
+ base::AutoReset<std::string> SetSpeechDispatcherLibraryPathForTesting(
+@@ -183,9 +188,20 @@ class TtsPlatformImplLinux : public TtsPlatformImpl {
  
  void TtsPlatformImplBackgroundWorker::Initialize() {
    PlatformVoices voices;
@@ -103,7 +103,7 @@ index f613b03e8917..52afa4d32eff 100644
    }
  
    bool success = (conn_ != nullptr);
-@@ -212,6 +228,9 @@ void TtsPlatformImplBackgroundWorker::ProcessSpeech(
+@@ -226,6 +242,9 @@ void TtsPlatformImplBackgroundWorker::ProcessSpeech(
    utterance_id_ = utterance_id;
    utterance_char_position_ = 0;
    utterance_length_ = parsed_utterance.size();
@@ -113,7 +113,7 @@ index f613b03e8917..52afa4d32eff 100644
  
    // spd_say(...) returns msg_uid on success, -1 otherwise. Each call to spd_say
    // returns a different msg_uid.
-@@ -257,6 +276,12 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
+@@ -271,6 +290,12 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
    if (!conn_)
      return;
  
@@ -126,7 +126,7 @@ index f613b03e8917..52afa4d32eff 100644
    char** modules = libspeechd_loader_.spd_list_modules(conn_);
    if (!modules)
      return;
-@@ -274,11 +299,18 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
+@@ -288,11 +313,18 @@ void TtsPlatformImplBackgroundWorker::InitializeVoices(PlatformVoices* voices) {
        spd_data.name = spd_voice->name;
        spd_data.module = module;
        spd_data.language = spd_voice->language;
@@ -150,7 +150,7 @@ index f613b03e8917..52afa4d32eff 100644
        free(UNSAFE_TODO(spd_voices[j]));
      }
      free(UNSAFE_TODO(modules[i]));
-@@ -312,8 +344,12 @@ void TtsPlatformImplBackgroundWorker::OpenConnection() {
+@@ -326,8 +358,12 @@ void TtsPlatformImplBackgroundWorker::OpenConnection() {
  
  void TtsPlatformImplBackgroundWorker::CloseConnection() {
    if (conn_) {
@@ -164,7 +164,7 @@ index f613b03e8917..52afa4d32eff 100644
    }
  }
  
-@@ -406,7 +442,7 @@ TtsPlatformImplLinux::TtsPlatformImplLinux()
+@@ -421,7 +457,7 @@ TtsPlatformImplLinux::TtsPlatformImplLinux()
          base::NotFatalUntil::M159);
    const base::CommandLine& command_line =
        *base::CommandLine::ForCurrentProcess();
@@ -173,7 +173,7 @@ index f613b03e8917..52afa4d32eff 100644
      return;
  
    // The TTS platform is supported. The Tts platform initialisation will happen
-@@ -502,6 +538,9 @@ void TtsPlatformImplLinux::GetVoices(std::vector<VoiceData>* out_voices) {
+@@ -517,6 +553,9 @@ void TtsPlatformImplLinux::GetVoices(std::vector<VoiceData>* out_voices) {
          base::NotFatalUntil::M159);
    CHECK(PlatformImplInitialized(), base::NotFatalUntil::M159);
  

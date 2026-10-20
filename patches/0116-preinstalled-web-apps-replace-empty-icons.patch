@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/web_applications/preinstalled_web_app_manager.cc b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
-index a31934718190..d896f5e29141 100644
+index 0c80270d0732..39496eb23466 100644
 --- a/chrome/browser/web_applications/preinstalled_web_app_manager.cc
 +++ b/chrome/browser/web_applications/preinstalled_web_app_manager.cc
 @@ -577,6 +577,47 @@ void MaybeForceInstallForRemigration(
@@ -50,7 +50,7 @@ index a31934718190..d896f5e29141 100644
  }  // namespace
  
  PreinstalledAppForUpdating::PreinstalledAppForUpdating(
-@@ -1041,7 +1082,34 @@ void PreinstalledWebAppManager::PostProcessConfigs(
+@@ -1042,7 +1083,34 @@ void PreinstalledWebAppManager::PostProcessConfigs(
    base::UmaHistogramCounts100(kHistogramCorruptUserUninstallPrefsCount,
                                corrupt_user_uninstall_prefs_count);
  

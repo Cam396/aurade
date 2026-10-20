@@ -499,10 +499,10 @@ index 84080c665fc1..3ed26d96fa83 100644
      if (this.androidAppsInfo.playStoreEnabled) {
        Router.getInstance().navigateTo(routes.ANDROID_APPS_DETAILS);
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
-index 151929ef5cc0..7f72975b0ec2 100644
+index 0c69b415f4b1..93406fd3bc68 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.cc
-@@ -4,13 +4,23 @@
+@@ -4,11 +4,21 @@
  
  #include "chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h"
  
@@ -513,8 +513,6 @@ index 151929ef5cc0..7f72975b0ec2 100644
 +#include "base/json/json_reader.h"
 +#include "base/logging.h"
  #include "chrome/browser/apps/app_service/app_service_proxy.h"
- #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
- #include "chrome/browser/apps/app_service/launch_utils.h"
  #include "chrome/browser/ash/arc/arc_util.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chromeos/ash/experiences/arc/app/arc_app_constants.h"
@@ -526,7 +524,7 @@ index 151929ef5cc0..7f72975b0ec2 100644
  #include "components/services/app_service/public/cpp/app_launch_util.h"
  #include "components/services/app_service/public/cpp/intent_util.h"
  #include "content/public/browser/web_contents.h"
-@@ -20,6 +30,14 @@
+@@ -18,6 +28,14 @@
  
  namespace ash::settings {
  
@@ -541,7 +539,7 @@ index 151929ef5cc0..7f72975b0ec2 100644
  AndroidAppsHandler::AndroidAppsHandler(Profile* profile,
                                         apps::AppServiceProxy* app_service_proxy)
      : profile_(profile), app_service_proxy_(app_service_proxy) {}
-@@ -32,6 +50,22 @@ void AndroidAppsHandler::RegisterMessages() {
+@@ -30,6 +48,22 @@ void AndroidAppsHandler::RegisterMessages() {
        "requestAndroidAppsInfo",
        base::BindRepeating(&AndroidAppsHandler::HandleRequestAndroidAppsInfo,
                            weak_ptr_factory_.GetWeakPtr()));
@@ -564,7 +562,7 @@ index 151929ef5cc0..7f72975b0ec2 100644
    web_ui()->RegisterMessageCallback(
        "showAndroidAppsSettings",
        base::BindRepeating(&AndroidAppsHandler::ShowAndroidAppsSettings,
-@@ -113,6 +147,171 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
+@@ -111,6 +145,171 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue& args) {
        std::make_unique<apps::WindowInfo>(GetDisplayIdForCurrentProfile()));
  }
  
@@ -735,7 +733,7 @@ index 151929ef5cc0..7f72975b0ec2 100644
 +
  int64_t AndroidAppsHandler::GetDisplayIdForCurrentProfile() {
    // Settings in secondary profile cannot access ARC.
-   DCHECK(arc::IsArcAllowedForProfile(profile_));
+   CHECK(arc::IsArcAllowedForProfile(profile_), base::NotFatalUntil::M162);
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h b/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h
 index 7d203b8be5bb..e9c840e0de52 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/apps/android_apps_handler.h

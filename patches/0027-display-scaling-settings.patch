@@ -748,7 +748,7 @@ index a65b096ea310..43867417f652 100644
    <template is="dom-if"
        if="[[showDropDownResolutionSetting_(selectedDisplay)]]" restamp>
 diff --git a/chrome/browser/resources/ash/settings/device_page/display.ts b/chrome/browser/resources/ash/settings/device_page/display.ts
-index 38153b296f06..7a142147cacf 100644
+index 38153b296f06..0528eb434af8 100644
 --- a/chrome/browser/resources/ash/settings/device_page/display.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/display.ts
 @@ -8,6 +8,7 @@
@@ -867,16 +867,16 @@ index 38153b296f06..7a142147cacf 100644
    ]);
  
    declare private readonly ambientColorAvailable_: boolean;
-+  private auraDisplayApplyInProgress_: boolean;
-+  private auraDisplayAvailable_: boolean;
-+  private auraDisplayModeOptions_: DropdownMenuOptionList;
-+  private auraDisplayModePref_: chrome.settingsPrivate.PrefObject;
-+  private auraDisplayStatus_: string;
-+  private auraFeatureProfileApplyInProgress_: boolean;
-+  private auraFeatureProfileAvailable_: boolean;
-+  private auraFeatureProfileOptions_: DropdownMenuOptionList;
-+  private auraFeatureProfilePref_: chrome.settingsPrivate.PrefObject;
-+  private auraFeatureProfileStatus_: string;
++  declare private auraDisplayApplyInProgress_: boolean;
++  declare private auraDisplayAvailable_: boolean;
++  declare private auraDisplayModeOptions_: DropdownMenuOptionList;
++  declare private auraDisplayModePref_: chrome.settingsPrivate.PrefObject;
++  declare private auraDisplayStatus_: string;
++  declare private auraFeatureProfileApplyInProgress_: boolean;
++  declare private auraFeatureProfileAvailable_: boolean;
++  declare private auraFeatureProfileOptions_: DropdownMenuOptionList;
++  declare private auraFeatureProfilePref_: chrome.settingsPrivate.PrefObject;
++  declare private auraFeatureProfileStatus_: string;
    private browserProxy_: DevicePageBrowserProxy;
    declare private brightnessSliderMax_: number;
    declare private brightnessSliderMin_: number;
@@ -884,11 +884,11 @@ index 38153b296f06..7a142147cacf 100644
    declare private selectedZoomPref_: chrome.settingsPrivate.PrefObject;
    declare private readonly unifiedDesktopAvailable_: boolean;
    declare private unifiedDesktopMode_: boolean;
-+  private auraDisplayScaleApplyInProgress_: boolean;
-+  private auraDisplayScaleAvailable_: boolean;
++  declare private auraDisplayScaleApplyInProgress_: boolean;
++  declare private auraDisplayScaleAvailable_: boolean;
 +  private auraDisplayScaleOptions_: SliderTick[];
-+  private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
-+  private auraDisplayScaleStatus_: string;
++  declare private auraDisplayScalePref_: chrome.settingsPrivate.PrefObject;
++  declare private auraDisplayScaleStatus_: string;
    declare private zoomValues_: SliderTick[];
  
    constructor() {
@@ -1122,7 +1122,7 @@ index 38153b296f06..7a142147cacf 100644
      if (!displays.length) {
        return;
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
-index 1764a9516fc4..5fe3499233c6 100644
+index ec9b145fde4c..b65980c56de3 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_display_handler.cc
 @@ -4,16 +4,663 @@
@@ -2022,10 +2022,10 @@ index ed341408420e..c35d9d8f9a41 100644
  
  }  // namespace ash::settings
 diff --git a/ui/display/manager/display_manager.cc b/ui/display/manager/display_manager.cc
-index 26b59f719f8d..7571a75d86f4 100644
+index 6b417cdeed48..17ff3c7c5d69 100644
 --- a/ui/display/manager/display_manager.cc
 +++ b/ui/display/manager/display_manager.cc
-@@ -782,8 +782,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
+@@ -783,8 +783,9 @@ void DisplayManager::OnScreenBrightnessChanged(float brightness) {
      display_info_list.emplace_back(info);
    }
  
@@ -2036,7 +2036,7 @@ index 26b59f719f8d..7571a75d86f4 100644
  }
  
  bool DisplayManager::SetDisplayMode(int64_t display_id,
-@@ -1904,6 +1905,13 @@ void DisplayManager::ClearTouchCalibrationData(
+@@ -1905,6 +1906,13 @@ void DisplayManager::ClearTouchCalibrationData(
  void DisplayManager::UpdateZoomFactor(int64_t display_id, float zoom_factor) {
    DCHECK(zoom_factor > 0);
    DCHECK_NE(display_id, kInvalidDisplayId);

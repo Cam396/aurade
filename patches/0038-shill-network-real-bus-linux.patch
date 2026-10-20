@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/ash/dbus/ash_dbus_helper.cc b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-index 8fe37da76be3..8f7f80af2e40 100644
+index d2125713b4a4..03ac60df0768 100644
 --- a/chrome/browser/ash/dbus/ash_dbus_helper.cc
 +++ b/chrome/browser/ash/dbus/ash_dbus_helper.cc
-@@ -203,7 +203,16 @@ void InitializeDBus() {
+@@ -202,7 +202,16 @@ void InitializeDBus() {
    // Initialize Chrome dbus clients.
    dbus::Bus* bus = DBusThreadManager::Get()->GetSystemBus();
  

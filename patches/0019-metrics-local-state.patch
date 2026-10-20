@@ -103,7 +103,7 @@ index 05704a3eee26..7097d4767a90 100644
        base::BindOnce(&ChromeOSSystemProfileProvider::OnArcFeaturesParsed,
                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 diff --git a/chrome/browser/metrics/per_user_state_manager_chromeos.cc b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
-index 8a095aa132a4..03c539e90f75 100644
+index 076056187a8f..9634dfa8be17 100644
 --- a/chrome/browser/metrics/per_user_state_manager_chromeos.cc
 +++ b/chrome/browser/metrics/per_user_state_manager_chromeos.cc
 @@ -7,8 +7,10 @@
@@ -201,7 +201,7 @@ index 8a095aa132a4..03c539e90f75 100644
 @@ -304,14 +348,13 @@ void PerUserStateManagerChromeOS::SetReportingState(bool user_choice) {
    GetCurrentUserPrefs()->SetBoolean(prefs::kMetricsUserConsent, user_choice);
  
-   std::string hash = user_manager_->GetActiveUser()->username_hash();
+   std::string hash = current_user_->username_hash();
 -  base::FilePath daemon_store_consent = base::FilePath(kDaemonStorePath)
 -                                            .Append(hash)
 -                                            .Append(kDaemonStoreFileName);

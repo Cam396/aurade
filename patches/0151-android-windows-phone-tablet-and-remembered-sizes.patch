@@ -1,4 +1,5 @@
 diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
+index f6f3770ca6f1..d3e28a8f4d4c 100644
 --- a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
 +++ b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc
 @@ -73,6 +73,7 @@ using arc::mojom::AppCategory;
@@ -75,6 +76,7 @@ diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.cc b/chrome/brow
        GetResizeLockNeedsConfirmation(app_id);
  
 diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
+index 21bf331695ac..cc9ab54feb01 100644
 --- a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
 +++ b/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h
 @@ -449,6 +449,12 @@ class ArcAppListPrefs : public KeyedService,
@@ -91,6 +93,7 @@ diff --git a/chrome/browser/ash/app_list/arc/arc_app_list_prefs.h b/chrome/brows
    void SetResizeLockNeedsConfirmation(const std::string& app_id,
                                        bool is_needed) override;
 diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
+index 4774eb6503e2..1062e463db19 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
 +++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
 @@ -4,6 +4,8 @@
@@ -243,6 +246,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.cc
  
  void ArcResizeLockManager::EnableResizeLock(aura::Window* window) {
 diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
+index 486137653d90..3788f6d6e9b9 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
 +++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h
 @@ -6,12 +6,14 @@
@@ -296,6 +300,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_manager.h 
  
    base::ScopedMultiSourceObservation<aura::Window, aura::WindowObserver>
 diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
+index 4b093bea5562..2f4a61ca8e25 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
 +++ b/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_delegate.h
 @@ -5,9 +5,11 @@
@@ -328,6 +333,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/arc_resize_lock_pref_deleg
  
  }  // namespace arc
 diff --git a/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc b/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
+index 46b3e5ecb264..dde1b8caf0db 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
 +++ b/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_controller.cc
 @@ -12,18 +12,64 @@
@@ -407,6 +413,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/compat_mode_button_control
      }
    }
 diff --git a/chromeos/ash/experiences/arc/compat_mode/resize_util.cc b/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
+index cacfb9530842..245022773935 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
 +++ b/chromeos/ash/experiences/arc/compat_mode/resize_util.cc
 @@ -122,6 +122,12 @@ void ResizeToTablet(views::Widget* widget) {
@@ -434,6 +441,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/resize_util.cc b/chromeos/
    if (!app_id || pref_delegate->GetResizeLockState(*app_id) ==
                       mojom::ArcResizeLockState::OFF) {
 diff --git a/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc b/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
+index 8bb7e6444d7b..f101eada6c96 100644
 --- a/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
 +++ b/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base.cc
 @@ -8,6 +8,7 @@
@@ -479,6 +487,7 @@ diff --git a/chromeos/ash/experiences/arc/compat_mode/test/compat_mode_test_base
  };
  
 diff --git a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
+index 00681f6ac191..d7f667688603 100644
 --- a/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
 +++ b/chromeos/ash/experiences/arc/session/arc_aurade_bridge.cc
 @@ -395,6 +395,12 @@ class Bridge : public ArcAuraDEBridge,

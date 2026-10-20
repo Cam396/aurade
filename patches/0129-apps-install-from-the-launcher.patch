@@ -86,7 +86,7 @@ index 4671248c3bde..57b6006ad9a3 100644
      case SearchResultListType::kSearchAndAssistant:
        title_label_->SetText(l10n_util::GetStringUTF16(
 diff --git a/chrome/browser/ash/app_list/search/BUILD.gn b/chrome/browser/ash/app_list/search/BUILD.gn
-index e865290b20f8..877de7082bd8 100644
+index 191b56cd44b5..2cf950cf6dda 100644
 --- a/chrome/browser/ash/app_list/search/BUILD.gn
 +++ b/chrome/browser/ash/app_list/search/BUILD.gn
 @@ -20,6 +20,8 @@ static_library("search") {
@@ -98,13 +98,12 @@ index e865290b20f8..877de7082bd8 100644
      "burn_in_controller.cc",
      "burn_in_controller.h",
      "chrome_search_result.cc",
-@@ -103,15 +105,18 @@ static_library("search") {
+@@ -102,14 +104,17 @@ static_library("search") {
      "//chromeos/components/mahi/public/cpp",
      "//chromeos/strings:strings_grit",
      "//components/account_id",
 +    "//components/crx_file",
      "//components/drive",
-     "//components/feature_engagement/public",
      "//components/metrics/structured:structured_events",
      "//components/omnibox/browser",
      "//components/services/app_service",
@@ -661,16 +660,15 @@ index 000000000000..9a76c6902904
 +
 +#endif  // CHROME_BROWSER_ASH_APP_LIST_SEARCH_AURADE_INSTALL_PROVIDER_H_
 diff --git a/chrome/browser/ash/app_list/search/search_controller_factory.cc b/chrome/browser/ash/app_list/search/search_controller_factory.cc
-index b368b4312526..8e1f9f39da25 100644
+index 1dfb80439e95..f6f53cbbe4dd 100644
 --- a/chrome/browser/ash/app_list/search/search_controller_factory.cc
 +++ b/chrome/browser/ash/app_list/search/search_controller_factory.cc
-@@ -11,12 +11,14 @@
+@@ -11,11 +11,13 @@
  #include "base/check_deref.h"
  #include "base/files/file_enumerator.h"
  #include "base/metrics/field_trial_params.h"
 +#include "base/system/sys_info.h"
  #include "build/build_config.h"
- #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
  #include "chrome/browser/ash/app_list/search/app_search_provider.h"
  #include "chrome/browser/ash/app_list/search/app_zero_state_provider.h"
  #include "chrome/browser/ash/app_list/search/arc/arc_app_shortcuts_search_provider.h"
@@ -679,7 +677,7 @@ index b368b4312526..8e1f9f39da25 100644
  #include "chrome/browser/ash/app_list/search/desks_admin_template_provider.h"
  #include "chrome/browser/ash/app_list/search/files/drive_search_provider.h"
  #include "chrome/browser/ash/app_list/search/files/file_search_provider.h"
-@@ -97,6 +99,12 @@ std::unique_ptr<SearchController> CreateSearchController(
+@@ -96,6 +98,12 @@ std::unique_ptr<SearchController> CreateSearchController(
    controller->AddProvider(std::make_unique<ArcPlayStoreSearchProvider>(
        kMaxPlayStoreResults, profile, list_controller));
  

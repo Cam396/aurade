@@ -229,7 +229,7 @@ index b16b702376a2..60f9cd69df2f 100644
    <h2>$i18n{deviceSoundsTitle}</h2>
    <div id="deviceSoundsSection" class="subsection">
 diff --git a/chrome/browser/resources/ash/settings/device_page/audio.ts b/chrome/browser/resources/ash/settings/device_page/audio.ts
-index b34860a9c3a5..d9513b6f1bda 100644
+index ee963630785f..bc25ee822142 100644
 --- a/chrome/browser/resources/ash/settings/device_page/audio.ts
 +++ b/chrome/browser/resources/ash/settings/device_page/audio.ts
 @@ -29,7 +29,7 @@ import {DeepLinkingMixin} from '../common/deep_linking_mixin.js';
@@ -241,7 +241,7 @@ index b34860a9c3a5..d9513b6f1bda 100644
  import type {VoiceIsolationUIAppearance} from '../mojom-webui/cros_audio_config.mojom-webui.js';
  import {Setting} from '../mojom-webui/setting.mojom-webui.js';
  import {AudioAndCaptionsPageBrowserProxyImpl} from '../os_a11y_page/audio_and_captions_page_browser_proxy.js';
-@@ -510,6 +510,81 @@ export class SettingsAudioElement extends SettingsAudioElementBase {
+@@ -512,6 +512,81 @@ export class SettingsAudioElement extends SettingsAudioElementBase {
      return !this.batteryStatus_ || !this.batteryStatus_.present;
    }
  
@@ -361,10 +361,10 @@ index 70f14bd94d59..05dc3e51d7b4 100644
     * Returns true if hfpMicSrState is enabled on the device with id `deviceId`.
     */
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-index 8e836a430606..e651321be328 100644
+index c7d0c12154fe..56f0123c2437 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/device/device_section.cc
-@@ -793,6 +793,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
+@@ -789,6 +789,42 @@ void AddDeviceAudioStrings(content::WebUIDataSource* html_source) {
  
    html_source->AddLocalizedStrings(kAudioStrings);
  

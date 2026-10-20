@@ -1,10 +1,10 @@
 diff --git a/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc b/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
-index 52112d73ce18..f0590395cb4a 100644
+index fe35021b074a..89a628c1c672 100644
 --- a/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
 +++ b/chrome/browser/ui/webui/ash/settings/pages/people/people_section.cc
 @@ -569,13 +569,24 @@ void PeopleSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
    user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile());
-   DCHECK(user);
+   CHECK(user, base::NotFatalUntil::M162);
  
 +  // AuraDE: a local account has no Google profile, so often no given name.
 +  // Without one the title read "'s accounts"; it falls back to the display

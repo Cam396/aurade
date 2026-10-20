@@ -216,7 +216,7 @@ index fee2b968f29c..98a0ed97388f 100644
    constexpr gfx::Size size(100, 100);
    constexpr viz::SharedImageFormat format = viz::MultiPlaneFormat::kNV12;
 diff --git a/ui/base/clipboard/BUILD.gn b/ui/base/clipboard/BUILD.gn
-index 3c7a17dbeedc..5f3212fa8399 100644
+index d5af2867316e..9db10de93653 100644
 --- a/ui/base/clipboard/BUILD.gn
 +++ b/ui/base/clipboard/BUILD.gn
 @@ -65,7 +65,7 @@ component("clipboard_types") {
@@ -255,7 +255,7 @@ index d189afddfd78..25edd784577b 100644
  component("linux_ui") {
    defines = [ "IS_LINUX_UI_IMPL" ]
 diff --git a/ui/ozone/platform/drm/host/drm_display_host_manager.cc b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
-index 27eea5ab9d47..c8f0c67ff078 100644
+index 39cddb2c9bf6..3c87f386eed9 100644
 --- a/ui/ozone/platform/drm/host/drm_display_host_manager.cc
 +++ b/ui/ozone/platform/drm/host/drm_display_host_manager.cc
 @@ -371,7 +371,10 @@ void DrmDisplayHostManager::AddDelegate(DrmNativeDisplayDelegate* delegate) {
@@ -271,7 +271,7 @@ index 27eea5ab9d47..c8f0c67ff078 100644
  }
  
 diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
-index 5b239de06670..03d15f1388e7 100644
+index 934fb02480be..63fb449257cd 100644
 --- a/ui/ozone/platform/wayland/BUILD.gn
 +++ b/ui/ozone/platform/wayland/BUILD.gn
 @@ -9,7 +9,7 @@ import("//gpu/vulkan/features.gni")

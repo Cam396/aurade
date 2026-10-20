@@ -45,10 +45,10 @@ index b0a134935ca3..57af01fa8336 100644
  }
  
 diff --git a/chrome/browser/ash/system_web_apps/apps/BUILD.gn b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
-index fcc530574fa7..6a94432d0375 100644
+index 6ca65d529919..1b9fe383c2a3 100644
 --- a/chrome/browser/ash/system_web_apps/apps/BUILD.gn
 +++ b/chrome/browser/ash/system_web_apps/apps/BUILD.gn
-@@ -91,6 +91,7 @@ static_library("apps") {
+@@ -90,6 +90,7 @@ static_library("apps") {
    ]
  
    deps = [
@@ -1025,7 +1025,7 @@ index db4260a9e4ce..971b1c870974 100644
  }
  
 diff --git a/chrome/browser/extensions/api/terminal/terminal_private_api.cc b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
-index 2bdfe2aecfce..e5874648af17 100644
+index 92bf84312406..9c3b9c9056e6 100644
 --- a/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 +++ b/chrome/browser/extensions/api/terminal/terminal_private_api.cc
 @@ -96,6 +96,26 @@ const char kCroshName[] = "crosh";
@@ -1055,9 +1055,9 @@ index 2bdfe2aecfce..e5874648af17 100644
  
  const char kVmShellName[] = "vmshell";
  const char kVmShellCommand[] = "/usr/bin/vsh";
-@@ -118,6 +138,18 @@ static const base::NoDestructor<std::vector<std::string>> kPrefsReadAllowList{{
+@@ -118,6 +138,18 @@ constexpr auto kPrefsReadAllowList = std::to_array<std::string_view>({
      guest_os::prefs::kGuestOsContainers,
- }};
+ });
  
 +bool IsAuraDeLocalTerminalEnabled() {
 +  return base::CommandLine::ForCurrentProcess()->HasSwitch(

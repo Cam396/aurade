@@ -1,5 +1,5 @@
 diff --git a/BUILD.gn b/BUILD.gn
-index 29478cec8041..1acf9b8ad20f 100644
+index 4c6f014f81d9..0d15c4a60a94 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
 @@ -299,7 +299,7 @@ group("gn_all") {
@@ -33,10 +33,10 @@ index 54911d971b8c..7dcb41765667 100644
 +}
 diff --git a/services/on_device_model/aurade/BUILD.gn b/services/on_device_model/aurade/BUILD.gn
 new file mode 100644
-index 000000000000..e1ea0d45db76
+index 000000000000..b264abe8980c
 --- /dev/null
 +++ b/services/on_device_model/aurade/BUILD.gn
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,78 @@
 +# Copyright 2026 The AuraDE Authors
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -72,7 +72,9 @@ index 000000000000..e1ea0d45db76
 +  sources = [ "model_config/aurade_model_config.cc" ]
 +  deps = [
 +    "//base",
-+    "//components/optimization_guide/core/model_execution/configs",
++    "//components/optimization_guide/core/model_execution/configs:manifest_builder",
++    "//components/optimization_guide/core/model_execution/configs:substitution_builders",
++    "//components/optimization_guide/core/model_execution/configs:summarize_config",
 +    "//components/optimization_guide/proto:optimization_guide_proto",
 +  ]
 +}
@@ -7548,10 +7550,10 @@ index 000000000000..f15ca9f75d7e
 +#endif // LLAMA_H
 diff --git a/services/on_device_model/aurade/model_config/aurade_model_config.cc b/services/on_device_model/aurade/model_config/aurade_model_config.cc
 new file mode 100644
-index 000000000000..ae6b001c6688
+index 000000000000..618035bc04f7
 --- /dev/null
 +++ b/services/on_device_model/aurade/model_config/aurade_model_config.cc
-@@ -0,0 +1,485 @@
+@@ -0,0 +1,479 @@
 +// Copyright 2026 The AuraDE Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -7641,7 +7643,6 @@ index 000000000000..ae6b001c6688
 +  proto::SolutionConfig solution;
 +  auto* config = solution.mutable_feature();
 +  config->set_feature(proto::MODEL_EXECUTION_FEATURE_PROMPT_API);
-+  config->set_can_skip_text_safety(true);
 +  config->mutable_input_config()->set_max_context_tokens(kMaxTokens - 2048);
 +  *config->mutable_sampling_params() = Sampling(64, 1.0f);
 +
@@ -7653,14 +7654,11 @@ index 000000000000..ae6b001c6688
 +}
 +
 +// ---------------------------------------------------------------------------
-+// Summarizer. Chrome's own prompt, sized for this model and without the
-+// safety model Gemini Nano ships with.
++// Summarizer. Chrome's own prompt, sized for this model.
 +
 +proto::SolutionConfig SummarizerConfig() {
 +  proto::SolutionConfig solution = BuildSummarizeSolutionConfig();
-+  solution.clear_safety();
 +  auto* config = solution.mutable_feature();
-+  config->set_can_skip_text_safety(true);
 +  auto* input = config->mutable_input_config();
 +  input->set_min_context_tokens(4096);
 +  input->set_max_context_tokens(4096);
@@ -7840,7 +7838,6 @@ index 000000000000..ae6b001c6688
 +  proto::SolutionConfig solution;
 +  auto* config = solution.mutable_feature();
 +  config->set_feature(proto::MODEL_EXECUTION_FEATURE_WRITING_ASSISTANCE_API);
-+  config->set_can_skip_text_safety(true);
 +  auto* input = config->mutable_input_config();
 +  input->set_request_base_name(
 +      "optimization_guide.proto.WritingAssistanceApiRequest");
@@ -7927,7 +7924,6 @@ index 000000000000..ae6b001c6688
 +  proto::SolutionConfig solution;
 +  auto* config = solution.mutable_feature();
 +  config->set_feature(proto::MODEL_EXECUTION_FEATURE_PROOFREADER_API);
-+  config->set_can_skip_text_safety(true);
 +  auto* input = config->mutable_input_config();
 +  input->set_request_base_name("optimization_guide.proto.ProofreaderApiRequest");
 +  input->set_max_execute_tokens(6144);
@@ -7969,7 +7965,7 @@ index 000000000000..ae6b001c6688
 +  for (const char* use_case :
 +       {kPromptApi, kSummarizerApi, kWritingAssistanceApi, kProofreaderApi}) {
 +    builder.Add(std::string(use_case) + "_solution",
-+                SolutionRecipe("gemma4_e2b_recipe", kNoSafetyModel,
++                SolutionRecipe("gemma4_e2b_recipe",
 +                               ManifestFileReference(std::string(use_case) +
 +                                                     ".binarypb")),
 +                {

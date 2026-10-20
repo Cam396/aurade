@@ -17,7 +17,7 @@ index 6fdd0c84943c..b014102823cf 100644
    return gfx::Rect(x, y, bubble_size.width(), bubble_size.height());
  }
 diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
-index 133fcb13f700..3c33db0e8723 100644
+index ade14de64392..2884e0953931 100644
 --- a/ash/ash_strings.grd
 +++ b/ash/ash_strings.grd
 @@ -282,6 +282,9 @@ Style notes:
@@ -53,7 +53,7 @@ index 133fcb13f700..3c33db0e8723 100644
        <message name="IDS_SHELF_STATE_ALWAYS_SHOWN" desc="Accessibility announcement notifying users that the shelf is now always being shown">
          Shelf always shown
        </message>
-@@ -1607,6 +1619,9 @@ You can also use the keyboard shortcut. First, highlight text, then press <ph na
+@@ -1610,6 +1622,9 @@ You can also use the keyboard shortcut. First, highlight text, then press <ph na
        <message name="IDS_ASH_STATUS_TRAY_REBOOT" desc="The accessible text for the reboot button.">
          Restart
        </message>
@@ -414,10 +414,10 @@ index 0fc4cdfd1de4..476b5cfa8563 100644
  
    gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
 diff --git a/ash/shelf/shelf_bubble.cc b/ash/shelf/shelf_bubble.cc
-index d54514e3f18d..b9bf5565eb2f 100644
+index f9a356b9af55..986fb9a286cf 100644
 --- a/ash/shelf/shelf_bubble.cc
 +++ b/ash/shelf/shelf_bubble.cc
-@@ -29,6 +29,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
+@@ -33,6 +33,8 @@ views::BubbleBorder::Arrow GetArrow(ash::ShelfAlignment alignment) {
        return views::BubbleBorder::LEFT_CENTER;
      case ash::ShelfAlignment::kRight:
        return views::BubbleBorder::RIGHT_CENTER;
@@ -964,7 +964,7 @@ index 331e1c4680e7..d77203bbb27b 100644
  }
  
 diff --git a/ash/shelf/shelf_widget.cc b/ash/shelf/shelf_widget.cc
-index 7868a827a379..273469817f0f 100644
+index 99bac07ae01a..7fbfdad480fe 100644
 --- a/ash/shelf/shelf_widget.cc
 +++ b/ash/shelf/shelf_widget.cc
 @@ -34,6 +34,7 @@
@@ -975,7 +975,7 @@ index 7868a827a379..273469817f0f 100644
  #include "ash/system/status_area_widget.h"
  #include "ash/wm/overview/overview_controller.h"
  #include "ash/wm/tablet_mode/tablet_mode_controller.h"
-@@ -139,10 +140,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -140,10 +141,10 @@ class ShelfBackgroundView : public views::View {
      corner_radius_ = radius;
  
      layer()->SetRoundedCornerRadius({
@@ -989,17 +989,17 @@ index 7868a827a379..273469817f0f 100644
 +        shelf_->SelectValueForShelfAlignment(0.0f, 0.0f, radius, radius),
      });
  
-     if (needs_paint) {
-@@ -174,7 +175,7 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+     if (changed) {
+@@ -171,7 +172,7 @@ class ShelfBackgroundView : public views::View {
+ 
      if (corner_radius_ > 0) {
        views::HighlightBorder::PaintBorderToCanvas(
-           canvas, *owner_view_, gfx::Rect(layer()->size()),
--          gfx::RoundedCornersF(corner_radius_), highlight_border_type_);
-+          layer()->rounded_corner_radii(), highlight_border_type_);
+-          canvas, *this, GetLocalBounds(), gfx::RoundedCornersF(corner_radius_),
++          canvas, *this, GetLocalBounds(), layer()->rounded_corner_radii(),
+           highlight_border_type_);
      } else {
        // If the shelf corners are not rounded, only paint the highlight border
-       // on the inner edge of the shelf to separate the shelf and the work area.
-@@ -232,6 +233,12 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -232,6 +233,12 @@ class ShelfBackgroundView : public views::View {
          start_point.Offset(half_thickness, 0);
          end_point.Offset(half_thickness, 0);
          break;
@@ -1012,7 +1012,7 @@ index 7868a827a379..273469817f0f 100644
      }
  
      // Draw the outer line.
-@@ -251,6 +258,10 @@ class ShelfBackgroundLayerDelegate : public ui::LayerOwner,
+@@ -251,6 +258,10 @@ class ShelfBackgroundView : public views::View {
          start_point.Offset(border_thickness, 0);
          end_point.Offset(border_thickness, 0);
          break;
@@ -1023,7 +1023,7 @@ index 7868a827a379..273469817f0f 100644
      }
  
      // Draw the inner line.
-@@ -361,6 +372,8 @@ class ShelfWidgetDelegateView
+@@ -366,6 +377,8 @@ class ShelfWidgetDelegateView
    // Cache the state of the background blur so that it can be updated only
    // when necessary.
    bool background_is_currently_blurred_ = false;
@@ -1032,7 +1032,7 @@ index 7868a827a379..273469817f0f 100644
  };
  
  ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
-@@ -387,6 +400,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
+@@ -394,6 +407,9 @@ ShelfWidgetDelegateView::ShelfWidgetDelegateView(ShelfWidget* shelf_widget,
    animating_drag_handle_.SetRoundedCornerRadius(
        {kDragHandleCornerRadius, kDragHandleCornerRadius,
         kDragHandleCornerRadius, kDragHandleCornerRadius});
@@ -1042,14 +1042,14 @@ index 7868a827a379..273469817f0f 100644
  }
  
  ShelfWidgetDelegateView::~ShelfWidgetDelegateView() = default;
-@@ -503,10 +519,14 @@ void ShelfWidgetDelegateView::UpdateOpaqueBackground() {
-   // We can easily round only 2 corners out of 4 which means we don't need as
-   // much extra shelf height.
+@@ -550,10 +566,14 @@ gfx::Rect ShelfWidgetDelegateView::GetOpaqueBackgroundBounds() const {
+   const Shelf* shelf = shelf_widget_->shelf();
    const int safety_margin = kShelfMaxOvershootHeight;
+   gfx::Rect bounds = GetLocalBounds();
 +  // AuraDE compatibility: top shelf support must extend overshoot toward the
 +  // top display edge. The three-way helper maps top to bottom, which leaves a
 +  // second-looking strip under the shelf.
-   opaque_background_bounds.Inset(gfx::Insets::TLBR(
+   bounds.Inset(gfx::Insets::TLBR(
 -      0, -shelf->SelectValueForShelfAlignment(0, safety_margin, 0),
 -      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0),
 -      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin)));
@@ -1057,10 +1057,10 @@ index 7868a827a379..273469817f0f 100644
 +      -shelf->SelectValueForShelfAlignment(0, safety_margin, 0, 0),
 +      -shelf->SelectValueForShelfAlignment(safety_margin, 0, 0, 0),
 +      -shelf->SelectValueForShelfAlignment(0, 0, safety_margin, 0)));
-   opaque_back_ground_layer->SetBounds(opaque_background_bounds);
- 
-   // Do not show rounded corners when the background is in maximized mode (app
-@@ -833,11 +853,13 @@ void ShelfWidget::CalculateTargetBounds() {
+   // Child view bounds are mirrored in RTL, but the overshoot must always
+   // extend toward the screen edge the shelf is aligned to, so pre-mirror the
+   // bounds to cancel that out.
+@@ -837,11 +857,13 @@ void ShelfWidget::CalculateTargetBounds() {
    const int shelf_primary_position = shelf_->SelectValueForShelfAlignment(
        available_bounds.bottom() - shelf_in_screen_portion,
        available_bounds.x() - shelf_size + shelf_in_screen_portion,
@@ -1076,7 +1076,7 @@ index 7868a827a379..273469817f0f 100644
  
    target_bounds_ =
        gfx::Rect(shelf_origin.x(), shelf_origin.y(), shelf_width, shelf_height);
-@@ -939,14 +961,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
+@@ -943,14 +965,12 @@ void ShelfWidget::OnSessionStateChanged(session_manager::SessionState state) {
    // 3. in RMA state - shelf should be hidden to avoid blocking the RMA app
    // controls or intercepting UI events; or
    // 4. on secondary screens in states other than ACTIVE.
@@ -1436,10 +1436,10 @@ index 353c238afed6..2a80ec716f0d 100644
    GetWidget()->SetBounds(new_bounds);
  }
 diff --git a/ash/wm/window_animations.cc b/ash/wm/window_animations.cc
-index 3308b2d26c12..630f141c0ba8 100644
+index 58fbfec0706f..66935b0467cb 100644
 --- a/ash/wm/window_animations.cc
 +++ b/ash/wm/window_animations.cc
-@@ -736,6 +736,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+@@ -735,6 +735,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
          item_rect.set_x(shelf_bounds.right());
        else if (shelf->alignment() == ShelfAlignment::kRight)
          item_rect.set_x(shelf_bounds.x());
@@ -1448,7 +1448,7 @@ index 3308b2d26c12..630f141c0ba8 100644
        else
          item_rect.set_y(shelf_bounds.y());
        return item_rect;
-@@ -756,6 +758,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+@@ -755,6 +757,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
        return gfx::Rect(work_area.x(), work_area.y(), 0, 0);
      case ShelfAlignment::kRight:
        return gfx::Rect(work_area.right(), work_area.y(), 0, 0);
@@ -1458,10 +1458,10 @@ index 3308b2d26c12..630f141c0ba8 100644
    NOTREACHED();
  }
 diff --git a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-index 0338c5d4d798..0461f0a82ffe 100644
+index eca6bc0e495b..75b3f23abe29 100644
 --- a/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
 +++ b/chrome/browser/ash/extensions/autotest_private/autotest_private_api.cc
-@@ -3504,6 +3504,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
+@@ -3505,6 +3505,9 @@ AutotestPrivateGetShelfAlignmentFunction::Run() {
      case ash::ShelfAlignment::kRight:
        alignment_type = api::autotest_private::ShelfAlignmentType::kRight;
        break;
@@ -1471,7 +1471,7 @@ index 0338c5d4d798..0461f0a82ffe 100644
      case ash::ShelfAlignment::kBottomLocked:
        // ShelfAlignment::kBottomLocked not supported by
        // shelf_prefs.cc
-@@ -3542,10 +3545,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
+@@ -3543,10 +3546,13 @@ AutotestPrivateSetShelfAlignmentFunction::Run() {
      case api::autotest_private::ShelfAlignmentType::kRight:
        alignment = ash::ShelfAlignment::kRight;
        break;

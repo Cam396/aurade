@@ -1,8 +1,8 @@
 diff --git a/ash/app_list/app_list_controller_impl.cc b/ash/app_list/app_list_controller_impl.cc
-index 00004a9e3f62..369c6cb0824d 100644
+index f24ec0c045be..37b904930532 100644
 --- a/ash/app_list/app_list_controller_impl.cc
 +++ b/ash/app_list/app_list_controller_impl.cc
-@@ -1325,13 +1325,24 @@ bool AppListControllerImpl::HasValidProfile() const {
+@@ -1304,13 +1304,24 @@ bool AppListControllerImpl::HasValidProfile() const {
    return profile_id_ != kAppListInvalidProfileID;
  }
  
@@ -28,7 +28,7 @@ index 00004a9e3f62..369c6cb0824d 100644
    if (hide == is_hidden)
      return;
 diff --git a/ash/multi_user/multi_user_window_manager.cc b/ash/multi_user/multi_user_window_manager.cc
-index bf58e97dfb2c..789e978ae175 100644
+index eba3217541a5..2e30e1d2ea28 100644
 --- a/ash/multi_user/multi_user_window_manager.cc
 +++ b/ash/multi_user/multi_user_window_manager.cc
 @@ -179,9 +179,15 @@ void MultiUserWindowManager::SetWindowOwner(aura::Window* window,
@@ -209,10 +209,10 @@ index 110a2c1d4ee2..5e00d24d9622 100644
  
  bool BirchBarController::IsDataLoading() const {
 diff --git a/chrome/browser/ash/magic_boost/magic_boost_state.cc b/chrome/browser/ash/magic_boost/magic_boost_state.cc
-index e8d77f6e7e99..2ad40e118e2d 100644
+index c5163bf3710c..40264ef299f8 100644
 --- a/chrome/browser/ash/magic_boost/magic_boost_state.cc
 +++ b/chrome/browser/ash/magic_boost/magic_boost_state.cc
-@@ -90,11 +90,14 @@ MagicBoostState::MagicBoostState(
+@@ -88,11 +88,14 @@ MagicBoostState::MagicBoostState(
  
    session_observation_.Observe(session_controller);
  
@@ -231,10 +231,10 @@ index e8d77f6e7e99..2ad40e118e2d 100644
  }
  
 diff --git a/chrome/browser/ash/net/vpn_list_forwarder.cc b/chrome/browser/ash/net/vpn_list_forwarder.cc
-index aa45d71abbca..05ff2d19135c 100644
+index 7416959b1d48..f17f4e1cefe7 100644
 --- a/chrome/browser/ash/net/vpn_list_forwarder.cc
 +++ b/chrome/browser/ash/net/vpn_list_forwarder.cc
-@@ -171,10 +171,17 @@ void VpnListForwarder::AttachToPrimaryUserProfile() {
+@@ -177,10 +177,17 @@ void VpnListForwarder::AttachToPrimaryUserProfile() {
    AttachToPrimaryUserArcVpnProviderManager();
  }
  
@@ -245,29 +245,29 @@ index aa45d71abbca..05ff2d19135c 100644
  void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
    CHECK(!extension_registry_, base::NotFatalUntil::M161);
 -  extension_registry_ =
--      extensions::ExtensionRegistry::Get(GetProfileForPrimaryUser());
-+  Profile* profile = GetProfileForPrimaryUser();
-+  if (!profile) {
+-      extensions::ExtensionRegistry::Get(GetPrimaryUserBrowserContext());
++  content::BrowserContext* context = GetPrimaryUserBrowserContext();
++  if (!context) {
 +    return;
 +  }
-+  extension_registry_ = extensions::ExtensionRegistry::Get(profile);
++  extension_registry_ = extensions::ExtensionRegistry::Get(context);
    extension_registry_->AddObserver(this);
  
    for (const auto& extension : extension_registry_->enabled_extensions()) {
-@@ -185,9 +192,15 @@ void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
+@@ -191,9 +198,15 @@ void VpnListForwarder::AttachToPrimaryUserExtensionRegistry() {
    SetVpnProviders();
  }
  
-+// HACK(AuraDE): Same null-profile safety as AttachToPrimaryUserExtensionRegistry
++// HACK(AuraDE): Same null-context safety as AttachToPrimaryUserExtensionRegistry
 +// above. Both are called from AttachToPrimaryUserProfile() during PreProfileInit.
  void VpnListForwarder::AttachToPrimaryUserArcVpnProviderManager() {
-+  Profile* profile = GetProfileForPrimaryUser();
-+  if (!profile) {
++  content::BrowserContext* context = GetPrimaryUserBrowserContext();
++  if (!context) {
 +    return;
 +  }
    arc_vpn_provider_manager_ =
--      app_list::ArcVpnProviderManager::Get(GetProfileForPrimaryUser());
-+      app_list::ArcVpnProviderManager::Get(profile);
+-      app_list::ArcVpnProviderManager::Get(GetPrimaryUserBrowserContext());
++      app_list::ArcVpnProviderManager::Get(context);
  
    if (arc_vpn_provider_manager_)
      arc_vpn_provider_manager_->AddObserver(this);
@@ -302,10 +302,10 @@ index 7e85bf4e4522..4d45608089e8 100644
  }
  
 diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
-index d623d9895966..9900667b758a 100644
+index d074c1d6ee0e..0f37ee10e692 100644
 --- a/chrome/browser/profiles/profile_manager.cc
 +++ b/chrome/browser/profiles/profile_manager.cc
-@@ -660,7 +660,10 @@ Profile* ProfileManager::GetPrimaryUserProfile(
+@@ -659,7 +659,10 @@ Profile* ProfileManager::GetPrimaryUserProfile(
  
      if (user->is_profile_created()) {
        // Note: The ProfileHelper will take care of guest profiles.
@@ -331,10 +331,10 @@ index 4c61cf88d1fc..d55c5982dfcc 100644
  
  void ProfileSelections::SetProfileSelectionForRegular(
 diff --git a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-index c3d188cf459f..894ef1e2f33c 100644
+index 08e841df4259..7285ceaf178c 100644
 --- a/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
 +++ b/chrome/browser/ui/ash/capture_mode/chrome_capture_mode_delegate.cc
-@@ -834,11 +834,18 @@ bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
+@@ -836,11 +836,18 @@ bool ChromeCaptureModeDelegate::ActiveUserDefaultSearchProviderIsGoogle()
    // TODO(crbug.com/278643115): Take the account_id from the callers.
    const auto* active_session =
        session_manager::SessionManager::Get()->GetActiveSession();
@@ -355,7 +355,7 @@ index c3d188cf459f..894ef1e2f33c 100644
  
    return search::DefaultSearchProviderIsGoogle(template_url_service);
  }
-@@ -1041,7 +1048,9 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
+@@ -1043,7 +1050,9 @@ void ChromeCaptureModeDelegate::OnAccessTokenAvailableForImageSearch(
    // image search.
    TemplateURLService* template_url_service =
        ash::TemplateURLServiceProvider::Get().Find(account_id);
@@ -367,7 +367,7 @@ index c3d188cf459f..894ef1e2f33c 100644
    const TemplateURL* const default_provider =
        template_url_service->GetDefaultSearchProvider();
 diff --git a/chrome/browser/ui/ash/desks/desks_client.cc b/chrome/browser/ui/ash/desks/desks_client.cc
-index b119d430f693..48540ae8ab22 100644
+index cb72b9876c0c..e90b8b2aaa5a 100644
 --- a/chrome/browser/ui/ash/desks/desks_client.cc
 +++ b/chrome/browser/ui/ash/desks/desks_client.cc
 @@ -505,6 +505,16 @@ void DesksClient::LaunchAppsFromTemplate(
@@ -388,7 +388,7 @@ index b119d430f693..48540ae8ab22 100644
    // disabled or 2) Desk Templates and Floating workspace are disabled. If we
    // are unable to get the desk sync service or its bridge, then we default to
 diff --git a/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc b/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
-index 3efa5d15aeef..9f588d3b1296 100644
+index 54367cd63a03..ba19b0eb00cf 100644
 --- a/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
 +++ b/chrome/browser/ui/ash/quick_answers/quick_answers_state_ash.cc
 @@ -37,11 +37,14 @@ QuickAnswersStateAsh::QuickAnswersStateAsh() {
@@ -401,7 +401,7 @@ index 3efa5d15aeef..9f588d3b1296 100644
 +  // TODO: Consolidate with other PreProfileInit pref safety patches.
    if (session_controller->IsActiveUserSessionStarted()) {
      PrefService* prefs = session_controller->GetPrimaryUserPrefService();
--    DCHECK(prefs);
+-    CHECK(prefs, base::NotFatalUntil::M162);
 -    RegisterPrefChanges(prefs);
 +    if (prefs) {
 +      RegisterPrefChanges(prefs);

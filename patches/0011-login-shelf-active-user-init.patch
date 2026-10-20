@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
-index a6922b83c3e0..44fad7e8ac1a 100644
+index 2eebe65ddfef..64d45a7d43cf 100644
 --- a/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 +++ b/chrome/browser/ui/ash/main_extra_parts/chrome_browser_main_extra_parts_ash.cc
 @@ -15,8 +15,11 @@
@@ -18,8 +18,8 @@ index a6922b83c3e0..44fad7e8ac1a 100644
    void OnSessionStateChanged() override {
      TRACE_EVENT0("ui",
                   "ChromeShelfControllerInitializer::OnSessionStateChanged");
--    DCHECK(!chrome_shelf_controller_);
--    DCHECK(!ChromeShelfController::instance());
+-    CHECK(!chrome_shelf_controller_, base::NotFatalUntil::M162);
+-    CHECK(!ChromeShelfController::instance(), base::NotFatalUntil::M162);
 +    if (chrome_shelf_controller_ || ChromeShelfController::instance()) {
 +      // HACK(AuraDE): If we created the shelf early at LOGIN_PRIMARY with the
 +      // sign-in profile, switch to the user's profile when the session becomes
@@ -112,18 +112,18 @@ index a6922b83c3e0..44fad7e8ac1a 100644
        ChromeShelfController::instance()->OnUserProfileReadyToSwitch(profile);
      }
 diff --git a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
-index 0f5977e4d747..a9c0479941a4 100644
+index f4a093153a96..4f937b736556 100644
 --- a/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
 +++ b/chrome/browser/ui/ash/shelf/chrome_shelf_controller.cc
-@@ -304,7 +304,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,
+@@ -305,7 +305,6 @@ ChromeShelfController::ChromeShelfController(Profile* profile,
        profile = profile->GetOriginalProfile();
      }
    }
 -
    // All profile relevant settings get bound to the current profile.
    AttachProfile(profile);
-   DCHECK_EQ(profile, profile_);
-@@ -788,6 +787,16 @@ void ChromeShelfController::SetShelfIDForBrowserWindowContents(
+   CHECK_EQ(profile, profile_, base::NotFatalUntil::M162);
+@@ -804,6 +803,16 @@ void ChromeShelfController::SetShelfIDForBrowserWindowContents(
  void ChromeShelfController::OnUserProfileReadyToSwitch(Profile* profile) {
    if (user_switch_observer_.get()) {
      user_switch_observer_->OnUserProfileReadyToSwitch(profile);
