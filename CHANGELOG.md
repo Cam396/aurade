@@ -34,6 +34,10 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   angle. Each holds a resting value and can be changed for a test, for
   example `setprop aurade.sensor.accel 9.8,0,0` turns the device on its side.
 
+### Changed
+- The desktop and browser are built on Chromium 158 (158.0.8115.0), with the
+  upstream fixes since Chromium 157.
+
 ## 1.3.2, 2026-10-20
 
 ### Fixed
@@ -185,7 +189,7 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   speakers and microphone may need a fix made for that model, and where it is.
 
 ### Changed
-- The desktop and browser are built on Chromium 157 (157.0.8090.0), three
+- The desktop and browser are built on Chromium 157, three
   weeks newer than the Chromium 156 snapshot before it, with the upstream
   fixes in between.
 - The desktop and browser call themselves AuraDE where they said Chromium,
