@@ -1,0 +1,10 @@
+[Unit]
+Description=AuraDE local Glic page
+
+[Socket]
+# A port below 1024 on loopback: only root can listen there, so no program a
+# user runs can serve this page in its place.
+ListenStream=127.0.0.1:885
+
+[Install]
+WantedBy=sockets.target

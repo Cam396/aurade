@@ -1,0 +1,17 @@
+post_install() {
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    # Started as well as enabled, so Glic set to local finds its page at the
+    # next sign-in rather than after the next boot. In a chroot the start
+    # fails and the enable still stands.
+    systemctl enable --now aurade-glic.socket >/dev/null 2>&1 ||
+        systemctl enable aurade-glic.socket >/dev/null 2>&1 || true
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    systemctl disable --now aurade-glic.socket aurade-glic.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+}

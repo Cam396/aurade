@@ -1,0 +1,17 @@
+[Unit]
+Description=AuraDE local Glic page
+Requires=aurade-glic.socket
+
+[Service]
+ExecStart=/usr/lib/aurade-ai/aurade-glic-server
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=no
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+MemoryDenyWriteExecute=yes

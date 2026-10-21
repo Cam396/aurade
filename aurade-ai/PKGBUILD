@@ -2,12 +2,12 @@
 
 pkgname=aurade-ai
 pkgver=158.0.8115.0
-pkgrel=1
+pkgrel=2
 # The llama.cpp revision whose headers AuraDE's Chromium carries in
 # services/on_device_model/aurade/llama_include. They must match: Chrome
 # passes llama.cpp structures by value.
 _llama_commit=62df1815bc053066761f4eac58e288f23778e164
-pkgdesc="Optional AuraDE Advanced Plus AI: local Gemma 4 for the browser's built-in AI, and the Ollama bootstrap"
+pkgdesc="Optional AuraDE Advanced Plus AI: local Gemma 4 for the browser's built-in AI and Glic, and the Ollama bootstrap"
 arch=('x86_64')
 url="https://github.com/Cam396/aurade"
 license=('BSD-3-Clause' 'MIT')
@@ -17,6 +17,7 @@ depends=(
     'gcc-libs'
     'glibc'
     'ollama'
+    'python'
     'util-linux'
 )
 makedepends=(
@@ -31,16 +32,29 @@ optdepends=(
 source=(
     'aurade-ai-bootstrap'
     'aurade-ai.conf'
+    'aurade-glic-server'
+    'aurade-glic.service'
+    'aurade-glic.socket'
+    'glic-index.html'
+    'glic.css'
+    'glic.js'
     'LICENSE'
     'llama-sandbox.patch'
     "llama.cpp-${_llama_commit}.tar.gz::https://github.com/ggml-org/llama.cpp/archive/${_llama_commit}.tar.gz"
 )
 sha256sums=('f0ae1ff6493c5a4ac93fd397bd52bef537ef489d93e3a0c6d929e271744592c9'
-            '50791f566f13159dd9ccc755a3ec1dc5296e08fc7dffdca5e72f83b282f446a8'
+            '1461f99409d4358c122c1520840a0a12b5038ce00285df30e09942f8738669ef'
+            '407e22ff6ad8402ac55ac8d7a95e1ef32bf4ac33caba1c1f3f68bbcda9605ffd'
+            '43ada7263ced693771cb61ca2cd59656abf4a4b72b6145eecfbba1bbced482e0'
+            'afffb79534fdbd720e1f6cec3150f008448d54409aa771c36874fd02d5d0e773'
+            'b2ded4907921f6962900f3dbb3615ac0a5337feff5d931bdb87e55efff79b6a3'
+            '65e3aa8b6c27f58847e0e3bb81206e9866c63927b201e30d88e22f6830236367'
+            'd1dde19346c34dca2b216f3e43a6b5891e8c823929657be72656817ab640c4bc'
             '5b68c7ce81302fe380820537df535fa736f537a469b14c371e2427a2c79c8f0f'
             '50a8329a22eb8de02cc1fee7aecf43fbda4f95401b4590c9e87811c901437119'
             '8187e35cc38086bbc9b14e5e7a1aa24a38308ca3d73d49e7ee937f21f93cfa89')
 backup=('etc/aurade/ai.conf')
+install=aurade-ai.install
 
 prepare() {
     # Chrome's on-device model service runs llama.cpp inside a seccomp
@@ -90,4 +104,15 @@ package() {
         "${pkgdir}/etc/aurade/ai.conf"
     install -Dm644 "${srcdir}/LICENSE" \
         "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+    # Glic answered by Gemma: the page, and the socket that serves it, which
+    # starts the server on the first visit (enabled by aurade-ai.install).
+    install -Dm755 "${srcdir}/aurade-glic-server" \
+        "${pkgdir}/usr/lib/aurade-ai/aurade-glic-server"
+    install -Dm644 -t "${pkgdir}/usr/lib/systemd/system" \
+        "${srcdir}/aurade-glic.service" "${srcdir}/aurade-glic.socket"
+    install -Dm644 "${srcdir}/glic-index.html" \
+        "${pkgdir}/usr/share/aurade-ai/glic/index.html"
+    install -Dm644 -t "${pkgdir}/usr/share/aurade-ai/glic" \
+        "${srcdir}/glic.css" "${srcdir}/glic.js"
 }

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gemma</title>
+<link rel="stylesheet" href="glic.css">
+</head>
+<body>
+<header>
+  <div class="title">
+    <span class="name">Gemma</span>
+    <span class="where">on this computer</span>
+  </div>
+  <button id="new-chat" type="button" title="Start a new chat">New chat</button>
+</header>
+<main id="chat" aria-live="polite">
+  <div id="welcome" class="welcome">
+    <p>Ask about the page you are on, or anything else.</p>
+    <p class="small">Answers come from Gemma 4, running on this computer. Nothing you type
+      or show it leaves the computer. It can be wrong, so check what matters.</p>
+  </div>
+</main>
+<div id="status" class="status" hidden></div>
+<footer>
+  <label class="tab-toggle">
+    <input id="use-tab" type="checkbox" checked>
+    <span>Use this tab</span>
+    <span id="tab-title" class="tab-title"></span>
+  </label>
+  <form id="ask">
+    <textarea id="question" rows="2" placeholder="Ask Gemma" aria-label="Ask Gemma"></textarea>
+    <button id="send" type="submit">Send</button>
+    <button id="stop" type="button" hidden>Stop</button>
+  </form>
+</footer>
+<script src="glic.js" nonce="{{nonce}}"></script>
+</body>
+</html>
