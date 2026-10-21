@@ -33,6 +33,12 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
   magnetometer, light, proximity, pressure, temperature, humidity and hinge
   angle. Each holds a resting value and can be changed for a test, for
   example `setprop aurade.sensor.accel 9.8,0,0` turns the device on its side.
+- Glic, the assistant panel, can answer with Gemma on this computer instead of
+  Gemini, with no Google account. It reads the tab you are on when you ask it
+  to, keeps the conversation going, and nothing leaves the computer. It is
+  off by default: in the Advanced Plus AI profile with the built-in AI on,
+  set `AURADE_GLIC=local` in `/etc/aurade/ai.conf` or
+  `~/.config/aurade/ai.conf` and sign in again.
 
 ### Changed
 - The desktop and browser are built on Chromium 158 (158.0.8115.0), with the
