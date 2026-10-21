@@ -547,6 +547,30 @@ if [ "${AURADE_FEATURE_PROFILE}" = "advanced_plus_ai" ]; then
             AIProofreadingAPI
             "OnDeviceModelCpuBackend:on_device_cpu_ram_threshold_mb/7000"
         )
+        # Glic answered by Gemma on this computer instead of Gemini, when
+        # ai.conf asks for it. Its page comes from aurade-glic.socket, which
+        # only root can listen on, so no other program can stand in for it
+        # and read the tabs Glic is shown. Google's first-run screen and its
+        # country and language lists are about Gemini, not this.
+        if [ -z "${AURADE_GLIC:-}" ]; then
+            for config in /etc/aurade/ai.conf \
+                "${XDG_CONFIG_HOME:-${HOME}/.config}/aurade/ai.conf"; do
+                value="$(aurade_read_config_value "${config}" AURADE_GLIC)"
+                [ -z "${value}" ] || AURADE_GLIC="${value}"
+            done
+        fi
+        if [ "${AURADE_GLIC:-web}" = "local" ] && \
+            [ -f /usr/share/aurade-ai/glic/index.html ]; then
+            FLAGS+=(
+                --aurade-glic-local
+                --glic-guest-url=http://127.0.0.1:885/
+                --glic-always-skip-fre
+            )
+            AURADE_DISABLED_FEATURES+=(
+                GlicCountryFiltering
+                GlicLocaleFiltering
+            )
+        fi
     fi
     unset model_key model_version model_file override value config
 fi
