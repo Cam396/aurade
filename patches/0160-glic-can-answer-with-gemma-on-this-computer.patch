@@ -1,0 +1,62 @@
+diff --git a/chrome/browser/glic/host/glic_pwc_policy_delegate.cc b/chrome/browser/glic/host/glic_pwc_policy_delegate.cc
+index 0fa7a9fbb65b..01b7ec506c35 100644
+--- a/chrome/browser/glic/host/glic_pwc_policy_delegate.cc
++++ b/chrome/browser/glic/host/glic_pwc_policy_delegate.cc
+@@ -12,6 +12,14 @@
+ 
+ namespace glic {
+ 
++namespace {
++
++// AuraDE: Glic answered by the local model is served over plain HTTP on
++// loopback by aurade-glic.socket, on a port only root can listen on.
++constexpr char kAuraDeGlicLocalSwitch[] = "aurade-glic-local";
++
++}  // namespace
++
+ GlicPwcPolicyDelegate::GlicPwcPolicyDelegate(Profile* profile)
+     : profile_(profile) {}
+ 
+@@ -31,8 +39,14 @@ bool GlicPwcPolicyDelegate::IsCapabilityOrigin(
+ // PWC HTTPS guardrail follow suit so HTTP dev servers can load.
+ bool GlicPwcPolicyDelegate::AllowsInsecureDevOrigin(
+     const url::Origin& origin) const {
+-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+-      ::switches::kGlicDev);
++  auto* command_line = base::CommandLine::ForCurrentProcess();
++  if (command_line->HasSwitch(::switches::kGlicDev)) {
++    return true;
++  }
++  // The local Glic page and nothing else.
++  return command_line->HasSwitch(kAuraDeGlicLocalSwitch) &&
++         origin.host() == "127.0.0.1" &&
++         origin.IsSameOriginWith(GetGuestOrigin(profile_));
+ }
+ 
+ }  // namespace glic
+diff --git a/chrome/browser/glic/public/glic_enabling.cc b/chrome/browser/glic/public/glic_enabling.cc
+index 754819121a01..240740a3217a 100644
+--- a/chrome/browser/glic/public/glic_enabling.cc
++++ b/chrome/browser/glic/public/glic_enabling.cc
+@@ -128,6 +128,11 @@ namespace {
+ 
+ constexpr int kExperimentalTriggeringVersion = 1;
+ 
++// AuraDE: Glic answered by the local model on this computer. Its page is
++// served from this computer, so a Google account and the rollout do not
++// apply.
++constexpr char kAuraDeGlicLocalSwitch[] = "aurade-glic-local";
++
+ std::vector<std::string> GetFieldTrialParamAsSplitString(
+     const base::Feature& feature,
+     const std::string& param_name,
+@@ -437,7 +442,8 @@ GlicEnabling::ProfileEnablement ComputeProfileEnablement(
+ 
+   // Certain checks are bypassed if --glic-dev is passed.
+   auto* command_line = base::CommandLine::ForCurrentProcess();
+-  if (!command_line->HasSwitch(::switches::kGlicDev)) {
++  if (!command_line->HasSwitch(::switches::kGlicDev) &&
++      !command_line->HasSwitch(kAuraDeGlicLocalSwitch)) {
+     if (!base::FeatureList::IsEnabled(features::kGlicRollout) &&
+         !GlicEnabling::IsEligibleForGlicTieredRollout(profile)) {
+       result.is_rolled_out = false;
