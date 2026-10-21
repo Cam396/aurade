@@ -23,6 +23,10 @@ Notable changes to AuraDE, newest first. Versions match the GitHub releases.
 - Opening the first Android app after Android started could add a second,
   blank app to the shelf that opened nothing when clicked. It was Android's
   own desktop background, and it no longer shows.
+- Turning Android off and on again in Settings made every Android app vanish
+  from the launcher and shelf until the next sign-in. Ash asked for the app
+  list before Android had finished starting, got an empty one, and was never
+  told it changed. Android now announces its apps once it is up.
 
 ### Added
 - Android has virtual sensors for testing apps: accelerometer, gyroscope,

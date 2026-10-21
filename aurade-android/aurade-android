@@ -1498,6 +1498,7 @@ class Android(dbus.service.Object):
         self.stop_watchers()
         self.watch_uid = uid
         self.apps_seen = None
+        self.apps_booted = False
         self.log_buf = ""
         self.start_logcat()
         self.poll_src = GLib.timeout_add_seconds(5, self.poll_apps)
@@ -1660,14 +1661,23 @@ class Android(dbus.service.Object):
         # One cheap guest command decides whether the real list is worth asking
         # for; the list itself starts several processes.
         try:
+            # The package manager answers before Android has finished booting,
+            # while the launcher activities Ash's list is made of are not
+            # there yet. A list read then is empty, so nothing counts as seen
+            # until the boot is done.
+            if not self.apps_booted:
+                boot = self.guest("/system/bin/getprop", "sys.boot_completed")
+                if boot.stdout.strip() != "1":
+                    return True
+                self.apps_booted = True
             res = self.guest("/system/bin/pm", "list", "packages", "--show-versioncode")
         except Exception as e:  # noqa: BLE001
             log(f"app poll failed: {e}")
             return True
         key = hash(res.stdout)
-        # The first answer counts as a change too: on a cold boot Ash asks for
-        # the app list while Android is still starting, gets nothing, and
-        # would otherwise never hear that the apps showed up.
+        # The first answer counts as a change too: Ash asks for the app list
+        # as soon as it turns Android on, while Android is still starting, gets
+        # nothing, and would otherwise never hear that the apps showed up.
         if key != self.apps_seen:
             self.AppsChanged()
         self.apps_seen = key
